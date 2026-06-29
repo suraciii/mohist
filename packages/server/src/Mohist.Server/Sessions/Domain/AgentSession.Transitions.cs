@@ -34,10 +34,13 @@ public static partial class AgentSessionExtensions
                 AgentRuntimeSessionId = isNewRuntimeBinding ? agentSessionId : existingAgentSessionId,
                 BoundAt = isNewRuntimeBinding ? now : session.Status.BoundAt ?? now,
                 LastDataAt = now,
+                RuntimeSessionLineage = isNewRuntimeBinding
+                    ? AppendLineageEntry(session.Status.RuntimeSessionLineage, agentSessionId, now)
+                    : session.Status.RuntimeSessionLineage
             };
             var events = new List<AgentSessionEvent>();
             if (isNewRuntimeBinding)
-                events.Add(new AgentSessionRuntimeBound(agentSessionId));
+                events.Add(new AgentSessionRuntimeBound(agentSessionId, existingAgentSessionId));
             if (!string.Equals(oldModel, session.Settings.Model, StringComparison.Ordinal))
                 events.Add(new AgentSessionModelChanged(session.Settings.Model));
             return events;
@@ -97,6 +100,7 @@ public static partial class AgentSessionExtensions
             DateTime now)
         {
             var oldAgentSessionId = session.Status.AgentRuntimeSessionId;
+            var rebinds = !string.Equals(oldAgentSessionId, newAgentSessionId, StringComparison.Ordinal);
             session.Status = session.Status with
             {
                 AgentRuntimeSessionId = newAgentSessionId,
@@ -106,11 +110,20 @@ public static partial class AgentSessionExtensions
                 {
                     ContextWindowUsed = contextWindowUsedAfter,
                     ContextWindowSize = contextWindowSizeAfter ?? (session.Status.UsageSummary ?? new AgentUsageSummary()).ContextWindowSize,
-                }
+                },
+                // Append the new runtime session entry while keeping every prior
+                // entry. On the very first rebind after a legacy rehydration
+                // (no lineage yet but a stale AgentRuntimeSessionId),
+                // AppendLineageEntry backfills the predecessor so the chain
+                // still answers "who came before?".
+                RuntimeSessionLineage = rebinds
+                    ? AppendLineageEntry(session.Status.RuntimeSessionLineage, newAgentSessionId, now,
+                        seedPrevious: oldAgentSessionId)
+                    : session.Status.RuntimeSessionLineage
             };
             var events = new List<AgentSessionEvent>();
-            if (!string.Equals(oldAgentSessionId, newAgentSessionId, StringComparison.Ordinal))
-                events.Add(new AgentSessionRuntimeBound(newAgentSessionId));
+            if (rebinds)
+                events.Add(new AgentSessionRuntimeBound(newAgentSessionId, oldAgentSessionId));
             return events;
         }
 
@@ -196,6 +209,36 @@ public static partial class AgentSessionExtensions
         {
             if (delta is null or < 0) return current;
             return (current ?? 0) + delta.Value;
+        }
+
+        /// <summary>
+        /// Returns a new lineage list with <paramref name="newAgentSessionId"/>
+        /// appended at <paramref name="now"/>. When the chain is empty
+        /// (legacy rehydration or never-bound session) and
+        /// <paramref name="seedPrevious"/> is non-null, the predecessor
+        /// is back-filled first so the chain still answers
+        /// "who came before?". Otherwise the chain is left untouched
+        /// on null (matches the historical "no lineage" rendering).
+        /// </summary>
+        private static IReadOnlyList<RuntimeSessionLineageEntry> AppendLineageEntry(
+            IReadOnlyList<RuntimeSessionLineageEntry>? lineage,
+            string newAgentSessionId,
+            DateTime now,
+            string? seedPrevious = null)
+        {
+            var entries = lineage is null
+                ? new List<RuntimeSessionLineageEntry>()
+                : new List<RuntimeSessionLineageEntry>(lineage);
+
+            if (entries.Count == 0
+                && !string.IsNullOrEmpty(seedPrevious)
+                && !string.Equals(seedPrevious, newAgentSessionId, StringComparison.Ordinal))
+            {
+                entries.Add(new RuntimeSessionLineageEntry(seedPrevious, now));
+            }
+
+            entries.Add(new RuntimeSessionLineageEntry(newAgentSessionId, now));
+            return entries;
         }
     }
 }

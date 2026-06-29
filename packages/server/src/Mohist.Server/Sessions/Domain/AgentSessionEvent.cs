@@ -8,7 +8,18 @@ public union AgentSessionEvent(
     AgentSessionContextExhausted,
     AgentSessionContextHealthUpdated);
 
-public sealed record AgentSessionRuntimeBound(string AgentRuntimeSessionId);
+/// <summary>
+/// Emitted whenever the session binds to a (possibly new)
+/// runtime session id. On the initial binding <see cref="PreviousAgentRuntimeSessionId"/>
+/// is <c>null</c>; on a compact/reset rebind it carries the
+/// predecessor runtime session id retained in
+/// <see cref="AgentSessionStatusSnapshot.RuntimeSessionLineage"/>.
+/// Realtime consumers use this to render a lineage link without
+/// re-querying the session.
+/// </summary>
+public sealed record AgentSessionRuntimeBound(
+    string AgentRuntimeSessionId,
+    string? PreviousAgentRuntimeSessionId = null);
 public sealed record AgentSessionUsageRecorded(AgentUsageSummary Usage);
 public sealed record AgentSessionModelChanged(string? Model);
 public sealed record AgentSessionContextCompacted(

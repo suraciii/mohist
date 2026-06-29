@@ -83,15 +83,33 @@ public sealed record AgentSessionRuntime(
 
 public sealed record AgentSessionSettings(string? Model = null);
 
+/// <summary>
+/// One entry in the ordered lineage of runtime sessions bound to an
+/// <see cref="AgentSession"/> during its lifetime. The Mohist
+/// <see cref="AgentSession.Id"/> is the stable identity; each
+/// <see cref="AgentRuntimeSessionId"/> is a mutable runtime facet
+/// created by compact/reset rebinds
+/// (<c>design/conventions.md#identity-terms</c>). The chain
+/// <see cref="AgentSessionStatusSnapshot.RuntimeSessionLineage"/>
+/// holds all such entries — predecessor/successor are derived by
+/// position. Entries are append-only on rebind; the first entry
+/// records the original runtime session bound by AttachPhysicalSession.
+/// </summary>
+[GenerateSerializer]
+public sealed record RuntimeSessionLineageEntry(
+    [property: Id(0)] string AgentRuntimeSessionId,
+    [property: Id(1)] DateTime BoundAt);
+
 public sealed record AgentSessionStatusSnapshot(
     string? AgentRuntimeSessionId = null,
     DateTime CreatedAt = default,
     DateTime? BoundAt = null,
     DateTime? LastDataAt = null,
-    AgentUsageSummary? UsageSummary = null)
+    AgentUsageSummary? UsageSummary = null,
+    IReadOnlyList<RuntimeSessionLineageEntry>? RuntimeSessionLineage = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
-        new(CreatedAt: now, UsageSummary: new AgentUsageSummary());
+        new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), RuntimeSessionLineage: []);
 }
 
 public sealed record AgentUsageSummary(

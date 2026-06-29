@@ -596,6 +596,7 @@ public class AgentSessionQuerier : IScopedService
             transcriptEvents.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson)));
         var toolCount = eventSummary.ToolCallCount ?? 0;
         var usage = AgentSessionJsonHelper.Usage(domainSession);
+        var lineage = BuildLineageDto(domainSession);
 
         return new AgentSessionMetadataDto(
             domainSession.Id,
@@ -609,7 +610,43 @@ public class AgentSessionQuerier : IScopedService
             null,
             ToEventSummaryDto(eventSummary),
             ToUsageDto(usage),
-            new AgentSessionMetadataCounts(partCount, toolCount));
+            new AgentSessionMetadataCounts(partCount, toolCount),
+            lineage);
+    }
+
+    /// <summary>
+    /// Builds the <see cref="RuntimeSessionLineageEntryDto"/> projection
+    /// from <see cref="AgentSession.Status.RuntimeSessionLineage"/>. When
+    /// the grain hasn't yet recorded an explicit lineage (legacy
+    /// rehydration) but the session is currently bound, a single entry is
+    /// synthesized so the UI can still distinguish "no chain at all"
+    /// (historical single binding) from "real chain" (>=2 entries).
+    /// Returns <c>null</c> only when there is truly nothing to surface.
+    /// </summary>
+    internal static IReadOnlyList<RuntimeSessionLineageEntryDto>? BuildLineageDto(AgentSession domainSession)
+    {
+        var lineage = domainSession.Status.RuntimeSessionLineage;
+        if (lineage is not null && lineage.Count > 0)
+        {
+            return lineage
+                .Select(e => new RuntimeSessionLineageEntryDto(
+                    e.AgentRuntimeSessionId,
+                    e.BoundAt.ToString("o")))
+                .ToList();
+        }
+
+        if (!string.IsNullOrEmpty(domainSession.Status.AgentRuntimeSessionId))
+        {
+            var boundAt = domainSession.Status.BoundAt ?? domainSession.Status.CreatedAt;
+            return
+            [
+                new RuntimeSessionLineageEntryDto(
+                    domainSession.Status.AgentRuntimeSessionId,
+                    boundAt.ToString("o"))
+            ];
+        }
+
+        return null;
     }
 
     private async Task<AgentSessionRecord?> FindCurrentSessionAsync(

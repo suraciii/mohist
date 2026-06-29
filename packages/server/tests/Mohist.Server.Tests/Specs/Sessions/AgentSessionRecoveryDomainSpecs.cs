@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Workflow.Services.Sessions;
 using Xunit;
 using Mohist.Server.Tests.Support;
 
@@ -35,6 +36,204 @@ public class AgentSessionRecoveryDomainSpecs
         Assert.Equal(200_000, session.Status.UsageSummary!.ContextWindowSize);
         var bound = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
         Assert.Equal("acp-new", Assert.IsType<AgentSessionRuntimeBound>(bound.Value).AgentRuntimeSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void RebindRuntimeSession_AppendsLineageAndCarriesPreviousRuntimeSessionId()
+    {
+        var session = CreateSession();
+        var firstBoundAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        var secondBoundAt = new DateTime(2026, 6, 2, 0, 0, 0, DateTimeKind.Utc);
+        session.Status = session.Status with
+        {
+            AgentRuntimeSessionId = "acp-1",
+            BoundAt = firstBoundAt,
+            RuntimeSessionLineage = new[]
+            {
+                new RuntimeSessionLineageEntry("acp-1", firstBoundAt)
+            }
+        };
+
+        var events = session.RebindRuntimeSession(
+            newAgentSessionId: "acp-2",
+            contextWindowUsedAfter: 5_000,
+            contextWindowSizeAfter: 200_000,
+            now: secondBoundAt);
+
+        var lineage = session.Status.RuntimeSessionLineage!;
+        Assert.Equal(2, lineage.Count);
+        Assert.Equal("acp-1", lineage[0].AgentRuntimeSessionId);
+        Assert.Equal(firstBoundAt, lineage[0].BoundAt);
+        Assert.Equal("acp-2", lineage[1].AgentRuntimeSessionId);
+        Assert.Equal(secondBoundAt, lineage[1].BoundAt);
+
+        var bound = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
+        var runtimeBound = Assert.IsType<AgentSessionRuntimeBound>(bound.Value);
+        Assert.Equal("acp-2", runtimeBound.AgentRuntimeSessionId);
+        Assert.Equal("acp-1", runtimeBound.PreviousAgentRuntimeSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void RebindRuntimeSession_AfterLegacyRehydration_BackfillsPredecessorIntoLineage()
+    {
+        var session = CreateSession();
+        var legacyBoundAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        // Legacy session deserialised before T-001: no recorded lineage, just a
+        // current AgentRuntimeSessionId and BoundAt.
+        session.Status = session.Status with
+        {
+            AgentRuntimeSessionId = "acp-legacy",
+            BoundAt = legacyBoundAt,
+            RuntimeSessionLineage = null
+        };
+        var now = new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc);
+
+        var events = session.RebindRuntimeSession(
+            newAgentSessionId: "acp-after",
+            contextWindowUsedAfter: 5_000,
+            contextWindowSizeAfter: 200_000,
+            now: now);
+
+        var lineage = session.Status.RuntimeSessionLineage!;
+        Assert.Equal(2, lineage.Count);
+        Assert.Equal("acp-legacy", lineage[0].AgentRuntimeSessionId);
+        Assert.Equal("acp-after", lineage[1].AgentRuntimeSessionId);
+
+        var bound = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
+        var runtimeBound = Assert.IsType<AgentSessionRuntimeBound>(bound.Value);
+        Assert.Equal("acp-after", runtimeBound.AgentRuntimeSessionId);
+        Assert.Equal("acp-legacy", runtimeBound.PreviousAgentRuntimeSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void RebindRuntimeSession_NoRebind_DoesNotGrowLineageOrEmitBound()
+    {
+        var session = CreateSession();
+        session.Status = session.Status with
+        {
+            AgentRuntimeSessionId = "acp-keep",
+            RuntimeSessionLineage = new[]
+            {
+                new RuntimeSessionLineageEntry("acp-keep", new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc))
+            }
+        };
+
+        var events = session.RebindRuntimeSession("acp-keep", null, null, DateTime.UtcNow);
+
+        Assert.Empty(events);
+        Assert.Single(session.Status.RuntimeSessionLineage!);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void RebindRuntimeSession_Repeated_RetainsAllPriorEntries()
+    {
+        var session = CreateSession();
+        var firstBoundAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        session.Status = session.Status with
+        {
+            AgentRuntimeSessionId = "acp-1",
+            BoundAt = firstBoundAt,
+            RuntimeSessionLineage = new[]
+            {
+                new RuntimeSessionLineageEntry("acp-1", firstBoundAt)
+            }
+        };
+        var secondAt = firstBoundAt.AddMinutes(10);
+        var thirdAt = firstBoundAt.AddMinutes(20);
+
+        session.RebindRuntimeSession("acp-2", null, null, secondAt);
+        session.RebindRuntimeSession("acp-3", null, null, thirdAt);
+
+        var lineage = session.Status.RuntimeSessionLineage!;
+        Assert.Equal(3, lineage.Count);
+        Assert.Equal("acp-1", lineage[0].AgentRuntimeSessionId);
+        Assert.Equal("acp-2", lineage[1].AgentRuntimeSessionId);
+        Assert.Equal("acp-3", lineage[2].AgentRuntimeSessionId);
+        Assert.Equal(secondAt, lineage[1].BoundAt);
+        Assert.Equal(thirdAt, lineage[2].BoundAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void LineageDto_PopulatedSession_ProjectsAllEntries()
+    {
+        var session = CreateSession();
+        var firstBoundAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        var secondBoundAt = firstBoundAt.AddMinutes(10);
+        session.Status = session.Status with
+        {
+            AgentRuntimeSessionId = "acp-2",
+            BoundAt = secondBoundAt,
+            RuntimeSessionLineage = new[]
+            {
+                new RuntimeSessionLineageEntry("acp-1", firstBoundAt),
+                new RuntimeSessionLineageEntry("acp-2", secondBoundAt)
+            }
+        };
+
+        var lineage = AgentSessionQuerier.BuildLineageDto(session);
+
+        Assert.NotNull(lineage);
+        Assert.Equal(2, lineage!.Count);
+        Assert.Equal("acp-1", lineage[0].AgentRuntimeSessionId);
+        Assert.Equal(firstBoundAt.ToString("o"), lineage[0].BoundAt);
+        Assert.Equal("acp-2", lineage[1].AgentRuntimeSessionId);
+        Assert.Equal(secondBoundAt.ToString("o"), lineage[1].BoundAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void LineageDto_LegacySessionWithCurrentBinding_SynthesizesSingleEntry()
+    {
+        var session = CreateSession();
+        var legacyBoundAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        // Legacy rehydration: current binding exists but lineage was never
+        // recorded. UI should still render the chain as a single entry so
+        // it can distinguish "no chain" from "unbound".
+        session.Status = session.Status with
+        {
+            AgentRuntimeSessionId = "acp-legacy",
+            BoundAt = legacyBoundAt,
+            RuntimeSessionLineage = null
+        };
+
+        var lineage = AgentSessionQuerier.BuildLineageDto(session);
+
+        Assert.NotNull(lineage);
+        var entry = Assert.Single(lineage!);
+        Assert.Equal("acp-legacy", entry.AgentRuntimeSessionId);
+        Assert.Equal(legacyBoundAt.ToString("o"), entry.BoundAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void LineageDto_UnboundSession_ReturnsNullWithoutThrowing()
+    {
+        var session = CreateSession();
+        // Neither a current binding nor a recorded lineage — the UI sees
+        // null and renders nothing. This is the "never bound" branch,
+        // never persisted prior to T-001, but kept safe.
+        session.Status = session.Status with
+        {
+            AgentRuntimeSessionId = null,
+            BoundAt = null,
+            RuntimeSessionLineage = null
+        };
+
+        var lineage = AgentSessionQuerier.BuildLineageDto(session);
+
+        Assert.Null(lineage);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

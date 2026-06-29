@@ -245,4 +245,75 @@ public class AgentSessionDomainSpecs
         Assert.Equal(0.001, Usage(session).CostAmount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void AttachPhysicalSession_FirstBinding_SeedsLineageWithSingleEntry()
+    {
+        var session = CreateSession();
+        var boundAt = new DateTime(2026, 6, 21, 1, 2, 3, DateTimeKind.Utc);
+
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
+
+        var lineage = session.Status.RuntimeSessionLineage;
+        Assert.NotNull(lineage);
+        var entry = Assert.Single(lineage!);
+        Assert.Equal("runtime-session-1", entry.AgentRuntimeSessionId);
+        Assert.Equal(boundAt, entry.BoundAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void AttachPhysicalSession_SamePhysicalSession_DoesNotGrowLineage()
+    {
+        var session = CreateSession();
+        var boundAt = new DateTime(2026, 6, 21, 1, 2, 3, DateTimeKind.Utc);
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
+
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
+
+        Assert.Single(session.Status.RuntimeSessionLineage!);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void AttachPhysicalSession_RebindToNewPhysicalSession_AppendsLineageAndCarriesPrevious()
+    {
+        var session = CreateSession();
+        var firstBoundAt = new DateTime(2026, 6, 21, 1, 0, 0, DateTimeKind.Utc);
+        var reboundAt = firstBoundAt.AddMinutes(2);
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, firstBoundAt);
+
+        var events = session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, reboundAt);
+
+        var lineage = session.Status.RuntimeSessionLineage!;
+        Assert.Equal(2, lineage.Count);
+        Assert.Equal("runtime-session-1", lineage[0].AgentRuntimeSessionId);
+        Assert.Equal(firstBoundAt, lineage[0].BoundAt);
+        Assert.Equal("runtime-session-2", lineage[1].AgentRuntimeSessionId);
+        Assert.Equal(reboundAt, lineage[1].BoundAt);
+
+        var boundEvent = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
+        var bound = Assert.IsType<AgentSessionRuntimeBound>(boundEvent.Value);
+        Assert.Equal("runtime-session-2", bound.AgentRuntimeSessionId);
+        Assert.Equal("runtime-session-1", bound.PreviousAgentRuntimeSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void AttachPhysicalSession_NewlyCreatedSession_RuntimeBoundEventHasNullPrevious()
+    {
+        var session = CreateSession();
+        var boundAt = new DateTime(2026, 6, 21, 0, 0, 0, DateTimeKind.Utc);
+
+        var events = session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
+
+        var boundEvent = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
+        var bound = Assert.IsType<AgentSessionRuntimeBound>(boundEvent.Value);
+        Assert.Equal("runtime-session-1", bound.AgentRuntimeSessionId);
+        Assert.Null(bound.PreviousAgentRuntimeSessionId);
+    }
 }
