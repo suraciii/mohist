@@ -80,8 +80,7 @@ internal sealed record InfoVerboseOsRuntime(
     string? NodeVersion);
 
 internal sealed record InfoVerboseCapacity(
-    int? ActiveWorkflows,
-    int? MaxConcurrentWorkflows);
+    int? ActiveWorkflows);
 
 internal sealed record InfoVerboseDiskCategory(
     string Name,

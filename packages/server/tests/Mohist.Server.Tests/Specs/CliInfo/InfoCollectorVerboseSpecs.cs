@@ -289,7 +289,7 @@ public class InfoCollectorVerboseSpecs
     {
         var commands = new RecordingCommandExecutor();
         commands.Queue("systemctl", 0, """
-            Environment=MAX_CONCURRENT_WORKFLOWS=4 RUNNER_ID=runner-1 SERVER_URL=http://localhost:3456 PATH=/usr/bin
+            Environment=RUNNER_ID=runner-1 SERVER_URL=http://localhost:3456 PATH=/usr/bin
             """);
         var runner = new InfoService(new InfoServiceStatus("active", 1234, "5m"), null);
 
@@ -301,7 +301,6 @@ public class InfoCollectorVerboseSpecs
 
         var result = await collector.GetEnvVarsVerboseAsync(runner, systemdAvailable: true);
 
-        Assert.Contains(result, e => e.Name == "MAX_CONCURRENT_WORKFLOWS" && e.Value == "4");
         Assert.Contains(result, e => e.Name == "RUNNER_ID" && e.Value == "runner-1");
         Assert.Contains(result, e => e.Name == "SERVER_URL" && e.Value == "http://localhost:3456");
         Assert.DoesNotContain(result, e => e.Name == "PATH");
@@ -373,11 +372,11 @@ public class InfoCollectorVerboseSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task Verbose_Capacity_ReadsMaxFromSystemdEnvAndActiveFromServer()
+    public async Task Verbose_Capacity_ReadsActiveFromServerOnly()
     {
         var commands = new RecordingCommandExecutor();
         commands.Queue("systemctl", 0, """
-            Environment=MAX_CONCURRENT_WORKFLOWS=8 RUNNER_ID=r1 SERVER_URL=http://localhost:3456
+            Environment=RUNNER_ID=r1 SERVER_URL=http://localhost:3456
             """);
         var handler = new MultiResponseHandler(new[]
         {
@@ -398,13 +397,12 @@ public class InfoCollectorVerboseSpecs
         var result = await collector.GetCapacityVerboseAsync(runner, project, systemdAvailable: true);
 
         Assert.Equal(2, result.ActiveWorkflows);
-        Assert.Equal(8, result.MaxConcurrentWorkflows);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task Verbose_Capacity_FallsBackToServerMaxWhenUnitAndEnvMissing()
+    public async Task Verbose_Capacity_DoesNotExposeServerMax()
     {
         var commands = new RecordingCommandExecutor();
         commands.Queue("systemctl", 0, "Environment=RUNNER_ID=r1 SERVER_URL=http://localhost:3456\n");
@@ -427,17 +425,16 @@ public class InfoCollectorVerboseSpecs
         var result = await collector.GetCapacityVerboseAsync(runner, project, systemdAvailable: true);
 
         Assert.Equal(2, result.ActiveWorkflows);
-        Assert.Equal(8, result.MaxConcurrentWorkflows);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task Verbose_Capacity_NoProject_FallsBackToUnitMax()
+    public async Task Verbose_Capacity_NoProject_LeavesActiveUnknown()
     {
         var commands = new RecordingCommandExecutor();
         commands.Queue("systemctl", 0, """
-            Environment=MAX_CONCURRENT_WORKFLOWS=3
+            Environment=RUNNER_ID=r1
             """);
         var api = BuildApi(new FakeFileSystem(), commands, HttpStatusCode.OK, "{}");
 
@@ -448,17 +445,16 @@ public class InfoCollectorVerboseSpecs
         var result = await collector.GetCapacityVerboseAsync(runner, project: null, systemdAvailable: true);
 
         Assert.Null(result.ActiveWorkflows);
-        Assert.Equal(3, result.MaxConcurrentWorkflows);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task Verbose_Capacity_ServerUnreachable_StillReportsMax()
+    public async Task Verbose_Capacity_ServerUnreachable_LeavesActiveUnknown()
     {
         var commands = new RecordingCommandExecutor();
         commands.Queue("systemctl", 0, """
-            Environment=MAX_CONCURRENT_WORKFLOWS=5
+            Environment=RUNNER_ID=r1
             """);
         var api = BuildApi(new FakeFileSystem(), commands, HttpStatusCode.InternalServerError, "{}");
 
@@ -470,7 +466,6 @@ public class InfoCollectorVerboseSpecs
         var result = await collector.GetCapacityVerboseAsync(runner, project, systemdAvailable: true);
 
         Assert.Null(result.ActiveWorkflows);
-        Assert.Equal(5, result.MaxConcurrentWorkflows);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -573,17 +568,17 @@ public class InfoCollectorVerboseSpecs
             MainPID=1234
             ExecMainStartTimestamp=Mon 2026-01-01 10:00:00 UTC
             FragmentPath=/units/mohist.service
-            Environment=MAX_CONCURRENT_WORKFLOWS=4 RUNNER_ID=r1 SERVER_URL=http://localhost:3456
+            Environment=RUNNER_ID=r1 SERVER_URL=http://localhost:3456
             """);
         commands.Queue("systemctl", 0, """
             ActiveState=active
             MainPID=5678
             ExecMainStartTimestamp=Mon 2026-01-01 10:05:00 UTC
             FragmentPath=/units/mohist.service
-            Environment=MAX_CONCURRENT_WORKFLOWS=4 RUNNER_ID=r1 SERVER_URL=http://localhost:3456
+            Environment=RUNNER_ID=r1 SERVER_URL=http://localhost:3456
             """);
         commands.Queue("systemctl", 0, """
-            Environment=MAX_CONCURRENT_WORKFLOWS=4 RUNNER_ID=r1 SERVER_URL=http://localhost:3456
+            Environment=RUNNER_ID=r1 SERVER_URL=http://localhost:3456
             """);
         commands.Queue("git", 0, "a1b2c3d\n");
         commands.Queue("git", 0, "Add info command\n");
@@ -639,7 +634,6 @@ public class InfoCollectorVerboseSpecs
         Assert.Equal("git@github.com:suraciii/mohist.git", actualOrigin);
         Assert.Equal("opencode", result.Verbose.OpencodeRuntime.Command);
         Assert.NotEmpty(result.Verbose.EnvVars);
-        Assert.Equal(4, result.Verbose.Capacity.MaxConcurrentWorkflows);
         Assert.Equal(1, result.Verbose.Capacity.ActiveWorkflows);
         Assert.Equal(3, result.Verbose.DiskUsage.Categories.Count);
     }
@@ -688,7 +682,7 @@ public class InfoCollectorVerboseSpecs
             OpencodeRuntime: new InfoVerboseOpencodeRuntime("opencode", "1.0.0", 5, Resolved: true),
             EnvVars: [new InfoVerboseEnvVar("RUNNER_ID", "r1")],
             OsRuntime: new InfoVerboseOsRuntime("linux", "x64", ".NET 11.0", "v22.5.0"),
-            Capacity: new InfoVerboseCapacity(1, 4),
+            Capacity: new InfoVerboseCapacity(1),
             DiskUsage: new InfoVerboseDiskUsage([new InfoVerboseDiskCategory("projects", "10M", 3)], Resolved: true));
 
         var writer = new StringWriter();
@@ -720,7 +714,7 @@ public class InfoCollectorVerboseSpecs
             OpencodeRuntime: new InfoVerboseOpencodeRuntime(null, null, null, Resolved: false),
             EnvVars: [],
             OsRuntime: new InfoVerboseOsRuntime(null, null, null, null),
-            Capacity: new InfoVerboseCapacity(null, null),
+            Capacity: new InfoVerboseCapacity(null),
             DiskUsage: new InfoVerboseDiskUsage([], Resolved: true));
 
         var writer = new StringWriter();

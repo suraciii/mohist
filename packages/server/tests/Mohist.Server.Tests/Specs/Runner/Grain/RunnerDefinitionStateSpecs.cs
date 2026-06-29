@@ -38,7 +38,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task RegisterAsync_NewRunner_InitializesPersistedSlotsToOne_AndIgnoresReportedValue()
+    public async Task RegisterAsync_NewRunner_InitializesPersistedSlotsToOne()
     {
         var runnerId = $"runner-default-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -47,8 +47,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
             runnerId,
             ["spec/*"],
             "test-host",
-            TestProjectId(runnerId),
-            MaxWorkflowSlots: 99));
+            TestProjectId(runnerId)));
 
         Assert.Equal(1, await runner.GetSlotsAsync());
 
@@ -117,8 +116,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
             runnerId,
             ["spec/*"],
             "test-host",
-            projectId,
-            MaxWorkflowSlots: 99));
+            projectId));
 
         Assert.Equal(4, await reactivated.GetSlotsAsync());
     }
@@ -216,39 +214,4 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         Assert.Equal("invalid-work", assignment.Reason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task ReportedMaxWorkflowSlots_DoesNotAffectDispatchCapacity()
-    {
-        var projectId = $"test-project-{Guid.NewGuid():N}";
-        var runnerId = $"runner-reported-{Guid.NewGuid():N}";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-
-        await runner.RegisterAsync(new RunnerInfo(
-            runnerId,
-            ["spec/*"],
-            "test-host",
-            projectId,
-            MaxWorkflowSlots: 5));
-
-        Assert.Equal(1, await runner.GetSlotsAsync());
-
-        _workflowId = $"wf-reported-{Guid.NewGuid():N}";
-        var wf1 = Grains.GetGrain<IWorkflowGrain>(_workflowId);
-        await SeedWorkflowTemplateAsync(_workflowId, SingleStage(checks: []), projectId);
-        await wf1.StartAsync(TestInput(projectId));
-        await AssignWorkflowToRunnerAsync(_workflowId, runnerId);
-
-        var wf2Id = $"wf-reported-2-{Guid.NewGuid():N}";
-        var wf2 = Grains.GetGrain<IWorkflowGrain>(wf2Id);
-        await SeedWorkflowTemplateAsync(wf2Id, SingleStage(checks: []), projectId);
-        await wf2.StartAsync(TestInput(projectId));
-
-        var first = await runner.PollAsync();
-        Assert.NotNull(first);
-        Assert.Equal(_workflowId, first.WorkflowRunId);
-
-        Assert.Null(await runner.PollAsync());
-    }
 }

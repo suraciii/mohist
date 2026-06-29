@@ -652,8 +652,8 @@ public class AgentJobRoutesEndToEndSpecs
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId,
-            maxWorkflowSlots,
         });
+        await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = maxWorkflowSlots });
 
         var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);

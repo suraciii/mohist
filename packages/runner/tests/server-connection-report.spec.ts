@@ -26,7 +26,7 @@ function mockResponse({ status, contentType = "application/json", body = "{}" }:
 }
 
 function options() {
-  return { serverUrl: "http://localhost:3456", runnerId: "runner-1", runnerRoot: "/tmp", maxConcurrentWorkflows: 1, pollIntervalMs: 100, heartbeatIntervalMs: 60_000, dispatchLivenessProbeIntervalMs: 60_000 }
+  return { serverUrl: "http://localhost:3456", runnerId: "runner-1", runnerRoot: "/tmp", pollIntervalMs: 100, heartbeatIntervalMs: 60_000, dispatchLivenessProbeIntervalMs: 60_000 }
 }
 
 describe("ServerConnection.report", () => {

@@ -53,7 +53,6 @@ internal sealed class InfoRenderer
 
         writer.WriteLine("Runner capacity:");
         writer.WriteLine($"  active:  {verbose.Capacity.ActiveWorkflows?.ToString() ?? Unknown}");
-        writer.WriteLine($"  max:     {verbose.Capacity.MaxConcurrentWorkflows?.ToString() ?? Unknown}");
 
         writer.WriteLine("Disk usage breakdown:");
         WriteIndentedList(writer, BuildDiskCategoryLines(verbose.DiskUsage.Categories), indent: 2);
@@ -251,7 +250,6 @@ internal sealed class InfoRenderer
         return new JsonObject
         {
             ["activeWorkflows"] = capacity.ActiveWorkflows,
-            ["maxConcurrentWorkflows"] = capacity.MaxConcurrentWorkflows,
         };
     }
 

@@ -73,27 +73,12 @@ internal sealed class VerboseRunnerInspector
         bool systemdAvailable,
         IReadOnlyDictionary<string, string>? unitEnv = null)
     {
-        int? maxFromUnit = null;
-        int? maxFromEnv = null;
         RunnerCapacity? serverCapacity = null;
-        var envSource = unitEnv ?? await TryGetRunnerUnitEnvironmentAsync(systemdAvailable, CancellationToken.None);
-
-        if (runner.Status is { State: "active" } && envSource is not null
-            && envSource.TryGetValue("MAX_CONCURRENT_WORKFLOWS", out var maxText)
-            && int.TryParse(maxText, out var parsed)
-            && parsed > 0)
-        {
-            maxFromUnit = parsed;
-        }
-
-        var maxFromEnvText = _environment.GetEnvironmentVariable("MAX_CONCURRENT_WORKFLOWS");
-        if (maxFromEnvText is not null && int.TryParse(maxFromEnvText, out var maxEnvParsed) && maxEnvParsed > 0)
-            maxFromEnv = maxEnvParsed;
 
         if (project is not null && !string.IsNullOrWhiteSpace(project.Id))
             serverCapacity = await TryGetServerCapacityAsync(project.Id!);
 
-        return new InfoVerboseCapacity(serverCapacity?.Active, maxFromUnit ?? serverCapacity?.Max ?? maxFromEnv);
+        return new InfoVerboseCapacity(serverCapacity?.Active);
     }
 
     private async Task<RunnerCapacity?> TryGetServerCapacityAsync(string projectId)
@@ -112,9 +97,7 @@ internal sealed class VerboseRunnerInspector
             var capacity = node?["data"]?["capacity"];
             if (capacity is null)
                 return null;
-            return new RunnerCapacity(
-                capacity["active"]?.GetValue<int?>(),
-                capacity["max"]?.GetValue<int?>());
+            return new RunnerCapacity(capacity["active"]?.GetValue<int?>());
         }
         catch
         {
@@ -122,7 +105,7 @@ internal sealed class VerboseRunnerInspector
         }
     }
 
-    private sealed record RunnerCapacity(int? Active, int? Max);
+    private sealed record RunnerCapacity(int? Active);
 
     private static readonly string[] WatchedEnvVarNames =
     {
@@ -135,7 +118,6 @@ internal sealed class VerboseRunnerInspector
         "MOHIST_WORKSPACE_ROOT",
         "MOHIST_ARTIFACT_ROOT",
         "MOHIST_CONFIG__AGENT_COMMAND",
-        "MAX_CONCURRENT_WORKFLOWS",
         "RUNNER_ID",
         "SERVER_URL",
     };

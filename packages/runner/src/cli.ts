@@ -12,7 +12,6 @@ await new RunnerHost({
   runnerId: env("RUNNER_ID") ?? env("RunnerId") ?? `runner-${hostname()}`,
   projectId: env("PROJECT_ID") ?? env("ProjectId"),
   runnerRoot: env("RUNNER_ROOT") ?? env("RunnerRoot") ?? defaultRunnerRoot(),
-  maxConcurrentWorkflows: positiveNumberEnv("MAX_CONCURRENT_WORKFLOWS") ?? positiveNumberEnv("MaxConcurrentWorkflows") ?? 1,
   pollIntervalMs: numberEnv("POLL_INTERVAL_MS") ?? 1000,
   heartbeatIntervalMs: numberEnv("HEARTBEAT_INTERVAL_MS") ?? 15_000,
   dispatchLivenessProbeIntervalMs: numberEnv("DISPATCH_LIVENESS_PROBE_INTERVAL_MS") ?? 10_000,

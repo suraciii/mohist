@@ -431,7 +431,6 @@ public class RunnerStatusApiSpecs
             capabilities = new[] { "spec/*" },
             hostname = "multi-host",
             projectId,
-            maxWorkflowSlots = 2,
         });
 
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);

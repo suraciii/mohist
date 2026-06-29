@@ -20,11 +20,10 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
         if (isNew)
         {
             _log.LogInformation(
-                "Runner {Id} registered with [{Caps}], {ModelCount} coder models, and {Slots} workflow slots",
+                "Runner {Id} registered with [{Caps}] and {ModelCount} coder models",
                 info.RunnerId,
                 string.Join(", ", info.Capabilities),
-                info.CoderModels?.Length ?? 0,
-                info.MaxWorkflowSlots);
+                info.CoderModels?.Length ?? 0);
         }
         return Task.CompletedTask;
     }

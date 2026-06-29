@@ -285,11 +285,10 @@ public class InfoCollectorJsonSpecs
             OpencodeRuntime: new InfoVerboseOpencodeRuntime("opencode", "1.2.3", 5, Resolved: true),
             EnvVars:
             [
-                new("MAX_CONCURRENT_WORKFLOWS", "4"),
                 new("RUNNER_ID", "r1"),
             ],
             OsRuntime: new InfoVerboseOsRuntime("linux", "x64", ".NET 11.0", "v22.5.0"),
-            Capacity: new InfoVerboseCapacity(2, 4),
+            Capacity: new InfoVerboseCapacity(2),
             DiskUsage: new InfoVerboseDiskUsage(
             [
                 new("logs", "2M", 4),
@@ -335,7 +334,7 @@ public class InfoCollectorJsonSpecs
 
         var envVars = node["envVars"] as JsonArray;
         Assert.NotNull(envVars);
-        Assert.Equal(2, envVars!.Count);
+        Assert.Single(envVars!);
 
         var osRuntime = node["osRuntime"] as JsonObject;
         Assert.Equal("linux", (string?)osRuntime!["os"]);
@@ -345,7 +344,6 @@ public class InfoCollectorJsonSpecs
 
         var capacity = node["capacity"] as JsonObject;
         Assert.Equal(2, (int?)capacity!["activeWorkflows"]);
-        Assert.Equal(4, (int?)capacity["maxConcurrentWorkflows"]);
 
         var diskUsage = node["diskUsage"] as JsonArray;
         Assert.NotNull(diskUsage);
@@ -393,7 +391,7 @@ public class InfoCollectorJsonSpecs
             OpencodeRuntime: new InfoVerboseOpencodeRuntime(null, null, null, Resolved: false),
             EnvVars: [],
             OsRuntime: new InfoVerboseOsRuntime(null, null, null, null),
-            Capacity: new InfoVerboseCapacity(null, null),
+            Capacity: new InfoVerboseCapacity(null),
             DiskUsage: new InfoVerboseDiskUsage([], Resolved: true));
 
         var result = new InfoResult(
@@ -427,7 +425,7 @@ public class InfoCollectorJsonSpecs
             OpencodeRuntime: new InfoVerboseOpencodeRuntime(null, null, null, Resolved: false),
             EnvVars: [],
             OsRuntime: new InfoVerboseOsRuntime(null, null, null, null),
-            Capacity: new InfoVerboseCapacity(null, null),
+            Capacity: new InfoVerboseCapacity(null),
             DiskUsage: new InfoVerboseDiskUsage([new("worktrees", null, null)], Resolved: true));
 
         var result = new InfoResult(

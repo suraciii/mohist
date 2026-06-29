@@ -326,7 +326,8 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
         _runnerId = $"global-runner-{Guid.NewGuid():N}";
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id, maxWorkflowSlots = 16 });
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+        await _client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 16 });
 
         for (var attempt = 0; attempt < 100; attempt++)
         {

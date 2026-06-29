@@ -38,7 +38,6 @@ export class RunnerHost {
   private readonly cleanupLoop: CleanupLoop
   private readonly cleanupConvergenceIntervalMs: number
   private readonly cleanupLoopIntervalMs: number
-  private readonly maxConcurrentWorkflows: number
   private readonly buildGitHash: string | null
   private coderModels: string[] = []
   private coderModelVariants: Record<string, string[]> = {}
@@ -58,7 +57,6 @@ export class RunnerHost {
   private workExecutor: WorkExecutor | null = null
 
   constructor(private readonly options: RunnerOptions) {
-    this.maxConcurrentWorkflows = Math.max(1, Math.floor(options.maxConcurrentWorkflows))
     this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
     this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
     const build = loadBuildInfo()
@@ -255,7 +253,7 @@ export class RunnerHost {
     const inFlight = new Map<string, Promise<void>>()
 
     while (!signal.aborted) {
-      while (!signal.aborted && inFlight.size < this.maxConcurrentWorkflows) {
+      while (!signal.aborted) {
         const work = await this.connection.poll(signal)
         if (!work) break
 
@@ -281,14 +279,10 @@ export class RunnerHost {
         continue
       }
 
-      if (inFlight.size >= this.maxConcurrentWorkflows) {
-        await Promise.race(inFlight.values())
-      } else {
-        await Promise.race([
-          delay(this.options.pollIntervalMs, signal),
-          ...inFlight.values(),
-        ])
-      }
+      await Promise.race([
+        delay(this.options.pollIntervalMs, signal),
+        ...inFlight.values(),
+      ])
     }
 
     await Promise.allSettled(inFlight.values())
@@ -383,7 +377,6 @@ export class RunnerHost {
       projectId: this.options.projectId,
       coderModels: this.coderModels,
       coderModelVariants: this.coderModelVariants,
-      maxWorkflowSlots: this.maxConcurrentWorkflows,
       connectionId: this.signalR.getConnectionId(),
     }
   }
