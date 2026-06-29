@@ -36,3 +36,9 @@
 - Added Paused group to the list-page table (present in UI as its own section between active and done).
 - Added Close Epic to action table (present in UI as a secondary action for non-terminal epics).
 - Linked to epics.md for lifecycle state machine (no duplication).
+
+## T-004
+
+- Removed the stale "当前 CLI 不支持的：Epic 管理" note from docs/cli-reference.md.
+- Added "Epic 管理" section with the full 11 subcommand list (verified against MohistCliCommands.Epic.cs).
+- Noted start/pause/resume are idempotent, cross-linked to epics.md#epic-的生命周期 for lifecycle semantics.
