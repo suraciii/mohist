@@ -426,13 +426,65 @@ public class AgentSessionQuerier : IScopedService
         return SessionTranscriptBuilder.Build(transcript);
     }
 
-    public async Task<AgentSessionMetadataDto?> GetGenericSessionMetadataAsync(string projectId, string sessionId, CancellationToken ct = default)
+    /// <summary>
+    /// Builds the generic-session summary surfaced by
+    /// <c>GET /api/projects/{projectRef}/agent-sessions/{sessionId}</c>
+    /// (issue-130 T-003 / design D4). Returns <c>null</c> when the
+    /// session id does not resolve to a generic <c>agent-launch</c>
+    /// session in the requested project — the cross-project guard
+    /// matches <see cref="ResolveGenericFollowupTargetAsync"/> and
+    /// <see cref="ResolveGenericCancelTargetAsync"/> so the caller never
+    /// observes a session from a different project.
+    /// </summary>
+    /// <remarks>
+    /// The DTO omits workflow-only fields (workflowRunId, sessionName,
+    /// workId, workType, stage) by construction — the record does not
+    /// declare them. Status uses the spec vocabulary (<c>running</c> /
+    /// <c>completed</c> / <c>failed</c> / <c>stopped</c>) resolved by
+    /// the same terminal-fact + bound state logic that powers
+    /// <see cref="ListAgentSessionsAsync"/> so list and summary stay in
+    /// lockstep. Resolved model, failure category, and tool
+    /// call/error counts are computed via
+    /// <see cref="TranscriptEventSummaryProjector"/> over the session's
+    /// transcript; the context-ref envelope is sourced from the
+    /// <see cref="GenericAgentSessionMetadata"/> labels stamped at
+    /// launch.
+    /// </remarks>
+    public async Task<GenericAgentSessionSummaryDto?> GetGenericSessionSummaryAsync(string projectId, string sessionId, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var session = await FindGenericSessionAsync(projectId, sessionId, ct);
-        if (session is null) return null;
+        var record = await FindGenericSessionAsync(projectId, sessionId, ct);
+        if (record is null) return null;
 
-        return await BuildSessionMetadataDtoAsync(db, session, sessionId, ct);
+        var session = record.Session;
+        var transcript = await LoadTranscriptAsync(db, session.Id, ct);
+        var sessionByTurnId = transcript.Turns.ToDictionary(t => t.Id, t => t.SessionId);
+        var transcriptEvents = transcript.Parts
+            .Where(part => sessionByTurnId.ContainsKey(part.TurnId))
+            .Select(part => ToProjection(sessionByTurnId[part.TurnId], part))
+            .ToList();
+
+        var summary = TranscriptEventSummaryProjector.Summarize(
+            transcriptEvents.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson)));
+
+        var terminalFacts = await LoadTerminalFactsAsync(db, new[] { session.Id }, ct);
+        var status = ResolveAgentSessionListStatus(record, terminalFacts.GetValueOrDefault(session.Id));
+
+        var usage = AgentSessionJsonHelper.Usage(session);
+
+        return new GenericAgentSessionSummaryDto(
+            session.Id,
+            Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty,
+            Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty,
+            status,
+            session.Status.CreatedAt.ToString("o"),
+            AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
+            summary.ResolvedModel,
+            summary.FailureCategory,
+            summary.ToolCallCount,
+            summary.ToolErrorCount,
+            BuildGenericSessionSummaryContextRefs(record),
+            ToUsageDto(usage));
     }
 
     public async Task<AgentSessionTranscriptResponse?> GetGenericSessionTranscriptAsync(string projectId, string sessionId, CancellationToken ct = default)
@@ -443,6 +495,31 @@ public class AgentSessionQuerier : IScopedService
 
         var transcript = await LoadTranscriptAsync(db, session.Session.Id, ct);
         return SessionTranscriptBuilder.Build(transcript);
+    }
+
+    /// <summary>
+    /// Builds the optional <see cref="GenericAgentSessionSummaryContextRefsDto"/>
+    /// envelope from the labels stamped at launch (issue-130 T-003).
+    /// Returns <c>null</c> when the session carried no context references
+    /// so the wire response omits the field instead of fabricating an
+    /// empty object — mirroring the agent-scoped list's
+    /// <see cref="BuildAgentSessionListContextRefs"/> invariant.
+    /// </summary>
+    private static GenericAgentSessionSummaryContextRefsDto? BuildGenericSessionSummaryContextRefs(AgentSessionRecord record)
+    {
+        var issueNumberText = Label(record, GenericAgentSessionMetadata.IssueNumber);
+        var issueNumber = int.TryParse(issueNumberText, out var parsed) ? parsed : (int?)null;
+        var epicNumber = Label(record, GenericAgentSessionMetadata.EpicNumber);
+        var repository = Label(record, GenericAgentSessionMetadata.Repository);
+        var workspacePath = Label(record, GenericAgentSessionMetadata.WorkspacePath);
+
+        if (issueNumber is null && string.IsNullOrWhiteSpace(epicNumber)
+            && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))
+        {
+            return null;
+        }
+
+        return new GenericAgentSessionSummaryContextRefsDto(issueNumber, epicNumber, repository, workspacePath);
     }
 
     private async Task<AgentSessionMetadataDto> BuildSessionMetadataDtoAsync(

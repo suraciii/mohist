@@ -66,3 +66,24 @@
   filter (`dotnet test … --filter "FullyQualifiedName~Sessions"`), and the
   Unit-speed tests. The Otel async-span capture test is flaky on this
   workstation and unrelated to schema work.
+
+### AgentSessionQuerier's duplicate `GetGenericSessionSummaryAsync` (T-003)
+- The method appeared twice in `AgentSessionQuerier.cs` (lines 453 and 524,
+  identical bodies) — a copy-paste artifact from the T-001/T-002 work.
+  Removed the second copy; the removal also unblocked compilation since
+  CS0111 blocked the CS1061 for the still-missing `GetGenericSessionMetadataAsync`.
+- The route in `AgentSessionFollowupRoutes.cs` called the removed
+  `GetGenericSessionMetadataAsync` — renamed to `GetGenericSessionSummaryAsync`
+  (the T-003 replacement that returns the enriched DTO). The old variable
+  `metadata` was also renamed to `summary` for consistency.
+- `GenericAgentSessionSummaryDto` and `GenericAgentSessionSummaryContextRefsDto`
+  were already defined in `AgentSessionReadModels.cs` (added by prior tasks).
+  The T-003 implementation reuses them as-is.
+- `GetGenericSessionSummaryAsync` does not touch `_workflowQuerier`, so unit
+  tests can construct `AgentSessionQuerier` with `null!` for that dependency.
+
+### Transcript seed data must have unique (TurnId, Type, CorrelationKey)
+- `AgentSessionTranscriptParts` has a unique constraint on
+  `(TurnId, Type, CorrelationKey)`. Test seed data must assign unique
+  `CorrelationKey` values for parts with the same `Type` (e.g. multiple
+  tool call parts must each have a different CorrelationKey).

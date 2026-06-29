@@ -216,6 +216,58 @@ public sealed record AgentSessionListContextRefsDto(
     string? Repository,
     string? WorkspacePath);
 
+/// <summary>
+/// Read shape for the generic-session summary route
+/// (<c>GET /api/projects/{projectRef}/agent-sessions/{sessionId}</c>),
+/// surfaced as the
+/// <see cref="Workflow.Services.Sessions.AgentSessionQuerier.GetGenericSessionSummaryAsync"/>
+/// response. Issue-130 T-003 / design D4: the summary carries the
+/// resolved Agent profile identity (id + name), the session status in
+/// the spec vocabulary (<c>running</c> / <c>completed</c> / <c>failed</c>
+/// / <c>stopped</c>), the created / last-activity timestamps, the
+/// resolved model, the usage metrics, the failure category (when
+/// present), the tool call and tool error counts, and the optional
+/// context references stamped at launch. Workflow-only fields
+/// (<c>workflowRunId</c>, <c>sessionName</c>, <c>workId</c>,
+/// <c>workType</c>, <c>stage</c>) are absent by construction rather than
+/// nulled — the record simply does not declare them, so a generic
+/// session's summary cannot fabricate workflow identity.
+/// </summary>
+/// <remarks>
+/// <see cref="ContextRefs"/> is the optional envelope of context
+/// references (issue / epic / repository / workspace path) recorded on
+/// the session metadata at launch; it is <c>null</c> when the session
+/// carried no context reference, in line with "absent rather than null".
+/// </remarks>
+public sealed record GenericAgentSessionSummaryDto(
+    string SessionId,
+    string AgentId,
+    string AgentName,
+    [property: JsonPropertyName("status")] string Status,
+    string CreatedAt,
+    string? LastActivityAt,
+    string? ResolvedModel,
+    string? FailureCategory,
+    int? ToolCallCount,
+    int? ToolErrorCount,
+    [property: JsonPropertyName("contextRefs")] GenericAgentSessionSummaryContextRefsDto? ContextRefs,
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
+
+/// <summary>
+/// Optional envelope of context references recorded on a generic
+/// AgentSession at launch (issue-130 T-003 / design D4). Each field is
+/// null when the session carried no such reference; the envelope itself
+/// is null when the session had no context references at all, mirroring
+/// <see cref="AgentSessionListContextRefsDto"/> but kept as a distinct
+/// type so the summary's wire shape evolves independently of the
+/// agent-scoped list's.
+/// </summary>
+public sealed record GenericAgentSessionSummaryContextRefsDto(
+    int? IssueNumber,
+    string? EpicNumber,
+    string? Repository,
+    string? WorkspacePath);
+
 public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, AgentSessionTranscriptResponse Transcript);
 
 public sealed record ActivityDto(
