@@ -358,8 +358,11 @@ internal static class AgentCommands
     {
         var session = new Command(
             "session",
-            "Manage a generic AgentSession launched from an Agent profile (issue-129). Subcommands: launch <agent>, followup <sessionId>, cancel <sessionId>.");
+            "Manage a generic AgentSession launched from an Agent profile (issue-129). Subcommands: list <agent>, show <sessionId>, transcript <sessionId>, launch <agent>, followup <sessionId>, cancel <sessionId>.");
 
+        session.Subcommands.Add(BuildSessionList(api));
+        session.Subcommands.Add(BuildSessionShow(api));
+        session.Subcommands.Add(BuildSessionTranscript(api));
         session.Subcommands.Add(BuildSessionLaunch(api));
         session.Subcommands.Add(BuildSessionFollowup(api));
         session.Subcommands.Add(BuildSessionCancel(api));
@@ -556,6 +559,149 @@ internal static class AgentCommands
         return cmd;
     }
 
+    private static Command BuildSessionList(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "list",
+            "List agent sessions for a given Agent profile. Resolves the agent ref client-side, then GETs .../agents/{agentId}/sessions.");
+        cmd.Aliases.Add("ls");
+        var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
+        var statusOpt = new Option<string?>("--status") { Description = "Filter by session status (running, completed, failed, stopped)" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
+
+        cmd.Arguments.Add(agentRefArg);
+        cmd.Options.Add(statusOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var agentRef = ctx.GetValue(agentRefArg);
+            var status = ctx.GetValue(statusOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return ListAsync();
+
+            async Task<int> ListAsync()
+            {
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+
+                var agent = await ResolveAgentAsync(api, resolvedProjectId, agentRef!);
+                if (agent is null)
+                    return 1;
+
+                var query = string.IsNullOrWhiteSpace(status)
+                    ? ""
+                    : $"?status={Uri.EscapeDataString(status)}";
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintWithOutputAsync(
+                    ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}/sessions") + query,
+                    mode,
+                    nameof(MohistCliApi.TableShape.AgentSessionList));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildSessionShow(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "show",
+            "Show the summary of a generic AgentSession. GETs .../agent-sessions/{sessionId}.");
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Agent session id returned by launch" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var sessionId = ctx.GetValue(sessionIdArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return ShowAsync();
+
+            async Task<int> ShowAsync()
+            {
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintWithOutputAsync(
+                    ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}"),
+                    mode,
+                    nameof(MohistCliApi.TableShape.AgentSessionShow));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildSessionTranscript(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "transcript",
+            "Show transcript summary of a generic AgentSession. GETs .../agent-sessions/{sessionId}/transcript.");
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Agent session id returned by launch" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var sessionId = ctx.GetValue(sessionIdArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return TranscriptAsync();
+
+            async Task<int> TranscriptAsync()
+            {
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintWithOutputAsync(
+                    ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/transcript"),
+                    mode,
+                    nameof(MohistCliApi.TableShape.AgentSessionTranscript));
+            }
+        });
+        return cmd;
+    }
+
     private static object? BuildLaunchContext(int? issue, string? epic, string? repository, string? workspacePath)
     {
         if (issue is null && string.IsNullOrWhiteSpace(epic) && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))
@@ -644,7 +790,10 @@ internal static class AgentCommands
         {
             if (nameOrId.StartsWith("agent_", StringComparison.Ordinal))
             {
-                var data = await api.GetDataAsync(ProjectAgentsPath(projectId, $"/agents/{MohistCliCommands.Escape(nameOrId)}"));
+                var (exitCode, data) = await api.GetDataOrPrintErrorAsync(
+                    ProjectAgentsPath(projectId, $"/agents/{MohistCliCommands.Escape(nameOrId)}"));
+                if (exitCode != 0)
+                    return null;
                 return AgentRef.From(data);
             }
 

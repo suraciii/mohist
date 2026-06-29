@@ -191,3 +191,37 @@
   - Unknown epic ref → 404
 - Tests seed `AgentSessionRow` directly into the DB (same pattern as `AgentSessionReadApiSpecs`).
 - Issue creation uses grains (`IIssueGrain`, `IIssueCounterGrain`) with a project that has a repository; epic creation uses the HTTP API.
+
+### T-007: CLI mo agent session list/show/transcript verbs
+
+#### ResolveAgentAsync changed from GetDataAsync to GetDataOrPrintErrorAsync
+- The existing `ResolveAgentAsync` used `GetDataAsync` for the `agent_*` direct-lookup path, which throws `ApiResponseException` (a private class) on 404/server error. Changed to `GetDataOrPrintErrorAsync` which catches the exception internally, prints the error to stderr, and returns the exit code. The caller pattern `if (agent is null) return 1` converts the 404 exit code to exit 1, matching existing callers' pattern.
+
+#### Three new TableShape enum entries
+- `AgentSessionList` — table-mode renders one row per session with `session id`, `status`, `created`, `model` columns; can be empty (no message shown).
+- `AgentSessionShow` — table-mode renders the enriched summary: agent identity (id+name), status, created/last-activity, model, failure category, tool call/error counts, token/cost from usage envelope, and context refs.
+- `AgentSessionTranscript` — same summary shape as `RenderSessionTranscriptSummary`: turns, parts, first/last activity, no individual message bodies.
+
+#### Three new CLI subcommands in BuildSession
+- `list <agent> [--status]` — resolves agentRef client-side via `ResolveAgentAsync` then GETs `/agents/{agentId}/sessions`. Default output is `table`. Aliased as `ls`.
+- `show <sessionId>` — GETs `/agent-sessions/{sessionId}`. Default output is `table`.
+- `transcript <sessionId>` — GETs `/agent-sessions/{sessionId}/transcript`. Default output is `table`.
+- All three accept `--project/--project-id` and `-o table|json`. List also accepts `--status`.
+- The help text updated to list all 6 subcommands.
+
+#### Test coverage: 13 new CLI spec scenarios
+- `SessionList_Table_ResolvesAgentAndRendersSessions` — two requests (agent lookup + sessions list), table output
+- `SessionList_Json_EmitsRawPayload` — json output shows raw payload
+- `SessionList_HonorsStatusFilter` — `--status failed` appends `?status=failed` to sessions URL
+- `SessionList_UnknownAgent_SurfacesClientError` — unknown name exits non-zero with client-side "not found"
+- `SessionList_UnknownAgentById_SurfacesServer404Error` — unknown `agent_*` id propagates server 404
+- `SessionShow_Table_RendersEnrichedSummary` — table output shows agent, status, model, tool counts, tokens, cost, context refs
+- `SessionShow_Json_EmitsRawPayload` — json output shows raw payload
+- `SessionShow_NotFound_SurfacesServer404` — unknown session exits 4 and prints server error
+- `SessionTranscript_Table_RendersSummaryNotFullDump` — summary only, no message bodies
+- `SessionTranscript_Json_EmitsFullTranscript` — json output shows full transcript
+- `SessionTranscript_NotFound_SurfacesServer404` — unknown session exits 4 and prints server error
+- `SessionShow_ShowAndTranscriptUnchanged_AreDistinctFromIssueSessionVerbs` — agent session show/transcript hit the generic session endpoints, not workflow-session endpoints
+- `SessionList_UsesAgentIdDirectlyWhenPassed` — `agent_123` bypasses name resolution, hits agent detail then sessions list
+- `SessionList_DefaultOutputIsTable` — default output mode is table
+- `SessionHelp_ListsAllSixSubcommands` — help lists all 6 subcommands (list, show, transcript, launch, followup, cancel)
