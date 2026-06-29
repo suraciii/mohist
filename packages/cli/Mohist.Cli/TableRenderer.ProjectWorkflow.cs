@@ -66,4 +66,24 @@ internal sealed partial class TableRenderer
                 _out.WriteLine($"  | {line.TrimEnd('\r')}");
         }
     }
+
+    private void RenderProjectWorkflowProfile(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var defaultTemplateId = StringOf(data, "defaultTemplateId");
+        var profileId = StringOf(data, "profileId");
+
+        _out.WriteLine("workflow profile:");
+        if (!string.IsNullOrEmpty(profileId))
+            _out.WriteLine($"  profile:      {profileId}");
+        _out.WriteLine($"  default template: {(string.IsNullOrEmpty(defaultTemplateId) ? "(none)" : defaultTemplateId)}");
+
+        RenderWorkflowProfileVariables(data["variables"]);
+        RenderWorkflowProfilePrompts(data["prompts"]);
+    }
 }

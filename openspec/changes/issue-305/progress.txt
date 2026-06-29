@@ -15,3 +15,15 @@
 ## Decisions
 
 - Config subcommand is registered as empty skeleton in T-001 so `mo project workflow --help` lists both `template` and `config` from the start (aligns with spec AC).
+
+## T-002 Recordings
+
+- Config verbs mirror issue-level `BuildWorkflowConfig*` closely:
+  - `get` → `PrintProjectWorkflowProfileAsync` (same two-GET pattern: profile + prompts, merge, render)
+  - `set` → composite: `--default-template <id>` (PUT), `--var`/`--stage-var` (PATCH), `--vars-file` (PUT full replace), `--prompt` (PUT)
+  - `clear` → composite: `--default-template` (DELETE, bool flag requires `!result.Implicit` check), `--var` (PATCH null), `--prompt` (DELETE)
+  - `preview <key>` → POST prompts/{key}/preview
+- `--vars-file` parsed from JSON file via `JsonNode.Parse` then passed as `object` to `PrintPutWithOutputAsync`
+- For boolean options (`--default-template` in clear), `ctx.GetResult(opt) is not null` returns `true` even when not provided (implicit default value). Must check `!result.Implicit` to distinguish explicit from default.
+- `RenderProjectWorkflowProfile` added in `TableRenderer.ProjectWorkflow.cs`; reuses `RenderWorkflowProfileVariables` and `RenderWorkflowProfilePrompts` from the issue-level partial (same partial class).
+- Config get also uses `ProjectWorkflowProfile` table shape (different from issue-level `WorkflowProfile` which shows issueNumber, templateSource, etc.)

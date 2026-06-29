@@ -126,6 +126,9 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.ProjectTemplateShow:
                 RenderProjectTemplateShow(data);
                 break;
+            case MohistCliApi.TableShape.ProjectWorkflowProfile:
+                RenderProjectWorkflowProfile(data);
+                break;
             case MohistCliApi.TableShape.AgentSessionCancel:
                 RenderAgentSessionCancel(data);
                 break;

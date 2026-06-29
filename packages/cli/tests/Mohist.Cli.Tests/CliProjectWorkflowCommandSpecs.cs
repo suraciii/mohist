@@ -448,6 +448,454 @@ public class CliProjectWorkflowCommandSpecs
         Assert.Contains("json", error.ToString());
     }
 
+    // ──────────────────────────────────────────────
+    // Config command group
+    // ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task ConfigHelp_ListsFourVerbs()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("get", stdout);
+        Assert.Contains("set", stdout);
+        Assert.Contains("clear", stdout);
+        Assert.Contains("preview", stdout);
+    }
+
+    [Fact]
+    public async Task ConfigGet_TableMode_SendsGetAndRendersDefaultTemplateVariablesPrompts()
+    {
+        var getCount = 0;
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile")
+            {
+                getCount++;
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        defaultTemplateId = "tpl_abc",
+                        profileId = "mohist/github-pr",
+                        variables = new
+                        {
+                            vars = new Dictionary<string, object> { ["foo"] = "bar" },
+                            stages = new Dictionary<string, object>(),
+                        },
+                    },
+                });
+            }
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts")
+            {
+                getCount++;
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new Dictionary<string, object> { ["plan_prompt"] = "You are a planner" },
+                });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "get", "-o", "table"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(2, getCount);
+        var stdout = output.ToString();
+        Assert.Contains("tpl_abc", stdout);
+        Assert.Contains("foo", stdout);
+        Assert.Contains("bar", stdout);
+        Assert.Contains("plan_prompt", stdout);
+    }
+
+    [Fact]
+    public async Task ConfigGet_JsonMode_EmitsRawPayload()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { defaultTemplateId = "tpl_abc" },
+                });
+            }
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { plan_prompt = "You are a planner" },
+                });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "get", "-o", "json"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.DoesNotContain("\"success\"", stdout);
+        Assert.Contains("tpl_abc", stdout);
+    }
+
+    [Fact]
+    public async Task ConfigSet_DefaultTemplate_SendsPut()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/default-template")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "set", "--default-template", "tpl_abc"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var putReq = handler.Requests.Single(r => r.Method == HttpMethod.Put);
+        Assert.Equal("/api/projects/proj_abc/workflow-profile/default-template", putReq.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task ConfigSet_VarAndStageVar_SendsPatchOnly()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "set", "--var", "foo=bar", "--stage-var", "plan.baz=qux"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(handler.Requests);
+        var patchReq = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
+        Assert.Equal("/api/projects/proj_abc/workflow-profile/variables", patchReq.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task ConfigSet_VarAndStageVar_PatchBodyHasCorrectShape()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "set", "--var", "foo=bar", "--stage-var", "plan.baz=qux"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var patchReq = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
+        var body = JsonNode.Parse(patchReq.Body!) as JsonObject;
+        Assert.NotNull(body);
+        Assert.Equal("bar", body!["vars"]?["foo"]?.GetValue<string>());
+        Assert.Equal("qux", body["stages"]?["plan"]?["vars"]?["baz"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ConfigSet_VarsFile_SendsPutVariables()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+        fs.AddFile("/vars.json", "{\"vars\": {\"foo\": \"bar\"}}");
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "set", "--vars-file", "/vars.json"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(handler.Requests);
+        var putReq = handler.Requests.Single(r => r.Method == HttpMethod.Put);
+        Assert.Equal("/api/projects/proj_abc/workflow-profile/variables", putReq.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task ConfigSet_VarsFileAndVar_MutuallyExclusive()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "set", "--vars-file", "/vars.json", "--var", "foo=bar"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("mutually exclusive", error.ToString());
+    }
+
+    [Fact]
+    public async Task ConfigSet_VarsFileAndStageVar_MutuallyExclusive()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "set", "--vars-file", "/vars.json", "--stage-var", "plan.baz=qux"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("mutually exclusive", error.ToString());
+    }
+
+    [Fact]
+    public async Task ConfigSet_NoFlags_ExitsNonZero()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "set"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("nothing to change", error.ToString());
+    }
+
+    [Fact]
+    public async Task ConfigSet_PromptInline_SendsPut()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/greeting")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "set", "--prompt", "greeting=You are..."], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var putReq = handler.Requests.Single(r => r.Method == HttpMethod.Put);
+        Assert.Equal("/api/projects/proj_abc/workflow-profile/prompts/greeting", putReq.RequestUri?.PathAndQuery);
+        var body = JsonNode.Parse(putReq.Body!) as JsonObject;
+        Assert.Equal("You are...", body!["body"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ConfigSet_PromptFromFile_SendsPutWithFileContent()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/greeting")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+        fs.AddFile("/prompt.md", "You are a helpful assistant");
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "set", "--prompt", "greeting=@/prompt.md"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var putReq = handler.Requests.Single(r => r.Method == HttpMethod.Put);
+        var body = JsonNode.Parse(putReq.Body!) as JsonObject;
+        Assert.Equal("You are a helpful assistant", body!["body"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ConfigSet_Composite_SendsMultipleRequests()
+    {
+        var callCount = 0;
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            callCount++;
+            if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/default-template")
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            if (req.Method == HttpMethod.Put && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/greeting")
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "set", "--default-template", "tpl_abc", "--var", "foo=bar", "--prompt", "greeting=Hi"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(3, callCount);
+    }
+
+    [Fact]
+    public async Task ConfigClear_DefaultTemplate_SendsDelete()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/default-template")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "clear", "--default-template"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(handler.Requests);
+        var deleteReq = handler.Requests.Single(r => r.Method == HttpMethod.Delete);
+        Assert.Equal("/api/projects/proj_abc/workflow-profile/default-template", deleteReq.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task ConfigClear_Var_SendsPatchWithNull()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "clear", "--var", "foo"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var patchReq = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
+        var body = JsonNode.Parse(patchReq.Body!) as JsonObject;
+        Assert.NotNull(body);
+        Assert.True(body!["vars"]?["foo"] is null);
+    }
+
+    [Fact]
+    public async Task ConfigClear_Prompt_SendsDelete()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/greeting")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { key = "greeting", deleted = true } });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "clear", "--prompt", "greeting"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var deleteReq = handler.Requests.Single(r => r.Method == HttpMethod.Delete);
+        Assert.Equal("/api/projects/proj_abc/workflow-profile/prompts/greeting", deleteReq.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task ConfigClear_NoFlags_ExitsNonZero()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "clear"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("nothing to clear", error.ToString());
+    }
+
+    [Fact]
+    public async Task ConfigClear_Composite_SendsMultipleRequests()
+    {
+        var callCount = 0;
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            callCount++;
+            if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/default-template")
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            if (req.Method == HttpMethod.Patch && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/variables")
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            if (req.Method == HttpMethod.Delete && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/greeting")
+                return RecordingHttpHandler.Json(new { success = true, data = new { key = "greeting", deleted = true } });
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "clear", "--default-template", "--var", "foo", "--prompt", "greeting"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(3, callCount);
+    }
+
+    [Fact]
+    public async Task ConfigPreview_SendsPostAndPrintsRendered()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts/plan_prompt/preview")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { rendered = "You are a planner. Focus on architecture." },
+                });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "preview", "plan_prompt"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var postReq = handler.Requests.Single(r => r.Method == HttpMethod.Post);
+        Assert.Equal("/api/projects/proj_abc/workflow-profile/prompts/plan_prompt/preview", postReq.RequestUri?.PathAndQuery);
+        var stdout = output.ToString();
+        Assert.Contains("architecture", stdout);
+    }
+
+    [Fact]
+    public async Task ConfigPreview_EmptyKey_ExitsNonZero()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "preview", ""], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("prompt key is required", error.ToString());
+    }
+
+    [Fact]
+    public async Task ConfigGet_NoActiveProject_PrintsError()
+    {
+        var handler = new RecordingHttpHandler((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { } })));
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var fs = new FakeFileSystem();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "get"], output, error, fs, new FakeCommandExecutor());
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("mo project use", error.ToString());
+    }
+
     [Fact]
     public async Task TemplateList_NoActiveProject_PrintsError()
     {

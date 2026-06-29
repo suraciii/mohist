@@ -55,6 +55,35 @@ mo project workflow template delete <template-id>       # 删除 workflow 模板
 
 `--yaml` 接受 inline YAML 或 `@file`（从文件读取）。所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。
 
+### Workflow 配置管理
+
+```bash
+mo project workflow config get                               # 查看完整配置（默认模板、变量、提示词覆盖）
+mo project workflow config set [flags]                       # 复合写入（默认模板/变量/提示词）
+mo project workflow config clear [flags]                     # 复合清除（默认模板/变量/提示词）
+mo project workflow config preview <key>                     # 预览渲染后的提示词
+```
+
+`config set` 支持的 flags：
+
+| Flag | 含义 |
+|------|------|
+| `--default-template <id>` | 设置默认 workflow 模板（PUT /default-template） |
+| `--var <k=v>` | 增量设置顶层变量（可重复，PATCH /variables） |
+| `--stage-var <stage.k=v>` | 增量设置阶段变量（可重复，PATCH /variables） |
+| `--vars-file <file>` | 全量替换所有变量（PUT /variables，JSON 文件，与 `--var`/`--stage-var` 互斥） |
+| `--prompt <key=body\|@file>` | 设置提示词覆盖（可重复，PUT /prompts/{key}，`@file` 从文件读） |
+
+`config clear` 支持的 flags：
+
+| Flag | 含义 |
+|------|------|
+| `--default-template` | 清除默认模板（DELETE /default-template） |
+| `--var <k>` | 清除指定变量（可重复，PATCH /variables 设 null） |
+| `--prompt <key>` | 清除指定提示词覆盖（可重复，DELETE /prompts/{key}） |
+
+所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。
+
 ## Issue 管理
 
 完整命令在 [Issue 管理](issues.md)。这里给速查表：
