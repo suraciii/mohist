@@ -372,6 +372,213 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         Assert.Equal("timeout", terminal.FailureReason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task EnsureWorkTimeoutReminder_RegistersReminderOnlyOnFirstOutstandingWork()
+    {
+        // Reaches into the in-memory reminder table via the silo service
+        // provider (the table is registered as a singleton by
+        // UseInMemoryReminderService). The LocalReminderService starts a
+        // local timer immediately on register, so a row appears in the
+        // table the same moment a grain calls RegisterOrUpdateReminder.
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (_, runnerId) = await PollWorkAnyAsync();
+
+        var reminder = await GetWorkTimeoutReminderAsync(runnerId);
+        Assert.NotNull(reminder);
+        Assert.Equal(TimeSpan.FromMinutes(1), reminder!.Period);
+        Assert.Equal(_fixture.TimeProvider.GetUtcNow().UtcDateTime.AddMinutes(1), reminder.StartAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task EnsureWorkTimeoutReminder_DoesNotResetStartAt_OnSubsequentAssignment()
+    {
+        // Pin the register-if-absent fix: the second work assignment while
+        // the reminder already exists MUST NOT call RegisterOrUpdateReminder
+        // (otherwise the row's StartAt would shift to now+period). The
+        // table assertion is the precise, intent-revealing check for the
+        // due-time-drift regression — it does not rely on the reminder
+        // ticking, only on the row state.
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (_, runnerId) = await PollWorkAnyAsync();
+        var initial = await GetWorkTimeoutReminderAsync(runnerId);
+        Assert.NotNull(initial);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(2));
+
+        var assigned = await Grains.GetGrain<IRunnerGrain>(runnerId).AssignAgentJobAsync(new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: $"extra-work-{Guid.NewGuid():N}",
+            AgentJobId: $"extra-agent-{Guid.NewGuid():N}",
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob));
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assigned.Status);
+
+        var afterSecondAssignment = await GetWorkTimeoutReminderAsync(runnerId);
+        Assert.NotNull(afterSecondAssignment);
+        Assert.Equal(initial!.StartAt, afterSecondAssignment!.StartAt);
+        Assert.Equal(initial.ETag, afterSecondAssignment.ETag);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task EnsureWorkTimeoutReminder_IsReleasedWhenOutstandingWorkDrains()
+    {
+        // Drain path: after every outstanding work has reported, the scan
+        // observes no pending/running work and calls
+        // MaybeUnregisterWorkTimeoutReminderAsync. The table must show no
+        // reminder row for the runner grain id.
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        Assert.NotNull(await GetWorkTimeoutReminderAsync(runnerId));
+
+        await ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, new WorkResult("completed"));
+
+        Assert.Null(await GetWorkTimeoutReminderAsync(runnerId));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task EnsureWorkTimeoutReminder_ReregistersWithFreshStartAt_AfterDrainAndNewWork()
+    {
+        // After drain + new work, the reminder must come back with a
+        // freshly-computed StartAt (register-if-absent semantics). The
+        // row id parity here is implicit: a re-register after a
+        // remove-then-add cycle gets a new StartAt equal to "now + period",
+        // which is observably later than the pre-drain StartAt.
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var preDrainStartAt = (await GetWorkTimeoutReminderAsync(runnerId))!.StartAt;
+
+        await ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, new WorkResult("completed"));
+        Assert.Null(await GetWorkTimeoutReminderAsync(runnerId));
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(7));
+
+        var assigned = await Grains.GetGrain<IRunnerGrain>(runnerId).AssignAgentJobAsync(new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: $"drained-reregister-work-{Guid.NewGuid():N}",
+            AgentJobId: $"drained-reregister-agent-{Guid.NewGuid():N}",
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob));
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assigned.Status);
+
+        var postAssign = await GetWorkTimeoutReminderAsync(runnerId);
+        Assert.NotNull(postAssign);
+        Assert.NotEqual(preDrainStartAt, postAssign!.StartAt);
+        Assert.Equal(_fixture.TimeProvider.GetUtcNow().UtcDateTime.AddMinutes(1), postAssign.StartAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task OlderOutstandingWorkTimesOut_WhenNewerWorkIsAssignedBeforeItsDeadline()
+    {
+        // End-to-end behavioral pin: after the fix, assigning a new work
+        // item W2 near W1's WorkCompletionTimeout deadline must NOT push
+        // W1's judgment later. This test drives the behavior through the
+        // actual reminder path (FakeTimeProvider drives the
+        // LocalReminderService's PeriodicTimer, which fires
+        // ReceiveReminder on the RunnerGrain), not only through
+        // CheckWorkTimeoutsAsync.
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var initialReminder = await GetWorkTimeoutReminderAsync(runnerId);
+        Assert.NotNull(initialReminder);
+        var initialStartAt = initialReminder!.StartAt;
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(9) + TimeSpan.FromSeconds(30));
+
+        var w2AgentJobId = $"elder-agent-{Guid.NewGuid():N}";
+        var w2WorkId = $"elder-work-mate-{Guid.NewGuid():N}";
+        var assigned = await runner.AssignAgentJobAsync(new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: w2WorkId,
+            AgentJobId: w2AgentJobId,
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob));
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assigned.Status);
+
+        var afterW2Reminder = await GetWorkTimeoutReminderAsync(runnerId);
+        Assert.Equal(initialStartAt, afterW2Reminder!.StartAt);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(2));
+
+        await WaitForRunStatusAsync(work.WorkflowRunId, "Failed", TimeSpan.FromSeconds(10));
+
+        // The reminder tick and the synthesis path are asynchronous; the
+        // workflow status reaches "Failed" before the ledger row is
+        // updated by MarkRunnerWorkTerminalAsync. Poll the ledger row the
+        // same way to avoid a flaky ordering assertion.
+        var w1Row = await WaitForRunnerWorkStatusAsync(
+            runnerId, WorkDispatchOwnerKinds.Workflow, work.WorkflowRunId, work.WorkId,
+            expectedStatus: "failed", expectedReason: "timeout", TimeSpan.FromSeconds(10));
+        Assert.Equal("timeout", w1Row!.Reason);
+
+        var w2Row = await FindRunnerWorkAsync(runnerId, WorkDispatchOwnerKinds.AgentJob, w2AgentJobId, w2WorkId);
+        Assert.NotNull(w2Row);
+        Assert.Equal("outstanding", w2Row!.Status);
+    }
+
+    private async Task<RunnerWorkRow?> WaitForRunnerWorkStatusAsync(
+        string runnerId,
+        string ownerKind,
+        string ownerId,
+        string workId,
+        string expectedStatus,
+        string? expectedReason,
+        TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        RunnerWorkRow? row = null;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            row = await FindRunnerWorkAsync(runnerId, ownerKind, ownerId, workId);
+            if (row is not null
+                && string.Equals(row.Status, expectedStatus, StringComparison.Ordinal)
+                && (expectedReason is null || string.Equals(row.Reason, expectedReason, StringComparison.Ordinal)))
+            {
+                return row;
+            }
+
+            await Task.Delay(50);
+        }
+
+        Assert.Fail(
+            $"Runner work ({ownerKind}/{ownerId}/{workId}) did not reach status '{expectedStatus}' (reason='{expectedReason}') within {timeout}; last row was {(row is null ? "<null>" : $"status='{row.Status}' reason='{row.Reason}'")}");
+        return null;
+    }
+
+    private async Task<ReminderEntry?> GetWorkTimeoutReminderAsync(string runnerId)
+    {
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var grainId = runner.GetGrainId();
+        var table = await _fixture.ReminderTable.ReadRows(grainId);
+        return table.Reminders.SingleOrDefault(r => r.ReminderName == "work-timeout");
+    }
+
+    private async Task WaitForRunStatusAsync(
+        string workflowId,
+        string expectedStatus,
+        TimeSpan timeout)
+    {
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        string? lastStatus = null;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            lastStatus = await workflow.GetRunStatusAsync();
+            if (string.Equals(lastStatus, expectedStatus, StringComparison.Ordinal))
+                return;
+            await Task.Delay(50);
+        }
+        Assert.Fail($"Workflow '{workflowId}' did not reach status '{expectedStatus}' within {timeout}; last status was '{lastStatus}'");
+    }
+
     private async Task<RunnerWorkRow?> FindRunnerWorkAsync(
         string runnerId,
         string ownerKind,

@@ -21,6 +21,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public string ConnectionString => _keeper.ConnectionString;
     public FakeRunnerWorkspaceClient RunnerWorkspace => Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    public IReminderTable ReminderTable => Cluster.GetSiloServiceProvider(null).GetRequiredService<IReminderTable>();
 
     private readonly InMemoryEventBus _sharedEventBus = new(
         NullLogger<InMemoryEventBus>.Instance);

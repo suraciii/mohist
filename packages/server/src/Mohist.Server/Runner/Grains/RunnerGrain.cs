@@ -869,6 +869,9 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         try
         {
+            if (await this.GetReminder(WorkTimeoutReminderName) is not null)
+                return;
+
             await this.RegisterOrUpdateReminder(
                 WorkTimeoutReminderName,
                 WorkTimeoutReminderPeriod,
