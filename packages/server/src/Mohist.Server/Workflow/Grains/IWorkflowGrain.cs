@@ -16,6 +16,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<string> RequestChangesAsync(string body);
     Task RetryAsync();
     Task RerunAsync();
+    Task RerunFromStageAsync(string stageId);
     Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task);
     Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request);
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);

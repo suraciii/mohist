@@ -207,6 +207,25 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await CommitAsync(events);
     }
 
+    public async Task RerunFromStageAsync(string stageId)
+    {
+        EnsureRun();
+        try
+        {
+            var events = _run.RerunFromStage(stageId);
+            var targetIdx = _run.Stages.FindIndex(s => s.Id == stageId);
+            for (var i = targetIdx; i < _run.Stages.Count; i++)
+                await ReleaseStageLocksAsync(_run.Stages[i].Id, "rerun-from-stage");
+            _log.LogInformation("Workflow {Id} rerun-from-stage at stage={Stage}", GrainKey, stageId);
+            await CommitAsync(events);
+        }
+        catch (WorkflowControlRejectionException ex)
+        {
+            var detailsSegment = ex.Details is null ? "" : $"|{ex.Details}";
+            throw new InvalidOperationException($"RerunFromStage rejected [{ex.Code}]: {ex.Message}{detailsSegment}");
+        }
+    }
+
     public async Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task)
     {
         EnsureRun();
