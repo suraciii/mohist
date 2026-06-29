@@ -132,17 +132,17 @@ URL: `/epics` 和 `/epics/<id>`
 
 ### 列表页
 
-所有 epic 按状态分组展示：
+列表先展示 `idle` / `running` Epic 的当前工作进度分组，再展示独立的生命周期分区：
 
 | 分组 | 含义 | 展示方式 |
 |---|---|---|
-| **Running** | 正在自动推进 linked issues（有 in-progress issue） | 展开 |
-| **Ready to start** | 有可推进的 next issue，等待启动 | 展开 |
-| **Waiting / Blocked** | 有 nextIssueReason（如 blocked、依赖未就绪） | 展开 |
-| **Idle / Empty** | 无 next issue、无 blocker、无 linked issues | 展开 |
-| **Paused** | 暂停推进（当前 in-progress issue 不中断） | 常规分区，始终显示 |
-| **Done** | 已完成 | 折叠 |
-| **Closed** | 已关闭 | 折叠 |
+| **Running** | `idle` / `running` Epic 中有 linked issue 正在 in-progress；这是工作进度分组，不等同于所有卡片都是 `running` 生命周期状态 | 有内容时展开 |
+| **Ready to start** | `idle` / `running` Epic 中有可推进的 next issue，等待启动 | 有内容时展开 |
+| **Waiting / Blocked** | `idle` / `running` Epic 中有 open linked issue，但当前没有 startable issue，详情由 nextIssueReason 解释 | 有内容时展开 |
+| **Idle / Empty** | `idle` / `running` Epic 中无 next issue、无 blocker、无 linked issues | 有内容时展开 |
+| **Paused** | 暂停推进（当前 in-progress issue 不中断） | 有 paused Epic 时显示 |
+| **Done** | 已完成 | 有 done Epic 时折叠显示 |
+| **Closed** | 已关闭 | 有 closed Epic 时折叠显示 |
 
 每张卡片显示编号、状态、优先级、进度条（X / Y completed）、以及当前活动或下一步信息。状态为 Paused 的卡片半透明。
 
