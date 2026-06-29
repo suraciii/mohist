@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { SidebarProvider } from '@/shared/ui/components/sidebar'
 import { AppSidebar } from './AppSidebar'
+import type { InboxItem } from '../../../entities/inbox'
 
 vi.mock('../../../entities/project', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/project')>()
@@ -175,5 +176,102 @@ describe('AppSidebar primary navigation', () => {
 
     expect(screen.getByTestId('nav-logs')).toBeInTheDocument()
     expect(screen.getByTestId('nav-settings')).toBeInTheDocument()
+  })
+})
+
+describe('AppSidebar unread inbox count badge', () => {
+  function renderSidebarWithCache(initialRoute: string, inboxData: InboxItem[]) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(['inbox', TEST_PROJECT.id], inboxData)
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={[initialRoute]}>
+            <SidebarProvider>
+              <AppSidebar onCreateIssue={vi.fn()} />
+            </SidebarProvider>
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+  }
+
+  const readItem: InboxItem = {
+    itemId: 'inb-1', notificationKind: 'workflow_failed', issueId: 'i-1', issueNumber: 1,
+    issueTitle: 'Read', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false,
+    readAt: '2024-01-02T00:00:00.000Z', archivedAt: null,
+  }
+  const unreadItem: InboxItem = {
+    itemId: 'inb-2', notificationKind: 'issue_started', issueId: 'i-2', issueNumber: 2,
+    issueTitle: 'Unread', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false,
+    readAt: null, archivedAt: null,
+  }
+
+  it('shows a badge with the unread count when there are unread inbox items', () => {
+    renderSidebarWithCache('/demo', [readItem, unreadItem])
+
+    const badge = screen.getByTestId('nav-inbox-badge')
+    expect(badge).toBeInTheDocument()
+    expect(badge).toHaveTextContent('1')
+  })
+
+  it('does NOT show a badge when all inbox items are read', () => {
+    renderSidebarWithCache('/demo', [readItem])
+
+    expect(screen.queryByTestId('nav-inbox-badge')).not.toBeInTheDocument()
+  })
+
+  it('does NOT show a badge when inbox data is not yet loaded', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={['/demo']}>
+            <SidebarProvider>
+              <AppSidebar onCreateIssue={vi.fn()} />
+            </SidebarProvider>
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByTestId('nav-inbox-badge')).not.toBeInTheDocument()
+  })
+
+  it('updates the badge count when unread items change (live update)', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(['inbox', TEST_PROJECT.id], [readItem, unreadItem])
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={['/demo']}>
+            <SidebarProvider>
+              <AppSidebar onCreateIssue={vi.fn()} />
+            </SidebarProvider>
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByTestId('nav-inbox-badge')).toHaveTextContent('1')
+
+    queryClient.setQueryData(['inbox', TEST_PROJECT.id], [
+      { ...unreadItem, isRead: true, readAt: '2024-01-03T00:00:00.000Z' },
+      readItem,
+    ])
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={['/demo']}>
+            <SidebarProvider>
+              <AppSidebar onCreateIssue={vi.fn()} />
+            </SidebarProvider>
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByTestId('nav-inbox-badge')).not.toBeInTheDocument()
   })
 })

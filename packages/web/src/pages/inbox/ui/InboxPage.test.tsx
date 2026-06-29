@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   useMarkInboxItemRead: vi.fn(),
   useMarkAllInboxRead: vi.fn(),
   useArchiveInboxItem: vi.fn(),
-  useInboxLiveRefresh: vi.fn(),
 }))
 
 vi.mock('../../../entities/inbox', async (importOriginal) => {
@@ -24,7 +23,6 @@ vi.mock('../../../entities/inbox', async (importOriginal) => {
     useMarkInboxItemRead: mocks.useMarkInboxItemRead,
     useMarkAllInboxRead: mocks.useMarkAllInboxRead,
     useArchiveInboxItem: mocks.useArchiveInboxItem,
-    useInboxLiveRefresh: mocks.useInboxLiveRefresh,
   }
 })
 
@@ -116,7 +114,6 @@ describe('InboxPage empty state', () => {
     mocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useInboxLiveRefresh.mockReturnValue(undefined)
   })
 
   afterEach(() => {
@@ -158,7 +155,6 @@ describe('InboxPage loading state', () => {
     mocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useInboxLiveRefresh.mockReturnValue(undefined)
   })
 
   afterEach(() => {
@@ -179,7 +175,6 @@ describe('InboxPage error state', () => {
     mocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useInboxLiveRefresh.mockReturnValue(undefined)
   })
 
   afterEach(() => {
@@ -227,7 +222,6 @@ describe('InboxPage list rendering and link', () => {
     mocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useInboxLiveRefresh.mockReturnValue(undefined)
   })
 
   afterEach(() => {
@@ -352,7 +346,6 @@ describe('InboxPage mutations', () => {
     mocks.useMarkInboxItemRead.mockReturnValue({ mutate: markReadMutate, isPending: false })
     mocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useInboxLiveRefresh.mockReturnValue(undefined)
 
     renderPage()
 
@@ -366,7 +359,6 @@ describe('InboxPage mutations', () => {
     mocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useArchiveInboxItem.mockReturnValue({ mutate: archiveMutate, isPending: false })
-    mocks.useInboxLiveRefresh.mockReturnValue(undefined)
 
     renderPage()
 
@@ -380,7 +372,6 @@ describe('InboxPage mutations', () => {
     mocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useMarkAllInboxRead.mockReturnValue({ mutate: markAllMutate, isPending: false })
     mocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useInboxLiveRefresh.mockReturnValue(undefined)
 
     renderPage()
 
@@ -393,7 +384,6 @@ describe('InboxPage mutations', () => {
     mocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: true })
     mocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useInboxLiveRefresh.mockReturnValue(undefined)
 
     renderPage()
 
@@ -408,18 +398,6 @@ describe('InboxPage live refresh', () => {
     cleanup()
   })
 
-  it('subscribes to the inbox live refresh hook on mount', () => {
-    mocks.useInbox.mockReturnValue({ data: [], isLoading: false })
-    mocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useInboxLiveRefresh.mockReturnValue(undefined)
-
-    renderPage()
-
-    expect(mocks.useInboxLiveRefresh).toHaveBeenCalled()
-  })
-
   it('renders directly from the API query result and does not synthesize items locally', () => {
     const seed: InboxItem[] = [
       makeItem({ itemId: 'inb-a', notificationKind: NOTIFICATION_KINDS.IssueStarted, issueNumber: 1, isRead: false }),
@@ -428,7 +406,6 @@ describe('InboxPage live refresh', () => {
     mocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
-    mocks.useInboxLiveRefresh.mockReturnValue(undefined)
 
     renderPage()
 

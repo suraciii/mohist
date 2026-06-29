@@ -7,6 +7,7 @@ import type { AgentDetailEventMap } from '../../entities/agent'
 import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
 import { dispatchTimelineEvent, type TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
 import { invalidateApprovalWait } from '../../entities/issue'
+import { applyInboxHint, isHighAttentionKind, parseInboxItemPersistedHint, shouldSuppressInAppNotice } from '../../entities/inbox/model/inbox-effects'
 import { useProject } from '../../entities/project'
 import { LiveTaskContext } from '../../entities/issue'
 import { useEventsConnection } from '../../shared/api/events-hub'
@@ -209,11 +210,11 @@ function unwrapTranscriptEnvelope(rawData: unknown): { eventName: string; payloa
   }
 }
 
-export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName, buildTimelineLiveEvent }
+export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName, buildTimelineLiveEvent, parseInboxItemPersistedHint, getCurrentIssueNumber }
 
 
 function getCurrentIssueNumber(): number | null {
-  const match = window.location.pathname.match(/\/issue\/(\d+)/)
+  const match = window.location.pathname.match(/\/issues\/(\d+)/)
   return match ? parseInt(match[1], 10) : null
 }
 
@@ -527,6 +528,36 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
             invalidateApprovalWait(queryClient)
             break
           }
+          case REVERSE_DNS_EVENT_TYPES.InboxItemPersisted: {
+            // The hint is invalidation only — the inbox HTTP API remains the
+            // source of truth. We never synthesise an InboxItem from the hint
+            // payload here; the shared `['inbox', projectId]` invalidation
+            // triggers a refetch which reconciles truth. Project affinity is
+            // also enforced server-side (T-002); this is the second line of
+            // defence that drops hints for the wrong project without a
+            // round-trip.
+            const hint = parseInboxItemPersistedHint(parsed)
+            if (hint) {
+              const result = applyInboxHint(hint, queryClient, { currentProjectId: projectId })
+              // High-attention kinds surface an in-app notice only for the
+              // current project (result.applied), with route-based duplicate-
+              // notice suppression (T-005 / D7). Suppressed when on the inbox
+              // page (items appear live via invalidation) or when viewing the
+              // same issue.
+              if (
+                result.applied
+                && isHighAttentionKind(hint.kind)
+                && !shouldSuppressInAppNotice(hint, window.location.pathname, viewedIssueRef.current)
+              ) {
+                if (hint.kind === 'approval_requested') {
+                  toast.info(`Issue #${hint.issueNumber} needs approval`)
+                } else {
+                  toast.error(`Issue #${hint.issueNumber} encountered an error`)
+                }
+              }
+            }
+            break
+          }
         }
 
         const timelineEvent = buildTimelineLiveEvent(eventName, rawData, parsed)
@@ -535,7 +566,7 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
         // ignore malformed events
       }
     },
-    [queryClient],
+    [queryClient, projectId],
   )
 
   const handleTranscriptEvent = useCallback(

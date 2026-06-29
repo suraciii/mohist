@@ -1,3 +1,4 @@
+import type { InboxItemPersistedHintPayload } from '../../inbox/model/inbox-effects'
 import type { AgentDetailEventMap } from '../../agent/@x/events'
 import { REVERSE_DNS_EVENT_TYPES } from '../../../shared/lib/canonical-event-types'
 
@@ -32,6 +33,7 @@ export type EventMap = {
   [REVERSE_DNS_EVENT_TYPES.AgentSessionContextCompacted]: { issueId: string; projectId: string; strategy?: string | null; contextWindowUsedBefore?: number | null; contextWindowUsedAfter?: number | null; contextWindowSize?: number | null; summary?: string | null; recordedAt?: string }
   [REVERSE_DNS_EVENT_TYPES.AgentSessionContextExhausted]: { issueId: string; projectId: string; failureCategory?: string | null; contextUsagePercent?: number | null; contextWindowUsed?: number | null; contextWindowSize?: number | null; recordedAt?: string }
   [REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated]: { issueId: string; projectId: string; healthStatus: string; contextUsagePercent?: number | null; contextWindowUsed?: number | null; contextWindowSize?: number | null; recordedAt?: string }
+  [REVERSE_DNS_EVENT_TYPES.InboxItemPersisted]: InboxItemPersistedHintPayload
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap

@@ -13,6 +13,16 @@ export function invalidateInbox(queryClient: ReturnType<typeof useQueryClient>, 
   queryClient.invalidateQueries({ queryKey: inboxQueryKey(projectId) })
 }
 
+export function useUnreadInboxCount() {
+  const { projectId } = useProject()
+  return useQuery<InboxItem[], Error, number>({
+    queryKey: inboxQueryKey(projectId),
+    queryFn: () => getInbox(projectId ?? undefined),
+    enabled: !!projectId,
+    select: (data) => data.filter((i) => !i.isRead).length,
+  })
+}
+
 export function useInbox() {
   const { projectId } = useProject()
   return useQuery<InboxItem[]>({

@@ -19,7 +19,6 @@ const eventMocks = vi.hoisted(() => ({
 
 const inboxMocks = vi.hoisted(() => ({
   useInbox: vi.fn(),
-  useInboxLiveRefresh: vi.fn(),
   useMarkInboxItemRead: vi.fn(),
   useMarkAllInboxRead: vi.fn(),
   useArchiveInboxItem: vi.fn(),
@@ -68,7 +67,6 @@ vi.mock('../entities/inbox', async (importOriginal) => {
   return {
     ...actual,
     useInbox: inboxMocks.useInbox,
-    useInboxLiveRefresh: inboxMocks.useInboxLiveRefresh,
     useMarkInboxItemRead: inboxMocks.useMarkInboxItemRead,
     useMarkAllInboxRead: inboxMocks.useMarkAllInboxRead,
     useArchiveInboxItem: inboxMocks.useArchiveInboxItem,
@@ -100,7 +98,6 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
     epicMocks.useEpic.mockReturnValue({ data: undefined, isLoading: false })
     eventMocks.useEventsConnection.mockReturnValue('disconnected')
     inboxMocks.useInbox.mockReturnValue({ data: [], isLoading: false })
-    inboxMocks.useInboxLiveRefresh.mockReturnValue(undefined)
     inboxMocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     inboxMocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     inboxMocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
@@ -140,6 +137,5 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
 
     expect(getByTestId('inbox-title')).toHaveTextContent('Inbox')
     expect(inboxMocks.useInbox).toHaveBeenCalled()
-    expect(inboxMocks.useInboxLiveRefresh).toHaveBeenCalled()
   })
 })

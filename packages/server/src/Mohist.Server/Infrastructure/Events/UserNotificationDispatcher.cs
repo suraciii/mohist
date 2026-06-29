@@ -49,6 +49,20 @@ public sealed class ConnectionSubscriptionRegistry : ISingletonService
     private readonly ConcurrentDictionary<string, HashSet<string>> _byConnection = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// connectionId → declared project affinity, or <c>null</c> when the
+    /// connection did not declare a project (e.g. an admin / cross-project
+    /// tab). Captured from the SignalR <c>?projectId=</c> query string by
+    /// <c>MohistHub.OnConnectedAsync</c>. Read by
+    /// <see cref="UserNotificationDispatcher"/> to gate project-scoped
+    /// events: when the event carries <c>extensions["projectid"]</c> AND
+    /// this connection has declared a project, the connection only
+    /// receives the event on project match. Transport-level presentation
+    /// state, intentionally not durable — see the <c>project-inbox</c>
+    /// spec which keeps live subscriptions as transport state.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, string?> _byConnectionProjectId = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Snapshot of all currently-tracked connection IDs. Read by
     /// <see cref="UserNotificationDispatcher"/> on every emit.
     /// </summary>
@@ -69,11 +83,13 @@ public sealed class ConnectionSubscriptionRegistry : ISingletonService
     public void RegisterConnection(string connectionId)
     {
         _byConnection.TryAdd(connectionId, new HashSet<string>(StringComparer.Ordinal));
+        _byConnectionProjectId.TryAdd(connectionId, null);
     }
 
     public void UnregisterConnection(string connectionId)
     {
         _byConnection.TryRemove(connectionId, out _);
+        _byConnectionProjectId.TryRemove(connectionId, out _);
     }
 
     public void SetSubscriptions(string connectionId, IReadOnlyCollection<string> eventTypes)
@@ -111,6 +127,43 @@ public sealed class ConnectionSubscriptionRegistry : ISingletonService
         return _byConnection.TryGetValue(connectionId, out var set)
             && set.Contains(eventType);
     }
+
+    /// <summary>
+    /// Declare the project this connection is scoped to. Called once
+    /// from <c>MohistHub.OnConnectedAsync</c> with the value of the
+    /// <c>?projectId=</c> query string (already sent by the Web's
+    /// <c>events-hub.ts</c>). A null / empty / whitespace value
+    /// normalises to <c>null</c> — the connection keeps type-only
+    /// matching behaviour and is treated as a cross-project
+    /// connection by the dispatcher. Re-invoking replaces the
+    /// affinity (a fresh SignalR reconnect that picks a different
+    /// project rotates it cleanly).
+    /// </summary>
+    public void SetProjectId(string connectionId, string? projectId)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            projectId = null;
+        }
+        _byConnectionProjectId[connectionId] = projectId;
+    }
+
+    /// <summary>
+    /// Read the declared project affinity for a connection. Returns
+    /// <c>false</c> (and <c>null</c>) when the connection is not
+    /// registered — the dispatcher's gating rule treats that as
+    /// "no declared project" and falls back to type-only matching.
+    /// </summary>
+    public bool TryGetProjectId(string connectionId, out string? projectId)
+    {
+        if (_byConnectionProjectId.TryGetValue(connectionId, out var stored))
+        {
+            projectId = stored;
+            return true;
+        }
+        projectId = null;
+        return false;
+    }
 }
 
 /// <summary>
@@ -143,6 +196,16 @@ public sealed class UserNotificationDispatcher : IUserNotificationDispatcher
 {
     private readonly ConnectionSubscriptionRegistry _registry;
 
+    /// <summary>
+    /// The CloudEvents extension attribute key that the project's
+    /// established routing convention uses to stamp the owning
+    /// project on a CloudEvent. Mirrored by
+    /// <c>IssueGrain.cs:605</c> and read by <c>InboxProjectionHandler</c>;
+    /// the inbox hint published from <c>InboxProjectionHandler.ProjectAsync</c>
+    /// also stamps this key.
+    /// </summary>
+    internal const string ProjectIdExtension = "projectid";
+
     public UserNotificationDispatcher(ConnectionSubscriptionRegistry registry)
     {
         _registry = registry;
@@ -158,13 +221,56 @@ public sealed class UserNotificationDispatcher : IUserNotificationDispatcher
             return Task.FromResult<IReadOnlySet<string>>(_empty);
         }
 
+        // Project-scoped routing is gated on BOTH sides: the event
+        // must carry extensions["projectid"] AND the connection must
+        // have declared a project. When either side is absent the
+        // dispatcher falls back to type-only matching — every
+        // existing non-projectid event (e.g. agent session runtime
+        // events, transcript events that reach this dispatcher by
+        // mistake, anything published without a project stamp) is
+        // byte-for-byte unchanged. See design.md D3 for the blast-
+        // radius discussion.
+        string? eventProjectId = null;
+        if (cloudEvent.Extensions is { Count: > 0 }
+            && cloudEvent.Extensions.TryGetValue(ProjectIdExtension, out var rawProjectExtension)
+            && rawProjectExtension is string stamped
+            && !string.IsNullOrWhiteSpace(stamped))
+        {
+            eventProjectId = stamped;
+        }
+
         var result = new HashSet<string>(StringComparer.Ordinal);
         foreach (var connectionId in _registry.ConnectionIds)
         {
-            if (_registry.ShouldNotify(connectionId, eventType))
+            if (!_registry.ShouldNotify(connectionId, eventType))
             {
-                result.Add(connectionId);
+                continue;
             }
+
+            // Apply the project gate only when BOTH the event
+            // carries extensions["projectid"] AND the connection
+            // has declared a project. If either side is missing
+            // the affinity, we fall back to type-only matching —
+            // this preserves the existing behaviour for every
+            // connection that hasn't yet declared a project
+            // (cross-project / admin tabs) and for every event
+            // that arrives without the projectid stamp (legacy
+            // emits, agent session runtime events, anything
+            // published outside the inbox / issue convention).
+            if (eventProjectId is not null
+                && _registry.TryGetProjectId(connectionId, out var connectionProjectId)
+                && !string.IsNullOrEmpty(connectionProjectId))
+            {
+                if (!StringComparer.Ordinal.Equals(connectionProjectId, eventProjectId))
+                {
+                    // The connection declared a project AND the
+                    // event has a projectid, but they don't match
+                    // — this is the cross-project leakage guard.
+                    continue;
+                }
+            }
+
+            result.Add(connectionId);
         }
         return Task.FromResult<IReadOnlySet<string>>(result);
     }
