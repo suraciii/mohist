@@ -29,6 +29,10 @@ function ghFail(stderr: string, stdout = "", exitCode = 1): CommandResult {
   return { exitCode, stdout, stderr }
 }
 
+function statusCheckRollup(checks: unknown[]): string {
+  return JSON.stringify({ statusCheckRollup: checks })
+}
+
 function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
   return {
     workflowRunId: "wr-merge-1",
@@ -99,8 +103,8 @@ describe("mohist/merge-github-pr action", () => {
           return ghOk("ok\n")
         case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-        case "gh pr checks 42 --json bucket,name,state":
-          return ghOk(JSON.stringify([{ name: "build", bucket: "pass", state: "SUCCESS" }]))
+        case "gh pr view 42 --json statusCheckRollup":
+          return ghOk(statusCheckRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
         case "gh pr view 42 --json mergeStateStatus":
           return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
         case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
@@ -127,7 +131,7 @@ describe("mohist/merge-github-pr action", () => {
       "gh --version",
       "gh auth status",
       "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus",
-      "gh pr checks 42 --json bucket,name,state",
+      "gh pr view 42 --json statusCheckRollup",
       "gh pr view 42 --json mergeStateStatus",
       "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ",
       "gh pr view 42 --json state,mergeCommit,url",
@@ -183,8 +187,8 @@ describe("mohist/merge-github-pr action", () => {
           return ghOk("ok\n")
         case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-        case "gh pr checks 42 --json bucket,name,state":
-          return ghOk(JSON.stringify([{ name: "build", bucket: "pass", state: "SUCCESS" }]))
+        case "gh pr view 42 --json statusCheckRollup":
+          return ghOk(statusCheckRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
         case "gh pr view 42 --json mergeStateStatus":
           return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
         case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
@@ -217,10 +221,10 @@ describe("mohist/merge-github-pr action", () => {
     installMoIssueShow()
     installGit(() => { throw new Error("git should not be called") })
 
-    const failureCases: Array<{ bucket: string; state: string }> = [
-      { bucket: "fail", state: "FAILURE" },
-      { bucket: "fail", state: "CANCELLED" },
-      { bucket: "fail", state: "ACTION_REQUIRED" },
+    const failureCases: Array<{ conclusion: string }> = [
+      { conclusion: "FAILURE" },
+      { conclusion: "CANCELLED" },
+      { conclusion: "ACTION_REQUIRED" },
     ]
 
     for (const scenario of failureCases) {
@@ -234,8 +238,8 @@ describe("mohist/merge-github-pr action", () => {
             return ghOk("ok\n")
           case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
             return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-          case "gh pr checks 42 --json bucket,name,state":
-            return ghOk(JSON.stringify([{ name: "build", bucket: scenario.bucket, state: scenario.state }]))
+          case "gh pr view 42 --json statusCheckRollup":
+            return ghOk(statusCheckRollup([{ name: "build", status: "COMPLETED", conclusion: scenario.conclusion }]))
           default:
             return ghFail(`unexpected gh call: ${full}`)
         }
@@ -262,10 +266,10 @@ describe("mohist/merge-github-pr action", () => {
     }
   })
 
-  it("treats 'no checks reported' as transient and keeps polling until checks pass", async () => {
+  it("treats an empty statusCheckRollup as transient and keeps polling until checks pass", async () => {
     // Right after a push / force-push, GitHub hasn't registered the workflow
-    // run as a check run yet, so `gh pr checks` exits non-zero with
-    // "no checks reported". This is transient and must be polled, not failed.
+    // run as a check run yet, so the PR statusCheckRollup can be empty. This
+    // is transient and must be polled, not failed.
     setGitHubPrChecksTimingForTest({ pollIntervalMs: 1, noChecksGraceMs: 60_000 })
     const ghCalls: string[] = []
     installMoIssueShow()
@@ -280,12 +284,12 @@ describe("mohist/merge-github-pr action", () => {
           return ghOk("ok\n")
         case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-        case "gh pr checks 42 --json bucket,name,state":
+        case "gh pr view 42 --json statusCheckRollup":
           checksCalls += 1
           if (checksCalls < 3) {
-            return ghFail(`no checks reported on the 'mohist/run-wr-merge-1' branch\n`)
+            return ghOk(statusCheckRollup([]))
           }
-          return ghOk(JSON.stringify([{ name: "build", bucket: "pass", state: "SUCCESS" }]))
+          return ghOk(statusCheckRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
         case "gh pr view 42 --json mergeStateStatus":
           return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
         case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
@@ -306,7 +310,7 @@ describe("mohist/merge-github-pr action", () => {
 
     expect(result.status).toBe("success")
     expect(checksCalls).toBeGreaterThanOrEqual(3)
-    expect(ghCalls.filter((c) => c === "gh pr checks 42 --json bucket,name,state").length).toBeGreaterThanOrEqual(3)
+    expect(ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup").length).toBeGreaterThanOrEqual(3)
     expect(ghCalls).toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
     expect(output).toMatchObject({
       kind: "merge-github-pr",
@@ -331,8 +335,8 @@ describe("mohist/merge-github-pr action", () => {
           return ghOk("ok\n")
         case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-        case "gh pr checks 42 --json bucket,name,state":
-          return ghFail(`no checks reported on the 'mohist/run-wr-merge-1' branch\n`)
+        case "gh pr view 42 --json statusCheckRollup":
+          return ghOk(statusCheckRollup([]))
         case "gh pr view 42 --json mergeStateStatus":
           return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
         case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
@@ -352,12 +356,12 @@ describe("mohist/merge-github-pr action", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
-    expect(ghCalls.filter((c) => c === "gh pr checks 42 --json bucket,name,state").length).toBeGreaterThan(1)
+    expect(ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup").length).toBeGreaterThan(1)
     expect(ghCalls).toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
     expect(output).toMatchObject({ kind: "merge-github-pr", status: "completed", mergeCommitSha: "merge-sha-1" })
   })
 
-  it("still fails immediately with pr-checks-failed when gh pr checks errors for another reason", async () => {
+  it("still fails immediately with pr-checks-failed when gh pr view statusCheckRollup errors", async () => {
     setGitHubPrChecksTimingForTest({ pollIntervalMs: 1, noChecksGraceMs: 60_000 })
     const ghCalls: string[] = []
     installMoIssueShow()
@@ -371,7 +375,7 @@ describe("mohist/merge-github-pr action", () => {
           return ghOk("ok\n")
         case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-        case "gh pr checks 42 --json bucket,name,state":
+        case "gh pr view 42 --json statusCheckRollup":
           return ghFail("GraphQL: could not resolve check runs\n")
         default:
           return ghFail(`unexpected gh call: ${full}`)
@@ -432,8 +436,8 @@ describe("mohist/merge-github-pr action", () => {
           return ghOk("ok\n")
         case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-        case "gh pr checks 42 --json bucket,name,state":
-          return ghOk(JSON.stringify([{ name: "build", bucket: "pass", state: "SUCCESS" }]))
+        case "gh pr view 42 --json statusCheckRollup":
+          return ghOk(statusCheckRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
         case "gh pr view 42 --json mergeStateStatus":
           return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
         case "gh pr merge 42 --squash --subject Issue title --body ":
@@ -495,22 +499,22 @@ describe("mohist/merge-github-pr action", () => {
               return ghOk("ok\n")
             case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
               return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-            case "gh pr checks 42 --json bucket,name,state": {
-              const checksCount = ghCalls.filter((c) => c === "gh pr checks 42 --json bucket,name,state").length
+            case "gh pr view 42 --json statusCheckRollup": {
+              const checksCount = ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup").length
               if (checksCount < 3) {
-                return ghOk(JSON.stringify([
-                  { name: "build", bucket: "pending", state: "" },
-                  { name: "lint", bucket: "pending", state: "" },
+                return ghOk(statusCheckRollup([
+                  { name: "build", status: "IN_PROGRESS", conclusion: null },
+                  { name: "lint", status: "QUEUED", conclusion: null },
                 ]))
               }
-              return ghOk(JSON.stringify([
-                { name: "build", bucket: "pass", state: "SUCCESS" },
-                { name: "lint", bucket: "pass", state: "SUCCESS" },
+              return ghOk(statusCheckRollup([
+                { name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
+                { name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
               ]))
             }
             case "gh pr view 42 --json mergeStateStatus":
-          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
-        case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
+              return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
+            case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
               return ghOk("Merged pull request #42\n")
             case "gh pr view 42 --json state,mergeCommit,url":
               return ghOk(JSON.stringify({ state: "MERGED", url: "https://github.com/example/repo/pull/42", mergeCommit: { oid: "merge-sha-1" } }))
@@ -531,7 +535,7 @@ describe("mohist/merge-github-pr action", () => {
         const output = JSON.parse(result.output ?? "{}")
 
         expect(result.status).toBe("success")
-        const checksCalls = ghCalls.filter((c) => c === "gh pr checks 42 --json bucket,name,state")
+        const checksCalls = ghCalls.filter((c) => c === "gh pr view 42 --json statusCheckRollup")
         expect(checksCalls.length).toBe(3)
         expect(ghCalls).toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
         expect(output).toMatchObject({
@@ -565,8 +569,8 @@ describe("mohist/merge-github-pr action", () => {
               return ghOk("ok\n")
             case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
               return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-            case "gh pr checks 42 --json bucket,name,state":
-              return ghOk(JSON.stringify([{ name: "build", bucket: "pending", state: "" }]))
+            case "gh pr view 42 --json statusCheckRollup":
+              return ghOk(statusCheckRollup([{ name: "build", status: "IN_PROGRESS", conclusion: null }]))
             default:
               return ghFail(`unexpected gh call: ${full}`)
           }
@@ -604,13 +608,12 @@ describe("mohist/merge-github-pr action", () => {
       }
     })
 
-    it("merges when all checks are PASS/SKIP or when no checks are reported", async () => {
+    it("merges when all checks are PASS/SKIP", async () => {
       const cases: Array<{ checks: unknown[] }> = [
         { checks: [
-          { name: "build", bucket: "pass", state: "SUCCESS" },
-          { name: "lint", bucket: "skip", state: "SKIPPED" },
+          { name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
+          { name: "lint", status: "COMPLETED", conclusion: "SKIPPED" },
         ] },
-        { checks: [] },
       ]
 
       for (const scenario of cases) {
@@ -625,8 +628,8 @@ describe("mohist/merge-github-pr action", () => {
               return ghOk("ok\n")
             case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
               return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-            case "gh pr checks 42 --json bucket,name,state":
-              return ghOk(JSON.stringify(scenario.checks))
+            case "gh pr view 42 --json statusCheckRollup":
+              return ghOk(statusCheckRollup(scenario.checks))
             case "gh pr view 42 --json mergeStateStatus":
           return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
         case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
@@ -646,7 +649,7 @@ describe("mohist/merge-github-pr action", () => {
         const output = JSON.parse(result.output ?? "{}")
 
         expect(result.status).toBe("success")
-        expect(ghCalls).toContain("gh pr checks 42 --json bucket,name,state")
+        expect(ghCalls).toContain("gh pr view 42 --json statusCheckRollup")
         expect(ghCalls).toContain("gh pr merge 42 --squash --subject Use GitHub PR workflow --body ")
         expect(output).toMatchObject({
           kind: "merge-github-pr",
