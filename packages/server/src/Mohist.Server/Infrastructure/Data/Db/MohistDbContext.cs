@@ -15,6 +15,8 @@ using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Data.Label;
 using Mohist.Server.Infrastructure.Data.Runner;
+using Mohist.Server.Infrastructure.Data.Inbox;
+using Mohist.Server.Inbox;
 using Mohist.Server.Project.Domain;
 
 namespace Mohist.Server.Infrastructure.Data.Db;
@@ -56,6 +58,7 @@ public class MohistDbContext : DbContext
     public DbSet<ProjectIssueTemplateRow> ProjectIssueTemplates { get; set; } = null!;
     public DbSet<RunnerRow> Runners { get; set; } = null!;
     public DbSet<RunnerWorkRow> RunnerWorks { get; set; } = null!;
+    public DbSet<InboxItemRow> InboxItems { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -535,6 +538,38 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Reason).HasMaxLength(256);
             entity.HasIndex(e => new { e.RunnerId, e.Status });
             entity.HasIndex(e => new { e.RunnerId, e.OwnerKind, e.OwnerId, e.WorkId });
+        });
+
+        modelBuilder.Entity<InboxItemRow>(entity =>
+        {
+            entity.ToTable("InboxItems", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_InboxItems_NotificationKind",
+                    "\"NotificationKind\" IN ('workflow_failed', 'approval_requested', 'issue_started', 'issue_completed')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.IssueTitle).HasMaxLength(512);
+            entity.Property(e => e.NotificationKind).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.SourceEventSource).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.SourceEventId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.ReadAt);
+            entity.Property(e => e.ArchivedAt);
+            // Most-recent-first list query scoped to one project.
+            entity.HasIndex(e => new { e.ProjectId, e.CreatedAt })
+                .HasDatabaseName("IX_InboxItems_ProjectId_CreatedAt")
+                .IsDescending(false, true);
+            // Idempotency: CloudEvents are uniquely identified by source + id.
+            entity.HasIndex(e => new { e.SourceEventSource, e.SourceEventId })
+                .IsUnique()
+                .HasDatabaseName("UQ_InboxItems_SourceEvent");
+            // Project-scoped lookups for mark-read / archive mutations.
+            entity.HasIndex(e => new { e.ProjectId, e.Id })
+                .HasDatabaseName("IX_InboxItems_ProjectId_Id");
         });
     }
 

@@ -89,6 +89,8 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
 
     private sealed class NoopEventPublisher : IEventPublisher
     {
+        public Task PublishAsync(CloudEvent envelope, CancellationToken ct = default) => Task.CompletedTask;
+
         public Task PublishAsync<TData>(
             TData data,
             string type,

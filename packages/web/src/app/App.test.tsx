@@ -17,6 +17,14 @@ const eventMocks = vi.hoisted(() => ({
   useEventsConnection: vi.fn(),
 }))
 
+const inboxMocks = vi.hoisted(() => ({
+  useInbox: vi.fn(),
+  useInboxLiveRefresh: vi.fn(),
+  useMarkInboxItemRead: vi.fn(),
+  useMarkAllInboxRead: vi.fn(),
+  useArchiveInboxItem: vi.fn(),
+}))
+
 const TEST_PROJECT = {
   id: 'test-project',
   name: 'demo',
@@ -55,6 +63,18 @@ vi.mock('../shared/api/events-hub', () => ({
   useEventsConnection: (...args: unknown[]) => eventMocks.useEventsConnection(...args),
 }))
 
+vi.mock('../entities/inbox', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../entities/inbox')>()
+  return {
+    ...actual,
+    useInbox: inboxMocks.useInbox,
+    useInboxLiveRefresh: inboxMocks.useInboxLiveRefresh,
+    useMarkInboxItemRead: inboxMocks.useMarkInboxItemRead,
+    useMarkAllInboxRead: inboxMocks.useMarkAllInboxRead,
+    useArchiveInboxItem: inboxMocks.useArchiveInboxItem,
+  }
+})
+
 function renderApp() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -79,6 +99,11 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
     })
     epicMocks.useEpic.mockReturnValue({ data: undefined, isLoading: false })
     eventMocks.useEventsConnection.mockReturnValue('disconnected')
+    inboxMocks.useInbox.mockReturnValue({ data: [], isLoading: false })
+    inboxMocks.useInboxLiveRefresh.mockReturnValue(undefined)
+    inboxMocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    inboxMocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    inboxMocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
   })
 
   afterEach(() => {
@@ -106,5 +131,15 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
 
     const classNames = shellContainer!.className.split(/\s+/)
     expect(classNames).not.toContain('pb-14')
+  })
+
+  it('routes /:projectName/inbox to the project inbox page', () => {
+    window.history.replaceState({}, '', '/demo/inbox')
+
+    const { getByTestId } = renderApp()
+
+    expect(getByTestId('inbox-title')).toHaveTextContent('Inbox')
+    expect(inboxMocks.useInbox).toHaveBeenCalled()
+    expect(inboxMocks.useInboxLiveRefresh).toHaveBeenCalled()
   })
 })

@@ -5,6 +5,8 @@ namespace Mohist.Server.Infrastructure.Events;
 /// </summary>
 public interface IEventPublisher
 {
+    Task PublishAsync(CloudEvent envelope, CancellationToken ct = default);
+
     Task PublishAsync<TData>(
         TData data,
         string type,

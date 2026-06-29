@@ -76,6 +76,8 @@ public static class EventCatalog
         ReverseDns.RunnerDisconnected,
         ReverseDns.IssueCompleted,
         ReverseDns.IssueCancelled,
+        ReverseDns.IssueWorkStarted,
+        ReverseDns.IssueWorkCompleted,
     };
 
     /// <summary>
@@ -123,5 +125,7 @@ public static class EventCatalog
 
         public const string IssueCompleted = "com.mohist.issue.completed";
         public const string IssueCancelled = "com.mohist.issue.cancelled";
+        public const string IssueWorkStarted = "com.mohist.issue.work-started";
+        public const string IssueWorkCompleted = "com.mohist.issue.work-completed";
     }
 }
