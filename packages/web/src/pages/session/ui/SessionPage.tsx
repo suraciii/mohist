@@ -936,13 +936,22 @@ export function SessionPage() {
           meta={detail.metadata}
           statusKind={displayStatusKind}
           turnCount={displayTurnCount}
-          recoveryBar={recoveryBar}
           siblingNav={siblingNavigation}
         />
         <div
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto min-w-0"
+          data-testid="session-transcript-scroll-container"
         >
+          {recoveryBar && (
+            <div
+              data-testid="session-recovery-bar"
+              data-sticky="true"
+              className="sticky top-0 z-20 border-b border-gray-200 bg-white px-4 py-3"
+            >
+              {recoveryBar}
+            </div>
+          )}
           <SessionTranscriptLayout
             title={detail.metadata.sessionName ?? routeSessionKey ?? 'Session'}
             turnCount={displayTurnCount}
