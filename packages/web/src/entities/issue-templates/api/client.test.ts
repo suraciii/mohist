@@ -28,7 +28,7 @@ describe('getIssueTemplates', () => {
 
   it('returns the issue template info list', async () => {
     const payload = [
-      { id: 'mohist/default', name: 'Mohist Default', about: 'three-voice PRD', isDefault: true, suitableFor: ['prd'], source: 'builtin' },
+      { id: 'feature', name: 'Feature', description: 'Three-voice PRD template', source: 'builtin' },
     ]
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(mockJsonResponse(payload)))
 
@@ -42,12 +42,9 @@ describe('getIssueTemplate', () => {
   it('requests GET /api/issue-templates/{name} with the literal slash left unencoded', async () => {
     const fetchMock = vi.fn<typeof fetch>()
     fetchMock.mockResolvedValue(mockJsonResponse({
-      id: 'mohist/default',
-      name: 'Mohist Default',
-      about: 'three-voice PRD',
-      isDefault: true,
-      suitableFor: ['prd'],
-      defaults: null,
+      id: 'feature',
+      name: 'Feature',
+      description: 'Three-voice PRD template',
       sections: [],
       source: 'builtin',
     }))

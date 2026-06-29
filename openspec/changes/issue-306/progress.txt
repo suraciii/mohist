@@ -33,3 +33,16 @@
 ### Verification
 - `dotnet build Mohist.sln` — 0 warnings, 0 errors
 - 19 CLI template command tests — all passed
+
+## T-003: Web align issue-template consumers to trimmed metadata
+
+### Changes
+- **types.ts**: `IssueTemplateInfo` trimmed to `(id, name, description, source)` (removed `about`, `isDefault`, `suitableFor`). `IssueTemplateDetail` trimmed to `(id, name, description, sections, source)` (removed `about`, `isDefault`, `suitableFor`, `defaults`). `IssueTemplateDefaults` interface removed entirely.
+- **CreateIssueDialog.tsx**: `TemplateSelector` prop type uses `description` instead of `about`, removed `isDefault` field. Rendering drops `(default)` suffix. Extras default object updated.
+- **client.test.ts**: List/detail fixture payloads trimmed to the new shape (uses `feature` canonical id, `description` field, no removed fields).
+- **queries.test.ts**: Mock template detail payload trimmed to new shape.
+- **CreateIssueDialog.test.tsx**: `TEMPLATE_FIXTURES` updated to trimmed shape (no `about`/`isDefault`/`suitableFor`/`defaults`). Tests reference `feature` canonical id instead of `mohist/default`. "Does not apply advisory defaults" assertion adjusted for removed defaults.
+
+### Verification
+- `npm run typecheck -w packages/web` — passes
+- `npm run test:run -w packages/web` — 198 test files, 2988 passed
