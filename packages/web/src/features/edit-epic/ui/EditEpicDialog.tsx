@@ -6,11 +6,13 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
-import { Textarea } from '@/shared/ui/components/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
+import { EpicDescriptionField } from '@/shared/ui'
+import { cn } from '@/shared/lib/utils'
 
 interface EditEpicDialogProps {
   open: boolean
@@ -63,78 +65,103 @@ export function EditEpicDialog({ open, onClose, epic }: EditEpicDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
-      <DialogContent>
-        <DialogHeader>
+      <DialogContent
+        data-testid="edit-epic-dialog"
+        className={cn(
+          'flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg',
+          'max-w-[calc(100%-2rem)]',
+        )}
+      >
+        <DialogHeader className="border-b border-foreground/10 px-4 py-3">
           <DialogTitle>Edit Epic {epic.number != null ? `#${epic.number}` : ''}</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="edit-epic-title" className="block text-sm font-medium text-foreground mb-1">
-              Title
-            </label>
-            <Input
-              id="edit-epic-title"
-              type="text"
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder="Epic title"
-              required
-            />
-          </div>
 
-          <div>
-            <label htmlFor="edit-epic-description" className="block text-sm font-medium text-foreground mb-1">
-              Description
-            </label>
-            <Textarea
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3" data-testid="edit-epic-scroll-region">
+          <form
+            id="edit-epic-form"
+            onSubmit={handleSubmit}
+            className="space-y-4"
+            data-testid="edit-epic-form"
+          >
+            <div>
+              <label
+                htmlFor="edit-epic-title"
+                className="block text-sm font-medium text-foreground mb-1"
+              >
+                Title
+              </label>
+              <Input
+                id="edit-epic-title"
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Epic title"
+                required
+                className="w-full max-w-full"
+              />
+            </div>
+
+            <EpicDescriptionField
               id="edit-epic-description"
               value={description}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="Describe the goal and scope of this epic..."
-              rows={4}
+              onChange={setDescription}
+              showInsertAction
+              rows={6}
             />
-          </div>
 
-          <div>
-            <label htmlFor="edit-epic-priority" className="block text-sm font-medium text-foreground mb-1">
-              Priority
-            </label>
-            <Select value={priority} onValueChange={(value) => value && setPriority(value as EpicPriority)}>
-              <SelectTrigger id="edit-epic-priority" className="w-full">
-                <SelectValue placeholder="Select priority" />
-              </SelectTrigger>
-              <SelectContent>
-                {PRIORITIES.map(p => (
-                  <SelectItem key={p.value} value={p.value}>
-                    {p.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {updateEpic.isError && (
-            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-              {updateEpic.error?.message || 'Failed to update epic'}
+            <div>
+              <label
+                htmlFor="edit-epic-priority"
+                className="block text-sm font-medium text-foreground mb-1"
+              >
+                Priority
+              </label>
+              <Select value={priority} onValueChange={(value) => value && setPriority(value as EpicPriority)}>
+                <SelectTrigger id="edit-epic-priority" className="w-full max-w-full">
+                  <SelectValue placeholder="Select priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRIORITIES.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          )}
 
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleClose}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={updateEpic.isPending || !title.trim()}
-            >
-              {updateEpic.isPending ? 'Saving...' : 'Save'}
-            </Button>
-          </div>
-        </form>
+            {updateEpic.isError && (
+              <div
+                className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600"
+                data-testid="edit-epic-error"
+              >
+                {updateEpic.error?.message || 'Failed to update epic'}
+              </div>
+            )}
+          </form>
+        </div>
+
+        <DialogFooter
+          className="border-t border-foreground/10 bg-muted/30 px-4 py-3"
+          data-testid="edit-epic-footer"
+        >
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleClose}
+            data-testid="edit-epic-cancel"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            form="edit-epic-form"
+            disabled={updateEpic.isPending || !title.trim()}
+            data-testid="edit-epic-submit"
+          >
+            {updateEpic.isPending ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

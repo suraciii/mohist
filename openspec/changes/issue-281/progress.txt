@@ -66,3 +66,31 @@ T-002 (Guided Create Epic flow) — done.
 - T-001: shipped. `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` both green (2829 tests passing).
 - T-002: shipped. New `EpicCreateDialog.test.tsx` (19 tests) covers prefill, non-destructive insert, quick create, navigate-vs-stay via returned id, idle-aware wording, internal scroll + sticky footer, and mobile no-overflow at 320/390/430 px. `useCreateEpic` slimmed (no success toast; invalidation kept). Full web test suite green: 192 files / 2848 tests passing.
 - T-003 (Edit flow) is pending; it will consume `EpicDescriptionField` opt-in Insert with the same conventions.
+
+T-003 (Non-destructive Edit Epic with opt-in template) — done.
+
+## Codebase Patterns (T-003 additions)
+
+- **Always-on Insert action in Edit**: unlike Create (`showInsertAction = !hasEpicDescriptionStructure(description)`), Edit passes `showInsertAction` unconditionally to `EpicDescriptionField`. The spec wording — "visible when empty, available on demand otherwise" — collapses to "always available on demand" since the user has to click the button either way. Treating it as opt-in keeps the contract symmetric with Create and avoids a re-render flicker when the user types content into a previously-empty field.
+- **`<form>` lives inside the scroll region; submit button lives in the sticky footer via `form="<form-id>"`**: same pattern as T-002. The form keeps `id="edit-epic-form"`; the submit button references it via `form="edit-epic-form"`. Lets the action row stay reachable when the soft keyboard is open without moving the form out of the scroll region.
+- **`useEffect` reset on `[open, epic]`**: the existing useEffect already re-seeds `title`/`description`/`priority` from `epic` when `open` flips or the prop identity changes. Tests rely on this to verify state reload across epic prop swaps without remounting the component.
+
+## Decisions (T-003)
+
+- **Keep the existing `useUpdateEpic` contract untouched**: T-003 only changes presentation. The submit still sends `{ id, data: { title, description, priority } }` and `useUpdateEpic` continues to fire its own success toast — no hook slimming required (the toast is generic "Epic updated" UX, not a lifecycle signal like the Create flow).
+- **Verbatim load is enforced by tests, not by an explicit "do not transform" sentinel in the component**: the `useState(epic.description)` initializer + `useEffect` reset are sufficient, and the field is fully controlled. The tests cover four cases (existing markdown, structured markdown that already contains a Goal heading, empty description, and prop swap) so any future regression to auto-template-injection trips a test.
+- **Submit payload assertion shape**: tests verify `payload.data` does NOT include `goal`/`background`/`nonGoals`/`scope` keys — locks the "no hidden structured payload sent" contract that the spec's "only markdown is sent" scenario depends on.
+
+## Gotchas (T-003)
+
+- **`vi.hoisted` is required when mocking a hook that is read at module init**: without it, `mocks.useUpdateEpic` is `undefined` at the time `vi.mock('../../../entities/epic', …)` evaluates the factory. Same trick is used by `EpicCreateDialog.test.tsx` — kept here for consistency.
+- **`MemoryRouter` is required even when no `<Link>` is rendered**: `react-router-dom` is imported transitively by shared UI in some paths; providing the router makes the test setup resilient if a sibling component reaches for a router hook.
+- **`ProjectProvider` must wrap the dialog** because `useUpdateEpic` calls `useProject()` internally — the same constraint that T-002 surfaced for `useCreateEpic`. Without it, the dialog would throw on mount in tests.
+- **`re-rendering with `rerender(...)` from `@testing-library/react`**: needed to assert state reload across epic prop swaps without remounting. The dialog receives a new `epic` prop and the `useEffect` reset path must re-seed local state. Building a fresh `QueryClientProvider` inside the rerender is required because the prior `QueryClient` instance is bound to the old render tree.
+- **Footer / scroll-region containment assertions**: tests verify both directions — submit + cancel live INSIDE the footer, and the footer is NOT inside the scroll region — so a regression that moves the action row back into the scrollable area fails immediately rather than slipping through.
+
+## Status
+
+- T-001: shipped. `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` both green (2829 tests passing).
+- T-002: shipped. New `EpicCreateDialog.test.tsx` (19 tests) covers prefill, non-destructive insert, quick create, navigate-vs-stay via returned id, idle-aware wording, internal scroll + sticky footer, and mobile no-overflow at 320/390/430 px. `useCreateEpic` slimmed (no success toast; invalidation kept). Full web test suite green: 192 files / 2848 tests passing.
+- T-003: shipped. New `EditEpicDialog.test.tsx` (20 tests) covers verbatim load (incl. structured-markdown no-rewrite, empty description, prop swap), save-preserves-content (incl. payload field shape, edited body, close on success), opt-in Insert (visible when empty, available on demand, set-template on empty, preserve-on-non-empty, no-save-without-explicit-Insert), and mobile-safe layout (320/390/430 px no-overflow, sticky footer outside scroll region, title/description inside scroll region). Full web test suite green: 193 files / 2868 tests passing.
