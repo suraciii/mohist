@@ -60,7 +60,7 @@ public static class AgentSessionLaunchRoutes
             }
 
             var project = context.GetResolvedProject();
-            var agent = await ResolveAgentAsync(agentQuerier, project.Id, agentRef);
+            var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
             if (agent is null)
             {
                 return ApiResults.NotFound($"Agent '{agentRef}' not found");
@@ -110,25 +110,6 @@ public static class AgentSessionLaunchRoutes
         });
 
         return app;
-    }
-
-    private static async Task<AgentInfo?> ResolveAgentAsync(
-        AgentQuerier querier,
-        string projectId,
-        string agentRef)
-    {
-        if (string.IsNullOrWhiteSpace(agentRef))
-            return null;
-
-        if (agentRef.StartsWith("agent_", StringComparison.Ordinal))
-            return await querier.GetByIdAsync(projectId, agentRef);
-
-        // Fall back to name resolution so callers can pass either an id
-        // or a friendly name on the URL.
-        var byName = await querier.GetByNameAsync(projectId, agentRef);
-        if (byName is not null) return byName;
-
-        return await querier.GetByIdAsync(projectId, agentRef);
     }
 
     private static GenericAgentSessionContext BuildContext(

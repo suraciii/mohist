@@ -21,4 +21,15 @@ public class AgentSessionRow
     public string? LabelWorkType { get; set; }
     public string? LabelStage { get; set; }
     public string? LabelSourceKind { get; set; }
+
+    // Direct Agent (generic agent-launch) label keys, issued-130 T-001.
+    // Mirror the workflow-shaped columns above; the json_extract paths
+    // reference GenericAgentSessionMetadata constants so the SQL and the
+    // runtime metadata can never drift.
+    public string? LabelAgentId { get; set; }
+    public string? LabelAgentName { get; set; }
+    public string? LabelAgentLaunchIssueNumber { get; set; }
+    public string? LabelAgentLaunchEpicNumber { get; set; }
+    public string? LabelAgentLaunchRepository { get; set; }
+    public string? LabelAgentLaunchWorkspacePath { get; set; }
 }

@@ -112,6 +112,18 @@ public sealed class AgentSessionQuery : IScopedService
                 AgentSessionQueryMetadataKeys.WorkType => query.Where(s => s.LabelWorkType == value),
                 AgentSessionQueryMetadataKeys.Stage => query.Where(s => s.LabelStage == value),
                 AgentSessionQueryMetadataKeys.SourceKind => query.Where(s => s.LabelSourceKind == value),
+
+                // Direct Agent (agent-launch) lookup keys — issued-130 T-001.
+                // Each maps a GenericAgentSessionMetadata constant to the
+                // matching stored computed column; drift between SQL and
+                // metadata is caught at compile time.
+                GenericAgentSessionMetadata.AgentId => query.Where(s => s.LabelAgentId == value),
+                GenericAgentSessionMetadata.AgentName => query.Where(s => s.LabelAgentName == value),
+                GenericAgentSessionMetadata.IssueNumber => query.Where(s => s.LabelAgentLaunchIssueNumber == value),
+                GenericAgentSessionMetadata.EpicNumber => query.Where(s => s.LabelAgentLaunchEpicNumber == value),
+                GenericAgentSessionMetadata.Repository => query.Where(s => s.LabelAgentLaunchRepository == value),
+                GenericAgentSessionMetadata.WorkspacePath => query.Where(s => s.LabelAgentLaunchWorkspacePath == value),
+
                 _ => query.Where(_ => false),
             };
         }

@@ -123,7 +123,9 @@ public class AgentSessionLaunchRoutesSpecs
 
             Assert.Equal(HttpStatusCode.OK, metadata.StatusCode);
             var metadataPayload = await metadata.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal(sessionId, metadataPayload.GetProperty("data").GetProperty("id").GetString());
+            Assert.Equal(sessionId, metadataPayload.GetProperty("data").GetProperty("sessionId").GetString());
+            Assert.Equal(agent.Id, metadataPayload.GetProperty("data").GetProperty("agentId").GetString());
+            Assert.Equal("readable-agent", metadataPayload.GetProperty("data").GetProperty("agentName").GetString());
 
             Assert.Equal(HttpStatusCode.OK, transcript.StatusCode);
             var transcriptPayload = await transcript.Content.ReadFromJsonAsync<JsonElement>();

@@ -36,10 +36,10 @@ public static class AgentSessionFollowupRoutes
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-            var metadata = await sessions.GetGenericSessionMetadataAsync(project.Id, sessionId, ct);
-            return metadata is null
+            var summary = await sessions.GetGenericSessionSummaryAsync(project.Id, sessionId, ct);
+            return summary is null
                 ? ApiResults.NotFound($"Agent session {sessionId} not found")
-                : ApiResults.Ok(metadata);
+                : ApiResults.Ok(summary);
         });
 
         group.MapGet("/{sessionId}/transcript", async (

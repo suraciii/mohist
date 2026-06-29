@@ -108,12 +108,9 @@ describe("opencode log diagnostics", () => {
   it("reads tail of large log files", async () => {
     tempDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-"))
     process.env.MOHIST_OPENCODE_LOG_DIR = tempDir
-    const padding = "x".repeat(100)
-    const lines: string[] = []
-    for (let i = 0; i < 200_000; i++) lines.push(`timestamp=2026-06-14T10:00:${String(i % 60).padStart(2, "0")}.000Z level=INFO run=big message=loop step=${i} ${padding}`)
-    lines.push(`timestamp=2026-06-14T10:12:32.370Z level=ERROR run=big message="stream error" providerID=kimi-for-coding modelID=k2p7 session.id=ses_big small=false agent=build mode=primary error.error="AI_APICallError: quota exceeded"`)
-    lines.push("")
-    await writeFile(join(tempDir, "opencode.log"), lines.join("\n"))
+    const largePrefix = `${"x".repeat(11 * 1024 * 1024)}\n`
+    const errorLine = `timestamp=2026-06-14T10:12:32.370Z level=ERROR run=big message="stream error" providerID=kimi-for-coding modelID=k2p7 session.id=ses_big small=false agent=build mode=primary error.error="AI_APICallError: quota exceeded"\n`
+    await writeFile(join(tempDir, "opencode.log"), largePrefix + errorLine)
 
     const diagnostic = await findOpencodeProviderErrorDiagnostic("ses_big")
 
