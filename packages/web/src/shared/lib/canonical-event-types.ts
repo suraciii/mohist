@@ -19,6 +19,7 @@ export const REVERSE_DNS_EVENT_TYPES = {
   IssueReopened: 'com.mohist.issue.reopened',
   IssueWorkStarted: 'com.mohist.issue.work-started',
   IssueWorkCompleted: 'com.mohist.issue.work-completed',
+  InboxItemPersisted: 'com.mohist.inbox.item-persisted',
   IssueLabelsChanged: 'com.mohist.issue.labels-changed',
   IssuePriorityChanged: 'com.mohist.issue.priority-changed',
   IssuePrerequisiteAdded: 'com.mohist.issue.prerequisite-added',

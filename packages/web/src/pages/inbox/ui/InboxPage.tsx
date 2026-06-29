@@ -6,7 +6,6 @@ import {
   type NotificationKind,
   useArchiveInboxItem,
   useInbox,
-  useInboxLiveRefresh,
   useMarkAllInboxRead,
   useMarkInboxItemRead,
 } from '../../../entities/inbox'
@@ -162,7 +161,6 @@ function InboxItemRow({
 
 export function InboxPage() {
   useDocumentTitle('Inbox — Mohist')
-  useInboxLiveRefresh()
 
   const { data: items, error, isError, isLoading, refetch } = useInbox()
   const markRead = useMarkInboxItemRead()

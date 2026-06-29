@@ -48,6 +48,17 @@ namespace Mohist.Server.Events.Subscriptions;
 /// Exceptions are logged and swallowed: the bus already tolerates
 /// handler failures (see <see cref="InMemoryEventBus"/>), and the spec
 /// states the projection must never block workflow / issue execution.
+///
+/// <para>
+/// <b>Realtime hint</b>. On a successful, non-duplicate
+/// <see cref="InboxStore.InsertAsync"/> the handler publishes exactly one
+/// <c>com.mohist.inbox.item-persisted</c> CloudEvent carrying an
+/// <see cref="InboxItemPersistedHint"/> identity payload and an
+/// <c>extensions["projectid"]</c> stamp so the dispatcher can route it
+/// project-scoped. The publish is awaited inline <i>after</i> the insert
+/// returns and inherits <see cref="HandleAsync"/>'s swallow-and-log
+/// guard, so a publish failure cannot break the source-event projection.
+/// </para>
 /// </summary>
 [Subscription(Type =
     "com.mohist.workflow.run.failed|" +
@@ -56,6 +67,8 @@ namespace Mohist.Server.Events.Subscriptions;
     "com.mohist.issue.work-completed")]
 public sealed class InboxProjectionHandler : ICloudEventHandler
 {
+    private const string HintSource = "/mohist/inbox";
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<InboxProjectionHandler> _log;
 
@@ -133,7 +146,37 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             SourceEventSource: evt.Source.ToString(),
             SourceEventId: evt.Id);
 
-        await inboxStore.InsertAsync(draft, ct).ConfigureAwait(false);
+        var result = await inboxStore.InsertAsync(draft, ct).ConfigureAwait(false);
+        if (result.AlreadyExisted)
+        {
+            return;
+        }
+
+        var hint = new InboxItemPersistedHint(
+            ItemId: result.Id,
+            ProjectId: draft.ProjectId,
+            Kind: kind,
+            IssueId: draft.IssueId,
+            IssueNumber: draft.IssueNumber);
+
+        var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["projectid"] = draft.ProjectId,
+        };
+
+        // The hint publish reuses the same async scope that resolved
+        // InboxStore. We cannot inject IEventPublisher through the
+        // handler constructor: the bus wires InboxProjectionHandler as a
+        // singleton, and IEventPublisher resolves to the InMemoryEventBus
+        // singleton whose constructor enumerates all handler subscriptions,
+        // which would close a DI cycle on first construction. Resolving
+        // the publisher from the already-open scope avoids this and is
+        // semantically identical — IEventPublisher is itself a singleton,
+        // so every request would land on the same instance.
+        var eventPublisher = scope.ServiceProvider.GetRequiredService<IEventPublisher>();
+        await eventPublisher
+            .PublishAsync(hint, EventCatalog.ReverseDns.InboxItemPersisted, HintSource, extensions: extensions, ct: ct)
+            .ConfigureAwait(false);
     }
 
     private async Task<ResolvedIdentity?> ResolveFromWorkflowRunAsync(CloudEvent evt, IWorkflowRunStore workflowRunStore, CancellationToken ct)

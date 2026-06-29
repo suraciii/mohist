@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { inboxQueryKey, invalidateInbox, useArchiveInboxItem, useInbox, useMarkAllInboxRead, useMarkInboxItemRead } from './queries'
+import { inboxQueryKey, invalidateInbox, useArchiveInboxItem, useInbox, useMarkAllInboxRead, useMarkInboxItemRead, useUnreadInboxCount } from './queries'
+import type { InboxItem } from '../model/types'
 
 const useQueryMock = vi.fn()
 const useMutationMock = vi.fn()
@@ -265,5 +266,63 @@ describe('useArchiveInboxItem', () => {
     options.onError(new Error('archive failed'))
 
     expect(toastErrorMock).toHaveBeenCalledWith('archive failed')
+  })
+})
+
+describe('useUnreadInboxCount', () => {
+  it('uses the same query key as useInbox', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useUnreadInboxCount()
+
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.queryKey).toEqual(['inbox', 'proj-1'])
+  })
+
+  it('disables the query when there is no project', () => {
+    useProjectMock.mockReturnValue({ projectId: null })
+
+    useUnreadInboxCount()
+
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.enabled).toBe(false)
+  })
+
+  it('selects the count of unread items from the inbox list', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useUnreadInboxCount()
+
+    const config = useQueryMock.mock.calls[0][0]
+    const items: InboxItem[] = [
+      { itemId: 'inb-1', notificationKind: 'workflow_failed', issueId: 'i-1', issueNumber: 1, issueTitle: 'A', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false, readAt: null, archivedAt: null },
+      { itemId: 'inb-2', notificationKind: 'issue_started', issueId: 'i-2', issueNumber: 2, issueTitle: 'B', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
+      { itemId: 'inb-3', notificationKind: 'approval_requested', issueId: 'i-3', issueNumber: 3, issueTitle: 'C', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false, readAt: null, archivedAt: null },
+    ]
+    expect(config.select(items)).toBe(2)
+  })
+
+  it('returns 0 when all items are read', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useUnreadInboxCount()
+
+    const config = useQueryMock.mock.calls[0][0]
+    const items: InboxItem[] = [
+      { itemId: 'inb-1', notificationKind: 'workflow_failed', issueId: 'i-1', issueNumber: 1, issueTitle: 'A', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
+      { itemId: 'inb-2', notificationKind: 'issue_started', issueId: 'i-2', issueNumber: 2, issueTitle: 'B', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false, readAt: '2024-01-02T00:00:00.000Z', archivedAt: null },
+    ]
+    expect(config.select(items)).toBe(0)
+  })
+
+  it('forwards projectId to getInbox as queryFn', async () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-xyz' })
+    getInboxMock.mockResolvedValue([])
+
+    useUnreadInboxCount()
+
+    const config = useQueryMock.mock.calls[0][0]
+    await config.queryFn()
+    expect(getInboxMock).toHaveBeenCalledWith('proj-xyz')
   })
 })

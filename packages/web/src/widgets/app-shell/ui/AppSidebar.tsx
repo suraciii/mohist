@@ -18,6 +18,7 @@ import {
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
 import { useDeleteProject } from '../../../entities/project'
+import { useUnreadInboxCount } from '../../../entities/inbox'
 import {
   Sidebar,
   SidebarContent,
@@ -27,6 +28,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -266,6 +268,7 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
   const navigate = useNavigate()
   const { currentProject } = useProject()
   const toProjectPath = useProjectPath()
+  const { data: unreadCount } = useUnreadInboxCount()
   const visibleConfigureNav = configureNav.filter(
     (item) => item.key !== 'settings' || currentProject !== null,
   )
@@ -283,6 +286,9 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
           <item.icon />
           <span>{item.label}</span>
         </SidebarMenuButton>
+        {item.key === 'inbox' && unreadCount != null && unreadCount > 0 && (
+          <SidebarMenuBadge data-testid="nav-inbox-badge">{unreadCount}</SidebarMenuBadge>
+        )}
       </SidebarMenuItem>
     )
   }

@@ -76,6 +76,15 @@ public interface IEventsClient
 ///             whose set is empty, which is the correct behaviour
 ///             in the window between connect and the first
 ///             <see cref="SetSubscriptionsAsync"/> call.</item>
+///       <item>Capture the <c>?projectId=</c> query-string value
+///             as the connection's declared project affinity. The
+///             dispatcher uses this together with
+///             <c>extensions["projectid"]</c> on incoming
+///             CloudEvents to gate project-scoped delivery (see
+///             <c>UserNotificationDispatcher</c>). A missing value
+///             leaves the connection on type-only matching —
+///             the right default for cross-project / admin tabs.
+///             Affinity is transport-level state, not durable.</item>
 ///       <item>Best-effort replay the durable subscription set from
 ///             <see cref="IConnectionSubscriptionGrain"/> when
 ///             present. This is the replay-on-reconnect path. A new
@@ -124,6 +133,20 @@ public sealed class MohistHub : Hub<IEventsClient>
         // the window between connect and the first
         // SetSubscriptionsAsync call from the client.
         _registry.RegisterConnection(Context.ConnectionId);
+
+        // Capture per-connection project affinity from the
+        // SignalR query string. The Web's events-hub.ts sends
+        // ?projectId=<id> on every connection / reconnect; we
+        // mirror it in the registry so the dispatcher can apply
+        // the gated project filter (see
+        // UserNotificationDispatcher.ResolveTargetConnectionsAsync
+        // and design.md D3). A missing / empty value normalises
+        // to null — the connection keeps type-only matching
+        // behaviour, which is the right default for cross-project
+        // tabs and admin tooling.
+        var query = Context.GetHttpContext()?.Request.Query;
+        var projectId = query?["projectId"].ToString();
+        _registry.SetProjectId(Context.ConnectionId, projectId);
 
         // Replay the durable subscription set on reconnect. The
         // grain is keyed by connectionId; a new connectionId

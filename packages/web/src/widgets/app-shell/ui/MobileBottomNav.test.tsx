@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { SidebarProvider } from '@/shared/ui/components/sidebar'
 import { MobileBottomNav } from './MobileBottomNav'
+import type { InboxItem } from '../../../entities/inbox'
 
 const TEST_PROJECT = {
   id: 'test-project',
@@ -123,5 +124,65 @@ describe('MobileBottomNav primary navigation', () => {
 
     expect(screen.queryByTestId('mobile-nav-board')).not.toBeInTheDocument()
     expect(screen.queryByTestId('mobile-nav-home')).not.toBeInTheDocument()
+  })
+})
+
+describe('MobileBottomNav unread inbox count badge', () => {
+  function renderWithCache(initialRoute: string, inboxData: InboxItem[]) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(['inbox', TEST_PROJECT.id], inboxData)
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={[initialRoute]}>
+            <SidebarProvider>
+              <MobileBottomNav />
+            </SidebarProvider>
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+  }
+
+  const readItem: InboxItem = {
+    itemId: 'inb-1', notificationKind: 'workflow_failed', issueId: 'i-1', issueNumber: 1,
+    issueTitle: 'Read', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false,
+    readAt: '2024-01-02T00:00:00.000Z', archivedAt: null,
+  }
+  const unreadItem: InboxItem = {
+    itemId: 'inb-2', notificationKind: 'issue_started', issueId: 'i-2', issueNumber: 2,
+    issueTitle: 'Unread', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false,
+    readAt: null, archivedAt: null,
+  }
+
+  it('shows a badge with the unread count when there are unread inbox items', () => {
+    renderWithCache('/demo', [readItem, unreadItem])
+
+    const badge = screen.getByTestId('mobile-nav-inbox-badge')
+    expect(badge).toBeInTheDocument()
+    expect(badge).toHaveTextContent('1')
+  })
+
+  it('does NOT show a badge when all inbox items are read', () => {
+    renderWithCache('/demo', [readItem])
+
+    expect(screen.queryByTestId('mobile-nav-inbox-badge')).not.toBeInTheDocument()
+  })
+
+  it('does NOT show a badge when inbox data is not yet loaded', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={['/demo']}>
+            <SidebarProvider>
+              <MobileBottomNav />
+            </SidebarProvider>
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByTestId('mobile-nav-inbox-badge')).not.toBeInTheDocument()
   })
 })

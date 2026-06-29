@@ -3,6 +3,7 @@ import { LayoutDashboardIcon, ListTodoIcon, ActivityIcon, MenuIcon, InboxIcon } 
 import { useSidebar } from '@/shared/ui/components/sidebar'
 import { Button } from '@/shared/ui/components/button'
 import { useProjectPath } from '../../../entities/project'
+import { useUnreadInboxCount } from '../../../entities/inbox'
 
 interface Tab {
   label: string
@@ -17,6 +18,7 @@ export function MobileBottomNav() {
   const navigate = useNavigate()
   const { setOpenMobile } = useSidebar()
   const toProjectPath = useProjectPath()
+  const { data: unreadCount } = useUnreadInboxCount()
 
   const tabs: Tab[] = [
     {
@@ -94,7 +96,17 @@ export function MobileBottomNav() {
                   : 'text-muted-foreground hover:text-foreground/80'
               }`}
             >
-              {tab.icon}
+              <span className="relative">
+                {tab.icon}
+                {tab.testId === 'mobile-nav-inbox' && unreadCount != null && unreadCount > 0 && (
+                  <span
+                    data-testid="mobile-nav-inbox-badge"
+                    className="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white tabular-nums leading-none"
+                  >
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </span>
               <span className="text-[10px] font-medium leading-none">
                 {tab.label}
               </span>
