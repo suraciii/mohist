@@ -1,6 +1,6 @@
 ---
 name: Refactor
-description: Internal quality — refactoring, test coverage, optimization. Signal: external behavior is unchanged; the value is internal (maintainability/reliability/performance ceiling).
+description: "Internal quality — refactoring, test coverage, optimization. Signal: external behavior is unchanged; the value is internal (maintainability/reliability/performance ceiling)."
 ---
 
 ## Motivation

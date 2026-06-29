@@ -1,0 +1,24 @@
+# progress.txt — issue-306
+
+## T-001: Server file-asset template loading model with trimmed metadata
+
+### Decisions made during implementation
+- **File loader + body parser**: Created `IssueTemplateFileLoader` (scans `templates/*.md`, uses `PromptFrontmatterParser` for frontmatter, skips `README.md`) and `IssueTemplateBodyParser` (splits body on `## ` headers, extracts `<!-- -->` as guidance, rest as placeholder). Both internal/static.
+- **Registry internal constructor**: The production constructor uses `AppContext.BaseDirectory` + well-known path. An internal constructor accepts a pre-loaded `Dictionary<string, BuiltinTemplateEntry>` for testability, enabled by `InternalsVisibleTo`.
+- **Source determination**: Added `IsBuiltin(string id)` to registry (resolves alias first, then checks `_builtinData`) so the API route can determine "builtin" vs "custom" for detail responses.
+- **Body parser simplicity**: Avoided regex; used simple string operations (`StartsWith("<!--")`, `IndexOf("-->")`, range indexing). This keeps the parser understandable and avoids regex edge cases.
+- **Tolerant custom deserialization**: Validation relaxed to only require `Id + Name + Sections` (dropped `About` and `SuitableFor` requirements). `DeserializedIssueTemplate.Description` maps from legacy `About` (falls back to empty).
+- **DTO classes preserved**: `IssueTemplateDto`, `IssueTemplateDefaultsDto`, `IssueTemplateSectionDto` kept with their old properties for backward-compat JSON deserialization of custom template rows.
+
+### Gotchas
+- **YAML unquoted colons**: Template frontmatter descriptions containing `Signal:` (colon+space) cause YAML parse errors because YamlDotNet interprets them as mapping key-value separators in plain scalars. Fixed by wrapping all three `description` values in double quotes (`"..."`).
+- **Test project file layout**: The `WebApplicationFactory<Program>` has `AppContext.BaseDirectory` pointed at the test project output, not the server output. The server's csproj `PreserveNewest` content include copies to server output only. Added a `CopyTemplates` MSBuild target to test csproj (mirroring existing `CopyCliSkillData` pattern) that copies templates into the test output at the correct relative path before build.
+- **API tests need file loading**: The `IssueTemplateApiSpecs` go through HTTP and create the registry via DI (the production constructor). Without the test csproj copy target, the template files are missing and the registry loads zero builtins → all GET endpoints return 500 (exception during DI construction).
+- **`Assert.NotEmpty(JsonElement)`**: Doesn't compile because `JsonElement` is not `IEnumerable`. Use `Assert.True(sections.GetArrayLength() > 0)` instead.
+- **`mohist/default` alias behavior in list**: The alias is a resolution-only concept (not surfaced in `List()`). The list returns canonical ids (`feature`, `bug`, `refactor`). Tests checking for `"mohist/default"` in list output need to use `"feature"` instead.
+
+### File inventory for T-001
+- **New**: `IssueTemplateBodyParser.cs`, `IssueTemplateFileLoader.cs`
+- **Modified**: `IIssueTemplate.cs`, `IssueTemplates.cs`, `IssueTemplateRegistry.cs`, `IssueTemplateRoutes.cs`, `Mohist.Server.csproj`, `templates/*.md` (quoting), test `.csproj`
+- **Deleted**: `MohistDefaultIssueTemplate.cs`
+- **Tests**: `IssueTemplateRegistrySpecs.cs` (rewritten), `IssueTemplateApiSpecs.cs` (rewritten), `IssueTemplateBodyParserSpecs.cs` (new)

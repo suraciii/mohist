@@ -4,11 +4,6 @@ using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Api;
 
-/// <summary>
-/// Issue template list/get endpoints.
-/// Deliberately separate from <see cref="TemplateRoutes"/> (prompt templates)
-/// and not nested under /api/workflow-*.
-/// </summary>
 public static class IssueTemplateRoutes
 {
     public static WebApplication MapIssueTemplateRoutes(this WebApplication app)
@@ -32,15 +27,12 @@ public static class IssueTemplateRoutes
                 return ApiResults.NotFound($"Issue template '{name}' not found");
 
             var template = registry.Get(name, project.Id!);
-            var source = template.Id == IssueTemplates.DefaultId ? "builtin" : "custom";
+            var source = registry.IsBuiltin(name) ? "builtin" : "custom";
 
             var detail = new IssueTemplateDetail(
                 template.Id,
                 template.Name,
-                template.About,
-                template.IsDefault,
-                template.SuitableFor,
-                template.Defaults,
+                template.Description,
                 template.Sections,
                 source);
 
@@ -69,9 +61,6 @@ public static class IssueTemplateRoutes
 public sealed record IssueTemplateDetail(
     string Id,
     string Name,
-    string About,
-    bool IsDefault,
-    IReadOnlyList<string> SuitableFor,
-    IssueTemplateDefaults Defaults,
+    string Description,
     IReadOnlyList<IssueTemplateSection> Sections,
     string Source);

@@ -25,47 +25,74 @@ public class IssueTemplateApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task List_IncludesDefaultTemplate()
+    public async Task List_IncludesBuiltinTemplates()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-list-{Guid.NewGuid():N}" });
 
         var list = await _client.GetDataAsync<List<JsonElement>>($"/api/issue-templates?projectId={project.Id}");
 
         Assert.NotEmpty(list);
-        var defaultTemplate = list.Single(t => t.GetProperty("id").GetString() == "mohist/default");
-        Assert.False(string.IsNullOrEmpty(defaultTemplate.GetProperty("name").GetString()));
-        Assert.False(string.IsNullOrEmpty(defaultTemplate.GetProperty("about").GetString()));
-        Assert.True(defaultTemplate.GetProperty("suitableFor").GetArrayLength() > 0);
-        Assert.True(defaultTemplate.GetProperty("isDefault").GetBoolean());
-        Assert.Equal("builtin", defaultTemplate.GetProperty("source").GetString());
+        var feature = Assert.Single(list, t => t.GetProperty("id").GetString() == "feature");
+        Assert.False(string.IsNullOrEmpty(feature.GetProperty("name").GetString()));
+        Assert.False(string.IsNullOrEmpty(feature.GetProperty("description").GetString()));
+        Assert.Equal("builtin", feature.GetProperty("source").GetString());
+
+        // The removed fields should not appear
+        Assert.False(feature.TryGetProperty("about", out _));
+        Assert.False(feature.TryGetProperty("suitableFor", out _));
+        Assert.False(feature.TryGetProperty("isDefault", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task Get_ReturnsFullTemplateWithSections()
+    public async Task Get_Feature_ReturnsFullTemplateWithSections()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-get-{Guid.NewGuid():N}" });
 
-        var response = await _client.GetAsync($"/api/issue-templates/mohist/default?projectId={project.Id}");
+        var response = await _client.GetAsync($"/api/issue-templates/feature?projectId={project.Id}");
         response.EnsureSuccessStatusCode();
         var envelope = await response.Content.ReadFromJsonAsync<JsonElement>();
 
         var data = envelope.GetProperty("data");
-        Assert.Equal("mohist/default", data.GetProperty("id").GetString());
-        Assert.Equal("Mohist Default", data.GetProperty("name").GetString());
+        Assert.Equal("feature", data.GetProperty("id").GetString());
+        Assert.Equal("Feature", data.GetProperty("name").GetString());
+        Assert.False(string.IsNullOrEmpty(data.GetProperty("description").GetString()));
 
         var sections = data.GetProperty("sections");
-        Assert.Equal(5, sections.GetArrayLength());
+        Assert.True(sections.GetArrayLength() > 0);
 
-        var expectedTitles = new[] { "User Voice", "Product Shape", "Domain Model", "Acceptance Criteria", "Non-Goals" };
-        for (var i = 0; i < expectedTitles.Length; i++)
-        {
-            var section = sections[i];
-            Assert.Equal(expectedTitles[i], section.GetProperty("title").GetString());
-            Assert.False(string.IsNullOrEmpty(section.GetProperty("guidance").GetString()));
-            Assert.False(string.IsNullOrEmpty(section.GetProperty("placeholder").GetString()));
-        }
+        var firstSection = sections[0];
+        Assert.False(string.IsNullOrEmpty(firstSection.GetProperty("title").GetString()));
+        Assert.False(string.IsNullOrEmpty(firstSection.GetProperty("guidance").GetString()));
+        Assert.False(string.IsNullOrEmpty(firstSection.GetProperty("placeholder").GetString()));
+
+        // The removed fields should not appear
+        Assert.False(data.TryGetProperty("about", out _));
+        Assert.False(data.TryGetProperty("suitableFor", out _));
+        Assert.False(data.TryGetProperty("isDefault", out _));
+        Assert.False(data.TryGetProperty("defaults", out _));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task Get_AliasMohistDefault_ReturnsFeature()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-alias-{Guid.NewGuid():N}" });
+
+        var responseCanonical = await _client.GetAsync($"/api/issue-templates/feature?projectId={project.Id}");
+        responseCanonical.EnsureSuccessStatusCode();
+        var canonical = (await responseCanonical.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+
+        var responseAlias = await _client.GetAsync($"/api/issue-templates/mohist/default?projectId={project.Id}");
+        responseAlias.EnsureSuccessStatusCode();
+        var alias = (await responseAlias.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+
+        Assert.Equal(canonical.GetProperty("id").GetString(), alias.GetProperty("id").GetString());
+        Assert.Equal(canonical.GetProperty("name").GetString(), alias.GetProperty("name").GetString());
+        Assert.Equal(canonical.GetProperty("description").GetString(), alias.GetProperty("description").GetString());
+        Assert.Equal(canonical.GetProperty("sections").GetArrayLength(), alias.GetProperty("sections").GetArrayLength());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -82,7 +109,7 @@ public class IssueTemplateApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task List_ExcludesDefaultWhenDisabled()
+    public async Task List_ExcludesBuiltinsWhenDisabled()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-disabled-{Guid.NewGuid():N}" });
 
@@ -99,7 +126,9 @@ public class IssueTemplateApiSpecs
 
         var list = await _client.GetDataAsync<List<JsonElement>>($"/api/issue-templates?projectId={project.Id}");
 
-        Assert.DoesNotContain(list, t => t.GetProperty("id").GetString() == "mohist/default");
+        Assert.DoesNotContain(list, t => t.GetProperty("id").GetString() == "feature");
+        Assert.DoesNotContain(list, t => t.GetProperty("id").GetString() == "bug");
+        Assert.DoesNotContain(list, t => t.GetProperty("id").GetString() == "refactor");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -119,8 +148,8 @@ public class IssueTemplateApiSpecs
         var listA = await _client.GetDataAsync<List<JsonElement>>($"/api/issue-templates?projectId={projectA.Id}");
         var listB = await _client.GetDataAsync<List<JsonElement>>($"/api/issue-templates?projectId={projectB.Id}");
 
-        Assert.DoesNotContain(listA, t => t.GetProperty("id").GetString() == "mohist/default");
-        Assert.Contains(listB, t => t.GetProperty("id").GetString() == "mohist/default");
+        Assert.DoesNotContain(listA, t => t.GetProperty("id").GetString() == "feature");
+        Assert.Contains(listB, t => t.GetProperty("id").GetString() == "feature");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

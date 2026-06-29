@@ -1,6 +1,6 @@
 ---
 name: Bug
-description: Fix — functional bugs (wrong behavior) or non-functional bugs (performance/reliability/resource). Signal: behavior deviates from the correct state, i.e. an invariant is violated.
+description: "Fix — functional bugs (wrong behavior) or non-functional bugs (performance/reliability/resource). Signal: behavior deviates from the correct state, i.e. an invariant is violated."
 ---
 
 ## Symptom & Evidence
