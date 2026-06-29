@@ -33,3 +33,36 @@ T-001 (Shared epic description scaffold, detector, and EpicDescriptionField) —
 
 - T-001: shipped. `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` both green (2829 tests passing).
 - T-002 (Create flow) and T-003 (Edit flow) are pending; they will consume the field via `import { EpicDescriptionField } from '@/shared/ui'`.
+
+T-002 (Guided Create Epic flow) — done.
+
+## Codebase Patterns (T-002 additions)
+
+- **`DialogContent` rebuild for mobile**: pass `className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg max-w-[calc(100%-2rem)]"` plus a sticky `<DialogFooter>`. The form lives in a sibling `min-h-0 flex-1 overflow-y-auto px-4 py-3` region so the submit/success actions stay reachable when the soft keyboard opens and content is tall. The base `DialogFooter` already has a `border-t` so it reads as a sticky footer out of the box.
+- **`useProjectPath` for cross-feature navigation**: import `useProjectPath` from `entities/project` and call it as `toProjectPath('/epics/${id}')`. The list page already does this for the in-page card nav — the dialog follows the same convention.
+- **`useCreateEpic` slimming**: drop `toast.success(...)` from `onSuccess` and keep `invalidateQueries({ queryKey: ['epics'] })`. Mutate still resolves to the created Epic so the dialog can read the returned id for navigation.
+- **Reusing `stubWidth` for mobile overflow tests**: copy the `EpicListPage.test.tsx` `stubWidth` pattern into the dialog test (`Object.defineProperty(document.documentElement, 'scrollWidth'/'clientWidth', { configurable: true, get: () => width })`) and assert `scrollWidth <= clientWidth` at 320/390/430 px.
+- **Submit button outside the `<form>`**: when the form lives in a scroll region, use `form="<form-id>"` on the submit button so it can live in the sticky footer while still submitting the right form.
+- **Mock `mutate` with synchronous `onSuccess`**: dialog-flow tests need React state to settle inside `fireEvent`. A mutator that calls `options.onSuccess(stubEpic)` synchronously (driven by a thin factory like `makeAutoSuccessMutate`) avoids manual `act(...)` wrapping around `mutate.mock.calls[0][1].onSuccess(...)`.
+- **`tsc -b` strictness on mock signatures**: when a `vi.fn(impl)` with a specific `(variables, options) => void` signature feeds into a `mutate: (...args: unknown[]) => void` prop, the type checker rejects the assignment. Cast the prop type to `(...args: unknown[]) => void` or pass the impl through a union type that matches.
+
+## Decisions (T-002)
+
+- **Initial description state = template**: `useState(EPIC_DESCRIPTION_TEMPLATE)` on open. The "non-empty simple text" scenario is hypothetical from the dialog's perspective (it always opens empty), but the Insert action still surfaces correctly when the user clears the template — so the same code path naturally covers both spec scenarios.
+- **Show Insert when structure is incomplete**: `showInsertAction = !hasEpicDescriptionStructure(description)` — visible after the user clears or partially deletes the template, hidden once all four headers are present (avoiding re-insert prompts the user does not need).
+- **Idle-aware wording (no "started"/"running")**: success title is `"Epic created as idle — ready to plan"`, body reinforces `"is idle. Start the Epic when you want it to begin autonomous execution."`. Tested with `not.toContain('started'/'running')` over the whole dialog.
+- **Success-stay-on-cancel**: `handleClose` and the success `Stay` button share the same handler so an X / overlay click during the success view is treated as Stay. `Open Epic` clears success state, calls `onClose()`, then `navigate()` — order matters because unmount-during-navigate races produce `Can't perform a React state update on an unmounted component` warnings. Resetting state first is the safe pattern.
+- **Form + footer split via `form="…"`**: the submit button is rendered inside `<DialogFooter>` and bound to the form by id. Keeps the form's internal scroll region and the footer's sticky positioning independent.
+
+## Gotchas (T-002)
+
+- **Mutate success path and `act(...)` warnings**: invoking `mutate.mock.calls[0][1].onSuccess(...)` outside a `fireEvent` triggers a React state update that React Testing Library flags. The simpler fix is to have the mock mutate itself call `onSuccess` synchronously — then the state updates happen inside the `fireEvent` boundary that React Testing Library already wraps in `act`.
+- **Success state reset on close**: forgot to `setCreatedEpic(null)` on first close pass and the dialog would reopen already in success view. Fixed by funnelling both "Stay" and "Cancel"/overlay close through `resetForm()`.
+- **`required` removal**: spec removes `required` on description but keeps it on title. The submit path still early-returns `if (!title.trim())` so the title constraint is enforced from the hook, not the browser's built-in form validation. Without that, you'd be able to submit with an empty title (which the API would also reject — but cleaner to block client-side).
+- **`tsc -b` strictness on the mockUseCreateEpic prop type**: `mutate: (...args: unknown[]) => void` rejected `vi.fn(makeAutoSuccessMutate(...))` because the impl has a narrower options type. Widened the prop type to `((...args: unknown[]) => void) | ((...args: never[]) => void)` and cast through `unknown` to satisfy the hook's `Mutation['mutate']` interface.
+
+## Status
+
+- T-001: shipped. `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` both green (2829 tests passing).
+- T-002: shipped. New `EpicCreateDialog.test.tsx` (19 tests) covers prefill, non-destructive insert, quick create, navigate-vs-stay via returned id, idle-aware wording, internal scroll + sticky footer, and mobile no-overflow at 320/390/430 px. `useCreateEpic` slimmed (no success toast; invalidation kept). Full web test suite green: 192 files / 2848 tests passing.
+- T-003 (Edit flow) is pending; it will consume `EpicDescriptionField` opt-in Insert with the same conventions.
