@@ -475,6 +475,45 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
+    public async Task EnsureWorkTimeoutReminder_RemainsRegistered_WhenNewWorkArrivesDuringUnregister()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var grainId = runner.GetGrainId();
+        var initialReminder = await GetWorkTimeoutReminderAsync(runnerId);
+        Assert.NotNull(initialReminder);
+
+        var pause = _fixture.ControllableReminderTable.PauseNextRemove(grainId, "work-timeout");
+        var reportTask = ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, new WorkResult("completed"));
+        await pause.Started.WaitAsync(TimeSpan.FromSeconds(10));
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(3));
+
+        var newAgentJobId = $"unregister-race-agent-{Guid.NewGuid():N}";
+        var newWorkId = $"unregister-race-work-{Guid.NewGuid():N}";
+        var assigned = await runner.AssignAgentJobAsync(new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: newWorkId,
+            AgentJobId: newAgentJobId,
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob));
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assigned.Status);
+
+        pause.Release();
+        await reportTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var afterRace = await GetWorkTimeoutReminderAsync(runnerId);
+        Assert.NotNull(afterRace);
+        Assert.Equal(_fixture.TimeProvider.GetUtcNow().UtcDateTime.AddMinutes(1), afterRace!.StartAt);
+
+        var newWorkRow = await FindRunnerWorkAsync(runnerId, WorkDispatchOwnerKinds.AgentJob, newAgentJobId, newWorkId);
+        Assert.NotNull(newWorkRow);
+        Assert.Equal("outstanding", newWorkRow!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
     public async Task OlderOutstandingWorkTimesOut_WhenNewerWorkIsAssignedBeforeItsDeadline()
     {
         // End-to-end behavioral pin: after the fix, assigning a new work
