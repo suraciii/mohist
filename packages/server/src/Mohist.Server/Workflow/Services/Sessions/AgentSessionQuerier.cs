@@ -116,6 +116,142 @@ public class AgentSessionQuerier : IScopedService
         return sessions.Select(ToSummaryDto).ToList();
     }
 
+    /// <summary>
+    /// Lists generic (non-workflow) <see cref="AgentSession"/>s for an Agent
+    /// profile within a project, recency-ordered and capped at the
+    /// requested limit (issued-130 T-002 / design D2). Composes the three
+    /// indexed labels (<c>project-id</c>, <c>agent-id</c>,
+    /// <c>source-kind = agent-launch</c>) so the DB query cannot leak
+    /// workflow sessions or another agent's sessions. Terminal status
+    /// (<c>completed</c> / <c>failed</c> / <c>stopped</c>) is resolved per
+    /// session by reusing <see cref="LoadTerminalFactsAsync"/>;
+    /// <c>running</c> maps to "opened + no terminal fact + AgentSessionId
+    /// present". The optional <paramref name="statusSet"/> is applied as
+    /// an in-memory filter over the indexed result set so it composes
+    /// with <paramref name="additionalContextLabels"/> (DB-level filters
+    /// resolved against the T-001 indexed columns). Each returned item
+    /// carries enough information for the workbench to derive the four
+    /// primary state groupings (recent / running / failed / ended)
+    /// directly from the response.
+    /// </summary>
+    /// <remarks>
+    /// The cap is clamped to <c>[1, 200]</c>; the default <c>50</c>
+    /// matches the established project-wide list
+    /// (<see cref="ListCurrentAsync"/>) and the active-agents readout
+    /// (<see cref="GetActivityAsync"/>). Status vocabulary: <c>running</c>
+    /// / <c>completed</c> / <c>failed</c> / <c>stopped</c>. The legacy
+    /// runner protocol's <c>cancelled</c> alias is normalised to
+    /// <c>stopped</c> at this read boundary. Sessions whose runner has
+    /// not yet bound <c>AgentSessionId</c> and which have no terminal
+    /// fact appear as <c>pending</c> and surface only in the
+    /// <c>recent</c> grouping.
+    /// </remarks>
+    public async Task<IReadOnlyList<AgentSessionListItemDto>> ListAgentSessionsAsync(
+        string projectId,
+        string agentId,
+        IReadOnlyCollection<string>? statusSet = null,
+        int limit = 50,
+        IReadOnlyDictionary<string, string>? additionalContextLabels = null,
+        CancellationToken ct = default)
+    {
+        var clampedLimit = Math.Clamp(limit, 1, 200);
+
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+            [GenericAgentSessionMetadata.AgentId] = agentId,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+        };
+        if (additionalContextLabels is not null)
+        {
+            foreach (var (key, value) in additionalContextLabels)
+            {
+                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+                    labels[key] = value;
+            }
+        }
+
+        var records = await _sessionQuery.ListByLabelsAsync(
+            labels,
+            AgentSessionQueryOrder.CreatedDescending,
+            clampedLimit,
+            ct: ct);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var sessionIds = records.Select(r => r.Session.Id).ToArray();
+        var terminalFacts = await LoadTerminalFactsAsync(db, sessionIds, ct);
+        var eventSummaries = await LoadEventSummariesAsync(db, sessionIds, ct);
+
+        var items = records.Select(record =>
+        {
+            var s = record.Session;
+            var fact = terminalFacts.GetValueOrDefault(s.Id);
+            var summary = eventSummaries.GetValueOrDefault(s.Id);
+            var status = ResolveAgentSessionListStatus(record, fact);
+            return new AgentSessionListItemDto(
+                s.Id,
+                Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty,
+                Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty,
+                status,
+                s.Status.CreatedAt.ToString("o"),
+                AgentSessionJsonHelper.LastActivityAt(s).ToString("o"),
+                summary?.ResolvedModel,
+                BuildAgentSessionListContextRefs(record));
+        }).ToList();
+
+        if (statusSet is { Count: > 0 })
+        {
+            var set = new HashSet<string>(statusSet, StringComparer.OrdinalIgnoreCase);
+            items = items.Where(i => set.Contains(i.Status)).ToList();
+        }
+
+        return items;
+    }
+
+    /// <summary>
+    /// Resolves the workbench-vocabulary status for an agent-scoped list
+    /// entry (issued-130 T-002 / design D2). Terminal facts take
+    /// precedence; <c>running</c> requires the runner to have bound
+    /// <see cref="AgentSessionRow.AgentSessionId"/> and no terminal fact
+    /// to be present; anything else is <c>pending</c>. The runner
+    /// protocol's legacy <c>cancelled</c> alias is normalised to the
+    /// spec vocabulary's <c>stopped</c>.
+    /// </summary>
+    private static string ResolveAgentSessionListStatus(AgentSessionRecord record, TerminalFact? fact)
+    {
+        if (fact is not null)
+        {
+            return string.Equals(fact.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
+                ? "stopped"
+                : fact.Status;
+        }
+        return record.Row.AgentSessionId is not null ? "running" : "pending";
+    }
+
+    /// <summary>
+    /// Builds the optional <see cref="AgentSessionListContextRefsDto"/>
+    /// envelope from the labels stamped at launch. Returns <c>null</c>
+    /// when the session carried no context references so the wire
+    /// response omits the field instead of fabricating an empty object
+    /// (issued-130 T-002: "absent rather than null", per design D4).
+    /// </summary>
+    private static AgentSessionListContextRefsDto? BuildAgentSessionListContextRefs(AgentSessionRecord record)
+    {
+        var issueNumberText = Label(record, GenericAgentSessionMetadata.IssueNumber);
+        var issueNumber = int.TryParse(issueNumberText, out var parsed) ? parsed : (int?)null;
+        var epicNumber = Label(record, GenericAgentSessionMetadata.EpicNumber);
+        var repository = Label(record, GenericAgentSessionMetadata.Repository);
+        var workspacePath = Label(record, GenericAgentSessionMetadata.WorkspacePath);
+
+        if (issueNumber is null && string.IsNullOrWhiteSpace(epicNumber)
+            && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))
+        {
+            return null;
+        }
+
+        return new AgentSessionListContextRefsDto(issueNumber, epicNumber, repository, workspacePath);
+    }
+
     public async Task<string?> ResolveIssueSessionIdAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -989,7 +1125,12 @@ internal sealed record TerminalFact(
     {
         var payload = AgentSessionJsonHelper.ParsePayload(part.PayloadJson);
         var status = AgentSessionJsonHelper.GetStringProp(payload, "status") ?? "completed";
-        if (status is not ("completed" or "failed" or "cancelled")) return null;
+        // issued-130 T-002: accept "stopped" alongside the legacy
+        // "cancelled" alias. The runner protocol uses "cancelled" today;
+        // "stopped" is the spec vocabulary used by the agent workbench
+        // groupings (design D2). Loading both lets the in-memory status
+        // filter surface either name without changing the write path.
+        if (status is not ("completed" or "failed" or "cancelled" or "stopped")) return null;
         return new TerminalFact(
             status,
             part.LastSeenAt,

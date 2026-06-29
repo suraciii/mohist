@@ -178,6 +178,44 @@ public sealed record WorkflowSessionDto(
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage);
 
+/// <summary>
+/// Read shape for a generic (non-workflow) <see cref="Sessions.Domain.AgentSession"/>
+/// as surfaced by the agent-scoped list endpoint
+/// (<c>GET /api/projects/{projectRef}/agents/{agentRef}/sessions</c>).
+/// Issued-130 T-002 / design D2: the status field carries one of the
+/// spec vocabulary values (<c>running</c> / <c>completed</c> / <c>failed</c>
+/// / <c>stopped</c>) so the workbench can derive the four primary state
+/// groupings (recent / running / failed / ended) directly from the list
+/// output, and the legacy runner-protocol <c>cancelled</c> alias is
+/// normalised to <c>stopped</c>. <see cref="ContextRefs"/> is the
+/// optional envelope of context references stamped on the session at
+/// launch (issue / epic / repository / workspace path); absent when the
+/// session carried no such reference. Workflow-shaped fields
+/// (<c>workflowRunId</c>, <c>sessionName</c>, <c>workId</c>,
+/// <c>workType</c>, <c>stage</c>) are omitted by construction.
+/// </summary>
+public sealed record AgentSessionListItemDto(
+    string SessionId,
+    string AgentId,
+    string AgentName,
+    [property: JsonPropertyName("status")] string Status,
+    string CreatedAt,
+    string? LastActivityAt,
+    string? ResolvedModel,
+    [property: JsonPropertyName("contextRefs")] AgentSessionListContextRefsDto? ContextRefs);
+
+/// <summary>
+/// Optional envelope of context references recorded on a generic
+/// AgentSession at launch (issue-130 T-002). Each field is null when the
+/// session carried no such reference; the envelope itself is null when
+/// the session had no context references at all.
+/// </summary>
+public sealed record AgentSessionListContextRefsDto(
+    int? IssueNumber,
+    string? EpicNumber,
+    string? Repository,
+    string? WorkspacePath);
+
 public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, AgentSessionTranscriptResponse Transcript);
 
 public sealed record ActivityDto(
