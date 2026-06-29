@@ -27,3 +27,15 @@
 - For boolean options (`--default-template` in clear), `ctx.GetResult(opt) is not null` returns `true` even when not provided (implicit default value). Must check `!result.Implicit` to distinguish explicit from default.
 - `RenderProjectWorkflowProfile` added in `TableRenderer.ProjectWorkflow.cs`; reuses `RenderWorkflowProfileVariables` and `RenderWorkflowProfilePrompts` from the issue-level partial (same partial class).
 - Config get also uses `ProjectWorkflowProfile` table shape (different from issue-level `WorkflowProfile` which shows issueNumber, templateSource, etc.)
+
+## T-003 Recordings
+
+- `BuildSessionFollowup` in `IssueCommands` mirrors `AgentCommands.BuildSessionFollowup` precisely:
+  - Uses `NumberArg()` + `SessionNameArg()` positionals (not session-id)
+  - Reuses `BodyInputResolver.ResolveAsync` with custom `SourceFlags("--text", "--text-file", "--text-stdin", "text")`
+  - Path: `/issues/{num}/sessions/{name}/followup`
+  - POST body: `new { text = textValue }`
+  - Uses `PrintPostWithOutputAsync` with `AgentSessionFollowup` table shape and `rawJson: true`
+- No new `TableShape` or renderer needed — `AgentSessionFollowup` (delivery: sent) matches the response shape exactly
+- `--text` option requires a value (Option<string?>), so theory tests for followup must include `--text "x"` extra args
+- The `PrintEnvelopeAsync` with `rawJson: true` returns the full envelope including success, so JSON mode test checks for `"success": true` (unlike the usual `-o json` that strips the envelope)

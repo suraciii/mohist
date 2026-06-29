@@ -861,6 +861,7 @@ internal static class IssueCommands
         session.Subcommands.Add(BuildSessionTranscript(api));
         session.Subcommands.Add(BuildSessionCompact(api));
         session.Subcommands.Add(BuildSessionReset(api));
+        session.Subcommands.Add(BuildSessionFollowup(api));
 
         return session;
     }
@@ -1047,6 +1048,75 @@ internal static class IssueCommands
                     new { },
                     mode,
                     nameof(MohistCliApi.TableShape.SessionRecovery));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildSessionFollowup(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "followup",
+            "Send followup text to a running issue workflow session. Sends POST /api/projects/:projectId/issues/:number/sessions/:name/followup.");
+        var numberArg = NumberArg();
+        var nameArg = SessionNameArg();
+        var textOpt = new Option<string?>("--text") { Description = "Followup text (mutually exclusive with --text-file and --text-stdin)" };
+        var textFileOpt = new Option<string?>("--text-file") { Description = "Read followup text from a UTF-8 file path (recommended for long messages; mutually exclusive with --text and --text-stdin)" };
+        var textStdinOpt = new Option<bool>("--text-stdin") { Description = "Read followup text from stdin (mutually exclusive with --text and --text-file)" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
+
+        cmd.Arguments.Add(numberArg);
+        cmd.Arguments.Add(nameArg);
+        cmd.Options.Add(textOpt);
+        cmd.Options.Add(textFileOpt);
+        cmd.Options.Add(textStdinOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var name = ctx.GetValue(nameArg);
+            var text = ctx.GetValue(textOpt);
+            var textFile = ctx.GetValue(textFileOpt);
+            var textStdin = ctx.GetValue(textStdinOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return FollowupAsync();
+
+            async Task<int> FollowupAsync()
+            {
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalidOutput)
+                {
+                    api.Error.WriteLine(invalidOutput.Message);
+                    return 1;
+                }
+
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+
+                var resolvedText = await BodyInputResolver.ResolveAsync(
+                    text, textFile, textStdin,
+                    new BodyInputResolver.SourceFlags("--text", "--text-file", "--text-stdin", "text"),
+                    api.FileSystem, api.StandardInput, api.Error);
+                if (resolvedText is BodyInputResolver.Result.Failure)
+                    return 1;
+                var textValue = ((BodyInputResolver.Result.Success)resolvedText).Body;
+
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var path = ProjectIssuesPath(
+                    resolvedProjectId,
+                    $"/issues/{MohistCliCommands.Escape(number!)}/sessions/{MohistCliCommands.Escape(name!)}/followup");
+                return await api.PrintPostWithOutputAsync(
+                    path,
+                    new { text = textValue },
+                    mode,
+                    nameof(MohistCliApi.TableShape.AgentSessionFollowup),
+                    rawJson: true);
             }
         });
         return cmd;

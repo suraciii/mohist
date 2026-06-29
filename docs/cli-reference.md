@@ -114,6 +114,11 @@ mo issue events <number>
 mo issue diff <number>
 mo issue commits <number>
 mo issue sessions <number>
+mo issue session show <number> <name>
+mo issue session transcript <number> <name>
+mo issue session compact <number> <name>
+mo issue session reset <number> <name>
+mo issue session followup <number> <name> [options]
 mo issue workflow [subcommand]
 ```
 
@@ -131,6 +136,24 @@ mo issue workflow [subcommand]
 | `--project <name>` | 所有 | 指定 project |
 | `--archived` | list | 看归档 |
 | `--all` | list | 看全部（含归档） |
+
+Session 子命令：
+
+```bash
+mo issue session show <number> <name>            # 查看 session 元数据
+mo issue session transcript <number> <name>      # 查看 session 对话摘要
+mo issue session compact <number> <name>         # 压缩 session 上下文
+mo issue session reset <number> <name>           # 重置 session 上下文
+mo issue session followup <number> <name> --text <text|--text-file|--text-stdin>  # 向运行中的 session 推送后续指令
+```
+
+`followup` 的文本源选项（三者选一）：
+
+| 选项 | 含义 |
+|------|------|
+| `--text <text>` | inline 后续文本 |
+| `--text-file <path>` | 从 UTF-8 文件读取 |
+| `--text-stdin` | 从标准输入读取 |
 
 ## Server 管理
 
