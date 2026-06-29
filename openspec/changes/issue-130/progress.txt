@@ -1,0 +1,68 @@
+# issue-130 working memory
+
+## Codebase Patterns
+
+### Computed label columns: column property and SQL live side-by-side
+- `AgentSessionRow.cs:16-23` already had 8 `string? Label*` properties whose values
+  are projected by `json_extract("State", '$.metadata.labels."…"')` STORED
+  computed columns declared in `MohistDbContext.cs:129-143`.
+- The `ReplaceAgentSessionLabelsWithComputedColumns` migration
+  (`Infrastructure/Data/Migrations/20260620185946_…cs`) is the canonical
+  pattern: add plain nullable TEXT, then `AlterColumn` to `STORED`. EF Core's
+  SQLite provider triggers an automatic table rebuild for STORED computed
+  columns (`AddColumn` with `computedColumnSql … stored: true` does the same
+  rebuild, see the EF-generated T-001 migration `20260629112745_…cs`).
+- The `FixAgentSessionLabelsComputedColumnCase` migration fixed the JSON path
+  casing from `$.Metadata.Labels` to `$.metadata.labels` to match
+  `JSON.Options` (`JsonSerializerDefaults.Web` → camelCase). **Always write
+  test fixtures' State JSON with `JSON.Options`, not the default serializer**
+  — otherwise `json_extract` returns `null` for everything and the column
+  assertions look like the SQL is wrong.
+
+### `QueryRowsByLabels` is a switch on the label-key constant string
+- `AgentSessionQuery.cs:105` maps each `AgentSessionQueryMetadataKeys.*`
+  constant to a `LabelXxx == value` predicate; unknown keys fall through
+  to `_ => query.Where(_ => false)`. Adding a new label key means:
+  1. Add the column on `AgentSessionRow`,
+  2. Configure it in `MohistDbContext.OnModelCreating` (computed SQL +
+    index),
+  3. Reference the metadata-key constant (NOT a string literal) in the
+    EF model so a typo is a compile error,
+  4. Add a switch case in `QueryRowsByLabels` that uses the same
+    `LabelXxx == value` predicate.
+
+### `dotnet-ef` design-time tools are available
+- `dotnet tool install --global dotnet-ef --version 10.0.8` works on this
+  workstation; the local cache was missing it but it is the canonical way
+  to scaffold a migration. After scaffolding, the `MigrationsAssembly` re-
+  emits the `*.Designer.cs` snapshot and the model snapshot.
+- `dotnet-ef` looks for `DOTNET_ROOT`; on this machine it lives at
+  `/home/szf/.dotnet`, so we run with `export DOTNET_ROOT=/home/szf/.dotnet`
+  before invoking `dotnet-ef`.
+
+### In-memory SQLite migration helpers
+- `Specs/Inbox/InboxItemsMigrationSpecs.cs` is the canonical pattern:
+  `IDbContextFactory<MohistDbContext>` backed by an in-memory
+  `SqliteConnection`, then drive the migration via `MigrateAsync(targetMigration)`
+  (or `Database.MigrateAsync()` for the full chain). Verify schema with
+  `pragma_table_xinfo` (includes STORED generated columns as `hidden=2/3`
+  entries; `pragma_table_info` filters them out so `Assert.Contains(name,
+  pragma_table_info_keys)` would have looked correct-but-misleading).
+- The `dotnet ef migrations add …` invocation uses a project reference to
+  `Mohist.Server.csproj`; the new migration lands under
+  `Infrastructure/Data/Migrations` automatically.
+
+### Migrator `MigrateAsync(targetMigrationName)` quirks
+- When the database is empty, `MigrateAsync(targetName)` runs every
+  migration up to and including that target (not just the target), so a
+  full-chain smoke test works via either form.
+
+## Notes
+
+- `AgentSessionQuery` is a `ScopedService`, so unit tests can construct it
+  directly (`new AgentSessionQuery(fakeDbFactory)`) without DI — handy for
+  the FakeDbContextFactory pattern.
+- Pre-flight regressions to run after schema changes: Sessions-tests
+  filter (`dotnet test … --filter "FullyQualifiedName~Sessions"`), and the
+  Unit-speed tests. The Otel async-span capture test is flaky on this
+  workstation and unrelated to schema work.
