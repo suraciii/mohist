@@ -189,7 +189,7 @@ export function EpicCreateDialog({ open, onClose }: EpicCreateDialogProps) {
         </div>
 
         <DialogFooter
-          className="border-t border-foreground/10 bg-muted/30 px-4 py-3"
+          className="mx-0 mb-0 border-t border-foreground/10 bg-muted/30 px-4 py-3"
           data-testid="epic-create-footer"
         >
           {isSuccess ? (

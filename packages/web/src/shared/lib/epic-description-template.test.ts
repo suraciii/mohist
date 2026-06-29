@@ -61,6 +61,24 @@ describe('hasEpicDescriptionStructure', () => {
     expect(hasEpicDescriptionStructure(wrapped)).toBe(true)
   })
 
+  it('returns true when standalone headers have trailing whitespace', () => {
+    const withTrailingWhitespace = [
+      '## Goal   ',
+      'ship it',
+      '',
+      '## Background\t',
+      'context',
+      '',
+      '## Non-goals ',
+      'not this',
+      '',
+      '## Scope',
+      'web only',
+    ].join('\n')
+
+    expect(hasEpicDescriptionStructure(withTrailingWhitespace)).toBe(true)
+  })
+
   it('returns false for an empty string', () => {
     expect(hasEpicDescriptionStructure('')).toBe(false)
   })
@@ -88,6 +106,29 @@ describe('hasEpicDescriptionStructure', () => {
     ].join('\n')
 
     expect(hasEpicDescriptionStructure(partial)).toBe(false)
+  })
+
+  it('returns false when required header text appears only inside prose', () => {
+    const prose = 'Mention ## Goal, ## Background, ## Non-goals, and ## Scope without standalone headers.'
+    expect(hasEpicDescriptionStructure(prose)).toBe(false)
+  })
+
+  it('returns false when required header text appears at a different markdown heading level', () => {
+    const wrongLevel = [
+      '### Goal',
+      'ship it',
+      '',
+      '### Background',
+      'context',
+      '',
+      '### Non-goals',
+      'not this',
+      '',
+      '### Scope',
+      'web only',
+    ].join('\n')
+
+    expect(hasEpicDescriptionStructure(wrongLevel)).toBe(false)
   })
 
   it('is case-sensitive and does not match lower-case headers', () => {

@@ -25,6 +25,11 @@ export const EPIC_DESCRIPTION_TEMPLATE = [
 
 const REQUIRED_HEADERS = ['## Goal', '## Background', '## Non-goals', '## Scope'] as const
 
+function hasStandaloneHeader(content: string, header: string): boolean {
+  const escapedHeader = header.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`^${escapedHeader}\\s*$`, 'm').test(content)
+}
+
 /**
  * Conservative detector: returns true only when all four required section
  * headers are present in the description. Used by Create/Edit dialogs to decide
@@ -37,7 +42,7 @@ const REQUIRED_HEADERS = ['## Goal', '## Background', '## Non-goals', '## Scope'
 export function hasEpicDescriptionStructure(content: string | null | undefined): boolean {
   if (!content) return false
   for (const header of REQUIRED_HEADERS) {
-    if (!content.includes(header)) return false
+    if (!hasStandaloneHeader(content, header)) return false
   }
   return true
 }
