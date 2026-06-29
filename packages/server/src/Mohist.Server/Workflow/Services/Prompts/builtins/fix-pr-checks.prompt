@@ -23,10 +23,11 @@ which checks failed; read that as the entry point.
 
 1. Inspect the PR check status for the affected PR:
    ```bash
-   gh pr checks ${{ failure.output.prNumber }} --json bucket,name,state
+   gh pr view ${{ failure.output.prNumber }} --json statusCheckRollup \
+     --jq '.statusCheckRollup[] | {name, status, conclusion, detailsUrl}'
    ```
-2. For every check whose `bucket` is `fail` (or whose state is `FAILURE` /
-   `ERROR` / `CANCELLED`), identify the failing job.
+2. For every check whose `conclusion` is `FAILURE` / `ERROR` / `CANCELLED` /
+   `ACTION_REQUIRED`, identify the failing job.
 3. Use `gh run view <run-id>` / `gh run view <run-id> --log-failed` to fetch
    the failing job's logs and pinpoint the root cause.
 4. Apply focused fixes to source code, tests, or build configuration so that

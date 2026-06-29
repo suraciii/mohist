@@ -20,15 +20,15 @@ export function setGitHubPrGhRunnerForTest(runner: GhRunner | null) {
 }
 
 const PR_CHECKS_POLL_INTERVAL_MS_DEFAULT = 15_000
-// How long to keep polling after `gh pr checks` reports "no checks reported"
-// before concluding the branch genuinely has no CI and proceeding to merge.
-// Long enough to ride out the registration window right after a push / force
-// push (GitHub hasn't turned the workflow run into a check run yet), short
-// enough that repos without CI don't wait forever.
+// How long to keep polling after `gh pr view --json statusCheckRollup` reports
+// zero checks before concluding the branch genuinely has no CI and proceeding
+// to merge. Long enough to ride out the registration window right after a push
+// / force push (GitHub hasn't turned the workflow run into a check run yet),
+// short enough that repos without CI don't wait forever.
 const PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT = 120_000
 
 // How long to poll mergeStateStatus after checks pass before giving up.
-// GitHub's merge eligibility can lag behind gh pr checks by a few seconds;
+// GitHub's merge eligibility can lag behind PR check rollup by a few seconds;
 // a BLOCKED/UNSTABLE state right after checks settle is usually transient.
 const PR_MERGE_STATUS_POLL_TIMEOUT_MS = 120_000
 
@@ -661,9 +661,9 @@ export async function waitChecksAndMergePr(
     }
   }
 
-  // waitForPrChecks tracks commit statuses via gh pr checks, but branch
-  // protection may also gate on reviews or check suites that aren't reported
-  // as commit statuses. The PR's mergeStateStatus is the authoritative signal.
+  // waitForPrChecks tracks PR check rollup state, but branch protection may
+  // also gate on reviews or check suites that aren't reported as check runs.
+  // The PR's mergeStateStatus is the authoritative final signal.
   // Poll it for up to PR_MERGE_STATUS_POLL_TIMEOUT_MS — BLOCKED/UNSTABLE right
   // after checks settle is usually transient (checks hadn't fully registered).
   const mergeStatusPollStart = Date.now()
@@ -808,35 +808,38 @@ async function waitForPrChecks(
     }
     const checksResult = await gh(
       "gh",
-      ["pr", "checks", String(prNumber), "--json", "bucket,name,state"],
+      ["pr", "view", String(prNumber), "--json", "statusCheckRollup"],
       workDir,
       signal,
     )
     const checksOutput = combinedGhOutput(checksResult)
-    record("gh-pr-checks", `pr checks ${prNumber} --json bucket,name,state`, checksResult.exitCode, checksOutput)
+    record("gh-pr-checks", `pr view ${prNumber} --json statusCheckRollup`, checksResult.exitCode, checksOutput)
     if (checksResult.exitCode !== 0) {
-      // `gh pr checks` exits non-zero in two very different situations:
-      //   1. a check actually failed (terminal), and
-      //   2. the branch has zero check runs yet — right after a push / force
-      //      push, before GitHub has registered the workflow run as a check.
-      // Case 2 is transient (the "no checks reported" message) and must be
-      // polled like PENDING; only after the grace window elapses with still
-      // zero checks do we proceed to merge (repos with no CI).
-      if (looksLikeNoChecksReported(checksOutput)) {
+      return {
+        kind: "failure",
+        message: checksOutput,
+        output: checksOutput,
+      }
+    } else {
+      const entries = parseStatusCheckRollup(checksResult.stdout)
+      if (entries.length === 0) {
         if (noChecksSince === null) noChecksSince = Date.now()
         if (Date.now() - noChecksSince >= prChecksNoChecksGraceMs) {
           return { kind: "ok" }
         }
-      } else {
-        return {
-          kind: "failure",
-          message: checksOutput,
-          output: checksOutput,
+        try {
+          await delayWithSignal(prChecksPollIntervalMs, signal)
+          continue
+        } catch (error) {
+          return {
+            kind: "cancelled",
+            message: errorMessage(error),
+            output: `cancelled during wait: ${errorMessage(error)}`,
+          }
         }
       }
-    } else {
       noChecksSince = null
-      const classification = classifyPrChecks(parsePrChecks(checksResult.stdout))
+      const classification = classifyPrChecks(entries)
       if (classification.kind === "failed") {
         return {
           kind: "failure",
@@ -884,7 +887,7 @@ export interface PrCheckEntry {
   state: string
 }
 
-export function parsePrChecks(stdout: string): PrCheckEntry[] {
+export function parseStatusCheckRollup(stdout: string): PrCheckEntry[] {
   const trimmed = stdout.trim()
   if (!trimmed) return []
   let parsed: unknown
@@ -893,17 +896,41 @@ export function parsePrChecks(stdout: string): PrCheckEntry[] {
   } catch {
     return []
   }
-  if (!Array.isArray(parsed)) return []
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return []
+  const rollup = (parsed as Record<string, unknown>)["statusCheckRollup"]
+  if (!Array.isArray(rollup)) return []
   const out: PrCheckEntry[] = []
-  for (const item of parsed) {
+  for (const item of rollup) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue
     const obj = item as Record<string, unknown>
-    const name = typeof obj["name"] === "string" ? (obj["name"] as string) : ""
-    const bucket = typeof obj["bucket"] === "string" ? (obj["bucket"] as string) : ""
-    const state = typeof obj["state"] === "string" ? (obj["state"] as string) : ""
-    out.push({ name, bucket, state })
+    const name = typeof obj["name"] === "string"
+      ? (obj["name"] as string)
+      : typeof obj["context"] === "string"
+        ? (obj["context"] as string)
+        : ""
+    const status = typeof obj["status"] === "string" ? (obj["status"] as string) : ""
+    const conclusion = typeof obj["conclusion"] === "string"
+      ? (obj["conclusion"] as string)
+      : typeof obj["state"] === "string"
+        ? (obj["state"] as string)
+        : ""
+    out.push({
+      name,
+      bucket: checkRollupBucket(status, conclusion),
+      state: conclusion || status,
+    })
   }
   return out
+}
+
+function checkRollupBucket(status: string, conclusion: string): string {
+  const normalizedStatus = status.toLowerCase()
+  const normalizedConclusion = conclusion.toLowerCase()
+  if (normalizedStatus && normalizedStatus !== "completed") return "pending"
+  if (!normalizedConclusion) return "pending"
+  if (normalizedConclusion === "success" || normalizedConclusion === "neutral") return "pass"
+  if (normalizedConclusion === "skipped") return "skip"
+  return "fail"
 }
 
 type PrChecksClassification =
@@ -934,13 +961,6 @@ function formatFailedCheck(entry: PrCheckEntry): string {
   const bucket = entry.bucket || "FAIL"
   const state = entry.state && entry.state !== bucket ? ` (state=${entry.state})` : ""
   return `${label} [bucket=${bucket}]${state}`
-}
-
-// `gh pr checks` prints this and exits non-zero when the branch has zero check
-// runs. That's a transient state right after a push (and a permanent one for
-// repos with no CI), distinct from an actual check failure.
-export function looksLikeNoChecksReported(output: string): boolean {
-  return /no checks reported/i.test(output)
 }
 
 export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal): Promise<{ ok: true; output: string } | { ok: false; exitCode: number; output: string; message: string }> {
