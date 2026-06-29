@@ -326,3 +326,9 @@ Categories whose flags are absent SHALL NOT be affected. When no flag is present
 - **WHEN** the user runs `mo issue archive --all-completed` with no resolvable project
 - **THEN** the CLI SHALL print a clear error explaining no project is resolved
 - **AND** SHALL exit with a non-zero status
+
+#### Scenario: Single-issue archive and batch flag are mutually exclusive
+
+- **WHEN** the user runs `mo issue archive 42 --all-completed`
+- **THEN** the CLI SHALL print a clear validation error explaining `<number>` and `--all-completed` are mutually exclusive
+- **AND** SHALL exit with a non-zero status
