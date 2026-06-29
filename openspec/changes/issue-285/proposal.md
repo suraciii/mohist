@@ -24,7 +24,7 @@ The project inbox (issue 286) records all four notification kinds for every proj
 
 ## Impact
 
-- **Server** (`packages/server`): new project-scoped subscription preference state (model + Orleans grain/storage); new read/update HTTP routes; the inbox projection gains a per-kind, per-project subscription gate before inserting an item. Consumes no new events.
+- **Server** (`packages/server`): new project-scoped subscription preference state (model + durable storage); new read/update HTTP routes; the inbox projection gains a per-kind, per-project subscription gate before inserting an item. Consumes no new events.
 - **Web** (`packages/web`): new settings surface (toggles for the four kinds with product labels) plus query/mutation hooks; persists through the subscription API.
 - **Runner / workflow engine / issue lifecycle**: no changes. The runner continues to report facts and carries no subscription logic.
 - **No breaking changes** to existing API contracts or existing inbox items: current behavior is the default, and preferences affect only future projection.
