@@ -23,13 +23,18 @@ export interface OpencodeProviderErrorDiagnostic {
   occurredAt?: string
 }
 
+interface OpencodeProviderErrorSearchOptions {
+  sinceMs?: number
+  failFastOnly?: boolean
+}
+
 interface CandidateLogFile {
   path: string
   mtimeMs: number
   size: number
 }
 
-export async function findOpencodeProviderErrorDiagnostic(sessionId: string): Promise<OpencodeProviderErrorDiagnostic | undefined> {
+export async function findOpencodeProviderErrorDiagnostic(sessionId: string, options: OpencodeProviderErrorSearchOptions = {}): Promise<OpencodeProviderErrorDiagnostic | undefined> {
   if (!sessionId.trim()) return undefined
 
   const logDir = opencodeLogDir()
@@ -53,11 +58,47 @@ export async function findOpencodeProviderErrorDiagnostic(sessionId: string): Pr
 
   files.sort((a, b) => b.mtimeMs - a.mtimeMs)
   for (const file of files.slice(0, MAX_LOG_FILES)) {
-    const found = await findDiagnosticInLogFile(file, sessionId)
+    const found = await findDiagnosticInLogFile(file, sessionId, options)
     if (found) return found
   }
 
   return undefined
+}
+
+export async function findFailFastOpencodeProviderErrorDiagnostic(sessionId: string, sinceMs: number): Promise<OpencodeProviderErrorDiagnostic | undefined> {
+  return await findOpencodeProviderErrorDiagnostic(sessionId, { sinceMs, failFastOnly: true })
+}
+
+export function isFailFastOpencodeProviderError(diagnostic: OpencodeProviderErrorDiagnostic): boolean {
+  const haystack = [
+    diagnostic.errorName,
+    diagnostic.errorType,
+    diagnostic.message,
+    diagnostic.summary,
+  ].filter(Boolean).join(" ").toLowerCase()
+
+  if (diagnostic.statusCode && [400, 401, 402, 403, 404].includes(diagnostic.statusCode)) return true
+  if (/\bai_loadapikeyerror\b/i.test(diagnostic.errorName ?? "")) return true
+
+  return [
+    /token plan/,
+    /usage limit/,
+    /quota/,
+    /credit/,
+    /billing/,
+    /payment required/,
+    /api[_ -]?key/,
+    /auth(?:entication|orization)? failed/,
+    /unauthorized/,
+    /forbidden/,
+    /permission denied/,
+    /model .*not .*found/,
+    /model .*not .*available/,
+    /model .*unavailable/,
+    /model .*does not exist/,
+    /unsupported model/,
+    /invalid model/,
+  ].some((pattern) => pattern.test(haystack))
 }
 
 export function appendOpencodeDiagnostic(message: string, diagnostic: OpencodeProviderErrorDiagnostic | undefined) {
@@ -66,7 +107,7 @@ export function appendOpencodeDiagnostic(message: string, diagnostic: OpencodePr
   return `${message}\n${diagnostic.summary}`
 }
 
-async function findDiagnosticInLogFile(file: CandidateLogFile, sessionId: string): Promise<OpencodeProviderErrorDiagnostic | undefined> {
+async function findDiagnosticInLogFile(file: CandidateLogFile, sessionId: string, options: OpencodeProviderErrorSearchOptions): Promise<OpencodeProviderErrorDiagnostic | undefined> {
   const text = await readLogFileText(file)
   if (!text) return undefined
 
@@ -76,10 +117,22 @@ async function findDiagnosticInLogFile(file: CandidateLogFile, sessionId: string
     const line = lines[index]
     if (!isProviderErrorLine(line)) continue
     if (!line.includes(`session.id=${sessionId}`)) continue
-    return parseProviderErrorLine(line, sessionId, file.path, index + 1)
+    const diagnostic = parseProviderErrorLine(line, sessionId, file.path, index + 1)
+    if (!matchesSearchOptions(diagnostic, options)) continue
+    return diagnostic
   }
 
   return undefined
+}
+
+function matchesSearchOptions(diagnostic: OpencodeProviderErrorDiagnostic, options: OpencodeProviderErrorSearchOptions): boolean {
+  if (options.sinceMs !== undefined) {
+    if (!diagnostic.occurredAt) return false
+    const occurredAtMs = Date.parse(diagnostic.occurredAt)
+    if (!Number.isFinite(occurredAtMs) || occurredAtMs < options.sinceMs) return false
+  }
+  if (options.failFastOnly && !isFailFastOpencodeProviderError(diagnostic)) return false
+  return true
 }
 
 async function readLogFileText(file: CandidateLogFile): Promise<string | undefined> {

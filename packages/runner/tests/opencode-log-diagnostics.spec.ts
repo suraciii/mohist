@@ -2,7 +2,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, describe, expect, it } from "vitest"
-import { appendOpencodeDiagnostic, findOpencodeProviderErrorDiagnostic } from "../src/runtime/opencode-log-diagnostics.js"
+import {
+  appendOpencodeDiagnostic,
+  findFailFastOpencodeProviderErrorDiagnostic,
+  findOpencodeProviderErrorDiagnostic,
+  isFailFastOpencodeProviderError,
+} from "../src/runtime/opencode-log-diagnostics.js"
 
 let tempDir: string | undefined
 
@@ -62,6 +67,42 @@ describe("opencode log diagnostics", () => {
 
     expect(diagnostic?.errorName).toBe("AI_RetryError")
     expect(diagnostic?.message).toContain("Failed after 3 attempts")
+  })
+
+  it("finds fail-fast token plan errors after the prompt start time", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-"))
+    process.env.MOHIST_OPENCODE_LOG_DIR = tempDir
+    await writeFile(join(tempDir, "opencode.log"), [
+      `timestamp=2026-06-14T10:12:30.000Z level=ERROR run=old message="stream error" providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=ses_limit small=false agent=build mode=primary error.error="AI_APICallError: Cannot connect to API: The socket connection was closed unexpectedly."`,
+      `timestamp=2026-06-14T10:12:32.370Z level=ERROR run=new message="stream error" providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=ses_limit small=false agent=build mode=primary error.error="AI_APICallError: Token Plan usage limit reached: Upgrade your Token Plan or purchase Credits for more usage. (2056)"`,
+      "",
+    ].join("\n"))
+
+    const diagnostic = await findFailFastOpencodeProviderErrorDiagnostic("ses_limit", Date.parse("2026-06-14T10:12:31.000Z"))
+
+    expect(diagnostic?.summary).toBe("Opencode provider error: AI_APICallError on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached: Upgrade your Token Plan or purchase Credits for more usage. (2056)")
+  })
+
+  it("ignores fail-fast provider errors from before the prompt start time", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-"))
+    process.env.MOHIST_OPENCODE_LOG_DIR = tempDir
+    await writeFile(join(tempDir, "opencode.log"), [
+      `timestamp=2026-06-14T10:12:30.000Z level=ERROR run=old message="stream error" providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=ses_limit small=false agent=build mode=primary error.error="AI_APICallError: Token Plan usage limit reached: Upgrade your Token Plan or purchase Credits for more usage. (2056)"`,
+      "",
+    ].join("\n"))
+
+    const diagnostic = await findFailFastOpencodeProviderErrorDiagnostic("ses_limit", Date.parse("2026-06-14T10:12:31.000Z"))
+
+    expect(diagnostic).toBeUndefined()
+  })
+
+  it("does not classify socket disconnects as fail-fast provider errors", () => {
+    expect(isFailFastOpencodeProviderError({
+      sessionId: "ses_socket",
+      summary: "Opencode provider error: AI_APICallError on minimax/M3 - Cannot connect to API: The socket connection was closed unexpectedly.",
+      errorName: "AI_APICallError",
+      message: "Cannot connect to API: The socket connection was closed unexpectedly.",
+    })).toBe(false)
   })
 
   it("reads tail of large log files", async () => {

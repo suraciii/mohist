@@ -31,7 +31,7 @@ import {
   requestedModelMatchesSession,
   resolveRequestedModel,
 } from "./model-resolution.js"
-import type { LivenessFailureReason, SessionLivenessState } from "./liveness.js"
+import type { PromptFailureReason, SessionLivenessState } from "./liveness.js"
 import {
   createSessionLivenessState,
   monitorPrompt,
@@ -55,7 +55,7 @@ export interface AcpSessionResult {
   exitCode?: number | null
   activityCount?: number
   providerError?: OpencodeProviderErrorDiagnostic
-  failureCategory?: LivenessFailureReason
+  failureCategory?: PromptFailureReason
   expectation?: TaskArtifactExpectation
 }
 
@@ -63,7 +63,7 @@ export interface AcpPromptRunResult {
   completed: boolean
   error?: string
   providerError?: OpencodeProviderErrorDiagnostic
-  failureCategory?: LivenessFailureReason
+  failureCategory?: PromptFailureReason
   activityCount: number
   workActivityCount: number
   usageText: string
