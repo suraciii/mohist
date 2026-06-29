@@ -28,7 +28,29 @@
 - Runtime variables are stored externally (not on WorkflowRun aggregate), so the domain method naturally preserves them
 - Test stub in `RunnerWorkflowStatusRouterSpecs.cs` requires `RerunFromStageAsync` fake implementation
 
+## T-002: Implement `mo issue rerun-from-stage` CLI command
+
+### Completed 2026-06-29
+
+### What was done
+- Added `BuildRerunFromStage` command builder in `MohistCliCommands.Issue.cs` — dedicated builder (like `BuildReject`, not body-less `BuildAction`) with required `--stage` option. Validates `--stage` is non-empty before making any HTTP request. Uses `api.PrintPostAsync(path, new { stage })` per design D6.
+- Registered `rerun-from-stage` subcommand in `IssueCommands.Build()` alongside retry/rerun.
+
+### Tests
+- New `CliIssueRerunFromStageSpecs.cs` (modeled on `CliIssueRejectAndStopSpecs.cs`): 4 tests covering:
+  - Success path: POSTs `{ "stage": "build" }` to correct endpoint path
+  - Missing `--stage`: prints usage error to stderr, makes no HTTP request, exits 1
+  - `--project-id` alias resolution: uses provided project id in URL
+  - Server error surfacing: `stage_not_reached` code and message appear on stderr via `PrintResponseAsync`
+- `IssueCliRemainingProjectRefSpecs.cs`: Added `rerun-from-stage` to `IssueSubcommand_Help_ListsProjectAndProjectIdOptions` [Theory] InlineData
+
+### Codebase Patterns / Gotchas
+- `Option<string>` does not have `IsRequired` property in the System.CommandLine version used; validation is manual in the action handler (checking `string.IsNullOrWhiteSpace`).
+- CLI project has no npm workspace — covered by `dotnet test Mohist.sln` / `npm test`.
+- `PrintPostAsync` → `PrintResponseAsync` handles JSON envelope with `{ success, error, code }`, surfacing error+code to stderr, returning exit code 1 (or 4 for NotFound).
+
 ### Verification
 - `dotnet build Mohist.sln` — 0 warnings, 0 errors
-- `dotnet test Mohist.sln` — 3081 passed, 13 skipped (environmental), 0 failed
-- All existing retry/rerun tests pass unchanged
+- CLI tests: 460 passed, 0 failed (4 new tests)
+- Full suite: 3082 passed, 13 skipped (environmental), 0 failed
+- All existing retry/rerun CLI behavior unchanged
