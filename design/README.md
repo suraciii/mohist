@@ -27,6 +27,7 @@ style: ["短索引，只说明入口。"]
 
 ## 支撑主题
 
+- [issue-templates.md](issue-templates.md) — 三类 issue 模板（Feature / Bug / Refactor）的 body 结构与设计依据。
 - [prompt-management.md](prompt-management.md) — project-scoped prompt 库和 workflow 的关系。
 - [runner.md](runner.md) — Runner 聚合信息结构与自报 status。
 - [task-log.md](task-log.md) — task 执行日志的采集管道、上报通道与存储归属。
