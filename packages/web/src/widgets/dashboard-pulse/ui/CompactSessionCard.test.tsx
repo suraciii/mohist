@@ -34,10 +34,20 @@ function makeCard(overrides: Partial<SessionCard> = {}): SessionCard {
     contextWindowUsed: 300_000,
     contextWindowSize: 1_000_000,
     contextUsagePercent: 30,
+    contextUsageHistory: null,
     toolCallCount: 4,
     toolErrorCount: 1,
     ...overrides,
   }
+}
+
+function makeHistory(count: number, opts: { firstPercent?: number; lastPercent?: number } = {}) {
+  const { firstPercent = 10, lastPercent = 80 } = opts
+  return Array.from({ length: count }, (_, i) => {
+    const ratio = count === 1 ? 0 : i / (count - 1)
+    const percent = Math.round(firstPercent + (lastPercent - firstPercent) * ratio)
+    return { at: `2026-01-01T00:0${i}:00Z`, percent }
+  })
 }
 
 function renderCard(card: SessionCard) {
@@ -253,5 +263,115 @@ describe('CompactSessionCard', () => {
     renderCard(makeCard({ issueStage: 'Plan' }))
     const stage = screen.getByTestId('pulse-compact-stage')
     expect(stage.className).toContain('bg-blue-100')
+  })
+
+  it('renders a context-usage trend mini-chart when the activity source carries a usage history', () => {
+    renderCard(
+      makeCard({
+        contextWindowUsed: 720_000,
+        contextWindowSize: 1_000_000,
+        contextUsagePercent: 72,
+        contextUsageHistory: makeHistory(6, { firstPercent: 10, lastPercent: 72 }),
+      }),
+    )
+
+    const trend = screen.getByTestId('pulse-compact-trend')
+    expect(trend).toBeInTheDocument()
+    const chart = trend.querySelector('[data-testid="context-usage-trend-mini-chart"]') as SVGSVGElement | null
+    expect(chart).not.toBeNull()
+    expect(chart!.getAttribute('data-history-length')).toBe('6')
+    expect(chart!.getAttribute('data-latest-percent')).toBe('72')
+    expect(chart!.getAttribute('data-status')).toBe('yellow')
+  })
+
+  it('does not render the trend chart when usage history is absent', () => {
+    renderCard(
+      makeCard({
+        contextWindowUsed: 300_000,
+        contextWindowSize: 1_000_000,
+        contextUsagePercent: 30,
+        contextUsageHistory: null,
+      }),
+    )
+
+    expect(screen.queryByTestId('pulse-compact-trend')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('context-usage-trend-mini-chart')).not.toBeInTheDocument()
+  })
+
+  it('does not render the trend chart when usage history is an empty array (wire-omitted case)', () => {
+    renderCard(
+      makeCard({
+        contextWindowUsed: 300_000,
+        contextWindowSize: 1_000_000,
+        contextUsagePercent: 30,
+        contextUsageHistory: [],
+      }),
+    )
+
+    expect(screen.queryByTestId('pulse-compact-trend')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('context-usage-trend-mini-chart')).not.toBeInTheDocument()
+  })
+
+  it('does not render the trend chart when fewer than two samples are available (insufficient to plot)', () => {
+    renderCard(
+      makeCard({
+        contextWindowUsed: 300_000,
+        contextWindowSize: 1_000_000,
+        contextUsagePercent: 30,
+        contextUsageHistory: [{ at: '2026-01-01T00:00:00Z', percent: 30 }],
+      }),
+    )
+
+    expect(screen.queryByTestId('pulse-compact-trend')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('context-usage-trend-mini-chart')).not.toBeInTheDocument()
+  })
+
+  it('renders the trend chart with a critical-status stroke when the latest sample crosses 80%', () => {
+    renderCard(
+      makeCard({
+        contextWindowUsed: 950_000,
+        contextWindowSize: 1_000_000,
+        contextUsagePercent: 95,
+        contextUsageHistory: makeHistory(4, { firstPercent: 40, lastPercent: 95 }),
+      }),
+    )
+
+    const chart = screen.getByTestId('context-usage-trend-mini-chart')
+    expect(chart.getAttribute('data-status')).toBe('red')
+    expect(chart.getAttribute('data-latest-percent')).toBe('95')
+    const linePath = chart.querySelectorAll('path')[1]!
+    expect(linePath.getAttribute('class')).toContain('stroke-red-500')
+  })
+
+  it('renders the trend chart even when the snapshot contextWindowSize is unknown (history is the source for the chart)', () => {
+    renderCard(
+      makeCard({
+        contextWindowUsed: null,
+        contextWindowSize: null,
+        contextUsagePercent: null,
+        contextUsageHistory: makeHistory(3, { firstPercent: 20, lastPercent: 65 }),
+      }),
+    )
+
+    const chart = screen.getByTestId('context-usage-trend-mini-chart')
+    expect(chart.getAttribute('data-latest-percent')).toBe('65')
+    expect(chart.getAttribute('data-status')).toBe('yellow')
+    expect(screen.queryByTestId('context-health-indicator')).not.toBeInTheDocument()
+  })
+
+  it('does not write or mutate any domain state when reading history (Pulse zone stays read-only)', () => {
+    const card = makeCard({
+      contextWindowUsed: 720_000,
+      contextWindowSize: 1_000_000,
+      contextUsagePercent: 72,
+      contextUsageHistory: makeHistory(4, { firstPercent: 30, lastPercent: 72 }),
+    })
+    const snapshot = JSON.parse(JSON.stringify(card))
+
+    renderCard(card)
+
+    expect(card).toEqual(snapshot)
+    // Sanity check — the card stays the same object after render (no inner mutation either).
+    expect(card.contextUsageHistory).toEqual(snapshot.contextUsageHistory)
   })
 })

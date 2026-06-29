@@ -2,6 +2,27 @@ import type { SessionEvent } from '../../session/model/view'
 
 export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
 
+/**
+ * One sample in the bounded context-usage history exposed by
+ * `AgentUsageDto.contextUsageHistory` (projected server-side by
+ * `BuildUsageHistoryDto` from `AgentSession.Status.ContextUsageHistory`).
+ *
+ * The list is omitted from the wire when empty
+ * (`JsonIgnoreCondition.WhenWritingNull`), so a session that has
+ * never recorded a usage sample carries no `contextUsageHistory`
+ * field at all. `null` on the client mirrors that absence — the
+ * Pulse chart degrades to hidden when fewer than 2 samples are
+ * present (see `ContextUsageTrendMiniChart`).
+ *
+ * `at` is an ISO-8601 timestamp (the C# side stamps with
+ * `DateTime.ToString("o")`); `percent` is a 0–100 number (the
+ * classifier band is communicated by colour, not by this field).
+ */
+export interface ContextUsageHistoryEntry {
+  at: string
+  percent: number
+}
+
 export interface AgentSessionUsage {
   inputTokens?: number | null
   outputTokens?: number | null
@@ -14,6 +35,15 @@ export interface AgentSessionUsage {
   contextWindowSize?: number | null
   contextUsagePercent?: number | null
   healthStatus?: string | null
+  /**
+   * Bounded context-usage history retained server-side
+   * (issue-245 T-002 / design D5). Enables the Pulse compact
+   * card to render a context-usage trend mini-chart over the
+   * session lifetime rather than only the latest snapshot.
+   * Absent on the wire (undefined here) for sessions that have
+   * never recorded a usage sample.
+   */
+  contextUsageHistory?: ContextUsageHistoryEntry[] | null
 }
 
 export interface AgentSessionEventSummary {
