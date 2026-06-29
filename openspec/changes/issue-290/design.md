@@ -62,7 +62,7 @@ Call sites (`PollOneWorkflowAsync`, `AssignAgentJobAsync`) are unchanged — the
 
 ### Decision 2 — Leave the drain-side unregister path as-is
 
-`MaybeUnregisterWorkTimeoutReminderAsync` (RunnerGrain.cs:883) and its three call sites in `CheckWorkTimeoutsAsync` (:146, :176) and `ReportWorkflowResultAsync` (:405) already do `GetReminder` → `UnregisterReminder`. This is the existing drain behavior; the issue explicitly requires preserving it. No change.
+`MaybeUnregisterWorkTimeoutReminderAsync` (RunnerGrain.cs:883) and its drain-side call sites — in `CheckWorkTimeoutsAsync` (:146, :176) and in the report path (:405, :536) — already do `GetReminder` → `UnregisterReminder`. This is the existing drain behavior; the issue explicitly requires preserving it. No change.
 
 This keeps the symmetry the issue describes: reminder lifecycle is driven by outstanding-work *presence* (zero ↔ non-zero), not by assignment events.
 
