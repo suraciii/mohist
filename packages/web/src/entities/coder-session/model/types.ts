@@ -34,6 +34,26 @@ export interface AgentSessionMetadataCounts {
 
 export type AgentSessionEvent = SessionEvent
 
+/**
+ * One entry in the ordered lineage of runtime sessions bound to a
+ * Mohist session over its lifetime. The Mohist `sessionId` is the
+ * stable identity; each `agentRuntimeSessionId` is a mutable runtime
+ * facet created by compact/reset rebinds (see `design/conventions.md`
+ * identity rules). The chain starts with the original runtime
+ * session; each subsequent entry records a compact/reset rebind
+ * successor. Predecessor / successor are derived by position.
+ *
+ * Projected from `AgentSessionMetadataDto.runtimeSessionLineage` (T-001).
+ * Absent on the wire for sessions compacted before T-001 — the
+ * projection synthesizes a single entry from the current binding, so
+ * legacy sessions surface as a single-entry chain and the UI hides the
+ * link automatically.
+ */
+export interface RuntimeSessionLineageEntry {
+  agentRuntimeSessionId: string
+  boundAt: string
+}
+
 export interface AgentSessionMetadata {
   id: string
   sessionName: string
@@ -55,6 +75,15 @@ export interface AgentSessionMetadata {
   metadata: AgentSessionMetadataCounts
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
+  /**
+   * Ordered lineage of runtime sessions bound to this Mohist session
+   * over its lifetime. Null when the session is truly unbound; a
+   * single entry when there has been no compaction/reset; multiple
+   * entries when compact/reset has rebound the runtime session.
+   * Hidden by the UI when the chain is a single entry (no compaction
+   * relationship).
+   */
+  runtimeSessionLineage?: RuntimeSessionLineageEntry[] | null
 }
 
 export interface FileChangeSummary {
