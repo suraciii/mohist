@@ -267,7 +267,7 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         var runAfterLoss = await LoadRunAsync(work.WorkflowRunId);
         Assert.Equal("runner-lost", runAfterLoss.Failure?.Message);
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
+        await AdvanceTimeKeepingRunnerOnlineAsync(runner, TimeSpan.FromMinutes(11));
         await runner.CheckWorkTimeoutsAsync();
 
         var runAfterTimeout = await LoadRunAsync(work.WorkflowRunId);
