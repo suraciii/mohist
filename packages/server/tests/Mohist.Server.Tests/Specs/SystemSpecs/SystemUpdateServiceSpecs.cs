@@ -309,7 +309,7 @@ public class SystemUpdateServiceSpecs
             new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
 
         var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
-        await WaitUntilAsync(async () => (await store.GetLatestAsync())?.Status == "failed");
+        await store.WaitForStatusAsync("failed");
 
         var latest = await store.GetLatestAsync();
         Assert.True(result.Started);
@@ -1161,6 +1161,7 @@ public class SystemUpdateServiceSpecs
 
     private sealed class InMemoryUpdateStore : ISystemUpdateStore
     {
+        private readonly List<StatusWaiter> _statusWaiters = [];
         private readonly bool _acquireLock;
         private SystemUpdateJobState? _latest;
         private bool _locked;
@@ -1198,6 +1199,7 @@ public class SystemUpdateServiceSpecs
         public Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default)
         {
             _latest = state;
+            CompleteStatusWaiters();
             return Task.CompletedTask;
         }
 
@@ -1210,7 +1212,31 @@ public class SystemUpdateServiceSpecs
                 return Task.FromResult(false);
             }
             _latest = next;
+            CompleteStatusWaiters();
             return Task.FromResult(true);
+        }
+
+        public Task WaitForStatusAsync(string status)
+        {
+            if (string.Equals(_latest?.Status, status, StringComparison.Ordinal))
+                return Task.CompletedTask;
+
+            var waiter = new StatusWaiter(status);
+            _statusWaiters.Add(waiter);
+            return waiter.Task;
+        }
+
+        private void CompleteStatusWaiters()
+        {
+            for (var i = _statusWaiters.Count - 1; i >= 0; i--)
+            {
+                var waiter = _statusWaiters[i];
+                if (!string.Equals(_latest?.Status, waiter.Status, StringComparison.Ordinal))
+                    continue;
+
+                _statusWaiters.RemoveAt(i);
+                waiter.Complete();
+            }
         }
     }
 
@@ -1311,6 +1337,19 @@ public class SystemUpdateServiceSpecs
         public CountWaiter(int count) => Count = count;
 
         public int Count { get; }
+
+        public Task Task => _tcs.Task;
+
+        public void Complete() => _tcs.TrySetResult();
+    }
+
+    private sealed class StatusWaiter
+    {
+        private readonly TaskCompletionSource _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public StatusWaiter(string status) => Status = status;
+
+        public string Status { get; }
 
         public Task Task => _tcs.Task;
 
