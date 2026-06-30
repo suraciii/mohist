@@ -11,27 +11,15 @@ public class CliIssueWorkflowConfigSpecs
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
         CreateHarness(Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
     {
-        return CreateAsyncHarness(responder is null
-            ? (Func<HttpRequestMessage, Task<HttpResponseMessage>>?)null
-            : req => Task.FromResult(responder(req)));
+        return CliTestHarness.Create(
+            responder is null ? null : (Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>)((req, _) => Task.FromResult(responder(req))));
     }
 
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
         CreateAsyncHarness(Func<HttpRequestMessage, Task<HttpResponseMessage>>? responder = null)
     {
-        var handler = new RecordingHttpHandler(async (req, ct) =>
-        {
-            if (responder is not null) return await responder(req);
-            return RecordingHttpHandler.Json(new { success = true, data = new { } });
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fs = new FakeFileSystem();
-        fs.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-            "{\"activeProjectId\":\"proj_abc\"}");
-        return (handler, http, output, error, fs, new FakeCommandExecutor());
+        return CliTestHarness.Create(
+            responder is null ? null : (Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>)((req, _) => responder(req)));
     }
 
     private static void AssertVariableSetToJsonNull(JsonObject? body, string varsKey, string expectedKey)
