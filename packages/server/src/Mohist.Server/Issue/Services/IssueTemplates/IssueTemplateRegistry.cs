@@ -5,43 +5,38 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Domain.IssueTemplate;
-using Mohist.Server.Issue.Services;
+using Mohist.Server.Workflow.Services.Prompts;
 
 namespace Mohist.Server.Issue.Services.IssueTemplates;
 
 public class IssueTemplateRegistry : IScopedService
 {
-    private readonly Dictionary<string, IIssueTemplate> _builtins;
+    private const string AliasId = "mohist/default";
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly Dictionary<string, BuiltinTemplateEntry> _builtinData;
 
     public IssueTemplateRegistry(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
-        var defaults = new MohistDefaultIssueTemplate();
-        _builtins = new Dictionary<string, IIssueTemplate>(StringComparer.OrdinalIgnoreCase)
-        {
-            [defaults.Id] = defaults,
-        };
+        var loader = new IssueTemplateFileLoader(
+            Path.Combine(AppContext.BaseDirectory, "Issue/Services/IssueTemplates/templates"));
+        _builtinData = loader.Discover();
     }
 
-    public IIssueTemplate Get(string? id, string? projectId = null)
+    internal IssueTemplateRegistry(IDbContextFactory<MohistDbContext> dbFactory, Dictionary<string, BuiltinTemplateEntry> builtinData)
     {
-        var templateId = string.IsNullOrWhiteSpace(id) ? IssueTemplates.DefaultId : id;
+        _dbFactory = dbFactory;
+        _builtinData = builtinData;
+    }
 
-        if (_builtins.TryGetValue(templateId, out var builtin))
-        {
-            if (projectId is not null && IsDefaultDisabled(projectId))
-                throw new KeyNotFoundException($"IssueTemplate '{templateId}' has been disabled for this project");
-            return builtin;
-        }
-
-        if (projectId is not null)
-        {
-            var custom = LoadCustomTemplate(projectId, templateId);
-            if (custom is not null) return custom;
-        }
-
-        throw new KeyNotFoundException($"IssueTemplate '{templateId}' not found");
+    private string ResolveId(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+            return IssueTemplates.DefaultId;
+        if (string.Equals(id, AliasId, StringComparison.OrdinalIgnoreCase))
+            return IssueTemplates.DefaultId;
+        return id;
     }
 
     public IReadOnlyList<IssueTemplateInfo> List(string? projectId = null)
@@ -50,59 +45,114 @@ public class IssueTemplateRegistry : IScopedService
 
         if (projectId is null || !IsDefaultDisabled(projectId))
         {
-            foreach (var builtin in _builtins.Values)
+            foreach (var (id, entry) in _builtinData)
             {
-                result.Add(ToInfo(builtin, "builtin"));
+                result.Add(new IssueTemplateInfo(id, entry.Name, entry.Description, "builtin"));
             }
         }
 
         if (projectId is not null)
         {
-            var customs = LoadCustomTemplates(projectId);
+            var customs = LoadCustomTemplateInfos(projectId);
             foreach (var custom in customs)
             {
-                result.Add(ToInfo(custom, "custom"));
+                result.Add(custom);
             }
         }
 
-        result.Sort((a, b) =>
-        {
-            var defaultCmp = b.IsDefault.CompareTo(a.IsDefault);
-            if (defaultCmp != 0) return defaultCmp;
-            return string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase);
-        });
+        result.Sort((a, b) => string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
 
         return result;
+    }
+
+    public IIssueTemplate Get(string? id, string? projectId = null)
+    {
+        return GetWithSource(id, projectId).Template;
+    }
+
+    public IssueTemplateLookup GetWithSource(string? id, string? projectId = null)
+    {
+        var resolvedId = ResolveId(id);
+
+        var defaultDisabled = projectId is not null && IsDefaultDisabled(projectId);
+
+        if (defaultDisabled && projectId is not null)
+        {
+            var custom = LoadCustomTemplate(projectId, resolvedId);
+            if (custom is not null) return new IssueTemplateLookup(custom, "custom");
+        }
+
+        if (_builtinData.TryGetValue(resolvedId, out var entry))
+        {
+            if (defaultDisabled)
+                throw new KeyNotFoundException($"IssueTemplate '{resolvedId}' has been disabled for this project");
+
+            try
+            {
+                var (_, body) = PromptFrontmatterParser.Parse(entry.LoadContent(), resolvedId);
+                var sections = IssueTemplateBodyParser.Parse(body);
+                return new IssueTemplateLookup(
+                    new FileAssetIssueTemplate(resolvedId, entry.Name, entry.Description, sections),
+                    "builtin");
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to load issue template '{resolvedId}' from '{entry.FilePath}'.", ex);
+            }
+        }
+
+        if (projectId is not null)
+        {
+            var custom = LoadCustomTemplate(projectId, resolvedId);
+            if (custom is not null) return new IssueTemplateLookup(custom, "custom");
+        }
+
+        throw new KeyNotFoundException($"IssueTemplate '{resolvedId}' not found");
     }
 
     public IReadOnlyList<IssueTemplateInfo> ListDescribed(string? projectId = null) =>
         List(projectId);
 
-    public IssueTemplateInfo Default =>
-        ToInfo(Get(IssueTemplates.DefaultId), "builtin");
+    public IssueTemplateInfo Default
+    {
+        get
+        {
+            var entry = _builtinData[IssueTemplates.DefaultId];
+            return new IssueTemplateInfo(IssueTemplates.DefaultId, entry.Name, entry.Description, "builtin");
+        }
+    }
 
     public bool Exists(string? id, string? projectId = null)
     {
         if (string.IsNullOrWhiteSpace(id)) return false;
+        var resolvedId = ResolveId(id);
+        var defaultDisabled = projectId is not null && IsDefaultDisabled(projectId);
 
-        if (_builtins.ContainsKey(id))
+        if (defaultDisabled && projectId is not null)
         {
-            if (projectId is not null && IsDefaultDisabled(projectId))
+            var custom = LoadCustomTemplate(projectId, resolvedId);
+            if (custom is not null) return true;
+        }
+
+        if (_builtinData.ContainsKey(resolvedId))
+        {
+            if (defaultDisabled)
                 return false;
             return true;
         }
 
         if (projectId is not null)
         {
-            var custom = LoadCustomTemplate(projectId, id);
+            var custom = LoadCustomTemplate(projectId, resolvedId);
             return custom is not null;
         }
 
         return false;
     }
 
-    private static IssueTemplateInfo ToInfo(IIssueTemplate template, string source) =>
-        new(template.Id, template.Name, template.About, template.IsDefault, template.SuitableFor, source);
+    public bool IsBuiltin(string id) =>
+        _builtinData.ContainsKey(ResolveId(id));
 
     private bool IsDefaultDisabled(string projectId)
     {
@@ -129,21 +179,21 @@ public class IssueTemplateRegistry : IScopedService
         }
     }
 
-    private IReadOnlyList<IIssueTemplate> LoadCustomTemplates(string projectId)
+    private IReadOnlyList<IssueTemplateInfo> LoadCustomTemplateInfos(string projectId)
     {
         using var db = _dbFactory.CreateDbContext();
         var rows = db.ProjectIssueTemplates.AsNoTracking()
             .Where(x => x.ProjectId == projectId)
             .ToList();
 
-        var result = new List<IIssueTemplate>();
+        var result = new List<IssueTemplateInfo>();
         foreach (var row in rows)
         {
             if (string.IsNullOrEmpty(row.Template)) continue;
             try
             {
-                var template = DeserializeTemplate(row.Template, row.Name);
-                result.Add(template);
+                var info = DeserializeTemplateInfo(row.Template, row.Name);
+                result.Add(info);
             }
             catch
             {
@@ -153,30 +203,41 @@ public class IssueTemplateRegistry : IScopedService
         return result;
     }
 
-    public bool Matches(string templateId, string? context, string? projectId = null) =>
-        SuitableForMatcher.Matches(Get(templateId, projectId).SuitableFor, context);
+    private static IssueTemplateInfo DeserializeTemplateInfo(string json, string rowName)
+    {
+        var dto = JSON.DeserializeOrThrow<IssueTemplateMetadataDto>(json);
+        ValidateTemplateMetadata(dto, rowName);
+        return new IssueTemplateInfo(
+            dto.Id,
+            dto.Name,
+            string.IsNullOrWhiteSpace(dto.Description)
+                ? (string.IsNullOrWhiteSpace(dto.About) ? string.Empty : dto.About)
+                : dto.Description,
+            "custom");
+    }
 
     private static IIssueTemplate DeserializeTemplate(string json, string rowName)
     {
         var dto = JSON.DeserializeOrThrow<IssueTemplateDto>(json);
-        ValidateTemplate(dto, rowName);
+        ValidateTemplateMetadata(dto, rowName);
+        ValidateTemplateSections(dto);
         return new DeserializedIssueTemplate(dto);
     }
 
-    private static void ValidateTemplate(IssueTemplateDto dto, string rowName)
+    private static void ValidateTemplateMetadata(IssueTemplateMetadataDto dto, string rowName)
     {
         if (string.IsNullOrWhiteSpace(dto.Id))
             throw new ArgumentException("Template is missing required field 'Id'");
         if (string.IsNullOrWhiteSpace(dto.Name))
             throw new ArgumentException("Template is missing required field 'Name'");
-        if (dto.About is null)
-            throw new ArgumentException("Template is missing required field 'About'");
-        if (dto.SuitableFor is null)
-            throw new ArgumentException("Template is missing required field 'SuitableFor'");
-        if (dto.Sections is null || dto.Sections.Count == 0)
-            throw new ArgumentException("Template must have at least one section");
         if (!string.Equals(dto.Id, rowName, StringComparison.Ordinal))
             throw new ArgumentException("Template id must match row name");
+    }
+
+    private static void ValidateTemplateSections(IssueTemplateDto dto)
+    {
+        if (dto.Sections is null || dto.Sections.Count == 0)
+            throw new ArgumentException("Template must have at least one section");
 
         foreach (var section in dto.Sections)
         {
@@ -193,16 +254,21 @@ public class IssueTemplateRegistry : IScopedService
 public sealed record IssueTemplateInfo(
     string Id,
     string Name,
-    string About,
-    bool IsDefault,
-    IReadOnlyList<string> SuitableFor,
+    string Description,
     string Source);
 
-public class IssueTemplateDto
+public sealed record IssueTemplateLookup(IIssueTemplate Template, string Source);
+
+public class IssueTemplateMetadataDto
 {
     public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string About { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+}
+
+public class IssueTemplateDto : IssueTemplateMetadataDto
+{
     public bool IsDefault { get; set; }
     public List<string> SuitableFor { get; set; } = new();
     public IssueTemplateDefaultsDto? Defaults { get; set; }
@@ -234,14 +300,26 @@ internal sealed class DeserializedIssueTemplate : IIssueTemplate
 
     public string Id => _dto.Id;
     public string Name => _dto.Name;
-    public string About => _dto.About;
-    public bool IsDefault => _dto.IsDefault;
-    public IReadOnlyList<string> SuitableFor => _dto.SuitableFor;
-    public IssueTemplateDefaults Defaults => new(
-        _dto.Defaults?.Labels,
-        _dto.Defaults?.Risk,
-        _dto.Defaults?.Workflow);
+    public string Description => string.IsNullOrWhiteSpace(_dto.Description)
+        ? (string.IsNullOrWhiteSpace(_dto.About) ? string.Empty : _dto.About)
+        : _dto.Description;
     public IReadOnlyList<IssueTemplateSection> Sections => _dto.Sections
         .Select(s => new IssueTemplateSection(s.Title, s.Guidance, s.Placeholder))
         .ToList();
+}
+
+internal sealed class FileAssetIssueTemplate : IIssueTemplate
+{
+    public string Id { get; }
+    public string Name { get; }
+    public string Description { get; }
+    public IReadOnlyList<IssueTemplateSection> Sections { get; }
+
+    public FileAssetIssueTemplate(string id, string name, string description, IReadOnlyList<IssueTemplateSection> sections)
+    {
+        Id = id;
+        Name = name;
+        Description = description;
+        Sections = sections;
+    }
 }

@@ -24,7 +24,7 @@ public class ProjectWorkflowProfile
     public Dictionary<string, string> Prompts { get; set; } = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// 是否禁用了内置默认 issue 模板 mohist/default。
+    /// 是否禁用了内置 issue 模板。
     /// </summary>
     public bool DisableDefaultIssueTemplate { get; set; }
 
