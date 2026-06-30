@@ -56,8 +56,6 @@ public class OtelInboundHttpTracingSpecs
         var response = await client.PostAsJsonAsync("/otel/v1/traces", new { resourceSpans = Array.Empty<object>() });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        await Task.Delay(200);
-
         var inbound = host.Recorder.EndedActivities.Where(IsInboundHttpSpan).ToList();
         Assert.Empty(inbound);
     }

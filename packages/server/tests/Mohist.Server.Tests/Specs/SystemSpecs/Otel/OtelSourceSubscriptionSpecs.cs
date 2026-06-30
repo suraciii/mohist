@@ -115,9 +115,9 @@ public class OtelSourceSubscriptionSpecs
         using var db = new Mohist.Server.Infrastructure.Data.Db.MohistDbContext(options);
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE Probe (Id INTEGER PRIMARY KEY);");
 
-        // Drain a moment so the EF source's listener has time to
-        // see at least one activity from the create-table query.
-        await Task.Delay(100);
+        await host.Recorder.WaitForAsync(
+            activities => activities.Any(a => a.Source?.Name == "OpenTelemetry.Instrumentation.EntityFrameworkCore"),
+            TimeSpan.FromSeconds(5));
 
         Assert.Contains(host.Recorder.EndedActivities,
             a => a.Source?.Name == "OpenTelemetry.Instrumentation.EntityFrameworkCore");
