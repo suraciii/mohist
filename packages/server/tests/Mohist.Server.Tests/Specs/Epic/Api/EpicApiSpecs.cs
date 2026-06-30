@@ -12,11 +12,13 @@ namespace Mohist.Server.Tests.Specs.Epic.Api;
 [Collection("MohistIntegration")]
 public class EpicApiSpecs
 {
+    private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
     private readonly IGrainFactory _grains;
 
     public EpicApiSpecs(MohistIntegrationFixture fixture)
     {
+        _fixture = fixture;
         _client = fixture.Client;
         _grains = fixture.Grains;
     }
@@ -122,7 +124,7 @@ public class EpicApiSpecs
         var older = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Older (p2)", description = "alpha", priority = "p2", projectId = project.Id });
         var newer = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Newer (p2)", description = "beta", priority = "p2", projectId = project.Id });
 
-        await Task.Delay(15);
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
         var updatedNewer = await _client.PatchDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{newer.Id}", new { title = "Newer (renamed)" });
 
         var list = await _client.GetDataAsync<EpicWithProgressDto[]>($"/api/projects/{project.Id}/epics");
@@ -327,7 +329,7 @@ public class EpicApiSpecs
         var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Titled", description = "body", priority = "p2", projectId = project.Id });
 
         var before = DateTimeOffset.Parse(created.UpdatedAt);
-        await Task.Delay(15);
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
 
         var patched = await _client.PatchDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{created.Id}", new { title = "Renamed" });
 

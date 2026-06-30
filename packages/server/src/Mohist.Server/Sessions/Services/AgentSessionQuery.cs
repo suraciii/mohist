@@ -16,10 +16,12 @@ public enum AgentSessionQueryOrder
 public sealed class AgentSessionQuery : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly TimeProvider _timeProvider;
 
-    public AgentSessionQuery(IDbContextFactory<MohistDbContext> dbFactory)
+    public AgentSessionQuery(IDbContextFactory<MohistDbContext> dbFactory, TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
+        _timeProvider = timeProvider;
     }
 
     public async Task<AgentSessionRecord?> FirstByLabelsAsync(
@@ -46,7 +48,7 @@ public sealed class AgentSessionQuery : IScopedService
             query = query.Where(session => session.CreatedAt >= from.Value);
         if (to is not null)
             query = query.Where(session => session.CreatedAt < to.Value);
-        query = ApplyStatusFilter(query, status);
+        query = ApplyStatusFilter(query, status, _timeProvider.GetUtcNow().UtcDateTime);
         query = order == AgentSessionQueryOrder.CreatedDescending
             ? query.OrderByDescending(session => session.CreatedAt)
             : query.OrderBy(session => session.CreatedAt);
@@ -77,11 +79,11 @@ public sealed class AgentSessionQuery : IScopedService
     /// filters, ordering and limit in a single SQL statement.
     /// </summary>
     private static IQueryable<AgentSessionRow> ApplyStatusFilter(
-        IQueryable<AgentSessionRow> query, string? status)
+        IQueryable<AgentSessionRow> query, string? status, DateTime now)
     {
         if (string.IsNullOrWhiteSpace(status))
             return query;
-        var cutoff = DateTime.UtcNow - AgentSessionJsonHelper.ActiveRuntimeEventWindow;
+        var cutoff = now - AgentSessionJsonHelper.ActiveRuntimeEventWindow;
         return status.Trim().ToLowerInvariant() switch
         {
             "active" => query.Where(s => s.AgentSessionId != null && s.LastDataAt >= cutoff),

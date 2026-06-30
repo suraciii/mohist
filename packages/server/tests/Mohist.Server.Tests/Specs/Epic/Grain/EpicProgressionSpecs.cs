@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Epic.Domain;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -558,7 +559,11 @@ public class EpicProgressionSpecs
         }
 
         public IEpicGrain GetEpicGrain(string grainKey) =>
-            new EpicGrain(_dbFactory, this, NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
+            new EpicGrain(
+                _dbFactory,
+                this,
+                new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
+                NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
 
         public IIssueGrain GetIssueGrain(string issueId) => new RecordingIssueGrain(this, issueId);
 

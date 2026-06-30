@@ -153,7 +153,7 @@ public class AgentSessionContextExhaustionSpecs
 
         // Wait for deferred persistence to flush transcript parts.
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 2);
+        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 2, _fixture.Grains);
 
         // Inspect the persisted transcript for the health snapshot.
         await using var db = await dbFactory.CreateDbContextAsync();

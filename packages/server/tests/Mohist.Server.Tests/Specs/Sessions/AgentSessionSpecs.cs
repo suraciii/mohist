@@ -55,7 +55,7 @@ public class AgentSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
@@ -128,7 +128,7 @@ public class AgentSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 6);
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 6, _fixture.Grains);
 
         var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
         using var doc = JsonDocument.Parse(raw);
@@ -182,7 +182,7 @@ public class AgentSessionSpecs
         Assert.NotNull(beforeSummary.LastDataAt);
         var beforeLastDataAt = DateTime.Parse(beforeSummary.LastDataAt!);
 
-        await Task.Delay(20);
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
             runtimeEvents = new object[]
@@ -192,7 +192,7 @@ public class AgentSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
 
         var summaries = await _client.GetDataAsync<AgentSessionSummaryDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/coder-sessions");
         var summary = Assert.Single(summaries);
@@ -225,7 +225,7 @@ public class AgentSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 1);
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 1, _fixture.Grains);
 
         var response = await _client.GetDataAsync<AgentSessionTranscriptTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
 
@@ -311,7 +311,7 @@ public class AgentSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, _fixture.Grains);
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var parts = await LoadTranscriptPartsAsync(db, session.Id);
@@ -340,7 +340,7 @@ public class AgentSessionSpecs
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new { runtimeEvents });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var parts = await LoadTranscriptPartsAsync(db, session.Id);
@@ -414,7 +414,7 @@ public class AgentSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4, _fixture.Grains);
 
         await using var db = await dbFactory.CreateDbContextAsync();
         var dbParts = await LoadTranscriptPartsAsync(db, session.Id);
@@ -725,7 +725,7 @@ public class AgentSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, _fixture.Grains);
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -760,7 +760,7 @@ public class AgentSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -787,7 +787,7 @@ public class AgentSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1, _fixture.Grains);
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -830,7 +830,7 @@ public class AgentSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2, _fixture.Grains);
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -890,7 +890,7 @@ public class AgentSessionSpecs
         });
 
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4);
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4, _fixture.Grains);
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
@@ -922,7 +922,7 @@ public class AgentSessionSpecs
         var runState = JsonSerializer.Serialize(new
         {
             Id = work.WorkflowRunId,
-            Metadata = new { CreatedAt = DateTimeOffset.UtcNow, Name = "test" },
+            Metadata = new { CreatedAt = _fixture.TimeProvider.GetUtcNow(), Name = "test" },
             Status = "Running",
             CurrentStageId = work.Stage ?? "Build",
             Stages = new[]
@@ -987,7 +987,7 @@ public class AgentSessionSpecs
         var runState = JsonSerializer.Serialize(new
         {
             Id = work.WorkflowRunId,
-            Metadata = new { CreatedAt = DateTimeOffset.UtcNow, Name = "test" },
+            Metadata = new { CreatedAt = _fixture.TimeProvider.GetUtcNow(), Name = "test" },
             Status = "Running",
             CurrentStageId = "Build",
             Stages = new[]
@@ -1101,7 +1101,7 @@ public class AgentSessionSpecs
             using var response = await _client.PostAsync($"/api/runner/{_runnerId}/poll", null);
             if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
             {
-                await Task.Delay(20);
+                await Task.Yield();
                 continue;
             }
             response.EnsureSuccessStatusCode();

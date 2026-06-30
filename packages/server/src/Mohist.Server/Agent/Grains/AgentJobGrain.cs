@@ -468,7 +468,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 ["exitCode"] = (int?)null,
                 ["failureCategory"] = reason,
                 ["reason"] = $"agent-job-{reason} ({Key})",
-                ["recordedAt"] = DateTime.UtcNow.ToString("o"),
+                ["recordedAt"] = _timeProvider.GetUtcNow().ToString("o"),
             });
             await grain.AppendRuntimeEventsAsync(
                 new AppendAgentSessionRuntimeEventsCommand(

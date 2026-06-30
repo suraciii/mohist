@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data;
@@ -46,7 +47,7 @@ public static class MohistSiloRegistration
         silo.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         silo.Services.AddCloudEventHandlersFromAssembly(typeof(MohistSiloRegistration).Assembly);
         silo.Services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
-        silo.Services.AddSingleton(TimeProvider.System);
+        silo.Services.TryAddSingleton(TimeProvider.System);
 
         return silo;
     }

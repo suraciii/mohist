@@ -184,7 +184,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             BuildGitHash = effectiveHash,
         };
         _status = RunnerStatus.Online;
-        _lastHeartbeat = DateTime.UtcNow;
+        _lastHeartbeat = _timeProvider.GetUtcNow().UtcDateTime;
         _pendingBuildGitHash = null;
         _slots = await _definitions.GetOrInitAsync(RunnerId);
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
@@ -623,7 +623,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         if (_status == RunnerStatus.Offline) return;
 
-        var elapsed = DateTime.UtcNow - _lastHeartbeat;
+        var elapsed = _timeProvider.GetUtcNow().UtcDateTime - _lastHeartbeat;
         if (elapsed > HeartbeatTimeout)
         {
             _log.LogWarning("Runner {Id} heartbeat timeout ({Elapsed}s)", RunnerId, elapsed.TotalSeconds);
@@ -671,7 +671,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private async Task TouchPresenceAsync()
     {
-        _lastHeartbeat = DateTime.UtcNow;
+        _lastHeartbeat = _timeProvider.GetUtcNow().UtcDateTime;
         if (_info is null) return;
 
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);

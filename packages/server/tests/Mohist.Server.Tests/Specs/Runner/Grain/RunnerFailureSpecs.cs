@@ -107,8 +107,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
         var (work, runnerId) = await PollWorkAnyAsync();
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await AdvanceTimeKeepingRunnerOnlineAsync(runner, TimeSpan.FromMinutes(11));
         await runner.CheckWorkTimeoutsAsync();
 
         Assert.Equal("Failed", await workflow.GetRunStatusAsync());
@@ -160,7 +160,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var run = await LoadRunAsync(workflowId);
         var task = run.Stages.Single().Tasks.Single();
         task.Status = TaskRunStatus.Running;
-        task.StartedAt = DateTimeOffset.UtcNow;
+        task.StartedAt = _fixture.TimeProvider.GetUtcNow();
         task.WorkId = dispatched.WorkId;
         task.RunnerId = runnerId;
         run.Status = WorkflowRunStatus.Running;
@@ -228,5 +228,18 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var run = await LoadRunAsync(_workflowId!);
         Assert.Equal(TaskRunStatus.Failed, run.Stages.Single().Tasks.Single().Status);
         Assert.Equal("test-stop", run.Failure?.Message);
+    }
+
+    private async Task AdvanceTimeKeepingRunnerOnlineAsync(IRunnerGrain runner, TimeSpan duration)
+    {
+        var remaining = duration;
+        var step = TimeSpan.FromSeconds(30);
+        while (remaining > TimeSpan.Zero)
+        {
+            var next = remaining < step ? remaining : step;
+            _fixture.TimeProvider.Advance(next);
+            await runner.HeartbeatAsync();
+            remaining -= next;
+        }
     }
 }

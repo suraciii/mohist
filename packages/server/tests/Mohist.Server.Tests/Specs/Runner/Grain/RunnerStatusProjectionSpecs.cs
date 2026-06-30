@@ -42,7 +42,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
             checks: []), projectId);
         await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
-            CreatedAt: DateTimeOffset.UtcNow,
+            CreatedAt: _fixture.TimeProvider.GetUtcNow(),
             Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["projectId"] = projectId,
@@ -65,7 +65,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "global-host", null, ["openai/gpt-4"]));
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         Assert.Contains(result, r => r.Id == runnerId);
@@ -80,7 +80,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "project-host", "test-project", ["openai/gpt-4"]));
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         Assert.Contains(result, r => r.Id == runnerId);
@@ -95,7 +95,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "other-host", "other-project", ["openai/gpt-4"]));
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         Assert.Contains(result, r => r.Id == runnerId);
@@ -110,7 +110,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "scope-host", "some-project"));
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("different-project");
 
         Assert.Contains(result, r => r.Id == runnerId);
@@ -126,7 +126,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "idle-host", "test-project"));
         await runner.HeartbeatAsync();
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         var view = Assert.Single(result, r => r.Id == runnerId);
@@ -145,7 +145,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var workflowId = $"wf-{Guid.NewGuid():N}";
         await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         var view = Assert.Single(result, r => r.Id == runnerId);
@@ -161,10 +161,10 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     {
         var runnerId = $"runner-stale-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var registeredAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var registeredAt = _fixture.TimeProvider.GetUtcNow().AddMinutes(-10);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "stale-host", "test-project", RegisteredAt: registeredAt));
 
-        var now = DateTimeOffset.UtcNow.AddMinutes(5);
+        var now = _fixture.TimeProvider.GetUtcNow().AddMinutes(5);
         var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(now));
         var result = await service.GetRunnersAsync("test-project");
 
@@ -182,7 +182,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "offline-host", "test-project"));
         await runner.UnregisterAsync();
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         var view = result.FirstOrDefault(r => r.Id == runnerId);
@@ -204,7 +204,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var tracker = new RunnerConnectionTracker();
         tracker.Register(runnerId, "conn-123");
 
-        var service = CreateService(Grains, tracker, TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, tracker, TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         var view = Assert.Single(result, r => r.Id == runnerId);
@@ -220,7 +220,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "disc-host", "test-project"));
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         var view = Assert.Single(result, r => r.Id == runnerId);
@@ -237,7 +237,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*", "workspace-query"], "disc-status-host", "test-project"));
         await runner.HeartbeatAsync();
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         var view = Assert.Single(result, r => r.Id == runnerId);
@@ -258,7 +258,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var workflowId = $"wf-{Guid.NewGuid():N}";
         await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         var view = Assert.Single(result, r => r.Id == runnerId);
@@ -278,7 +278,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "cap-host", "test-project"));
         await runner.UpdateAsync(4);
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         var view = Assert.Single(result, r => r.Id == runnerId);
@@ -293,11 +293,11 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     {
         var runnerId = $"runner-full-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var registeredAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var registeredAt = _fixture.TimeProvider.GetUtcNow().AddMinutes(-5);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*", "workflow"], "full-host", "test-project", ["openai/gpt-4", "anthropic/claude-3"], "external", registeredAt));
         await runner.HeartbeatAsync();
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         var view = Assert.Single(result, r => r.Id == runnerId);
@@ -328,7 +328,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "scope-host", null));
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         var view = Assert.Single(result, r => r.Id == runnerId);
@@ -345,7 +345,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "safe-host", "test-project"));
         await runner.HeartbeatAsync();
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var result = await service.GetRunnersAsync("test-project");
 
         var view = Assert.Single(result, r => r.Id == runnerId);
@@ -488,7 +488,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var workflowId = $"wf-busy-state-{Guid.NewGuid():N}";
         await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var view = Assert.Single(await service.GetRunnersAsync("test-project"), r => r.Id == runnerId);
         Assert.Equal("busy", view.Status);
     }
@@ -499,7 +499,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     public async Task GetRuntimeStateAsync_OnlineIdleRunner_ReportsIdleStatus()
     {
         var runnerId = await RegisterRunnerAsync("idle-state-status-runner");
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var view = Assert.Single(await service.GetRunnersAsync("test-project"), r => r.Id == runnerId);
         Assert.Equal("idle", view.Status);
     }
@@ -517,7 +517,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await AssignActiveWorkForTestAsync(runnerId, workflowA, "task-a.1", "task", "build", "Task A");
         await AssignActiveWorkForTestAsync(runnerId, workflowB, "task-b.1", "task", "review", "Task B");
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var view = Assert.Single(await service.GetRunnersAsync("test-project-multi-proj"), r => r.Id == runnerId);
 
         Assert.Equal(2, view.ActiveWorks.Count);
@@ -554,7 +554,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
             issue.IssueId,
             issue.IssueNumber);
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var view = Assert.Single(await service.GetRunnersAsync("test-project"), r => r.Id == runnerId);
 
         var work = Assert.Single(view.ActiveWorks);
@@ -571,7 +571,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     public async Task ProjectRunnerAsync_IdleRunner_HasEmptyActiveWorksList()
     {
         var runnerId = await RegisterRunnerAsync($"runner-empty-proj-{Guid.NewGuid():N}");
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var view = Assert.Single(await service.GetRunnersAsync("test-project"), r => r.Id == runnerId);
         Assert.NotNull(view.ActiveWorks);
         Assert.Empty(view.ActiveWorks);
@@ -587,7 +587,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "getasync-host", "test-project", ["openai/gpt-4"], "external"));
         await runner.HeartbeatAsync();
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var view = await service.GetRunnerAsync("test-project", runnerId);
 
         Assert.NotNull(view);
@@ -602,7 +602,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task GetRunnerAsync_UnknownRunnerId_ReturnsNull()
     {
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var view = await service.GetRunnerAsync("test-project", $"runner-unknown-{Guid.NewGuid():N}");
         Assert.Null(view);
     }
@@ -616,7 +616,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "other-proj-host", "other-project"));
 
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var view = await service.GetRunnerAsync("test-project", runnerId);
 
         Assert.NotNull(view);
@@ -628,7 +628,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task GetRunnerAsync_EmptyRunnerId_ReturnsNull()
     {
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
         var view = await service.GetRunnerAsync("test-project", string.Empty);
         Assert.Null(view);
     }

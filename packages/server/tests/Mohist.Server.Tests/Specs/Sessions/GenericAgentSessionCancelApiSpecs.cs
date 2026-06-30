@@ -131,11 +131,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
                 Type: RuntimeEventTypes.SessionClosed,
                 PayloadJson: "{\"status\":\"completed\"}"),
         }));
-        for (var i = 0; i < 5; i++)
-        {
-            await grain.DeactivateForTestAsync();
-            await Task.Delay(150);
-        }
+        await grain.FlushForTestAsync();
 
         runnerHub.Clear();
         tracker.Register(_runnerId, "conn-gen-cancel-terminal");
@@ -175,11 +171,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
                 Type: RuntimeEventTypes.SessionClosed,
                 PayloadJson: $"{{\"status\":\"{terminalStatus}\"}}"),
         }));
-        for (var i = 0; i < 5; i++)
-        {
-            await grain.DeactivateForTestAsync();
-            await Task.Delay(150);
-        }
+        await grain.FlushForTestAsync();
 
         using var response = await PostGenericCancelAsync(project.Id, sessionId);
 
@@ -313,11 +305,7 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
                 Type: RuntimeEventTypes.SessionClosed,
                 PayloadJson: "{\"status\":\"failed\"}"),
         }));
-        for (var i = 0; i < 5; i++)
-        {
-            await grain.DeactivateForTestAsync();
-            await Task.Delay(150);
-        }
+        await grain.FlushForTestAsync();
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();

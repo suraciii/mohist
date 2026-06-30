@@ -262,14 +262,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
                 Type: RuntimeEventTypes.SessionClosed,
                 PayloadJson: "{\"status\":\"completed\"}"),
         }));
-        // The transcript persists on a 200ms timer; deactivate the grain
-        // (multiple passes + delay mirror the existing grain test pattern)
-        // so the resolver's DB query sees the terminal event.
-        for (var i = 0; i < 5; i++)
-        {
-            await grain.DeactivateForTestAsync();
-            await Task.Delay(150);
-        }
+        await grain.FlushForTestAsync();
 
         using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "ping" });
 
@@ -295,11 +288,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
                 Type: RuntimeEventTypes.SessionLiveness,
                 PayloadJson: "{}"),
         }));
-        for (var i = 0; i < 5; i++)
-        {
-            await grain.DeactivateForTestAsync();
-            await Task.Delay(150);
-        }
+        await grain.FlushForTestAsync();
 
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         tracker.Register(_runnerId, "conn-gen-followup-lifecycle");
@@ -319,11 +308,7 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
                 Type: RuntimeEventTypes.SessionClosed,
                 PayloadJson: "{\"status\":\"completed\"}"),
         }));
-        for (var i = 0; i < 5; i++)
-        {
-            await grain.DeactivateForTestAsync();
-            await Task.Delay(150);
-        }
+        await grain.FlushForTestAsync();
 
         using var terminalResponse = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "after close" });
         Assert.Equal(HttpStatusCode.Conflict, terminalResponse.StatusCode);

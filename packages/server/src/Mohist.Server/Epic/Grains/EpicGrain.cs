@@ -18,15 +18,18 @@ public class EpicGrain : Grain, IEpicGrain
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IGrainFactory _grains;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<EpicGrain> _log;
 
     public EpicGrain(
         IDbContextFactory<MohistDbContext> dbFactory,
         IGrainFactory grains,
+        TimeProvider timeProvider,
         ILogger<EpicGrain> log)
     {
         _dbFactory = dbFactory;
         _grains = grains;
+        _timeProvider = timeProvider;
         _log = log;
     }
 
@@ -34,19 +37,22 @@ public class EpicGrain : Grain, IEpicGrain
 
     private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;
 
+    private DateTimeOffset Now() => _timeProvider.GetUtcNow();
+
     public async Task<EpicDto> CreateAsync(string projectId, string title, string? description, string? priority)
     {
         var number = await _grains.GetGrain<IEpicCounterGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.EpicCounter(projectId)).NextAsync();
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var now = DateTimeOffset.UtcNow;
+        var now = Now();
         var epic = EpicAggregate.Create(
             id: $"epic_{Guid.NewGuid():N}",
             projectId: projectId,
             number: number,
             title: title,
             description: description,
-            priority: priority);
+            priority: priority,
+            now: now.UtcDateTime);
         var row = MapToRow(epic, now);
         db.Epics.Add(row);
         await db.SaveChangesAsync();
@@ -81,7 +87,7 @@ public class EpicGrain : Grain, IEpicGrain
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
         var domain = Materialize(row, links);
-        var now = DateTimeOffset.UtcNow;
+        var now = Now();
         domain.LinkIssue(issueId, issueNumber, now.UtcDateTime);
 
         db.EpicIssues.Add(new EpicIssueRow
@@ -132,7 +138,7 @@ public class EpicGrain : Grain, IEpicGrain
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
         var domain = Materialize(row, links);
-        var now = DateTimeOffset.UtcNow;
+        var now = Now();
         domain.UnlinkIssue(issueId, now.UtcDateTime);
 
         var link = await db.EpicIssues.FirstOrDefaultAsync(
@@ -164,7 +170,7 @@ public class EpicGrain : Grain, IEpicGrain
         // EpicPauseRequiresRunningException; Pause-from-Terminal raises
         // EpicAlreadyTerminalException) propagate so the HTTP layer can
         // surface them as 409 EPIC_NOT_RUNNING / 409 EPIC_ALREADY_TERMINAL.
-        var now = DateTimeOffset.UtcNow;
+        var now = Now();
         domain.Pause(reason, now.UtcDateTime);
         MapToRow(domain, row, now);
         if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
@@ -194,7 +200,7 @@ public class EpicGrain : Grain, IEpicGrain
         // EpicStartRequiresIdleException; Start-from-Terminal raises
         // EpicAlreadyTerminalException) propagate so the HTTP layer can
         // surface them as 409 EPIC_START_REQUIRES_IDLE / 409 EPIC_ALREADY_TERMINAL.
-        var now = DateTimeOffset.UtcNow;
+        var now = Now();
         var wasAlreadyRunning = row.Status == EpicStatusName.Running;
         domain.Start(now.UtcDateTime);
         MapToRow(domain, row, now);
@@ -228,7 +234,7 @@ public class EpicGrain : Grain, IEpicGrain
         // EpicResumeRequiresPausedException; Resume-from-Terminal raises
         // EpicAlreadyTerminalException) propagate so the HTTP layer can
         // surface them as 409 EPIC_RESUME_REQUIRES_PAUSED / 409 EPIC_ALREADY_TERMINAL.
-        var now = DateTimeOffset.UtcNow;
+        var now = Now();
         var wasAlreadyRunning = row.Status == EpicStatusName.Running;
         domain.Resume(now.UtcDateTime);
         MapToRow(domain, row, now);
@@ -256,7 +262,7 @@ public class EpicGrain : Grain, IEpicGrain
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
         var domain = Materialize(row, links);
-        var now = DateTimeOffset.UtcNow;
+        var now = Now();
 
         switch (status?.ToLowerInvariant())
         {
@@ -295,7 +301,7 @@ public class EpicGrain : Grain, IEpicGrain
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
         var domain = Materialize(row, links);
-        var now = DateTimeOffset.UtcNow;
+        var now = Now();
         domain.Update(title, description, priority, now.UtcDateTime);
         MapToRow(domain, row, now);
         ApplyPendingEvents(domain);
@@ -358,7 +364,7 @@ public class EpicGrain : Grain, IEpicGrain
         if (open.Count == 0)
         {
             var domain = Materialize(row, links);
-            var now = DateTimeOffset.UtcNow;
+            var now = Now();
             domain.MarkDone(open, now.UtcDateTime);
             MapToRow(domain, row, now);
             await ReleaseActiveMembershipsAsync(db, projectId, epicId);
@@ -442,7 +448,7 @@ public class EpicGrain : Grain, IEpicGrain
             return ToDto(row);
 
         var domain = Materialize(row, links);
-        var now = DateTimeOffset.UtcNow;
+        var now = Now();
         domain.MarkDone(open, now.UtcDateTime);
         MapToRow(domain, row, now);
         await ReleaseActiveMembershipsAsync(db, projectId, epicId);

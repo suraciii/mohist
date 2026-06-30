@@ -19,6 +19,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly IEventPublisher _eventPublisher;
     private readonly ITranscriptEventPublisher _transcriptPublisher;
     private readonly ILogger<AgentSessionGrain> _log;
+    private readonly TimeProvider _timeProvider;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
     private AgentSessionTranscriptSummary? _cachedSummary;
@@ -34,6 +35,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventPublisher eventPublisher,
         ITranscriptEventPublisher transcriptPublisher,
+        TimeProvider timeProvider,
         ILogger<AgentSessionGrain> log)
     {
         _stateStore = stateStore;
@@ -41,6 +43,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _dbFactory = dbFactory;
         _eventPublisher = eventPublisher;
         _transcriptPublisher = transcriptPublisher;
+        _timeProvider = timeProvider;
         _log = log;
     }
 
@@ -93,7 +96,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             SessionId,
             command.RunnerId ?? string.Empty,
             command.WorkDir,
-            command.Metadata);
+            command.Metadata,
+            Now());
         session.Settings = new AgentSessionSettings(command.Model);
         return session;
     }
@@ -102,7 +106,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         var session = await GetRequiredAsync();
 
-        var now = DateTime.UtcNow;
+        var now = Now();
         var events = session.AttachPhysicalSession(command.AgentSessionId, command.Model, command.WorkDir, command.ChangeDir, command.ProcessPid, now);
         if (events.Count == 0)
         {
@@ -120,7 +124,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetRequiredAsync();
         EnsureSessionIdleForRecovery(session);
 
-        var now = DateTime.UtcNow;
+        var now = Now();
         var usage = AgentSessionJsonHelper.Usage(session);
         var usedBefore = usage.ContextWindowUsed;
         var size = usage.ContextWindowSize;
@@ -149,7 +153,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetRequiredAsync();
         EnsureSessionIdleForRecovery(session);
 
-        var now = DateTime.UtcNow;
+        var now = Now();
         var usage = AgentSessionJsonHelper.Usage(session);
         var usedBefore = usage.ContextWindowUsed;
         var size = usage.ContextWindowSize;
@@ -169,9 +173,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
     }
 
-    private static void EnsureSessionIdleForRecovery(AgentSession session)
+    private void EnsureSessionIdleForRecovery(AgentSession session)
     {
-        if (AgentSessionJsonHelper.StatusName(session) == "active")
+        if (AgentSessionJsonHelper.StatusName(session, Now()) == "active")
             throw new InvalidOperationException("Cannot recover a session that is currently active.");
     }
 
@@ -262,7 +266,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IReadOnlyList<AgentSessionEvent> events,
         IReadOnlyList<RuntimeEventEnvelope> transcriptEntries)
     {
-        var now = DateTime.UtcNow;
+        var now = Now();
         _transcript.Accept(session, transcriptEntries, now);
         var transcript = _transcript.BuildFlush(session, now);
 
@@ -277,7 +281,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await FanOutRealtimeAsync(session, transcriptEntries, events);
     }
 
-    private static AgentSessionRecoveryResult BuildRecoveryResult(
+    private AgentSessionRecoveryResult BuildRecoveryResult(
         AgentSession session,
         long? usedBefore,
         long? size,
@@ -288,7 +292,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return new AgentSessionRecoveryResult(
             session.Id,
             session.Status.AgentRuntimeSessionId,
-            AgentSessionJsonHelper.StatusName(session),
+            AgentSessionJsonHelper.StatusName(session, Now()),
             usage.ContextWindowSize ?? size,
             usage.ContextWindowUsed ?? usedBefore,
             AgentSessionJsonHelper.ContextUsagePercent(usage.ContextWindowUsed ?? usedBefore, usage.ContextWindowSize ?? size),
@@ -303,7 +307,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var session = await GetRequiredAsync();
 
-        var now = DateTime.UtcNow;
+        var now = Now();
         var events = new List<AgentSessionEvent>();
         events.AddRange(session.RecordActivity(now));
         _stateDirty = true;
@@ -586,7 +590,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         if (_session is null) return true;
 
-        var now = DateTime.UtcNow;
+        var now = Now();
         var transcript = _transcript.BuildFlush(_session, now);
         var stateSaved = !_stateDirty;
 
@@ -648,6 +652,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return Task.CompletedTask;
     }
 
+    public async Task FlushForTestAsync()
+    {
+        if (await FlushAsync(CancellationToken.None))
+            DisposePersistTimer();
+    }
+
     private async Task<AgentSession> GetRequiredAsync()
     {
         if (_session is not null) return _session;
@@ -705,7 +715,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         s.Id,
         s.Runtime.RunnerId,
         s.Status.AgentRuntimeSessionId,
-        AgentSessionJsonHelper.StatusName(s),
+        AgentSessionJsonHelper.StatusName(s, Now()),
         s.Settings.Model,
         s.Runtime.WorkDir,
         s.Status.CreatedAt.ToString("o"),
@@ -749,6 +759,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             .Select(part => new TranscriptSummaryEvent(part.Sequence, part.Type, part.PayloadJson));
         return _cachedSummary = TranscriptEventSummaryProjector.Summarize(events);
     }
+
+    private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;
 
     private static AgentSessionRuntimeEventInfo ToEventInfo(RuntimeEventEnvelope e) => new(
         e.Id.ToString(),

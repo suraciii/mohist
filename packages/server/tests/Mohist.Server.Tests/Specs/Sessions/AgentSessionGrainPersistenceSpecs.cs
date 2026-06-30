@@ -19,8 +19,17 @@ public abstract class AgentSessionGrainPersistenceSpecsBase : IClassFixture<Agen
 
     protected IAgentSessionGrain NewGrain() => Fixture.Grains.GetGrain<IAgentSessionGrain>($"agent-session-spec-{Guid.NewGuid():N}");
 
-    protected static Task WaitUntilAsync(Func<bool> condition, string description, int timeoutMs = 5000)
-        => TestWait.ForAsync(condition, TimeSpan.FromMilliseconds(timeoutMs), TimeSpan.FromMilliseconds(25), description);
+    protected Task WaitUntilAsync(Func<bool> condition, string description, int timeoutMs = 5000)
+        => TestWait.ForAsync(
+            condition,
+            TimeSpan.FromMilliseconds(timeoutMs),
+            TimeSpan.FromMilliseconds(25),
+            description,
+            () =>
+            {
+                Fixture.TimeProvider.Advance(TimeSpan.FromMilliseconds(250));
+                return Task.CompletedTask;
+            });
 }
 
 [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

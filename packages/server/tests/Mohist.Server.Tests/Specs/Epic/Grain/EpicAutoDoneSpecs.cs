@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Epic.Domain;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -377,7 +378,11 @@ public class EpicAutoDoneSpecs
     }
 
     private static EpicGrain CreateGrain(TestDbContextFactory factory, string grainKey) =>
-        new(factory, null!, NullLogger<EpicGrain>.Instance)
+        new(
+            factory,
+            null!,
+            new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
+            NullLogger<EpicGrain>.Instance)
         {
             GrainKeyForTest = grainKey,
         };

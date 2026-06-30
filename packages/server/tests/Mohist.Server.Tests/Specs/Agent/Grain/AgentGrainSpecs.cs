@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
@@ -151,7 +152,10 @@ public class AgentGrainSpecs
 
     private static AgentGrain CreateGrain(TestDbContextFactory factory, string projectId, string agentId)
     {
-        var grain = new AgentGrain(new AgentStore(factory), new AgentQuerier(factory))
+        var grain = new AgentGrain(
+            new AgentStore(factory),
+            new AgentQuerier(factory),
+            new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)))
         {
             GrainKeyForTest = GrainKey.Agent(projectId, agentId),
         };
