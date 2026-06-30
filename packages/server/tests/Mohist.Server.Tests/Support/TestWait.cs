@@ -3,10 +3,10 @@ using Xunit;
 namespace Mohist.Server.Tests.Support;
 
 /// <summary>
-/// Poll-based wait helpers for tests. These bound the wait with
-/// <see cref="CancellationTokenSource"/> cancellation rather than
-/// comparing against the wall clock (<c>while(DateTime.UtcNow &lt; deadline)</c>),
-/// which the testing principles forbid.
+/// Poll-based wait helpers for tests. The retry budget is computed from the
+/// supplied timeout/step pair but does not use wall-clock timers; each retry
+/// yields to let queued async work run, or invokes the supplied fake-time
+/// advance hook when time progression is part of the behavior under test.
 /// </summary>
 /// <remarks>
 /// Prefer a deterministic signal (<c>TaskCompletionSource</c>, event await,
@@ -27,40 +27,24 @@ public static class TestWait
     {
         if (advance is not null)
         {
-            var attempts = Math.Max(1, (int)Math.Ceiling(timeout.TotalMilliseconds / Math.Max(1, step.TotalMilliseconds)));
-            T current = default!;
-            for (var i = 0; i <= attempts; i++)
-            {
-                current = await probe();
-                if (isDone(current))
-                    return current;
-                if (i == attempts)
-                    break;
-                await advance();
-                await Task.Yield();
-            }
-            Assert.Fail($"Timed out waiting for: {description}. Last value: {current}");
-            return default!;
         }
 
-        using var cts = new CancellationTokenSource(timeout);
-        var token = cts.Token;
-        T last = default!;
-        try
+        var attempts = Attempts(timeout, step);
+        T current = default!;
+        for (var i = 0; i <= attempts; i++)
         {
-            while (true)
-            {
-                last = await probe();
-                if (isDone(last))
-                    return last;
-                await Task.Delay(step, token);
-            }
+            current = await probe();
+            if (isDone(current))
+                return current;
+            if (i == attempts)
+                break;
+            if (advance is not null)
+                await advance();
+            await Task.Yield();
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
-        {
-            Assert.Fail($"Timed out waiting for: {description}. Last value: {last}");
-            return default!;
-        }
+
+        Assert.Fail($"Timed out waiting for: {description}. Last value: {current}");
+        return default!;
     }
 
     public static async Task ForAsync(
@@ -70,32 +54,21 @@ public static class TestWait
         string description,
         Func<Task>? advance = null)
     {
-        if (advance is not null)
+        var attempts = Attempts(timeout, step);
+        for (var i = 0; i <= attempts; i++)
         {
-            var attempts = Math.Max(1, (int)Math.Ceiling(timeout.TotalMilliseconds / Math.Max(1, step.TotalMilliseconds)));
-            for (var i = 0; i <= attempts; i++)
-            {
-                if (condition())
-                    return;
-                if (i == attempts)
-                    break;
+            if (condition())
+                return;
+            if (i == attempts)
+                break;
+            if (advance is not null)
                 await advance();
-                await Task.Yield();
-            }
-            Assert.Fail($"Timed out waiting for: {description}.");
-            return;
+            await Task.Yield();
         }
 
-        using var cts = new CancellationTokenSource(timeout);
-        var token = cts.Token;
-        try
-        {
-            while (!condition())
-                await Task.Delay(step, token);
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
-        {
-            Assert.Fail($"Timed out waiting for: {description}.");
-        }
+        Assert.Fail($"Timed out waiting for: {description}.");
     }
+
+    private static int Attempts(TimeSpan timeout, TimeSpan step) =>
+        Math.Max(1, (int)Math.Ceiling(timeout.TotalMilliseconds / Math.Max(1, step.TotalMilliseconds)));
 }
