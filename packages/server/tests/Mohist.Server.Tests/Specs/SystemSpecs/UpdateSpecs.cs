@@ -942,7 +942,11 @@ public class UpdateSpecs
                 unitDir: "/units");
 
             using var cts = new CancellationTokenSource();
-            cts.CancelAfter(TimeSpan.FromMilliseconds(120));
+            commands.OnExecute = (fileName, args) =>
+            {
+                if (fileName == "systemctl" && args.SequenceEqual(["--user", "stop", "mohist-runner.service"]))
+                    cts.Cancel();
+            };
             var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token);
 
             Assert.Equal(130, exitCode);
@@ -2182,6 +2186,8 @@ public class UpdateSpecs
         private readonly List<(string FileName, Func<string[], bool> Match, string Stdout)> _stdoutRules = new();
         private readonly List<(string FileName, Func<string[], bool> Match, int ExitCode, string Stdout, string Stderr)> _resultRules = new();
 
+        public Action<string, string[]>? OnExecute { get; set; }
+
         public void SetNextExitCode(int code) => _exitCodes.Enqueue(code);
         public void SetNextStdout(string stdout) => _stdout.Enqueue(stdout);
         public void SetNextResult(int exitCode, string stdout, string stderr)
@@ -2199,6 +2205,7 @@ public class UpdateSpecs
             string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
         {
             ExecutedCommands.Add((fileName, args, workingDirectory));
+            OnExecute?.Invoke(fileName, args);
             var resultRule = _resultRules.FirstOrDefault(rule => rule.FileName == fileName && rule.Match(args));
             if (resultRule.Match is not null)
                 return Task.FromResult((resultRule.ExitCode, resultRule.Stdout, resultRule.Stderr));

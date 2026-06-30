@@ -106,6 +106,7 @@ internal sealed partial class SourceCodeUpdater
     private readonly ServiceReadinessProbe _readinessProbe;
     private readonly RunnerRefreshVerifier _runnerRefreshVerifier;
     private readonly UpdateOutcomeReporter _outcomeReporter;
+    private readonly TimeProvider _timeProvider;
 
     public SourceCodeUpdater(
         TextWriter output,
@@ -115,7 +116,8 @@ internal sealed partial class SourceCodeUpdater
         ServiceReadinessProbe readinessProbe,
         RunnerRefreshVerifier runnerRefreshVerifier,
         UpdateOutcomeReporter outcomeReporter,
-        TimeSpan? serverReadyTimeout = null)
+        TimeSpan? serverReadyTimeout = null,
+        TimeProvider? timeProvider = null)
     {
         _out = output;
         _err = error;
@@ -125,6 +127,7 @@ internal sealed partial class SourceCodeUpdater
         _runnerRefreshVerifier = runnerRefreshVerifier;
         _outcomeReporter = outcomeReporter;
         _serverReadyTimeout = serverReadyTimeout ?? ServerReadyTimeout;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public const string ServerUrlEnvironmentVariable = "MOHIST_SERVER_URL";
@@ -142,7 +145,8 @@ internal sealed partial class SourceCodeUpdater
         Func<string?>? getUserHome = null,
         TimeSpan? runnerIdentityTimeout = null,
         Func<string?>? getLocalHostname = null,
-        string? unitDir = null)
+        string? unitDir = null,
+        TimeProvider? timeProvider = null)
     {
         var fs = fileSystem ?? RealFileSystem.Instance;
         var env = environment ?? SystemEnvironmentVariableProvider.Instance;
@@ -153,7 +157,7 @@ internal sealed partial class SourceCodeUpdater
         };
         var operations = new UpdateOperations(output, error, systemd, commandExecutor, fs, env, unitDir, getUserHome);
         var validator = new RuntimeConsistencyValidator(httpClient, commandExecutor, fs, env, output, getUserHome);
-        var readinessProbe = new ServiceReadinessProbe(httpClient, output);
+        var readinessProbe = new ServiceReadinessProbe(httpClient, output, timeProvider);
         var runnerRefreshVerifier = new RunnerRefreshVerifier(
             httpClient,
             commandExecutor,
@@ -169,7 +173,8 @@ internal sealed partial class SourceCodeUpdater
             readinessProbe,
             runnerRefreshVerifier,
             outcomeReporter,
-            serverReadyTimeout);
+            serverReadyTimeout,
+            timeProvider);
     }
 
     internal RuntimeConsistencyValidator Validator => _validator;

@@ -156,7 +156,7 @@ internal sealed partial class SourceCodeUpdater
         {
             _out.WriteLine("Waiting for runner service to become active...");
             using var activeCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            activeCts.CancelAfter(RunnerActiveTimeout);
+            using var activeTimer = StartTimeoutTimer(activeCts, RunnerActiveTimeout);
             var becameActive = false;
             while (!activeCts.IsCancellationRequested)
             {
@@ -168,7 +168,7 @@ internal sealed partial class SourceCodeUpdater
 
                 try
                 {
-                    await Task.Delay(RunnerActivePollInterval, activeCts.Token);
+                    await Task.Delay(RunnerActivePollInterval, _timeProvider, activeCts.Token);
                 }
                 catch (OperationCanceledException)
                 {
@@ -288,7 +288,8 @@ internal sealed partial class SourceCodeUpdater
 
     private async Task<StageOutcome> RunRecoveryStageAsync(UpdateContext context, Func<UpdateContext, CancellationToken, Task<int>> stage)
     {
-        using var recoveryCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var recoveryCts = new CancellationTokenSource();
+        using var recoveryTimer = StartTimeoutTimer(recoveryCts, TimeSpan.FromSeconds(30));
 
         try
         {
@@ -304,5 +305,29 @@ internal sealed partial class SourceCodeUpdater
             _err.WriteLine($"Update recovery stage failed: {ex.GetType().Name}: {ex.Message}");
             return new StageOutcome(false, 1, ex);
         }
+    }
+
+    private ITimer? StartTimeoutTimer(CancellationTokenSource cts, TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            cts.Cancel();
+            return null;
+        }
+
+        return _timeProvider.CreateTimer(
+            static state =>
+            {
+                try
+                {
+                    ((CancellationTokenSource)state!).Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            },
+            cts,
+            timeout,
+            Timeout.InfiniteTimeSpan);
     }
 }

@@ -87,7 +87,7 @@ public class RunnerWorkflowTerminalStatusHandlerSpecs : IAsyncLifetime
         // Persist a Running row with an assignment so the workflow grain
         // returns the runner id when asked. Status is canonical
         // WorkflowRunStatus.Failed so the test can verify the router
-        // receives the terminal name end-to-end. The route handlers and
+        // receives the terminal name through the production path. The route handlers and
         // hub invocation are exercised regardless of which terminal
         // status we choose.
         var run = new WorkflowRun

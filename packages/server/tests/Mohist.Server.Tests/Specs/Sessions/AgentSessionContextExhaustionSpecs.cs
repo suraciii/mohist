@@ -15,7 +15,7 @@ namespace Mohist.Server.Tests.Specs.Sessions;
 /// new SSE event types wired up in
 /// <c>openspec/changes/issue-110</c>. These tests cover the grain-level
 /// orchestration in <c>AgentSessionGrain.AppendRuntimeEventsAsync</c>
-/// end-to-end against the Orleans cluster and the event-publishing
+/// through the Orleans cluster and the event-publishing
 /// fixture (recording both <c>IEventPublisher</c> and
 /// <c>ITranscriptEventPublisher</c>).
 /// </summary>

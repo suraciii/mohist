@@ -297,22 +297,17 @@ public class AgentSessionLaunchRoutesSpecs
     {
         var projectId = await CreateProjectAsync("launch-distinct");
 
-        // The validation-only endpoint is a developer smoke-test that
-        // round-trips a raw prompt through the AgentJob engine and
-        // returns the terminal result. It has no project/agent scoping,
+        // The validation-only endpoint has no project/agent scoping,
         // no AgentSession minting, and no source-kind=agent-launch label.
+        // Use a synchronous validation error here; this route-boundary spec
+        // must not start an AgentJob and wait for runner/report completion.
         using var validate = await _fixture.Client.PostAsJsonAsync(
             AgentJobController.ValidatePath,
-            new { prompt = "validation-only path" });
-        Assert.Equal(HttpStatusCode.OK, validate.StatusCode);
+            new { workspace = new { path = "/tmp/validation-only" } });
+        Assert.Equal(HttpStatusCode.BadRequest, validate.StatusCode);
         var validatePayload = await validate.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.True(validatePayload.GetProperty("success").GetBoolean());
-        // The validation response carries an AgentJobValidationResponse
-        // with Status / FailureReason fields — the input prompt is not
-        // echoed back. The point of this assertion is that the endpoint
-        // responded, not that it ran successfully end-to-end.
-        Assert.False(string.IsNullOrWhiteSpace(
-            validatePayload.GetProperty("data").GetProperty("jobId").GetString()));
+        Assert.False(validatePayload.GetProperty("success").GetBoolean());
+        Assert.Equal("validation_failed", validatePayload.GetProperty("code").GetString());
 
         using var launch = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/agents/agent_unknown/sessions",

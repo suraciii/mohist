@@ -104,7 +104,7 @@ public class OtelSourceSubscriptionSpecs
         // exercise the production DbContextFactory here because it
         // requires extensive fixture wiring (the SQL connection
         // string + migrations); what we are pinning is the OTel
-        // EF Core source subscription. The end-to-end EF text
+        // EF Core source subscription. The full EF text
         // assertion lives in OtelExecutionChainTracingSpecs
         // .EfQuery_CarriesSqlTextAsAttribute.
         using var conn = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");

@@ -29,35 +29,36 @@ internal sealed class ServiceReadinessProbe
 
     private readonly HttpClient _http;
     private readonly TextWriter _out;
+    private readonly TimeProvider _timeProvider;
 
-    public ServiceReadinessProbe(HttpClient http, TextWriter output)
+    public ServiceReadinessProbe(HttpClient http, TextWriter output, TimeProvider? timeProvider = null)
     {
         _http = http;
         _out = output;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<ServerReadinessResult> WaitForServerReadyWithProgressAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeout);
-
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var timeoutTimer = StartTimeoutTimer(timeoutCts, timeout);
+        var waitToken = timeoutCts.Token;
         string? lastFailure = null;
         string? lastReason = null;
-        var lastProgress = DateTimeOffset.UtcNow;
-        int i = 0;
+        var lastProgress = _timeProvider.GetUtcNow();
+        var deadline = _timeProvider.GetUtcNow() + timeout;
 
-        while (!cts.IsCancellationRequested)
+        while (!waitToken.IsCancellationRequested && _timeProvider.GetUtcNow() < deadline)
         {
-            i++;
             var probe = new ReadinessProbeState();
             try
             {
-                lastFailure = await CheckServerReadyOnceWithReasonAsync(cts.Token, probe);
+                lastFailure = await CheckServerReadyOnceWithReasonAsync(waitToken, probe);
                 if (lastFailure is null)
                     return new ServerReadinessResult(true, null);
                 lastReason = probe.Reason;
             }
-            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            catch (OperationCanceledException) when (waitToken.IsCancellationRequested)
             {
                 break;
             }
@@ -67,17 +68,21 @@ internal sealed class ServiceReadinessProbe
                 lastReason ??= "waiting for Mohist API";
             }
 
-            if (DateTimeOffset.UtcNow - lastProgress >= ServerReadyProgressInterval)
+            var now = _timeProvider.GetUtcNow();
+            if (now - lastProgress >= ServerReadyProgressInterval)
             {
                 _out.WriteLine($"  waiting... {lastReason ?? "waiting for Mohist API"}");
-                lastProgress = DateTimeOffset.UtcNow;
+                lastProgress = now;
             }
+
+            if (deadline - _timeProvider.GetUtcNow() < ServerReadyPollInterval)
+                break;
 
             try
             {
-                await Task.Delay(ServerReadyPollInterval, cts.Token);
+                await DelayAsync(ServerReadyPollInterval, waitToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (waitToken.IsCancellationRequested)
             {
                 break;
             }
@@ -89,20 +94,20 @@ internal sealed class ServiceReadinessProbe
 
     public async Task<ServerReadinessResult> WaitForServerReadyAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var timeoutTimer = StartTimeoutTimer(timeoutCts, timeout);
+        var waitToken = timeoutCts.Token;
         string? lastFailure = null;
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeout);
-        int i = 0;
-        while (!cts.IsCancellationRequested)
+        var deadline = _timeProvider.GetUtcNow() + timeout;
+        while (!waitToken.IsCancellationRequested && _timeProvider.GetUtcNow() < deadline)
         {
-            i++;
             try
             {
-                lastFailure = await CheckServerReadyOnceAsync(cts.Token);
+                lastFailure = await CheckServerReadyOnceAsync(waitToken);
                 if (lastFailure is null)
                     return new ServerReadinessResult(true, null);
             }
-            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            catch (OperationCanceledException) when (waitToken.IsCancellationRequested)
             {
                 break;
             }
@@ -112,11 +117,14 @@ internal sealed class ServiceReadinessProbe
                 // The service can be active before Kestrel starts accepting requests.
             }
 
+            if (deadline - _timeProvider.GetUtcNow() < ServerReadyPollInterval)
+                break;
+
             try
             {
-                await Task.Delay(ServerReadyPollInterval, cts.Token);
+                await DelayAsync(ServerReadyPollInterval, waitToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (waitToken.IsCancellationRequested)
             {
                 break;
             }
@@ -208,7 +216,7 @@ internal sealed class ServiceReadinessProbe
             return null;
 
         using var finalCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        finalCts.CancelAfter(FinalFailureProbeTimeout);
+        using var finalTimer = StartTimeoutTimer(finalCts, FinalFailureProbeTimeout);
 
         try
         {
@@ -222,6 +230,35 @@ internal sealed class ServiceReadinessProbe
         {
             return FormatReadinessException(ex);
         }
+    }
+
+    private Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
+        delay <= TimeSpan.Zero
+            ? Task.CompletedTask
+            : Task.Delay(delay, _timeProvider, cancellationToken);
+
+    private ITimer? StartTimeoutTimer(CancellationTokenSource cts, TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            cts.Cancel();
+            return null;
+        }
+
+        return _timeProvider.CreateTimer(
+            static state =>
+            {
+                try
+                {
+                    ((CancellationTokenSource)state!).Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            },
+            cts,
+            timeout,
+            Timeout.InfiniteTimeSpan);
     }
 
     private static string? FindFirstAssetPath(string html)

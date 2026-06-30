@@ -176,7 +176,7 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
     {
         // After T-004, the runner-side synthesized failed report flows
         // through the same translator that any runner-process "failed"
-        // report would. This pins the end-to-end observable contract:
+        // report would. This pins the observable product contract:
         // the workflow grain ends up with task status Failed and the
         // failure message "runner-lost" — identical to the old
         // NotifyRunnerLostAsync path but produced via the report channel.
@@ -188,7 +188,7 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         await runner.UnregisterAsync();
 
         // The synthesized report's `Detail: "runner-lost"` is preserved
-        // end-to-end through the translator → grain → failure-message path.
+        // through the translator -> grain -> failure-message path.
         var run = await LoadRunAsync(work.WorkflowRunId);
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
         Assert.Equal(TaskRunStatus.Failed, run.Stages.Single().Tasks.Single().Status);

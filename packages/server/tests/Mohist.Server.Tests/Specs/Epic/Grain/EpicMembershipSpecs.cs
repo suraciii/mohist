@@ -347,7 +347,7 @@ public class EpicMembershipSpecs
         // The EpicIssueRow set is unchanged; EpicQuerier (which is
         // status-agnostic in its read-model) continues to surface the
         // membership history. The HTTP-driven EpicLifecycleSpecs covers
-        // the full EpicQuerier.GetAsync round-trip end-to-end.
+        // the full EpicQuerier.GetAsync round-trip.
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1);

@@ -15,7 +15,7 @@ namespace Mohist.Server.Tests.Specs.Sessions;
 /// on <c>AgentSessions</c> via the EF Core migrator against an in-memory
 /// SQLite fixture (matches the established <c>InboxItemsMigrationSpecs</c>
 /// pattern). Verifies the SQLite table rebuild path EF takes when adding
-/// STORED computed columns works end-to-end.
+/// STORED computed columns works through the EF migrator path.
 /// </summary>
 public class AgentLaunchLabelComputedColumnsMigrationSpecs
 {
