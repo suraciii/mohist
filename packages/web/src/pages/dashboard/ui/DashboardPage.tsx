@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useProjects, useProject } from '../../../entities/project'
+import { useNavigate } from 'react-router-dom'
+import { useProjects, useProject, useProjectPath } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
 import { CreateProjectDialog } from '../../../widgets/create-project-dialog'
 import { DashboardDigestWidget } from '../../../widgets/dashboard-digest'
@@ -8,6 +9,7 @@ import { FactoryStatusHeadline } from '../../../widgets/factory-status'
 import { AttentionHero } from '../../../widgets/attention-hero'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { BotIcon } from 'lucide-react'
 import { ProductivityZone } from '../productivity/ProductivityZone'
 import { DashboardZone } from './DashboardZone'
 import type { DashboardZoneId } from './DashboardZone'
@@ -19,6 +21,8 @@ const DASHBOARD_ZONES: { id: DashboardZoneId; name: string }[] = [
 ]
 
 export function DashboardPage() {
+  const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
   const { data: projects, isLoading: projectsLoading } = useProjects()
   const { currentProject } = useProject()
   const { data: agentStatus } = useAgentStatus()
@@ -69,6 +73,16 @@ export function DashboardPage() {
         </div>
         <div data-testid="dashboard-hero">
           <AttentionHero />
+          <div className="mt-4 flex justify-end">
+            <Button
+              variant="outline"
+              onClick={() => navigate(toProjectPath('/agent-sessions/new'))}
+              data-testid="ask-agent-project"
+            >
+              <BotIcon className="size-4 mr-2" />
+              Ask Agent
+            </Button>
+          </div>
         </div>
         <div
           data-testid="dashboard-zones"

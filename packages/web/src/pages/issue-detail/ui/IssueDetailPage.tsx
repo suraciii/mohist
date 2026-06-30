@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
+import { ArrowLeftIcon, BotIcon, PencilIcon } from 'lucide-react'
 import { IssueStatus, IssueHealth, WorkflowStage, type AttachmentInfo, type RecoveryProjection } from '../../../entities/issue'
 import { addComment, addPrerequisite, closeIssue, commentAttachmentContentPath, deleteComment, extractAttachmentIds, forceStopIssue, issueAttachmentContentPath, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue, updateIssue } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline, useWorkflowYaml } from '../../../entities/issue'
@@ -1285,6 +1285,18 @@ export function IssueDetailPage() {
                       {activeAgents.length} agent{activeAgents.length > 1 ? 's' : ''} running on other issues
                     </div>
                   )}
+
+                  <div className="border-t border-border/60 pt-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => navigate(toProjectPath('/agent-sessions/new?issue=' + encodeURIComponent(issueNumber)))}
+                      className="w-full"
+                      data-testid="ask-agent-issue"
+                    >
+                      <BotIcon className="size-4 mr-2" />
+                      Ask Agent
+                    </Button>
+                  </div>
                 </div>
               </CardSection>
 
