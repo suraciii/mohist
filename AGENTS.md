@@ -63,6 +63,7 @@ npm test           -w packages/runner
 - **边界与放置规则**：[`design/architecture.md`](design/architecture.md) —— 什么放 Server / Runner / CLI，执行事实与状态裁判分离。
 - **领域分解**：[`design/domain-analysis.md`](design/domain-analysis.md) —— 核心域（Workflow）与支撑子域，判断改动落在哪个域。
 - **约定**：[`design/conventions.md`](design/conventions.md)。
+- **测试**：[`design/testing.md`](design/testing.md) —— spec/unit 两条轨道、外部依赖与时间依赖的硬约束、各端 fake 入口。
 
 ## 设计原则
 
@@ -70,5 +71,11 @@ npm test           -w packages/runner
 
 ## 测试原则
 
-* **绝对禁止**直接使用真实的外部系统（API、操作系统、外部进程等），应当使用Fake
-* 测试的运行时间应该足够快，需要保证测试能在合理的时间里完成
+详见 [`design/testing.md`](design/testing.md)。要点：
+
+* **区分 spec 与 unit**：spec 验证产品行为（高集成），unit 验证模块/类（低集成）。命名与放置要一致表达验证对象。
+* **禁止真实外部依赖**：不得触碰真实网络/进程/git/DB/系统服务，全部走 fake（DI 注入 / factory hook / mock）。
+* **禁止真实时间**：时间逻辑必须可注入（C# `TimeProvider` / TS `vi.useFakeTimers`），不得走墙钟；不得用 `while(now<deadline)` 或 `elapsed < N` 做断言。
+* **不得 flaky**：不得依赖顺序、时间戳种子、未恢复的 stub；不得用 `it.skip` 掩盖 flaky。
+* **简洁、无冗余、读得出 spec**：setup 抽共享 helper，迁移/回归完成后删旧文件，禁止新旧并存。
+* **足够快**：unit < 50ms，spec < 500ms；e2e/a11y 单独跑，不进默认 `npm test`。

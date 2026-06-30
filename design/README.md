@@ -13,6 +13,7 @@ style: ["短索引，只说明入口。"]
 - [domain-analysis.md](domain-analysis.md) — 问题空间和子域划分。
 - [context-map.md](context-map.md) — 限界上下文和模型依赖方向。
 - [conventions.md](conventions.md) — 命名、分层、变量等约定。
+- [testing.md](testing.md) — 测试两条轨道（spec/unit）、外部依赖、时间依赖、fake 入口速查。
 - [eventbus.md](eventbus.md) — 事件总线边界和 CloudEvent 约定。
 
 ## Workflow 核心域
