@@ -283,9 +283,9 @@ public class EpicQuerierListAsyncSpecs
     public async Task ListAsync_OrdersByPriorityThenUpdatedAt()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, "proj_1", "epic_p2_old", 1, priority: "p2");
-        await Task.Delay(20);
-        await SeedEpicAsync(database, "proj_1", "epic_p2_new", 2, priority: "p2");
+        var now = new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
+        await SeedEpicAsync(database, "proj_1", "epic_p2_old", 1, priority: "p2", updatedAt: now);
+        await SeedEpicAsync(database, "proj_1", "epic_p2_new", 2, priority: "p2", updatedAt: now.AddMinutes(1));
         await SeedEpicAsync(database, "proj_1", "epic_p0", 3, priority: "p0");
 
         var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
@@ -334,8 +334,9 @@ public class EpicQuerierListAsyncSpecs
         return (new TestDatabase(connection, factory), commands);
     }
 
-    private static async Task SeedEpicAsync(TestDatabase database, string projectId, string epicId, int number, string priority = "p2")
+    private static async Task SeedEpicAsync(TestDatabase database, string projectId, string epicId, int number, string priority = "p2", DateTimeOffset? updatedAt = null)
     {
+        var now = updatedAt ?? DateTimeOffset.UtcNow;
         await using var db = database.CreateDbContext();
         db.Epics.Add(new EpicRow
         {
@@ -346,8 +347,8 @@ public class EpicQuerierListAsyncSpecs
             Description = "",
             Priority = priority,
             Status = "idle",
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = now,
+            UpdatedAt = now,
         });
         await db.SaveChangesAsync();
     }
