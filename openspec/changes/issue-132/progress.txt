@@ -1,0 +1,71 @@
+# T-001 Agent data layer: CRUD query hooks and generic AgentSession client/hooks
+
+Status: completed
+
+## Files changed
+
+- **packages/web/src/entities/agent/api/queries.ts** — Extended with `useAgents()`,
+  `useAgent(agentRef)`, `useCreateAgent()`, `useUpdateAgent()`,
+  `useArchiveAgent()` for Agent profile CRUD (wrapping existing client fns).
+  Also added `useAgentSessions({ agentRef })` for agent-scoped session list
+  (query key `['agents', projectId, agentRef, 'sessions']`). Renamed existing
+  global `useAgentSessions` → `useGlobalAgentSessions` to avoid name collision.
+
+- **packages/web/src/entities/agent/api/agent-sessions.ts** (new) — Pure client
+  fns (`getAgentSessions`, `getGenericSessionSummary`,
+  `getGenericSessionTranscript`, `launchAgentSession`, `postGenericFollowup`,
+  `cancelGenericSession`) and matching query/mutation hooks
+  (`useGenericSessionSummary`, `useGenericSessionTranscript`,
+  `useLaunchAgentSession`, `useGenericFollowup`, `useCancelGenericSession`)
+  consuming #129 (launch/followup/cancel) and #130 (summary/transcript/list)
+  endpoints over `projectApiPath` + shared `request` envelope.
+
+- **packages/web/src/entities/agent/index.ts** — Barrel re-exports for all new
+  hooks, client fns, and DTO types.
+
+- **packages/web/src/widgets/dashboard-pulse/ui/PulseZone.test.tsx** — Updated
+  mock to reference renamed `useGlobalAgentSessions`.
+
+- **packages/web/src/entities/agent/api/queries.test.ts** (new) — Tests for
+  CRUD hooks and `useAgentSessions`: query keys, enabled guards, queryFn
+  delegation, mutation success/error toasts and invalidation behavior.
+
+- **packages/web/src/entities/agent/api/agent-sessions.test.ts** (new) — Tests
+  for all client fns (URL/bodies via fetch spy) and all hooks (query keys,
+  enabled guards, polling logic, mutation invalidation and toast).
+
+## Design decisions
+
+- Renamed existing `useAgentSessions` → `useGlobalAgentSessions` to free the
+  `useAgentSessions` name for the agent-scoped variant (matching D9 / T-001 AC).
+
+- Agent-scoped session list DTO types (`AgentSessionListItemDto`,
+  `GenericAgentSessionSummaryDto` etc.) placed in `agent-sessions.ts` alongside
+  their client fns — not in `model/types.ts` — to keep the data-access module
+  self-contained (consistent with `cost-rollup.ts` pattern).
+
+- `useGenericSessionSummary` and `useGenericSessionTranscript` have dynamic
+  `refetchInterval` that polls every 5s while the session is non-terminal /
+  has incomplete turns, stops polling on terminal state.
+
+- Followup and cancel mutations accept optional `agentRef` for invalidation of
+  the owning agent's session list; `useLaunchAgentSession` always requires it
+  since the agent is known at mutation time.
+
+- The existing `getAgentSessions` from `client.ts` (global list) is imported
+  as `getGlobalAgentSessions` in queries.ts to coexist with the new
+  agent-scoped `getAgentSessions` from `agent-sessions.ts`.
+
+## Gotchas
+
+- `vi.spyOn(globalThis, 'fetch')` must be cleaned up with `vi.restoreAllMocks()`
+  in `afterEach` to prevent cross-test pollution in the client-fn URL tests.
+
+- Mutation tests that evaluate `onSuccess`/`onError` callbacks should not invoke
+  `mutationFn` unless the underlying client fn is also mocked, otherwise the
+  real implementation will hit the network stack and cause unhandled rejections
+  in jsdom.
+
+- TypeScript 5+ strict tuple inference in `.filter()` callbacks requires
+  widening the callback parameter to `unknown[]` instead of a tuple pattern
+  when filtering mock.calls arrays.
