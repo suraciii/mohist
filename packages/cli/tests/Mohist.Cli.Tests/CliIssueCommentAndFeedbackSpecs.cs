@@ -7,29 +7,10 @@ namespace Mohist.Cli.Tests;
 
 public class CliIssueCommentAndFeedbackSpecs
 {
-    private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateHarness(Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
-    {
-        var handler = new RecordingHttpHandler((req, _) =>
-        {
-            var response = responder?.Invoke(req);
-            if (response is not null) return Task.FromResult(response);
-            return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { } }));
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fs = new FakeFileSystem();
-        fs.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-            "{\"activeProjectId\":\"proj_abc\"}");
-        return (handler, http, output, error, fs, new FakeCommandExecutor());
-    }
-
     [Fact]
     public async Task IssueCommentAdd_SuccessPath_SendsPostWithBodyAndPrintsNewCommentId()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -60,7 +41,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueCommentAdd_FromFile_ReadsFileAndSendsContentsAsBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -86,7 +67,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueCommentAdd_MissingBody_PrintsValidationErrorAndExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "comment", "add", "42"], output, error, fs, executor);
@@ -100,7 +81,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueComment_HelpListsAddSubcommand()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "comment", "--help"], output, error, fs, executor);
@@ -113,7 +94,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueCommentAdd_AcceptsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -139,7 +120,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueCommentAdd_JsonOutput_PrintsJsonEnvelope()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -167,7 +148,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_SuccessPath_SendsPostWithStageAndBodyAndPrintsNewId()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -202,7 +183,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_FromFile_ReadsFileAndSendsContentsAsBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -231,7 +212,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_MissingStage_PrintsValidationErrorAndExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -248,7 +229,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_MissingBody_PrintsValidationErrorAndExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -264,7 +245,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedback_HelpListsCreateAlongsideListAndShow()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "feedback", "--help"], output, error, fs, executor);
@@ -279,7 +260,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_AcceptsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -305,7 +286,7 @@ public class CliIssueCommentAndFeedbackSpecs
     [Fact]
     public async Task IssueFeedbackCreate_JsonOutput_PrintsJsonEnvelope()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {

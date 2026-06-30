@@ -8,29 +8,10 @@ namespace Mohist.Cli.Tests;
 
 public class CliIssueWorkflowProfileSpecs
 {
-    private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateHarness(Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
-    {
-        var handler = new RecordingHttpHandler((req, _) =>
-        {
-            var response = responder?.Invoke(req);
-            if (response is not null) return Task.FromResult(response);
-            return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { } }));
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fs = new FakeFileSystem();
-        fs.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-            "{\"activeProjectId\":\"proj_abc\"}");
-        return (handler, http, output, error, fs, new FakeCommandExecutor());
-    }
-
     [Fact]
     public async Task IssueCreate_WithWorkflowProfileFlag_SendsWorkflowProfileIdInPostBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -64,7 +45,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueCreate_WithoutWorkflowProfileFlag_OmitsWorkflowProfileIdFromPostBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -91,7 +72,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueShow_RendersEffectiveWorkflowProfile()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get)
             {
@@ -127,7 +108,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueShow_RendersInheritedDefaultWhenNoSelection()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get)
             {
@@ -161,7 +142,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueShow_RoundTripsCreateThenShow()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -215,7 +196,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueUpdate_WithWorkflowProfileFlag_SendsWorkflowProfileIdInPatchBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -232,7 +213,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueUpdate_WithoutWorkflowProfileFlag_OmitsWorkflowProfileIdFromPatchBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -249,7 +230,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueUpdate_NoFlags_SendsPatchWithNoOptionalFieldKeys()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "42"], output, error, fs, executor);
@@ -267,7 +248,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueUpdate_WorkflowProfileWithOtherFlags_PatchBodyOnlyContainsProvidedFields()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -358,7 +339,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueUpdate_WorkflowProfileOnStartedIssue_PrintsServerErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Patch)
             {
