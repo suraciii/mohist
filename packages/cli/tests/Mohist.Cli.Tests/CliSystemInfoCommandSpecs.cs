@@ -11,20 +11,9 @@ public class CliSystemInfoCommandSpecs
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder,
         string? activeProjectId = null)
     {
-        var handler = new RecordingHttpHandler(responder);
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fileSystem = new FakeFileSystem();
-        if (activeProjectId is not null)
-        {
-            fileSystem.AddFile(
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-                $"{{\"activeProjectId\":\"{activeProjectId}\"}}");
-        }
-        var executor = new FakeCommandExecutor();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(responder, activeProjectId);
         var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        return (http, handler, output, error, fileSystem, executor, env);
+        return (http, handler, output, error, fs, executor, env);
     }
 
     private static object SystemInfoPayload(

@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using Mohist.Cli.Tests.Support;
 using Xunit;
@@ -11,19 +10,13 @@ public class CliProjectCommandSpecs
     [Fact]
     public async Task ProjectCreate_NameOnly_SendsBodyWithoutPathFields()
     {
-        var handler = new RecordingHttpHandler(async (_, _) =>
-        {
-            return RecordingHttpHandler.Json(new
+        var (handler, http, output, error, fileSystem, executor) = CliTestHarness.Create(
+            async (_, _) => RecordingHttpHandler.Json(new
             {
                 success = true,
                 data = new { id = "proj_123", name = "my-project" },
-            }, HttpStatusCode.Created);
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fileSystem = new FakeFileSystem();
-        var executor = new FakeCommandExecutor();
+            }, HttpStatusCode.Created),
+            activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "create", "my-project"], output, error, fileSystem, executor);
@@ -43,9 +36,8 @@ public class CliProjectCommandSpecs
     [Fact]
     public async Task ProjectList_DisplaysNamesAndCurrentMarkerWithoutPaths()
     {
-        var handler = new RecordingHttpHandler(async (_, _) =>
-        {
-            return RecordingHttpHandler.Json(new
+        var (handler, http, output, error, fileSystem, executor) = CliTestHarness.Create(
+            async (_, _) => RecordingHttpHandler.Json(new
             {
                 success = true,
                 data = new[]
@@ -53,16 +45,8 @@ public class CliProjectCommandSpecs
                     new { id = "proj_a", name = "alpha" },
                     new { id = "proj_b", name = "beta" },
                 },
-            });
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-            "{\"activeProjectId\":\"proj_b\"}");
-        var executor = new FakeCommandExecutor();
+            }),
+            "proj_b");
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "list", "--output", "table"], output, error, fileSystem, executor);
