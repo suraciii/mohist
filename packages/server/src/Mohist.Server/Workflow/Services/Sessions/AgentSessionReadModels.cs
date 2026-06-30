@@ -14,7 +14,20 @@ public sealed record AgentUsageDto(
     long? ContextWindowUsed,
     long? ContextWindowSize,
     double? ContextUsagePercent,
-    string? HealthStatus);
+    string? HealthStatus,
+    [property: JsonPropertyName("contextUsageHistory")] IReadOnlyList<ContextUsageHistoryEntryDto>? ContextUsageHistory = null);
+
+/// <summary>
+/// DTO projection of <see cref="Mohist.Server.Sessions.Domain.ContextUsageHistoryEntry"/>.
+/// One sample of the bounded context-usage history exposed on
+/// <see cref="AgentUsageDto.ContextUsageHistory"/> so the Pulse
+/// zone can render a context-usage trend mini-chart from the live
+/// activity feed (issue-245 T-002 / design D5). The list is omitted
+/// from the wire when empty (<c>JsonIgnoreCondition.WhenWritingNull</c>).
+/// </summary>
+public sealed record ContextUsageHistoryEntryDto(
+    [property: JsonPropertyName("at")] string At,
+    [property: JsonPropertyName("percent")] double Percent);
 
 public sealed record AgentEventSummaryDto(
     string? ResolvedModel,
@@ -62,7 +75,19 @@ public sealed record AgentSessionMetadataDto(
     string? CompletedAt,
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage,
-    [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata);
+    [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata,
+    [property: JsonPropertyName("runtimeSessionLineage")] IReadOnlyList<RuntimeSessionLineageEntryDto>? RuntimeSessionLineage);
+
+/// <summary>
+/// DTO projection of <see cref="Mohist.Server.Sessions.Domain.RuntimeSessionLineageEntry"/>.
+/// Ordered by binding time. The first entry is the original runtime
+/// session; each subsequent entry records a compact/reset rebind
+/// successor. Absent on the wire when the chain is empty (historical
+/// sessions compacted before T-001) so the field degrades to hidden.
+/// </summary>
+public sealed record RuntimeSessionLineageEntryDto(
+    [property: JsonPropertyName("agentRuntimeSessionId")] string AgentRuntimeSessionId,
+    [property: JsonPropertyName("boundAt")] string BoundAt);
 
 public sealed record AgentSessionMetadataCounts(
     [property: JsonPropertyName("partCount")] int PartCount,

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import { useIssue } from '../../../entities/issue'
@@ -14,7 +14,7 @@ import type { AgentSessionMetadata, AgentSessionTranscriptResponse, SessionMetad
 import { SessionTranscriptLayout } from '../../../widgets/session-transcript'
 import { SessionRecoveryActions } from '../../../widgets/coder-session'
 import { SessionFollowupComposer } from '../../../widgets/coder-session'
-import { ContextHealthBar } from '../../../widgets/session-health'
+import { ContextHealthBar, CompactionLineageLink } from '../../../widgets/session-health'
 import { useSiblingSessions } from '../../../widgets/issue-workflow'
 import { Button } from '@/shared/ui/components/button'
 
@@ -574,6 +574,7 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount, r
 export function SessionPage() {
   const { number: numberStr, sessionId, sessionName } = useParams<{ number: string; sessionId?: string; sessionName?: string }>()
   const { projectId } = useProject()
+  const toProjectPath = useProjectPath()
   const queryClient = useQueryClient()
   const issueNumber = Number(numberStr)
   const decodedSessionId = sessionId ? decodeURIComponent(sessionId) : undefined
@@ -698,24 +699,49 @@ export function SessionPage() {
   const displayTurns = turns.map((turn) => projectTurn(turn))
 
   const recoverySessionName = detail?.metadata?.sessionName ?? session?.sessionName ?? session?.executionId ?? routeSessionKey ?? ''
+
+  // The lineage link is anchored to the runtime session the user is
+  // currently looking at — either the one named by the `?rt=` query
+  // param (intra-session runtime facet) or the latest binding (the
+  // page default when no `?rt` is present). The page itself always
+  // loads the metadata/transcript for the stable Mohist session; the
+  // `?rt` value is only used to scope the link to a specific runtime
+  // session in the lineage chain.
+  const [searchParams] = useSearchParams()
+  const runtimeLineage = metadata?.runtimeSessionLineage ?? null
+  const viewedRuntimeSessionId = searchParams.get('rt') ?? metadata?.acpSessionId ?? null
+  const lineageLink = runtimeLineage && runtimeLineage.length >= 2 ? (
+    <CompactionLineageLink
+      runtimeSessionLineage={runtimeLineage}
+      viewedRuntimeSessionId={viewedRuntimeSessionId}
+      buildTargetPath={(runtimeId) => {
+        const base = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(recoverySessionName)}`)
+        return `${base}?rt=${encodeURIComponent(runtimeId)}`
+      }}
+    />
+  ) : null
+
   const recoveryBar = recoverySessionName ? (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex-1 min-w-0">
-        <ContextHealthBar
-          contextWindowUsed={detail?.metadata?.usage?.contextWindowUsed ?? null}
-          contextWindowSize={detail?.metadata?.usage?.contextWindowSize ?? null}
-          contextUsagePercent={detail?.metadata?.usage?.contextUsagePercent ?? null}
-        />
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex-1 min-w-0">
+          <ContextHealthBar
+            contextWindowUsed={detail?.metadata?.usage?.contextWindowUsed ?? null}
+            contextWindowSize={detail?.metadata?.usage?.contextWindowSize ?? null}
+            contextUsagePercent={detail?.metadata?.usage?.contextUsagePercent ?? null}
+          />
+        </div>
+        <div className="shrink-0">
+          <SessionRecoveryActions
+            issueNumber={issueNumber}
+            sessionName={recoverySessionName}
+            status={detail?.metadata?.status ?? detail?.status ?? session?.status ?? null}
+            onSuccess={handleRecoverySuccess}
+            bare
+          />
+        </div>
       </div>
-      <div className="shrink-0">
-        <SessionRecoveryActions
-          issueNumber={issueNumber}
-          sessionName={recoverySessionName}
-          status={detail?.metadata?.status ?? detail?.status ?? session?.status ?? null}
-          onSuccess={handleRecoverySuccess}
-          bare
-        />
-      </div>
+      {lineageLink}
     </div>
   ) : null
 
@@ -936,13 +962,22 @@ export function SessionPage() {
           meta={detail.metadata}
           statusKind={displayStatusKind}
           turnCount={displayTurnCount}
-          recoveryBar={recoveryBar}
           siblingNav={siblingNavigation}
         />
         <div
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto min-w-0"
+          data-testid="session-transcript-scroll-container"
         >
+          {recoveryBar && (
+            <div
+              data-testid="session-recovery-bar"
+              data-sticky="true"
+              className="sticky top-0 z-20 border-b border-gray-200 bg-white px-4 py-3"
+            >
+              {recoveryBar}
+            </div>
+          )}
           <SessionTranscriptLayout
             title={detail.metadata.sessionName ?? routeSessionKey ?? 'Session'}
             turnCount={displayTurnCount}

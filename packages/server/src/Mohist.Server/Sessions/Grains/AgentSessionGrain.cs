@@ -778,7 +778,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 AgentSessionJsonHelper.GetCostAmount(payload),
                 AgentSessionJsonHelper.GetCostCurrency(payload),
                 AgentSessionJsonHelper.GetContextWindowUsed(payload),
-                AgentSessionJsonHelper.GetContextWindowSize(payload)),
+                AgentSessionJsonHelper.GetContextWindowSize(payload),
+                now),
             RuntimeEventTypes.ModelResolved => session.ResolveModel(
                 AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel") ?? AgentSessionJsonHelper.GetStringProp(payload, "model"),
                 now),

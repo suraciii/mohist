@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useAgentActivity } from '../../../entities/agent'
 import type { AgentActivitySession, AgentActivityWaiting } from '../../../entities/agent'
+import type { ContextUsageHistoryEntry } from '../../../entities/coder-session/model/types'
 
 export interface TaskProgress {
   completed: number
@@ -22,6 +23,16 @@ export interface WaitingCard {
   questionId?: string
   questionAskedAt?: string
 }
+
+/**
+ * One sample of the bounded context-usage history carried through
+ * `SessionCard.contextUsageHistory`. Mirrors the wire projection of
+ * `AgentUsageDto.contextUsageHistory` exposed by the activity feed
+ * (issue-245 T-002 / design D5). `null` means the server emitted no
+ * history for this session; the Pulse mini-chart component degrades
+ * to hidden in that case (and when fewer than 2 samples are present).
+ */
+export type SessionCardUsageHistoryEntry = ContextUsageHistoryEntry
 
 export interface SessionCard {
   issueId: string
@@ -50,6 +61,14 @@ export interface SessionCard {
   contextWindowUsed: number | null
   contextWindowSize: number | null
   contextUsagePercent?: number | null
+  /**
+   * Bounded context-usage history carried from the live activity
+   * source (`AgentUsageDto.contextUsageHistory`). Drives the
+   * `ContextUsageTrendMiniChart` on the Pulse compact card.
+   * Absent/null when the session has not recorded a usage sample
+   * (the wire omits the field entirely in that case).
+   */
+  contextUsageHistory?: SessionCardUsageHistoryEntry[] | null
   toolCallCount: number | null
   toolErrorCount: number | null
 }
@@ -63,9 +82,11 @@ export interface StatusCounts {
 
 const ACTIVE_STATUSES = new Set(['active'])
 
-function sessionToCard(s: AgentActivitySession): SessionCard {
+export function sessionToCard(s: AgentActivitySession): SessionCard {
   const usage = s.usage
   const eventSummary = s.eventSummary
+  const rawHistory = usage?.contextUsageHistory
+  const contextUsageHistory = rawHistory == null || rawHistory.length === 0 ? null : rawHistory
   return {
     issueId: s.issueId,
     issueNumber: String(s.issueNumber),
@@ -93,6 +114,7 @@ function sessionToCard(s: AgentActivitySession): SessionCard {
     contextWindowUsed: usage?.contextWindowUsed ?? null,
     contextWindowSize: usage?.contextWindowSize ?? null,
     contextUsagePercent: usage?.contextUsagePercent ?? null,
+    contextUsageHistory,
     toolCallCount: eventSummary?.toolCallCount ?? null,
     toolErrorCount: eventSummary?.toolErrorCount ?? null,
   }

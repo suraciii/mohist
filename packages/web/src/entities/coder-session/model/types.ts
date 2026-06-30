@@ -2,6 +2,27 @@ import type { SessionEvent } from '../../session/model/view'
 
 export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
 
+/**
+ * One sample in the bounded context-usage history exposed by
+ * `AgentUsageDto.contextUsageHistory` (projected server-side by
+ * `BuildUsageHistoryDto` from `AgentSession.Status.ContextUsageHistory`).
+ *
+ * The list is omitted from the wire when empty
+ * (`JsonIgnoreCondition.WhenWritingNull`), so a session that has
+ * never recorded a usage sample carries no `contextUsageHistory`
+ * field at all. `null` on the client mirrors that absence — the
+ * Pulse chart degrades to hidden when fewer than 2 samples are
+ * present (see `ContextUsageTrendMiniChart`).
+ *
+ * `at` is an ISO-8601 timestamp (the C# side stamps with
+ * `DateTime.ToString("o")`); `percent` is a 0–100 number (the
+ * classifier band is communicated by colour, not by this field).
+ */
+export interface ContextUsageHistoryEntry {
+  at: string
+  percent: number
+}
+
 export interface AgentSessionUsage {
   inputTokens?: number | null
   outputTokens?: number | null
@@ -14,6 +35,15 @@ export interface AgentSessionUsage {
   contextWindowSize?: number | null
   contextUsagePercent?: number | null
   healthStatus?: string | null
+  /**
+   * Bounded context-usage history retained server-side
+   * (issue-245 T-002 / design D5). Enables the Pulse compact
+   * card to render a context-usage trend mini-chart over the
+   * session lifetime rather than only the latest snapshot.
+   * Absent on the wire (undefined here) for sessions that have
+   * never recorded a usage sample.
+   */
+  contextUsageHistory?: ContextUsageHistoryEntry[] | null
 }
 
 export interface AgentSessionEventSummary {
@@ -33,6 +63,26 @@ export interface AgentSessionMetadataCounts {
 }
 
 export type AgentSessionEvent = SessionEvent
+
+/**
+ * One entry in the ordered lineage of runtime sessions bound to a
+ * Mohist session over its lifetime. The Mohist `sessionId` is the
+ * stable identity; each `agentRuntimeSessionId` is a mutable runtime
+ * facet created by compact/reset rebinds (see `design/conventions.md`
+ * identity rules). The chain starts with the original runtime
+ * session; each subsequent entry records a compact/reset rebind
+ * successor. Predecessor / successor are derived by position.
+ *
+ * Projected from `AgentSessionMetadataDto.runtimeSessionLineage` (T-001).
+ * Absent on the wire for sessions compacted before T-001 — the
+ * projection synthesizes a single entry from the current binding, so
+ * legacy sessions surface as a single-entry chain and the UI hides the
+ * link automatically.
+ */
+export interface RuntimeSessionLineageEntry {
+  agentRuntimeSessionId: string
+  boundAt: string
+}
 
 export interface AgentSessionMetadata {
   id: string
@@ -55,6 +105,15 @@ export interface AgentSessionMetadata {
   metadata: AgentSessionMetadataCounts
   eventSummary?: AgentSessionEventSummary
   usage?: AgentSessionUsage
+  /**
+   * Ordered lineage of runtime sessions bound to this Mohist session
+   * over its lifetime. Null when the session is truly unbound; a
+   * single entry when there has been no compaction/reset; multiple
+   * entries when compact/reset has rebound the runtime session.
+   * Hidden by the UI when the chain is a single entry (no compaction
+   * relationship).
+   */
+  runtimeSessionLineage?: RuntimeSessionLineageEntry[] | null
 }
 
 export interface FileChangeSummary {

@@ -1,7 +1,24 @@
+using Mohist.Server.Sessions.Services;
+
 namespace Mohist.Server.Sessions.Domain;
 
 public static partial class AgentSessionExtensions
 {
+    /// <summary>
+    /// Target cap for the retained context-usage history. Picked small
+    /// so a trend mini-chart still gets a "lifetime" view (issue-245 T-002,
+    /// design D5) while the grain state and downstream activity payloads
+    /// stay bounded.
+    /// </summary>
+    public const int ContextUsageHistoryCap = 24;
+
+    /// <summary>
+    /// Time-bucket size for context-usage history time-thinning. Within a
+    /// bucket only the latest sample is kept (last-wins), so back-to-back
+    /// usage updates don't drown out the long-run trend.
+    /// </summary>
+    public static readonly TimeSpan ContextUsageHistoryBucket = TimeSpan.FromSeconds(30);
+
     extension(AgentSession session)
     {
         public IReadOnlyList<AgentSessionEvent> MergeMetadata(AgentSessionMetadata? metadata)
@@ -34,10 +51,13 @@ public static partial class AgentSessionExtensions
                 AgentRuntimeSessionId = isNewRuntimeBinding ? agentSessionId : existingAgentSessionId,
                 BoundAt = isNewRuntimeBinding ? now : session.Status.BoundAt ?? now,
                 LastDataAt = now,
+                RuntimeSessionLineage = isNewRuntimeBinding
+                    ? AppendLineageEntry(session.Status.RuntimeSessionLineage, agentSessionId, now)
+                    : session.Status.RuntimeSessionLineage
             };
             var events = new List<AgentSessionEvent>();
             if (isNewRuntimeBinding)
-                events.Add(new AgentSessionRuntimeBound(agentSessionId));
+                events.Add(new AgentSessionRuntimeBound(agentSessionId, existingAgentSessionId));
             if (!string.Equals(oldModel, session.Settings.Model, StringComparison.Ordinal))
                 events.Add(new AgentSessionModelChanged(session.Settings.Model));
             return events;
@@ -69,9 +89,12 @@ public static partial class AgentSessionExtensions
             double? costAmount,
             string? costCurrency,
             long? contextWindowUsed,
-            long? contextWindowSize)
+            long? contextWindowSize,
+            DateTime now)
         {
             var usage = session.Status.UsageSummary ?? new AgentUsageSummary();
+            var newUsed = contextWindowUsed ?? usage.ContextWindowUsed;
+            var newSize = contextWindowSize ?? usage.ContextWindowSize;
             session.Status = session.Status with
             {
                 UsageSummary = usage with
@@ -83,9 +106,10 @@ public static partial class AgentSessionExtensions
                     ThoughtTokens = AddNonNegative(usage.ThoughtTokens, thoughtTokens),
                     CostAmount = AddNonNegative(usage.CostAmount, costAmount),
                     CostCurrency = costCurrency ?? usage.CostCurrency,
-                    ContextWindowUsed = contextWindowUsed ?? usage.ContextWindowUsed,
-                    ContextWindowSize = contextWindowSize ?? usage.ContextWindowSize
-                }
+                    ContextWindowUsed = newUsed,
+                    ContextWindowSize = newSize
+                },
+                ContextUsageHistory = AppendUsageHistorySample(session.Status.ContextUsageHistory, newUsed, newSize, now)
             };
             return [new AgentSessionUsageRecorded(session.Status.UsageSummary ?? new AgentUsageSummary())];
         }
@@ -97,6 +121,7 @@ public static partial class AgentSessionExtensions
             DateTime now)
         {
             var oldAgentSessionId = session.Status.AgentRuntimeSessionId;
+            var rebinds = !string.Equals(oldAgentSessionId, newAgentSessionId, StringComparison.Ordinal);
             session.Status = session.Status with
             {
                 AgentRuntimeSessionId = newAgentSessionId,
@@ -106,11 +131,20 @@ public static partial class AgentSessionExtensions
                 {
                     ContextWindowUsed = contextWindowUsedAfter,
                     ContextWindowSize = contextWindowSizeAfter ?? (session.Status.UsageSummary ?? new AgentUsageSummary()).ContextWindowSize,
-                }
+                },
+                // Append the new runtime session entry while keeping every prior
+                // entry. On the very first rebind after a legacy rehydration
+                // (no lineage yet but a stale AgentRuntimeSessionId),
+                // AppendLineageEntry backfills the predecessor so the chain
+                // still answers "who came before?".
+                RuntimeSessionLineage = rebinds
+                    ? AppendLineageEntry(session.Status.RuntimeSessionLineage, newAgentSessionId, now,
+                        seedPrevious: oldAgentSessionId)
+                    : session.Status.RuntimeSessionLineage
             };
             var events = new List<AgentSessionEvent>();
-            if (!string.Equals(oldAgentSessionId, newAgentSessionId, StringComparison.Ordinal))
-                events.Add(new AgentSessionRuntimeBound(newAgentSessionId));
+            if (rebinds)
+                events.Add(new AgentSessionRuntimeBound(newAgentSessionId, oldAgentSessionId));
             return events;
         }
 
@@ -168,7 +202,10 @@ public static partial class AgentSessionExtensions
         /// Records a context-health transition (green/yellow/red
         /// threshold crossing or large percent change). The session
         /// status is updated so subsequent reads of the session
-        /// expose the latest known health snapshot.
+        /// expose the latest known health snapshot, and the bounded
+        /// context-usage history is thinned-appended so a freshly
+        /// opened Pulse sees the lifetime trend rather than only the
+        /// latest snapshot (issue-245 T-002 / design D5).
         /// </summary>
         public IReadOnlyList<AgentSessionEvent> RecordContextHealthUpdate(
             string healthStatus,
@@ -177,7 +214,15 @@ public static partial class AgentSessionExtensions
             long? contextWindowSize,
             DateTime now)
         {
-            session.Status = session.Status with { LastDataAt = now };
+            session.Status = session.Status with
+            {
+                LastDataAt = now,
+                ContextUsageHistory = AppendUsageHistorySample(
+                    session.Status.ContextUsageHistory,
+                    contextWindowUsed,
+                    contextWindowSize,
+                    now)
+            };
             return [new AgentSessionContextHealthUpdated(
                 HealthStatus: healthStatus,
                 ContextUsagePercent: contextUsagePercent,
@@ -197,5 +242,92 @@ public static partial class AgentSessionExtensions
             if (delta is null or < 0) return current;
             return (current ?? 0) + delta.Value;
         }
+
+        /// <summary>
+        /// Returns a new lineage list with <paramref name="newAgentSessionId"/>
+        /// appended at <paramref name="now"/>. When the chain is empty
+        /// (legacy rehydration or never-bound session) and
+        /// <paramref name="seedPrevious"/> is non-null, the predecessor
+        /// is back-filled first so the chain still answers
+        /// "who came before?". Otherwise the chain is left untouched
+        /// on null (matches the historical "no lineage" rendering).
+        /// </summary>
+        private static IReadOnlyList<RuntimeSessionLineageEntry> AppendLineageEntry(
+            IReadOnlyList<RuntimeSessionLineageEntry>? lineage,
+            string newAgentSessionId,
+            DateTime now,
+            string? seedPrevious = null)
+        {
+            var entries = lineage is null
+                ? new List<RuntimeSessionLineageEntry>()
+                : new List<RuntimeSessionLineageEntry>(lineage);
+
+            if (entries.Count == 0
+                && !string.IsNullOrEmpty(seedPrevious)
+                && !string.Equals(seedPrevious, newAgentSessionId, StringComparison.Ordinal))
+            {
+                entries.Add(new RuntimeSessionLineageEntry(seedPrevious, now));
+            }
+
+            entries.Add(new RuntimeSessionLineageEntry(newAgentSessionId, now));
+            return entries;
+        }
+
+        /// <summary>
+        /// Appends a thinned <see cref="ContextUsageHistoryEntry"/> to
+        /// <paramref name="history"/>. Behaviour (issue-245 T-002, design D5):
+        /// <list type="bullet">
+        ///   <item><description>returns <paramref name="history"/> unchanged
+        ///   when <paramref name="contextWindowUsed"/> or
+        ///   <paramref name="contextWindowSize"/> cannot produce a finite
+        ///   0..100 % (mirrors <see cref="AgentSessionJsonHelper.ContextUsagePercent"/>);</description></item>
+        ///   <item><description>coalesces with the last entry when it falls
+        ///   inside the same <see cref="ContextUsageHistoryBucket"/> time
+        ///   window (last-wins) so back-to-back usage updates don't drown
+        ///   the long-run trend;</description></item>
+        ///   <item><description>truncates to the most recent
+        ///   <see cref="ContextUsageHistoryCap"/> samples so the history
+        ///   cannot grow unbounded regardless of session length (bounded
+        ///   payload).</description></item>
+        /// </list>
+        /// </summary>
+        private static IReadOnlyList<ContextUsageHistoryEntry>? AppendUsageHistorySample(
+            IReadOnlyList<ContextUsageHistoryEntry>? history,
+            long? contextWindowUsed,
+            long? contextWindowSize,
+            DateTime now)
+        {
+            if (history is null) return null;
+
+            var percent = AgentSessionJsonHelper.ContextUsagePercent(contextWindowUsed, contextWindowSize);
+            if (percent is null) return history;
+
+            var entries = new List<ContextUsageHistoryEntry>(history.Count + 1);
+            entries.AddRange(history);
+
+            var lastBucket = GetHistoryBucket(entries.Count > 0 ? entries[^1].At : (DateTime?)null);
+            var nowBucket = GetHistoryBucket(now);
+
+            if (entries.Count > 0 && lastBucket == nowBucket)
+            {
+                entries[^1] = new ContextUsageHistoryEntry(now, percent.Value);
+            }
+            else
+            {
+                entries.Add(new ContextUsageHistoryEntry(now, percent.Value));
+            }
+
+            if (entries.Count > ContextUsageHistoryCap)
+            {
+                entries.RemoveRange(0, entries.Count - ContextUsageHistoryCap);
+            }
+
+            return entries;
+        }
+
+        private static long GetHistoryBucket(DateTime? at) =>
+            at is null
+                ? long.MinValue
+                : at.Value.Ticks / ContextUsageHistoryBucket.Ticks;
     }
 }

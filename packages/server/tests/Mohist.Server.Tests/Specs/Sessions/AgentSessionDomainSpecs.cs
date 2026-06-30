@@ -54,7 +54,7 @@ public class AgentSessionDomainSpecs
         var session = CreateSession();
 
         session.AttachPhysicalSession("acp-1", "intent-model", "/work", "/change", 123, DateTime.UtcNow);
-        session.ApplyUsage(10, 5, 15, 1, 2, 0.01, "USD", 100, 200);
+        session.ApplyUsage(10, 5, 15, 1, 2, 0.01, "USD", 100, 200, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
         var json = JsonSerializer.Serialize(session);
 
         using var doc = JsonDocument.Parse(json);
@@ -83,8 +83,8 @@ public class AgentSessionDomainSpecs
     {
         var session = CreateSession();
 
-        var firstEvents = session.ApplyUsage(10, 5, 15, 2, 1, 0.001, "USD", 100, 200);
-        var secondEvents = session.ApplyUsage(20, 10, 30, 3, 2, 0.002, "USD", 150, 200);
+        var firstEvents = session.ApplyUsage(10, 5, 15, 2, 1, 0.001, "USD", 100, 200, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
+        var secondEvents = session.ApplyUsage(20, 10, 30, 3, 2, 0.002, "USD", 150, 200, new DateTime(2026, 6, 10, 0, 0, 30, DateTimeKind.Utc));
 
         Assert.Equal(30, Usage(session).InputTokens);
         Assert.Equal(15, Usage(session).OutputTokens);
@@ -154,7 +154,7 @@ public class AgentSessionDomainSpecs
         var second = first.AddMinutes(1);
 
         session.RecordActivity(first);
-        session.ApplyUsage(10, 5, 15, null, null, null, null, null, null);
+        session.ApplyUsage(10, 5, 15, null, null, null, null, null, null, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
         session.RecordActivity(second);
 
         Assert.Equal(second, session.Status.LastDataAt);
@@ -168,8 +168,8 @@ public class AgentSessionDomainSpecs
     {
         var session = CreateSession();
 
-        session.ApplyUsage(null, null, null, null, null, 0.001, "USD", null, null);
-        session.ApplyUsage(null, null, null, null, null, 0.002, "EUR", null, null);
+        session.ApplyUsage(null, null, null, null, null, 0.001, "USD", null, null, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
+        session.ApplyUsage(null, null, null, null, null, 0.002, "EUR", null, null, new DateTime(2026, 6, 10, 0, 0, 30, DateTimeKind.Utc));
 
         Assert.Equal(0.003, Usage(session).CostAmount);
         Assert.Equal("EUR", Usage(session).CostCurrency);
@@ -181,9 +181,11 @@ public class AgentSessionDomainSpecs
     public void ApplyUsage_UpdatesContextWindowSnapshot()
     {
         var session = CreateSession();
+        var firstAt = new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc);
+        var secondAt = firstAt.AddMinutes(1);
 
-        session.ApplyUsage(null, null, null, null, null, null, null, 100, 200);
-        session.ApplyUsage(null, null, null, null, null, null, null, 150, 250);
+        session.ApplyUsage(null, null, null, null, null, null, null, 100, 200, firstAt);
+        session.ApplyUsage(null, null, null, null, null, null, null, 150, 250, secondAt);
 
         Assert.Equal(150, Usage(session).ContextWindowUsed);
         Assert.Equal(250, Usage(session).ContextWindowSize);
@@ -205,7 +207,7 @@ public class AgentSessionDomainSpecs
             }
         };
 
-        session.ApplyUsage(null, null, null, null, null, null, null, null, null);
+        session.ApplyUsage(null, null, null, null, null, null, null, null, null, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
 
         Assert.Equal(10, Usage(session).InputTokens);
         Assert.Equal(0.005, Usage(session).CostAmount);
@@ -223,7 +225,7 @@ public class AgentSessionDomainSpecs
             UsageSummary = Usage(session) with { InputTokens = 10 }
         };
 
-        session.ApplyUsage(-5, -3, -8, null, null, -0.001, null, null, null);
+        session.ApplyUsage(-5, -3, -8, null, null, -0.001, null, null, null, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
 
         Assert.Equal(10, Usage(session).InputTokens);
         Assert.Null(Usage(session).OutputTokens);
@@ -239,10 +241,159 @@ public class AgentSessionDomainSpecs
         var session = CreateSession();
         session.RecordActivity(DateTime.UtcNow);
 
-        session.ApplyUsage(10, 5, 15, null, null, 0.001, "USD", 100, 200);
+        session.ApplyUsage(10, 5, 15, null, null, 0.001, "USD", 100, 200, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
 
         Assert.Equal(10, Usage(session).InputTokens);
         Assert.Equal(0.001, Usage(session).CostAmount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void ApplyUsage_AppendsContextUsageHistorySample()
+    {
+        var session = CreateSession();
+        var now = new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc);
+
+        session.ApplyUsage(null, null, null, null, null, null, null, 25_000, 100_000, now);
+
+        Assert.NotNull(session.Status.ContextUsageHistory);
+        var sample = Assert.Single(session.Status.ContextUsageHistory!);
+        Assert.Equal(now, sample.At);
+        Assert.Equal(25.0, sample.Percent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void ApplyUsage_HistoryTimeThinningCoalescesNearbySamples()
+    {
+        var session = CreateSession();
+        var bucketStart = new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc);
+        var sameBucketLater = bucketStart.AddSeconds(10);
+        var sameBucketLatest = bucketStart.AddSeconds(25);
+        var nextBucket = bucketStart.AddSeconds(45);
+
+        session.ApplyUsage(null, null, null, null, null, null, null, 10_000, 100_000, bucketStart);
+        session.ApplyUsage(null, null, null, null, null, null, null, 20_000, 100_000, sameBucketLater);
+        session.ApplyUsage(null, null, null, null, null, null, null, 30_000, 100_000, sameBucketLatest);
+        session.ApplyUsage(null, null, null, null, null, null, null, 40_000, 100_000, nextBucket);
+
+        var history = session.Status.ContextUsageHistory!;
+        // 1st sample coalesced by 2nd (same bucket), then coalesced again by
+        // 3rd (still same bucket); 4th lands in the next bucket and is appended.
+        Assert.Equal(2, history.Count);
+        Assert.Equal(sameBucketLatest, history[0].At);
+        Assert.Equal(30.0, history[0].Percent);
+        Assert.Equal(nextBucket, history[1].At);
+        Assert.Equal(40.0, history[1].Percent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void ApplyUsage_HistoryHardCapRetainsLastNSamples()
+    {
+        var session = CreateSession();
+        var now = new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc);
+        const int total = AgentSessionExtensions.ContextUsageHistoryCap + 5;
+
+        for (var i = 0; i < total; i++)
+        {
+            var at = now.AddSeconds(i * AgentSessionExtensions.ContextUsageHistoryBucket.TotalSeconds);
+            session.ApplyUsage(null, null, null, null, null, null, null, (i + 1) * 1_000, 100_000, at);
+        }
+
+        var history = session.Status.ContextUsageHistory!;
+        Assert.Equal(AgentSessionExtensions.ContextUsageHistoryCap, history.Count);
+        // Cap drops oldest samples — the first retained entry is sample #5
+        // (zero-based), which corresponds to 6_000 used / 100_000 size = 6%.
+        Assert.Equal(6.0, history[0].Percent);
+        Assert.Equal(total * 1_000 / 1000d, history[^1].Percent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void ApplyUsage_MissingContextWindow_DoesNotAppendSample()
+    {
+        var session = CreateSession();
+        var now = new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc);
+
+        session.ApplyUsage(null, null, null, null, null, null, null, null, null, now);
+
+        Assert.Empty(session.Status.ContextUsageHistory!);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void AttachPhysicalSession_FirstBinding_SeedsLineageWithSingleEntry()
+    {
+        var session = CreateSession();
+        var boundAt = new DateTime(2026, 6, 21, 1, 2, 3, DateTimeKind.Utc);
+
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
+
+        var lineage = session.Status.RuntimeSessionLineage;
+        Assert.NotNull(lineage);
+        var entry = Assert.Single(lineage!);
+        Assert.Equal("runtime-session-1", entry.AgentRuntimeSessionId);
+        Assert.Equal(boundAt, entry.BoundAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void AttachPhysicalSession_SamePhysicalSession_DoesNotGrowLineage()
+    {
+        var session = CreateSession();
+        var boundAt = new DateTime(2026, 6, 21, 1, 2, 3, DateTimeKind.Utc);
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
+
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
+
+        Assert.Single(session.Status.RuntimeSessionLineage!);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void AttachPhysicalSession_RebindToNewPhysicalSession_AppendsLineageAndCarriesPrevious()
+    {
+        var session = CreateSession();
+        var firstBoundAt = new DateTime(2026, 6, 21, 1, 0, 0, DateTimeKind.Utc);
+        var reboundAt = firstBoundAt.AddMinutes(2);
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, firstBoundAt);
+
+        var events = session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, reboundAt);
+
+        var lineage = session.Status.RuntimeSessionLineage!;
+        Assert.Equal(2, lineage.Count);
+        Assert.Equal("runtime-session-1", lineage[0].AgentRuntimeSessionId);
+        Assert.Equal(firstBoundAt, lineage[0].BoundAt);
+        Assert.Equal("runtime-session-2", lineage[1].AgentRuntimeSessionId);
+        Assert.Equal(reboundAt, lineage[1].BoundAt);
+
+        var boundEvent = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
+        var bound = Assert.IsType<AgentSessionRuntimeBound>(boundEvent.Value);
+        Assert.Equal("runtime-session-2", bound.AgentRuntimeSessionId);
+        Assert.Equal("runtime-session-1", bound.PreviousAgentRuntimeSessionId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void AttachPhysicalSession_NewlyCreatedSession_RuntimeBoundEventHasNullPrevious()
+    {
+        var session = CreateSession();
+        var boundAt = new DateTime(2026, 6, 21, 0, 0, 0, DateTimeKind.Utc);
+
+        var events = session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, boundAt);
+
+        var boundEvent = Assert.Single(events, e => e.Value is AgentSessionRuntimeBound);
+        var bound = Assert.IsType<AgentSessionRuntimeBound>(boundEvent.Value);
+        Assert.Equal("runtime-session-1", bound.AgentRuntimeSessionId);
+        Assert.Null(bound.PreviousAgentRuntimeSessionId);
+    }
 }

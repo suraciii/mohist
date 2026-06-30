@@ -7,6 +7,7 @@ import { deriveToolCallTitle } from '../model/useSessionTimeline'
 import { PlanProgressPanel } from '../../issue-workflow/ui/PlanProgressPanel'
 import { ContextHealthBar } from '../../session-health/ui/ContextHealthBar'
 import { CompactionTimelineEntry } from '../../session-health/ui/CompactionTimelineEntry'
+import { CompactionCompactSummary } from '../../session-health/ui/CompactionCompactSummary'
 
 interface SessionTimelineProps {
   rounds: Round[]
@@ -524,6 +525,9 @@ export function SessionTimeline({
     && contextHealth.contextWindowSize > 0
     && (onCompact != null || onReset != null)
 
+  const allCompactions = rounds.flatMap((round) => round.compactions)
+  const hasCompactions = allCompactions.length > 0
+
   return (
     <div className="rounded-lg border border-blue-200 bg-blue-50/30">
       <div className="px-3 py-2 border-b border-blue-200 flex items-center gap-2">
@@ -551,6 +555,10 @@ export function SessionTimeline({
               onReset={onReset}
             />
           </div>
+        )}
+
+        {hasCompactions && (
+          <CompactionCompactSummary entries={allCompactions} />
         )}
 
         <WorkflowStatusTimeline currentStage={currentStage} />

@@ -1,3 +1,4 @@
+import { AlertTriangleIcon, CircleAlertIcon } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import { resolveContextUsage, type ContextHealthStatus } from '../model/context-health'
 
@@ -13,30 +14,74 @@ export interface ContextHealthIndicatorProps {
    */
   showTokens?: boolean
   /**
-   * Optional accessible label override. Defaults to a constructed
-   * "Context usage NN%" string that screen readers can announce.
+   * Optional accessible label override. Defaults to a severity-aware
+   * tooltip: a descriptive message for yellow/red ("Context window
+   * NN% full — near limit" / "… at limit, compact or reset recommended")
+   * and a simple "Context usage NN%" for healthy (green) usage so a
+   * healthy session does not advertise a non-existent problem.
    */
   ariaLabel?: string
 }
 
 const DOT_CLASS: Record<ContextHealthStatus, string> = {
-  green: 'bg-green-500',
+  green: 'bg-gray-400',
   yellow: 'bg-yellow-500',
   red: 'bg-red-500',
 }
 
 const TEXT_CLASS: Record<ContextHealthStatus, string> = {
-  green: 'text-green-700',
-  yellow: 'text-yellow-700',
-  red: 'text-red-700',
+  // Healthy usage is deliberately quiet: neutral gray, no warning
+  // color, no background pill. The alert treatment reserved for
+  // yellow/red signals "this needs attention".
+  green: 'text-gray-600',
+  yellow: 'text-yellow-800',
+  red: 'text-red-800',
+}
+
+const CONTAINER_CLASS: Record<ContextHealthStatus, string> = {
+  green: '',
+  yellow: 'rounded px-1.5 bg-yellow-50 border border-yellow-300',
+  red: 'rounded px-1.5 bg-red-50 border border-red-300',
+}
+
+const SEVERITY_LABEL: Record<ContextHealthStatus, 'ok' | 'warning' | 'critical'> = {
+  green: 'ok',
+  yellow: 'warning',
+  red: 'critical',
 }
 
 /**
- * Compact context-health badge for session list rows. Renders a colored
- * dot plus the current usage percentage (and optionally a "X / Y" token
- * label). Hidden entirely when no context data is available so that
- * sessions that have not yet received a `usage.updated` event do not
- * show a misleading empty indicator.
+ * Build a severity-aware tooltip. Healthy usage keeps a simple
+ * description; yellow/red communicate the situation directly so a user
+ * hovering a list row understands the situation without opening the
+ * session page.
+ */
+function buildSeverityTooltip(status: ContextHealthStatus, percent: number): string {
+  const rounded = Math.round(percent)
+  if (status === 'red') {
+    return `Context window ${rounded}% full — at limit, compact or reset recommended`
+  }
+  if (status === 'yellow') {
+    return `Context window ${rounded}% full — near limit`
+  }
+  return `Context usage ${rounded}%`
+}
+
+/**
+ * Compact context-health badge for session list rows, Pulse compact
+ * cards, and the session page. Renders a colored dot plus the current
+ * usage percentage (and optionally a "X / Y" token label).
+ *
+ * Alert treatment is centralized here so every surface renders the
+ * same warning behavior:
+ *   - yellow (60 – 79.99%)  → warning glyph + role="status"
+ *     + descriptive "near limit" tooltip
+ *   - red    (>= 80%)       → error glyph + role="alert"
+ *     + aria-live="polite" + descriptive "at limit" tooltip
+ *   - green  (< 60%)        → quiet, neutral gray, no glyph / role / aria-live
+ *   - missing / non-finite / non-positive-window → renders nothing
+ *     so a session that has not yet received a `usage.updated` event
+ *     does not display a misleading empty indicator.
  */
 export function ContextHealthIndicator({
   contextWindowUsed,
@@ -53,18 +98,42 @@ export function ContextHealthIndicator({
   }
 
   const label = `${Math.round(usage.percent)}%`
-  const description = ariaLabel ?? `Context usage ${label}`
+  const description = ariaLabel ?? buildSeverityTooltip(usage.status, usage.percent)
+  const status = usage.status
+  const severity = SEVERITY_LABEL[status]
 
   return (
     <span
-      className={cn('inline-flex items-center gap-1 text-[10px] font-medium', TEXT_CLASS[usage.status], className)}
+      className={cn(
+        'inline-flex items-center gap-1 text-[10px] font-medium',
+        TEXT_CLASS[status],
+        CONTAINER_CLASS[status],
+        className,
+      )}
       data-testid="context-health-indicator"
-      data-status={usage.status}
+      data-status={status}
+      data-severity={severity}
       title={description}
       aria-label={description}
+      role={status === 'red' ? 'alert' : status === 'yellow' ? 'status' : undefined}
+      aria-live={status === 'red' ? 'polite' : undefined}
     >
+      {status === 'red' && (
+        <CircleAlertIcon
+          className="h-3 w-3 shrink-0"
+          aria-hidden="true"
+          data-testid="context-health-glyph"
+        />
+      )}
+      {status === 'yellow' && (
+        <AlertTriangleIcon
+          className="h-3 w-3 shrink-0"
+          aria-hidden="true"
+          data-testid="context-health-glyph"
+        />
+      )}
       <span
-        className={cn('inline-block h-1.5 w-1.5 rounded-full', DOT_CLASS[usage.status])}
+        className={cn('inline-block h-1.5 w-1.5 rounded-full', DOT_CLASS[status])}
         aria-hidden="true"
       />
       <span className="tabular-nums">{label}</span>

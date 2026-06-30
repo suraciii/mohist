@@ -206,6 +206,152 @@ describe('SessionTimeline', () => {
     expect(within(entry).getByTestId('compaction-timeline-counts')).toHaveTextContent('950.0k tokens')
   })
 
+  it('renders the compact compaction summary atop the transcript when any round carries compaction events', () => {
+    const round = makeRound({
+      compactions: [
+        {
+          id: 'comp-1',
+          strategy: 'summary',
+          contextWindowUsedBefore: 950_000,
+          contextWindowUsedAfter: 400_000,
+          contextWindowSize: 1_000_000,
+          summary: 'Kept the original task instructions.',
+          timestamp: 1_704_067_200_000,
+          recordedAt: '2024-01-01T00:00:00Z',
+        },
+      ],
+    })
+    render(
+      <SessionTimeline
+        rounds={[round]}
+        isLoading={false}
+        isStreaming={false}
+        currentStage="build"
+        isLive={false}
+        taskProgress={new Map()}
+        loopProgress={null}
+        recoveryStatus={null}
+        planProgress={null}
+      />,
+    )
+    // The compact summary is rendered in the page (not nested inside the round).
+    const summary = screen.getByTestId('compaction-compact-summary')
+    expect(summary).toBeInTheDocument()
+    expect(summary).toHaveAttribute('data-compaction-count', '1')
+    // The summary must come before the per-round entry in document order
+    // (i.e. it is "atop the transcript", not buried inside the round).
+    const root = screen.getByText('Agent Session').closest('[class*="rounded-lg"]') as HTMLElement | null
+    expect(root).not.toBeNull()
+    const all = Array.from(root!.querySelectorAll('[data-testid]'))
+    const summaryIdx = all.findIndex((el) => el.getAttribute('data-testid') === 'compaction-compact-summary')
+    const entryIdx = all.findIndex((el) => el.getAttribute('data-testid') === 'compaction-timeline-entry')
+    expect(summaryIdx).toBeGreaterThanOrEqual(0)
+    expect(entryIdx).toBeGreaterThanOrEqual(0)
+    expect(summaryIdx).toBeLessThan(entryIdx)
+  })
+
+  it('aggregates compaction events from multiple rounds into one compact summary', () => {
+    const round1 = makeRound({
+      roundIndex: 0,
+      compactions: [
+        {
+          id: 'comp-a',
+          strategy: 'summary',
+          contextWindowUsedBefore: 900_000,
+          contextWindowUsedAfter: 400_000,
+          contextWindowSize: 1_000_000,
+          timestamp: 1_704_067_200_000,
+          recordedAt: '2024-01-01T00:00:00Z',
+        },
+      ],
+    })
+    const round2 = makeRound({
+      roundIndex: 1,
+      label: 'Round 2',
+      compactions: [
+        {
+          id: 'comp-b',
+          strategy: 'sliding-window',
+          contextWindowUsedBefore: 800_000,
+          contextWindowUsedAfter: 300_000,
+          contextWindowSize: 1_000_000,
+          timestamp: 1_704_153_600_000,
+          recordedAt: '2024-01-01T00:00:30Z',
+        },
+      ],
+    })
+    render(
+      <SessionTimeline
+        rounds={[round1, round2]}
+        isLoading={false}
+        isStreaming={false}
+        currentStage="build"
+        isLive={false}
+        taskProgress={new Map()}
+        loopProgress={null}
+        recoveryStatus={null}
+        planProgress={null}
+      />,
+    )
+    const summary = screen.getByTestId('compaction-compact-summary')
+    expect(summary).toBeInTheDocument()
+    expect(summary).toHaveAttribute('data-compaction-count', '2')
+    expect(screen.getByTestId('compaction-compact-summary-count')).toHaveTextContent('2 compactions')
+  })
+
+  it('omits the compact compaction summary when no round carries compaction events', () => {
+    render(
+      <SessionTimeline
+        rounds={[makeRound()]}
+        isLoading={false}
+        isStreaming={false}
+        currentStage="build"
+        isLive={false}
+        taskProgress={new Map()}
+        loopProgress={null}
+        recoveryStatus={null}
+        planProgress={null}
+      />,
+    )
+    expect(screen.queryByTestId('compaction-compact-summary')).toBeNull()
+  })
+
+  it('keeps the per-round CompactionTimelineEntry intact when the compact summary is rendered', () => {
+    const round = makeRound({
+      compactions: [
+        {
+          id: 'comp-1',
+          strategy: 'summary',
+          contextWindowUsedBefore: 950_000,
+          contextWindowUsedAfter: 400_000,
+          contextWindowSize: 1_000_000,
+          summary: 'Kept the original task instructions.',
+          timestamp: 1_704_067_200_000,
+          recordedAt: '2024-01-01T00:00:00Z',
+        },
+      ],
+    })
+    render(
+      <SessionTimeline
+        rounds={[round]}
+        isLoading={false}
+        isStreaming={false}
+        currentStage="build"
+        isLive={false}
+        taskProgress={new Map()}
+        loopProgress={null}
+        recoveryStatus={null}
+        planProgress={null}
+      />,
+    )
+    // Per-round detail (before/after token counts) must remain visible,
+    // sitting below the aggregate summary (which is at the transcript top).
+    const entry = screen.getByTestId('compaction-timeline-entry')
+    expect(entry).toBeInTheDocument()
+    expect(within(entry).getByTestId('compaction-timeline-counts')).toHaveTextContent('950.0k tokens')
+    expect(within(entry).getByTestId('compaction-timeline-counts')).toHaveTextContent('400.0k tokens')
+  })
+
   it('does not render a health bar when contextWindowSize is zero', () => {
     render(
       <SessionTimeline
