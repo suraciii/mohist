@@ -198,17 +198,13 @@ public static class WorkflowGrainTestHelpers
             "test-host",
             TestProjectId(workflowId)));
 
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            var work = await runner.PollAsync();
-            if (work is not null)
-                return (work, runnerId);
-
-            await Task.Delay(20);
-        }
-
-        Assert.Fail($"Runner '{runnerId}' has no work for workflow '{workflowId}'");
-        return default;
+        var work = await TestWait.ForAsync(
+            () => runner.PollAsync(),
+            value => value is not null,
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(20),
+            $"Runner '{runnerId}' to receive work for workflow '{workflowId}'");
+        return (work!, runnerId);
     }
 
     public static async Task ReportAsync(IGrainFactory grains, string runnerId, string workflowRunId, string workId, WorkResult result)
