@@ -641,18 +641,12 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         var management = Grains.GetGrain<IManagementGrain>(0);
         await management.ForceActivationCollection(TimeSpan.Zero);
 
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var activations = await management.GetDetailedGrainStatistics();
-            if (!activations.Any(stat => stat.GrainType.Contains(nameof(RunnerGrain), StringComparison.Ordinal)
-                && stat.GrainId.ToString()!.Contains(runnerId, StringComparison.Ordinal)))
-            {
-                return;
-            }
-
-            await Task.Delay(50);
-        }
-
-        Assert.Fail($"Runner grain '{runnerId}' did not deactivate in time.");
+        await TestWait.ForAsync(
+            async () => await management.GetDetailedGrainStatistics(),
+            activations => !activations.Any(stat => stat.GrainType.Contains(nameof(RunnerGrain), StringComparison.Ordinal)
+                && stat.GrainId.ToString()!.Contains(runnerId, StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(50),
+            $"Runner grain '{runnerId}' to deactivate");
     }
 }
