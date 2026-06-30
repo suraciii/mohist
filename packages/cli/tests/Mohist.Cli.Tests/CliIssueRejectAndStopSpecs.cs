@@ -7,29 +7,10 @@ namespace Mohist.Cli.Tests;
 
 public class CliIssueRejectAndStopSpecs
 {
-    private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateHarness(Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
-    {
-        var handler = new RecordingHttpHandler((req, _) =>
-        {
-            var response = responder?.Invoke(req);
-            if (response is not null) return Task.FromResult(response);
-            return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { } }));
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fs = new FakeFileSystem();
-        fs.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-            "{\"activeProjectId\":\"proj_abc\"}");
-        return (handler, http, output, error, fs, new FakeCommandExecutor());
-    }
-
     [Fact]
     public async Task IssueReject_SuccessPath_SendsPostWithMessageAndPrintsConfirmation()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -64,7 +45,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueReject_MissingMessage_PrintsValidationErrorAndExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "reject", "42"], output, error, fs, executor);
@@ -78,7 +59,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueReject_EmptyMessage_PrintsValidationErrorAndExitsWithCodeOne()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "reject", "42", "--message", "   "], output, error, fs, executor);
@@ -92,7 +73,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueReject_AcceptsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -118,7 +99,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueStop_SuccessPath_SendsPostAndPrintsConfirmation()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -147,7 +128,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueStop_HelpExplainsTerminalAndDistinguishesFromForceStop()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "stop", "--help"], output, error, fs, executor);
@@ -163,7 +144,7 @@ public class CliIssueRejectAndStopSpecs
     [Fact]
     public async Task IssueStop_AcceptsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
