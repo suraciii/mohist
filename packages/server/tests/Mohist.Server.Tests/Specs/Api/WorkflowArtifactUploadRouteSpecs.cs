@@ -364,14 +364,12 @@ public class WorkflowArtifactUploadRouteSpecs
         await workflow.AssignRunnerAsync(runnerId);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        // Poll until the runner has an active work item, then read the workId.
-        WorkDispatch? work = null;
-        for (var i = 0; i < 100 && work is null; i++)
-        {
-            work = await runner.PollAsync();
-            if (work is null) await Task.Delay(20);
-        }
-        Assert.NotNull(work);
+        var work = await TestWait.ForAsync(
+            () => runner.PollAsync(),
+            value => value is not null,
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(20),
+            $"Runner '{runnerId}' to receive active work");
 // Note: the runner is intentionally left registered here. Unregistering
         // would fail the in-flight task via the runner-lost notification, which
         // would break the subsequent upload assertions that require an active
