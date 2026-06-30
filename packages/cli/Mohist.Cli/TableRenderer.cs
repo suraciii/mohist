@@ -120,6 +120,15 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.AgentSessionFollowup:
                 RenderAgentSessionFollowup(data);
                 break;
+            case MohistCliApi.TableShape.ProjectTemplateList:
+                RenderProjectTemplateList(data);
+                break;
+            case MohistCliApi.TableShape.ProjectTemplateShow:
+                RenderProjectTemplateShow(data);
+                break;
+            case MohistCliApi.TableShape.ProjectWorkflowProfile:
+                RenderProjectWorkflowProfile(data);
+                break;
             case MohistCliApi.TableShape.AgentSessionCancel:
                 RenderAgentSessionCancel(data);
                 break;
@@ -131,6 +140,9 @@ internal sealed partial class TableRenderer
                 break;
             case MohistCliApi.TableShape.AgentSessionTranscript:
                 RenderAgentSessionTranscript(data);
+                break;
+            case MohistCliApi.TableShape.IssueArchiveCompleted:
+                RenderIssueArchiveCompleted(data);
                 break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
