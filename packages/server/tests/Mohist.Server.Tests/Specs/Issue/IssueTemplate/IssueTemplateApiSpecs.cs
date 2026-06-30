@@ -90,10 +90,7 @@ public class IssueTemplateApiSpecs
         responseAlias.EnsureSuccessStatusCode();
         var alias = (await responseAlias.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
 
-        Assert.Equal(canonical.GetProperty("id").GetString(), alias.GetProperty("id").GetString());
-        Assert.Equal(canonical.GetProperty("name").GetString(), alias.GetProperty("name").GetString());
-        Assert.Equal(canonical.GetProperty("description").GetString(), alias.GetProperty("description").GetString());
-        Assert.Equal(canonical.GetProperty("sections").GetArrayLength(), alias.GetProperty("sections").GetArrayLength());
+        Assert.Equal(canonical.GetRawText(), alias.GetRawText());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -172,6 +169,12 @@ public class IssueTemplateApiSpecs
         var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
         Assert.Equal("Custom Feature", data.GetProperty("name").GetString());
         Assert.Equal("Project feature template", data.GetProperty("description").GetString());
+        Assert.Equal("custom", data.GetProperty("source").GetString());
+
+        var aliasResponse = await _client.GetAsync($"/api/issue-templates/mohist/default?projectId={project.Id}");
+        aliasResponse.EnsureSuccessStatusCode();
+        var aliasData = (await aliasResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal(data.GetRawText(), aliasData.GetRawText());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

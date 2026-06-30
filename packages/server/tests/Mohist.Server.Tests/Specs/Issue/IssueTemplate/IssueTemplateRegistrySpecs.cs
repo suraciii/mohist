@@ -145,6 +145,36 @@ public class IssueTemplateRegistrySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public void Discover_BuiltInWithUnterminatedFrontmatter_FailsBeforeScanningWholeBody()
+    {
+        var bodyLines = Enumerable.Range(0, 200)
+            .Select(i => i == 150 ? "body-marker" : $"body-{i}");
+        var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["/templates/feature.md"] = "---\nname: Feature\ndescription: Product feature work\n" + string.Join('\n', bodyLines),
+        };
+        var readers = new List<FrontmatterOnlyReader>();
+        var loader = new IssueTemplateFileLoader(
+            "/templates",
+            (_, _) => files.Keys,
+            path =>
+            {
+                var reader = new FrontmatterOnlyReader(files[path]);
+                readers.Add(reader);
+                return reader;
+            },
+            path => files[path]);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => loader.Discover());
+
+        Assert.IsType<InvalidDataException>(ex.InnerException);
+        var reader = Assert.Single(readers);
+        Assert.False(reader.MarkerWasRead);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public void Get_ReadsOnlyRequestedBuiltInTemplateBody()
     {
         var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -589,7 +619,7 @@ public class IssueTemplateRegistrySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public void List_InvalidTemplate_MissingSectionGuidance_IsNotSurfaced()
+    public void List_CustomTemplateWithInvalidSectionGuidance_StillSurfacesMetadata()
     {
         var dbFactory = new FakeDbContextFactory(db =>
         {
@@ -613,13 +643,17 @@ public class IssueTemplateRegistrySpecs
 
         var list = registry.List("project-1");
 
-        Assert.DoesNotContain(list, t => t.Id == "invalid");
+        var info = Assert.Single(list, t => t.Id == "invalid");
+        Assert.Equal("Invalid", info.Name);
+        Assert.Equal("custom", info.Source);
+        Assert.False(registry.Exists("invalid", "project-1"));
+        Assert.Throws<KeyNotFoundException>(() => registry.Get("invalid", "project-1"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public void List_InvalidTemplate_MissingSectionPlaceholder_IsNotSurfaced()
+    public void List_CustomTemplateWithInvalidSectionPlaceholder_StillSurfacesMetadata()
     {
         var dbFactory = new FakeDbContextFactory(db =>
         {
@@ -643,13 +677,17 @@ public class IssueTemplateRegistrySpecs
 
         var list = registry.List("project-1");
 
-        Assert.DoesNotContain(list, t => t.Id == "invalid");
+        var info = Assert.Single(list, t => t.Id == "invalid");
+        Assert.Equal("Invalid", info.Name);
+        Assert.Equal("custom", info.Source);
+        Assert.False(registry.Exists("invalid", "project-1"));
+        Assert.Throws<KeyNotFoundException>(() => registry.Get("invalid", "project-1"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public void List_InvalidTemplate_MissingSectionTitle_IsNotSurfaced()
+    public void List_CustomTemplateWithInvalidSectionTitle_StillSurfacesMetadata()
     {
         var dbFactory = new FakeDbContextFactory(db =>
         {
@@ -673,7 +711,11 @@ public class IssueTemplateRegistrySpecs
 
         var list = registry.List("project-1");
 
-        Assert.DoesNotContain(list, t => t.Id == "invalid");
+        var info = Assert.Single(list, t => t.Id == "invalid");
+        Assert.Equal("Invalid", info.Name);
+        Assert.Equal("custom", info.Source);
+        Assert.False(registry.Exists("invalid", "project-1"));
+        Assert.Throws<KeyNotFoundException>(() => registry.Get("invalid", "project-1"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -739,7 +781,7 @@ public class IssueTemplateRegistrySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public void List_InvalidTemplate_EmptySections_IsNotSurfaced()
+    public void List_CustomTemplateWithEmptySections_StillSurfacesMetadata()
     {
         var dbFactory = new FakeDbContextFactory(db =>
         {
@@ -760,7 +802,11 @@ public class IssueTemplateRegistrySpecs
 
         var list = registry.List("project-1");
 
-        Assert.DoesNotContain(list, t => t.Id == "invalid");
+        var info = Assert.Single(list, t => t.Id == "invalid");
+        Assert.Equal("Invalid", info.Name);
+        Assert.Equal("custom", info.Source);
+        Assert.False(registry.Exists("invalid", "project-1"));
+        Assert.Throws<KeyNotFoundException>(() => registry.Get("invalid", "project-1"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -827,6 +873,7 @@ public class IssueTemplateRegistrySpecs
         }
 
         public bool BodyWasRead { get; private set; }
+        public bool MarkerWasRead { get; private set; }
 
         public override string? ReadLine()
         {
@@ -835,6 +882,8 @@ public class IssueTemplateRegistrySpecs
                 _delimiterCount++;
             else if (_delimiterCount >= 2 && line is not null)
                 BodyWasRead = true;
+            if (line == "body-marker")
+                MarkerWasRead = true;
             return line;
         }
     }

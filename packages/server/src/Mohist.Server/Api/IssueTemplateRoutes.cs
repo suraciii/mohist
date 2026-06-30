@@ -26,15 +26,15 @@ public static class IssueTemplateRoutes
             if (!registry.Exists(name, project.Id!))
                 return ApiResults.NotFound($"Issue template '{name}' not found");
 
-            var template = registry.Get(name, project.Id!);
-            var source = registry.IsBuiltin(name) ? "builtin" : "custom";
+            var lookup = registry.GetWithSource(name, project.Id!);
+            var template = lookup.Template;
 
             var detail = new IssueTemplateDetail(
                 template.Id,
                 template.Name,
                 template.Description,
                 template.Sections,
-                source);
+                lookup.Source);
 
             return ApiResults.Ok(detail);
         });

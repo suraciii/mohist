@@ -13,6 +13,8 @@ internal sealed record BuiltinTemplateEntry(
 
 internal sealed class IssueTemplateFileLoader
 {
+    private const int MaxFrontmatterLines = 100;
+
     private readonly string _directory;
     private readonly Func<string, string, IEnumerable<string>> _enumerateFiles;
     private readonly Func<string, TextReader> _openText;
@@ -89,13 +91,13 @@ internal sealed class IssueTemplateFileLoader
             return string.Join('\n', lines);
 
         string? line;
-        while ((line = reader.ReadLine()) is not null)
+        for (var lineCount = 1; lineCount < MaxFrontmatterLines && (line = reader.ReadLine()) is not null; lineCount++)
         {
             lines.Add(line);
             if (line == "---")
-                break;
+                return string.Join('\n', lines);
         }
 
-        return string.Join('\n', lines);
+        throw new InvalidDataException($"Issue template '{filePath}' has unterminated frontmatter.");
     }
 }

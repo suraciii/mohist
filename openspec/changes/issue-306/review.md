@@ -4,55 +4,59 @@
 
 ## Repaired Items
 
-- [ID: item-1]
-  Severity: info
-  Scope: cleanup
-  Evidence: `packages/server/src/Mohist.Server/Infrastructure/Data/Workflow/ProjectWorkflowProfileRow.cs:27` still documented `DisableDefaultIssueTemplate` as disabling only the legacy `mohist/default` template, while the accepted implementation gates all built-in issue templates. Updated the XML summary to say it disables built-in issue templates generally.
-  Verification: `dotnet test Mohist.sln -p:SkipWebBuild=true` passed after the edit: 3131 passed, 13 skipped.
-  Status: resolved
+_(none)_
 
 ## Blocking Items
 
+- [ID: item-1]
+  Severity: warning
+  Scope: `packages/server/src/Mohist.Server/Api/IssueTemplateRoutes.cs`
+  Evidence: The detail endpoint computes `source` from the requested name instead of the template that was actually returned: `var source = registry.IsBuiltin(name) ? "builtin" : "custom"` at `IssueTemplateRoutes.cs:29-37`. When built-ins are disabled and a project custom template shadows `feature`, `registry.Get("feature", projectId)` correctly returns the custom template (`IssueTemplateRegistry.cs:72-89`), but `registry.IsBuiltin("feature")` still returns true (`IssueTemplateRegistry.cs:147-148`). The API test `DisabledBuiltIn_CanBeShadowedByProjectCustomTemplate` verifies the custom name/description but does not assert detail `source`, so this regression is currently hidden. This breaks the list/detail source contract and will cause CLI/Web detail consumers to display a shadowed custom template as builtin. [disallowed: product behavior/API contract change]
+  SuggestedAction: Determine source from the resolved template context, not the raw request id. For example, have `IssueTemplateRegistry.Get` return source with the template, or add a source-aware lookup that respects disabled-built-in shadowing and aliases. Add an API test asserting detail `source == "custom"` for the disabled/shadowed `feature` case and for the legacy alias if it can resolve to the custom shadow.
+  Verification: `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~IssueTemplate"` currently passes 45 tests, confirming this case is not covered by existing assertions.
+  Status: open
+
 - [ID: item-2]
-  Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Issue/Services/IssueTemplates/IssueTemplateFileLoader.cs`, `packages/server/src/Mohist.Server/Issue/Services/IssueTemplates/IssueTemplateRegistry.cs`
-  Evidence: The candidate does not implement the required two-stage on-demand loading model. `IssueTemplateRegistry` constructs `IssueTemplateFileLoader` and calls `_builtinData = loader.Load()` during registry construction at `IssueTemplateRegistry.cs:21-23`. `IssueTemplateFileLoader.Load()` then reads every template with `File.ReadAllText(filePath)` and calls `PromptFrontmatterParser.Parse(content, id)` at `IssueTemplateFileLoader.cs:26-27`, storing the returned `body` in `BuiltinTemplateEntry` at `IssueTemplateFileLoader.cs:32-35`. As a result, the body for every built-in template is read and split before any `List()` or `Get()` call. This violates the issue acceptance criterion that `list` only parse frontmatter and `get` parse body, and the spec requirement that `list` not pay the cost of parsing every template body. [disallowed:reason] Fixing this requires changing the loader/registry contract, not a safe local review repair.
-  SuggestedAction: Store template file paths plus frontmatter metadata from discovery, and defer reading/parsing the markdown body until `Get()` for the requested id. Add an observable test using a fake file store or equivalent seam proving `List()` does not read/parse body content and `Get()` does.
-  Verification: Re-run `dotnet test Mohist.sln -p:SkipWebBuild=true`; add a failing-then-passing regression test that detects body reads on `List()`.
+  Severity: warning
+  Scope: `packages/server/src/Mohist.Server/Issue/Services/IssueTemplates/IssueTemplateRegistry.cs`
+  Evidence: Project-scoped `List()` still loads and validates full custom template bodies through `LoadCustomTemplates()` (`IssueTemplateRegistry.cs:54-60`, `175-197`) and `ValidateTemplate()` still requires every section title/guidance/placeholder (`IssueTemplateRegistry.cs:217-225`). The issue explicitly targets two-stage loading because list previously deserialized every body, and the spec says list SHALL parse metadata only and SHALL NOT parse or return template bodies. The built-in path satisfies this via `IssueTemplateFileLoader.ReadFrontmatterOnly()` (`IssueTemplateFileLoader.cs:80-100`), but the custom path still parses all sections just to render list metadata. This also makes a project custom template with valid metadata but a body/section issue disappear from list even though list does not need the body. [disallowed: product behavior/data contract change]
+  SuggestedAction: Split custom template metadata loading from detail loading as well, or explicitly narrow the spec/acceptance criteria to built-ins only. If current DB rows cannot support a cheap metadata-only read, introduce a lightweight metadata DTO/read path that does not validate sections on `List()`, and keep full section validation in `Get()`.
+  Verification: Existing tests intentionally assert invalid custom section bodies are not surfaced in list (`IssueTemplateRegistrySpecs.cs:589-764`), which documents the current full-body validation behavior rather than the requested metadata-only behavior.
   Status: open
 
 - [ID: item-3]
-  Severity: warning
-  Scope: `packages/server/src/Mohist.Server/Issue/Services/IssueTemplates/IssueTemplateRegistry.cs`
-  Evidence: A project with `DisableDefaultIssueTemplate=true` can list a custom template whose id collides with a built-in id, but cannot fetch it. `List()` skips built-ins when disabled, then appends custom templates at `IssueTemplateRegistry.cs:45-60`. `Get()` checks `_builtinData.TryGetValue(resolvedId, out var entry)` first, and if the id is a built-in while defaults are disabled it throws at `IssueTemplateRegistry.cs:71-74` before checking project custom rows at `IssueTemplateRegistry.cs:80-84`. So a custom row named `feature`, `bug`, or `refactor` is returned by `List(projectId)` but `Get("feature", projectId)` fails. This conflicts with the design intent that disabling built-ins leaves the project seeing only its custom templates, and creates a list/get inconsistency for a valid custom-template row. [disallowed:reason] Resolution requires product behavior precedence between custom and disabled built-in ids.
-  SuggestedAction: Decide and encode id precedence explicitly. If custom templates are allowed to shadow built-ins when built-ins are disabled, check project custom rows before throwing the disabled-built-in error. If collisions are disallowed, filter or reject them consistently so `List()` and `Get()` agree.
-  Verification: Add a registry/API regression test with `DisableDefaultIssueTemplate=true` and a custom row named `feature`, asserting the chosen list/get behavior.
-  Status: open
-
-- [ID: item-4]
   Severity: test-gap
-  Scope: `packages/server/tests/Mohist.Server.Tests/Specs/Issue/IssueTemplate/IssueTemplateRegistrySpecs.cs`, `packages/server/tests/Mohist.Server.Tests/Specs/Issue/IssueTemplate/IssueTemplateApiSpecs.cs`
-  Evidence: The tests cover the happy-path shape, aliases, body parser output, and disabled built-in filtering, but they do not verify the key lazy-loading contract or the disabled-builtin/custom-collision case. The existing registry specs inject `Dictionary<string, BuiltinTemplateEntry>` directly at `IssueTemplateRegistrySpecs.cs:36-41`, so they bypass `IssueTemplateFileLoader` and cannot catch that `Load()` eagerly reads and stores every body. The API specs assert response shape but not whether list avoided body reads.
-  SuggestedAction: Add a focused loader/registry test double that can fail if body content is accessed during list, and add the custom collision test described in item-3.
-  Verification: Run `dotnet test Mohist.sln -p:SkipWebBuild=true` and ensure the new tests fail on the current candidate before the implementation is corrected.
+  Scope: `packages/server/tests/Mohist.Server.Tests/Specs/Issue/IssueTemplate/IssueTemplateApiSpecs.cs`
+  Evidence: The acceptance criteria require `GET /api/issue-templates/mohist/default` to return an identical response to `feature`, and the API test only compares id/name/description/section count (`IssueTemplateApiSpecs.cs:81-97`). It does not compare the full `sections` payload or `source`, so regressions in parsed section guidance/placeholder/order or alias source would pass. The registry-level test compares only the first section (`IssueTemplateRegistrySpecs.cs:243-258`), and the CLI test uses mocked server data, not the real API parser.
+  SuggestedAction: Add an API-level deep equality assertion between the full `data` payload for `feature` and `mohist/default`, or compare every section title/guidance/placeholder/source explicitly.
+  Verification: `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~IssueTemplate"` passes 45 tests with the current weaker alias assertions.
   Status: open
 
 ## Follow-up Items
 
-- [ID: item-5]
+- [ID: item-4]
   Severity: follow-up
   Scope: `packages/server/src/Mohist.Server/Issue/Services/IssueTemplates/IssueTemplateFileLoader.cs`
-  Evidence: Missing or invalid template asset directory failures currently escape from `Directory.EnumerateFiles(_directory, "*.md")` or `PromptFrontmatterParser.Parse(...)` during scoped registry construction. That is acceptable for surfacing a broken deployment, but the error message will be a low-level IO/YAML exception without issue-template context.
-  SuggestedAction: Consider wrapping loader failures with template-directory/id context once the lazy-loading contract is corrected.
+  Evidence: `ReadFrontmatterOnly()` reads until EOF if the opening `---` has no matching closing delimiter (`IssueTemplateFileLoader.cs:80-100`). For controlled built-in assets this is unlikely, but it weakens the frontmatter-only guarantee on malformed files.
+  SuggestedAction: Consider capping discovery reads at the closing delimiter contract and failing discovery immediately when a frontmatter block is unterminated, without scanning the whole body.
   Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-6]
-  Severity: info
-  Scope: verification
-  Evidence: The first top-level `npm test` invocation timed out after 120s before reaching all workspace test phases. The phases were rerun separately: `dotnet test Mohist.sln -p:SkipWebBuild=true` passed, `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true` passed, `npm run typecheck -w packages/web` passed, `npm run test:run -w packages/web` passed, and `npm run test:ci --workspaces --if-present` passed.
-  SuggestedAction: No product action required.
+- [ID: item-5]
+  Severity: warning
+  Scope: dependency hygiene
+  Evidence: During `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~IssueTemplate"`, the server project build ran npm and reported `9 vulnerabilities (3 moderate, 3 high, 3 critical)`. This appears unrelated to the issue-template change and did not fail the command.
+  SuggestedAction: Triage npm audit findings separately.
   Status: out-of-scope
+
+## Verification Summary
+
+- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~IssueTemplate"` — passed, 45 tests.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter "FullyQualifiedName~CliIssueTemplateCommandSpecs"` — passed, 19 tests.
+- `npm run typecheck -w packages/web` — passed.
+- `npm run test:run -w packages/web -- --run src/entities/issue-templates/api/client.test.ts src/entities/issue-templates/api/queries.test.ts src/features/create-issue/ui/CreateIssueDialog.test.tsx` — passed, 35 tests.
+- `npm run test:run -w packages/web` — passed, 198 files, 2988 tests passed, 1 skipped.
+- `npm test` — first run timed out at 120s during .NET tests; rerun with a 300s timeout passed. Saved output showed .NET passed 3135 tests with 13 skipped, Web passed 2988 tests with 1 skipped, and runner passed 786 tests with 23 skipped.
 
 <promise>FAIL</promise>
