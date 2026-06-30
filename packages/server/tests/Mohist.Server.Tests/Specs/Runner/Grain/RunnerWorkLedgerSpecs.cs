@@ -267,7 +267,7 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         var runAfterLoss = await LoadRunAsync(work.WorkflowRunId);
         Assert.Equal("runner-lost", runAfterLoss.Failure?.Message);
 
-        await AdvanceTimeKeepingRunnerOnlineAsync(runner, TimeSpan.FromMinutes(11));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
         await runner.CheckWorkTimeoutsAsync();
 
         var runAfterTimeout = await LoadRunAsync(work.WorkflowRunId);
@@ -353,7 +353,7 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         var assigned = await runner.AssignAgentJobAsync(work);
         Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assigned.Status);
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
+        await AdvanceTimeKeepingRunnerOnlineAsync(runner, TimeSpan.FromMinutes(11));
         await runner.CheckWorkTimeoutsAsync();
 
         var row = await FindRunnerWorkAsync(runnerId, WorkDispatchOwnerKinds.AgentJob, jobKey, work.WorkId);
