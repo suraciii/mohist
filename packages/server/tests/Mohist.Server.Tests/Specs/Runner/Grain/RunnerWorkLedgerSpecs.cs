@@ -159,14 +159,12 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
             WorkspacePath: "/tmp/agent-job-ledger",
             ProjectId: projectId));
 
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
-        WorkDispatch? dispatch = null;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            dispatch = await runner.PollAsync();
-            if (dispatch is not null) break;
-            await Task.Delay(20);
-        }
+        WorkDispatch? dispatch = await TestWait.ForAsync(
+            () => runner.PollAsync(),
+            d => d is not null,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(20),
+            $"Runner '{runnerId}' to receive dispatch for job {jobKey}");
 
         Assert.NotNull(dispatch);
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, dispatch!.OwnerKind);
@@ -572,24 +570,14 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         string? expectedReason,
         TimeSpan timeout)
     {
-        var deadline = DateTimeOffset.UtcNow + timeout;
-        RunnerWorkRow? row = null;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            row = await FindRunnerWorkAsync(runnerId, ownerKind, ownerId, workId);
-            if (row is not null
+        return await TestWait.ForAsync(
+            () => FindRunnerWorkAsync(runnerId, ownerKind, ownerId, workId),
+            row => row is not null
                 && string.Equals(row.Status, expectedStatus, StringComparison.Ordinal)
-                && (expectedReason is null || string.Equals(row.Reason, expectedReason, StringComparison.Ordinal)))
-            {
-                return row;
-            }
-
-            await Task.Delay(50);
-        }
-
-        Assert.Fail(
-            $"Runner work ({ownerKind}/{ownerId}/{workId}) did not reach status '{expectedStatus}' (reason='{expectedReason}') within {timeout}; last row was {(row is null ? "<null>" : $"status='{row.Status}' reason='{row.Reason}'")}");
-        return null;
+                && (expectedReason is null || string.Equals(row.Reason, expectedReason, StringComparison.Ordinal)),
+            timeout,
+            TimeSpan.FromMilliseconds(50),
+            $"Runner work ({ownerKind}/{ownerId}/{workId}) to reach status '{expectedStatus}' (reason='{expectedReason}')");
     }
 
     private async Task<ReminderEntry?> GetWorkTimeoutReminderAsync(string runnerId)
@@ -606,16 +594,12 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         TimeSpan timeout)
     {
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        var deadline = DateTimeOffset.UtcNow + timeout;
-        string? lastStatus = null;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            lastStatus = await workflow.GetRunStatusAsync();
-            if (string.Equals(lastStatus, expectedStatus, StringComparison.Ordinal))
-                return;
-            await Task.Delay(50);
-        }
-        Assert.Fail($"Workflow '{workflowId}' did not reach status '{expectedStatus}' within {timeout}; last status was '{lastStatus}'");
+        await TestWait.ForAsync(
+            () => workflow.GetRunStatusAsync(),
+            status => string.Equals(status, expectedStatus, StringComparison.Ordinal),
+            timeout,
+            TimeSpan.FromMilliseconds(50),
+            $"Workflow '{workflowId}' to reach status '{expectedStatus}'");
     }
 
     private async Task<RunnerWorkRow?> FindRunnerWorkAsync(

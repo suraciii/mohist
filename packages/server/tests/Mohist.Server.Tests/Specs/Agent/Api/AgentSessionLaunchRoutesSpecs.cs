@@ -382,19 +382,12 @@ public class AgentSessionLaunchRoutesSpecs
         IAgentJobGrain job,
         AgentJobStatus expected,
         TimeSpan timeout)
-    {
-        var deadline = DateTimeOffset.UtcNow + timeout;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            var terminal = await job.GetTerminalResultAsync();
-            if (terminal.Status == expected)
-                return;
-            await Task.Delay(200);
-        }
-
-        var last = await job.GetTerminalResultAsync();
-        Assert.Fail($"Agent job did not reach {expected} within {timeout.TotalSeconds:N0}s (last status {last.Status}).");
-    }
+        => await TestWait.ForAsync(
+            () => job.GetTerminalResultAsync(),
+            t => t.Status == expected,
+            timeout,
+            TimeSpan.FromMilliseconds(200),
+            $"Agent job to reach {expected}");
 
     private async Task<string> CreateProjectAsync(string prefix)
     {
@@ -446,17 +439,12 @@ public class AgentSessionLaunchRoutesSpecs
         await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
 
         var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            var state = await runnerGrain.GetRuntimeStateAsync();
-            if (state.Status == RunnerStatus.Online)
-                return;
-            await Task.Delay(25);
-        }
-
-        var last = await runnerGrain.GetRuntimeStateAsync();
-        Assert.Fail($"Runner '{runnerId}' did not reach Online within 5s (last status {last.Status}).");
+        await TestWait.ForAsync(
+            () => runnerGrain.GetRuntimeStateAsync(),
+            s => s.Status == RunnerStatus.Online,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"Runner '{runnerId}' to reach Online");
     }
 
     private async Task<int> CountAgentLaunchSessionsAsync(string projectId)
@@ -489,29 +477,36 @@ public class AgentSessionLaunchRoutesSpecs
     /// </summary>
     private async Task<IAgentJobGrain?> FindAgentJobGrainAsync(string sessionId)
     {
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
-        while (DateTimeOffset.UtcNow < deadline)
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var token = cts.Token;
+        try
         {
-            var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-            var runners = await registry.ListRunnerIdsAsync();
-            foreach (var runnerId in runners)
+            while (true)
             {
-                var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-                var state = await runner.GetRuntimeStateAsync();
-                foreach (var work in state.ActiveWorks)
+                var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+                var runners = await registry.ListRunnerIdsAsync();
+                foreach (var runnerId in runners)
                 {
-                    if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
+                    var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+                    var state = await runner.GetRuntimeStateAsync();
+                    foreach (var work in state.ActiveWorks)
                     {
-                        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(work.OwnerId);
-                        var snapshot = await job.GetRuntimeSnapshotAsync();
-                        if (snapshot.CurrentWorkId == work.WorkId)
-                            return job;
+                        if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
+                        {
+                            var job = _fixture.Grains.GetGrain<IAgentJobGrain>(work.OwnerId);
+                            var snapshot = await job.GetRuntimeSnapshotAsync();
+                            if (snapshot.CurrentWorkId == work.WorkId)
+                                return job;
+                        }
                     }
                 }
+                await Task.Delay(50, token);
             }
-            await Task.Delay(50);
         }
-        return null;
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     private async Task<AgentJobRuntimeSnapshot?> FindAgentJobSnapshotAsync(string sessionId)

@@ -33,7 +33,7 @@ public class OtelInboundHttpTracingSpecs
         var response = await client.GetAsync("/api/health");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var spans = await WaitForSpansAsync(host.Recorder, s => s.Any(IsInboundHttpSpan), TimeSpan.FromSeconds(5));
+        var spans = await host.Recorder.WaitForAsync(s => s.Any(IsInboundHttpSpan), TimeSpan.FromSeconds(5));
 
         var inbound = spans.Where(IsInboundHttpSpan).ToList();
         Assert.Single(inbound);
@@ -89,23 +89,5 @@ public class OtelInboundHttpTracingSpecs
         if (activity.Source is null) return false;
         return activity.Source.Name == "Microsoft.AspNetCore"
             || activity.OperationName.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal);
-    }
-
-    private static async Task<List<Activity>> WaitForSpansAsync(
-        RecordingActivityProcessor processor,
-        Func<List<Activity>, bool> predicate,
-        TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            var snapshot = processor.EndedActivities.ToList();
-            if (predicate(snapshot))
-            {
-                return snapshot;
-            }
-            await Task.Delay(20);
-        }
-        return processor.EndedActivities.ToList();
     }
 }
