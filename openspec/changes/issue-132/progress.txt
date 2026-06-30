@@ -2,70 +2,111 @@
 
 Status: completed
 
+[previous content preserved — see git history]
+
+# T-002 Generalize SessionPage for generic AgentSession via SessionDataSource seam
+
+Status: completed
+
 ## Files changed
 
-- **packages/web/src/entities/agent/api/queries.ts** — Extended with `useAgents()`,
-  `useAgent(agentRef)`, `useCreateAgent()`, `useUpdateAgent()`,
-  `useArchiveAgent()` for Agent profile CRUD (wrapping existing client fns).
-  Also added `useAgentSessions({ agentRef })` for agent-scoped session list
-  (query key `['agents', projectId, agentRef, 'sessions']`). Renamed existing
-  global `useAgentSessions` → `useGlobalAgentSessions` to avoid name collision.
+### New files
 
-- **packages/web/src/entities/agent/api/agent-sessions.ts** (new) — Pure client
-  fns (`getAgentSessions`, `getGenericSessionSummary`,
-  `getGenericSessionTranscript`, `launchAgentSession`, `postGenericFollowup`,
-  `cancelGenericSession`) and matching query/mutation hooks
-  (`useGenericSessionSummary`, `useGenericSessionTranscript`,
-  `useLaunchAgentSession`, `useGenericFollowup`, `useCancelGenericSession`)
-  consuming #129 (launch/followup/cancel) and #130 (summary/transcript/list)
-  endpoints over `projectApiPath` + shared `request` envelope.
+- **packages/web/src/pages/session/data/SessionDataSource.ts** — `SessionDataSourceResult`
+  interface defining the full data contract between a data source hook and the
+  shared `SessionDetailShell`.
 
-- **packages/web/src/entities/agent/index.ts** — Barrel re-exports for all new
-  hooks, client fns, and DTO types.
+- **packages/web/src/pages/session/data/buildGenericSessionMetadata.ts** —
+  Adapter mapping `GenericAgentSessionSummaryDto` → `SessionMetadata`,
+  setting workflow-only fields (`stage`, `issueId`, `runtimeSessionLineage`)
+  to null/empty.
 
-- **packages/web/src/widgets/dashboard-pulse/ui/PulseZone.test.tsx** — Updated
-  mock to reference renamed `useGlobalAgentSessions`.
+- **packages/web/src/pages/session/data/useIssueSessionDataSource.tsx** —
+  Hook extracting all issue-scoped data fetching from the original SessionPage
+  (useIssue, useCoderSessions, getAgentSessionMetadata/Transcript, sibling nav,
+  lineage, recovery). Returns a `SessionDataSourceResult`.
 
-- **packages/web/src/entities/agent/api/queries.test.ts** (new) — Tests for
-  CRUD hooks and `useAgentSessions`: query keys, enabled guards, queryFn
-  delegation, mutation success/error toasts and invalidation behavior.
+- **packages/web/src/pages/session/data/useGenericSessionDataSource.ts** —
+  Hook consuming T-001's `useGenericSessionSummary`, `useGenericSessionTranscript`,
+  and `useGenericFollowup`. Returns a `SessionDataSourceResult`. Back link
+  prefers issue context ref when present, falls back to agent profile.
 
-- **packages/web/src/entities/agent/api/agent-sessions.test.ts** (new) — Tests
-  for all client fns (URL/bodies via fetch spy) and all hooks (query keys,
-  enabled guards, polling logic, mutation invalidation and toast).
+- **packages/web/src/pages/session/ui/SessionDetailShell.tsx** — Shared shell
+  component that accepts `SessionDataSourceResult` and renders the full session
+  layout (header, sticky recovery bar, transcript, followup composer, sibling
+  sidebar) uniformly for both issue-scoped and generic sources.
+
+- **packages/web/src/pages/session/ui/GenericSessionPage.tsx** — Route entry
+  for the `agent-sessions/:sessionId` path. Calls `useGenericSessionDataSource`
+  and delegates to `SessionDetailShell`.
+
+- **packages/web/src/pages/session/ui/GenericSessionPage.test.tsx** — 15 tests
+  covering: loading/error states, header/back-link logic (agent vs issue ref),
+  follow-up enable/disable for running vs completed/failed, recovery region
+  (ContextHealthBar present/absent, no Compact/Reset, no sibling sidebar),
+  transcript container presence.
+
+### Modified files
+
+- **packages/web/src/pages/session/ui/SessionPage.tsx** — Refactored from ~1000
+  lines of inline logic to a thin wrapper calling `useIssueSessionDataSource` +
+  `<SessionDetailShell>`. `isCurrentSiblingSession` preserved for the existing
+  import in SessionPage.test.ts.
+
+- **packages/web/src/widgets/coder-session/ui/SessionFollowupComposer.tsx** —
+  Generalized from `{ issueNumber, sessionName }` props to `{ onSend, isSending }`.
+  The component manages its own `sending`/`sent` state machine and error display
+  based on the async `onSend` callback. `resolveFollowupErrorMessage` removed
+  (caller responsibility).
+
+- **packages/web/src/widgets/coder-session/ui/SessionFollowupComposer.test.tsx** —
+  Updated from hardwired `useFollowupMutation` mock to a simple `onSend` mock.
+
+- **packages/web/src/widgets/session-transcript/model/useSessionTranscript.ts** —
+  Added `terminalInvalidationKey` option to `UseSessionTranscriptOptions`.
+  When set, overrides the hardcoded `['issues', issueNumber, 'coder-sessions', sessionId]`
+  invalidation so generic sessions can use `['agent-session', projectId, sessionId]`
+  instead. Used by `useGenericSessionDataSource`.
+
+- **packages/web/src/app/App.tsx** — Added `agent-sessions/:sessionId` route
+  mapping to `<GenericSessionPage />`, alongside existing issue-scoped routes.
 
 ## Design decisions
 
-- Renamed existing `useAgentSessions` → `useGlobalAgentSessions` to free the
-  `useAgentSessions` name for the agent-scoped variant (matching D9 / T-001 AC).
+- `SessionDetailShell` takes `{ data: SessionDataSourceResult }` as a prop
+  object (not spread) so it's a proper React component with predictable hook
+  ordering. All hooks (useRef, useCallback, useEffect) are placed before any
+  conditional return to satisfy React's rules of hooks.
 
-- Agent-scoped session list DTO types (`AgentSessionListItemDto`,
-  `GenericAgentSessionSummaryDto` etc.) placed in `agent-sessions.ts` alongside
-  their client fns — not in `model/types.ts` — to keep the data-access module
-  self-contained (consistent with `cost-rollup.ts` pattern).
+- Data sources return **only data** (no JSX). All component rendering
+  (`SiblingNavigation`, `SessionRecoveryActions`, `ContextHealthBar`,
+  `CompactionLineageLink`) is done in `SessionDetailShell` or `SessionHeader`
+  based on data flags. This keeps tests mockable — existing SessionPage tests
+  mock `widgets/coder-session` and `widgets/session-health`, and these mocks
+  are respected even when the imports happen inside `SessionDetailShell`.
 
-- `useGenericSessionSummary` and `useGenericSessionTranscript` have dynamic
-  `refetchInterval` that polls every 5s while the session is non-terminal /
-  has incomplete turns, stops polling on terminal state.
+- For the main transcript view, the recovery bar is rendered ONLY in the
+  sticky scroll container (not duplicated in the header). Early-return branches
+  (waiting, empty states) render the recovery bar inside the header.
 
-- Followup and cancel mutations accept optional `agentRef` for invalidation of
-  the owning agent's session list; `useLaunchAgentSession` always requires it
-  since the agent is known at mutation time.
-
-- The existing `getAgentSessions` from `client.ts` (global list) is imported
-  as `getGlobalAgentSessions` in queries.ts to coexist with the new
-  agent-scoped `getAgentSessions` from `agent-sessions.ts`.
+- `useGenericSessionDataSource` sends the back link to the agent profile
+  (`/agents/{agentId}`) by default, or to the referenced issue
+  (`/issues/{issueNumber}`) when an issue context ref exists — matching the
+  spec's OR clause.
 
 ## Gotchas
 
-- `vi.spyOn(globalThis, 'fetch')` must be cleaned up with `vi.restoreAllMocks()`
-  in `afterEach` to prevent cross-test pollution in the client-fn URL tests.
+- `SessionDetailShell` must be called as `<SessionDetailShell data={data} />`
+  (JSX component), never as `SessionDetailShell(data)` (function call). The
+  latter breaks React's hook tracking inside the shell, causing "Rendered more
+  hooks than during the previous render" errors.
 
-- Mutation tests that evaluate `onSuccess`/`onError` callbacks should not invoke
-  `mutationFn` unless the underlying client fn is also mocked, otherwise the
-  real implementation will hit the network stack and cause unhandled rejections
-  in jsdom.
+- All hooks in `SessionDetailShell` MUST precede any conditional early return,
+  or React throws "Rendered more hooks" on state transitions. This means
+  useCallback/useEffect for scroll management must be at the top of the
+  function body alongside useRef.
 
-- TypeScript 5+ strict tuple inference in `.filter()` callbacks requires
-  widening the callback parameter to `unknown[]` instead of a tuple pattern
-  when filtering mock.calls arrays.
+- Test state leakage between `it()` calls in GenericSessionPage tests requires
+  a `beforeEach` that resets ALL mock module variables
+  (`mocks.summaryData`, `summaryLoading`, etc.) — `afterEach` + `cleanup()`
+  is insufficient because mock closure references survive.

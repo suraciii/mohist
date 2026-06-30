@@ -10,6 +10,7 @@ import { SidebarProvider, SidebarInset } from '@/shared/ui/components/sidebar'
 import { IssueDetailPage } from '../pages/issue-detail/ui/IssueDetailPage'
 import { IssueChangedFilesPage } from '../pages/issue-changed-files/ui/IssueChangedFilesPage'
 import { SessionPage } from '../pages/session/ui/SessionPage'
+import { GenericSessionPage } from '../pages/session/ui/GenericSessionPage'
 import { CreateIssueDialog } from '../features/create-issue'
 import { SettingsPage } from '../pages/settings/ui/SettingsPage'
 import { ActivityPage } from '../pages/activity/ui/ActivityPage'
@@ -61,6 +62,7 @@ function AppContent() {
                 <Route path="issues/:number/files" element={<IssueChangedFilesPage />} />
                 <Route path="issues/:number/session/:sessionId" element={<SessionPage />} />
                 <Route path="issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
+                <Route path="agent-sessions/:sessionId" element={<GenericSessionPage />} />
                 <Route path="activity" element={<ActivityPage />} />
                 <Route path="runners" element={<RunnersPage />} />
                 <Route path="settings" element={<Navigate to="settings/ai" replace />} />

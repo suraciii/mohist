@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { ApiError } from '@/shared/api/client'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
-import { useFollowupMutation } from '../../../entities/coder-session'
 
 export interface SessionFollowupComposerProps {
-  issueNumber: number
-  sessionName: string
+  onSend: (text: string) => Promise<void> | void
+  isSending?: boolean
   disabled?: boolean
   className?: string
   placeholder?: string
@@ -15,30 +13,9 @@ export interface SessionFollowupComposerProps {
 
 type ComposerState = 'idle' | 'sending' | 'sent'
 
-function resolveFollowupErrorMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.status === 409) {
-      return err.message && err.message.trim().length > 0
-        ? err.message
-        : 'Session is no longer active.'
-    }
-    if (err.status === 503) {
-      return err.message && err.message.trim().length > 0
-        ? err.message
-        : 'Runner is offline. Try again once the runner reconnects.'
-    }
-    if (err.status === 404) {
-      return 'Session not found.'
-    }
-    return err.message || `Request failed with status ${err.status}.`
-  }
-  if (err instanceof Error) return err.message
-  return 'An unexpected error occurred.'
-}
-
 export function SessionFollowupComposer({
-  issueNumber,
-  sessionName,
+  onSend,
+  isSending: isSendingProp = false,
   disabled = false,
   className,
   placeholder = 'Send a followup message to the agent...',
@@ -46,13 +23,12 @@ export function SessionFollowupComposer({
   const [text, setText] = useState('')
   const [inlineError, setInlineError] = useState<string | null>(null)
   const [sentFlash, setSentFlash] = useState(false)
+  const [localSending, setLocalSending] = useState(false)
   const sentFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const followupMutation = useFollowupMutation()
 
   const trimmed = text.trim()
-  const isDisabled = disabled
-  const canSend = !isDisabled && trimmed.length > 0 && !followupMutation.isPending
-  const isSending = followupMutation.isPending
+  const isSending = isSendingProp || localSending
+  const canSend = !disabled && trimmed.length > 0 && !isSending
   const composerState: ComposerState = isSending ? 'sending' : (sentFlash ? 'sent' : 'idle')
 
   useEffect(() => {
@@ -67,7 +43,7 @@ export function SessionFollowupComposer({
     }
   }, [])
 
-  function submit() {
+  async function submit() {
     if (!canSend) return
     setInlineError(null)
     setSentFlash(false)
@@ -75,22 +51,20 @@ export function SessionFollowupComposer({
       clearTimeout(sentFlashTimerRef.current)
       sentFlashTimerRef.current = null
     }
-    followupMutation.mutate(
-      { issueNumber, sessionName, text: trimmed },
-      {
-        onSuccess: () => {
-          setText('')
-          setSentFlash(true)
-          sentFlashTimerRef.current = setTimeout(() => {
-            setSentFlash(false)
-            sentFlashTimerRef.current = null
-          }, 1500)
-        },
-        onError: (err) => {
-          setInlineError(resolveFollowupErrorMessage(err))
-        },
-      },
-    )
+    setLocalSending(true)
+    try {
+      await onSend(trimmed)
+      setText('')
+      setSentFlash(true)
+      sentFlashTimerRef.current = setTimeout(() => {
+        setSentFlash(false)
+        sentFlashTimerRef.current = null
+      }, 1500)
+    } catch (err: unknown) {
+      setInlineError(err instanceof Error ? err.message : 'An unexpected error occurred.')
+    } finally {
+      setLocalSending(false)
+    }
   }
 
   function handleSubmit(evt: FormEvent<HTMLFormElement>) {

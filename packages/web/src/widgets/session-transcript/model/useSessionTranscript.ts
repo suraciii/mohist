@@ -33,6 +33,7 @@ interface UseSessionTranscriptOptions {
   initialTurns?: SessionTurn[]
   sessionQueryKeys?: readonly (readonly unknown[])[]
   isRunning: boolean
+  terminalInvalidationKey?: readonly unknown[]
 }
 
 export interface UseSessionTranscriptResult {
@@ -55,6 +56,7 @@ export function useSessionTranscript({
   initialTurns,
   sessionQueryKeys,
   isRunning,
+  terminalInvalidationKey,
 }: UseSessionTranscriptOptions): UseSessionTranscriptResult {
   const queryClient = useQueryClient()
   const initialState = useMemo<SessionTurn[]>(() => {
@@ -128,8 +130,9 @@ export function useSessionTranscript({
     for (const queryKey of sessionQueryKeys ?? []) {
       queryClient.invalidateQueries({ queryKey })
     }
-    queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions', sessionId] })
-  }, [queryClient, issueNumber, sessionId, sessionQueryKeys])
+    const invKey = terminalInvalidationKey ?? ['issues', issueNumber, 'coder-sessions', sessionId]
+    queryClient.invalidateQueries({ queryKey: invKey })
+  }, [queryClient, issueNumber, sessionId, sessionQueryKeys, terminalInvalidationKey])
 
   useEffect(() => {
     if (hasLiveTailRef.current && isRunning) {
