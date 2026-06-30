@@ -338,16 +338,12 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, saveResponse.StatusCode);
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/approve");
-        for (var i = 0; i < 100; i++)
-        {
-            var buildStatusAttempt = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
-            var buildStageAttempt = buildStatusAttempt.Workflow?.Stages.FirstOrDefault(s => s.Stage == "build");
-            if (buildStageAttempt is not null && buildStageAttempt.Tasks.Any(t => t.Id == "brand-new-build-task"))
-                break;
-            await Task.Delay(20);
-        }
-
-        var buildStatus = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
+        var buildStatus = await TestWait.ForAsync(
+            () => _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status"),
+            status => status.Workflow?.Stages.FirstOrDefault(s => s.Stage == "build")?.Tasks.Any(t => t.Id == "brand-new-build-task") == true,
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(20),
+            "build stage to reflect rewritten issue template");
         var buildStage = Assert.Single(buildStatus.Workflow!.Stages, s => s.Stage == "build");
         Assert.Contains(buildStage.Tasks, t => t.Id == "brand-new-build-task");
         Assert.Contains(buildStage.Checks, c => c.Name == "build-definition-check");
@@ -547,37 +543,29 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
 
     private async Task<WorkDispatchDto> PollWorkAnyAsync()
     {
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            using var response = await _client.PostAsync($"/api/runner/{_runnerId}/poll", null);
-            if (response.StatusCode == HttpStatusCode.NoContent)
-            {
-                await Task.Delay(20);
-                continue;
-            }
+        var work = await TestWait.ForAsync(
+            async () => await PollMatchingWorkAsync(IsCurrentIssueWork),
+            value => value is not null,
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(20),
+            $"Runner '{_runnerId}' to receive work");
+        return work!;
+    }
 
-            response.EnsureSuccessStatusCode();
-            var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
-                ?? throw new InvalidOperationException("Empty work dispatch");
-            if (work.Stage == "plan" && work.Uses == "mohist/acp-agent")
-            {
-                if (!IsCurrentIssueWork(work))
-                {
-                    await ReportAsync(work.WorkflowRunId, work.WorkId, "completed");
-                    continue;
-                }
-            }
-            else if (!IsCurrentIssueWork(work))
-            {
-                await ReportAsync(work.WorkflowRunId, work.WorkId, work.WorkType == "checks" ? "pass" : "completed");
-                continue;
-            }
+    private async Task<WorkDispatchDto?> PollMatchingWorkAsync(Func<WorkDispatchDto, bool> matches)
+    {
+        using var response = await _client.PostAsync($"/api/runner/{_runnerId}/poll", null);
+        if (response.StatusCode == HttpStatusCode.NoContent)
+            return null;
 
+        response.EnsureSuccessStatusCode();
+        var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
+            ?? throw new InvalidOperationException("Empty work dispatch");
+        if (matches(work))
             return work;
-        }
 
-        Assert.Fail($"Runner '{_runnerId}' has no work");
-        return default!;
+        await ReportAsync(work.WorkflowRunId, work.WorkId, work.WorkType == "checks" ? "pass" : "completed");
+        return null;
     }
 
     private bool IsCurrentIssueWork(WorkDispatchDto work)

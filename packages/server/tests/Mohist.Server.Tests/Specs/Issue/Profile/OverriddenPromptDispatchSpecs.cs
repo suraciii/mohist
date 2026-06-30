@@ -104,40 +104,42 @@ public class OverriddenPromptDispatchSpecs : IAsyncLifetime
     private async Task<WorkDispatchDto> PollProposalWorkAsync(string runnerId, string projectId, int issueNumber)
     {
         var observed = new List<string>();
-        for (var attempt = 0; attempt < 200; attempt++)
-        {
-            using var response = await _client.PostAsync($"/api/runner/{runnerId}/poll", null);
-            if (response.StatusCode == HttpStatusCode.NoContent)
+        var result = await TestWait.ForAsync(
+            async () =>
             {
-                await Task.Delay(20);
-                continue;
-            }
+                using var response = await _client.PostAsync($"/api/runner/{runnerId}/poll", null);
+                if (response.StatusCode == HttpStatusCode.NoContent)
+                    return (Work: (WorkDispatchDto?)null, Observed: string.Join("; ", observed));
 
-            response.EnsureSuccessStatusCode();
-            var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
-                ?? throw new InvalidOperationException("Empty work dispatch");
+                response.EnsureSuccessStatusCode();
+                var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                    ?? throw new InvalidOperationException("Empty work dispatch");
 
-            if (work.ProjectId == projectId
-                && work.IssueNumber == issueNumber
-                && work.WorkType == "task"
-                && IsProposalWork(work.WorkId))
-            {
-                return work;
-            }
-
-            observed.Add($"{work.WorkType}/{work.Stage}/{work.WorkId}");
-            await _client.PostOkAsync(
-                $"/api/runner/{runnerId}/report",
-                new
+                if (work.ProjectId == projectId
+                    && work.IssueNumber == issueNumber
+                    && work.WorkType == "task"
+                    && IsProposalWork(work.WorkId))
                 {
-                    workflowRunId = work.WorkflowRunId,
-                    workId = work.WorkId,
-                    status = work.WorkType == "checks" ? "pass" : "completed",
-                });
-        }
+                    return (Work: (WorkDispatchDto?)work, Observed: string.Join("; ", observed));
+                }
 
-        Assert.Fail($"Runner '{runnerId}' never received the proposal task for project '{projectId}' issue '{issueNumber}'. Observed: {string.Join("; ", observed)}");
-        return default!;
+                observed.Add($"{work.WorkType}/{work.Stage}/{work.WorkId}");
+                await _client.PostOkAsync(
+                    $"/api/runner/{runnerId}/report",
+                    new
+                    {
+                        workflowRunId = work.WorkflowRunId,
+                        workId = work.WorkId,
+                        status = work.WorkType == "checks" ? "pass" : "completed",
+                    });
+                return (Work: (WorkDispatchDto?)null, Observed: string.Join("; ", observed));
+            },
+            value => value.Work is not null,
+            TimeSpan.FromSeconds(4),
+            TimeSpan.FromMilliseconds(20),
+            $"Runner '{runnerId}' to receive the proposal task for project '{projectId}' issue '{issueNumber}'");
+
+        return result.Work!;
     }
 
     private static bool IsProposalWork(string workId)
