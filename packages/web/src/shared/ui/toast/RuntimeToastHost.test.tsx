@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
@@ -52,6 +52,7 @@ function renderWithHost(ui: React.ReactNode) {
 
 describe('RuntimeToastHost', () => {
   afterEach(() => {
+    vi.useRealTimers()
     cleanup()
   })
 

@@ -176,47 +176,4 @@ public class SourceCodeUpdaterVerifyRuntimeSpecs
         Assert.Equal(UpdateOutcome.Ready, context.Outcome);
         Assert.Contains("runner identity", output.ToString(), StringComparison.OrdinalIgnoreCase);
     }
-
-    private sealed class ScriptedCommandExecutor : ICommandExecutor
-    {
-        private readonly Dictionary<string, Queue<(int ExitCode, string Stdout, string Stderr)>> _byFileName = new(StringComparer.Ordinal);
-
-        public void Queue(string fileName, int exitCode, string stdout = "", string stderr = "")
-        {
-            if (!_byFileName.TryGetValue(fileName, out var bucket))
-            {
-                bucket = new Queue<(int, string, string)>();
-                _byFileName[fileName] = bucket;
-            }
-            bucket.Enqueue((exitCode, stdout, stderr));
-        }
-
-        public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
-            string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
-        {
-            if (_byFileName.TryGetValue(fileName, out var bucket) && bucket.Count > 0)
-                return Task.FromResult(bucket.Dequeue());
-            return Task.FromResult((0, string.Empty, string.Empty));
-        }
-    }
-
-    private sealed class FakeServiceInstaller : IServiceInstaller
-    {
-        public Task<int> InstallServerAsync(ServiceInstallOptions options) => Task.FromResult(0);
-        public Task<int> InstallRunnerAsync(ServiceInstallOptions options) => Task.FromResult(0);
-        public Task<int> StartServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<int> StopServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<int> RestartServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<int> StatusServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<int> LogsServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<int> UninstallServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<int> StartRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<int> StopRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<int> RestartRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<int> StatusRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<int> LogsRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<int> UninstallRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-        public Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
-        public Task<bool> IsRunnerInstalledAsync(string? unitDir = null) => Task.FromResult(false);
-    }
 }
