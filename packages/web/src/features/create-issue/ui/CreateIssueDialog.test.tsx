@@ -8,12 +8,9 @@ import { CreateIssueDialog } from './CreateIssueDialog'
 
 const TEMPLATE_FIXTURES = {
   default: {
-    id: 'mohist/default',
-    name: 'Mohist Default',
-    about: 'Three-voice PRD template',
-    isDefault: true,
-    suitableFor: ['prd', 'feature', 'refactor'],
-    defaults: { labels: { type: 'prd' }, risk: 'high', workflow: 'mohist/local' },
+    id: 'feature',
+    name: 'Feature',
+    description: 'Three-voice PRD template',
     sections: [
       { title: 'User Voice', guidance: 'What to write in User Voice', placeholder: '<user voice goes here>' },
       { title: 'Product Shape', guidance: 'What to write in Product Shape', placeholder: '<product shape goes here>' },
@@ -26,10 +23,7 @@ const TEMPLATE_FIXTURES = {
   custom: {
     id: 'team/bug-report',
     name: 'Bug Report',
-    about: 'Minimal bug report template',
-    isDefault: false,
-    suitableFor: ['bug'],
-    defaults: { labels: null, risk: null, workflow: null },
+    description: 'Minimal bug report template',
     sections: [
       { title: 'Summary', guidance: 'One-paragraph summary guidance', placeholder: '<one-paragraph summary>' },
       { title: 'Repro', guidance: 'Steps to reproduce guidance', placeholder: '<steps to reproduce>' },
@@ -214,9 +208,9 @@ describe('CreateIssueDialog template selector', () => {
     const options = Array.from(selector.querySelectorAll('option'))
 
     const labels = options.map((opt) => opt.textContent)
-    expect(labels.some((label) => label?.includes('Mohist Default'))).toBe(true)
+    expect(labels.some((label) => label?.includes('Feature'))).toBe(true)
     expect(labels.some((label) => label?.includes('Bug Report'))).toBe(true)
-    expect(options.find((opt) => opt.getAttribute('value') === 'mohist/default')).toBeDefined()
+    expect(options.find((opt) => opt.getAttribute('value') === 'feature')).toBeDefined()
     expect(options.find((opt) => opt.getAttribute('value') === 'team/bug-report')).toBeDefined()
   })
 
@@ -237,7 +231,7 @@ describe('CreateIssueDialog template selector', () => {
     renderDialog()
 
     const selector = await screen.findByTestId('issue-template-selector')
-    fireEvent.change(selector, { target: { value: 'mohist/default' } })
+    fireEvent.change(selector, { target: { value: 'feature' } })
 
     const description = await screen.findByPlaceholderText('Optional description') as HTMLTextAreaElement
 
@@ -279,7 +273,7 @@ describe('CreateIssueDialog template selector', () => {
     renderDialog()
 
     const selector = await screen.findByTestId('issue-template-selector')
-    fireEvent.change(selector, { target: { value: 'mohist/default' } })
+    fireEvent.change(selector, { target: { value: 'feature' } })
 
     const description = await screen.findByPlaceholderText('Optional description') as HTMLTextAreaElement
 
@@ -324,7 +318,7 @@ describe('CreateIssueDialog template selector', () => {
     renderDialog()
 
     const selector = await screen.findByTestId('issue-template-selector')
-    fireEvent.change(selector, { target: { value: 'mohist/default' } })
+    fireEvent.change(selector, { target: { value: 'feature' } })
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated issue' } })
 
     await waitFor(() => expect((screen.getByPlaceholderText('Optional description') as HTMLTextAreaElement).value).toContain('## User Voice'))
@@ -333,9 +327,9 @@ describe('CreateIssueDialog template selector', () => {
 
     await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
     expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
-      risk: 'high',
+      risk: expect.anything(),
       workflowProfileId: 'mohist/local',
-      labels: { type: 'prd' },
+      labels: expect.anything(),
     }))
   })
 })

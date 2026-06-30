@@ -34,12 +34,9 @@ beforeEach(() => {
   useQueryMock.mockReturnValue({ data: [], isLoading: false })
   getIssueTemplatesMock.mockResolvedValue([])
   getIssueTemplateMock.mockResolvedValue({
-    id: 'mohist/default',
-    name: 'Mohist Default',
-    about: '',
-    isDefault: true,
-    suitableFor: [],
-    defaults: null,
+    id: 'feature',
+    name: 'Feature',
+    description: '',
     sections: [],
     source: 'builtin',
   })

@@ -82,7 +82,7 @@ function TemplateSelector({
   value,
   onChange,
 }: {
-  templates: Array<{ id: string; name: string; about: string; isDefault: boolean; source: 'builtin' | 'custom' }>
+  templates: Array<{ id: string; name: string; description: string; source: 'builtin' | 'custom' }>
   isLoading: boolean
   value: string | null
   onChange: (id: string | null) => void
@@ -91,7 +91,7 @@ function TemplateSelector({
     const list = templates
     const known = new Set(list.map((t) => t.id))
     const extras = value && !known.has(value)
-      ? [{ id: value, name: value, about: '', isDefault: false, source: 'custom' as const }]
+      ? [{ id: value, name: value, description: '', source: 'custom' as const }]
       : []
     return [...list, ...extras]
   }, [templates, value])
@@ -111,7 +111,6 @@ function TemplateSelector({
         {options.map((t) => (
           <option key={t.id} value={t.id}>
             {t.name}
-            {t.isDefault ? ' (default)' : ''}
             {t.source === 'custom' ? ' (custom)' : ''}
           </option>
         ))}

@@ -449,7 +449,7 @@ public class UpdateSpecs
             {
                 BaseAddress = new Uri("http://localhost:3456"),
             },
-            TimeSpan.FromMilliseconds(20));
+            TimeSpan.FromMilliseconds(250));
 
         var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
 

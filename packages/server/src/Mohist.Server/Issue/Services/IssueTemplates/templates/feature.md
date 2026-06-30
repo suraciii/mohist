@@ -1,6 +1,6 @@
 ---
 name: Feature
-description: Product feature work — new features, or iteration/rework of existing features. Signal: external behavior changes in a user-perceivable way.
+description: "Product feature work — new features, or iteration/rework of existing features. Signal: external behavior changes in a user-perceivable way."
 ---
 
 ## User Voice

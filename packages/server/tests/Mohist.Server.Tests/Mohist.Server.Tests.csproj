@@ -27,6 +27,19 @@
     <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
   </ItemGroup>
 
+  <Target Name="CopyTemplates" BeforeTargets="Build">
+    <PropertyGroup>
+      <_TemplatesDir>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\src\Mohist.Server\Issue\Services\IssueTemplates\templates'))</_TemplatesDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_TemplateFiles Include="$(_TemplatesDir)\*.md" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(_TemplateFiles)"
+      DestinationFolder="$(OutputPath)Issue\Services\IssueTemplates\templates\"
+      SkipUnchangedFiles="true" />
+  </Target>
+
   <Target Name="CopyCliSkillData" AfterTargets="Build">
     <PropertyGroup>
       <_CliProjectDir>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..\cli\Mohist.Cli'))</_CliProjectDir>

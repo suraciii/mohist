@@ -7,6 +7,47 @@ namespace Mohist.Cli.Tests;
 
 public class CliIssueTemplateCommandSpecs
 {
+    private static readonly object FeatureDetail = new
+    {
+        id = "feature",
+        name = "Feature",
+        description = "Standard three-voice PRD with acceptance criteria and non-goals.",
+        source = "builtin",
+        sections = new[]
+        {
+            new
+            {
+                title = "User Voice",
+                guidance = "Describe the user need.",
+                placeholder = "<user need>",
+            },
+            new
+            {
+                title = "Product Shape",
+                guidance = "Describe the product boundary.",
+                placeholder = "<product shape>",
+            },
+            new
+            {
+                title = "Domain Model",
+                guidance = "Describe the domain model.",
+                placeholder = "<domain model>",
+            },
+            new
+            {
+                title = "Acceptance Criteria",
+                guidance = "List observable outcomes.",
+                placeholder = "- [ ] criterion",
+            },
+            new
+            {
+                title = "Non-Goals",
+                guidance = "List explicitly out-of-scope items.",
+                placeholder = "- non-goal",
+            },
+        },
+    };
+
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
         CreateHarness(string? activeProjectId = "proj_abc", Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
     {
@@ -22,75 +63,49 @@ public class CliIssueTemplateCommandSpecs
                     {
                         new
                         {
-                            id = "mohist/default",
-                            name = "Mohist Default",
-                            about = "Standard three-voice PRD with acceptance criteria and non-goals.",
-                            suitableFor = new[] { "feature development", "bug fixes" },
-                            isDefault = true,
+                            id = "feature",
+                            name = "Feature",
+                            description = "Standard three-voice PRD with acceptance criteria and non-goals.",
                             source = "builtin",
                         },
                         new
                         {
                             id = "team/bugfix",
                             name = "Team Bugfix",
-                            about = "Lightweight bugfix template for the support team.",
-                            suitableFor = new[] { "bug fixes" },
-                            isDefault = false,
+                            description = "Lightweight bugfix template for the support team.",
                             source = "custom",
                         },
                     },
                 });
             }
+            if (path.EndsWith("/issue-templates/feature", StringComparison.Ordinal) && req.Method == HttpMethod.Get)
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = FeatureDetail });
+            }
             if (path.EndsWith("/issue-templates/mohist/default", StringComparison.Ordinal) && req.Method == HttpMethod.Get)
             {
+                return RecordingHttpHandler.Json(new { success = true, data = FeatureDetail });
+            }
+            if (path.Contains("/issue-templates/", StringComparison.Ordinal) && req.Method == HttpMethod.Get)
+            {
+                var segments = path.Split('/');
+                var id = segments[^1].Split('?')[0];
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
                     data = new
                     {
-                        id = "mohist/default",
-                        name = "Mohist Default",
-                        about = "Standard three-voice PRD with acceptance criteria and non-goals.",
-                        isDefault = true,
-                        suitableFor = new[] { "feature development" },
-                        source = "builtin",
-                        defaults = new
-                        {
-                            labels = new Dictionary<string, string>(),
-                            risk = "medium",
-                            workflow = "mohist/local",
-                        },
+                        id,
+                        name = id,
+                        description = $"Description for {id}",
+                        source = "custom",
                         sections = new[]
                         {
                             new
                             {
-                                title = "User Voice",
-                                guidance = "Describe the user need.",
-                                placeholder = "<user need>",
-                            },
-                            new
-                            {
-                                title = "Product Shape",
-                                guidance = "Describe the product boundary.",
-                                placeholder = "<product shape>",
-                            },
-                            new
-                            {
-                                title = "Domain Model",
-                                guidance = "Describe the domain model.",
-                                placeholder = "<domain model>",
-                            },
-                            new
-                            {
-                                title = "Acceptance Criteria",
-                                guidance = "List observable outcomes.",
-                                placeholder = "- [ ] criterion",
-                            },
-                            new
-                            {
-                                title = "Non-Goals",
-                                guidance = "List explicitly out-of-scope items.",
-                                placeholder = "- non-goal",
+                                title = "Section 1",
+                                guidance = "Guidance for section 1",
+                                placeholder = "<placeholder 1>",
                             },
                         },
                     },
@@ -171,7 +186,7 @@ public class CliIssueTemplateCommandSpecs
     }
 
     [Fact]
-    public async Task TemplateList_Table_RendersEachTemplateByName()
+    public async Task TemplateList_Table_RendersNameAndDescription()
     {
         var (handler, http, output, error, fs, executor) = CreateHarness();
 
@@ -181,11 +196,13 @@ public class CliIssueTemplateCommandSpecs
         Assert.Equal(0, exitCode);
         var text = output.ToString();
         Assert.Contains("name", text);
-        Assert.Contains("Mohist Default", text);
+        Assert.Contains("description", text);
+        Assert.Contains("Feature", text);
         Assert.Contains("Team Bugfix", text);
         Assert.Contains("builtin", text);
         Assert.Contains("custom", text);
-        Assert.Contains("yes", text);
+        Assert.DoesNotContain("about", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("default", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -201,7 +218,7 @@ public class CliIssueTemplateCommandSpecs
         Assert.NotNull(json);
         Assert.Equal(2, json!.Count);
         var ids = json.Select(n => n?["id"]?.GetValue<string>()).ToArray();
-        Assert.Contains("mohist/default", ids);
+        Assert.Contains("feature", ids);
         Assert.Contains("team/bugfix", ids);
     }
 
@@ -260,7 +277,22 @@ public class CliIssueTemplateCommandSpecs
     }
 
     [Fact]
-    public async Task TemplateGet_DefaultTemplate_HitsCatchAllPath()
+    public async Task TemplateGet_FeatureTemplate_HitsFeaturePath()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "template", "get", "feature"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var req = handler.Requests.Last();
+        Assert.Equal(HttpMethod.Get, req.Method);
+        var path = req.RequestUri?.PathAndQuery ?? "";
+        Assert.Equal("/api/issue-templates/feature?projectId=proj_abc", path);
+    }
+
+    [Fact]
+    public async Task TemplateGet_LegacyAlias_HitsMohistDefaultPath()
     {
         var (handler, http, output, error, fs, executor) = CreateHarness();
 
@@ -286,16 +318,8 @@ public class CliIssueTemplateCommandSpecs
                 {
                     id = "team/bugfix",
                     name = "Team Bugfix",
-                    about = "Bugfix template.",
-                    isDefault = false,
-                    suitableFor = new[] { "bug fixes" },
+                    description = "Bugfix template.",
                     source = "custom",
-                    defaults = new
-                    {
-                        labels = new Dictionary<string, string>(),
-                        risk = (string?)null,
-                        workflow = (string?)null,
-                    },
                     sections = new[]
                     {
                         new
@@ -331,7 +355,7 @@ public class CliIssueTemplateCommandSpecs
         var (handler, http, output, error, fs, executor) = CreateHarness(activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "get", "mohist/default"], output, error, fs, executor);
+            http, ["issue", "template", "get", "feature"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -344,14 +368,13 @@ public class CliIssueTemplateCommandSpecs
         var (handler, http, output, error, fs, executor) = CreateHarness();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "get", "mohist/default", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "template", "get", "feature", "-o", "table"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
         Assert.Contains("id:", text);
-        Assert.Contains("mohist/default", text);
-        Assert.Contains("Mohist Default", text);
-        Assert.Contains("default:", text);
+        Assert.Contains("feature", text);
+        Assert.Contains("description:", text);
         Assert.Contains("source:", text);
         Assert.Contains("builtin", text);
         Assert.Contains("sections:", text);
@@ -365,15 +388,17 @@ public class CliIssueTemplateCommandSpecs
         Assert.Contains("placeholder:", text);
         Assert.Contains("<user need>", text);
         Assert.Contains("guidance:", text);
+        Assert.DoesNotContain("about:", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("default:", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task TemplateGet_DefaultTemplate_PrintsAllFiveSectionTitlesInOrder()
+    public async Task TemplateGet_PrintsAllFiveSectionTitlesInOrder()
     {
         var (handler, http, output, error, fs, executor) = CreateHarness();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "get", "mohist/default", "-o", "table"], output, error, fs, executor);
+            http, ["issue", "template", "get", "feature", "-o", "table"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
@@ -390,17 +415,22 @@ public class CliIssueTemplateCommandSpecs
     }
 
     [Fact]
-    public async Task TemplateGet_DefaultsBlock_RendersRiskAndWorkflow()
+    public async Task TemplateGet_FeatureAndLegacyAlias_RenderIdentically()
     {
         var (handler, http, output, error, fs, executor) = CreateHarness();
 
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "get", "mohist/default", "-o", "table"], output, error, fs, executor);
+        var exitCode1 = await MohistCliCommands.RunAsync(
+            http, ["issue", "template", "get", "feature", "-o", "table"], output, error, fs, executor);
+        Assert.Equal(0, exitCode1);
+        var featureText = output.ToString();
+        output.GetStringBuilder().Clear();
 
-        Assert.Equal(0, exitCode);
-        var text = output.ToString();
-        Assert.Contains("defaults.risk:       medium", text);
-        Assert.Contains("defaults.workflow:   mohist/local", text);
+        var exitCode2 = await MohistCliCommands.RunAsync(
+            http, ["issue", "template", "get", "mohist/default", "-o", "table"], output, error, fs, executor);
+        Assert.Equal(0, exitCode2);
+        var aliasText = output.ToString();
+
+        Assert.Equal(featureText, aliasText);
     }
 
     [Fact]
@@ -436,13 +466,13 @@ public class CliIssueTemplateCommandSpecs
         var (handler, http, output, error, fs, executor) = CreateHarness();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "get", "mohist/default"], output, error, fs, executor);
+            http, ["issue", "template", "get", "feature"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var json = JsonNode.Parse(output.ToString()) as JsonObject;
         Assert.NotNull(json);
-        Assert.Equal("mohist/default", json!["id"]?.GetValue<string>());
-        Assert.Equal("Mohist Default", json["name"]?.GetValue<string>());
+        Assert.Equal("feature", json!["id"]?.GetValue<string>());
+        Assert.Equal("Feature", json["name"]?.GetValue<string>());
         var sections = json["sections"] as JsonArray;
         Assert.NotNull(sections);
         Assert.Equal(5, sections!.Count);
@@ -465,7 +495,7 @@ public class CliIssueTemplateCommandSpecs
         var executor = new FakeCommandExecutor();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "template", "get", "mohist/default"], output, error, fs, executor);
+            http, ["issue", "template", "get", "feature"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("mo server start", error.ToString(), StringComparison.OrdinalIgnoreCase);

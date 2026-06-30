@@ -13,8 +13,8 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var headers = new[] { "name", "about", "default", "source" };
-        var widths = new[] { IdSoftCap, TitleSoftCap, 7, 12 };
+        var headers = new[] { "name", "description", "source" };
+        var widths = new[] { IdSoftCap, TitleSoftCap, 12 };
 
         var cells = new List<string[]>();
         foreach (var row in rows)
@@ -22,14 +22,12 @@ internal sealed partial class TableRenderer
             var name = StringOf(row, "name");
             if (string.IsNullOrEmpty(name))
                 name = StringOf(row, "id");
-            var about = StringOf(row, "about");
-            var isDefault = BoolOf(row, "isDefault") ? "yes" : "";
+            var description = StringOf(row, "description");
             var source = StringOf(row, "source");
             cells.Add(new[]
             {
                 Truncate(name, IdSoftCap),
-                Truncate(about, TitleSoftCap),
-                Truncate(isDefault, 7),
+                Truncate(description, TitleSoftCap),
                 Truncate(source, 12),
             });
         }
@@ -47,45 +45,14 @@ internal sealed partial class TableRenderer
 
         var id = StringOf(data, "id");
         var name = StringOf(data, "name");
-        var about = StringOf(data, "about");
-        var isDefault = BoolOf(data, "isDefault");
+        var description = StringOf(data, "description");
         var source = StringOf(data, "source");
-        var suitableFor = data["suitableFor"] as JsonArray;
-        var defaults = data["defaults"] as JsonObject;
         var sections = data["sections"] as JsonArray;
 
         _out.WriteLine($"id:          {id}");
         _out.WriteLine($"name:        {name}");
-        _out.WriteLine($"about:       {Truncate(about, BodySoftCap)}");
-        _out.WriteLine($"default:     {(isDefault ? "yes" : "no")}");
+        _out.WriteLine($"description: {Truncate(description, BodySoftCap)}");
         _out.WriteLine($"source:      {source}");
-
-        if (suitableFor is not null && suitableFor.Count > 0)
-        {
-            var items = suitableFor.Select(s => s?.GetValue<string>() ?? "").Where(s => !string.IsNullOrWhiteSpace(s));
-            _out.WriteLine($"suitable for: {string.Join(", ", items)}");
-        }
-
-        if (defaults is not null && defaults.Count > 0)
-        {
-            var risk = StringOf(defaults, "risk");
-            var workflow = StringOf(defaults, "workflow");
-            var labels = defaults["labels"] as JsonObject;
-            var labelText = labels is null || labels.Count == 0
-                ? ""
-                : string.Join(",", labels.OrderBy(kv => kv.Key, StringComparer.Ordinal)
-                    .Select(kv =>
-                    {
-                        var value = kv.Value is null ? "" : (kv.Value.GetValue<string>() ?? "");
-                        return string.Concat(kv.Key, "=", value);
-                    }));
-            if (!string.IsNullOrWhiteSpace(risk))
-                _out.WriteLine($"defaults.risk:       {risk}");
-            if (!string.IsNullOrWhiteSpace(workflow))
-                _out.WriteLine($"defaults.workflow:   {workflow}");
-            if (!string.IsNullOrEmpty(labelText))
-                _out.WriteLine($"defaults.labels:     {labelText}");
-        }
 
         if (sections is null || sections.Count == 0)
         {
