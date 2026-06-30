@@ -6,11 +6,12 @@
       "id": "T-001",
       "title": "Agent data layer: CRUD query hooks and generic AgentSession client/hooks",
       "spec": "specs/agent-workbench/spec.md",
-      "description": "Add the missing TanStack Query layer for Agent profile CRUD (useAgents, useAgent, useCreateAgent, useUpdateAgent, useArchiveAgent) following existing issue/epic query conventions, wrapping the low-level client fns already present in entities/agent/api/client.ts. Add a new generic-AgentSession client module (entities/agent/api/agent-sessions.ts) with pure client fns and matching query/mutation hooks consuming the #129 launch/followup/cancel and #130 generic summary/transcript endpoints. All hooks use projectApiPath + the shared request envelope and are enabled only when projectId is present. This is the foundational data layer every subsequent UI task consumes.",
+      "description": "Add the missing TanStack Query layer for Agent profile CRUD (useAgents, useAgent, useCreateAgent, useUpdateAgent, useArchiveAgent) following existing issue/epic query conventions, wrapping the low-level client fns already present in entities/agent/api/client.ts. Add a new generic-AgentSession client module (entities/agent/api/agent-sessions.ts) with pure client fns and matching query/mutation hooks consuming the #129 launch/followup/cancel and #130 generic summary/transcript and agent-scoped session-list endpoints. All hooks use projectApiPath + the shared request envelope and are enabled only when projectId is present. This is the foundational data layer every subsequent UI task consumes.",
       "acceptanceCriteria": [
         "useAgents() and useAgent(agentRef) return typed AgentInfo, query-keyed ['agents', projectId] and ['agents', projectId, agentRef] respectively, enabled only when projectId is present",
         "useCreateAgent, useUpdateAgent, useArchiveAgent mutations call the existing client fns and invalidate ['agents'] (and ['agent-status'] for launch-affecting changes) on success",
         "getGenericSessionSummary(sessionId), getGenericSessionTranscript(sessionId), launchAgentSession(agentRef, { prompt, context }), postGenericFollowup(sessionId, text), cancelGenericSession(sessionId) client fns exist over projectApiPath + request envelope matching the #129/#130 endpoint contracts",
+        "getAgentSessions(agentRef) client fn and useAgentSessions({ agentRef }) query hook exist over the #130 agent-scoped session-list endpoint (GET /agents/{ref}/sessions), query-keyed ['agents', projectId, agentRef, 'sessions'], enabled only when projectId is present",
         "useGenericSessionSummary and useGenericSessionTranscript hooks are query-keyed ['agent-session', projectId, sessionId] (+ '/transcript'), enabled only when projectId is present",
         "useLaunchAgentSession, useGenericFollowup, useCancelGenericSession mutations invalidate ['agent-status'], ['agent-activity'], the owning ['agents', projectId, agentRef, 'sessions'] list, and the relevant ['agent-session', …] query on success",
         "All client fns and hooks are covered by unit tests against faked responses (no real API calls per test policy)",
@@ -24,7 +25,7 @@
       "output": "packages/web/src/entities/agent/api/queries.ts (extended), packages/web/src/entities/agent/api/agent-sessions.ts (new), packages/web/src/entities/agent/index.ts (re-exports), unit tests",
       "dependsOn": [],
       "passes": false,
-      "notes": "Design D4 (CRUD hooks) + D5 (generic session client). The low-level CRUD client fns (listAgents/getAgent/createAgent/updateAgent/archiveAgent) and model helpers (readAgentModelAndVariant/writeAgentModelAndVariant) already exist in client.ts — this task adds the Query/mutation layer on top. No #129/#130 client wrapper exists yet."
+      "notes": "Design D4 (CRUD hooks) + D5 (generic session client). The low-level CRUD client fns (listAgents/getAgent/createAgent/updateAgent/archiveAgent) and model helpers (readAgentModelAndVariant/writeAgentModelAndVariant) already exist in client.ts — this task adds the Query/mutation layer on top. No #129/#130 client wrapper exists yet. Also owns the #130 agent-scoped session-list client fn + useAgentSessions({ agentRef }) hook (D9), query key ['agents', projectId, agentRef, 'sessions'], which the launch/followup/cancel mutations already invalidate and which T-003's session history consumes."
     },
     {
       "id": "T-002",
