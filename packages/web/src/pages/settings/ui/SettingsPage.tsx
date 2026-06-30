@@ -6,12 +6,14 @@ import {
   FileTextIcon,
   FolderTreeIcon,
   GitBranchIcon,
+  InboxIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
   TagIcon,
 } from 'lucide-react'
 import { AiSettingsSection } from './AiSettingsSection'
 import { AgentSettingsSection } from './AgentSettingsSection'
+import { InboxSubscriptionSection } from './InboxSubscriptionSection'
 import { PreferencesSection } from './PreferencesSection'
 import { SystemSettingsSection } from './SystemSettingsSection'
 import { WorkflowProfilesSection } from './WorkflowProfilesSection'
@@ -36,6 +38,7 @@ const VALID_SECTIONS = [
   'workflows',
   'templates',
   'label-catalog',
+  'inbox',
   'system',
   'preferences',
 ] as const
@@ -49,6 +52,7 @@ const SECTION_META: { key: Section; label: string; icon: ReactNode }[] = [
   { key: 'workflows', label: 'Workflows', icon: <GitBranchIcon /> },
   { key: 'templates', label: 'Templates', icon: <FileTextIcon /> },
   { key: 'label-catalog', label: 'Label catalog', icon: <TagIcon /> },
+  { key: 'inbox', label: 'Inbox', icon: <InboxIcon /> },
   { key: 'system', label: 'System', icon: <SettingsIcon /> },
   { key: 'preferences', label: 'Preferences', icon: <SlidersHorizontalIcon /> },
 ]
@@ -65,6 +69,12 @@ function SectionContent({ section }: { section: Section }) {
       return <AiSettingsSection />
     case 'agent':
       return <AgentSettingsSection />
+    case 'inbox':
+      return currentProject ? (
+        <InboxSubscriptionSection />
+      ) : (
+        <div className="text-sm text-muted-foreground">No project selected</div>
+      )
     case 'repositories':
       return currentProject ? (
         <RepositoriesSection projectId={currentProject.id} />

@@ -67,3 +67,25 @@ public sealed class InboxItemView
     public bool IsRead => ReadAt.HasValue;
     public bool IsArchived => ArchivedAt.HasValue;
 }
+
+/// <summary>
+/// Project-scoped inbox subscription preference state. Returned by
+/// <see cref="InboxSubscriptionStore.GetAsync"/> — when no row exists,
+/// all four kinds are synthesized as enabled. Toggles are keyed
+/// by <see cref="NotificationKinds"/> value.
+/// </summary>
+public sealed record InboxSubscriptionState(
+    bool WorkflowFailedEnabled = true,
+    bool ApprovalRequestedEnabled = true,
+    bool IssueStartedEnabled = true,
+    bool IssueCompletedEnabled = true)
+{
+    public bool IsEnabled(string kind) => kind switch
+    {
+        NotificationKinds.WorkflowFailed => WorkflowFailedEnabled,
+        NotificationKinds.ApprovalRequested => ApprovalRequestedEnabled,
+        NotificationKinds.IssueStarted => IssueStartedEnabled,
+        NotificationKinds.IssueCompleted => IssueCompletedEnabled,
+        _ => false,
+    };
+}

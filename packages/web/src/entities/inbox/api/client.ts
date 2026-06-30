@@ -1,5 +1,5 @@
 import { request, projectApiPath } from '../../../shared/api/client'
-import type { InboxArchiveResponse, InboxItem, InboxMarkAllReadResponse, InboxMarkReadResponse } from '../model/types'
+import type { InboxArchiveResponse, InboxItem, InboxMarkAllReadResponse, InboxMarkReadResponse, InboxSubscription, InboxSubscriptionUpdate } from '../model/types'
 
 export function getInbox(projectId: string | null | undefined) {
   return request<InboxItem[]>(projectApiPath(projectId, '/inbox'))
@@ -23,5 +23,21 @@ export function archiveInboxItem(itemId: string, projectId: string | null | unde
   return request<InboxArchiveResponse>(
     projectApiPath(projectId, `/inbox/${encodeURIComponent(itemId)}/archive`),
     { method: 'POST' },
+  )
+}
+
+export function getInboxSubscription(projectId: string | null | undefined) {
+  return request<InboxSubscription>(
+    projectApiPath(projectId, '/inbox/subscription'),
+  )
+}
+
+export function updateInboxSubscription(
+  projectId: string | null | undefined,
+  data: InboxSubscriptionUpdate,
+) {
+  return request<InboxSubscription>(
+    projectApiPath(projectId, '/inbox/subscription'),
+    { method: 'PUT', body: JSON.stringify(data) },
   )
 }

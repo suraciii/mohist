@@ -137,6 +137,13 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             return;
         }
 
+        var subscriptionStore = scope.ServiceProvider.GetRequiredService<InboxSubscriptionStore>();
+        var subscription = await subscriptionStore.GetAsync(resolved.Value.ProjectId, ct).ConfigureAwait(false);
+        if (!subscription.IsEnabled(kind))
+        {
+            return;
+        }
+
         var draft = new InboxItemDraft(
             ProjectId: resolved.Value.ProjectId,
             IssueId: resolved.Value.IssueId,
