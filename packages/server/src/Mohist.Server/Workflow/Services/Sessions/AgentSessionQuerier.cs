@@ -966,7 +966,7 @@ public class AgentSessionQuerier : IScopedService
                 agentId,
                 agentName,
                 ToEventSummaryDto(eventSummary),
-                ToUsageDto(usage));
+                ToUsageDto(s));
         }
 
         return new ActivityCardDto(
