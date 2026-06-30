@@ -8,10 +8,12 @@ namespace Mohist.Server.Tests.Specs.Project.Grain;
 
 public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
 {
+    private readonly WorkflowGrainFixture _fixture;
     private readonly IGrainFactory _grains;
 
     public ProjectGrainSpecs(WorkflowGrainFixture fixture)
     {
+        _fixture = fixture;
         _grains = fixture.Grains;
     }
 
@@ -88,7 +90,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         var grain = NewProjectGrain();
         var created = await grain.CreateAsync("updatable");
         var before = created.UpdatedAt;
-        await Task.Delay(10);
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
 
         var updated = await grain.UpdateAsync();
 

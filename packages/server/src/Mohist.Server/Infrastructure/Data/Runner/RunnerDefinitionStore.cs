@@ -8,10 +8,12 @@ public class RunnerDefinitionStore
     public const int DefaultSlots = 1;
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly TimeProvider _timeProvider;
 
-    public RunnerDefinitionStore(IDbContextFactory<MohistDbContext> dbFactory)
+    public RunnerDefinitionStore(IDbContextFactory<MohistDbContext> dbFactory, TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
+        _timeProvider = timeProvider;
     }
 
     public async Task<int> GetOrInitAsync(string runnerId, CancellationToken ct = default)
@@ -24,7 +26,7 @@ public class RunnerDefinitionStore
         if (existing is not null)
             return existing.Slots;
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         var row = new RunnerRow
         {
             Id = runnerId,
@@ -63,7 +65,7 @@ public class RunnerDefinitionStore
             throw new InvalidOperationException($"Runner '{runnerId}' has no persisted definition state");
 
         row.Slots = slots;
-        row.UpdatedAt = DateTimeOffset.UtcNow;
+        row.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
     }
 }
