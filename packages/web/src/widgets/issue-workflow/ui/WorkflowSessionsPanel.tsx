@@ -67,14 +67,10 @@ function usageText(session: WorkflowRunSession): string {
 }
 
 function contextText(session: WorkflowRunSession): string | null {
-  const used = session.usage?.contextWindowUsed
-  const size = session.usage?.contextWindowSize
-  if (used == null) return null
-  if (size == null || size <= 0) {
-    return `${formatCompact(used)} ctx`
-  }
-  const pct = Math.min(100, Math.round((used / size) * 100))
-  return `${pct}% ctx`
+  const pct = session.usage?.contextUsagePercent
+  if (pct == null) return null
+  const clamped = Math.max(0, Math.min(100, pct))
+  return `${Math.round(clamped)}% ctx`
 }
 
 function modelLabel(session: WorkflowRunSession): string | null {

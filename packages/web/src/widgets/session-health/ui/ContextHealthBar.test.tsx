@@ -10,7 +10,7 @@ describe('ContextHealthBar', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('renders nothing when only the explicit percent is null', () => {
+  it('renders nothing when contextUsagePercent is null', () => {
     const { container } = render(
       <ContextHealthBar
         contextWindowUsed={500_000}
@@ -18,9 +18,7 @@ describe('ContextHealthBar', () => {
         contextUsagePercent={null}
       />,
     )
-    // Percent is derived from used/size when the explicit value is null.
-    // The component should render in this case.
-    expect(container.firstChild).not.toBeNull()
+    expect(container.firstChild).toBeNull()
   })
 
   it('renders the standard "used / total (percent%)" label at low usage', () => {
@@ -43,6 +41,18 @@ describe('ContextHealthBar', () => {
       />,
     )
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'green')
+  })
+
+  it('uses server-provided healthStatus when present over percent classification', () => {
+    render(
+      <ContextHealthBar
+        contextWindowUsed={450_000}
+        contextWindowSize={1_000_000}
+        contextUsagePercent={45}
+        healthStatus="yellow"
+      />,
+    )
+    expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'yellow')
   })
 
   it('marks the bar with status="yellow" when usage is at the 60% boundary', () => {
@@ -226,8 +236,6 @@ describe('ContextHealthBar', () => {
         onCompact={() => {}}
       />,
     )
-    // The banner only appears when at least one recovery action is wired
-    // up; with just compact it should still show because onCompact is set.
     expect(screen.getByRole('status')).toBeInTheDocument()
   })
 
@@ -239,7 +247,6 @@ describe('ContextHealthBar', () => {
         contextUsagePercent={95}
       />,
     )
-    // No Compact/Reset wired up => no actionable banner, just the bar.
     expect(screen.queryByRole('status')).toBeNull()
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'red')
   })
@@ -271,7 +278,6 @@ describe('ContextHealthBar', () => {
       />,
     )
     expect(screen.queryByRole('status')).toBeNull()
-    // The bar itself should still reflect the high-usage red state.
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'red')
   })
 
@@ -287,7 +293,6 @@ describe('ContextHealthBar', () => {
     )
     expect(screen.getByRole('status')).toBeInTheDocument()
 
-    // After a new SSE update drops usage below 80%, the banner disappears.
     rerender(
       <ContextHealthBar
         contextWindowUsed={450_000}

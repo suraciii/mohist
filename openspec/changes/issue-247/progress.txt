@@ -10,3 +10,14 @@
 - Added `context_health_update` handler that matches by `coderSessionId`/`acpSessionId` and applies `healthStatus`, `contextUsagePercent`, `contextWindowUsed`, `contextWindowSize`.
 - Tests: 5 new tests covering usage.updated parity (with and without refetch), context_health_update by coderSessionId, context_health_update by acpSessionId, and non-matching session ignore.
 - `session()` helper fix: needed `usage` and `eventSummary` spread to support override tests.
+
+## T-002
+
+- `buildSessionMetadata` in `SessionPage.tsx` now maps `contextUsagePercent` and `healthStatus` into `metadata.usage` (were previously dropped).
+- Removed `resolveContextUsagePercent` and `resolveContextUsage` from `context-health.ts` — these were the recompute helpers that derived percent from `contextWindowUsed`/`contextWindowSize`. Kept `classifyContextHealth` (pure percent→status) and exported `clampPercent` (pure formatting).
+- `ContextHealthIndicator` accepts optional `healthStatus` prop. Uses server-provided `healthStatus` when present; falls back to `classifyContextHealth(clampPercent(contextUsagePercent))` for backward compat. Hides when `contextUsagePercent` is absent.
+- `ContextHealthBar` same pattern. Removed `resolveContextUsage` import.
+- `WorkflowSessionsPanel.contextText` now reads `session.usage?.contextUsagePercent` directly instead of computing from `contextWindowUsed`/`contextWindowSize`.
+- SessionPage observability bar `contextWindowPct` now reads `usage?.contextUsagePercent` directly.
+- All widget tests updated: `healthStatus` added to test data where needed, used/size derivation tests replaced with server-value tests. 206 test files, 3106 tests pass.
+- Backward compat preserved: callers that pass `contextUsagePercent` without `healthStatus` (e.g. `SessionCard`, `CompactSessionCard`) still work via `classifyContextHealth` fallback.

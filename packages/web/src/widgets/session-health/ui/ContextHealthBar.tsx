@@ -3,12 +3,19 @@ import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/components/button'
 import { formatCompact } from '@/shared/lib/format-compact'
 import type { ContextHealthStatus } from '../model/context-health'
-import { resolveContextUsage } from '../model/context-health'
+import { classifyContextHealth, clampPercent } from '../model/context-health'
 
 export interface ContextHealthBarProps {
   contextWindowUsed?: number | null
   contextWindowSize?: number | null
   contextUsagePercent?: number | null
+  /**
+   * Server-provided health classification. When provided, used as the
+   * authoritative source of truth. When absent, classification is
+   * derived from `contextUsagePercent` (backward compat). When both
+   * `contextUsagePercent` and `healthStatus` are absent, the bar hides.
+   */
+  healthStatus?: string | null
   onCompact?: () => void
   onReset?: () => void
   compactLabel?: string
@@ -51,6 +58,7 @@ export function ContextHealthBar({
   contextWindowUsed,
   contextWindowSize,
   contextUsagePercent,
+  healthStatus,
   onCompact,
   onReset,
   compactLabel = 'Compact',
@@ -58,16 +66,18 @@ export function ContextHealthBar({
   className,
   showWarning = true,
 }: ContextHealthBarProps) {
-  const usage = resolveContextUsage({ contextWindowUsed, contextWindowSize, contextUsagePercent })
   const [warningDismissed, setWarningDismissed] = useState(false)
 
-  if (usage.percent == null || usage.status == null) {
-    return null
-  }
+  if (contextUsagePercent == null || !Number.isFinite(contextUsagePercent)) return null
 
-  const label = formatUsageLabel(usage.used, usage.size, usage.percent)
+  const percent = clampPercent(contextUsagePercent)
+  const status: ContextHealthStatus = healthStatus != null
+    ? (healthStatus as ContextHealthStatus)
+    : (classifyContextHealth(percent) ?? 'green')
+
+  const label = formatUsageLabel(contextWindowUsed ?? null, contextWindowSize ?? null, percent)
   const showWarningBanner = showWarning
-    && usage.percent >= 80
+    && percent >= 80
     && (onCompact != null || onReset != null)
     && !warningDismissed
 
@@ -93,7 +103,7 @@ export function ContextHealthBar({
           </svg>
           <div className="flex-1 min-w-0 space-y-1">
             <div className="font-medium">
-              Context window is at {Math.round(usage.percent)}% capacity. Compact or reset the
+              Context window is at {Math.round(percent)}% capacity. Compact or reset the
               session to recover headroom before continuing.
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -134,17 +144,17 @@ export function ContextHealthBar({
         </div>
       )}
 
-      <div className="flex flex-col gap-1" data-testid="context-health-bar" data-status={usage.status}>
+      <div className="flex flex-col gap-1" data-testid="context-health-bar" data-status={status}>
         <div className="flex items-center gap-2 text-xs">
-          <span className={cn('inline-block h-2 w-2 rounded-full', STATUS_DOT_CLASS[usage.status])} aria-hidden="true" />
+          <span className={cn('inline-block h-2 w-2 rounded-full', STATUS_DOT_CLASS[status])} aria-hidden="true" />
           <span className="font-mono text-gray-700" data-testid="context-health-label">{label}</span>
         </div>
         <div className="h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
           <div
-            className={cn('h-full rounded-full transition-all duration-300', STATUS_BAR_CLASS[usage.status])}
-            style={{ width: `${usage.percent}%` }}
+            className={cn('h-full rounded-full transition-all duration-300', STATUS_BAR_CLASS[status])}
+            style={{ width: `${percent}%` }}
             data-testid="context-health-fill"
-            data-percent={Math.round(usage.percent)}
+            data-percent={Math.round(percent)}
           />
         </div>
       </div>

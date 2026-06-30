@@ -36,6 +36,7 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
     contextWindowUsed,
     contextWindowSize,
     contextUsagePercent,
+    healthStatus,
     hasRecoveryActions,
     recoverySessionName,
     runtimeSessionLineage,
@@ -72,6 +73,7 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
               contextWindowUsed={contextWindowUsed}
               contextWindowSize={contextWindowSize}
               contextUsagePercent={contextUsagePercent}
+              healthStatus={healthStatus}
             />
           </div>
           {recoverySessionName && (
@@ -404,8 +406,8 @@ function SessionHeader({
     usage?.thoughtTokens != null
 
   const contextWindowPct =
-    usage?.contextWindowUsed != null && usage?.contextWindowSize != null && usage.contextWindowSize > 0
-      ? Math.min(100, Math.round((usage.contextWindowUsed / usage.contextWindowSize) * 100))
+    usage?.contextUsagePercent != null
+      ? Math.round(Math.max(0, Math.min(100, usage.contextUsagePercent)))
       : null
 
   return (
