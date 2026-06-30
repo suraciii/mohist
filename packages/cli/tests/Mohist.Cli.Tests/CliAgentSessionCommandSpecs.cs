@@ -12,16 +12,8 @@ public class CliAgentSessionCommandSpecs
     private static (HttpClient http, RecordingHttpHandler handler, StringWriter output, StringWriter error, FakeFileSystem fileSystem, FakeCommandExecutor executor) SetupEnv(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
     {
-        var handler = new RecordingHttpHandler(responder);
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-            $"{{\"activeProjectId\":\"{ActiveProjectId}\"}}");
-        var executor = new FakeCommandExecutor();
-        return (http, handler, output, error, fileSystem, executor);
+        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(responder, ActiveProjectId);
+        return (http, handler, output, error, fs, executor);
     }
 
     [Fact]

@@ -9,21 +9,7 @@ public class CliLabelCatalogSpecs
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
         CreateHarness(string? activeProjectId = "proj_abc")
     {
-        var handler = new RecordingHttpHandler(async (req, _) =>
-        {
-            return RecordingHttpHandler.Json(new { success = true, data = new { } });
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fs = new FakeFileSystem();
-        if (activeProjectId is not null)
-        {
-            fs.AddFile(
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-                $"{{\"activeProjectId\":\"{activeProjectId}\"}}");
-        }
-        return (handler, http, output, error, fs, new FakeCommandExecutor());
+        return CliTestHarness.Create(activeProjectId: activeProjectId);
     }
 
     private static void SetCatalogListResponse(RecordingHttpHandler handler, params object[] definitions)
