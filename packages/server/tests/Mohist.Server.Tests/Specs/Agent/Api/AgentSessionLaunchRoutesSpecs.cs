@@ -110,11 +110,7 @@ public class AgentSessionLaunchRoutesSpecs
                     Type: RuntimeEventTypes.SessionInput,
                     PayloadJson: "{\"text\":\"open product transcript\",\"kind\":\"task\"}"),
             }));
-            for (var i = 0; i < 5; i++)
-            {
-                await grain.DeactivateForTestAsync();
-                await Task.Delay(150);
-            }
+            await grain.FlushForTestAsync();
 
             using var metadata = await _fixture.Client.GetAsync(
                 $"/api/projects/{projectId}/agent-sessions/{sessionId}");
@@ -487,36 +483,35 @@ public class AgentSessionLaunchRoutesSpecs
     /// </summary>
     private async Task<IAgentJobGrain?> FindAgentJobGrainAsync(string sessionId)
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var token = cts.Token;
-        try
+        return await TestWait.ForAsync(
+            ProbeAgentJobGrainAsync,
+            job => job is not null,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(50),
+            $"agent job grain for session '{sessionId}'");
+    }
+
+    private async Task<IAgentJobGrain?> ProbeAgentJobGrainAsync()
+    {
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        var runners = await registry.ListRunnerIdsAsync();
+        foreach (var runnerId in runners)
         {
-            while (true)
+            var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+            var state = await runner.GetRuntimeStateAsync();
+            foreach (var work in state.ActiveWorks)
             {
-                var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-                var runners = await registry.ListRunnerIdsAsync();
-                foreach (var runnerId in runners)
+                if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
                 {
-                    var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-                    var state = await runner.GetRuntimeStateAsync();
-                    foreach (var work in state.ActiveWorks)
-                    {
-                        if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
-                        {
-                            var job = _fixture.Grains.GetGrain<IAgentJobGrain>(work.OwnerId);
-                            var snapshot = await job.GetRuntimeSnapshotAsync();
-                            if (snapshot.CurrentWorkId == work.WorkId)
-                                return job;
-                        }
-                    }
+                    var job = _fixture.Grains.GetGrain<IAgentJobGrain>(work.OwnerId);
+                    var snapshot = await job.GetRuntimeSnapshotAsync();
+                    if (snapshot.CurrentWorkId == work.WorkId)
+                        return job;
                 }
-                await Task.Delay(50, token);
             }
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
-        {
-            return null;
-        }
+
+        return null;
     }
 
     private async Task<AgentJobRuntimeSnapshot?> FindAgentJobSnapshotAsync(string sessionId)
