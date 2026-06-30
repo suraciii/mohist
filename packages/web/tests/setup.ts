@@ -2,15 +2,20 @@ import '@testing-library/jest-dom'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
+let _reducedMotionOverride: boolean | undefined
+
 afterEach(() => {
   cleanup()
+  _reducedMotionOverride = undefined
 })
 
 if (typeof window !== 'undefined' && !window.matchMedia) {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
-      matches: false,
+      matches: _reducedMotionOverride === true
+        ? query === '(prefers-reduced-motion: reduce)'
+        : false,
       media: query,
       onchange: null,
       addListener: vi.fn(),
@@ -20,6 +25,14 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
       dispatchEvent: vi.fn(),
     })),
   })
+}
+
+/**
+ * Opt an individual test into prefers-reduced-motion: reduce.
+ * The override is reset after each test via afterEach cleanup.
+ */
+export function setPrefersReducedMotion(reduce: boolean) {
+  _reducedMotionOverride = reduce
 }
 
 if (typeof window !== 'undefined' && !window.innerWidth) {

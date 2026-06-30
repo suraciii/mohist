@@ -356,7 +356,15 @@ public sealed record AgentUsageTimeseriesDto(
     DateTime RangeFrom,
     DateTime RangeTo,
     string BucketGranularity,
-    IReadOnlyList<UsageBucketDto> Buckets);
+    IReadOnlyList<UsageBucketDto> Buckets,
+    IReadOnlyList<CumulativeCostPerShipPointDto>? CumulativeCostPerShip = null);
+
+public sealed record CumulativeCostPerShipPointDto(
+    DateTime DayEnd,
+    double? CumulativeCost,
+    string? Currency,
+    int CumulativeShippedCount,
+    double? CostPerShip);
 
 public sealed record UsageBucketDto(
     DateTime BucketStart,

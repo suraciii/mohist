@@ -2,7 +2,9 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Services.Sessions;
@@ -182,6 +184,265 @@ public class AgentUsageTimeseriesApiSpecs
         Assert.Equal(0, totalInput);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_CumulativeSeriesHasSameLengthAsBuckets()
+    {
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+
+        Assert.NotNull(response.CumulativeCostPerShip);
+        Assert.Equal(response.Buckets.Count, response.CumulativeCostPerShip.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_CumulativeSeriesComputesPrefixSums()
+    {
+        var project = await CreateProjectAsync();
+
+        // Use the API's own RangeFrom to align session creation with window.
+        // First request establishes the window boundaries.
+        var emptyResponse = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+        var rangeFrom = emptyResponse.RangeFrom;
+
+        // Create sessions at known bucket positions relative to rangeFrom.
+        // Bucket 2: session at rangeFrom + 2 days, cost 0.02
+        await InsertSessionAsync(project.Id, rangeFrom.AddDays(2).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
+        // Bucket 6: session at rangeFrom + 6 days, cost 0.05
+        await InsertSessionAsync(project.Id, rangeFrom.AddDays(6).AddHours(10),
+            inputTokens: 200, outputTokens: 80, totalTokens: 280, costAmount: 0.05, costCurrency: "USD");
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+
+        Assert.NotNull(response.CumulativeCostPerShip);
+        Assert.Equal(7, response.CumulativeCostPerShip.Count);
+
+        // No pre-window data: preWindowSpend = 0, preWindowSamples = 0.
+        // No shipped issues: cumulativeShipped = 0 for all days.
+        // Day 0-1: no sessions yet → cumulativeSamples=0 → CumulativeCost=null
+        for (var i = 0; i < 2; i++)
+        {
+            Assert.Null(response.CumulativeCostPerShip[i].CumulativeCost);
+            Assert.Null(response.CumulativeCostPerShip[i].Currency);
+            Assert.Equal(0, response.CumulativeCostPerShip[i].CumulativeShippedCount);
+            Assert.Null(response.CumulativeCostPerShip[i].CostPerShip);
+        }
+
+        // Day 2: first session (0.02) → cumulativeSamples=1, cumulativeCost=0.02
+        Assert.Equal(0.02, response.CumulativeCostPerShip[2].CumulativeCost);
+        Assert.Equal("USD", response.CumulativeCostPerShip[2].Currency);
+        Assert.Equal(0, response.CumulativeCostPerShip[2].CumulativeShippedCount);
+        Assert.Null(response.CumulativeCostPerShip[2].CostPerShip);
+
+        // Day 3-5: no new sessions → cumulative stays at 0.02
+        for (var i = 3; i <= 5; i++)
+        {
+            Assert.Equal(0.02, response.CumulativeCostPerShip[i].CumulativeCost);
+        }
+
+        // Day 6: second session (0.05) → cumulativeCost = 0.02 + 0.05 = 0.07
+        Assert.Equal(0.07, response.CumulativeCostPerShip[6].CumulativeCost);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_CumulativeShippedCountsIssuesOnOrBeforeDayEnd()
+    {
+        var project = await CreateProjectAsync();
+
+        // Use the API's own RangeFrom to determine window boundaries.
+        var emptyResponse = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+        var rangeFrom = emptyResponse.RangeFrom;
+
+        // Issue at rangeFrom + 2 days (bucket index 2)
+        await InsertDoneIssueAsync(project.Id, 1, "Done mid",
+            rangeFrom.AddDays(2).AddHours(12));
+
+        // Issue at rangeFrom + 5 days (bucket index 5)
+        await InsertDoneIssueAsync(project.Id, 2, "Done late",
+            rangeFrom.AddDays(5).AddHours(8));
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+
+        Assert.NotNull(response.CumulativeCostPerShip);
+        Assert.Equal(7, response.CumulativeCostPerShip.Count);
+
+        // No pre-window issues: preWindowShipped = 0
+        // Day 0-1: no window issues yet → cumulative shipped = 0
+        Assert.Equal(0, response.CumulativeCostPerShip[0].CumulativeShippedCount);
+        Assert.Equal(0, response.CumulativeCostPerShip[1].CumulativeShippedCount);
+
+        // Day 2: issue at rangeFrom+2 → cumulative shipped = 1
+        Assert.Equal(1, response.CumulativeCostPerShip[2].CumulativeShippedCount);
+
+        // Day 3-4: no new issues → cumulative shipped = 1
+        Assert.Equal(1, response.CumulativeCostPerShip[3].CumulativeShippedCount);
+        Assert.Equal(1, response.CumulativeCostPerShip[4].CumulativeShippedCount);
+
+        // Day 5: issue at rangeFrom+5 → cumulative shipped = 2
+        Assert.Equal(2, response.CumulativeCostPerShip[5].CumulativeShippedCount);
+        Assert.Equal(2, response.CumulativeCostPerShip[6].CumulativeShippedCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_CumulativeCostPerShipIsNullWhenNoShipped()
+    {
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+
+        Assert.NotNull(response.CumulativeCostPerShip);
+
+        // No issues exist, so cumulativeShipped = 0 → CostPerShip = null for all days
+        foreach (var point in response.CumulativeCostPerShip)
+        {
+            Assert.Null(point.CostPerShip);
+            Assert.Equal(0, point.CumulativeShippedCount);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_CumulativeZeroCostWithShippedIsGenuineZero()
+    {
+        var project = await CreateProjectAsync();
+
+        // Session with zero cost but non-null usage
+        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(10),
+            inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 0, costCurrency: "USD");
+
+        // A shipped issue
+        await InsertDoneIssueAsync(project.Id, 1, "Done issue",
+            DateTime.UtcNow.Date.AddDays(-1).AddHours(12));
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+
+        Assert.NotNull(response.CumulativeCostPerShip);
+
+        // Find a day where shipped > 0
+        var dayWithShip = response.CumulativeCostPerShip
+            .FirstOrDefault(p => p.CumulativeShippedCount > 0);
+
+        Assert.NotNull(dayWithShip);
+        // Cost is 0, shipped > 0 → CostPerShip should be 0 (not null)
+        Assert.Equal(0.0, dayWithShip.CostPerShip);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_CumulativeCostPerShipIsZeroWhenShippedExistsButNoUsageSamples()
+    {
+        var project = await CreateProjectAsync();
+
+        var emptyResponse = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+        var rangeFrom = emptyResponse.RangeFrom;
+
+        await InsertDoneIssueAsync(project.Id, 1, "Done without usage",
+            rangeFrom.AddDays(1).AddHours(12));
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+
+        Assert.NotNull(response.CumulativeCostPerShip);
+
+        var shippedPoints = response.CumulativeCostPerShip
+            .Where(point => point.CumulativeShippedCount > 0)
+            .ToArray();
+
+        Assert.NotEmpty(shippedPoints);
+        foreach (var point in shippedPoints)
+        {
+            Assert.Equal(0, point.CumulativeCost);
+            Assert.Null(point.Currency);
+            Assert.Equal(0, point.CostPerShip);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_CumulativeSeriesIncludesPreWindowHistory()
+    {
+        var project = await CreateProjectAsync();
+
+        var emptyResponse = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+        var rangeFrom = emptyResponse.RangeFrom;
+
+        await InsertSessionAsync(project.Id, rangeFrom.AddDays(-2).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.03, costCurrency: "USD");
+        await InsertDoneIssueAsync(project.Id, 1, "Done before window",
+            rangeFrom.AddDays(-1).AddHours(12));
+
+        await InsertSessionAsync(project.Id, rangeFrom.AddDays(1).AddHours(10),
+            inputTokens: 200, outputTokens: 80, totalTokens: 280, costAmount: 0.02, costCurrency: "USD");
+        await InsertDoneIssueAsync(project.Id, 2, "Done in window",
+            rangeFrom.AddDays(2).AddHours(8));
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+
+        Assert.NotNull(response.CumulativeCostPerShip);
+        Assert.Equal(0.03, response.CumulativeCostPerShip[0].CumulativeCost);
+        Assert.Equal(1, response.CumulativeCostPerShip[0].CumulativeShippedCount);
+        Assert.Equal(0.03, response.CumulativeCostPerShip[0].CostPerShip);
+
+        Assert.Equal(0.05, response.CumulativeCostPerShip[1].CumulativeCost);
+        Assert.Equal(1, response.CumulativeCostPerShip[1].CumulativeShippedCount);
+        Assert.Equal(0.05, response.CumulativeCostPerShip[1].CostPerShip);
+
+        Assert.Equal(0.05, response.CumulativeCostPerShip[2].CumulativeCost);
+        Assert.Equal(2, response.CumulativeCostPerShip[2].CumulativeShippedCount);
+        Assert.Equal(0.025, response.CumulativeCostPerShip[2].CostPerShip);
+
+        Assert.Equal(0.02, response.Buckets.Sum(bucket => bucket.CostAmount));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_CumulativeZeroSampleProject_ReturnsDefinedEmptyResult()
+    {
+        var project = await CreateProjectAsync();
+        // No sessions, no issues
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+
+        Assert.NotNull(response.CumulativeCostPerShip);
+        Assert.Equal(7, response.CumulativeCostPerShip.Count);
+
+        foreach (var point in response.CumulativeCostPerShip)
+        {
+            Assert.Null(point.CumulativeCost);
+            Assert.Null(point.Currency);
+            Assert.Equal(0, point.CumulativeShippedCount);
+            Assert.Null(point.CostPerShip);
+        }
+    }
+
     private async Task<ProjectDto> CreateProjectAsync()
     {
         var name = $"usage-{Guid.NewGuid():N}";
@@ -275,7 +536,8 @@ public class AgentUsageTimeseriesApiSpecs
         DateTime RangeFrom,
         DateTime RangeTo,
         string BucketGranularity,
-        IReadOnlyList<UsageBucketResponseDto> Buckets);
+        IReadOnlyList<UsageBucketResponseDto> Buckets,
+        IReadOnlyList<CumulativeCostPerShipPointResponseDto>? CumulativeCostPerShip = null);
 
     private sealed record UsageBucketResponseDto(
         DateTime BucketStart,
@@ -285,4 +547,33 @@ public class AgentUsageTimeseriesApiSpecs
         long TotalTokens,
         double CostAmount,
         string? CostCurrency);
+
+    private sealed record CumulativeCostPerShipPointResponseDto(
+        DateTime DayEnd,
+        double? CumulativeCost,
+        string? Currency,
+        int CumulativeShippedCount,
+        double? CostPerShip);
+
+    private async Task InsertDoneIssueAsync(string projectId, int number, string title, DateTime completedAt)
+    {
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = $"issue_{Guid.NewGuid():N}",
+            ProjectId = projectId,
+            Number = number,
+            Title = title,
+            Status = IssueStatus.Done,
+            CompletedAt = completedAt,
+        };
+
+        await using var db = await _fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
+        });
+        await db.SaveChangesAsync();
+    }
 }

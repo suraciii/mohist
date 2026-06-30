@@ -1,4 +1,5 @@
 import { CompletionTrend } from './CompletionTrend'
+import { CostTrendChart } from './CostTrendChart'
 import { EpicProgressList } from './EpicProgressList'
 import { InvestmentPanel } from './InvestmentPanel'
 import { QualityPanel } from './QualityPanel'
@@ -16,6 +17,7 @@ export function ProductivityZone() {
       <CompletionTrend />
       <QualityPanel />
       <InvestmentPanel />
+      <CostTrendChart />
     </div>
   )
 }
