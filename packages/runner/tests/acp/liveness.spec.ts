@@ -1,6 +1,3 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
 import { afterEach, describe, expect, it } from "vitest"
 import { acpAgentAction, setAcpProcessFactoryForTest } from "../../src/actions/acp-agent.js"
 import {
@@ -8,6 +5,7 @@ import {
   monitorPrompt,
 } from "../../src/actions/acp/liveness.js"
 import type { ActionContext } from "../../src/core/types.js"
+import type { OpencodeProviderErrorDiagnostic } from "../../src/runtime/opencode-log-diagnostics.js"
 import { ServerConnection } from "../../src/server/connection.js"
 import {
   baseContext,
@@ -17,126 +15,110 @@ import {
   createTrackedFakeProcess,
   FakeAcpAgent,
   FakeServerConnection,
+  resetAcpTestHooks,
+  runAcpActionUntilSettled,
+  useAcpProviderDiagnostic,
+  useAcpFakeTimers,
 } from "./support.js"
 
 afterEach(() => {
   setAcpProcessFactoryForTest(null)
-  delete process.env.MOHIST_OPENCODE_LOG_DIR
+  resetAcpTestHooks()
 })
 
 describe("mohist/acp-agent monitorPrompt provider fail-fast", () => {
-  it("TokenPlanProviderErrorAppearsInOpencodeLog_MonitorFailsPromptImmediately", async () => {
-    const logDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-"))
-    process.env.MOHIST_OPENCODE_LOG_DIR = logDir
-    try {
-      const context = {
-        ...baseContext({ prompt: "hanging task" }),
-        serverConnection: new FakeServerConnection() as unknown as ServerConnection,
-      }
-      let cancelled = false
-      const connection = {
-        async prompt() {
-          return await new Promise(() => {})
-        },
-        async cancel() {
-          cancelled = true
-          return {}
-        },
-      }
-      setTimeout(() => {
-        void writeFile(join(logDir, "opencode.log"), [
-          `timestamp=${new Date().toISOString()} level=ERROR run=test message="stream error" providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=fake-session-1 small=false agent=build mode=primary error.error="AI_APICallError: Token Plan usage limit reached: Upgrade your Token Plan or purchase Credits for more usage. (2056)"`,
-          "",
-        ].join("\n"))
-      }, 20)
-
-      const result = await monitorPrompt(context, connection as never, "fake-session-1", "do the work", {
-        timeoutMs: 1_000,
-        livenessQuietThresholdMs: 5_000,
-        probeTimeoutMs: 5_000,
-        livenessState: createSessionLivenessState(),
-        waitForData: () => new Promise<"data">(() => {}),
-        providerErrorCheckIntervalMs: 5,
-      })
-
-      expect(result).not.toBe("completed")
-      if (result === "completed") return
-      expect(result.failureReason).toBe("provider_error")
-      expect(result.error).toContain("Opencode provider error: AI_APICallError on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached")
-      expect(result.providerError?.message).toContain("Token Plan usage limit reached")
-      expect(cancelled).toBe(true)
-
-      const failed = (context.serverConnection as unknown as FakeServerConnection).calls
-        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
-        .map((entry) => entry.payload as Record<string, unknown>)
-        .find((payload) => payload.status === "failed")
-      expect(failed?.failureReason).toBe("provider_error")
-      expect((failed?.providerError as Record<string, unknown>)?.message).toContain("Token Plan usage limit reached")
-    } finally {
-      await rm(logDir, { recursive: true, force: true })
+  it("TokenPlanProviderDiagnostic_MonitorFailsPromptImmediately", async () => {
+    useAcpFakeTimers()
+    useAcpProviderDiagnostic(tokenPlanDiagnostic(new Date().toISOString()))
+    const context = {
+      ...baseContext({ prompt: "hanging task" }),
+      serverConnection: new FakeServerConnection() as unknown as ServerConnection,
     }
+    let cancelled = false
+    const connection = {
+      async prompt() {
+        return await new Promise(() => {})
+      },
+      async cancel() {
+        cancelled = true
+        return {}
+      },
+    }
+
+    const result = await runAcpActionUntilSettled(monitorPrompt(context, connection as never, "fake-session-1", "do the work", {
+      timeoutMs: 1_000,
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      livenessState: createSessionLivenessState(),
+      waitForData: () => new Promise<"data">(() => {}),
+    }))
+
+    expect(result).not.toBe("completed")
+    if (result === "completed") return
+    expect(result.failureReason).toBe("provider_error")
+    expect(result.error).toContain("Opencode provider error: AI_APICallError on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached")
+    expect(result.providerError?.message).toContain("Token Plan usage limit reached")
+    expect(cancelled).toBe(true)
+
+    const failed = (context.serverConnection as unknown as FakeServerConnection).calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .find((payload) => payload.status === "failed")
+    expect(failed?.failureReason).toBe("provider_error")
+    expect((failed?.providerError as Record<string, unknown>)?.message).toContain("Token Plan usage limit reached")
   })
 
-  it("SocketProviderErrorAppearsInOpencodeLog_MonitorDoesNotFailFastBeforePromptTimeout", async () => {
-    const logDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-"))
-    process.env.MOHIST_OPENCODE_LOG_DIR = logDir
-    try {
-      const connection = {
-        async prompt() {
-          return await new Promise(() => {})
-        },
-        async cancel() {
-          return {}
-        },
-      }
-      setTimeout(() => {
-        void writeFile(join(logDir, "opencode.log"), [
-          `timestamp=${new Date().toISOString()} level=ERROR run=test message="stream error" providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=fake-session-1 small=false agent=build mode=primary error.error="AI_APICallError: Cannot connect to API: The socket connection was closed unexpectedly."`,
-          "",
-        ].join("\n"))
-      }, 10)
-
-      const result = await monitorPrompt(baseContext({ prompt: "hanging task" }), connection as never, "fake-session-1", "do the work", {
-        timeoutMs: 40,
-        livenessQuietThresholdMs: 5_000,
-        probeTimeoutMs: 5_000,
-        livenessState: createSessionLivenessState(),
-        waitForData: () => new Promise<"data">(() => {}),
-        providerErrorCheckIntervalMs: 5,
-      })
-
-      expect(result).not.toBe("completed")
-      if (result === "completed") return
-      expect(result.failureReason).toBe("prompt_timeout")
-      expect(result.error).toContain("Timed out after")
-    } finally {
-      await rm(logDir, { recursive: true, force: true })
+  it("SocketProviderDiagnostic_MonitorDoesNotFailFastBeforePromptTimeout", async () => {
+    useAcpFakeTimers()
+    useAcpProviderDiagnostic(socketDiagnostic(new Date().toISOString()))
+    const connection = {
+      async prompt() {
+        return await new Promise(() => {})
+      },
+      async cancel() {
+        return {}
+      },
     }
+
+    const result = await runAcpActionUntilSettled(monitorPrompt(baseContext({ prompt: "hanging task" }), connection as never, "fake-session-1", "do the work", {
+      timeoutMs: 40,
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      livenessState: createSessionLivenessState(),
+      waitForData: () => new Promise<"data">(() => {}),
+    }))
+
+    expect(result).not.toBe("completed")
+    if (result === "completed") return
+    expect(result.failureReason).toBe("prompt_timeout")
+    expect(result.error).toContain("Timed out after")
   })
 })
 
-describe.skip("mohist/acp-agent cancelAndReturn bounded cleanup [SKIPPED: relies on physical wall-clock; needs fake time]", () => {
+describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
   it("EphemeralSessionCancelHangs_CleanupForcesProcessKill_AndReturnsWithinBound", async () => {
+    useAcpFakeTimers()
     const agent = new FakeAcpAgent("cancel-hangs")
     const tracked = createTrackedFakeProcess(agent, { hangCancelWrites: true })
     setAcpProcessFactoryForTest(() => tracked)
     const serverConnection = new FakeServerConnection()
 
     const startedAt = Date.now()
-    const result = await acpAgentAction({
+    const result = await runAcpActionUntilSettled(acpAgentAction({
       ...baseContext({ prompt: "hanging task", timeout: 100 }),
       serverConnection: serverConnection as unknown as ServerConnection,
-    })
+    }))
     const elapsed = Date.now() - startedAt
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Timed out")
     expect(tracked.cleanupCount()).toBeGreaterThanOrEqual(1)
-    expect(elapsed).toBeGreaterThanOrEqual(4_500)
-    expect(elapsed).toBeLessThan(10_000)
-  }, 15_000)
+    expect(elapsed).toBeGreaterThanOrEqual(150)
+    expect(elapsed).toBeLessThan(500)
+  })
 
   it("EphemeralSessionCancelResolvesPromptly_NoForceCleanupFromTimeoutRace", async () => {
+    useAcpFakeTimers()
     const agent = new FakeAcpAgent("cancel-hangs")
     agent.cancelHangs = false
     const tracked = createTrackedFakeProcess(agent)
@@ -147,10 +129,10 @@ describe.skip("mohist/acp-agent cancelAndReturn bounded cleanup [SKIPPED: relies
 
     const cleanupBefore = tracked.cleanupCount()
     const startedAt = Date.now()
-    const result = await acpAgentAction({
+    const result = await runAcpActionUntilSettled(acpAgentAction({
       ...baseContext({ prompt: "abort task", timeout: 5_000 }, controller.signal),
       serverConnection: serverConnection as unknown as ServerConnection,
-    })
+    }))
     const elapsed = Date.now() - startedAt
 
     expect(result.status).toBe("failure")
@@ -162,16 +144,17 @@ describe.skip("mohist/acp-agent cancelAndReturn bounded cleanup [SKIPPED: relies
   })
 
   it("SharedSessionCancelHangs_NoProcessIsKilled", async () => {
+    useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
     shared.agent.cancelHangs = true
 
-    const result = await acpAgentAction(contextWithOverrides({
+    const result = await runAcpActionUntilSettled(acpAgentAction(contextWithOverrides({
       prompt: "long shared task",
       session: "shared-session",
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
       timeout: 100,
-    }, undefined, shared.context()))
+    }, undefined, shared.context())))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Timed out")
@@ -179,103 +162,91 @@ describe.skip("mohist/acp-agent cancelAndReturn bounded cleanup [SKIPPED: relies
   })
 })
 
-describe.skip("mohist/acp-agent monitorPrompt prompt_timeout diagnostics [SKIPPED: relies on physical wall-clock; needs fake time]", () => {
-  it("PromptTimesOutWithProviderErrorInLog_ErrorMessageContainsDiagnostic_AndFailureCategoryIsPromptTimeout", async () => {
-    const logDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-"))
-    process.env.MOHIST_OPENCODE_LOG_DIR = logDir
-    try {
-      await writeFile(join(logDir, "2026-06-03T164901.log"), [
-        'ERROR 2026-06-03T16:49:06 service=llm providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=fake-session-1 small=false agent=build mode=primary error={"error":{"name":"AI_APICallError","statusCode":2056,"responseBody":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"token_plan_limit_error\\",\\"message\\":\\"Token Plan usage limit reached\\"}}","isRetryable":true}} stream error',
-        "",
-      ].join("\n"))
-      const fixture = createFixture("cancel-hangs")
-      setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
-
-      const result = await acpAgentAction(fixture.context({
-        prompt: "hanging prompt",
-        timeout: 100,
-        livenessQuietThresholdMs: 5_000,
-        probeTimeoutMs: 5_000,
-      }))
-
-      expect(result.status).toBe("failure")
-      expect(result.message ?? "").toContain("Timed out after")
-      expect(result.message ?? "").toContain("Opencode provider error: 2056 token_plan_limit_error on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached")
-
-      const output = JSON.parse(result.output ?? "{}") as Record<string, unknown>
-      const providerError = output.providerError as Record<string, unknown> | undefined
-      expect(providerError?.statusCode).toBe(2056)
-      expect(providerError?.errorType).toBe("token_plan_limit_error")
-      expect(providerError?.message).toContain("Token Plan usage limit reached")
-
-      const failed = fixture.serverConnection.calls
-        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
-        .map((entry) => entry.payload as Record<string, unknown>)
-        .find((payload) => payload.status === "failed")
-      expect(failed).toBeTruthy()
-      expect(failed?.failureReason).toBe("prompt_timeout")
-      expect((failed?.providerError as Record<string, unknown>)?.statusCode).toBe(2056)
-
-      const terminal = fixture.serverConnection.calls
-        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
-        .map((entry) => entry.payload as Record<string, unknown>)
-        .at(-1)
-      expect(terminal?.failureCategory).toBe("prompt_timeout")
-      expect(String(terminal?.failureReason)).toContain("Opencode provider error: 2056 token_plan_limit_error")
-    } finally {
-      await rm(logDir, { recursive: true, force: true })
-    }
-  })
-
-  it("PromptTimesOutWithEmptyLogDir_ErrorContainsNoDiagnostic_AndFailureCategoryStillPromptTimeout", async () => {
-    const logDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-empty-"))
-    process.env.MOHIST_OPENCODE_LOG_DIR = logDir
-    try {
-      const fixture = createFixture("cancel-hangs")
-      setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
-
-      const result = await acpAgentAction(fixture.context({
-        prompt: "hanging prompt no log",
-        timeout: 100,
-        livenessQuietThresholdMs: 5_000,
-        probeTimeoutMs: 5_000,
-      }))
-
-      expect(result.status).toBe("failure")
-      expect(result.message ?? "").toContain("Timed out after")
-      expect(result.message ?? "").not.toContain("Opencode provider error")
-
-      const output = JSON.parse(result.output ?? "{}") as Record<string, unknown>
-      expect(output.providerError).toBeUndefined()
-
-      const failed = fixture.serverConnection.calls
-        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
-        .map((entry) => entry.payload as Record<string, unknown>)
-        .find((payload) => payload.status === "failed")
-      expect(failed).toBeTruthy()
-      expect(failed?.failureReason).toBe("prompt_timeout")
-      expect(failed?.providerError).toBeUndefined()
-
-      const terminal = fixture.serverConnection.calls
-        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
-        .map((entry) => entry.payload as Record<string, unknown>)
-        .at(-1)
-      expect(terminal?.failureCategory).toBe("prompt_timeout")
-    } finally {
-      await rm(logDir, { recursive: true, force: true })
-    }
-  })
-
-  it("PromptTimesOut_EmitsLivenessFailedEventWithPromptTimeoutFailureReason", async () => {
+describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
+  it("PromptTimesOutWithProviderDiagnostic_ErrorMessageContainsDiagnostic_AndFailureCategoryIsPromptTimeout", async () => {
+    useAcpFakeTimers()
+    useAcpProviderDiagnostic(tokenPlanLimitDiagnostic("2026-06-03T16:49:06.000Z"))
     const fixture = createFixture("cancel-hangs")
     setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
 
-    await acpAgentAction(fixture.context({
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
+      prompt: "hanging prompt",
+      timeout: 100,
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+    })))
+
+    expect(result.status).toBe("failure")
+    expect(result.message ?? "").toContain("Timed out after")
+    expect(result.message ?? "").toContain("Opencode provider error: 2056 token_plan_limit_error on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached")
+
+    const output = JSON.parse(result.output ?? "{}") as Record<string, unknown>
+    const providerError = output.providerError as Record<string, unknown> | undefined
+    expect(providerError?.statusCode).toBe(2056)
+    expect(providerError?.errorType).toBe("token_plan_limit_error")
+    expect(providerError?.message).toContain("Token Plan usage limit reached")
+
+    const failed = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .find((payload) => payload.status === "failed")
+    expect(failed).toBeTruthy()
+    expect(failed?.failureReason).toBe("prompt_timeout")
+    expect((failed?.providerError as Record<string, unknown>)?.statusCode).toBe(2056)
+
+    const terminal = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .at(-1)
+    expect(terminal?.failureCategory).toBe("prompt_timeout")
+    expect(String(terminal?.failureReason)).toContain("Opencode provider error: 2056 token_plan_limit_error")
+  })
+
+  it("PromptTimesOutWithoutProviderDiagnostic_ErrorContainsNoDiagnostic_AndFailureCategoryStillPromptTimeout", async () => {
+    useAcpFakeTimers()
+    const fixture = createFixture("cancel-hangs")
+    setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
+
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
+      prompt: "hanging prompt no log",
+      timeout: 100,
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+    })))
+
+    expect(result.status).toBe("failure")
+    expect(result.message ?? "").toContain("Timed out after")
+    expect(result.message ?? "").not.toContain("Opencode provider error")
+
+    const output = JSON.parse(result.output ?? "{}") as Record<string, unknown>
+    expect(output.providerError).toBeUndefined()
+
+    const failed = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .find((payload) => payload.status === "failed")
+    expect(failed).toBeTruthy()
+    expect(failed?.failureReason).toBe("prompt_timeout")
+    expect(failed?.providerError).toBeUndefined()
+
+    const terminal = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .at(-1)
+    expect(terminal?.failureCategory).toBe("prompt_timeout")
+  })
+
+  it("PromptTimesOut_EmitsLivenessFailedEventWithPromptTimeoutFailureReason", async () => {
+    useAcpFakeTimers()
+    const fixture = createFixture("cancel-hangs")
+    setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
+
+    await runAcpActionUntilSettled(acpAgentAction(fixture.context({
       prompt: "hanging prompt liveness event",
       timeout: 100,
       livenessQuietThresholdMs: 5_000,
       probeTimeoutMs: 5_000,
-    }))
+    })))
 
     const livenessEvents = fixture.serverConnection.calls
       .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
@@ -303,5 +274,44 @@ function createFixture(scenario: "cancel-hangs") {
         ...overrides,
       }
     },
+  }
+}
+
+function tokenPlanDiagnostic(occurredAt: string): OpencodeProviderErrorDiagnostic {
+  return {
+    sessionId: "fake-session-1",
+    summary: "Opencode provider error: AI_APICallError on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached",
+    providerId: "minimax-coding-plan",
+    modelId: "MiniMax-M3",
+    errorName: "AI_APICallError",
+    message: "Token Plan usage limit reached",
+    occurredAt,
+  }
+}
+
+function socketDiagnostic(occurredAt: string): OpencodeProviderErrorDiagnostic {
+  return {
+    sessionId: "fake-session-1",
+    summary: "Opencode provider error: AI_APICallError on minimax-coding-plan/MiniMax-M3 - Cannot connect to API: The socket connection was closed unexpectedly.",
+    providerId: "minimax-coding-plan",
+    modelId: "MiniMax-M3",
+    errorName: "AI_APICallError",
+    message: "Cannot connect to API: The socket connection was closed unexpectedly.",
+    occurredAt,
+  }
+}
+
+function tokenPlanLimitDiagnostic(occurredAt: string): OpencodeProviderErrorDiagnostic {
+  return {
+    sessionId: "fake-session-1",
+    summary: "Opencode provider error: 2056 token_plan_limit_error on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached",
+    providerId: "minimax-coding-plan",
+    modelId: "MiniMax-M3",
+    statusCode: 2056,
+    errorName: "AI_APICallError",
+    errorType: "token_plan_limit_error",
+    message: "Token Plan usage limit reached",
+    retryable: true,
+    occurredAt,
   }
 }

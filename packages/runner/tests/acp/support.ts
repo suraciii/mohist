@@ -3,9 +3,16 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { AgentSideConnection, ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { Agent, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
+import { vi } from "vitest"
 import { setAcpProcessFactoryForTest, type AcpProcessHandle } from "../../src/actions/acp-agent.js"
+import { setAcpCancelTimeoutMsForTest } from "../../src/actions/acp/liveness.js"
 import type { ActionContext } from "../../src/core/types.js"
 import { AcpSessionManager, type SharedAcpConnection } from "../../src/runtime/acp-connection.js"
+import {
+  isFailFastOpencodeProviderError,
+  setOpencodeProviderErrorDiagnosticFinderForTest,
+  type OpencodeProviderErrorDiagnostic,
+} from "../../src/runtime/opencode-log-diagnostics.js"
 import { ServerConnection } from "../../src/server/connection.js"
 
 export type Scenario =
@@ -31,6 +38,7 @@ export type Scenario =
   | "expectation-repair"
   | "expectation-repair-usage-only"
   | "cancel-hangs"
+  | "failif-fail"
 
 export function createFixture(scenario: Scenario) {
   const timeline: Array<{ event: string }> = []
@@ -169,6 +177,7 @@ export class FakeAcpAgent {
         if (self.scenario === "empty-complete") return { stopReason: "end_turn" }
         if (self.scenario === "expectation-repair") return await self.runExpectationRepairPrompt(params.sessionId, text)
         if (self.scenario === "expectation-repair-usage-only") return await self.runExpectationRepairUsageOnlyPrompt(params.sessionId, text)
+        if (self.scenario === "failif-fail") return await self.runFailIfFailPrompt(params.sessionId)
         if (self.scenario === "tool-weird") await self.emitWeirdToolEvents(params.sessionId)
         if (self.scenario === "config-option-update") {
           await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "switching" } } } as never)
@@ -274,6 +283,12 @@ export class FakeAcpAgent {
     }
 
     await this.connection.sessionUpdate(textUpdate(sessionId, "review complete"))
+    return { stopReason: "end_turn" as const }
+  }
+
+  private async runFailIfFailPrompt(sessionId: string) {
+    await writeFile(join(this.extractCwd(), "review.md"), "Found issues.\n<promise>FAIL</promise>\n")
+    await this.connection.sessionUpdate(textUpdate(sessionId, "wrote review.md"))
     return { stopReason: "end_turn" as const }
   }
 
@@ -471,6 +486,60 @@ export function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+export function useAcpFakeTimers(now = "2026-06-30T00:00:00.000Z") {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+  vi.setSystemTime(new Date(now))
+  setAcpCancelTimeoutMsForTest(50)
+  setOpencodeProviderErrorDiagnosticFinderForTest(async () => undefined)
+}
+
+export function resetAcpTestHooks() {
+  setAcpCancelTimeoutMsForTest(null)
+  setOpencodeProviderErrorDiagnosticFinderForTest(null)
+  vi.useRealTimers()
+  delete process.env.MOHIST_OPENCODE_LOG_DIR
+}
+
+export function useAcpProviderDiagnostic(diagnostic: OpencodeProviderErrorDiagnostic | undefined) {
+  setOpencodeProviderErrorDiagnosticFinderForTest(async (sessionId, options) => {
+    if (!diagnostic || diagnostic.sessionId !== sessionId) return undefined
+    if (options.sinceMs !== undefined) {
+      if (!diagnostic.occurredAt) return undefined
+      const occurredAtMs = Date.parse(diagnostic.occurredAt)
+      if (!Number.isFinite(occurredAtMs) || occurredAtMs < options.sinceMs) return undefined
+    }
+    if (options.failFastOnly && !isFailFastOpencodeProviderError(diagnostic)) return undefined
+    return diagnostic
+  })
+}
+
+export async function runAcpActionUntilSettled<T>(action: Promise<T>, maxRounds = 1_000): Promise<T> {
+  let done = false
+  let value: T | undefined
+  let error: unknown
+  void action.then(
+    (resolved) => {
+      done = true
+      value = resolved
+    },
+    (rejected) => {
+      done = true
+      error = rejected
+    },
+  )
+
+  for (let round = 0; round < maxRounds; round += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    if (done) {
+      if (error) throw error
+      return value as T
+    }
+    if (vi.getTimerCount() > 0) await vi.advanceTimersToNextTimerAsync()
+  }
+
+  throw new Error(`ACP action did not settle after ${maxRounds} fake-timer rounds`)
+}
+
 export function createTrackedFakeProcess(agent: FakeAcpAgent, options: { hangCancelWrites?: boolean } = {}): AcpProcessHandle & { cleanupCount: () => number } {
   const base = createFakeProcess(agent, options)
   let cleanupCalls = 0
@@ -603,10 +672,76 @@ export function fakeServerConnection() {
 }
 
 export function linkedStreams(): [Stream, Stream] {
-  const clientToAgent = new TransformStream()
-  const agentToClient = new TransformStream()
+  const clientToAgent = createSyncPipe()
+  const agentToClient = createSyncPipe()
   return [
     { writable: clientToAgent.writable, readable: agentToClient.readable },
     { writable: agentToClient.writable, readable: clientToAgent.readable },
   ]
+}
+
+function createSyncPipe(): { writable: any, readable: any } {
+  const queue: unknown[] = []
+  const pendingReads: Array<(value: { value: unknown; done: boolean }) => void> = []
+  let closed = false
+
+  const enqueue = (chunk: unknown) => {
+    if (closed) return
+    const pendingRead = pendingReads.shift()
+    if (pendingRead) {
+      pendingRead({ value: chunk, done: false })
+    } else {
+      queue.push(chunk)
+    }
+  }
+
+  const close = () => {
+    closed = true
+    while (pendingReads.length > 0) {
+      const pendingRead = pendingReads.shift()
+      if (!pendingRead) continue
+      if (queue.length > 0) {
+        pendingRead({ value: queue.shift(), done: false })
+      } else {
+        pendingRead({ value: undefined, done: true })
+      }
+    }
+    return Promise.resolve()
+  }
+
+  const cancel = () => {
+    closed = true
+    queue.length = 0
+    while (pendingReads.length > 0) {
+      pendingReads.shift()?.({ value: undefined, done: true })
+    }
+    return Promise.resolve()
+  }
+
+  return {
+    readable: {
+      getReader: () => ({
+        read: () => {
+          if (queue.length > 0) return Promise.resolve({ value: queue.shift(), done: false })
+          if (closed) return Promise.resolve({ value: undefined, done: true })
+          return new Promise(resolve => { pendingReads.push(resolve) })
+        },
+        releaseLock() {},
+        cancel,
+      }),
+      locked: false,
+      cancel,
+    },
+    writable: {
+      getWriter: () => ({
+        write: (chunk: unknown) => { enqueue(chunk); return Promise.resolve() },
+        releaseLock() {},
+        close,
+        abort: cancel,
+      }),
+      locked: false,
+      abort: cancel,
+      close,
+    },
+  }
 }

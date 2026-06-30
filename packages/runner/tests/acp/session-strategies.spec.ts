@@ -14,12 +14,15 @@ import {
   createFixture,
   createSharedFixture,
   createSharedSessionFixture,
+  resetAcpTestHooks,
+  runAcpActionUntilSettled,
+  useAcpFakeTimers,
 } from "./support.js"
 
 afterEach(() => {
   setAcpProcessFactoryForTest(null)
   setPromptLoaderRegistryForTest(null)
-  delete process.env.MOHIST_OPENCODE_LOG_DIR
+  resetAcpTestHooks()
 })
 
 describe("mohist/acp-agent new and ephemeral sessions", () => {
@@ -145,10 +148,11 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     expect(result.status).toBe("success")
   })
 
-  it.skip("RunningSessionExceedsQuietThreshold_LivenessMonitored_EntersProbingAndSendsProbePrompt [SKIPPED: physical wall-clock]", async () => {
+  it("RunningSessionExceedsQuietThreshold_LivenessMonitored_EntersProbingAndSendsProbePrompt", async () => {
+    useAcpFakeTimers()
     const fixture = createFixture("liveness")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 }))
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 })))
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.some((entry) => entry.event === "prompt" && entry.promptCount === 2 && entry.text.includes("still alive"))).toBe(true)
@@ -251,31 +255,96 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     }
   })
 
-  it.skip("ProbeTimesOutWithoutQualifyingActivity_LivenessMonitored_FailsSession [SKIPPED: physical wall-clock]", async () => {
+  it("FailIf_PASSMarker_ActionReportsSuccess", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-acp-failif-pass-"))
+    const fixture = createFixture("expectation-repair")
+
+    try {
+      const result = await acpAgentAction(fixture.context({
+        prompt: "review the change",
+        session: "check",
+        expect: {
+          markers: [
+            {
+              path: "review.md",
+              oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+              failIf: "<promise>FAIL</promise>",
+            },
+          ],
+        },
+      }, undefined, { workDir }))
+
+      expect(result.status).toBe("success")
+      const output = JSON.parse(result.output ?? "{}")
+      expect(output.promise).toBe("PASS")
+      expect(output.failIfMarker).toBeNull()
+      expect(output.expectation.satisfied).toBe(true)
+      expect(output.expectation.failIfMatches).toHaveLength(0)
+    } finally {
+      await rm(workDir, { recursive: true, force: true })
+    }
+  })
+
+  it("FailIf_FAILMarker_ActionReportsFailureWithFailPromise", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-acp-failif-fail-"))
+    const fixture = createFixture("failif-fail")
+
+    try {
+      const result = await acpAgentAction(fixture.context({
+        prompt: "review the change",
+        session: "check",
+        expect: {
+          markers: [
+            {
+              path: "review.md",
+              oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+              failIf: "<promise>FAIL</promise>",
+            },
+          ],
+        },
+      }, undefined, { workDir }))
+
+      expect(result.status).toBe("failure")
+      const output = JSON.parse(result.output ?? "{}")
+      expect(output.promise).toBe("FAIL")
+      expect(output.failIfMarker).toBe("<promise>FAIL</promise>")
+      expect(output.expectation.satisfied).toBe(false)
+      expect(output.expectation.failIfMatches).toHaveLength(1)
+      expect(result.message).toContain("failIf marker matched")
+      expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
+    } finally {
+      await rm(workDir, { recursive: true, force: true })
+    }
+  })
+
+  it("ProbeTimesOutWithoutQualifyingActivity_LivenessMonitored_FailsSession", async () => {
+    useAcpFakeTimers()
     const fixture = createFixture("quiet-then-done")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "long silent task", livenessQuietThresholdMs: 30, probeTimeoutMs: 30, timeout: 2_000 }))
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({ prompt: "long silent task", livenessQuietThresholdMs: 30, probeTimeoutMs: 30, timeout: 2_000 })))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Session liveness probe timed out")
     expect(fixture.agent.calls.some((entry) => entry.event === "prompt" && entry.promptCount === 2 && entry.text.includes("still alive"))).toBe(true)
   })
 
-  it.skip("ThoughtAndToolUpdatesArrive_LivenessMonitored_DoNotProbeWhileAgentIsActive [SKIPPED: physical wall-clock]", async () => {
+  it("ThoughtAndToolUpdatesArrive_LivenessMonitored_DoNotProbeWhileAgentIsActive", async () => {
+    useAcpFakeTimers()
     const fixture = createFixture("liveness-non-message")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 }))
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 })))
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
   })
 
   it("AbortSignalFires_PromptRunning_SendsSessionCancelBeforeCleanup", async () => {
+    useAcpFakeTimers()
     const fixture = createFixture("abort")
     const controller = new AbortController()
     setTimeout(() => controller.abort(), 50)
 
-    const result = await acpAgentAction(fixture.context({ prompt: "cancel me", timeout: 500 }, controller.signal))
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({ prompt: "cancel me", timeout: 500 }, controller.signal)))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toMatch(/stopped by user/i)
@@ -555,15 +624,16 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
   })
 
   it("ProbeTimeoutFails_TerminalEventCarriesProbeTimeoutFailureCategory", async () => {
+    useAcpFakeTimers()
     const fixture = createFixture("probe-timeout")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
       prompt: "quiet task",
       session: "timeout-session",
       livenessQuietThresholdMs: 30,
       probeTimeoutMs: 60,
       timeout: 1_000,
-    }))
+    })))
 
     expect(result.status).toBe("failure")
     const terminalEvent = fixture.serverConnection.calls

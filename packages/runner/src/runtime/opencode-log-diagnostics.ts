@@ -23,9 +23,29 @@ export interface OpencodeProviderErrorDiagnostic {
   occurredAt?: string
 }
 
-interface OpencodeProviderErrorSearchOptions {
+export interface OpencodeProviderErrorSearchOptions {
   sinceMs?: number
   failFastOnly?: boolean
+}
+
+type OpencodeProviderErrorDiagnosticFinder = (sessionId: string, options: OpencodeProviderErrorSearchOptions) => Promise<OpencodeProviderErrorDiagnostic | undefined>
+
+let providerErrorDiagnosticFinderForTest: OpencodeProviderErrorDiagnosticFinder | null = null
+let logFileSystemForTest: OpencodeLogFileSystem | null = null
+
+export interface OpencodeLogFileSystem {
+  readdir(path: string): Promise<string[]>
+  stat(path: string): Promise<{ isFile(): boolean; mtimeMs: number; size: number }>
+  readFile(path: string): Promise<string>
+  readTail(path: string, start: number, length: number): Promise<string>
+}
+
+export function setOpencodeProviderErrorDiagnosticFinderForTest(finder: OpencodeProviderErrorDiagnosticFinder | null) {
+  providerErrorDiagnosticFinderForTest = finder
+}
+
+export function setOpencodeLogFileSystemForTest(fileSystem: OpencodeLogFileSystem | null) {
+  logFileSystemForTest = fileSystem
 }
 
 interface CandidateLogFile {
@@ -36,11 +56,13 @@ interface CandidateLogFile {
 
 export async function findOpencodeProviderErrorDiagnostic(sessionId: string, options: OpencodeProviderErrorSearchOptions = {}): Promise<OpencodeProviderErrorDiagnostic | undefined> {
   if (!sessionId.trim()) return undefined
+  if (providerErrorDiagnosticFinderForTest) return await providerErrorDiagnosticFinderForTest(sessionId, options)
 
+  const fileSystem = logFileSystemForTest ?? nodeOpencodeLogFileSystem
   const logDir = opencodeLogDir()
   let entries: string[]
   try {
-    entries = await readdir(logDir)
+    entries = await fileSystem.readdir(logDir)
   } catch {
     return undefined
   }
@@ -50,7 +72,7 @@ export async function findOpencodeProviderErrorDiagnostic(sessionId: string, opt
     if (!entry.endsWith(".log")) continue
     const path = join(logDir, entry)
     try {
-      const info = await stat(path)
+      const info = await fileSystem.stat(path)
       if (!info.isFile()) continue
       files.push({ path, mtimeMs: info.mtimeMs, size: info.size })
     } catch {}
@@ -136,32 +158,47 @@ function matchesSearchOptions(diagnostic: OpencodeProviderErrorDiagnostic, optio
 }
 
 async function readLogFileText(file: CandidateLogFile): Promise<string | undefined> {
+  const fileSystem = logFileSystemForTest ?? nodeOpencodeLogFileSystem
   if (file.size <= MAX_LOG_FILE_BYTES) {
     try {
-      return await readFile(file.path, "utf8")
+      return await fileSystem.readFile(file.path)
     } catch {
       return undefined
     }
   }
   try {
     const start = Math.max(0, file.size - TAIL_BYTES)
-    const handle = await open(file.path, "r")
-    try {
-      const length = file.size - start
-      const buffer = Buffer.alloc(length)
-      await handle.read(buffer, 0, length, start)
-      let text = buffer.toString("utf8")
-      if (start > 0) {
-        const firstNewline = text.indexOf("\n")
-        if (firstNewline >= 0) text = text.slice(firstNewline + 1)
-      }
-      return text
-    } finally {
-      await handle.close()
+    let text = await fileSystem.readTail(file.path, start, file.size - start)
+    if (start > 0) {
+      const firstNewline = text.indexOf("\n")
+      if (firstNewline >= 0) text = text.slice(firstNewline + 1)
     }
+    return text
   } catch {
     return undefined
   }
+}
+
+const nodeOpencodeLogFileSystem: OpencodeLogFileSystem = {
+  async readdir(path) {
+    return await readdir(path)
+  },
+  async stat(path) {
+    return await stat(path)
+  },
+  async readFile(path) {
+    return await readFile(path, "utf8")
+  },
+  async readTail(path, start, length) {
+    const handle = await open(path, "r")
+    try {
+      const buffer = Buffer.alloc(length)
+      await handle.read(buffer, 0, length, start)
+      return buffer.toString("utf8")
+    } finally {
+      await handle.close()
+    }
+  },
 }
 
 function isProviderErrorLine(line: string): boolean {
