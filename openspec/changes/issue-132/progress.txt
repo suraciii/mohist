@@ -194,3 +194,57 @@ Status: completed
   Since `buildGenericSessionMetadata` hardcodes `turnCount: 0`, the `??` operator
   does NOT fall through to `turns.length` (0 is not null/undefined). Tests must
   check for "0 turns" rather than expecting the turns array length.
+
+# T-004 New-session composer with context refs and launch
+
+Status: completed
+
+## Files changed
+
+### New files
+
+- **packages/web/src/pages/agent-session-composer/ui/AgentSessionComposerPage.tsx** —
+  New-session composer page at route `agent-sessions/new`. Reads query params
+  (`?agent=`, `?issue=`, `?epic=`, `?repo=`, `?ws=`) to pre-select agent and
+  pre-fill context references. Agent selector uses `useAgents()` with Popover
+  dropdown (searchable, archived marked). Context refs render as removable chips
+  (ContextRefChip). Prompt via AttachmentComposer. Launch calls
+  `useLaunchAgentSession`; on 201 navigates to `agent-sessions/:sessionId`.
+  Error states: 'no available runner' (`NO_AVAILABLE_RUNNER` code/message) and
+  'external agent unavailable' (`EXTERNAL_AGENT_UNAVAILABLE` code/message).
+
+- **packages/web/src/pages/agent-session-composer/ui/AgentSessionComposerPage.test.tsx** —
+  21 tests covering: query-param parsing (agent, issue, epic, repo, ws, multi),
+  agent selection (dropdown open, selection), prompt validation (disabled empty,
+  blurred error, enabled filled), launch call with args (basic and with context
+  refs), navigation on success, context-ref chip remove, archived agent launch
+  disabling (disabled button + warning), error states (no-runner with code,
+  external-agent with code, message fallback, error present).
+
+### Modified files
+
+- **packages/web/src/app/App.tsx** — Added `agent-sessions/new` route declared
+  before `agent-sessions/:sessionId` so the literal segment wins.
+
+## Design decisions
+
+- Agent selector uses Popover + Button (matching ModelSelect pattern) with
+  search input, rather than the base-ui Select. This gives control over item
+  rendering (archived badge per row) and avoids SelectValue content limitations.
+- Prompt validation is driven by `promptTouched` (onBlur) instead of submit
+  attempt, since the disabled button cannot fire click events. Error message
+  appears when the textarea loses focus with an empty value.
+- Error state detection checks both `error.code` (e.g. `NO_AVAILABLE_RUNNER`)
+  and a case-insensitive `error.message` fallback, matching the ApiError code
+  from the `request` client.
+
+## Gotchas
+
+- `fireEvent.click` on a disabled `<button>` does not trigger React's `onClick`
+  handler (disabled buttons suppress events). Prompt validation must use blur
+  tracking rather than click-to-submit approach.
+- The mock `AttachmentComposer` must use `data-testid="prompt-textarea"` to
+  match the prop passthrough (the real component merges `...textareaProps`).
+  Tests querying `data-testid="attachment-composer"` will fail because the page
+  passes `data-testid` through props to AttachmentComposer, which passes it to
+  the underlying textarea.

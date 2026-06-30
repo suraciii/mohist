@@ -28,6 +28,7 @@ import { RunnerDetailPage } from '../pages/runner-detail/ui/RunnerDetailPage'
 import { InboxPage } from '../pages/inbox/ui/InboxPage'
 import { AgentListPage } from '../pages/agent-list/ui/AgentListPage'
 import { AgentDetailPage } from '../pages/agent-detail/ui/AgentDetailPage'
+import { AgentSessionComposerPage } from '../pages/agent-session-composer/ui/AgentSessionComposerPage'
 
 function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
@@ -66,6 +67,7 @@ function AppContent() {
                 <Route path="issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
                 <Route path="agents" element={<AgentListPage />} />
                 <Route path="agents/:agentId" element={<AgentDetailPage />} />
+                <Route path="agent-sessions/new" element={<AgentSessionComposerPage />} />
                 <Route path="agent-sessions/:sessionId" element={<GenericSessionPage />} />
                 <Route path="activity" element={<ActivityPage />} />
                 <Route path="runners" element={<RunnersPage />} />
