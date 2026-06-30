@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 
@@ -119,6 +120,43 @@ public static partial class IssueRoutes
             return ApiResults.Ok();
         });
 
+        group.MapPost("/{number:int}/rerun-from-stage", async (
+            HttpContext ctx,
+            string projectRef,
+            int number,
+            RerunFromStageRequest? req,
+            IGrainFactory grains,
+            IssueIdentityResolver issueIdentityResolver,
+            IssueQuerier issuesQuery) =>
+        {
+            var project = GetRequiredProject(ctx);
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.RetryOrRerun);
+            if (control.Result is not null) return control.Result;
+            var wrId = control.WorkflowRunId!;
+            if (string.IsNullOrWhiteSpace(req?.Stage))
+                return ApiResults.BadRequest("Stage is required for rerun-from-stage");
+            try
+            {
+                var result = await grains.GetGrain<IWorkflowGrain>(wrId).RerunFromStageAsync(req.Stage);
+                if (!result.Success)
+                {
+                    return result.Code switch
+                    {
+                        "unknown_stage" or "stage_not_reached" => ApiResults.BadRequest(result.Error ?? "Workflow control rejected", result.Code, result.Details),
+                        "active_work_in_range" => ApiResults.Conflict(result.Error ?? "Workflow control rejected", result.Code, result.Details),
+                        _ => ApiResults.BadRequest(result.Error ?? "Workflow control rejected", result.Code, result.Details),
+                    };
+                }
+            }
+            catch (Exception ex) when (IsWorkflowRunStateCorruption(ex))
+            {
+                var issueGrain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
+                if (issueGrain is null) return ApiResults.NotFound($"Issue #{number} not found");
+                await issueGrain.StartWorkAsync();
+            }
+            return ApiResults.Ok();
+        });
+
         // Force-stop is implemented as workflow pause. The user can resume afterwards.
         // For terminal disposal, use /close (issue close -> workflow Stopped) or /stop.
         group.MapPost("/{number:int}/force-stop", async (
@@ -210,6 +248,7 @@ public static partial class IssueRoutes
     }
 
     internal sealed record RejectRequest(string? Message);
+    internal sealed record RerunFromStageRequest(string? Stage);
 
     private sealed record WorkflowControlResolution(string? WorkflowRunId, IResult? Result);
 

@@ -1,6 +1,6 @@
 using System.Text.Json;
-using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -135,6 +135,77 @@ public static partial class WorkflowRunExtensions
             return [
                 new WorkflowRunResumed(),
                 new StageStarted(newStage.Id)
+            ];
+        }
+
+        public IReadOnlyList<WorkflowEvent> RerunFromStage(string stageId)
+        {
+            var targetIdx = run.Stages.FindIndex(s => s.Id == stageId);
+            var currentIdx = run.Stages.FindIndex(s => s.Id == run.CurrentStageId);
+            var eligibleStages = run.Stages
+                .Take(currentIdx + 1)
+                .Select(s => s.Id)
+                .ToList();
+
+            if (targetIdx < 0)
+                throw new WorkflowControlRejectionException(
+                    "unknown_stage",
+                    $"Stage '{stageId}' is not part of this workflow run.",
+                    new
+                    {
+                        eligibleStages
+                    });
+
+            if (targetIdx > currentIdx)
+                throw new WorkflowControlRejectionException(
+                    "stage_not_reached",
+                    $"Stage '{stageId}' has not been reached yet. Choose a stage the workflow run has already reached.",
+                    new
+                    {
+                        eligibleStages
+                    });
+
+            for (var i = targetIdx; i < run.Stages.Count; i++)
+            {
+                var stage = run.Stages[i];
+                if (stage.Tasks.Any(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed)))
+                    throw new WorkflowControlRejectionException(
+                        "active_work_in_range",
+                        $"Cannot rerun from stage '{stageId}' because there is active work in the invalidation range. Stop or cancel the active work first, then retry.");
+                if (stage.Checks.Any(c => c.Status is StageCheckStatus.Pending or StageCheckStatus.Running))
+                    throw new WorkflowControlRejectionException(
+                        "active_work_in_range",
+                        $"Cannot rerun from stage '{stageId}' because there is active work in the invalidation range. Stop or cancel the active work first, then retry.");
+            }
+
+            var target = run.Stages[targetIdx];
+            run.Stages[targetIdx] = new StageRun
+            {
+                Id = target.Id,
+                Attempt = target.Attempt + 1,
+                RequiresApproval = target.RequiresApproval,
+                Status = StageRunStatus.Running,
+            };
+
+            for (var i = targetIdx + 1; i < run.Stages.Count; i++)
+            {
+                var later = run.Stages[i];
+                run.Stages[i] = new StageRun
+                {
+                    Id = later.Id,
+                    Attempt = 1,
+                    RequiresApproval = later.RequiresApproval,
+                    Status = StageRunStatus.Pending,
+                };
+            }
+
+            run.CurrentStageId = run.Stages[targetIdx].Id;
+            run.Failure = null;
+            run.Status = WorkflowRunStatus.Running;
+
+            return [
+                new WorkflowRunResumed(),
+                new StageStarted(run.Stages[targetIdx].Id)
             ];
         }
 

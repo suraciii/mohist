@@ -21,6 +21,7 @@ internal static class IssueCommands
         issue.Subcommands.Add(BuildAction("reopen", "Reopen issue", api));
         issue.Subcommands.Add(BuildAction("retry", "Retry issue", api));
         issue.Subcommands.Add(BuildAction("rerun", "Rerun issue", api));
+        issue.Subcommands.Add(BuildRerunFromStage(api));
         issue.Subcommands.Add(BuildAction("force-stop", "Force stop workflow", api));
         issue.Subcommands.Add(BuildAction("resume", "Resume workflow", api));
         issue.Subcommands.Add(BuildReject(api));
@@ -631,6 +632,44 @@ internal static class IssueCommands
                     new { message },
                     mode,
                     nameof(MohistCliApi.TableShape.IssueShow));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildRerunFromStage(MohistCliApi api)
+    {
+        var cmd = new Command("rerun-from-stage", "Rerun the workflow from a specified stage (invalidates the target stage and all later stages, creating new attempts)");
+        var numberArg = NumberArg();
+        var stageOpt = new Option<string>("--stage")
+        {
+            Description = "Target stage to rerun from (e.g. plan, build, check, integrate)",
+        };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(stageOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var stage = ctx.GetValue(stageOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            return RerunFromStageAsync();
+
+            async Task<int> RerunFromStageAsync()
+            {
+                if (string.IsNullOrWhiteSpace(stage))
+                {
+                    api.Error.WriteLine("--stage is required and must not be empty");
+                    return 1;
+                }
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/rerun-from-stage");
+                return await api.PrintPostAsync(path, new { stage });
             }
         });
         return cmd;

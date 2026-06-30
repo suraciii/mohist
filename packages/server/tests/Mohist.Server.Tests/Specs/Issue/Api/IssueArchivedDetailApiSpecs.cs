@@ -305,6 +305,7 @@ public class IssueArchivedDetailApiSpecs
     [InlineData("reject")]
     [InlineData("retry")]
     [InlineData("rerun")]
+    [InlineData("rerun-from-stage")]
     [InlineData("force-stop")]
     [InlineData("stop")]
     public async Task WorkflowControl_ForArchivedDoneIssue_IsRejectedAsNotActive(string action)
@@ -315,9 +316,12 @@ public class IssueArchivedDetailApiSpecs
         var grain = _grains.GetGrain<IIssueGrain>(await ResolveIssueIdAsync(projectId, issueNumber));
         await grain.ArchiveAsync();
 
-        using var response = action == "reject"
-            ? await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { message = "historical" })
-            : await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", null);
+        using var response = action switch
+        {
+            "reject" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { message = "historical" }),
+            "rerun-from-stage" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { stage = "build" }),
+            _ => await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", null),
+        };
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var raw = await response.Content.ReadAsStringAsync();
@@ -332,6 +336,7 @@ public class IssueArchivedDetailApiSpecs
     [InlineData("reject")]
     [InlineData("retry")]
     [InlineData("rerun")]
+    [InlineData("rerun-from-stage")]
     [InlineData("force-stop")]
     [InlineData("stop")]
     public async Task WorkflowControl_ForInProgressIssueWithCompletedWorkflow_IsRejectedAsNotActive(string action)
@@ -339,9 +344,12 @@ public class IssueArchivedDetailApiSpecs
         var (projectId, issueNumber, _, wrId) = await SeedInProgressIssueWithWorkflowRunAsync();
         await MarkWorkflowRunCompletedAsync(wrId);
 
-        using var response = action == "reject"
-            ? await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { message = "historical" })
-            : await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", null);
+        using var response = action switch
+        {
+            "reject" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { message = "historical" }),
+            "rerun-from-stage" => await _client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", new { stage = "build" }),
+            _ => await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/{action}", null),
+        };
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var raw = await response.Content.ReadAsStringAsync();
