@@ -28,6 +28,24 @@ export function parseNotificationKind(
   return NOTIFICATION_KINDS.WorkflowFailed
 }
 
+export interface InboxSubscription {
+  workflow_failed: boolean
+  approval_requested: boolean
+  issue_started: boolean
+  issue_completed: boolean
+}
+
+export type InboxSubscriptionUpdate = InboxSubscription
+
+export interface InboxSubscriptionApiData {
+  data: InboxSubscription
+}
+
+export interface InboxSubscriptionResponse {
+  success: boolean
+  data: InboxSubscription
+}
+
 export interface InboxItem {
   itemId: string
   notificationKind: NotificationKind

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { archiveInboxItem, getInbox, markAllInboxRead, markInboxItemRead } from './client'
+import { archiveInboxItem, getInbox, getInboxSubscription, markAllInboxRead, markInboxItemRead, updateInboxSubscription } from './client'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -94,5 +94,48 @@ describe('archiveInboxItem', () => {
     const [calledPath, calledInit] = fetchMock.mock.calls[0]
     expect(calledPath).toBe('/api/projects/proj-1/inbox/inb-1/archive')
     expect(calledInit?.method).toBe('POST')
+  })
+})
+
+describe('getInboxSubscription', () => {
+  it('requests GET /api/projects/{ref}/inbox/subscription', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(mockJsonResponse({ workflow_failed: true, approval_requested: true, issue_started: true, issue_completed: true }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const subscription = await getInboxSubscription('proj-1')
+
+    expect(subscription).toEqual({ workflow_failed: true, approval_requested: true, issue_started: true, issue_completed: true })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [calledPath, calledInit] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/inbox/subscription')
+    expect(calledInit?.method).toBeUndefined()
+  })
+})
+
+describe('updateInboxSubscription', () => {
+  it('PUTs to /api/projects/{ref}/inbox/subscription with the full subscription body', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(mockJsonResponse({ workflow_failed: false, approval_requested: true, issue_started: true, issue_completed: true }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await updateInboxSubscription('proj-1', {
+      workflow_failed: false,
+      approval_requested: true,
+      issue_started: true,
+      issue_completed: true,
+    })
+
+    expect(result).toEqual({ workflow_failed: false, approval_requested: true, issue_started: true, issue_completed: true })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [calledPath, calledInit] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/inbox/subscription')
+    expect(calledInit?.method).toBe('PUT')
+    expect(JSON.parse(calledInit?.body as string)).toEqual({
+      workflow_failed: false,
+      approval_requested: true,
+      issue_started: true,
+      issue_completed: true,
+    })
   })
 })

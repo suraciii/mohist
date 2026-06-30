@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Inbox;
@@ -94,6 +95,8 @@ internal static class InboxProjectionTestSupport
         int issueNumber,
         string title)
     {
+        await SeedProjectAsync(database, projectId);
+
         var issue = new DomainIssue
         {
             Id = issueId,
@@ -110,6 +113,47 @@ internal static class InboxProjectionTestSupport
             State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
+    }
+
+    public static async Task SeedProjectAsync(TestDatabase database, string projectId)
+    {
+        await using var db = database.CreateDbContext();
+        if (await db.Projects.AnyAsync(p => p.Id == projectId))
+            return;
+
+        db.Projects.Add(new ProjectRow
+        {
+            Id = projectId,
+            Name = ProjectNameFromId(projectId),
+            RepositoriesJson = "[]",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    public static async Task SeedSubscriptionAsync(
+        TestDatabase database,
+        string projectId,
+        bool workflowFailedEnabled = true,
+        bool approvalRequestedEnabled = true,
+        bool issueStartedEnabled = true,
+        bool issueCompletedEnabled = true)
+    {
+        await SeedProjectAsync(database, projectId);
+
+        var store = new InboxSubscriptionStore(database.Factory);
+        await store.SetAsync(projectId, new InboxSubscriptionState(
+            WorkflowFailedEnabled: workflowFailedEnabled,
+            ApprovalRequestedEnabled: approvalRequestedEnabled,
+            IssueStartedEnabled: issueStartedEnabled,
+            IssueCompletedEnabled: issueCompletedEnabled));
+    }
+
+    private static string ProjectNameFromId(string projectId)
+    {
+        var candidate = projectId.Replace('_', '-');
+        return candidate.Length <= 63 ? candidate : candidate[..63];
     }
 
     public static async Task SeedWorkflowRunAsync(
@@ -253,6 +297,7 @@ internal static class InboxProjectionTestSupport
                 services.AddSingleton<IDbContextFactory<MohistDbContext>>(_database.Factory);
                 services.AddSingleton(eventPublisher);
                 services.AddScoped<InboxStore>();
+                services.AddScoped<InboxSubscriptionStore>();
                 services.AddScoped<IWorkflowRunStore>(sp => new WorkflowRunStore(
                     _database.Factory,
                     new NoopEventStore(),

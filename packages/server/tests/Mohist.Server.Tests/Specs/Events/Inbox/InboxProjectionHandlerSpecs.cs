@@ -674,4 +674,254 @@ public class InboxProjectionHandlerSpecs
             NotificationKinds.IssueCompleted,
         }, kinds);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task Subscription_EnabledKind_CreatesItem()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1,
+            title: "Enabled test");
+        await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
+            workflowFailedEnabled: true);
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        var evt = InboxProjectionTestSupport.BuildIssueEvent(
+            type: EventCatalog.ReverseDns.IssueWorkCompleted,
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1,
+            eventId: "evt-enabled");
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+        Assert.Equal(NotificationKinds.IssueCompleted, item.NotificationKind);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task Subscription_DisabledKind_DoesNotCreateItem()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1,
+            title: "Disabled test");
+        await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
+            workflowFailedEnabled: false);
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        var evt = InboxProjectionTestSupport.BuildWorkflowEvent(
+            type: EventCatalog.ReverseDns.WorkflowRunFailed,
+            workflowRunId: "wf_disabled",
+            eventId: "evt-disabled");
+
+        // Seed the workflow run (needed for resolution) but subscription
+        // gate should prevent the insert.
+        await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
+            workflowRunId: "wf_disabled",
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1);
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task Subscription_DifferentDisabledKinds_EachPreventsItsOwnKind()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1,
+            title: "Multi disabled");
+        await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
+            workflowFailedEnabled: false,
+            approvalRequestedEnabled: false,
+            issueStartedEnabled: false,
+            issueCompletedEnabled: false);
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
+            workflowRunId: "wf_fail", projectId: "proj_a", issueId: "issue_1", issueNumber: 1);
+        await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
+            workflowRunId: "wf_approve", projectId: "proj_a", issueId: "issue_1", issueNumber: 1);
+
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "wf_fail", "evt-f"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "wf_approve", "evt-a"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "proj_a", "issue_1", 1, "evt-s"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkCompleted, "proj_a", "issue_1", 1, "evt-c"), CancellationToken.None);
+
+        Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task Subscription_MissingSubscription_CreatesItem()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1,
+            title: "Missing sub");
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        var evt = InboxProjectionTestSupport.BuildIssueEvent(
+            type: EventCatalog.ReverseDns.IssueWorkStarted,
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1,
+            eventId: "evt-no-sub");
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+        Assert.Equal(NotificationKinds.IssueStarted, item.NotificationKind);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task Subscription_DisabledKind_LeavesExistingItemsUntouched()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1,
+            title: "Existing item");
+        await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
+            workflowRunId: "wf_existing",
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1);
+
+        // First, create an item with kind enabled.
+        await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
+            workflowFailedEnabled: true);
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        var evt1 = InboxProjectionTestSupport.BuildWorkflowEvent(
+            type: EventCatalog.ReverseDns.WorkflowRunFailed,
+            workflowRunId: "wf_existing",
+            eventId: "evt-first");
+        await handler.HandleAsync(evt1, CancellationToken.None);
+
+        var before = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+
+        // Now disable the kind and fire a new event.
+        await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
+            workflowFailedEnabled: false);
+
+        var evt2 = InboxProjectionTestSupport.BuildWorkflowEvent(
+            type: EventCatalog.ReverseDns.WorkflowRunFailed,
+            workflowRunId: "wf_existing",
+            eventId: "evt-second");
+        await handler.HandleAsync(evt2, CancellationToken.None);
+
+        // Existing item is unchanged; no new item added.
+        var after = await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a");
+        var item = Assert.Single(after);
+        Assert.Equal(before.Id, item.Id);
+        Assert.Equal(NotificationKinds.WorkflowFailed, item.NotificationKind);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task Subscription_ReEnabledKind_CreatesItemForSubsequentEvent()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1,
+            title: "Re-enable test");
+        await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
+            workflowRunId: "wf_re",
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1);
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+
+        // Start with disabled.
+        await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
+            workflowFailedEnabled: false);
+
+        var evtDisabled = InboxProjectionTestSupport.BuildWorkflowEvent(
+            type: EventCatalog.ReverseDns.WorkflowRunFailed,
+            workflowRunId: "wf_re",
+            eventId: "evt-while-disabled");
+        await handler.HandleAsync(evtDisabled, CancellationToken.None);
+        Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+
+        // Re-enable the kind.
+        await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
+            workflowFailedEnabled: true);
+
+        // Fire a different event (new SourceEventId) after re-enable.
+        await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
+            workflowRunId: "wf_re2",
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1);
+
+        var evtAfter = InboxProjectionTestSupport.BuildWorkflowEvent(
+            type: EventCatalog.ReverseDns.WorkflowRunFailed,
+            workflowRunId: "wf_re2",
+            eventId: "evt-after-reenable");
+        await handler.HandleAsync(evtAfter, CancellationToken.None);
+
+        // Exactly one item — the one fired after re-enable.
+        var item = Assert.Single(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+        Assert.Equal("evt-after-reenable", item.SourceEventId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task Subscription_ReplayingDisabledKindEvent_RemainsNoOp()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1,
+            title: "Replay disabled");
+        await InboxProjectionTestSupport.SeedWorkflowRunAsync(database,
+            workflowRunId: "wf_replay_disabled",
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 1);
+
+        await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
+            approvalRequestedEnabled: false);
+
+        var handler = InboxProjectionTestSupport.CreateHandler(database);
+        var evt = InboxProjectionTestSupport.BuildWorkflowEvent(
+            type: EventCatalog.ReverseDns.StageApprovalRequested,
+            workflowRunId: "wf_replay_disabled",
+            eventId: "evt-replay-disabled");
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+        await handler.HandleAsync(evt, CancellationToken.None);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+    }
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { inboxQueryKey, invalidateInbox, useArchiveInboxItem, useInbox, useMarkAllInboxRead, useMarkInboxItemRead, useUnreadInboxCount } from './queries'
+import { inboxQueryKey, invalidateInbox, subscriptionQueryKey, useArchiveInboxItem, useInbox, useInboxSubscription, useMarkAllInboxRead, useMarkInboxItemRead, useUnreadInboxCount, useUpdateInboxSubscription } from './queries'
 import type { InboxItem } from '../model/types'
 
 const useQueryMock = vi.fn()
@@ -7,6 +7,8 @@ const useMutationMock = vi.fn()
 const useQueryClientMock = vi.fn()
 const useProjectMock = vi.fn()
 const getInboxMock = vi.fn()
+const getInboxSubscriptionMock = vi.fn()
+const updateInboxSubscriptionMock = vi.fn()
 const markInboxItemReadMock = vi.fn()
 const markAllInboxReadMock = vi.fn()
 const archiveInboxItemMock = vi.fn()
@@ -27,6 +29,8 @@ vi.mock('../../project/@x/project-context', () => ({
 
 vi.mock('./client', () => ({
   getInbox: (...args: unknown[]) => getInboxMock(...args),
+  getInboxSubscription: (...args: unknown[]) => getInboxSubscriptionMock(...args),
+  updateInboxSubscription: (...args: unknown[]) => updateInboxSubscriptionMock(...args),
   markInboxItemRead: (...args: unknown[]) => markInboxItemReadMock(...args),
   markAllInboxRead: (...args: unknown[]) => markAllInboxReadMock(...args),
   archiveInboxItem: (...args: unknown[]) => archiveInboxItemMock(...args),
@@ -45,6 +49,8 @@ beforeEach(() => {
   useQueryClientMock.mockReset()
   useProjectMock.mockReset()
   getInboxMock.mockReset()
+  getInboxSubscriptionMock.mockReset()
+  updateInboxSubscriptionMock.mockReset()
   markInboxItemReadMock.mockReset()
   markAllInboxReadMock.mockReset()
   archiveInboxItemMock.mockReset()
@@ -324,5 +330,112 @@ describe('useUnreadInboxCount', () => {
     const config = useQueryMock.mock.calls[0][0]
     await config.queryFn()
     expect(getInboxMock).toHaveBeenCalledWith('proj-xyz')
+  })
+})
+
+describe('subscriptionQueryKey', () => {
+  it('returns the project-scoped key when projectId is set', () => {
+    expect(subscriptionQueryKey('proj-1')).toEqual(['inbox-subscription', 'proj-1'])
+  })
+
+  it('returns the shared key when projectId is null', () => {
+    expect(subscriptionQueryKey(null)).toEqual(['inbox-subscription'])
+  })
+
+  it('returns the shared key when projectId is undefined', () => {
+    expect(subscriptionQueryKey(undefined)).toEqual(['inbox-subscription'])
+  })
+})
+
+describe('useInboxSubscription', () => {
+  it('uses the query key ["inbox-subscription", projectId] scoped to the project', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useInboxSubscription()
+
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.queryKey).toEqual(['inbox-subscription', 'proj-1'])
+  })
+
+  it('disables the query when there is no project', () => {
+    useProjectMock.mockReturnValue({ projectId: null })
+
+    useInboxSubscription()
+
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.enabled).toBe(false)
+  })
+
+  it('calls getInboxSubscription(projectId) on the queryFn', async () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-abc' })
+    getInboxSubscriptionMock.mockResolvedValue({
+      workflow_failed: true,
+      approval_requested: true,
+      issue_started: true,
+      issue_completed: true,
+    })
+
+    useInboxSubscription()
+
+    const config = useQueryMock.mock.calls[0][0]
+    await config.queryFn()
+    expect(getInboxSubscriptionMock).toHaveBeenCalledWith('proj-abc')
+  })
+})
+
+describe('useUpdateInboxSubscription', () => {
+  it('forwards data to updateInboxSubscription', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+    updateInboxSubscriptionMock.mockResolvedValue({
+      workflow_failed: false,
+      approval_requested: true,
+      issue_started: true,
+      issue_completed: true,
+    })
+
+    useUpdateInboxSubscription()
+
+    const options = getLastMutationOptions()
+    void options.mutationFn({
+      workflow_failed: false,
+      approval_requested: true,
+      issue_started: true,
+      issue_completed: true,
+    })
+
+    expect(updateInboxSubscriptionMock).toHaveBeenCalledWith('proj-1', {
+      workflow_failed: false,
+      approval_requested: true,
+      issue_started: true,
+      issue_completed: true,
+    })
+  })
+
+  it('invalidates only the subscription query on success (NOT the inbox query)', () => {
+    useUpdateInboxSubscription()
+
+    const options = getLastMutationOptions()
+    options.onSuccess()
+
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['inbox-subscription', 'proj-1'] })
+    expect(invalidateQueriesMock).not.toHaveBeenCalledWith({ queryKey: ['inbox', 'proj-1'] })
+  })
+
+  it('toasts the error message on failure', () => {
+    useUpdateInboxSubscription()
+
+    const options = getLastMutationOptions()
+    options.onError(new Error('update failed'))
+
+    expect(toastErrorMock).toHaveBeenCalledWith('update failed')
+  })
+
+  it('falls back to "Request failed" on empty error message', () => {
+    useUpdateInboxSubscription()
+
+    const options = getLastMutationOptions()
+    options.onError(new Error(''))
+
+    expect(toastErrorMock).toHaveBeenCalledWith('Request failed')
   })
 })

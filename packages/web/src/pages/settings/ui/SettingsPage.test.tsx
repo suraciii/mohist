@@ -130,7 +130,7 @@ describe('SettingsPage', () => {
     expect(screen.getByTestId('preferences-shortcuts-card')).toBeInTheDocument()
   })
 
-  it('exposes the Preferences tab trigger alongside the other six Settings tabs', () => {
+  it('exposes the Preferences tab trigger alongside the other Settings tabs', () => {
     renderSettings('/settings/ai')
 
     for (const key of [
@@ -140,11 +140,18 @@ describe('SettingsPage', () => {
       'settings-tab-workflows',
       'settings-tab-templates',
       'settings-tab-label-catalog',
+      'settings-tab-inbox',
       'settings-tab-system',
       'settings-tab-preferences',
     ]) {
       expect(screen.getByTestId(key)).toBeInTheDocument()
     }
+  })
+
+  it('renders the Inbox tab and /settings/inbox resolves', () => {
+    renderSettings('/settings/inbox')
+
+    expect(screen.getByTestId('settings-tab-inbox')).toBeInTheDocument()
   })
 
   it('navigates to the Preferences tab from another Settings tab via the trigger', () => {

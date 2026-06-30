@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.Inbox;
 
 namespace Mohist.Server.Api;
@@ -70,8 +72,110 @@ public static class InboxRoutes
                 : ApiResults.Ok(new { itemId, archived = true });
         });
 
+        // GET /api/projects/{projectRef}/inbox/subscription
+        group.MapGet("/subscription", async (HttpContext context, InboxSubscriptionStore store) =>
+        {
+            var pid = context.GetResolvedProject().Id;
+            var state = await store.GetAsync(pid);
+            return ApiResults.Ok(InboxSubscriptionDto.FromState(state));
+        });
+
+        // PUT /api/projects/{projectRef}/inbox/subscription
+        group.MapPut("/subscription", async (HttpContext context, InboxSubscriptionStore store, JsonElement body) =>
+        {
+            if (body.ValueKind != JsonValueKind.Object)
+                return ApiResults.BadRequest("Subscription payload must be a JSON object");
+
+            JsonProperty[] properties;
+            try
+            {
+                properties = body.EnumerateObject().ToArray();
+            }
+            catch (InvalidOperationException)
+            {
+                return ApiResults.BadRequest("Subscription payload must be a JSON object");
+            }
+
+            foreach (var prop in properties)
+            {
+                if (!NotificationKinds.IsDefined(prop.Name))
+                    return ApiResults.BadRequest($"Unknown notification kind: '{prop.Name}'");
+
+                if (prop.Value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    return ApiResults.BadRequest($"Notification kind '{prop.Name}' must be a boolean");
+            }
+
+            var required = new[]
+            {
+                NotificationKinds.WorkflowFailed,
+                NotificationKinds.ApprovalRequested,
+                NotificationKinds.IssueStarted,
+                NotificationKinds.IssueCompleted,
+            };
+            var provided = properties.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+            var missing = required.Where(k => !provided.Contains(k)).ToArray();
+            if (missing.Length > 0)
+                return ApiResults.BadRequest($"Missing required keys: {string.Join(", ", missing)}");
+
+            var pid = context.GetResolvedProject().Id;
+            var json = body.GetRawText();
+            InboxSubscriptionDto? dto;
+            try
+            {
+                dto = JsonSerializer.Deserialize<InboxSubscriptionDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = false });
+            }
+            catch (JsonException)
+            {
+                return ApiResults.BadRequest("Invalid subscription payload");
+            }
+            catch (InvalidOperationException)
+            {
+                return ApiResults.BadRequest("Invalid subscription payload");
+            }
+            if (dto is null)
+                return ApiResults.BadRequest("Invalid subscription payload");
+
+            var result = await store.SetAsync(pid, dto.ToState());
+            return ApiResults.Ok(InboxSubscriptionDto.FromState(result));
+        });
+
         return app;
     }
+}
+
+/// <summary>
+/// Response/request DTO for inbox subscription preferences. Maps between
+/// the API JSON contract (camelCase bool properties) and the internal
+/// <see cref="InboxSubscriptionState"/> record. Each property corresponds
+/// to one <see cref="NotificationKinds"/> value.
+/// </summary>
+public sealed class InboxSubscriptionDto
+{
+    [JsonPropertyName("workflow_failed")]
+    public bool WorkflowFailed { get; init; }
+
+    [JsonPropertyName("approval_requested")]
+    public bool ApprovalRequested { get; init; }
+
+    [JsonPropertyName("issue_started")]
+    public bool IssueStarted { get; init; }
+
+    [JsonPropertyName("issue_completed")]
+    public bool IssueCompleted { get; init; }
+
+    public static InboxSubscriptionDto FromState(InboxSubscriptionState state) => new()
+    {
+        WorkflowFailed = state.WorkflowFailedEnabled,
+        ApprovalRequested = state.ApprovalRequestedEnabled,
+        IssueStarted = state.IssueStartedEnabled,
+        IssueCompleted = state.IssueCompletedEnabled,
+    };
+
+    public InboxSubscriptionState ToState() => new(
+        WorkflowFailedEnabled: WorkflowFailed,
+        ApprovalRequestedEnabled: ApprovalRequested,
+        IssueStartedEnabled: IssueStarted,
+        IssueCompletedEnabled: IssueCompleted);
 }
 
 /// <summary>
