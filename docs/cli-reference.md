@@ -157,6 +157,26 @@ mo issue session followup <number> <name> --text <text>  # 向运行中的 sessi
 | `--text-file <path>` | 从 UTF-8 文件读取 |
 | `--text-stdin` | 从标准输入读取 |
 
+## Epic 管理
+
+完整命令在 [用 Epic 规划](epics.md)。这里给速查表：
+
+```bash
+mo epic create <title> [options]
+mo epic list [options]
+mo epic show <epic-id-or-number>
+mo epic update <epic-id-or-number> [options]
+mo epic link <epic-id-or-number> <issue-id-or-number>
+mo epic unlink <epic-id-or-number> <issue-id>
+mo epic start <epic-id-or-number>
+mo epic pause <epic-id-or-number>
+mo epic resume <epic-id-or-number>
+mo epic done <epic-id-or-number>
+mo epic close <epic-id-or-number>
+```
+
+`start`、`pause`、`resume` 是幂等的 — 详情和生命周期语义见 [Epic 生命周期](epics.md#epic-的生命周期)。
+
 ## Server 管理
 
 ```bash
@@ -262,7 +282,6 @@ mo issue list --output json | \
 
 - 看完整命令树：`mo --help`
 - 看子命令选项：`mo <command> --help`
-- 当前 CLI 不支持的：Epic 管理（用 API，见 [用 Epic 规划](epics.md)）
 
 ## 退出码
 
