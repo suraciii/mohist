@@ -10,9 +10,8 @@ public class CliRepositoryCommandSpecs
     [Fact]
     public async Task RepositoryAdd_WithGitUrl_SendsGitUrlMetadataAndNoPathFields()
     {
-        var handler = new RecordingHttpHandler(async (_, _) =>
-        {
-            return RecordingHttpHandler.Json(new
+        var (handler, http, output, error, fileSystem, executor) = CliTestHarness.Create(
+            async (_, _) => RecordingHttpHandler.Json(new
             {
                 success = true,
                 data = new
@@ -23,16 +22,8 @@ public class CliRepositoryCommandSpecs
                         new { name = "origin", gitUrl = "git@example.com:repo.git", baseBranch = "main", isDefault = true },
                     },
                 },
-            }, HttpStatusCode.Created);
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-            "{\"activeProjectId\":\"proj_123\"}");
-        var executor = new FakeCommandExecutor();
+            }, HttpStatusCode.Created),
+            "proj_123");
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -60,9 +51,8 @@ public class CliRepositoryCommandSpecs
     [Fact]
     public async Task RepositoryUpdate_WithGitUrl_SendsGitUrlMetadataAndNoPathFields()
     {
-        var handler = new RecordingHttpHandler(async (_, _) =>
-        {
-            return RecordingHttpHandler.Json(new
+        var (handler, http, output, error, fileSystem, executor) = CliTestHarness.Create(
+            async (_, _) => RecordingHttpHandler.Json(new
             {
                 success = true,
                 data = new
@@ -73,16 +63,8 @@ public class CliRepositoryCommandSpecs
                         new { name = "upstream", gitUrl = "git@example.com:repo-v2.git", baseBranch = "develop", isDefault = false },
                     },
                 },
-            });
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-            "{\"activeProjectId\":\"proj_123\"}");
-        var executor = new FakeCommandExecutor();
+            }),
+            "proj_123");
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -109,18 +91,9 @@ public class CliRepositoryCommandSpecs
     [Fact]
     public async Task RepositoryAdd_WithoutGitUrl_IsRejectedWithClearError()
     {
-        var handler = new RecordingHttpHandler(async (_, _) =>
-        {
-            return RecordingHttpHandler.JsonError("gitUrl is required", "repository_giturl_required");
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-            "{\"activeProjectId\":\"proj_123\"}");
-        var executor = new FakeCommandExecutor();
+        var (handler, http, output, error, fileSystem, executor) = CliTestHarness.Create(
+            async (_, _) => RecordingHttpHandler.JsonError("gitUrl is required", "repository_giturl_required"),
+            "proj_123");
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
