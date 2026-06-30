@@ -187,10 +187,92 @@ public sealed class OtelTestHostOptions
 public sealed class RecordingActivityProcessor : BaseProcessor<Activity>
 {
     private readonly List<Activity> _ended = new();
+    private readonly List<PendingWait> _waiters = new();
+    private readonly object _gate = new();
 
-    public IReadOnlyList<Activity> EndedActivities => _ended;
+    /// <summary>
+    /// A point-in-time snapshot of every ended activity captured so far.
+    /// Returns a copy so callers iterate a stable view even while
+    /// <see cref="OnEnd"/> keeps appending.
+    /// </summary>
+    public IReadOnlyList<Activity> EndedActivities
+    {
+        get
+        {
+            lock (_gate) return _ended.ToList();
+        }
+    }
 
-    public override void OnEnd(Activity activity) => _ended.Add(activity);
+    public override void OnEnd(Activity activity)
+    {
+        List<Activity>? snapshot = null;
+        lock (_gate)
+        {
+            _ended.Add(activity);
+            if (_waiters.Count > 0)
+            {
+                snapshot = _ended.ToList();
+                for (int i = _waiters.Count - 1; i >= 0; i--)
+                {
+                    var wait = _waiters[i];
+                    if (wait.Predicate(snapshot))
+                    {
+                        _waiters.RemoveAt(i);
+                        wait.Tcs.TrySetResult(snapshot);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Awaits the captured span list deterministically: resolves as soon
+    /// as <see cref="OnEnd"/> appends an activity that makes
+    /// <paramref name="predicate"/> true, rather than polling the wall
+    /// clock. <paramref name="timeout"/> is only a safety bound for the
+    /// never-satisfied case so a missing span fails loudly instead of
+    /// hanging the test runner.
+    /// </summary>
+    public Task<List<Activity>> WaitForAsync(Func<List<Activity>, bool> predicate, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        return WaitForAsync(predicate, cts.Token);
+    }
+
+    public Task<List<Activity>> WaitForAsync(Func<List<Activity>, bool> predicate, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var initial = _ended.ToList();
+            if (predicate(initial))
+                return Task.FromResult(initial);
+
+            var tcs = new TaskCompletionSource<List<Activity>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var wait = new PendingWait(predicate, tcs);
+            _waiters.Add(wait);
+
+            if (cancellationToken.CanBeCanceled)
+            {
+                cancellationToken.Register(() =>
+                {
+                    lock (_gate) _waiters.Remove(wait);
+                    tcs.TrySetCanceled(cancellationToken);
+                });
+            }
+            return tcs.Task;
+        }
+    }
+
+    private sealed class PendingWait
+    {
+        public Func<List<Activity>, bool> Predicate { get; }
+        public TaskCompletionSource<List<Activity>> Tcs { get; }
+        public PendingWait(Func<List<Activity>, bool> predicate, TaskCompletionSource<List<Activity>> tcs)
+        {
+            Predicate = predicate;
+            Tcs = tcs;
+        }
+    }
 }
 
 internal sealed class RecordingHttpMessageHandler : HttpMessageHandler

@@ -205,21 +205,27 @@ public class RunnerWorkflowTerminalStatusHandlerSpecs : IAsyncLifetime
     private async Task<RecordedRunnerHubMessage?> WaitForPushAsync(string connectionId, string workflowRunId)
     {
         // The CloudEvent bus + workflow grain commit + SignalR push are
-        // three asynchronous hops. Poll the recorded messages for up to
-        // ~2 seconds; the test environment is in-process so this is well
-        // within tolerance.
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
-        while (DateTimeOffset.UtcNow < deadline)
+        // three asynchronous hops. Poll the recorded messages until the
+        // expected push lands, bounded by cancellation (not wall-clock
+        // comparison). Returns null only if the push never arrives.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var token = cts.Token;
+        try
         {
-            var match = _hub.SentMessages.FirstOrDefault(m =>
-                m.Method == "ReceiveWorkflowRunStatus" &&
-                string.Equals(m.ConnectionId, connectionId, StringComparison.Ordinal));
-            if (match is not null)
-                return match;
+            while (true)
+            {
+                var match = _hub.SentMessages.FirstOrDefault(m =>
+                    m.Method == "ReceiveWorkflowRunStatus" &&
+                    string.Equals(m.ConnectionId, connectionId, StringComparison.Ordinal));
+                if (match is not null)
+                    return match;
 
-            await Task.Delay(25);
+                await Task.Delay(25, token);
+            }
         }
-
-        return null;
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 }

@@ -52,7 +52,7 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
             var response = await _fixture.Client.GetAsync("/api/health");
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            await WaitForAsync(() => recorder.EndedActivities.Any(IsInboundHttpSpan), TimeSpan.FromSeconds(5));
+            await recorder.WaitForAsync(s => s.Any(IsInboundHttpSpan), TimeSpan.FromSeconds(5));
         }
 
         var inbound = recorder.EndedActivities.Where(IsInboundHttpSpan).ToList();
@@ -99,12 +99,12 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
         var response = await client.GetAsync("/api/otel-chain");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        await WaitForAsync(() =>
-            host.Recorder.EndedActivities.Any(IsInboundHttpSpan)
-            && host.Recorder.EndedActivities.Any(IsSignalRActivity)
-            && host.Recorder.EndedActivities.Any(IsOrleansActivity)
-            && host.Recorder.EndedActivities.Any(IsEfCoreActivity)
-            && host.Recorder.EndedActivities.Any(IsOutboundHttpSpan),
+        await host.Recorder.WaitForAsync(s =>
+            s.Any(IsInboundHttpSpan)
+            && s.Any(IsSignalRActivity)
+            && s.Any(IsOrleansActivity)
+            && s.Any(IsEfCoreActivity)
+            && s.Any(IsOutboundHttpSpan),
             TimeSpan.FromSeconds(5));
 
         var inbound = Assert.Single(host.Recorder.EndedActivities, IsInboundHttpSpan);
@@ -162,9 +162,7 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
             content);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
-        await WaitForAsync(() =>
-            FindIssueCreationTrace(recorder.EndedActivities) is not null,
-            TimeSpan.FromSeconds(5));
+        await recorder.WaitForAsync(s => FindIssueCreationTrace(s) is not null, TimeSpan.FromSeconds(5));
 
         var activities = recorder.EndedActivities;
 
@@ -248,7 +246,7 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
                 content);
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
-            await WaitForAsync(() => recorder.EndedActivities.Any(IsEfCoreActivity), TimeSpan.FromSeconds(5));
+            await recorder.WaitForAsync(s => s.Any(IsEfCoreActivity), TimeSpan.FromSeconds(5));
         }
 
         var ef = recorder.EndedActivities.Where(IsEfCoreActivity).ToList();
@@ -420,16 +418,6 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
         return new ListenerScope(listener);
     }
 
-    private static async Task WaitForAsync(Func<bool> predicate, TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            if (predicate()) return;
-            await Task.Delay(20);
-        }
-    }
-
     private sealed class ListenerScope : IAsyncDisposable
     {
         private readonly ActivityListener _listener;
@@ -445,6 +433,7 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
     {
         private readonly object _gate = new();
         private readonly List<Activity> _endedActivities = new();
+        private readonly List<PendingWait> _waiters = new();
 
         public IReadOnlyList<Activity> EndedActivities
         {
@@ -459,9 +448,71 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
 
         public void Record(Activity activity)
         {
+            List<Activity>? snapshot = null;
             lock (_gate)
             {
                 _endedActivities.Add(activity);
+                if (_waiters.Count > 0)
+                {
+                    snapshot = _endedActivities.ToList();
+                    for (int i = _waiters.Count - 1; i >= 0; i--)
+                    {
+                        var wait = _waiters[i];
+                        if (wait.Predicate(snapshot))
+                        {
+                            _waiters.RemoveAt(i);
+                            wait.Tcs.TrySetResult(true);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Resolves as soon as <see cref="Record"/> appends an activity
+        /// that makes <paramref name="predicate"/> true, instead of
+        /// polling the wall clock. <paramref name="timeout"/> only
+        /// bounds the never-satisfied case.
+        /// </summary>
+        public async Task<List<Activity>> WaitForAsync(Func<List<Activity>, bool> predicate, TimeSpan timeout)
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            await WaitForAsync(predicate, cts.Token);
+            return EndedActivities.ToList();
+        }
+
+        public Task WaitForAsync(Func<List<Activity>, bool> predicate, CancellationToken cancellationToken)
+        {
+            lock (_gate)
+            {
+                var initial = _endedActivities.ToList();
+                if (predicate(initial))
+                    return Task.CompletedTask;
+
+                var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var wait = new PendingWait(predicate, tcs);
+                _waiters.Add(wait);
+
+                if (cancellationToken.CanBeCanceled)
+                {
+                    cancellationToken.Register(() =>
+                    {
+                        lock (_gate) _waiters.Remove(wait);
+                        tcs.TrySetCanceled(cancellationToken);
+                    });
+                }
+                return tcs.Task;
+            }
+        }
+
+        private sealed class PendingWait
+        {
+            public Func<List<Activity>, bool> Predicate { get; }
+            public TaskCompletionSource<bool> Tcs { get; }
+            public PendingWait(Func<List<Activity>, bool> predicate, TaskCompletionSource<bool> tcs)
+            {
+                Predicate = predicate;
+                Tcs = tcs;
             }
         }
     }

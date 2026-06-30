@@ -656,36 +656,22 @@ public class AgentJobRoutesEndToEndSpecs
         await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = maxWorkflowSlots });
 
         var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            var state = await runnerGrain.GetRuntimeStateAsync();
-            if (state.Status == RunnerStatus.Online)
-                return;
-
-            await Task.Delay(25);
-        }
-
-        var last = await runnerGrain.GetRuntimeStateAsync();
-        Assert.Fail($"Runner '{runnerId}' did not reach Online within 5s (last status {last.Status}).");
+        await TestWait.ForAsync(
+            () => runnerGrain.GetRuntimeStateAsync(),
+            s => s.Status == RunnerStatus.Online,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"Runner '{runnerId}' to reach Online");
     }
 
     private static async Task WaitForAgentJobStatusAsync(
         IAgentJobGrain job,
         AgentJobStatus expected,
         TimeSpan timeout)
-    {
-        var deadline = DateTimeOffset.UtcNow + timeout;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            var status = await job.GetStatusAsync();
-            if (status == expected)
-                return;
-
-            await Task.Delay(25);
-        }
-
-        var last = await job.GetStatusAsync();
-        Assert.Fail($"Agent job did not reach {expected} within {timeout.TotalSeconds:N0}s (last status {last}).");
-    }
+        => await TestWait.ForAsync(
+            () => job.GetStatusAsync(),
+            s => s == expected,
+            timeout,
+            TimeSpan.FromMilliseconds(25),
+            $"Agent job to reach {expected}");
 }

@@ -35,18 +35,7 @@ public class AgentJobGrainSpecs
         TimeSpan timeout,
         TimeSpan step,
         string description)
-    {
-        var deadline = DateTimeOffset.UtcNow + timeout;
-        T last = default!;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            last = await probe();
-            if (done(last)) return last;
-            await Task.Delay(step);
-        }
-        Assert.Fail($"Timed out waiting for: {description}. Last value: {last}");
-        return last;
-    }
+        => await TestWait.ForAsync(probe, done, timeout, step, description);
 
     private static async Task WaitForStatusAsync(IAgentJobGrain job, AgentJobStatus expected, TimeSpan timeout)
     {

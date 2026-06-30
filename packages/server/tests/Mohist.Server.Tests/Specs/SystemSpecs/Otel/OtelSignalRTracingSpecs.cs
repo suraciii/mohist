@@ -82,7 +82,7 @@ public class OtelSignalRTracingSpecs
         // lifecycle hook and every hub method invocation. Wait until
         // at least one Server-kind activity (the OnConnectedAsync
         // hook fired at connection establishment) has been captured.
-        await WaitForAsync(() => host.Recorder.EndedActivities
+        await host.Recorder.WaitForAsync(s => s
             .Any(a => a.Source?.Name == MohistOpenTelemetryRegistration.SignalRServerActivitySourceName),
             TimeSpan.FromSeconds(5));
 
@@ -118,16 +118,6 @@ public class OtelSignalRTracingSpecs
             Assert.NotNull(hubActivity.GetTagItem("rpc.method"));
             Assert.NotNull(hubActivity.GetTagItem("rpc.system"));
             Assert.Equal("signalr", hubActivity.GetTagItem("rpc.system"));
-        }
-    }
-
-    private static async Task WaitForAsync(Func<bool> predicate, TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            if (predicate()) return;
-            await Task.Delay(20);
         }
     }
 }
