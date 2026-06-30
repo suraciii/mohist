@@ -45,7 +45,7 @@
     {
       "id": "T-003",
       "title": "Surface complete session usage summary and token detail on the session page",
-      "spec": "specs/agent-session-ui/spec.md#Requirement: Session-level complete usage summary",
+      "spec": "specs/agent-session-ui/spec.md#Requirement: Session-level complete usage summary; specs/agent-session-ui/spec.md#Requirement: Token detail in the session observability bar and header row",
       "description": "Add cachedReadTokens and thoughtTokens to the SessionHeader observability bar alongside input/output/total, and add a new session usage summary region (replacing the SessionDetail dead-stub intent) that surfaces all usage fields in one observable place — input/output/total/cached/thought tokens, cost, context-window used/size, context-usage %, and health status. Apply omission rules so null/zero non-applicable fields (e.g. thoughtTokens for a non-reasoning model, cachedReadTokens with no cache hit) are omitted rather than rendered as misleading zeros; reuse the shared formatters already used by WorkflowSessionsPanel.",
       "acceptanceCriteria": [
         "The observability bar renders cachedReadTokens and thoughtTokens alongside input, output, and total tokens when they have accrued",
