@@ -15,14 +15,17 @@ namespace Mohist.Server.Project.Grains;
 public class ProjectGrain : Grain, IProjectGrain
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<ProjectGrain> _log;
     private ProjectInfo? _project;
 
     public ProjectGrain(
         IDbContextFactory<MohistDbContext> dbFactory,
+        TimeProvider timeProvider,
         ILogger<ProjectGrain> log)
     {
         _dbFactory = dbFactory;
+        _timeProvider = timeProvider;
         _log = log;
     }
 
@@ -45,11 +48,15 @@ public class ProjectGrain : Grain, IProjectGrain
         if (_project is not null)
             throw new InvalidOperationException($"Project '{GrainKey}' already exists");
 
+        var now = Now();
+        var nowText = now.UtcDateTime.ToString("o");
         var entry = new ProjectRow
         {
             Id = GrainKey,
             Name = name,
             RepositoriesJson = "[]",
+            CreatedAt = now,
+            UpdatedAt = now,
         };
 
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -60,6 +67,8 @@ public class ProjectGrain : Grain, IProjectGrain
         {
             Id = GrainKey,
             Name = name,
+            CreatedAt = nowText,
+            UpdatedAt = nowText,
             Repositories = [],
             Variables = ProjectVariablesBag.Empty,
         };
@@ -72,13 +81,14 @@ public class ProjectGrain : Grain, IProjectGrain
     {
         if (_project is null) return null;
 
-        _project.UpdatedAt = DateTime.UtcNow.ToString("o");
+        var now = Now();
+        _project.UpdatedAt = now.UtcDateTime.ToString("o");
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var entry = await db.Projects.FindAsync(GrainKey);
         if (entry is null) return null;
 
-        entry.UpdatedAt = DateTimeOffset.UtcNow;
+        entry.UpdatedAt = now;
         await db.SaveChangesAsync();
 
         return _project;
@@ -127,7 +137,7 @@ public class ProjectGrain : Grain, IProjectGrain
             IsDefault = makeDefault,
         });
 
-        _project.UpdatedAt = DateTime.UtcNow.ToString("o");
+        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
         await PersistRepositoriesAsync();
         return _project;
     }
@@ -164,7 +174,7 @@ public class ProjectGrain : Grain, IProjectGrain
             _project.Repositories[0].IsDefault = true;
         }
 
-        _project.UpdatedAt = DateTime.UtcNow.ToString("o");
+        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
         await PersistRepositoriesAsync();
         return _project;
     }
@@ -180,7 +190,7 @@ public class ProjectGrain : Grain, IProjectGrain
         if (repo.IsDefault && _project.Repositories.Count > 0)
             _project.Repositories[0].IsDefault = true;
 
-        _project.UpdatedAt = DateTime.UtcNow.ToString("o");
+        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
         await PersistRepositoriesAsync();
         return _project;
     }
@@ -205,7 +215,7 @@ public class ProjectGrain : Grain, IProjectGrain
 
         if (!found) return null;
 
-        _project.UpdatedAt = DateTime.UtcNow.ToString("o");
+        _project.UpdatedAt = Now().UtcDateTime.ToString("o");
         await PersistRepositoriesAsync();
         return _project;
     }
@@ -217,7 +227,7 @@ public class ProjectGrain : Grain, IProjectGrain
         if (entry is null) return;
 
         entry.RepositoriesJson = JSON.Serialize(_project!.Repositories);
-        entry.UpdatedAt = DateTimeOffset.UtcNow;
+        entry.UpdatedAt = Now();
         await db.SaveChangesAsync();
     }
 
@@ -260,7 +270,8 @@ public class ProjectGrain : Grain, IProjectGrain
 
     private async Task PersistVariablesAsync()
     {
-        _project!.UpdatedAt = DateTime.UtcNow.ToString("o");
+        var now = Now();
+        _project!.UpdatedAt = now.UtcDateTime.ToString("o");
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var entry = await db.Projects.FindAsync(GrainKey);
@@ -272,15 +283,16 @@ public class ProjectGrain : Grain, IProjectGrain
                 kv => kv.Key,
                 kv => new StageVariables(ToJsonObject(kv.Value?.Vars)),
                 StringComparer.OrdinalIgnoreCase));
-        await UpsertWorkflowProfileVariablesAsync(db, GrainKey, bundle);
-        entry.UpdatedAt = DateTimeOffset.UtcNow;
+        await UpsertWorkflowProfileVariablesAsync(db, GrainKey, bundle, now);
+        entry.UpdatedAt = now;
         await db.SaveChangesAsync();
     }
 
     private static async Task UpsertWorkflowProfileVariablesAsync(
         MohistDbContext db,
         string projectId,
-        VariableBundle bundle)
+        VariableBundle bundle,
+        DateTimeOffset now)
     {
         var row = await db.ProjectWorkflowProfiles
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
@@ -291,14 +303,16 @@ public class ProjectGrain : Grain, IProjectGrain
             {
                 ProjectId = projectId,
                 Variables = bundle.ToJson(),
-                UpdatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = now,
             });
             return;
         }
 
         row.Variables = bundle.ToJson();
-        row.UpdatedAt = DateTimeOffset.UtcNow;
+        row.UpdatedAt = now;
     }
+
+    private DateTimeOffset Now() => _timeProvider.GetUtcNow();
 
     private static JsonElement? ToJsonObject(Dictionary<string, JsonElement?>? values)
     {

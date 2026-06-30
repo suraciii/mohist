@@ -14,10 +14,12 @@ namespace Mohist.Server.Inbox;
 public sealed class InboxSubscriptionStore : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly TimeProvider _timeProvider;
 
-    public InboxSubscriptionStore(IDbContextFactory<MohistDbContext> dbFactory)
+    public InboxSubscriptionStore(IDbContextFactory<MohistDbContext> dbFactory, TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
+        _timeProvider = timeProvider;
     }
 
     /// <summary>
@@ -56,7 +58,7 @@ public sealed class InboxSubscriptionStore : IScopedService
         var row = await db.InboxSubscriptions
             .FirstOrDefaultAsync(r => r.ProjectId == projectId, ct);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
 
         if (row is null)
         {

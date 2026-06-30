@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Tests.Support;
@@ -13,6 +14,7 @@ public class RunnerDefinitionStoreSpecs : IAsyncLifetime
     private readonly string _dbPath;
     private readonly DbContextOptions<MohistDbContext> _options;
     private readonly RunnerDefinitionStore _store;
+    private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
     public RunnerDefinitionStoreSpecs()
     {
@@ -20,7 +22,7 @@ public class RunnerDefinitionStoreSpecs : IAsyncLifetime
         _options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite($"Data Source={_dbPath}")
             .Options;
-        _store = new RunnerDefinitionStore(new Factory(_options));
+        _store = new RunnerDefinitionStore(new Factory(_options), _timeProvider);
 
         using var db = new MohistDbContext(_options);
         db.Database.EnsureCreated();
@@ -97,7 +99,7 @@ public class RunnerDefinitionStoreSpecs : IAsyncLifetime
             Assert.Equal(initial.CreatedAt, initial.UpdatedAt);
         }
 
-        await Task.Delay(15);
+        _timeProvider.Advance(TimeSpan.FromSeconds(1));
 
         await _store.UpdateSlotsAsync(runnerId, 7);
 
@@ -148,7 +150,7 @@ public class RunnerDefinitionStoreSpecs : IAsyncLifetime
         var persisted = await verifyDb.Runners.AsNoTracking().FirstAsync(r => r.Id == runnerId);
         Assert.Equal(4, persisted.Slots);
 
-        var freshStore = new RunnerDefinitionStore(new Factory(_options));
+        var freshStore = new RunnerDefinitionStore(new Factory(_options), _timeProvider);
         var slots = await freshStore.GetOrInitAsync(runnerId);
         Assert.Equal(4, slots);
     }

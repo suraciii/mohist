@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Subscriptions;
@@ -142,7 +143,9 @@ internal static class InboxProjectionTestSupport
     {
         await SeedProjectAsync(database, projectId);
 
-        var store = new InboxSubscriptionStore(database.Factory);
+        var store = new InboxSubscriptionStore(
+            database.Factory,
+            new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)));
         await store.SetAsync(projectId, new InboxSubscriptionState(
             WorkflowFailedEnabled: workflowFailedEnabled,
             ApprovalRequestedEnabled: approvalRequestedEnabled,
@@ -295,6 +298,7 @@ internal static class InboxProjectionTestSupport
             {
                 var services = new ServiceCollection();
                 services.AddSingleton<IDbContextFactory<MohistDbContext>>(_database.Factory);
+                services.AddSingleton<TimeProvider>(new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)));
                 services.AddSingleton(eventPublisher);
                 services.AddScoped<InboxStore>();
                 services.AddScoped<InboxSubscriptionStore>();

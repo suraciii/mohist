@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Inbox;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
@@ -10,13 +11,15 @@ namespace Mohist.Server.Tests.Specs.Inbox;
 
 public class InboxSubscriptionStoreSpecs
 {
+    private static readonly DateTimeOffset StartTime = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
+
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task GetAsync_NoStoredRow_ReturnsAllEnabledDefault()
     {
         await using var database = CreateDatabase();
-        var store = new InboxSubscriptionStore(database.Factory);
+        var store = NewStore(database);
 
         var state = await store.GetAsync("proj_a");
 
@@ -33,7 +36,7 @@ public class InboxSubscriptionStoreSpecs
     {
         await using var database = CreateDatabase();
         await SeedProjectAsync(database, "proj_a");
-        var store = new InboxSubscriptionStore(database.Factory);
+        var store = NewStore(database);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState(
             WorkflowFailedEnabled: false,
@@ -57,7 +60,7 @@ public class InboxSubscriptionStoreSpecs
     {
         await using var database = CreateDatabase();
         await SeedProjectAsync(database, "proj_a");
-        var store = new InboxSubscriptionStore(database.Factory);
+        var store = NewStore(database);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState(
             WorkflowFailedEnabled: false,
@@ -80,7 +83,7 @@ public class InboxSubscriptionStoreSpecs
     {
         await using var database = CreateDatabase();
         await SeedProjectAsync(database, "proj_a");
-        var store = new InboxSubscriptionStore(database.Factory);
+        var store = NewStore(database);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState(
             WorkflowFailedEnabled: false,
@@ -110,12 +113,13 @@ public class InboxSubscriptionStoreSpecs
     {
         await using var database = CreateDatabase();
         await SeedProjectAsync(database, "proj_a");
-        var store = new InboxSubscriptionStore(database.Factory);
+        var timeProvider = new FakeTimeProvider(StartTime);
+        var store = NewStore(database, timeProvider);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState());
         var firstUpdatedAt = (await ReadUpdatedAtAsync(database, "proj_a")).Ticks;
 
-        await Task.Delay(10); // ensure clock ticks
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
         await store.SetAsync("proj_a", new InboxSubscriptionState(WorkflowFailedEnabled: false));
         var secondUpdatedAt = (await ReadUpdatedAtAsync(database, "proj_a")).Ticks;
 
@@ -129,7 +133,7 @@ public class InboxSubscriptionStoreSpecs
     {
         await using var database = CreateDatabase();
         await SeedProjectAsync(database, "proj_a");
-        var store = new InboxSubscriptionStore(database.Factory);
+        var store = NewStore(database);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState(
             WorkflowFailedEnabled: false,
@@ -152,7 +156,7 @@ public class InboxSubscriptionStoreSpecs
     {
         await using var database = CreateDatabase();
         await SeedProjectAsync(database, "proj_a");
-        var store = new InboxSubscriptionStore(database.Factory);
+        var store = NewStore(database);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState(WorkflowFailedEnabled: false));
 
@@ -166,7 +170,7 @@ public class InboxSubscriptionStoreSpecs
     public async Task SetAsync_MissingProject_FailsForeignKey()
     {
         await using var database = CreateDatabase();
-        var store = new InboxSubscriptionStore(database.Factory);
+        var store = NewStore(database);
 
         await Assert.ThrowsAsync<DbUpdateException>(() =>
             store.SetAsync("proj_missing", new InboxSubscriptionState()));
@@ -179,6 +183,9 @@ public class InboxSubscriptionStoreSpecs
             .FirstAsync(r => r.ProjectId == projectId);
         return row.UpdatedAt;
     }
+
+    private static InboxSubscriptionStore NewStore(TestDatabase database, FakeTimeProvider? timeProvider = null) =>
+        new(database.Factory, timeProvider ?? new FakeTimeProvider(StartTime));
 
     private static async Task SeedProjectAsync(TestDatabase database, string projectId)
     {
