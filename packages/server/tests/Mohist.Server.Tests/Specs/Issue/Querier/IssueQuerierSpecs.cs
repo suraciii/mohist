@@ -862,7 +862,7 @@ public class IssueQuerierSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task GetCompletionBucketsAsync_FlappingIssue_AppearsInEachAffectedBucket()
+    public async Task GetCompletionBucketsAsync_WeekBucketing_ReopenedIssueCountsOnlyLatestTerminalBucket()
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -870,10 +870,12 @@ public class IssueQuerierSpecs
         var i1 = SeedIssue(db, project, "issue_flap_1");
         await db.SaveChangesAsync();
 
-        // The issue closed in week 1, was reopened and closed again
-        // in week 2. The endpoint must count distinct completions
-        // across buckets, so it shows up in both week 1 and week 2.
+        // The issue closed in week 1, was reopened, and closed again
+        // in week 2. The endpoint counts only the latest terminal
+        // event, so the earlier terminal bucket must not retain a stale
+        // failure count.
         SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 12, 10, 0, 0, TimeSpan.Zero));
         SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 6, 15, 10, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
@@ -882,9 +884,35 @@ public class IssueQuerierSpecs
         var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Week, now);
 
         var week1 = Assert.Single(result.Buckets, b => b.Boundary == "2026-06-08");
-        Assert.Equal(1, week1.Failed);
+        Assert.Equal(0, week1.Failed);
         var week2 = Assert.Single(result.Buckets, b => b.Boundary == "2026-06-15");
         Assert.Equal(1, week2.Failed);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_RecompletedIssueCountsOnlyLatestTerminalBucket()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-recomplete-{Guid.NewGuid():N}", Name = "Recomplete Project" };
+        var i1 = SeedIssue(db, project, "issue_recomplete_1");
+        await db.SaveChangesAsync();
+
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 18, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 19, 8, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        var day17 = Assert.Single(result.Buckets, b => b.Boundary == "2026-06-17");
+        Assert.Equal(0, day17.Completed);
+        var day19 = Assert.Single(result.Buckets, b => b.Boundary == "2026-06-19");
+        Assert.Equal(1, day19.Completed);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

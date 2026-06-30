@@ -302,10 +302,10 @@ public class IssueQuerier : IScopedService
                 Buckets: points);
         }
 
-        // Pull terminal events inside the bounded window, scoped to this
-        // project's issue sources. We then bucket in-memory because the
-        // result set is already tightly bounded (≤ 30/12 buckets × small
-        // event volume) and the project-id set is already a memory hash.
+        // Pull terminal events for this project's issue sources, choose
+        // each issue's latest terminal event, then apply the window and
+        // bucket in-memory. This keeps reopened/recompleted issues from
+        // leaving stale counts in earlier buckets.
         // EF Core SQLite cannot translate a `DateTimeOffset` comparison
         // against a TEXT column, so we fetch all events first and
         // filter the time + type + project-source predicates in memory.
@@ -313,40 +313,31 @@ public class IssueQuerier : IScopedService
         // is small; profiling per design D-OQ2 will tell us whether we
         // need an explicit index on (Type, Time) later.
         var candidates = await db.IssueEvents.AsNoTracking()
-            .Select(e => new { e.Source, e.Type, e.Time })
+            .Select(e => new { e.Source, e.Type, e.Time, e.Id })
             .ToListAsync();
         var sourceSet = new HashSet<string>(projectSources, StringComparer.Ordinal);
         var terminalTypes = new HashSet<string>(StringComparer.Ordinal) { WorkCompletedType, ClosedType };
         var rows = candidates
-            .Where(r => r.Time >= windowFrom
-                && r.Time < windowTo
-                && sourceSet.Contains(r.Source)
+            .Where(r => sourceSet.Contains(r.Source)
                 && terminalTypes.Contains(r.Type))
+            .GroupBy(r => r.Source, StringComparer.Ordinal)
+            .Select(g => g
+                .OrderByDescending(r => r.Time)
+                .ThenByDescending(r => r.Id)
+                .First())
+            .Where(r => r.Time >= windowFrom && r.Time < windowTo)
             .ToList();
 
         var indexByBoundary = boundaries
             .Select((b, i) => (Boundary: b, Index: i))
             .ToDictionary(t => t.Boundary, t => t.Index);
 
-        // Dedupe per bucket on (Source, Type) so that an issue with
-        // multiple same-type terminal events in one bucket counts once,
-        // but a flapping issue whose closed→reopened→closed straddles
-        // different buckets is counted in each bucket where an event
-        // landed.
-        var seenPerBucket = new Dictionary<int, HashSet<string>>(points.Count);
         foreach (var row in rows)
         {
             var boundary = bucket == CompletionBucket.Day
                 ? DateOnly.FromDateTime(row.Time.UtcDateTime.Date)
                 : DateOnly.FromDateTime(ISOWeekHelper.StartOfIsoWeek(row.Time.UtcDateTime));
             if (!indexByBoundary.TryGetValue(boundary, out var idx)) continue;
-
-            if (!seenPerBucket.TryGetValue(idx, out var seen))
-            {
-                seen = new HashSet<string>(StringComparer.Ordinal);
-                seenPerBucket[idx] = seen;
-            }
-            if (!seen.Add(row.Source + "|" + row.Type)) continue;
 
             if (row.Type == WorkCompletedType)
             {

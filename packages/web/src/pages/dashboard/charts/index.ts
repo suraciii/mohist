@@ -16,4 +16,7 @@ export type { ChartAxesProps, AxisTick, AxisSide } from './ChartAxes'
 export { ChartLegend } from './ChartLegend'
 export type { ChartLegendProps, LegendEntry, LegendShape } from './ChartLegend'
 
+export { SegmentedBarSeries } from './SegmentedBarSeries'
+export type { SegmentedBarSeriesProps, SegmentedBarDatum, Segment } from './SegmentedBarSeries'
+
 export { useReducedMotion } from './useReducedMotion'

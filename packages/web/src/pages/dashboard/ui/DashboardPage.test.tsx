@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   useArchivedIssuesMock: vi.fn(),
   epics: undefined as any[] | undefined,
   completionTrend: undefined as { bucket: string; window: { from: string; to: string }; buckets: { boundary: string; completed: number; failed: number }[] } | undefined,
+  completionThroughput: { bucket: 'day', window: { from: '2026-06-01T00:00:00', to: '2026-06-07T23:59:59' }, buckets: [] } as { bucket: string; window: { from: string; to: string }; buckets: { boundary: string; completed: number; failed: number }[] },
   approvalWait: undefined as { window: { from: string; to: string }; sampleCount: number; averageSeconds: number | null; medianSeconds: number | null; maxSeconds: number | null } | undefined,
   qualityMetrics: undefined as any,
 }))
@@ -70,6 +71,7 @@ vi.mock('../../../entities/epic/api/queries', () => ({
 
 vi.mock('../../../entities/issue/api/completion-trend', () => ({
   useCompletionTrend: () => ({ data: mocks.completionTrend }),
+  useCompletionThroughput: () => ({ data: mocks.completionThroughput }),
 }))
 
 vi.mock('../../../entities/issue/api/approval-wait', () => ({
