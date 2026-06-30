@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useProjectPath } from '@/entities/project'
-import { ContextHealthIndicator } from '@/widgets/session-health'
+import { ContextHealthIndicator, ContextUsageTrendMiniChart, type ContextUsageTrendSample } from '@/widgets/session-health'
 import { formatCompact, formatCost } from '@/shared/lib/format-compact'
 import type { SessionCard } from '@/widgets/coder-session/model/activity-cards'
 
@@ -96,6 +96,12 @@ export function CompactSessionCard({ card }: CompactSessionCardProps) {
             />
           </div>
         )}
+
+        {hasTrendData(card.contextUsageHistory) && (
+          <div className="mt-1" data-testid="pulse-compact-trend">
+            <ContextUsageTrendMiniChart history={card.contextUsageHistory} />
+          </div>
+        )}
       </div>
     </Link>
   )
@@ -104,6 +110,27 @@ export function CompactSessionCard({ card }: CompactSessionCardProps) {
 function getTaskProgressPercent(completed: number, total: number): number {
   if (total <= 0) return 0
   return Math.max(0, Math.min(100, (completed / total) * 100))
+}
+
+/**
+ * Count the finite-numbered samples in a usage history. The chart
+ * needs at least two such samples to plot a meaningful trend, so the
+ * Pulse card hides its trend block entirely when this returns `< 2`
+ * (no empty-axis visual to compete with the snapshot indicator).
+ */
+function countUsableHistorySamples(
+  history: ContextUsageTrendSample[] | null | undefined,
+): number {
+  if (!history) return 0
+  let n = 0
+  for (const sample of history) {
+    if (typeof sample?.percent === 'number' && Number.isFinite(sample.percent)) n += 1
+  }
+  return n
+}
+
+function hasTrendData(history: ContextUsageTrendSample[] | null | undefined): boolean {
+  return countUsableHistorySamples(history) >= 2
 }
 
 function UsageLine({ card }: { card: SessionCard }) {
