@@ -25,7 +25,7 @@ namespace Mohist.Server.Tests.Support;
 ///
 /// <para>
 /// This class deliberately avoids <c>WebApplicationFactory</c> so the
-/// OTel registration can be driven end-to-end without an extra
+/// OTel registration can be driven through the hosted pipeline without an extra
 /// production <c>Program</c> entry point, and so each test owns a
 /// fresh <see cref="IHost"/> (and a fresh
 /// <see cref="OpenTelemetryBuilder"/> / <c>TracerProvider</c>) — the
@@ -165,7 +165,7 @@ public sealed class OtelTestHostOptions
     /// after the default <c>/api/health</c> and <c>/otel/v1/traces</c>
     /// routes have been mapped. Used by integration tests that need
     /// to exercise a SignalR hub method or an EF / outbound-HttpClient
-    /// chain end-to-end.
+    /// chain through the hosted pipeline.
     /// </summary>
     public Action<WebApplication>? ConfigureApp { get; init; }
 

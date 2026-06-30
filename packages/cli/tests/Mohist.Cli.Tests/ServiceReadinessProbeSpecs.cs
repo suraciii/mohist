@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Cli.Tests.Support;
 using Xunit;
 
@@ -8,8 +9,9 @@ public class ServiceReadinessProbeSpecs
 {
     private static ServiceReadinessProbe BuildProbe(
         HttpClient http,
-        TextWriter? output = null)
-        => new(http, output ?? TextWriter.Null);
+        TextWriter? output = null,
+        TimeProvider? timeProvider = null)
+        => new(http, output ?? TextWriter.Null, timeProvider);
 
     private static HttpClient BuildHttp(Func<HttpRequestMessage, HttpResponseMessage> responder)
     {
@@ -73,20 +75,22 @@ public class ServiceReadinessProbeSpecs
     [Fact]
     public async Task WaitForServerReadyAsync_TimeoutWithNeverReady_ReportsNotReady()
     {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         var http = BuildHttp(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
 
-        var probe = BuildProbe(http);
+        var probe = BuildProbe(http, timeProvider: time);
 
-        var start = DateTimeOffset.UtcNow;
-        var result = await probe.WaitForServerReadyAsync(
-            TimeSpan.FromMilliseconds(150),
+        var wait = probe.WaitForServerReadyAsync(
+            TimeSpan.FromSeconds(2),
             CancellationToken.None);
-        var elapsed = DateTimeOffset.UtcNow - start;
+        await Task.Yield();
+        Assert.False(wait.IsCompleted);
+
+        time.Advance(TimeSpan.FromSeconds(2));
+        var result = await wait;
 
         Assert.False(result.Ready);
         Assert.NotNull(result.LastFailure);
-        Assert.True(elapsed >= TimeSpan.FromMilliseconds(100),
-            $"Expected polling to last at least ~timeout window; took {elapsed.TotalMilliseconds}ms");
     }
 
     [Fact]
@@ -106,11 +110,14 @@ public class ServiceReadinessProbeSpecs
             return new HttpResponseMessage(HttpStatusCode.InternalServerError);
         });
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
-        var probe = BuildProbe(http);
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var probe = BuildProbe(http, timeProvider: time);
 
         var wait = probe.WaitForServerReadyAsync(TimeSpan.FromMilliseconds(1), CancellationToken.None);
-        await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
-        releaseFirstRequest.SetResult();
+        await Task.Yield();
+        Assert.True(firstRequestStarted.Task.IsCompleted);
+
+        time.Advance(TimeSpan.FromMilliseconds(1));
         var result = await wait;
 
         Assert.False(result.Ready);
@@ -120,6 +127,7 @@ public class ServiceReadinessProbeSpecs
     [Fact]
     public async Task WaitForServerReadyAsync_BecomesReadyMidPoll_ReportsReady()
     {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         var pollCount = 0;
         var http = BuildHttp(req =>
         {
@@ -137,11 +145,16 @@ public class ServiceReadinessProbeSpecs
             };
         });
 
-        var probe = BuildProbe(http);
+        var probe = BuildProbe(http, timeProvider: time);
 
-        var result = await probe.WaitForServerReadyAsync(
+        var wait = probe.WaitForServerReadyAsync(
             TimeSpan.FromSeconds(3),
             CancellationToken.None);
+        await Task.Yield();
+        Assert.False(wait.IsCompleted);
+
+        time.Advance(TimeSpan.FromMilliseconds(500));
+        var result = await wait;
 
         Assert.True(result.Ready, $"LastFailure: {result.LastFailure}");
         Assert.Null(result.LastFailure);

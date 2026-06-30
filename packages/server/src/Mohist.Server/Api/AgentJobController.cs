@@ -8,7 +8,7 @@ using Mohist.Server.Infrastructure;
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// Minimal end-to-end validation HTTP API for the standalone Agent Jobs engine.
+/// Minimal validation HTTP API for the standalone Agent Jobs engine.
 ///
 /// POST <c>/api/agent-jobs/validate</c> accepts a body of
 /// <c>{ prompt, model, workspace }</c>, creates an <see cref="IAgentJobGrain"/>
@@ -17,7 +17,7 @@ namespace Mohist.Server.Api;
 ///
 /// IMPORTANT — validation-only surface: this endpoint is intentionally minimal
 /// and is NOT the product API for agent execution. It exists solely to prove
-/// the engine runs end-to-end. There is no auth, no authority/permission model,
+/// the engine's dispatch and report path. There is no auth, no authority/permission model,
 /// no polling, and no read-model. It must NOT be exposed on a production edge
 /// as-is; treat it as a developer smoke-test endpoint.
 ///
@@ -177,9 +177,6 @@ public static class AgentJobController
         TimeProvider timeProvider,
         CancellationToken requestCt)
     {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(requestCt);
-        linked.CancelAfter(timeout);
-
         var deadline = timeProvider.GetUtcNow() + timeout;
         var step = TimeSpan.FromMilliseconds(100);
 
@@ -197,17 +194,7 @@ public static class AgentJobController
                 throw new TimeoutException("Agent job did not reach a terminal state in time.");
             }
 
-            try
-            {
-                await Task.Delay(step, timeProvider, linked.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                terminal = await grain.GetTerminalResultAsync();
-                if (terminal.Status is AgentJobStatus.Completed or AgentJobStatus.Failed)
-                    return terminal;
-                throw new TimeoutException("Agent job did not reach a terminal state in time.");
-            }
+            await Task.Delay(step, timeProvider, requestCt);
         }
     }
 

@@ -299,11 +299,11 @@ internal sealed class SingleAgentJobGrainFactory : IGrainFactory
 }
 
 [Collection("MohistIntegration")]
-public class AgentJobRoutesEndToEndSpecs
+public class AgentJobDispatchRouteSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public AgentJobRoutesEndToEndSpecs(MohistIntegrationFixture fixture)
+    public AgentJobDispatchRouteSpecs(MohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }
@@ -313,11 +313,11 @@ public class AgentJobRoutesEndToEndSpecs
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task FullPath_HttpPost_CreatesAgentJobGrain_DispatchesThroughRegistry_RunnerAccepts_ReportsBack()
+    public async Task PostValidate_DispatchesAgentJobToRunner_AndReturnsReportedCompletion()
     {
-        var projectId = $"e2e-path-project-{Guid.NewGuid():N}";
-        var runnerId = $"e2e-path-runner-{Guid.NewGuid():N}";
-        var jobKey = $"agent-job-validate-e2e-path-{Guid.NewGuid():N}";
+        var projectId = $"agent-route-project-{Guid.NewGuid():N}";
+        var runnerId = $"agent-route-runner-{Guid.NewGuid():N}";
+        var jobKey = $"agent-job-validate-route-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 2);
 
         try
@@ -326,22 +326,16 @@ public class AgentJobRoutesEndToEndSpecs
                 AgentJobController.ValidatePath,
                 new
                 {
-                    prompt = "full path prompt",
+                    prompt = "route completion prompt",
                     model = "openai/gpt-test",
                     jobId = jobKey,
-                    workspace = new { path = "/tmp/agent-job-fullpath", projectId },
+                    workspace = new { path = "/tmp/agent-job-route", projectId },
                 });
 
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
 
             await WaitForAgentJobStatusAsync(jobGrain, AgentJobStatus.Running, TimeSpan.FromSeconds(8));
             var workId = (await jobGrain.GetRuntimeSnapshotAsync()).CurrentWorkId!;
-            var dispatch = new WorkDispatch(
-                WorkflowRunId: string.Empty,
-                WorkId: workId,
-                AgentJobId: jobKey,
-                OwnerKind: WorkDispatchOwnerKinds.AgentJob);
-
             var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
             await runnerGrain.ReportAgentJobResultAsync(
                 jobKey,
@@ -352,6 +346,7 @@ public class AgentJobRoutesEndToEndSpecs
                     Output: "{\"hello\":\"world\"}",
                     ExitCode: 0,
                     ArtifactUploadIds: new[] { "artifact-a" }));
+            WakeAgentJobValidationAwaiter();
 
             using var response = await responseTask;
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -382,11 +377,11 @@ public class AgentJobRoutesEndToEndSpecs
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task FullPath_RunnerReportsFailure_ReturnsStructuredFailedResponse()
+    public async Task PostValidate_WhenRunnerReportsFailure_ReturnsStructuredFailure()
     {
-        var projectId = $"e2e-fail-project-{Guid.NewGuid():N}";
-        var runnerId = $"e2e-fail-runner-{Guid.NewGuid():N}";
-        var jobKey = $"agent-job-validate-e2e-fail-{Guid.NewGuid():N}";
+        var projectId = $"agent-route-fail-project-{Guid.NewGuid():N}";
+        var runnerId = $"agent-route-fail-runner-{Guid.NewGuid():N}";
+        var jobKey = $"agent-job-validate-route-fail-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 4);
 
         try
@@ -405,12 +400,6 @@ public class AgentJobRoutesEndToEndSpecs
 
             await WaitForAgentJobStatusAsync(jobGrain, AgentJobStatus.Running, TimeSpan.FromSeconds(8));
             var workId = (await jobGrain.GetRuntimeSnapshotAsync()).CurrentWorkId!;
-            var dispatch = new WorkDispatch(
-                WorkflowRunId: string.Empty,
-                WorkId: workId,
-                AgentJobId: jobKey,
-                OwnerKind: WorkDispatchOwnerKinds.AgentJob);
-
             var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
             await runnerGrain.ReportAgentJobResultAsync(
                 jobKey,
@@ -420,6 +409,7 @@ public class AgentJobRoutesEndToEndSpecs
                     Message: "runner reported failure",
                     Output: "{\"error\":\"x\"}",
                     ExitCode: 1));
+            WakeAgentJobValidationAwaiter();
 
             using var response = await responseTask;
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -442,11 +432,11 @@ public class AgentJobRoutesEndToEndSpecs
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task Dispatch_VariablesCarryWorkspacePath_ForRunnerWorkspaceShortCircuit()
+    public async Task PostValidate_DispatchIncludesWorkspacePath_ForRunnerWorkspaceShortCircuit()
     {
-        var projectId = $"e2e-workspace-project-{Guid.NewGuid():N}";
-        var runnerId = $"e2e-workspace-runner-{Guid.NewGuid():N}";
-        var jobKey = $"agent-job-validate-e2e-workspace-{Guid.NewGuid():N}";
+        var projectId = $"agent-route-workspace-project-{Guid.NewGuid():N}";
+        var runnerId = $"agent-route-workspace-runner-{Guid.NewGuid():N}";
+        var jobKey = $"agent-job-validate-route-workspace-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 1);
 
         try
@@ -479,16 +469,11 @@ public class AgentJobRoutesEndToEndSpecs
             var with = JsonSerializer.Deserialize<JsonElement>(polled.With!);
             Assert.Equal("only workspace path", with.GetProperty("prompt").GetString());
 
-            var dispatch = new WorkDispatch(
-                WorkflowRunId: string.Empty,
-                WorkId: workId,
-                AgentJobId: jobKey,
-                OwnerKind: WorkDispatchOwnerKinds.AgentJob);
-
             await runnerGrain.ReportAgentJobResultAsync(
                 jobKey,
                 workId,
                 new WorkResult(Status: "completed", Message: "ok"));
+            WakeAgentJobValidationAwaiter();
 
             using var response = await responseTask;
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -506,11 +491,11 @@ public class AgentJobRoutesEndToEndSpecs
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task FullPath_RunnerReportsViaHttpReportEndpoint_DeliversToAgentJobGrain()
+    public async Task RunnerReportEndpoint_ForAgentJob_DeliversResultToValidateResponse()
     {
-        var projectId = $"e2e-http-report-project-{Guid.NewGuid():N}";
-        var runnerId = $"e2e-http-report-runner-{Guid.NewGuid():N}";
-        var jobKey = $"agent-job-validate-e2e-http-report-{Guid.NewGuid():N}";
+        var projectId = $"agent-route-http-report-project-{Guid.NewGuid():N}";
+        var runnerId = $"agent-route-http-report-runner-{Guid.NewGuid():N}";
+        var jobKey = $"agent-job-validate-route-http-report-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 2);
 
         try
@@ -519,7 +504,7 @@ public class AgentJobRoutesEndToEndSpecs
                 AgentJobController.ValidatePath,
                 new
                 {
-                    prompt = "http report path prompt",
+                    prompt = "http report route prompt",
                     model = "openai/gpt-test",
                     jobId = jobKey,
                     workspace = new { path = "/tmp/agent-job-http-report", projectId },
@@ -543,6 +528,7 @@ public class AgentJobRoutesEndToEndSpecs
                     artifactUploadIds = new[] { "artifact-http" },
                 });
             Assert.Equal(HttpStatusCode.OK, reportResponse.StatusCode);
+            WakeAgentJobValidationAwaiter();
 
             using var response = await responseTask;
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -566,11 +552,11 @@ public class AgentJobRoutesEndToEndSpecs
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task FullPath_HttpPollEndpoint_ExposesOwnerKindAndAgentJobId()
+    public async Task RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId()
     {
-        var projectId = $"e2e-http-poll-project-{Guid.NewGuid():N}";
-        var runnerId = $"e2e-http-poll-runner-{Guid.NewGuid():N}";
-        var jobKey = $"agent-job-validate-e2e-http-poll-{Guid.NewGuid():N}";
+        var projectId = $"agent-route-http-poll-project-{Guid.NewGuid():N}";
+        var runnerId = $"agent-route-http-poll-runner-{Guid.NewGuid():N}";
+        var jobKey = $"agent-job-validate-route-http-poll-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 1);
 
         try
@@ -579,7 +565,7 @@ public class AgentJobRoutesEndToEndSpecs
                 AgentJobController.ValidatePath,
                 new
                 {
-                    prompt = "http poll path prompt",
+                    prompt = "http poll route prompt",
                     model = "openai/gpt-test",
                     jobId = jobKey,
                     workspace = new { path = "/tmp/agent-job-http-poll", projectId },
@@ -596,16 +582,12 @@ public class AgentJobRoutesEndToEndSpecs
             Assert.Equal(WorkDispatchOwnerKinds.AgentJob, httpBody.GetProperty("ownerKind").GetString());
             Assert.Equal(jobKey, httpBody.GetProperty("agentJobId").GetString());
 
-            var dispatch = new WorkDispatch(
-                WorkflowRunId: string.Empty,
-                WorkId: workId,
-                AgentJobId: jobKey,
-                OwnerKind: WorkDispatchOwnerKinds.AgentJob);
             var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
             await runnerGrain.ReportAgentJobResultAsync(
                 jobKey,
                 workId,
                 new WorkResult(Status: "completed", Message: "ok"));
+            WakeAgentJobValidationAwaiter();
 
             using var response = await responseTask;
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -623,8 +605,8 @@ public class AgentJobRoutesEndToEndSpecs
     [Fact]
     public async Task HttpReportEndpoint_AgentJobWithoutAgentJobId_Returns400()
     {
-        var projectId = $"e2e-http-bad-request-project-{Guid.NewGuid():N}";
-        var runnerId = $"e2e-http-bad-request-runner-{Guid.NewGuid():N}";
+        var projectId = $"agent-route-http-bad-request-project-{Guid.NewGuid():N}";
+        var runnerId = $"agent-route-http-bad-request-runner-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 1);
 
         try
@@ -673,5 +655,9 @@ public class AgentJobRoutesEndToEndSpecs
             s => s == expected,
             timeout,
             TimeSpan.FromMilliseconds(25),
-            $"Agent job to reach {expected}");
+            $"Agent job to reach {expected}",
+            () => job.CheckTimeoutsAsync());
+
+    private void WakeAgentJobValidationAwaiter() =>
+        _fixture.TimeProvider.Advance(TimeSpan.FromMilliseconds(100));
 }

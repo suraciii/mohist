@@ -194,7 +194,7 @@ public class MohistHubSpecs
         // tab. The dispatcher must filter out every emit until
         // the client subscribes — this preserves the contract that
         // an open tab does not see anything it has not opted into.
-        // The dispatcher behaviour is exercised end-to-end in
+        // The dispatcher behavior is exercised through its product path in
         // EventBridgeSpecs; here we lock in the registry shape
         // the dispatcher depends on.
         foreach (var eventType in new[]

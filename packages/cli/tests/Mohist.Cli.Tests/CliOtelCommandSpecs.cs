@@ -75,12 +75,12 @@ public class CliOtelCommandSpecs : IDisposable
     [Fact]
     public void OtelQuery_DefaultPath_UsesHomeDir()
     {
-        // The actual end-to-end default-path run touches
+        // The product-level default-path behavior touches
         // ~/.mohist/otel.db on the real filesystem, which would race
         // with other parallel tests and any live otel.db the host
         // might already have. The unit-level contract (default =
         // $HOME/.mohist/otel.db) is covered by ResolveDatabasePath_NullOrEmpty_ReturnsHomeDirPath;
-        // the E2E "with default path" scenario is exercised by
+        // the explicit-path specs exercise the same execution contract through
         // OtelQuery_CustomDbPath_RunsAgainstExplicitPath + the
         // server tests, which collectively prove the CLI passes the
         // resolved path straight through to Microsoft.Data.Sqlite.

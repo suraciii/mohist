@@ -93,7 +93,7 @@ public class MohistOpenTelemetryRegistrationSpecs
         // Stand up the same provider pipeline the production code wires
         // up via AddMohistOpenTelemetry, then use an ActivityListener
         // (independent of any TracerProvider) to confirm an Activity
-        // started from a known source flows end-to-end. This proves the
+        // started from a known source flows through the registered pipeline. This proves the
         // hosting layer does not break the ambient Activity flow.
         var config = BuildConfig(enabled: true, endpoint: "http://collector.test/otel");
 

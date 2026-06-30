@@ -18,7 +18,7 @@ public class ProjectCliSpecs
         http.EnqueueJson(HttpStatusCode.OK, """
             {
               "success": true,
-              "data": { "id": "proj_123", "name": "e2e-smoke" }
+              "data": { "id": "proj_123", "name": "spec-smoke" }
             }
             """);
         var output = new StringWriter();
@@ -26,7 +26,7 @@ public class ProjectCliSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "use", "e2e-smoke"],
+            ["project", "use", "spec-smoke"],
             output,
             error,
             files,
@@ -34,9 +34,9 @@ public class ProjectCliSpecs
 
         Assert.Equal(0, exitCode);
         Assert.Equal(HttpMethod.Post, http.Requests.Single().Method);
-        Assert.Equal("/api/projects/e2e-smoke/use", http.Requests.Single().RequestUri!.PathAndQuery);
+        Assert.Equal("/api/projects/spec-smoke/use", http.Requests.Single().RequestUri!.PathAndQuery);
         Assert.Contains("\"activeProjectId\": \"proj_123\"", files.SingleFileContents);
-        Assert.Contains("Active project: e2e-smoke (proj_123)", output.ToString());
+        Assert.Contains("Active project: spec-smoke (proj_123)", output.ToString());
         Assert.Equal("", error.ToString());
     }
 
@@ -169,7 +169,7 @@ public class ProjectCliSpecs
               "success": true,
               "data": {
                 "id": "proj_123",
-                "name": "e2e",
+                "name": "spec",
                 "repositories": [
                   { "name": "backend", "gitUrl": "git@example.com:backend.git", "baseBranch": "main", "isDefault": true }
                 ]

@@ -250,7 +250,7 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
     /// <summary>
     /// Seeds a pending upload row whose content is written through the
     /// real artifact storage. Mirrors what the runner upload endpoint
-    /// does end-to-end, so the bound <c>WorkflowArtifact</c> row has
+    /// does through the production upload path, so the bound <c>WorkflowArtifact</c> row has
     /// a valid <c>ArtifactStoragePath</c> pointing at real bytes.
     /// </summary>
     private async Task<string> SeedReviewPendingUploadAsync(

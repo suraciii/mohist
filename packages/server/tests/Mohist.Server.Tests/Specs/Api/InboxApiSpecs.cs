@@ -310,7 +310,7 @@ public class InboxApiSpecs
     [Fact]
     public async Task WorkflowRunStoreEvent_ProjectsThroughProductionEventBusAndIsVisibleFromInboxApi()
     {
-        var projectId = await CreateProjectAsync("inbox-e2e");
+        var projectId = await CreateProjectAsync("inbox-spec");
         await _client.PostOkAsync(
             $"/api/projects/{projectId}/repositories",
             new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
@@ -333,7 +333,7 @@ public class InboxApiSpecs
             var runStore = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
             await runStore.SaveAsync(new WorkflowRun
             {
-                Id = $"wr_inbox_e2e_{Guid.NewGuid():N}",
+                Id = $"wr_inbox_spec_{Guid.NewGuid():N}",
                 Metadata = new WorkflowRunMetadata(
                     Name: null,
                     CreatedAt: DateTimeOffset.UtcNow,
@@ -356,7 +356,7 @@ public class InboxApiSpecs
         Assert.False(item.GetProperty("isRead").GetBoolean());
         Assert.False(item.TryGetProperty("readAt", out _));
 
-        var otherProjectId = await CreateProjectAsync("inbox-e2e-other");
+        var otherProjectId = await CreateProjectAsync("inbox-spec-other");
         Assert.Empty(await _client.GetDataAsync<JsonElement[]>(
             $"/api/projects/{otherProjectId}/inbox"));
     }
