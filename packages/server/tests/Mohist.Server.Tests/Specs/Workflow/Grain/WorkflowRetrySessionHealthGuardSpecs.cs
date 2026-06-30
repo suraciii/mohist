@@ -240,57 +240,6 @@ public class WorkflowRetrySessionHealthGuardSpecs
         }
     }
 
-    private async Task ClearSessionContextUsageAsync(string sessionId)
-    {
-        // Open and detach the session's compact/reset through the
-        // database, mimicking the result of a successful compact
-        // operation. This is the "after compact" state the workflow
-        // guard cares about: no recorded context window usage, so the
-        // gate evaluates to Healthy and the retry is accepted.
-        await using var db = await _fixture.Services
-            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
-            .CreateDbContextAsync();
-        var row = await db.AgentSessions.FirstOrDefaultAsync(s => s.Id == sessionId);
-        if (row is null) return;
-
-        var state = row.State;
-        if (state.Contains("\"ContextWindowUsed\":"))
-        {
-            state = System.Text.RegularExpressions.Regex.Replace(
-                state, "\"ContextWindowUsed\":[^,}]+", "\"ContextWindowUsed\":null");
-        }
-        else if (state.Contains("\"contextWindowUsed\":"))
-        {
-            state = System.Text.RegularExpressions.Regex.Replace(
-                state, "\"contextWindowUsed\":[^,}]+", "\"contextWindowUsed\":null");
-        }
-        if (state.Contains("\"ContextWindowSize\":"))
-        {
-            state = System.Text.RegularExpressions.Regex.Replace(
-                state, "\"ContextWindowSize\":[^,}]+", "\"ContextWindowSize\":null");
-        }
-        else if (state.Contains("\"contextWindowSize\":"))
-        {
-            state = System.Text.RegularExpressions.Regex.Replace(
-                state, "\"contextWindowSize\":[^,}]+", "\"contextWindowSize\":null");
-        }
-        row.State = state;
-        await db.SaveChangesAsync();
-
-        // Force the in-memory grain to discard its cached copy so the
-        // next workflow-retry guard re-hydrates from the cleared
-        // state. The test-only DeactivateForTestAsync hook on the grain
-        // calls DeactivateOnIdle() inside the grain (where the call
-        // reaches the silo's catalog directly), then we wait a short
-        // while for the deactivation to settle.
-        for (var i = 0; i < 5; i++)
-        {
-            await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).DeactivateForTestAsync();
-            await Task.Delay(200);
-        }
-        await Task.Delay(500);
-    }
-
     private async Task<(string ProjectId, int IssueNumber, string IssueId, string WorkflowRunId, string SessionName)> SeedProjectIssueWorkflowAsync()
     {
         var projectId = $"retry-guard-{Guid.NewGuid():N}";
@@ -336,37 +285,39 @@ public class WorkflowRetrySessionHealthGuardSpecs
 
     private async Task<WorkDispatchInfo> PollForTaskAsync(string runnerId, string projectId, string workflowRunId)
     {
-        for (var attempt = 0; attempt < 200; attempt++)
-        {
-            var response = await _client.PostAsync($"/api/runner/{runnerId}/poll", null);
-            if (response.StatusCode == HttpStatusCode.NoContent)
-            {
-                await Task.Delay(50);
-                continue;
-            }
-            response.EnsureSuccessStatusCode();
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var dispatchedWorkflowRunId = payload.GetProperty("workflowRunId").GetString();
-            if (string.Equals(dispatchedWorkflowRunId, workflowRunId, StringComparison.Ordinal))
-            {
-                return new WorkDispatchInfo(
-                    payload.GetProperty("workId").GetString()!,
-                    payload.GetProperty("stage").GetString() ?? "build",
-                    payload.TryGetProperty("title", out var t) ? t.GetString() : null);
-            }
+        var work = await TestWait.ForAsync(
+            async () => await PollMatchingTaskAsync(runnerId, workflowRunId),
+            value => value is not null,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(50),
+            $"Runner '{runnerId}' to receive a work item for workflow '{workflowRunId}'");
+        return work!;
+    }
 
-            // Discard mismatched work — put it back by reporting as
-            // completed so the runner is not stuck holding a lease for
-            // a different workflow.
-            await _client.PostOkAsync($"/api/runner/{runnerId}/report", new
-            {
-                workflowRunId = dispatchedWorkflowRunId,
-                workId = payload.GetProperty("workId").GetString(),
-                status = "completed",
-            });
+    private async Task<WorkDispatchInfo?> PollMatchingTaskAsync(string runnerId, string workflowRunId)
+    {
+        var response = await _client.PostAsync($"/api/runner/{runnerId}/poll", null);
+        if (response.StatusCode == HttpStatusCode.NoContent)
+            return null;
+
+        response.EnsureSuccessStatusCode();
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var dispatchedWorkflowRunId = payload.GetProperty("workflowRunId").GetString();
+        if (string.Equals(dispatchedWorkflowRunId, workflowRunId, StringComparison.Ordinal))
+        {
+            return new WorkDispatchInfo(
+                payload.GetProperty("workId").GetString()!,
+                payload.GetProperty("stage").GetString() ?? "build",
+                payload.TryGetProperty("title", out var t) ? t.GetString() : null);
         }
 
-        throw new InvalidOperationException("Runner never received a work item for the seeded workflow.");
+        await _client.PostOkAsync($"/api/runner/{runnerId}/report", new
+        {
+            workflowRunId = dispatchedWorkflowRunId,
+            workId = payload.GetProperty("workId").GetString(),
+            status = "completed",
+        });
+        return null;
     }
 
     private async Task<string> OpenAndAttachSessionAsync(string runnerId, string projectId, string workflowRunId, string sessionName, WorkDispatchInfo work)
@@ -456,68 +407,6 @@ public class WorkflowRetrySessionHealthGuardSpecs
             {
                 Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
             });
-    }
-
-    private async Task BackdateSessionActivityAsync(string projectId, string workflowRunId, string sessionName)
-    {
-        // The session is "active" when it has an AgentRuntimeSessionId
-        // and a LastDataAt within 5 minutes. To make the compact
-        // endpoint accept the request we reach into the database
-        // directly: rewrite the persisted state so LastDataAt is more
-        // than 5 minutes old, then force the in-memory grain to discard
-        // its cached copy so the next request re-hydrates from the
-        // backdated state.
-        var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
-        var backdated = DateTime.UtcNow.AddMinutes(-10);
-
-        for (var i = 0; i < 5; i++)
-        {
-            if (_fixture.Grains is IGrainFactory grains)
-            {
-                var grainRef = grains.GetGrain<IAgentSessionGrain>(sessionId);
-                if (grainRef is Orleans.IGrainBase gb)
-                {
-                    gb.DeactivateOnIdle();
-                }
-            }
-            await Task.Delay(500);
-        }
-
-        await using var db = await _fixture.Services
-            .GetRequiredService<IDbContextFactory<MohistDbContext>>()
-            .CreateDbContextAsync();
-        var row = await db.AgentSessions.FirstOrDefaultAsync(s => s.Id == sessionId);
-        if (row is null) return;
-
-        var state = row.State;
-        if (state.Contains("\"LastDataAt\":\""))
-        {
-            state = System.Text.RegularExpressions.Regex.Replace(
-                state, "\"LastDataAt\":\"[^\"]*\"",
-                $"\"LastDataAt\":\"{backdated:O}\"");
-        }
-        else if (state.Contains("\"lastDataAt\":\""))
-        {
-            state = System.Text.RegularExpressions.Regex.Replace(
-                state, "\"lastDataAt\":\"[^\"]*\"",
-                $"\"lastDataAt\":\"{backdated:O}\"");
-        }
-        row.State = state;
-        row.LastDataAt = backdated;
-        await db.SaveChangesAsync();
-
-        for (var i = 0; i < 10; i++)
-        {
-            if (_fixture.Grains is IGrainFactory grains2)
-            {
-                var grainRef = grains2.GetGrain<IAgentSessionGrain>(sessionId);
-                if (grainRef is Orleans.IGrainBase gb2)
-                {
-                    gb2.DeactivateOnIdle();
-                }
-            }
-            await Task.Delay(500);
-        }
     }
 
     private async Task<Mohist.Server.Workflow.Services.WorkflowStatusView?> LoadStatusViewAsync(string projectId, int issueNumber)
