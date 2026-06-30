@@ -144,19 +144,13 @@ public abstract class WorkflowGrainSpecs
         var management = Grains.GetGrain<IManagementGrain>(0);
         await management.ForceActivationCollection(TimeSpan.Zero);
 
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var activations = await management.GetDetailedGrainStatistics();
-            if (!activations.Any(stat => stat.GrainType.Contains(nameof(WorkflowGrain), StringComparison.Ordinal)
-                && stat.GrainId.ToString()!.Contains(workflowId, StringComparison.Ordinal)))
-            {
-                return;
-            }
-
-            await Task.Delay(50);
-        }
-
-        Assert.Fail($"Workflow grain '{workflowId}' did not deactivate in time.");
+        await TestWait.ForAsync(
+            async () => await management.GetDetailedGrainStatistics(),
+            activations => !activations.Any(stat => stat.GrainType.Contains(nameof(WorkflowGrain), StringComparison.Ordinal)
+                && stat.GrainId.ToString()!.Contains(workflowId, StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(50),
+            $"Workflow grain '{workflowId}' to deactivate");
     }
 
     protected async Task ClearBacklogAsync()
@@ -219,18 +213,14 @@ public abstract class WorkflowGrainSpecs
     protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAsync(string runnerId)
     {
         await EnsureRunnerForCurrentWorkflowAsync(runnerId);
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-            var work = await runner.PollAsync();
-            if (work is not null)
-                return (work, runnerId);
-
-            await Task.Delay(20);
-        }
-
-        Assert.Fail($"Runner '{runnerId}' has no work for workflow '{_workflowId}'");
-        return default;
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var work = await TestWait.ForAsync(
+            () => runner.PollAsync(),
+            value => value is not null,
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(20),
+            $"Runner '{runnerId}' to receive work for workflow '{_workflowId}'");
+        return (work!, runnerId);
     }
 
     private async Task EnsureRunnerForCurrentWorkflowAsync(string runnerId)

@@ -295,17 +295,13 @@ public class WorkflowRerunFromStageApiSpecs
     private async Task<(WorkDispatch Work, string RunnerId)> PollWorkAsync(string runnerId)
     {
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            var work = await runner.PollAsync();
-            if (work is not null)
-                return (work, runnerId);
-
-            await Task.Delay(20);
-        }
-
-        Assert.Fail($"Runner '{runnerId}' did not receive work.");
-        return default;
+        var work = await TestWait.ForAsync(
+            () => runner.PollAsync(),
+            value => value is not null,
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(20),
+            $"Runner '{runnerId}' to receive work");
+        return (work!, runnerId);
     }
 
     private async Task ReportAsync(string runnerId, string wrId, string workId, string status)
