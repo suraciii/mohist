@@ -14,9 +14,11 @@ export interface CompletionTrendResponse {
   buckets: CompletionBucketPoint[]
 }
 
-export function fetchCompletionTrend(projectId: string) {
+type CompletionBucket = 'day' | 'week'
+
+export function fetchCompletionTrend(projectId: string, bucket: CompletionBucket = 'week') {
   return request<CompletionTrendResponse>(
-    projectApiPath(projectId, '/issues/metrics/completion?bucket=week'),
+    projectApiPath(projectId, `/issues/metrics/completion?bucket=${bucket}`),
   )
 }
 
@@ -25,6 +27,16 @@ export function useCompletionTrend() {
   return useQuery({
     queryKey: ['issues', 'metrics', 'completion', 'week', projectId],
     queryFn: () => fetchCompletionTrend(projectId!),
+    enabled: !!projectId,
+    staleTime: 60_000,
+  })
+}
+
+export function useCompletionThroughput() {
+  const { projectId } = useProject()
+  return useQuery({
+    queryKey: ['issues', 'metrics', 'completion', 'day', projectId],
+    queryFn: () => fetchCompletionTrend(projectId!, 'day'),
     enabled: !!projectId,
     staleTime: 60_000,
   })

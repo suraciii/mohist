@@ -167,6 +167,29 @@ public class IssueMetricsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task CompletionMetrics_RecompletedIssue_CountsOnlyLatestTerminalBucket()
+    {
+        var project = await CreateProjectAsync($"metrics-recomplete-{Guid.NewGuid():N}");
+        var issue = await CreateIssueAsync(project.Id, "Recompleted");
+
+        await SeedEventAsync(issue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(issue.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 18, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(issue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 19, 8, 0, 0, TimeSpan.Zero));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+
+        var day17 = Assert.Single(payload.Buckets, b => b.Boundary == "2026-06-17");
+        Assert.Equal(0, day17.Completed);
+        var day19 = Assert.Single(payload.Buckets, b => b.Boundary == "2026-06-19");
+        Assert.Equal(1, day19.Completed);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task ApprovalWaitMetrics_HasCompletedApprovals_ReturnsWindowSampleCountAndStats()
     {
         var project = await CreateProjectAsync($"approval-wait-present-{Guid.NewGuid():N}");
