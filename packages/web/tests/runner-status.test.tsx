@@ -87,6 +87,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   cleanup()
 })
 
@@ -316,7 +317,6 @@ describe('RunnerList UI', () => {
       const rows = [makeRow({ lastHeartbeatAt: heartbeatTime, status: 'idle', connectionState: 'connected' })]
       renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('2m ago')).toBeInTheDocument()
-      vi.useRealTimers()
     })
 
     it('shows connected connection state', () => {
@@ -542,7 +542,6 @@ describe('RunnerList UI', () => {
       const rows = [makeRow({ lastHeartbeatAt: '2026-01-01T12:00:00Z', status: 'stale', connectionState: 'disconnected' })]
       renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('10m ago')).toBeInTheDocument()
-      vi.useRealTimers()
     })
 
     it('shows explicit heartbeat diagnostic for offline runner', () => {
@@ -550,7 +549,6 @@ describe('RunnerList UI', () => {
       const rows = [makeRow({ lastHeartbeatAt: '2026-01-01T12:00:00Z', status: 'offline', connectionState: 'disconnected' })]
       renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('2h ago')).toBeInTheDocument()
-      vi.useRealTimers()
     })
 
     it('shows disconnected connection state', () => {
