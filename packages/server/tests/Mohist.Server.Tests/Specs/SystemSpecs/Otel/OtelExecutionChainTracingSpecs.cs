@@ -163,29 +163,24 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
         await WaitForAsync(() =>
-            recorder.EndedActivities.Any(IsInboundHttpSpan)
-            && recorder.EndedActivities.Any(a => IsOrleansActivity(a))
-            && recorder.EndedActivities.Any(a => IsEfCoreActivity(a)),
+            FindIssueCreationTrace(recorder.EndedActivities) is not null,
             TimeSpan.FromSeconds(5));
 
-        var inbound = recorder.EndedActivities.Where(IsInboundHttpSpan).ToList();
-        var orleans = recorder.EndedActivities.Where(IsOrleansActivity).ToList();
-        var ef = recorder.EndedActivities.Where(IsEfCoreActivity).ToList();
+        var activities = recorder.EndedActivities;
 
         // Diagnostic dump: list every captured activity's source,
         // displayName, traceId, and parentSpanId so a future failure
         // shows the actual trace topology rather than just a
         // mismatch on one span.
-        foreach (var a in recorder.EndedActivities)
+        foreach (var a in activities)
         {
             Console.WriteLine($"ACTIVITY source={a.Source?.Name} displayName={a.DisplayName} traceId={a.TraceId} spanId={a.SpanId} parentSpanId={a.ParentSpanId}");
         }
 
-        Assert.NotEmpty(inbound);
-        Assert.NotEmpty(orleans);
-        Assert.NotEmpty(ef);
+        var trace = FindIssueCreationTrace(activities);
+        Assert.NotNull(trace);
 
-        var rootTraceId = inbound[0].TraceId;
+        var rootTraceId = trace.Inbound.TraceId;
 
         // Orleans activities caused by this request (i.e. excluding
         // independent background work like grain-timer callbacks that
@@ -196,10 +191,10 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
         // request's trace, and the spec requirement
         // ("no orphan span when a causal parent exists") exempts
         // them.
-        var orleansInRequest = orleans.Where(IsOrleansActivityCausedByRequest).ToList();
+        var orleansInRequest = trace.Orleans;
         Assert.NotEmpty(orleansInRequest);
 
-        var inboundSpanId = inbound[0].SpanId;
+        var inboundSpanId = trace.Inbound.SpanId;
         var allOrleansSpanIds = orleansInRequest.Select(o => o.SpanId).ToHashSet();
         foreach (var o in orleansInRequest)
         {
@@ -214,7 +209,7 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
         // that is itself part of this request's causal chain (the
         // grain that issued the EF query).
         var inboundOrOrleansSpanIds = new HashSet<ActivitySpanId>(allOrleansSpanIds) { inboundSpanId };
-        var efInRequest = ef.Where(e => e.TraceId == rootTraceId).ToList();
+        var efInRequest = trace.EfCore;
         Assert.NotEmpty(efInRequest);
         foreach (var e in efInRequest)
         {
@@ -285,6 +280,58 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
 
     private static bool IsInboundHttpSpan(Activity activity) =>
         activity.Source?.Name == "Microsoft.AspNetCore" && activity.Kind == ActivityKind.Server;
+
+    private static IssueCreationTrace? FindIssueCreationTrace(IReadOnlyList<Activity> activities)
+    {
+        foreach (var traceGroup in activities.GroupBy(a => a.TraceId))
+        {
+            var spans = traceGroup.ToList();
+            var inbound = spans.FirstOrDefault(IsIssueCreationInboundHttpSpan);
+            if (inbound is null) continue;
+
+            var orleans = spans.Where(IsOrleansActivityCausedByRequest).ToList();
+            if (orleans.Count == 0) continue;
+
+            var efCore = spans.Where(IsEfCoreActivity).ToList();
+            if (efCore.Count == 0) continue;
+
+            return new IssueCreationTrace(inbound, orleans, efCore);
+        }
+
+        return null;
+    }
+
+    private static bool IsIssueCreationInboundHttpSpan(Activity activity)
+    {
+        if (!IsInboundHttpSpan(activity)) return false;
+
+        var method = activity.GetTagItem("http.request.method") as string
+                     ?? activity.GetTagItem("http.method") as string;
+        if (!string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase)
+            && !activity.DisplayName.StartsWith("POST ", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var route = activity.GetTagItem("http.route") as string;
+        if (IsIssueCreationRoute(route)) return true;
+
+        var path = activity.GetTagItem("url.path") as string
+                   ?? activity.GetTagItem("http.target") as string;
+        if (path is not null
+            && path.Contains("/api/projects/", StringComparison.Ordinal)
+            && path.TrimEnd('/').EndsWith("/issues", StringComparison.Ordinal))
+            return true;
+
+        return IsIssueCreationRoute(activity.DisplayName);
+    }
+
+    private static bool IsIssueCreationRoute(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var route = value.Trim();
+        if (route.StartsWith("POST ", StringComparison.OrdinalIgnoreCase))
+            route = route["POST ".Length..].TrimStart();
+        return route.TrimEnd('/') == "/api/projects/{projectRef}/issues";
+    }
 
     private static bool IsSignalRActivity(Activity activity) =>
         activity.Source?.Name == MohistOpenTelemetryRegistration.SignalRServerActivitySourceName;
@@ -359,7 +406,7 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
                 || source.Name == "OpenTelemetry.Instrumentation.Http",
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
             ActivityStarted = a => { },
-            ActivityStopped = a => recorder.EndedActivities.Add(a),
+            ActivityStopped = recorder.Record,
         };
         ActivitySource.AddActivityListener(listener);
 
@@ -396,8 +443,33 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
 
     private sealed class RecordingActivityProcessor
     {
-        public List<Activity> EndedActivities { get; } = new();
+        private readonly object _gate = new();
+        private readonly List<Activity> _endedActivities = new();
+
+        public IReadOnlyList<Activity> EndedActivities
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _endedActivities.ToList();
+                }
+            }
+        }
+
+        public void Record(Activity activity)
+        {
+            lock (_gate)
+            {
+                _endedActivities.Add(activity);
+            }
+        }
     }
+
+    private sealed record IssueCreationTrace(
+        Activity Inbound,
+        IReadOnlyList<Activity> Orleans,
+        IReadOnlyList<Activity> EfCore);
 
     private static class MohistOpenTelemetryRegistrationTestSources
     {

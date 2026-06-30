@@ -51,6 +51,7 @@ export type GitHubPrErrorCode =
   | "config-error"
   | "protection-conflict"
   | "pr-state-conflict"
+  | "pr-checks-unavailable"
   | "pr-checks-failed"
 
 export interface GitHubPrStep {
@@ -643,10 +644,13 @@ export async function waitChecksAndMergePr(
 
   const checksWait = await waitForPrChecks(gh, workDir, prNumber, signal, record)
   if (checksWait.kind === "failure") {
+    const prefix = checksWait.errorCode === "pr-checks-unavailable"
+      ? "checks status unavailable"
+      : "checks failed"
     return {
       kind: "failure",
-      errorCode: "pr-checks-failed",
-      message: `PR #${prNumber} checks failed: ${checksWait.message}`,
+      errorCode: checksWait.errorCode,
+      message: `PR #${prNumber} ${prefix}: ${checksWait.message}`,
       prUrl: view.url ?? null,
       output: checksWait.output,
     }
@@ -784,7 +788,7 @@ export async function waitChecksAndMergePr(
 
 type PrChecksWaitResult =
   | { kind: "ok" }
-  | { kind: "failure"; message: string; output: string }
+  | { kind: "failure"; errorCode: "pr-checks-failed" | "pr-checks-unavailable"; message: string; output: string }
   | { kind: "cancelled"; message: string; output: string }
 
 async function waitForPrChecks(
@@ -815,23 +819,23 @@ async function waitForPrChecks(
     const checksOutput = combinedGhOutput(checksResult)
     record("gh-pr-checks", `pr view ${prNumber} --json statusCheckRollup`, checksResult.exitCode, checksOutput)
     if (checksResult.exitCode !== 0) {
-      // Right after a push / force-push, GitHub can briefly report no check
-      // runs before the workflow registers. Poll that state for a bounded
-      // grace window, then allow repos with no CI to merge.
-      if (looksLikeNoChecksReported(checksOutput)) {
-        if (noChecksSince === null) noChecksSince = Date.now()
-        if (Date.now() - noChecksSince >= prChecksNoChecksGraceMs) {
-          return { kind: "ok" }
-        }
-      } else {
-        return {
-          kind: "failure",
-          message: checksOutput,
-          output: checksOutput,
-        }
+      return {
+        kind: "failure",
+        errorCode: "pr-checks-unavailable",
+        message: checksOutput,
+        output: checksOutput,
       }
     } else {
-      const checks = parsePrStatusCheckRollup(checksResult.stdout)
+      const parsed = parsePrStatusCheckRollupResult(checksResult.stdout)
+      if (parsed.kind === "invalid") {
+        return {
+          kind: "failure",
+          errorCode: "pr-checks-unavailable",
+          message: parsed.message,
+          output: checksResult.stdout,
+        }
+      }
+      const checks = parsed.checks
       if (checks.length === 0) {
         if (noChecksSince === null) noChecksSince = Date.now()
         if (Date.now() - noChecksSince < prChecksNoChecksGraceMs) {
@@ -853,6 +857,7 @@ async function waitForPrChecks(
       if (classification.kind === "failed") {
         return {
           kind: "failure",
+          errorCode: "pr-checks-failed",
           message: classification.message,
           output: classification.message,
         }
@@ -897,18 +902,31 @@ export interface PrCheckEntry {
   state: string
 }
 
+type PrStatusCheckRollupParseResult =
+  | { kind: "ok"; checks: PrCheckEntry[] }
+  | { kind: "invalid"; message: string }
+
 export function parsePrStatusCheckRollup(stdout: string): PrCheckEntry[] {
+  const parsed = parsePrStatusCheckRollupResult(stdout)
+  return parsed.kind === "ok" ? parsed.checks : []
+}
+
+function parsePrStatusCheckRollupResult(stdout: string): PrStatusCheckRollupParseResult {
   const trimmed = stdout.trim()
-  if (!trimmed) return []
+  if (!trimmed) return { kind: "invalid", message: "gh pr view statusCheckRollup returned empty output" }
   let parsed: unknown
   try {
     parsed = JSON.parse(trimmed)
   } catch {
-    return []
+    return { kind: "invalid", message: "gh pr view statusCheckRollup returned unparseable JSON" }
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return []
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { kind: "invalid", message: "gh pr view statusCheckRollup returned unexpected JSON" }
+  }
   const rollup = (parsed as Record<string, unknown>)["statusCheckRollup"]
-  if (!Array.isArray(rollup)) return []
+  if (!Array.isArray(rollup)) {
+    return { kind: "invalid", message: "gh pr view statusCheckRollup did not include a statusCheckRollup array" }
+  }
   const out: PrCheckEntry[] = []
   for (const item of rollup) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue
@@ -925,7 +943,7 @@ export function parsePrStatusCheckRollup(stdout: string): PrCheckEntry[] {
     const bucket = classifyRollupBucket(status || rawState, conclusion)
     out.push({ name, bucket, state })
   }
-  return out
+  return { kind: "ok", checks: out }
 }
 
 function classifyRollupBucket(status: string, conclusion: string): string {
@@ -968,11 +986,6 @@ function formatFailedCheck(entry: PrCheckEntry): string {
   const bucket = entry.bucket || "FAIL"
   const state = entry.state && entry.state !== bucket ? ` (state=${entry.state})` : ""
   return `${label} [bucket=${bucket}]${state}`
-}
-
-// GitHub can return this before checks register, or permanently for repos with no CI.
-export function looksLikeNoChecksReported(output: string): boolean {
-  return /no checks reported/i.test(output)
 }
 
 export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal): Promise<{ ok: true; output: string } | { ok: false; exitCode: number; output: string; message: string }> {

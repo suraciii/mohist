@@ -461,6 +461,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var protectionConflict = handlers.Single(h => h.When == "errorCode=protection-conflict");
         Assert.True(protectionConflict.RetrySelf);
         Assert.Empty(protectionConflict.Tasks);
+
+        Assert.DoesNotContain(handlers, h => h.When == "errorCode=pr-checks-unavailable");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

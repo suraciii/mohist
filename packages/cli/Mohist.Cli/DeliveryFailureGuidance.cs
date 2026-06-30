@@ -14,6 +14,7 @@ internal static class DeliveryFailureGuidance
     public const string ConfigError = "config-error";
     public const string ProtectionConflict = "protection-conflict";
     public const string PrStateConflict = "pr-state-conflict";
+    public const string PrChecksUnavailable = "pr-checks-unavailable";
 
     private static readonly Dictionary<string, (string Label, string NextAction)> Guidance =
         new(StringComparer.Ordinal)
@@ -42,6 +43,9 @@ internal static class DeliveryFailureGuidance
             [PrStateConflict] = (
                 Label: "Pull request state changed externally",
                 NextAction: "The pull request was closed or its state changed outside the runner between workflow steps (for example, by a human via the GitHub UI). Decide whether to re-open the PR or abandon it, then re-run or close the issue. The workflow will not auto-retry this kind."),
+            [PrChecksUnavailable] = (
+                Label: "Pull request checks unavailable",
+                NextAction: "The runner could not read GitHub PR check status, so Mohist cannot safely decide whether checks are pending, passing, or failing. Inspect GitHub / gh CLI connectivity and retry the issue after the check status is readable. The workflow will not trigger code recovery for this kind."),
         };
 
     public static readonly IReadOnlyList<string> AllKinds = new[]
@@ -54,6 +58,7 @@ internal static class DeliveryFailureGuidance
         ConfigError,
         ProtectionConflict,
         PrStateConflict,
+        PrChecksUnavailable,
     };
 
     public static readonly IReadOnlyList<string> WorkspaceSetupKinds = new[]
@@ -62,7 +67,7 @@ internal static class DeliveryFailureGuidance
     };
 
     private static readonly Regex KindInMessage = new(
-        @"\((conflict|base-moved|retry-safe|branch-invariant-violation|workspace-setup|config-error|protection-conflict|pr-state-conflict)\)",
+        @"\((conflict|base-moved|retry-safe|branch-invariant-violation|workspace-setup|config-error|protection-conflict|pr-state-conflict|pr-checks-unavailable)\)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex BranchInvariantInMessage = new(

@@ -350,6 +350,7 @@ public class IssueCliTableRendererSpecs
         new object[] { DeliveryFailureGuidance.ConfigError, "Runner environment is misconfigured", "gh auth login" },
         new object[] { DeliveryFailureGuidance.ProtectionConflict, "Branch protection blocked the merge", "branch protection" },
         new object[] { DeliveryFailureGuidance.PrStateConflict, "Pull request state changed externally", "auto-retry this kind" },
+        new object[] { DeliveryFailureGuidance.PrChecksUnavailable, "Pull request checks unavailable", "will not trigger code recovery" },
     };
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -378,6 +379,7 @@ public class IssueCliTableRendererSpecs
     [InlineData("Publish failed (config-error): gh CLI is not installed", DeliveryFailureGuidance.ConfigError, "Runner environment is misconfigured")]
     [InlineData("Publish failed (protection-conflict): required status checks missing", DeliveryFailureGuidance.ProtectionConflict, "Branch protection blocked the merge")]
     [InlineData("Publish failed (pr-state-conflict): PR was closed externally", DeliveryFailureGuidance.PrStateConflict, "Pull request state changed externally")]
+    [InlineData("Merge failed (pr-checks-unavailable): GraphQL EOF", DeliveryFailureGuidance.PrChecksUnavailable, "Pull request checks unavailable")]
     public void DeliveryFailureGuidance_ResolveFailureKindFromMessage_ExtractsKind(
         string message, string expectedKind, string expectedLabel)
     {
@@ -609,6 +611,7 @@ public class IssueCliTableRendererSpecs
     [InlineData("Publish failed (config-error): gh CLI is not installed", DeliveryFailureGuidance.ConfigError)]
     [InlineData("Publish failed (protection-conflict): required status checks missing", DeliveryFailureGuidance.ProtectionConflict)]
     [InlineData("Publish failed (pr-state-conflict): PR was closed externally", DeliveryFailureGuidance.PrStateConflict)]
+    [InlineData("Merge failed (pr-checks-unavailable): GraphQL EOF", DeliveryFailureGuidance.PrChecksUnavailable)]
     public async Task RenderTable_WorkflowStatus_SurfacesDeliveryFailureKindLabelAndNextAction(
         string failureMessage, string expectedKind)
     {
