@@ -389,17 +389,28 @@ describe('ContextHealthIndicator', () => {
       expect(indicator).toHaveTextContent('85%')
     })
 
-    it('can degrade gracefully when healthStatus is absent: classifies from contextUsagePercent', () => {
-      render(
+    it('degrades gracefully without fabricating a status when healthStatus is absent', () => {
+      const { container } = render(
         <ContextHealthIndicator
           contextWindowUsed={720_000}
           contextWindowSize={1_000_000}
           contextUsagePercent={72}
         />,
       )
-      const indicator = screen.getByTestId('context-health-indicator')
-      expect(indicator).toHaveAttribute('data-status', 'yellow')
-      expect(indicator).toHaveTextContent('72%')
+      expect(container.firstChild).toBeNull()
+      expect(screen.queryByTestId('context-health-indicator')).toBeNull()
+    })
+
+    it('does not render data-status="yellow" from percent-only input', () => {
+      const { container } = render(
+        <ContextHealthIndicator
+          contextWindowUsed={720_000}
+          contextWindowSize={1_000_000}
+          contextUsagePercent={72}
+          healthStatus={null}
+        />,
+      )
+      expect(container.querySelector('[data-status="yellow"]')).toBeNull()
     })
 
     it('hides when contextUsagePercent is absent even if healthStatus is present', () => {

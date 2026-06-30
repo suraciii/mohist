@@ -166,6 +166,7 @@ export function ActiveSessionCard({ card, now }: ActiveSessionCardProps) {
               contextWindowUsed={card.contextWindowUsed ?? null}
               contextWindowSize={card.contextWindowSize ?? null}
               contextUsagePercent={card.contextUsagePercent ?? null}
+              healthStatus={card.healthStatus ?? null}
             />
           </div>
         )}

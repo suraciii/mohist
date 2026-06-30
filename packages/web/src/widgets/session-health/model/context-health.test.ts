@@ -1,43 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { classifyContextHealth, clampPercent } from './context-health'
+import { clampPercent, isContextHealthStatus } from './context-health'
 
-describe('classifyContextHealth', () => {
-  it('returns null when percent is null', () => {
-    expect(classifyContextHealth(null)).toBeNull()
-  })
-
-  it('returns null when percent is undefined', () => {
-    expect(classifyContextHealth(undefined)).toBeNull()
-  })
-
-  it('returns null for non-finite values', () => {
-    expect(classifyContextHealth(NaN)).toBeNull()
-    expect(classifyContextHealth(Infinity)).toBeNull()
-    expect(classifyContextHealth(-Infinity)).toBeNull()
-  })
-
-  it('returns green for usage below 60%', () => {
-    expect(classifyContextHealth(0)).toBe('green')
-    expect(classifyContextHealth(30)).toBe('green')
-    expect(classifyContextHealth(45)).toBe('green')
-    expect(classifyContextHealth(59.9)).toBe('green')
-  })
-
-  it('returns yellow for usage at 60% and above (up to 80% threshold)', () => {
-    expect(classifyContextHealth(60)).toBe('yellow')
-    expect(classifyContextHealth(72)).toBe('yellow')
-    expect(classifyContextHealth(79.9)).toBe('yellow')
-  })
-
-  it('returns red for usage at 80% and above', () => {
-    expect(classifyContextHealth(80)).toBe('red')
-    expect(classifyContextHealth(85)).toBe('red')
-    expect(classifyContextHealth(95)).toBe('red')
-    expect(classifyContextHealth(100)).toBe('red')
-  })
-
-  it('returns red for values above 100%', () => {
-    expect(classifyContextHealth(150)).toBe('red')
+describe('isContextHealthStatus', () => {
+  it('accepts only server health status values', () => {
+    expect(isContextHealthStatus('green')).toBe(true)
+    expect(isContextHealthStatus('yellow')).toBe(true)
+    expect(isContextHealthStatus('red')).toBe(true)
+    expect(isContextHealthStatus('blue')).toBe(false)
+    expect(isContextHealthStatus(null)).toBe(false)
+    expect(isContextHealthStatus(undefined)).toBe(false)
   })
 })
 

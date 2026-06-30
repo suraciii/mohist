@@ -1,5 +1,50 @@
-import { describe, it, expect, vi } from 'vitest'
-import { deriveToolCallTitle, reconstructRoundsFromEvents } from './useSessionTimeline'
+// @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { renderHook, act } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { createElement, type ReactNode } from 'react'
+import { dispatchAgentEvent } from '../../../entities/agent'
+import { deriveToolCallTitle, reconstructRoundsFromEvents, useSessionTimeline } from './useSessionTimeline'
+
+vi.mock('../../../entities/agent/api/client', () => ({
+  getAgentStatus: vi.fn().mockResolvedValue({ running: true, issueNumber: 123 }),
+}))
+
+const queryClients: QueryClient[] = []
+
+afterEach(() => {
+  for (const queryClient of queryClients) queryClient.clear()
+  queryClients.length = 0
+})
+
+function renderTimelineHook() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClients.push(queryClient)
+  return renderHook(
+    () => useSessionTimeline(123, {
+      id: 'coder-1',
+      acpSessionId: 'acp-1',
+      executionId: null,
+      taskDescription: null,
+      status: 'active',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      completedAt: null,
+      model: null,
+      coderType: null,
+      stage: null,
+      title: null,
+      lastDataAt: null,
+      probeSentAt: null,
+      probeDeadlineAt: null,
+      failureReason: null,
+    }),
+    {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        createElement(QueryClientProvider, { client: queryClient }, children)
+      ),
+    },
+  )
+}
 
 describe('deriveToolCallTitle', () => {
   it('returns title when title differs from toolName', () => {
@@ -247,5 +292,72 @@ describe('reconstructRoundsFromEvents', () => {
     expect(rounds[0].compactions).toHaveLength(2)
     expect(rounds[0].compactions[0].contextWindowUsedAfter).toBe(400_000)
     expect(rounds[0].compactions[1].contextWindowUsedAfter).toBe(350_000)
+  })
+})
+
+describe('useSessionTimeline context health events', () => {
+  it('uses server-provided usage.updated percent and healthStatus without deriving from window ratio', async () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('usage.updated', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        contextWindowUsed: 45_000,
+        contextWindowSize: 100_000,
+        contextUsagePercent: 72,
+        healthStatus: 'red',
+      })
+    })
+
+    expect(hook.result.current.contextHealth).toMatchObject({
+      status: 'red',
+      contextWindowUsed: 45_000,
+      contextWindowSize: 100_000,
+      contextUsagePercent: 72,
+    })
+  })
+
+  it('does not fabricate health status from context_health_update when healthStatus is absent', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('context_health_update', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        contextWindowUsed: 72_000,
+        contextWindowSize: 100_000,
+        contextUsagePercent: 72,
+        healthStatus: undefined as unknown as 'green',
+      })
+    })
+
+    expect(hook.result.current.contextHealth).toMatchObject({
+      status: null,
+      contextWindowUsed: 72_000,
+      contextWindowSize: 100_000,
+      contextUsagePercent: 72,
+    })
+  })
+
+  it('records compaction window counts without deriving percent or health status', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('compaction_event', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        contextWindowUsedAfter: 90_000,
+        contextWindowSize: 100_000,
+        recordedAt: '2024-01-01T00:00:00.000Z',
+      })
+    })
+
+    expect(hook.result.current.contextHealth).toMatchObject({
+      status: null,
+      contextWindowUsed: 90_000,
+      contextWindowSize: 100_000,
+      contextUsagePercent: null,
+    })
   })
 })

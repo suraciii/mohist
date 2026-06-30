@@ -34,6 +34,7 @@ function makeCard(overrides: Partial<SessionCard> = {}): SessionCard {
     contextWindowUsed: 300_000,
     contextWindowSize: 1_000_000,
     contextUsagePercent: 30,
+    healthStatus: 'green',
     contextUsageHistory: null,
     toolCallCount: 4,
     toolErrorCount: 1,
@@ -160,6 +161,7 @@ describe('CompactSessionCard', () => {
         contextWindowUsed: 950_000,
         contextWindowSize: 1_000_000,
         contextUsagePercent: 95,
+        healthStatus: 'red',
       }),
     )
 
@@ -193,6 +195,7 @@ describe('CompactSessionCard', () => {
         contextWindowUsed: 720_000,
         contextWindowSize: 1_000_000,
         contextUsagePercent: 72,
+        healthStatus: 'yellow',
       }),
     )
 
@@ -212,6 +215,7 @@ describe('CompactSessionCard', () => {
         contextWindowUsed: 950_000,
         contextWindowSize: 1_000_000,
         contextUsagePercent: 95,
+        healthStatus: 'red',
       }),
     )
 
@@ -281,7 +285,7 @@ describe('CompactSessionCard', () => {
     expect(chart).not.toBeNull()
     expect(chart!.getAttribute('data-history-length')).toBe('6')
     expect(chart!.getAttribute('data-latest-percent')).toBe('72')
-    expect(chart!.getAttribute('data-status')).toBe('yellow')
+    expect(chart!.getAttribute('data-status')).toBeNull()
   })
 
   it('does not render the trend chart when usage history is absent', () => {
@@ -326,7 +330,7 @@ describe('CompactSessionCard', () => {
     expect(screen.queryByTestId('context-usage-trend-mini-chart')).not.toBeInTheDocument()
   })
 
-  it('renders the trend chart with a critical-status stroke when the latest sample crosses 80%', () => {
+  it('renders the trend chart with neutral stroke when the latest sample crosses 80%', () => {
     renderCard(
       makeCard({
         contextWindowUsed: 950_000,
@@ -337,10 +341,10 @@ describe('CompactSessionCard', () => {
     )
 
     const chart = screen.getByTestId('context-usage-trend-mini-chart')
-    expect(chart.getAttribute('data-status')).toBe('red')
+    expect(chart.getAttribute('data-status')).toBeNull()
     expect(chart.getAttribute('data-latest-percent')).toBe('95')
     const linePath = chart.querySelectorAll('path')[1]!
-    expect(linePath.getAttribute('class')).toContain('stroke-red-500')
+    expect(linePath.getAttribute('class')).toContain('stroke-gray-400')
   })
 
   it('renders the trend chart even when the snapshot contextWindowSize is unknown (history is the source for the chart)', () => {
@@ -355,7 +359,7 @@ describe('CompactSessionCard', () => {
 
     const chart = screen.getByTestId('context-usage-trend-mini-chart')
     expect(chart.getAttribute('data-latest-percent')).toBe('65')
-    expect(chart.getAttribute('data-status')).toBe('yellow')
+    expect(chart.getAttribute('data-status')).toBeNull()
     expect(screen.queryByTestId('context-health-indicator')).not.toBeInTheDocument()
   })
 

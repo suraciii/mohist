@@ -27,17 +27,19 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={450_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={45}
+        healthStatus="green"
       />,
     )
     expect(screen.getByTestId('context-health-label')).toHaveTextContent('450.0k / 1.0M tokens (45%)')
   })
 
-  it('marks the bar with status="green" when usage is below 60%', () => {
+  it('marks the bar with the server-provided green status', () => {
     render(
       <ContextHealthBar
         contextWindowUsed={450_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={45}
+        healthStatus="green"
       />,
     )
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'green')
@@ -55,45 +57,61 @@ describe('ContextHealthBar', () => {
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'yellow')
   })
 
-  it('marks the bar with status="yellow" when usage is at the 60% boundary', () => {
-    render(
-      <ContextHealthBar
-        contextWindowUsed={600_000}
-        contextWindowSize={1_000_000}
-        contextUsagePercent={60}
-      />,
-    )
-    expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'yellow')
-  })
-
-  it('marks the bar with status="yellow" for usage between 60% and 80%', () => {
-    render(
+  it('renders nothing instead of classifying from percent when healthStatus is absent', () => {
+    const { container } = render(
       <ContextHealthBar
         contextWindowUsed={720_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={72}
       />,
     )
+    expect(container.firstChild).toBeNull()
+    expect(container.querySelector('[data-status="yellow"]')).toBeNull()
+  })
+
+  it('marks the bar with server-provided yellow status at the 60% boundary', () => {
+    render(
+      <ContextHealthBar
+        contextWindowUsed={600_000}
+        contextWindowSize={1_000_000}
+        contextUsagePercent={60}
+        healthStatus="yellow"
+      />,
+    )
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'yellow')
   })
 
-  it('marks the bar with status="red" when usage is at the 80% boundary', () => {
+  it('marks the bar with server-provided yellow status for usage between 60% and 80%', () => {
+    render(
+      <ContextHealthBar
+        contextWindowUsed={720_000}
+        contextWindowSize={1_000_000}
+        contextUsagePercent={72}
+        healthStatus="yellow"
+      />,
+    )
+    expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'yellow')
+  })
+
+  it('marks the bar with server-provided red status when usage is at the 80% boundary', () => {
     render(
       <ContextHealthBar
         contextWindowUsed={800_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={80}
+        healthStatus="red"
       />,
     )
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'red')
   })
 
-  it('marks the bar with status="red" for usage well above 80%', () => {
+  it('marks the bar with server-provided red status for usage well above 80%', () => {
     render(
       <ContextHealthBar
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
       />,
     )
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'red')
@@ -105,6 +123,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={450_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={45.4}
+        healthStatus="green"
       />,
     )
     const fill = screen.getByTestId('context-health-fill')
@@ -118,6 +137,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={1_500_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={150}
+        healthStatus="red"
       />,
     )
     const fill = screen.getByTestId('context-health-fill')
@@ -130,6 +150,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={450_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={45}
+        healthStatus="green"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -143,6 +164,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={799_999}
         contextWindowSize={1_000_000}
         contextUsagePercent={79.9}
+        healthStatus="yellow"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -156,6 +178,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={800_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={80}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -171,6 +194,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -186,6 +210,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -204,6 +229,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={onCompact}
         onReset={() => {}}
       />,
@@ -219,6 +245,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={onReset}
       />,
@@ -233,6 +260,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
       />,
     )
@@ -245,6 +273,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
       />,
     )
     expect(screen.queryByRole('status')).toBeNull()
@@ -257,6 +286,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -272,6 +302,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
         showWarning={false}
@@ -287,6 +318,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -298,6 +330,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={450_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={45}
+        healthStatus="green"
         onCompact={() => {}}
         onReset={() => {}}
       />,

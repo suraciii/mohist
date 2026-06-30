@@ -3,17 +3,15 @@ import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/components/button'
 import { formatCompact } from '@/shared/lib/format-compact'
 import type { ContextHealthStatus } from '../model/context-health'
-import { classifyContextHealth, clampPercent } from '../model/context-health'
+import { clampPercent, isContextHealthStatus } from '../model/context-health'
 
 export interface ContextHealthBarProps {
   contextWindowUsed?: number | null
   contextWindowSize?: number | null
   contextUsagePercent?: number | null
   /**
-   * Server-provided health classification. When provided, used as the
-   * authoritative source of truth. When absent, classification is
-   * derived from `contextUsagePercent` (backward compat). When both
-   * `contextUsagePercent` and `healthStatus` are absent, the bar hides.
+   * Server-provided health classification. When absent or invalid, the
+   * bar hides rather than fabricating a client-side classification.
    */
   healthStatus?: string | null
   onCompact?: () => void
@@ -69,11 +67,10 @@ export function ContextHealthBar({
   const [warningDismissed, setWarningDismissed] = useState(false)
 
   if (contextUsagePercent == null || !Number.isFinite(contextUsagePercent)) return null
+  if (!isContextHealthStatus(healthStatus)) return null
 
   const percent = clampPercent(contextUsagePercent)
-  const status: ContextHealthStatus = healthStatus != null
-    ? (healthStatus as ContextHealthStatus)
-    : (classifyContextHealth(percent) ?? 'green')
+  const status = healthStatus
 
   const label = formatUsageLabel(contextWindowUsed ?? null, contextWindowSize ?? null, percent)
   const showWarningBanner = showWarning

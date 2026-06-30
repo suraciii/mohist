@@ -1,18 +1,14 @@
 import { AlertTriangleIcon, CircleAlertIcon } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
-import { classifyContextHealth, clampPercent, type ContextHealthStatus } from '../model/context-health'
+import { clampPercent, isContextHealthStatus, type ContextHealthStatus } from '../model/context-health'
 
 export interface ContextHealthIndicatorProps {
   contextWindowUsed?: number | null
   contextWindowSize?: number | null
   contextUsagePercent?: number | null
   /**
-   * Server-provided health classification. When provided, used as the
-   * authoritative source of truth. When absent, the indicator derives
-   * the classification from `contextUsagePercent` (backward compat for
-   * callers that do not yet carry the server field). When both
-   * `contextUsagePercent` and `healthStatus` are absent, the indicator
-   * hides entirely.
+   * Server-provided health classification. When absent or invalid, the
+   * indicator hides rather than fabricating a client-side classification.
    */
   healthStatus?: string | null
   className?: string
@@ -102,11 +98,10 @@ export function ContextHealthIndicator({
   ariaLabel,
 }: ContextHealthIndicatorProps) {
   if (contextUsagePercent == null || !Number.isFinite(contextUsagePercent)) return null
+  if (!isContextHealthStatus(healthStatus)) return null
 
   const percent = clampPercent(contextUsagePercent)
-  const status: ContextHealthStatus = healthStatus != null
-    ? (healthStatus as ContextHealthStatus)
-    : (classifyContextHealth(percent) ?? 'green')
+  const status = healthStatus
 
   const label = `${Math.round(percent)}%`
   const description = ariaLabel ?? buildSeverityTooltip(status, percent)

@@ -287,7 +287,7 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
             <div
               data-testid="session-recovery-bar"
               data-sticky="true"
-              className="sticky top-0 z-20 border-b border-gray-200 bg-white px-4 py-3"
+              className="sticky top-9 z-20 border-b border-gray-200 bg-white px-4 py-3"
             >
               {recoveryBarContent}
             </div>

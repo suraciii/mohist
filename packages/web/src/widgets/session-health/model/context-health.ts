@@ -1,24 +1,8 @@
-/**
- * Compute a traffic-light health status from a context-window usage
- * percentage.
- *
- * Thresholds match the backend `ContextHealthClassifier`:
- *   - green  : < 60%
- *   - yellow : 60% – 79.99%
- *   - red    : >= 80%
- *
- * Returns `null` when usage cannot be derived (missing data, non-positive
- * window size, or non-finite values) so callers can hide the indicator
- * entirely instead of guessing.
- */
-export function classifyContextHealth(usagePercent: number | null | undefined): ContextHealthStatus | null {
-  if (usagePercent == null || !Number.isFinite(usagePercent)) return null
-  if (usagePercent >= 80) return 'red'
-  if (usagePercent >= 60) return 'yellow'
-  return 'green'
-}
-
 export type ContextHealthStatus = 'green' | 'yellow' | 'red'
+
+export function isContextHealthStatus(value: string | null | undefined): value is ContextHealthStatus {
+  return value === 'green' || value === 'yellow' || value === 'red'
+}
 
 export interface ContextUsageSnapshot {
   contextWindowUsed?: number | null

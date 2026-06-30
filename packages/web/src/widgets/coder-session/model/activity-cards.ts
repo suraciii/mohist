@@ -61,6 +61,7 @@ export interface SessionCard {
   contextWindowUsed: number | null
   contextWindowSize: number | null
   contextUsagePercent?: number | null
+  healthStatus?: string | null
   /**
    * Bounded context-usage history carried from the live activity
    * source (`AgentUsageDto.contextUsageHistory`). Drives the
@@ -114,6 +115,7 @@ export function sessionToCard(s: AgentActivitySession): SessionCard {
     contextWindowUsed: usage?.contextWindowUsed ?? null,
     contextWindowSize: usage?.contextWindowSize ?? null,
     contextUsagePercent: usage?.contextUsagePercent ?? null,
+    healthStatus: usage?.healthStatus ?? null,
     contextUsageHistory,
     toolCallCount: eventSummary?.toolCallCount ?? null,
     toolErrorCount: eventSummary?.toolErrorCount ?? null,

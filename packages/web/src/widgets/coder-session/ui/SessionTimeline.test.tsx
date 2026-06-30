@@ -371,4 +371,24 @@ describe('SessionTimeline', () => {
     )
     expect(screen.queryByTestId('context-health-section')).toBeNull()
   })
+
+  it('does not render a health bar when server health status is absent', () => {
+    render(
+      <SessionTimeline
+        rounds={[makeRound()]}
+        isLoading={false}
+        isStreaming={false}
+        currentStage="build"
+        isLive={false}
+        taskProgress={new Map()}
+        loopProgress={null}
+        recoveryStatus={null}
+        planProgress={null}
+        contextHealth={makeContextHealth({ status: null, contextUsagePercent: 72 })}
+        onCompact={() => {}}
+        onReset={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId('context-health-section')).toBeNull()
+  })
 })

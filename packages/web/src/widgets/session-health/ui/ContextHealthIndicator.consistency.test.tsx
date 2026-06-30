@@ -37,6 +37,7 @@ function makeListRow(overrides: Partial<SessionCardType> = {}): SessionCardType 
     contextUsagePercent: null,
     toolCallCount: null,
     toolErrorCount: null,
+    healthStatus: null,
     ...overrides,
   }
 }
@@ -88,6 +89,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       contextWindowUsed: 300_000,
       contextWindowSize: 1_000_000,
       contextUsagePercent: 30,
+      healthStatus: 'green',
     }
 
     const { unmount: unmountList } = renderListRow(makeListRow(usage))
@@ -105,6 +107,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       contextWindowUsed: 720_000,
       contextWindowSize: 1_000_000,
       contextUsagePercent: 72,
+      healthStatus: 'yellow',
     }
 
     const { unmount: unmountList } = renderListRow(makeListRow(usage))
@@ -122,6 +125,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       contextWindowUsed: 950_000,
       contextWindowSize: 1_000_000,
       contextUsagePercent: 95,
+      healthStatus: 'red',
     }
 
     const { unmount: unmountList } = renderListRow(makeListRow(usage))
@@ -154,6 +158,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       contextWindowUsed: 950_000,
       contextWindowSize: 1_000_000,
       contextUsagePercent: 95,
+      healthStatus: 'red',
     }
 
     const { unmount: unmountList } = renderListRow(makeListRow(usage))
@@ -178,6 +183,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       contextWindowUsed: 720_000,
       contextWindowSize: 1_000_000,
       contextUsagePercent: 72,
+      healthStatus: 'yellow',
     }
 
     const { unmount: unmountList } = renderListRow(makeListRow(usage))
@@ -202,6 +208,7 @@ describe('ContextHealthIndicator — cross-surface consistency', () => {
       contextWindowUsed: 300_000,
       contextWindowSize: 1_000_000,
       contextUsagePercent: 30,
+      healthStatus: 'green',
     }
 
     const { unmount: unmountList } = renderListRow(makeListRow(usage))
