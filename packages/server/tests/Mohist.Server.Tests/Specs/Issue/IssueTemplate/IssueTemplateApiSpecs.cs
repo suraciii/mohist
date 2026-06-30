@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -129,6 +130,48 @@ public class IssueTemplateApiSpecs
         Assert.DoesNotContain(list, t => t.GetProperty("id").GetString() == "feature");
         Assert.DoesNotContain(list, t => t.GetProperty("id").GetString() == "bug");
         Assert.DoesNotContain(list, t => t.GetProperty("id").GetString() == "refactor");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DisabledBuiltIn_CanBeShadowedByProjectCustomTemplate()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-shadow-{Guid.NewGuid():N}" });
+
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+        {
+            ProjectId = project.Id,
+            DisableDefaultIssueTemplate = true,
+        });
+        db.ProjectIssueTemplates.Add(new ProjectIssueTemplateRow
+        {
+            ProjectId = project.Id,
+            Name = "feature",
+            Template = JsonSerializer.Serialize(new
+            {
+                Id = "feature",
+                Name = "Custom Feature",
+                About = "Project feature template",
+                Sections = new[]
+                {
+                    new { Title = "S", Guidance = "g", Placeholder = "p" },
+                },
+            }),
+        });
+        await db.SaveChangesAsync();
+
+        var list = await _client.GetDataAsync<List<JsonElement>>($"/api/issue-templates?projectId={project.Id}");
+        var listed = Assert.Single(list, t => t.GetProperty("id").GetString() == "feature");
+        Assert.Equal("custom", listed.GetProperty("source").GetString());
+
+        var response = await _client.GetAsync($"/api/issue-templates/feature?projectId={project.Id}");
+        response.EnsureSuccessStatusCode();
+        var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal("Custom Feature", data.GetProperty("name").GetString());
+        Assert.Equal("Project feature template", data.GetProperty("description").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

@@ -33,14 +33,29 @@ public sealed class FakeDbContextFactory : IDbContextFactory<MohistDbContext>
 
 public class IssueTemplateRegistrySpecs
 {
+    private const string FeatureSections = "## Section A\n\n<!-- guidance-a -->\n\n<placeholder-a>\n\n## Section B\n\nBody text";
+
+    private static BuiltinTemplateEntry Builtin(string name, string description, string body) =>
+        new(name, description, $"/templates/{name}.md", () => $"---\nname: {name}\ndescription: {description}\n---\n{body}");
+
     private static Dictionary<string, BuiltinTemplateEntry> Builtins() => new(StringComparer.OrdinalIgnoreCase)
     {
-        ["feature"] = new("Feature", "Product feature work", "## Section A\n\n<!-- guidance-a -->\n\n<placeholder-a>\n\n## Section B\n\nBody text"),
-        ["bug"] = new("Bug", "Fix functional bugs", "## Symptom\n\n<!-- steps -->\n\n<repro>\n\n## Fix\n\nBody"),
-        ["refactor"] = new("Refactor", "Internal quality", "## Motivation\n\n<!-- why -->\n\n<reason>"),
+        ["feature"] = Builtin("Feature", "Product feature work", FeatureSections),
+        ["bug"] = Builtin("Bug", "Fix functional bugs", "## Symptom\n\n<!-- steps -->\n\n<repro>\n\n## Fix\n\nBody"),
+        ["refactor"] = Builtin("Refactor", "Internal quality", "## Motivation\n\n<!-- why -->\n\n<reason>"),
     };
 
-    private const string FeatureSections = "## Section A\n\n<!-- guidance-a -->\n\n<placeholder-a>\n\n## Section B\n\nBody text";
+    private static string CustomTemplateJson(string id, string name, string description) =>
+        System.Text.Json.JsonSerializer.Serialize(new
+        {
+            Id = id,
+            Name = name,
+            About = description,
+            Sections = new[]
+            {
+                new { Title = "S", Guidance = "g", Placeholder = "p" },
+            },
+        });
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
@@ -90,6 +105,71 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal("bug", list[0].Id);
         Assert.Equal("feature", list[1].Id);
         Assert.Equal("refactor", list[2].Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void List_DoesNotReadBuiltInTemplateBodies()
+    {
+        var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["/templates/feature.md"] = "---\nname: Feature\ndescription: Product feature work\n---\n## Body\n\n<feature>",
+            ["/templates/bug.md"] = "---\nname: Bug\ndescription: Fix functional bugs\n---\n## Body\n\n<bug>",
+        };
+        var readers = new List<FrontmatterOnlyReader>();
+        var fullReads = new List<string>();
+        var loader = new IssueTemplateFileLoader(
+            "/templates",
+            (_, _) => files.Keys,
+            path =>
+            {
+                var reader = new FrontmatterOnlyReader(files[path]);
+                readers.Add(reader);
+                return reader;
+            },
+            path =>
+            {
+                fullReads.Add(path);
+                return files[path];
+            });
+        var registry = new IssueTemplateRegistry(new FakeDbContextFactory(), loader.Discover());
+
+        var list = registry.List();
+
+        Assert.Equal(2, list.Count);
+        Assert.All(readers, reader => Assert.False(reader.BodyWasRead));
+        Assert.Empty(fullReads);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Get_ReadsOnlyRequestedBuiltInTemplateBody()
+    {
+        var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["/templates/feature.md"] = "---\nname: Feature\ndescription: Product feature work\n---\n## Feature Body\n\n<feature>",
+            ["/templates/bug.md"] = "---\nname: Bug\ndescription: Fix functional bugs\n---\n## Bug Body\n\n<bug>",
+        };
+        var fullReads = new List<string>();
+        var loader = new IssueTemplateFileLoader(
+            "/templates",
+            (_, _) => files.Keys,
+            path => new StringReader(files[path]),
+            path =>
+            {
+                fullReads.Add(path);
+                return files[path];
+            });
+        var registry = new IssueTemplateRegistry(new FakeDbContextFactory(), loader.Discover());
+
+        var template = registry.Get("bug");
+
+        Assert.Equal("bug", template.Id);
+        Assert.Equal("Bug Body", template.Sections[0].Title);
+        var path = Assert.Single(fullReads);
+        Assert.Equal("/templates/bug.md", path);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -295,6 +375,39 @@ public class IssueTemplateRegistrySpecs
         Assert.Throws<KeyNotFoundException>(() => registry.Get("feature", "project-1"));
         Assert.Throws<KeyNotFoundException>(() => registry.Get("bug", "project-1"));
         Assert.Throws<KeyNotFoundException>(() => registry.Get("refactor", "project-1"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DisabledBuiltIn_CanBeShadowedByProjectCustomTemplate()
+    {
+        var dbFactory = new FakeDbContextFactory(db =>
+        {
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+            {
+                ProjectId = "project-1",
+                DisableDefaultIssueTemplate = true,
+            });
+            db.ProjectIssueTemplates.Add(new ProjectIssueTemplateRow
+            {
+                ProjectId = "project-1",
+                Name = "feature",
+                Template = CustomTemplateJson("feature", "Custom Feature", "Project feature template"),
+            });
+            db.SaveChanges();
+        });
+        var registry = new IssueTemplateRegistry(dbFactory, Builtins());
+
+        var list = registry.List("project-1");
+        var listed = Assert.Single(list, t => t.Id == "feature");
+        Assert.Equal("custom", listed.Source);
+
+        var template = registry.Get("feature", "project-1");
+        Assert.Equal("feature", template.Id);
+        Assert.Equal("Custom Feature", template.Name);
+        Assert.Equal("Project feature template", template.Description);
+        Assert.True(registry.Exists("feature", "project-1"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -703,5 +816,26 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal("Custom", template.Name);
         Assert.Equal("Custom template", template.Description);
         Assert.Single(template.Sections);
+    }
+
+    private sealed class FrontmatterOnlyReader : StringReader
+    {
+        private int _delimiterCount;
+
+        public FrontmatterOnlyReader(string value) : base(value)
+        {
+        }
+
+        public bool BodyWasRead { get; private set; }
+
+        public override string? ReadLine()
+        {
+            var line = base.ReadLine();
+            if (line == "---")
+                _delimiterCount++;
+            else if (_delimiterCount >= 2 && line is not null)
+                BodyWasRead = true;
+            return line;
+        }
     }
 }

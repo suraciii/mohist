@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Domain.IssueTemplate;
+using Mohist.Server.Workflow.Services.Prompts;
 
 namespace Mohist.Server.Issue.Services.IssueTemplates;
 
@@ -20,7 +21,7 @@ public class IssueTemplateRegistry : IScopedService
         _dbFactory = dbFactory;
         var loader = new IssueTemplateFileLoader(
             Path.Combine(AppContext.BaseDirectory, "Issue/Services/IssueTemplates/templates"));
-        _builtinData = loader.Load();
+        _builtinData = loader.Discover();
     }
 
     internal IssueTemplateRegistry(IDbContextFactory<MohistDbContext> dbFactory, Dictionary<string, BuiltinTemplateEntry> builtinData)
@@ -68,13 +69,30 @@ public class IssueTemplateRegistry : IScopedService
     {
         var resolvedId = ResolveId(id);
 
+        var defaultDisabled = projectId is not null && IsDefaultDisabled(projectId);
+
+        if (defaultDisabled && projectId is not null)
+        {
+            var custom = LoadCustomTemplate(projectId, resolvedId);
+            if (custom is not null) return custom;
+        }
+
         if (_builtinData.TryGetValue(resolvedId, out var entry))
         {
-            if (projectId is not null && IsDefaultDisabled(projectId))
+            if (defaultDisabled)
                 throw new KeyNotFoundException($"IssueTemplate '{resolvedId}' has been disabled for this project");
 
-            var sections = IssueTemplateBodyParser.Parse(entry.Body);
-            return new FileAssetIssueTemplate(resolvedId, entry.Name, entry.Description, sections);
+            try
+            {
+                var (_, body) = PromptFrontmatterParser.Parse(entry.LoadContent(), resolvedId);
+                var sections = IssueTemplateBodyParser.Parse(body);
+                return new FileAssetIssueTemplate(resolvedId, entry.Name, entry.Description, sections);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to load issue template '{resolvedId}' from '{entry.FilePath}'.", ex);
+            }
         }
 
         if (projectId is not null)
@@ -102,10 +120,17 @@ public class IssueTemplateRegistry : IScopedService
     {
         if (string.IsNullOrWhiteSpace(id)) return false;
         var resolvedId = ResolveId(id);
+        var defaultDisabled = projectId is not null && IsDefaultDisabled(projectId);
+
+        if (defaultDisabled && projectId is not null)
+        {
+            var custom = LoadCustomTemplate(projectId, resolvedId);
+            if (custom is not null) return true;
+        }
 
         if (_builtinData.ContainsKey(resolvedId))
         {
-            if (projectId is not null && IsDefaultDisabled(projectId))
+            if (defaultDisabled)
                 return false;
             return true;
         }
