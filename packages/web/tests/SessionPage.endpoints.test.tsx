@@ -253,7 +253,8 @@ describe('T-009: SessionPage split endpoints', () => {
       })
 
       expect(screen.getByText('Issue #51')).toBeInTheDocument()
-      expect(screen.getByText('Completed')).toBeInTheDocument()
+      const completedBadges = screen.getAllByText('Completed')
+      expect(completedBadges.length).toBeGreaterThanOrEqual(1)
       expect(screen.getByText('Build')).toBeInTheDocument()
       expect(screen.getByText('claude-3-5-sonnet')).toBeInTheDocument()
       expect(metadataMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)

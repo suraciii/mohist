@@ -325,14 +325,46 @@ describe('SessionPage sticky recovery bar (issue-245 T-004)', () => {
     expect(reset).not.toBeNull()
   })
 
-  it('does not pin the breadcrumb/title header — only the recovery region is sticky', async () => {
+  it('renders the sticky title strip with identity info and usage摘要 inside the scroll container', async () => {
+    const { container } = await renderPage()
+    const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
+    expect(scrollContainer).not.toBeNull()
+
+    await waitFor(() => {
+      const title = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')
+      if (!title) throw new Error('sticky title not rendered yet')
+      // Wait until the transcript data resolves so turnCount is 2
+      if (!title.textContent?.includes('2 turns')) throw new Error('turn count not resolved yet')
+    })
+
+    const stickyTitle = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')
+    expect(stickyTitle).not.toBeNull()
+
+    const className = stickyTitle!.className
+    expect(className).toContain('sticky')
+    expect(className).toContain('top-0')
+    expect(className).toContain('bg-white')
+
+    expect(stickyTitle!.textContent).toContain('session-1')
+    expect(stickyTitle!.textContent).toContain('Completed')
+    expect(stickyTitle!.textContent).toContain('2 turns')
+    expect(stickyTitle!.textContent).toContain('1.5k tokens')
+    expect(stickyTitle!.textContent).toContain('38% ctx')
+  })
+
+  it('keeps the outer session header non-sticky — only the title strip and recovery bar are sticky inside the scroll container', async () => {
     const { container } = await renderPage()
 
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
     expect(scrollContainer).not.toBeNull()
 
-    // The breadcrumb/title header is a sibling of the scroll container — it
-    // must not carry any sticky positioning class.
+    // The sticky title strip sits inside the scroll container.
+    const stickyTitle = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')
+    expect(stickyTitle).not.toBeNull()
+    expect(stickyTitle!.className).toContain('sticky')
+
+    // The outer SessionHeader (a sibling of the scroll container) must not
+    // carry any sticky positioning class.
     const stickyHeaderElements = Array.from(
       container.querySelectorAll('[class*="sticky"]'),
     ).filter((el) => !scrollContainer!.contains(el))
@@ -356,7 +388,7 @@ describe('SessionPage sticky recovery bar (issue-245 T-004)', () => {
     expect((reset as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('the recovery bar remains the first child of the transcript scroll container so it sits above the transcript content', async () => {
+  it('the sticky title strip is the first child of the transcript scroll container, above the recovery bar and transcript', async () => {
     const { container } = await renderPage()
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
     expect(scrollContainer).not.toBeNull()
@@ -364,7 +396,7 @@ describe('SessionPage sticky recovery bar (issue-245 T-004)', () => {
     const children = Array.from(scrollContainer!.children)
     expect(children.length).toBeGreaterThan(0)
     const firstChild = children[0] as HTMLElement
-    expect(firstChild.getAttribute('data-testid')).toBe('session-recovery-bar')
+    expect(firstChild.getAttribute('data-testid')).toBe('session-sticky-title')
   })
 
   it('keeps the recovery bar visible in the page scroll context after the transcript has scrolled (scroll-stick)', async () => {

@@ -278,6 +278,11 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
           className="flex-1 overflow-y-auto min-w-0"
           data-testid="session-transcript-scroll-container"
         >
+          <StickySessionTitle
+            meta={sessionMeta}
+            statusKind={displayStatusKind}
+            turnCount={displayTurnCount}
+          />
           {recoveryBarContent && (
             <div
               data-testid="session-recovery-bar"
@@ -548,6 +553,40 @@ function SessionHeader({
           {recoveryBar}
         </div>
       )}
+    </div>
+  )
+}
+
+function StickySessionTitle({ meta, statusKind, turnCount }: {
+  meta: import('../../../entities/coder-session').SessionMetadata
+  statusKind: StatusKind
+  turnCount: number
+}) {
+  const usage = meta?.usage
+  const totalTokens = usage?.totalTokens ?? null
+  const contextPct = usage?.contextUsagePercent != null
+    ? Math.round(Math.max(0, Math.min(100, usage.contextUsagePercent)))
+    : null
+
+  return (
+    <div className="sticky top-0 z-20 border-b border-gray-200 bg-white px-4 py-2" data-testid="session-sticky-title">
+      <div className="flex items-center gap-2 text-sm">
+        <span className="font-medium truncate">{meta?.sessionName ?? 'Session'}</span>
+        <StatusBadge kind={statusKind} />
+        <span className="text-gray-400 text-xs">{turnCount} turn{turnCount !== 1 ? 's' : ''}</span>
+        {totalTokens != null && (
+          <>
+            <span className="text-gray-300">·</span>
+            <span className="text-gray-500 text-xs">{formatCompact(totalTokens)} tokens</span>
+          </>
+        )}
+        {contextPct != null && (
+          <>
+            <span className="text-gray-300">·</span>
+            <span className="text-gray-500 text-xs">{contextPct}% ctx</span>
+          </>
+        )}
+      </div>
     </div>
   )
 }

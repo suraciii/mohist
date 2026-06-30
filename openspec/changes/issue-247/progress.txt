@@ -31,3 +31,12 @@
 - Wired into all four render paths (main transcript, empty turns, waiting, legacy incomplete).
 - 22 vitest tests cover all-fields-visible, cache-saved-surfaced, reasoning-tokens-surfaced, missing-field graceful-omission, and no-placeholder-stub scenarios.
 - 207 test files, 3128 tests pass.
+
+## T-004
+
+- Added `StickySessionTitle` component in `SessionPage.tsx`: a slim sticky strip inside the scroll container (before the recovery bar) that shows session name, status badge, turn count, total tokens, and context-usage %.
+- Both `StickySessionTitle` and the recovery bar are `sticky top-0 z-20` inside the scroll container; CSS handles natural stacking so the title strip sits above the recovery bar when both are sticky.
+- The outer `SessionHeader` remains non-sticky — verified by the re-scoped "keeps the outer session header non-sticky" test.
+- `SessionPage.sticky.test.tsx` updated: new test asserting the title strip shows identity info + usage摘要; re-scoped the "no pinned header outside" test to assert both the inner sticky strip AND the non-sticky outer header; updated the "first child" test to point at the title strip.
+- Existing `SessionPage.test.tsx` `getByText('Completed')` calls changed to `getAllByText` since the status badge now appears twice (outer header + sticky strip). Same fix in `SessionPage.endpoints.test.tsx`.
+- 207 test files, 3129 tests pass.
