@@ -1,0 +1,12 @@
+## Codebase Patterns
+
+- Event-based SSE handling in hooks: `onAgentEvent` mock uses a `Map<string, handler[]>` pattern (see `useCoderSessions.test.tsx`). Test files that need to dispatch fake events must replace the simple `vi.fn(() => vi.fn())` mock with a capture-based mock.
+- Workflow run sessions identified by both `coderSessionId` and `acpSessionId` — existing handlers match on `session.id === detail.coderSessionId || session.acpSessionId === detail.acpSessionId`.
+- The `session()` test helper in `useWorkflowRunSessions.test.tsx` was missing `usage` and `eventSummary` passthrough — usage-override tests need those fields spread from overrides.
+
+## T-001
+
+- Added `contextUsagePercent` and `healthStatus` to the `usage.updated` handler in `useWorkflowRunSessions.ts` (field parity with `useCoderSessions.ts`).
+- Added `context_health_update` handler that matches by `coderSessionId`/`acpSessionId` and applies `healthStatus`, `contextUsagePercent`, `contextWindowUsed`, `contextWindowSize`.
+- Tests: 5 new tests covering usage.updated parity (with and without refetch), context_health_update by coderSessionId, context_health_update by acpSessionId, and non-matching session ignore.
+- `session()` helper fix: needed `usage` and `eventSummary` spread to support override tests.
