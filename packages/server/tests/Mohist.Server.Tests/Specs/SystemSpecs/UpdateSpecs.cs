@@ -2325,8 +2325,10 @@ public class UpdateSpecs
 
     private sealed class NeverCompletingContent : HttpContent
     {
+        private readonly TaskCompletionSource _pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
-            => Task.Delay(Timeout.InfiniteTimeSpan);
+            => _pending.Task;
 
         protected override bool TryComputeLength(out long length)
         {

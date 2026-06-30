@@ -791,7 +791,11 @@ public class WindowsInstallSpecs
         installer.TestFollowStarted = () => followStarted.TrySetResult();
 
         var task = installer.LogsServerAsync(CommandOptions(follow: true));
-        await followStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await TestWait.ForAsync(
+            () => followStarted.Task.IsCompleted,
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromMilliseconds(20),
+            "server log follow watcher to start");
 
         files.WriteAllText(ServerLog, "initial\nnew line 1\nnew line 2\n");
         watcher.RaiseChanged();
@@ -1176,7 +1180,11 @@ public class WindowsInstallSpecs
         installer.TestFollowStarted = () => followStarted.TrySetResult();
 
         var task = installer.LogsRunnerAsync(CommandOptions(follow: true));
-        await followStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await TestWait.ForAsync(
+            () => followStarted.Task.IsCompleted,
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromMilliseconds(20),
+            "runner log follow watcher to start");
 
         files.WriteAllText(RunnerLog, "initial\nnew line 1\nnew line 2\n");
         watcher.RaiseChanged();

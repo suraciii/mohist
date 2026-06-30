@@ -483,7 +483,7 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
 
         var pause = _fixture.ControllableReminderTable.PauseNextRemove(grainId, "work-timeout");
         var reportTask = ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, new WorkResult("completed"));
-        await pause.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await pause.Started;
 
         _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(3));
 
@@ -497,7 +497,7 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assigned.Status);
 
         pause.Release();
-        await reportTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await reportTask;
 
         var afterRace = await GetWorkTimeoutReminderAsync(runnerId);
         Assert.NotNull(afterRace);
@@ -543,40 +543,18 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         Assert.Equal(initialStartAt, afterW2Reminder!.StartAt);
 
         await AdvanceTimeKeepingRunnerOnlineAsync(runner, TimeSpan.FromMinutes(2));
+        await runner.CheckWorkTimeoutsAsync();
 
-        await WaitForRunStatusAsync(work.WorkflowRunId, "Failed", TimeSpan.FromSeconds(10));
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
 
-        // The reminder tick and the synthesis path are asynchronous; the
-        // workflow status reaches "Failed" before the ledger row is
-        // updated by MarkRunnerWorkTerminalAsync. Poll the ledger row the
-        // same way to avoid a flaky ordering assertion.
-        var w1Row = await WaitForRunnerWorkStatusAsync(
-            runnerId, WorkDispatchOwnerKinds.Workflow, work.WorkflowRunId, work.WorkId,
-            expectedStatus: "failed", expectedReason: "timeout", TimeSpan.FromSeconds(10));
+        var w1Row = await FindRunnerWorkAsync(runnerId, WorkDispatchOwnerKinds.Workflow, work.WorkflowRunId, work.WorkId);
+        Assert.NotNull(w1Row);
+        Assert.Equal("failed", w1Row!.Status);
         Assert.Equal("timeout", w1Row!.Reason);
 
         var w2Row = await FindRunnerWorkAsync(runnerId, WorkDispatchOwnerKinds.AgentJob, w2AgentJobId, w2WorkId);
         Assert.NotNull(w2Row);
         Assert.Equal("outstanding", w2Row!.Status);
-    }
-
-    private async Task<RunnerWorkRow?> WaitForRunnerWorkStatusAsync(
-        string runnerId,
-        string ownerKind,
-        string ownerId,
-        string workId,
-        string expectedStatus,
-        string? expectedReason,
-        TimeSpan timeout)
-    {
-        return await TestWait.ForAsync(
-            () => FindRunnerWorkAsync(runnerId, ownerKind, ownerId, workId),
-            row => row is not null
-                && string.Equals(row.Status, expectedStatus, StringComparison.Ordinal)
-                && (expectedReason is null || string.Equals(row.Reason, expectedReason, StringComparison.Ordinal)),
-            timeout,
-            TimeSpan.FromMilliseconds(50),
-            $"Runner work ({ownerKind}/{ownerId}/{workId}) to reach status '{expectedStatus}' (reason='{expectedReason}')");
     }
 
     private async Task<ReminderEntry?> GetWorkTimeoutReminderAsync(string runnerId)
@@ -598,20 +576,6 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
             await runner.HeartbeatAsync();
             remaining -= next;
         }
-    }
-
-    private async Task WaitForRunStatusAsync(
-        string workflowId,
-        string expectedStatus,
-        TimeSpan timeout)
-    {
-        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await TestWait.ForAsync(
-            () => workflow.GetRunStatusAsync(),
-            status => string.Equals(status, expectedStatus, StringComparison.Ordinal),
-            timeout,
-            TimeSpan.FromMilliseconds(50),
-            $"Workflow '{workflowId}' to reach status '{expectedStatus}'");
     }
 
     private async Task<RunnerWorkRow?> FindRunnerWorkAsync(

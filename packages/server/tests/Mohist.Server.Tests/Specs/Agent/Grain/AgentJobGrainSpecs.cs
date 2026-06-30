@@ -44,8 +44,18 @@ public class AgentJobGrainSpecs
             s => s == expected,
             timeout,
             TimeSpan.FromMilliseconds(25),
-            $"status == {expected}");
+            $"status == {expected}",
+            () => job.CheckTimeoutsAsync());
     }
+
+    private static async Task<T> WaitForAsync<T>(
+        Func<Task<T>> probe,
+        Func<T, bool> done,
+        TimeSpan timeout,
+        TimeSpan step,
+        string description,
+        Func<Task> advance)
+        => await TestWait.ForAsync(probe, done, timeout, step, description, advance);
 
     private async Task<(string RunnerId, string ProjectId)> RegisterAgentJobRunnerAsync(
         string runnerId,
@@ -346,7 +356,7 @@ public class AgentJobGrainSpecs
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Failed, terminal.Status);
         Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
-        await sessionGrain.DeactivateForTestAsync();
+        await sessionGrain.FlushForTestAsync();
 
         var closedPayload = await WaitForAsync(
             async () =>
