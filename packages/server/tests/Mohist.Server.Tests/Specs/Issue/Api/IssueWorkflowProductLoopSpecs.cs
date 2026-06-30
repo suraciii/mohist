@@ -329,33 +329,16 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
         await _client.PatchOkAsync($"/api/runner/{_runnerId}", new { slots = 16 });
 
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            using var response = await _client.PostAsync($"/api/runner/{_runnerId}/poll", null);
-            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
-            {
-                await Task.Delay(20);
-                continue;
-            }
+        var work = await TestWait.ForAsync(
+            async () => await PollMatchingWorkAsync(candidate => candidate.ProjectId == project.Id && candidate.IssueNumber == issue.Number),
+            value => value is not null,
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(20),
+            "global runner to assign project backlog work");
 
-            response.EnsureSuccessStatusCode();
-            var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
-                ?? throw new InvalidOperationException("Empty work dispatch");
-            if (work.ProjectId != project.Id || work.IssueNumber != issue.Number)
-            {
-                await _client.PostOkAsync(
-                    $"/api/runner/{_runnerId}/report",
-                    new { workId = work.WorkId, workflowRunId = work.WorkflowRunId, status = work.WorkType == "checks" ? "pass" : "completed", projectId = work.ProjectId });
-                continue;
-            }
-
-            Assert.Equal(project.Id, work.ProjectId);
-            Assert.Equal(issue.Number, work.IssueNumber);
-            Assert.Equal("plan", work.Stage);
-            return;
-        }
-
-        Assert.Fail("Global runner did not assignment project backlog work");
+        Assert.Equal(project.Id, work!.ProjectId);
+        Assert.Equal(issue.Number, work.IssueNumber);
+        Assert.Equal("plan", work.Stage);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -535,35 +518,29 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
 
     private async Task<WorkDispatchDto> PollWorkAnyAsync()
     {
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            using var response = await _client.PostAsync($"/api/runner/{_runnerId}/poll", null);
-            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
-            {
-                await Task.Delay(20);
-                continue;
-            }
-            response.EnsureSuccessStatusCode();
-            var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
-                ?? throw new InvalidOperationException("Empty work dispatch");
-            if (work.Stage == "plan" && work.Uses == "mohist/acp-agent")
-            {
-                if (!IsCurrentIssueWork(work))
-                {
-                    await ReportAsync(work.WorkflowRunId, work.WorkId, "completed");
-                    continue;
-                }
-            }
-            else if (!IsCurrentIssueWork(work))
-            {
-                await ReportAsync(work.WorkflowRunId, work.WorkId, work.WorkType == "checks" ? "pass" : "completed");
-                continue;
-            }
-            return work;
-        }
+        var work = await TestWait.ForAsync(
+            async () => await PollMatchingWorkAsync(IsCurrentIssueWork),
+            value => value is not null,
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(20),
+            $"Runner '{_runnerId}' to receive work");
+        return work!;
+    }
 
-        Assert.Fail($"Runner '{_runnerId}' has no work");
-        return default!;
+    private async Task<WorkDispatchDto?> PollMatchingWorkAsync(Func<WorkDispatchDto, bool> matches)
+    {
+        using var response = await _client.PostAsync($"/api/runner/{_runnerId}/poll", null);
+        if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+            return null;
+
+        response.EnsureSuccessStatusCode();
+        var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
+            ?? throw new InvalidOperationException("Empty work dispatch");
+        if (matches(work))
+            return work;
+
+        await ReportAsync(work.WorkflowRunId, work.WorkId, work.WorkType == "checks" ? "pass" : "completed");
+        return null;
     }
 
     private bool IsCurrentIssueWork(WorkDispatchDto work)
