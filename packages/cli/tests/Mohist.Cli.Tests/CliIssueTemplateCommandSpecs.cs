@@ -113,22 +113,9 @@ public class CliIssueTemplateCommandSpecs
             }
             return RecordingHttpHandler.Json(new { success = true, data = new { } });
         });
-        var handler = new RecordingHttpHandler(async (req, _) =>
-        {
-            var r = responder is null ? defaultResponder(req) : responder(req);
-            return await Task.FromResult(r);
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fs = new FakeFileSystem();
-        if (activeProjectId is not null)
-        {
-            fs.AddFile(
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-                $"{{\"activeProjectId\":\"{activeProjectId}\"}}");
-        }
-        return (handler, http, output, error, fs, new FakeCommandExecutor());
+        return CliTestHarness.Create(
+            (req, _) => Task.FromResult(responder is null ? defaultResponder(req) : responder(req)),
+            activeProjectId);
     }
 
     [Fact]
