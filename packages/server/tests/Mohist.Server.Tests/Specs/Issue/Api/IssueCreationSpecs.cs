@@ -116,22 +116,9 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", project.Id));
 
-        WorkDispatch? work = null;
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            work = await runner.PollAsync();
-            if (work is null)
-            {
-                await Task.Delay(20);
-                continue;
-            }
-            if (string.Equals(work.WorkflowRunId, wrId, StringComparison.Ordinal))
-                break;
-            await Task.Delay(20);
-        }
+        var work = await PollWorkForWorkflowAsync(runner, runnerId, wrId);
 
-        Assert.NotNull(work);
-        Assert.Equal(wrId, work!.WorkflowRunId);
+        Assert.Equal(wrId, work.WorkflowRunId);
         Assert.NotNull(work.Variables);
         Assert.Contains("My Project", work.Variables);
         Assert.Contains("repository", work.Variables);
@@ -182,22 +169,9 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", project.Id));
 
-        WorkDispatch? work = null;
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            work = await runner.PollAsync();
-            if (work is null)
-            {
-                await Task.Delay(20);
-                continue;
-            }
-            if (string.Equals(work.WorkflowRunId, wrId, StringComparison.Ordinal))
-                break;
-            await Task.Delay(20);
-        }
+        var work = await PollWorkForWorkflowAsync(runner, runnerId, wrId);
 
-        Assert.NotNull(work);
-        Assert.Equal(wrId, work!.WorkflowRunId);
+        Assert.Equal(wrId, work.WorkflowRunId);
         Assert.Equal("custom-stage", work.Stage);
         Assert.StartsWith("custom-task.", work.WorkId);
         Assert.Contains("Project template prompt", work.With);
@@ -311,15 +285,7 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", project.Id));
 
-        WorkDispatch? dispatch = null;
-        for (var attempt = 0; attempt < 100 && dispatch is null; attempt++)
-        {
-            dispatch = await runner.PollAsync();
-            if (dispatch is null)
-                await Task.Delay(20);
-        }
-
-        Assert.NotNull(dispatch);
+        await PollAnyWorkAsync(runner, runnerId);
 
         var wfGrain = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
         await wfGrain.StopAsync("user-cancel");
@@ -482,6 +448,28 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             grain.CreateAsync(project.Id, number, "Bad", null, null, null, null, issueId, "unknown"));
+    }
+
+    private static async Task<WorkDispatch> PollWorkForWorkflowAsync(IRunnerGrain runner, string runnerId, string workflowRunId)
+    {
+        var work = await TestWait.ForAsync(
+            () => runner.PollAsync(),
+            value => string.Equals(value?.WorkflowRunId, workflowRunId, StringComparison.Ordinal),
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(20),
+            $"Runner '{runnerId}' to receive work for workflow '{workflowRunId}'");
+        return work!;
+    }
+
+    private static async Task<WorkDispatch> PollAnyWorkAsync(IRunnerGrain runner, string runnerId)
+    {
+        var work = await TestWait.ForAsync(
+            () => runner.PollAsync(),
+            value => value is not null,
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(20),
+            $"Runner '{runnerId}' to receive work");
+        return work!;
     }
 
 }
