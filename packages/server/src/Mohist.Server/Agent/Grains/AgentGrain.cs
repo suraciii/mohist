@@ -8,12 +8,14 @@ public class AgentGrain : Grain, IAgentGrain
 {
     private readonly IStateStore<Domain.Agent> _agentStore;
     private readonly AgentQuerier _querier;
+    private readonly TimeProvider _timeProvider;
     private Domain.Agent? _agent;
 
-    public AgentGrain(IStateStore<Domain.Agent> agentStore, AgentQuerier querier)
+    public AgentGrain(IStateStore<Domain.Agent> agentStore, AgentQuerier querier, TimeProvider timeProvider)
     {
         _agentStore = agentStore;
         _querier = querier;
+        _timeProvider = timeProvider;
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
@@ -33,7 +35,7 @@ public class AgentGrain : Grain, IAgentGrain
 
         await EnsureNameAvailableAsync(projectId, data.Name, exceptAgentId: null);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         _agent = new Domain.Agent
         {
             Id = agentId,
@@ -69,7 +71,7 @@ public class AgentGrain : Grain, IAgentGrain
         if (data.Fields.Contains(nameof(data.AgentConfig))) _agent.AgentConfig = Clone(data.AgentConfig);
         if (data.Fields.Contains(nameof(data.Skills))) _agent.Skills = data.Skills?.ToArray() ?? [];
         if (data.Fields.Contains(nameof(data.MaxConcurrentRuns))) _agent.MaxConcurrentRuns = data.MaxConcurrentRuns;
-        _agent.UpdatedAt = DateTimeOffset.UtcNow;
+        _agent.UpdatedAt = _timeProvider.GetUtcNow();
 
         await _agentStore.SaveAsync(CurrentKey(), _agent);
         return AgentQuerier.ToInfo(_agent);
@@ -79,7 +81,7 @@ public class AgentGrain : Grain, IAgentGrain
     {
         if (_agent is null) return null;
         _agent.Status = AgentStatus.Archived;
-        _agent.UpdatedAt = DateTimeOffset.UtcNow;
+        _agent.UpdatedAt = _timeProvider.GetUtcNow();
         await _agentStore.SaveAsync(CurrentKey(), _agent);
         return AgentQuerier.ToInfo(_agent);
     }

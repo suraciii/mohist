@@ -355,7 +355,15 @@ public class AgentSessionLaunchRoutesSpecs
             // the AgentJob is Failed and the session has been transitioned
             // to a terminal state via a synthesized session.closed runtime
             // event.
-            await WaitForJobTerminalAsync(jobGrain!, AgentJobStatus.Failed, TimeSpan.FromSeconds(30));
+            await WaitForJobTerminalAsync(
+                jobGrain!,
+                AgentJobStatus.Failed,
+                TimeSpan.FromSeconds(30),
+                async () =>
+                {
+                    _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(9));
+                    await jobGrain!.CheckTimeoutsAsync();
+                });
 
             var terminal = await jobGrain!.GetTerminalResultAsync();
             Assert.Equal(AgentJobStatus.Failed, terminal.Status);
@@ -381,13 +389,15 @@ public class AgentSessionLaunchRoutesSpecs
     private static async Task WaitForJobTerminalAsync(
         IAgentJobGrain job,
         AgentJobStatus expected,
-        TimeSpan timeout)
+        TimeSpan timeout,
+        Func<Task>? advance = null)
         => await TestWait.ForAsync(
             () => job.GetTerminalResultAsync(),
             t => t.Status == expected,
             timeout,
             TimeSpan.FromMilliseconds(200),
-            $"Agent job to reach {expected}");
+            $"Agent job to reach {expected}",
+            advance);
 
     private async Task<string> CreateProjectAsync(string prefix)
     {

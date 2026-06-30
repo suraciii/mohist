@@ -22,8 +22,27 @@ public static class TestWait
         Func<T, bool> isDone,
         TimeSpan timeout,
         TimeSpan step,
-        string description)
+        string description,
+        Func<Task>? advance = null)
     {
+        if (advance is not null)
+        {
+            var attempts = Math.Max(1, (int)Math.Ceiling(timeout.TotalMilliseconds / Math.Max(1, step.TotalMilliseconds)));
+            T current = default!;
+            for (var i = 0; i <= attempts; i++)
+            {
+                current = await probe();
+                if (isDone(current))
+                    return current;
+                if (i == attempts)
+                    break;
+                await advance();
+                await Task.Yield();
+            }
+            Assert.Fail($"Timed out waiting for: {description}. Last value: {current}");
+            return default!;
+        }
+
         using var cts = new CancellationTokenSource(timeout);
         var token = cts.Token;
         T last = default!;
@@ -48,8 +67,25 @@ public static class TestWait
         Func<bool> condition,
         TimeSpan timeout,
         TimeSpan step,
-        string description)
+        string description,
+        Func<Task>? advance = null)
     {
+        if (advance is not null)
+        {
+            var attempts = Math.Max(1, (int)Math.Ceiling(timeout.TotalMilliseconds / Math.Max(1, step.TotalMilliseconds)));
+            for (var i = 0; i <= attempts; i++)
+            {
+                if (condition())
+                    return;
+                if (i == attempts)
+                    break;
+                await advance();
+                await Task.Yield();
+            }
+            Assert.Fail($"Timed out waiting for: {description}.");
+            return;
+        }
+
         using var cts = new CancellationTokenSource(timeout);
         var token = cts.Token;
         try

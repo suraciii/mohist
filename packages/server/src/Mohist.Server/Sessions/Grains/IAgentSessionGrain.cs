@@ -18,6 +18,12 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     /// 15-minute quiet window) instead of forcing deactivation.
     /// </summary>
     Task DeactivateForTestAsync();
+
+    /// <summary>
+    /// Test-only hook: flushes pending session state and transcript data
+    /// without waiting for the grain timer tick.
+    /// </summary>
+    Task FlushForTestAsync();
 }
 
 [GenerateSerializer]

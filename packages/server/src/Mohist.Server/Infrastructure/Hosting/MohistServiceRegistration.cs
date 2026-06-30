@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Events.Hosting;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
@@ -74,7 +75,7 @@ public static class MohistServiceRegistration
         services.AddHostedService<AttachmentCleanupService>();
         services.AddHostedService<EpicReconciliationService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
-        services.AddSingleton(TimeProvider.System);
+        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
         services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
         services.AddSingleton<IGitSourceInspector, GitSourceInspector>();

@@ -216,9 +216,8 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         var (work, runnerId) = await PollWorkAnyAsync();
 
         await DeactivateRunnerAsync(runnerId);
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
-
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        _fixture.TimeProvider.SetUtcNow(_fixture.TimeProvider.GetUtcNow().AddMinutes(11));
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", TestProjectId(work.WorkflowRunId)));
         await runner.CheckWorkTimeoutsAsync();
 
@@ -238,8 +237,8 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
         var (work, runnerId) = await PollWorkAnyAsync();
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await AdvanceTimeKeepingRunnerOnlineAsync(runner, TimeSpan.FromMinutes(11));
         await runner.CheckWorkTimeoutsAsync();
 
         Assert.Equal("Failed", await workflow.GetRunStatusAsync());
@@ -319,8 +318,8 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
         var (work, runnerId) = await PollWorkAnyAsync();
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await AdvanceTimeKeepingRunnerOnlineAsync(runner, TimeSpan.FromMinutes(11));
         await runner.CheckWorkTimeoutsAsync();
 
         var row = await FindRunnerWorkAsync(runnerId, WorkDispatchOwnerKinds.Workflow, work.WorkflowRunId, work.WorkId);
@@ -529,7 +528,7 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         Assert.NotNull(initialReminder);
         var initialStartAt = initialReminder!.StartAt;
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(9) + TimeSpan.FromSeconds(30));
+        await AdvanceTimeKeepingRunnerOnlineAsync(runner, TimeSpan.FromMinutes(9) + TimeSpan.FromSeconds(30));
 
         var w2AgentJobId = $"elder-agent-{Guid.NewGuid():N}";
         var w2WorkId = $"elder-work-mate-{Guid.NewGuid():N}";
@@ -543,7 +542,7 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         var afterW2Reminder = await GetWorkTimeoutReminderAsync(runnerId);
         Assert.Equal(initialStartAt, afterW2Reminder!.StartAt);
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(2));
+        await AdvanceTimeKeepingRunnerOnlineAsync(runner, TimeSpan.FromMinutes(2));
 
         await WaitForRunStatusAsync(work.WorkflowRunId, "Failed", TimeSpan.FromSeconds(10));
 
@@ -586,6 +585,19 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         var grainId = runner.GetGrainId();
         var table = await _fixture.ReminderTable.ReadRows(grainId);
         return table.Reminders.SingleOrDefault(r => r.ReminderName == "work-timeout");
+    }
+
+    private async Task AdvanceTimeKeepingRunnerOnlineAsync(IRunnerGrain runner, TimeSpan duration)
+    {
+        var remaining = duration;
+        var step = TimeSpan.FromSeconds(30);
+        while (remaining > TimeSpan.Zero)
+        {
+            var next = remaining < step ? remaining : step;
+            _fixture.TimeProvider.Advance(next);
+            await runner.HeartbeatAsync();
+            remaining -= next;
+        }
     }
 
     private async Task WaitForRunStatusAsync(

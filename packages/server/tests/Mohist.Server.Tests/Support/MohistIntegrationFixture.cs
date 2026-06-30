@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
@@ -32,6 +33,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public IEventPublisher EventBus => _factory.Services.GetRequiredService<IEventPublisher>();
     public FakeGitService Git => _factory.Services.GetRequiredService<FakeGitService>();
     public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
+    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; private set; } = null!;
     public string RunnerRoot => _runnerRoot ?? throw new InvalidOperationException("Fixture is not initialized");
 
@@ -45,7 +47,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
         Directory.CreateDirectory(_runnerRoot);
         _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
 
-        _factory = new MohistWebApplicationFactory(ConnectionString, _runnerRoot, _systemUpdateStatePath);
+        _factory = new MohistWebApplicationFactory(ConnectionString, _runnerRoot, _systemUpdateStatePath, TimeProvider);
         Client = _factory.CreateClient();
         await _factory.EnsureSchemaAsync();
     }
@@ -70,17 +72,19 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _connectionString;
     private readonly string _runnerRoot;
     private readonly string _systemUpdateStatePath;
+    private readonly FakeTimeProvider _timeProvider;
     private readonly string _configPath;
     private readonly string _artifactStorageRoot;
     private string? _webRoot;
 
     public string ArtifactStorageRoot => _artifactStorageRoot;
 
-    public MohistWebApplicationFactory(string connectionString, string runnerRoot, string systemUpdateStatePath)
+    public MohistWebApplicationFactory(string connectionString, string runnerRoot, string systemUpdateStatePath, FakeTimeProvider? timeProvider = null)
     {
         _connectionString = connectionString;
         _runnerRoot = runnerRoot;
         _systemUpdateStatePath = systemUpdateStatePath;
+        _timeProvider = timeProvider ?? new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
         _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
         _artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_artifactStorageRoot);
@@ -119,6 +123,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<IRunnerWorkspaceClient>();
             services.AddSingleton<FakeRunnerWorkspaceClient>();
             services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());
+            services.RemoveAll<TimeProvider>();
+            services.AddSingleton<TimeProvider>(_timeProvider);
             services.RemoveAll<IHubContext<RunnerHub>>();
             services.AddSingleton<RecordingRunnerHubContext>();
             services.AddSingleton<IHubContext<RunnerHub>>(provider => provider.GetRequiredService<RecordingRunnerHubContext>());

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -61,6 +62,7 @@ public class GenericAgentSessionSummarySpecs
     private const string SessionIdWorkflow = "s_workflow_1";
 
     private static readonly DateTime CreatedAt = new(2026, 6, 15, 10, 0, 0, DateTimeKind.Utc);
+    private static readonly FakeTimeProvider TimeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
@@ -203,10 +205,10 @@ public class GenericAgentSessionSummarySpecs
 
     private static AgentSessionQuerier CreateQuerier(IDbContextFactory<MohistDbContext> factory)
     {
-        var sessionQuery = new AgentSessionQuery(factory);
+        var sessionQuery = new AgentSessionQuery(factory, TimeProvider);
         // GetGenericSessionSummaryAsync does not touch _workflowQuerier,
         // so passing null is safe for focused unit testing.
-        return new AgentSessionQuerier(factory, null!, sessionQuery);
+        return new AgentSessionQuerier(factory, null!, sessionQuery, TimeProvider);
     }
 
     private static async Task SeedGenericSessionAsync(

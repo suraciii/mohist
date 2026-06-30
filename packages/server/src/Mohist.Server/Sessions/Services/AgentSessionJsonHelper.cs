@@ -8,10 +8,10 @@ public static class AgentSessionJsonHelper
 {
     internal static readonly TimeSpan ActiveRuntimeEventWindow = TimeSpan.FromMinutes(5);
 
-    public static string StatusName(AgentSession session) =>
+    public static string StatusName(AgentSession session, DateTime now) =>
         session.Status.AgentRuntimeSessionId is not null
         && session.Status.LastDataAt is not null
-        && DateTime.UtcNow - session.Status.LastDataAt.Value <= ActiveRuntimeEventWindow
+        && now - session.Status.LastDataAt.Value <= ActiveRuntimeEventWindow
             ? "active"
             : "inactive";
 

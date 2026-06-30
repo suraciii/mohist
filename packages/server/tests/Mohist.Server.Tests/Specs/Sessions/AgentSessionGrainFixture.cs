@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
@@ -22,6 +23,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
     public FakeAgentSessionStore StateStore { get; } = new();
     public FakeAgentSessionTranscriptStore TranscriptStore { get; } = new();
     public TestLogger<AgentSessionGrain> Logger { get; } = new();
+    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; private set; } = null!;
 
     public void Reset()
@@ -55,6 +57,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<IAgentSessionTranscriptStore>(TranscriptStore);
             siloBuilder.Services.AddSingleton<IEventPublisher>(new NoopEventPublisher());
             siloBuilder.Services.AddSingleton<ITranscriptEventPublisher>(new NoopTranscriptEventPublisher());
+            siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
             siloBuilder.Services.AddSingleton<ILogger<AgentSessionGrain>>(Logger);
         });
         Cluster = builder.Build();

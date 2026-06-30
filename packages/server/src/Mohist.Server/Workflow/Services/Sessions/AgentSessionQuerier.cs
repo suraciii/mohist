@@ -29,12 +29,14 @@ public class AgentSessionQuerier : IScopedService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly AgentSessionQuery _sessionQuery;
+    private readonly TimeProvider _timeProvider;
 
-    public AgentSessionQuerier(IDbContextFactory<MohistDbContext> dbFactory, WorkflowQuerier workflowQuerier, AgentSessionQuery sessionQuery)
+    public AgentSessionQuerier(IDbContextFactory<MohistDbContext> dbFactory, WorkflowQuerier workflowQuerier, AgentSessionQuery sessionQuery, TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
         _workflowQuerier = workflowQuerier;
         _sessionQuery = sessionQuery;
+        _timeProvider = timeProvider;
     }
 
     public async Task<IReadOnlyList<WorkflowSessionDto>> ListByWorkflowAsync(string workflowRunId, CancellationToken ct = default)
@@ -96,7 +98,7 @@ public class AgentSessionQuerier : IScopedService
             IssueTitle(issueTitles, issueNumber),
             Label(record, AgentSessionQueryMetadataKeys.Stage) ?? string.Empty,
             s.Id,
-            AgentSessionJsonHelper.StatusName(s),
+            AgentSessionJsonHelper.StatusName(s, Now()),
             s.Settings.Model,
             null,
             s.Status.CreatedAt.ToString("o"),
@@ -332,7 +334,7 @@ public class AgentSessionQuerier : IScopedService
             runnerId,
             workflowRunId,
             Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? sessionName,
-            AgentSessionJsonHelper.StatusName(session) == "active");
+            AgentSessionJsonHelper.StatusName(session, Now()) == "active");
     }
 
     /// <summary>
@@ -375,7 +377,7 @@ public class AgentSessionQuerier : IScopedService
         var runnerId = record.Row.RunnerId;
         var statusActive = !string.IsNullOrWhiteSpace(runnerId)
             && await ReadTerminalStateAsync(db, sessionId, ct) is null
-            && AgentSessionJsonHelper.StatusName(record.Session) == "active";
+            && AgentSessionJsonHelper.StatusName(record.Session, Now()) == "active";
 
         return new GenericFollowupTarget(
             runnerId ?? string.Empty,
@@ -603,7 +605,7 @@ public class AgentSessionQuerier : IScopedService
             domainSession.Id,
             Label(session, AgentSessionQueryMetadataKeys.SessionName) ?? fallbackSessionName,
             domainSession.Status.AgentRuntimeSessionId ?? domainSession.Id,
-            AgentSessionJsonHelper.StatusName(domainSession),
+            AgentSessionJsonHelper.StatusName(domainSession, Now()),
             domainSession.Settings.Model,
             Label(session, AgentSessionQueryMetadataKeys.Stage),
             Annotation(domainSession, AgentSessionQueryMetadataKeys.Title),
@@ -762,7 +764,7 @@ public class AgentSessionQuerier : IScopedService
 
     public async Task<AgentUsageTimeseriesDto> GetUsageTimeseriesAsync(string projectId, CancellationToken ct = default)
     {
-        var rangeTo = DateTime.UtcNow.Date.AddDays(1);
+        var rangeTo = Now().Date.AddDays(1);
         var rangeFrom = rangeTo.AddDays(-7);
 
         var windowSessions = await _sessionQuery.ListByLabelsAsync(
@@ -902,7 +904,7 @@ public class AgentSessionQuerier : IScopedService
             AgentSessionQueryOrder.CreatedAscending,
             ct: ct);
 
-        var todayStart = DateTime.UtcNow.Date;
+        var todayStart = Now().Date;
         var todayEnd = todayStart.AddDays(1);
 
         double totalCost = 0d;
@@ -1027,7 +1029,7 @@ public class AgentSessionQuerier : IScopedService
                 g.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson))), StringComparer.Ordinal);
     }
 
-    private static ActivityCardDto ToActivityCard(AgentSessionRecord record, TranscriptEventProjection? latestEvent, AgentSessionTranscriptSummary? eventSummary, string issueTitle, ActivityTaskProgressDto? taskProgress)
+    private ActivityCardDto ToActivityCard(AgentSessionRecord record, TranscriptEventProjection? latestEvent, AgentSessionTranscriptSummary? eventSummary, string issueTitle, ActivityTaskProgressDto? taskProgress)
     {
         var s = record.Session;
         var lastActivityAt = AgentSessionJsonHelper.LastActivityAt(s).ToString("o");
@@ -1050,7 +1052,7 @@ public class AgentSessionQuerier : IScopedService
                 stage ?? string.Empty,
                 null,
                 s.Id,
-                AgentSessionJsonHelper.StatusName(s),
+                AgentSessionJsonHelper.StatusName(s, Now()),
                 s.Settings.Model,
                 null,
                 s.Status.CreatedAt.ToString("o"),
@@ -1073,7 +1075,7 @@ public class AgentSessionQuerier : IScopedService
             stage ?? string.Empty,
             null,
             s.Id,
-            AgentSessionJsonHelper.StatusName(s),
+            AgentSessionJsonHelper.StatusName(s, Now()),
             s.Settings.Model,
             null,
             s.Status.CreatedAt.ToString("o"),
@@ -1142,7 +1144,7 @@ public class AgentSessionQuerier : IScopedService
 
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "\u2026";
 
-    private static AgentSessionDto ToAgentSessionDto(AgentSessionRecord record)
+    private AgentSessionDto ToAgentSessionDto(AgentSessionRecord record)
     {
         var s = record.Session;
         var usage = AgentSessionJsonHelper.Usage(s);
@@ -1156,18 +1158,18 @@ public class AgentSessionQuerier : IScopedService
             Label(record, AgentSessionQueryMetadataKeys.WorkType),
             Label(record, AgentSessionQueryMetadataKeys.Stage),
             Annotation(s, AgentSessionQueryMetadataKeys.Title), s.Runtime.RunnerId, s.Status.AgentRuntimeSessionId,
-            AgentSessionJsonHelper.StatusName(s), s.Settings.Model, s.Runtime.WorkDir, null, null,
+            AgentSessionJsonHelper.StatusName(s, Now()), s.Settings.Model, s.Runtime.WorkDir, null, null,
             s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), null,
             s.Status.LastDataAt?.ToString("o"), null, null,
             new AgentEventSummaryDto(null, null, null, null, null, null),
             ToUsageDto(usage));
     }
 
-    private static WorkflowSessionDto ToWorkflowDto(AgentSessionRecord record, TerminalFact? terminalFact = null)
+    private WorkflowSessionDto ToWorkflowDto(AgentSessionRecord record, TerminalFact? terminalFact = null)
     {
         var s = record.Session;
         var issueNumber = IssueNumber(record);
-        var status = terminalFact?.Status ?? (AgentSessionJsonHelper.StatusName(s) == "active" ? "running" : "inactive");
+        var status = terminalFact?.Status ?? (AgentSessionJsonHelper.StatusName(s, Now()) == "active" ? "running" : "inactive");
         return new(
         s.Id,
         Label(record, AgentSessionQueryMetadataKeys.WorkflowRunId) ?? string.Empty,
@@ -1183,7 +1185,7 @@ public class AgentSessionQuerier : IScopedService
         ToUsageDto(s));
     }
 
-    private static AgentSessionSummaryDto ToSummaryDto(AgentSessionRecord record)
+    private AgentSessionSummaryDto ToSummaryDto(AgentSessionRecord record)
     {
         var s = record.Session;
         return new AgentSessionSummaryDto(
@@ -1192,7 +1194,7 @@ public class AgentSessionQuerier : IScopedService
             s.Status.AgentRuntimeSessionId ?? s.Id,
             Label(record, AgentSessionQueryMetadataKeys.WorkId),
             Annotation(s, AgentSessionQueryMetadataKeys.Title),
-            AgentSessionJsonHelper.StatusName(s), s.Status.CreatedAt.ToString("o"), null,
+            AgentSessionJsonHelper.StatusName(s, Now()), s.Status.CreatedAt.ToString("o"), null,
             s.Settings.Model, null, Label(record, AgentSessionQueryMetadataKeys.Stage), Annotation(s, AgentSessionQueryMetadataKeys.Title),
             s.Status.LastDataAt?.ToString("o"), null, null, null,
             new AgentEventSummaryDto(null, null, null, null, null, null),
@@ -1208,6 +1210,8 @@ public class AgentSessionQuerier : IScopedService
             : 0;
 
     private static string? Annotation(AgentSession session, string key) => session.Metadata.Annotation(key);
+
+    private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;
 
     /// <summary>
     /// Same overload as <see cref="ToUsageDto(AgentUsageSummary)"/> but reads

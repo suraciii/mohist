@@ -9,10 +9,12 @@ namespace Mohist.Server.Tests.Specs.Agent.Api;
 [Collection("MohistIntegration")]
 public class AgentDefinitionApiSpecs
 {
+    private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
     public AgentDefinitionApiSpecs(MohistIntegrationFixture fixture)
     {
+        _fixture = fixture;
         _client = fixture.Client;
     }
 
@@ -107,7 +109,7 @@ public class AgentDefinitionApiSpecs
         var first = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("first"));
         var second = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("second"));
         var before = DateTimeOffset.Parse(first.UpdatedAt);
-        await Task.Delay(15);
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
 
         var patched = await _client.PatchDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{first.Id}", new
         {
@@ -167,7 +169,7 @@ public class AgentDefinitionApiSpecs
         var secondProject = await CreateProjectAsync("agent-delete-b");
         var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{firstProject.Id}/agents", NewAgent("delete-me"));
         var before = DateTimeOffset.Parse(created.UpdatedAt);
-        await Task.Delay(15);
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
 
         using var crossProject = await _client.DeleteAsync($"/api/projects/{secondProject.Id}/agents/{created.Id}");
         var archived = await DeleteDataAsync<AgentDto>($"/api/projects/{firstProject.Id}/agents/{created.Id}");

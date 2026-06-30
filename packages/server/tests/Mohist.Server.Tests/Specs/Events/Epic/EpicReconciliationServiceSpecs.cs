@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Events.Hosting;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -550,7 +551,11 @@ public class EpicReconciliationServiceSpecs
         public IEpicGrain GetEpicGrain(string grainKey)
         {
             Calls.Add(new RecordedGrainCall(grainKey));
-            return new EpicGrain(_dbFactory, this, NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
+            return new EpicGrain(
+                _dbFactory,
+                this,
+                new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
+                NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
         }
 
         public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)

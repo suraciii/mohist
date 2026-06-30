@@ -6,16 +6,18 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
 {
     private readonly Dictionary<string, RunnerInfo> _runners = new();
     private readonly ILogger<RunnerRegistryGrain> _log;
+    private readonly TimeProvider _timeProvider;
 
-    public RunnerRegistryGrain(ILogger<RunnerRegistryGrain> log)
+    public RunnerRegistryGrain(ILogger<RunnerRegistryGrain> log, TimeProvider timeProvider)
     {
         _log = log;
+        _timeProvider = timeProvider;
     }
 
     public Task RegisterAsync(RunnerInfo info)
     {
         var isNew = !_runners.ContainsKey(info.RunnerId);
-        var enriched = info with { RegisteredAt = info.RegisteredAt ?? DateTimeOffset.UtcNow };
+        var enriched = info with { RegisteredAt = info.RegisteredAt ?? _timeProvider.GetUtcNow() };
         _runners[info.RunnerId] = enriched;
         if (isNew)
         {

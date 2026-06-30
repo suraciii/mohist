@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -66,6 +67,7 @@ public class AgentSessionQuerySpecs
     private const string WorkflowRunW1 = "wr-w1";
     private const string SessionNameW1 = "plan";
     private const string WorkflowIssueNumberW1 = "100";
+    private static readonly FakeTimeProvider TimeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
@@ -75,7 +77,7 @@ public class AgentSessionQuerySpecs
         using var fixture = new FakeAgentSessionQueryDbContextFactory();
         SeedMixedSessions(fixture);
 
-        var query = new AgentSessionQuery(fixture);
+        var query = new AgentSessionQuery(fixture, TimeProvider);
 
         var matches = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -112,7 +114,7 @@ public class AgentSessionQuerySpecs
         using var fixture = new FakeAgentSessionQueryDbContextFactory();
         SeedMixedSessions(fixture);
 
-        var query = new AgentSessionQuery(fixture);
+        var query = new AgentSessionQuery(fixture, TimeProvider);
 
         var byId = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -143,7 +145,7 @@ public class AgentSessionQuerySpecs
         using var fixture = new FakeAgentSessionQueryDbContextFactory();
         SeedMixedSessions(fixture);
 
-        var query = new AgentSessionQuery(fixture);
+        var query = new AgentSessionQuery(fixture, TimeProvider);
 
         var matches = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -181,7 +183,7 @@ public class AgentSessionQuerySpecs
         using var fixture = new FakeAgentSessionQueryDbContextFactory();
         SeedMixedSessions(fixture);
 
-        var query = new AgentSessionQuery(fixture);
+        var query = new AgentSessionQuery(fixture, TimeProvider);
 
         var matches = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -232,7 +234,7 @@ public class AgentSessionQuerySpecs
             await db.SaveChangesAsync();
         }
 
-        var query = new AgentSessionQuery(fixture);
+        var query = new AgentSessionQuery(fixture, TimeProvider);
 
         // The agent-id index must resolve the row that was inserted with
         // labels only in its State JSON — proving the computed column SQL
@@ -275,7 +277,7 @@ public class AgentSessionQuerySpecs
         using var fixture = new FakeAgentSessionQueryDbContextFactory();
         SeedMixedSessions(fixture);
 
-        var query = new AgentSessionQuery(fixture);
+        var query = new AgentSessionQuery(fixture, TimeProvider);
 
         var inOtherProject = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
         {
