@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
@@ -764,7 +765,7 @@ public class AgentSessionQuerier : IScopedService
         var rangeTo = DateTime.UtcNow.Date.AddDays(1);
         var rangeFrom = rangeTo.AddDays(-7);
 
-        var sessions = await _sessionQuery.ListByLabelsAsync(
+        var windowSessions = await _sessionQuery.ListByLabelsAsync(
             Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
             AgentSessionQueryOrder.CreatedAscending,
             from: rangeFrom,
@@ -775,7 +776,7 @@ public class AgentSessionQuerier : IScopedService
         for (var i = 0; i < 7; i++)
             buckets[i] = new UsageBucketData(rangeFrom.AddDays(i), rangeFrom.AddDays(i + 1));
 
-        foreach (var record in sessions)
+        foreach (var record in windowSessions)
         {
             var usage = AgentSessionJsonHelper.Usage(record.Session);
             if (!HasUsage(usage)) continue;
@@ -785,18 +786,113 @@ public class AgentSessionQuerier : IScopedService
             if (bucketIndex < 0 || bucketIndex >= 7) continue;
 
             var bucket = buckets[bucketIndex];
+            var costAmount = usage.CostAmount ?? 0d;
             bucket.InputTokens += usage.InputTokens ?? 0;
             bucket.OutputTokens += usage.OutputTokens ?? 0;
             bucket.TotalTokens += usage.TotalTokens ?? 0;
-            bucket.CostAmount += usage.CostAmount ?? 0d;
+            bucket.CostAmount += costAmount;
             bucket.CostCurrency ??= usage.CostCurrency;
+            bucket.SampleCount++;
         }
+
+        var preWindow = await ComputePreWindowSpendAsync(projectId, rangeFrom, ct);
+
+        var cumulative = await ComputeCumulativeCostPerShipAsync(
+            projectId, rangeFrom, preWindow.Spend, preWindow.Samples, preWindow.Currency, buckets, ct);
 
         return new AgentUsageTimeseriesDto(
             rangeFrom,
             rangeTo,
             "day",
-            buckets.Select(b => b.ToDto()).ToList());
+            buckets.Select(b => b.ToDto()).ToList(),
+            cumulative);
+    }
+
+    private sealed record PreWindowSpendResult(double Spend, int Samples, string? Currency);
+
+    private async Task<PreWindowSpendResult> ComputePreWindowSpendAsync(string projectId, DateTime rangeFrom, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.AgentSessions.AsNoTracking()
+            .Where(s => s.LabelProjectId == projectId && s.CreatedAt < rangeFrom)
+            .OrderBy(s => s.CreatedAt)
+            .ToListAsync(ct);
+
+        double spend = 0;
+        int samples = 0;
+        string? currency = null;
+
+        foreach (var row in rows)
+        {
+            var session = AgentSessionJson.Deserialize(row);
+            if (session is null) continue;
+
+            var usage = AgentSessionJsonHelper.Usage(session);
+            if (!HasUsage(usage)) continue;
+
+            spend += usage.CostAmount ?? 0d;
+            samples++;
+            currency ??= usage.CostCurrency;
+        }
+
+        return new PreWindowSpendResult(spend, samples, currency);
+    }
+
+    private async Task<IReadOnlyList<CumulativeCostPerShipPointDto>> ComputeCumulativeCostPerShipAsync(
+        string projectId,
+        DateTime rangeFrom,
+        double preWindowSpend,
+        int preWindowSamples,
+        string? currency,
+        UsageBucketData[] buckets,
+        CancellationToken ct)
+    {
+        List<DateTime> shippedDates;
+        await using (var db = await _dbFactory.CreateDbContextAsync(ct))
+        {
+            var rows = await db.Issues.AsNoTracking()
+                .Where(row => row.ProjectId == projectId)
+                .ToListAsync(ct);
+
+            shippedDates = IssueRowMapper.Deserialize(rows)
+                .Where(issue => issue.Status == IssueStatus.Done && issue.CompletedAt.HasValue)
+                .Select(issue => issue.CompletedAt!.Value)
+                .ToList();
+        }
+
+        var preWindowShipped = shippedDates.Count(d => d < rangeFrom);
+        var result = new List<CumulativeCostPerShipPointDto>(7);
+        double cumulativeCost = preWindowSpend;
+        int cumulativeSamples = preWindowSamples;
+        var cumulativeShipped = preWindowShipped;
+        string? resolvedCurrency = currency;
+
+        for (var i = 0; i < 7; i++)
+        {
+            var dayStart = rangeFrom.AddDays(i);
+            var dayEnd = rangeFrom.AddDays(i + 1);
+
+            cumulativeCost += buckets[i].CostAmount;
+            cumulativeSamples += buckets[i].SampleCount;
+            resolvedCurrency ??= buckets[i].CostCurrency;
+
+            var dayShipped = shippedDates.Count(d => d >= dayStart && d < dayEnd);
+            cumulativeShipped += dayShipped;
+
+            double? costForDay = cumulativeSamples > 0 || cumulativeShipped > 0 ? cumulativeCost : null;
+            double? costPerShip = cumulativeShipped > 0
+                ? cumulativeCost / cumulativeShipped
+                : null;
+
+            result.Add(new CumulativeCostPerShipPointDto(
+                dayEnd,
+                costForDay,
+                cumulativeSamples > 0 ? resolvedCurrency : null,
+                cumulativeShipped,
+                costPerShip));
+        }
+
+        return result;
     }
 
     public async Task<AgentCostRollupRawData> GetCostRollupAsync(string projectId, CancellationToken ct = default)
@@ -860,6 +956,7 @@ public class AgentSessionQuerier : IScopedService
         public long TotalTokens;
         public double CostAmount;
         public string? CostCurrency;
+        public int SampleCount;
 
         public UsageBucketData(DateTime bucketStart, DateTime bucketEnd)
         {

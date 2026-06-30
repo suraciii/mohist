@@ -1,5 +1,7 @@
-import { useMemo } from 'react'
 import { useCompletionTrend } from '../../../entities/issue'
+import type { CompletionBucketPoint } from '../../../entities/issue'
+import { ChartAccessibility, ChartContainer, LineSeries } from '../charts'
+import type { LinePoint } from '../charts'
 
 const VIEWBOX_WIDTH = 120
 const VIEWBOX_HEIGHT = 40
@@ -8,7 +10,7 @@ const PADDING_TOP = 4
 const PADDING_BOTTOM = 6
 
 interface SparklineGeometry {
-  points: string
+  points: LinePoint[]
   plotWidth: number
   plotHeight: number
 }
@@ -19,7 +21,7 @@ function buildGeometry(completedCounts: number[]): SparklineGeometry {
   const baselineY = PADDING_TOP + plotHeight
 
   if (completedCounts.length === 0) {
-    return { points: '', plotWidth, plotHeight }
+    return { points: [], plotWidth, plotHeight }
   }
 
   const max = Math.max(...completedCounts, 0)
@@ -31,33 +33,29 @@ function buildGeometry(completedCounts: number[]): SparklineGeometry {
     .map((value, index) => {
       const x = startX + index * stepX
       const y = baselineY - (value / safeMax) * plotHeight
-      return `${x.toFixed(2)},${y.toFixed(2)}`
+      return { x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) }
     })
-    .join(' ')
 
   return { points, plotWidth, plotHeight }
 }
 
 interface SparklineProps {
   completedCounts: number[]
+  summary: string
 }
 
-function Sparkline({ completedCounts }: SparklineProps) {
-  const { points, plotWidth, plotHeight } = useMemo(
-    () => buildGeometry(completedCounts),
-    [completedCounts],
-  )
+function Sparkline({ completedCounts, summary }: SparklineProps) {
+  const { points, plotWidth, plotHeight } = buildGeometry(completedCounts)
 
   const baselineY = PADDING_TOP + plotHeight
   const baselineX2 = plotWidth + 2 * PADDING_X
 
   return (
-    <svg
-      data-testid="productivity-trend-sparkline"
+    <ChartAccessibility
+      ariaLabel={`Completion trend across ${completedCounts.length} weeks`}
+      summary={summary}
+      legend={[{ label: 'Completed issues', shape: 'line', className: 'stroke-chart-1' }]}
       viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
-      preserveAspectRatio="none"
-      role="img"
-      aria-label={`Completion trend across ${completedCounts.length} weeks`}
       className="w-full h-16"
     >
       <line
@@ -66,60 +64,40 @@ function Sparkline({ completedCounts }: SparklineProps) {
         y1={baselineY}
         x2={baselineX2}
         y2={baselineY}
-        stroke="currentColor"
-        strokeOpacity="0.2"
+        className="stroke-border"
+        opacity="0.2"
         strokeWidth={1}
         strokeDasharray="2 2"
       />
-      {points && (
-        <polyline
-          data-testid="productivity-trend-polyline"
-          points={points}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.5}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
+      {points.length > 0 && (
+        <LineSeries points={points} className="stroke-chart-1" markerClassName="fill-chart-1" />
       )}
-    </svg>
+    </ChartAccessibility>
   )
 }
 
 export function CompletionTrend() {
-  const { data } = useCompletionTrend()
+  const { data, isLoading, isError } = useCompletionTrend()
 
   const buckets = data?.buckets ?? []
   const completedCounts = buckets.map((bucket) => bucket.completed)
 
   const hasNoData = buckets.length === 0
-
-  if (hasNoData) {
-    return (
-      <section
-        data-testid="productivity-trend"
-        data-state="empty"
-        aria-label="Completion trend"
-        className="rounded-lg border border-border bg-card/50 p-4"
-      >
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Completion trend
-          </h3>
-        </div>
-        <p
-          data-testid="productivity-trend-empty"
-          className="text-sm text-muted-foreground"
-        >
-          No completion data yet — weekly completions appear once issues reach the done state.
-        </p>
-      </section>
-    )
-  }
+  const status = isLoading ? 'loading'
+    : isError ? 'error'
+    : hasNoData ? 'empty'
+    : 'resolved'
+  const totalCompleted = completedCounts.reduce((total, count) => total + count, 0)
+  const peak = buckets.reduce<CompletionBucketPoint | null>(
+    (current, bucket) => current === null || bucket.completed > current.completed ? bucket : current,
+    null,
+  )
+  const summary = `Weekly completion trend from ${data?.window.from ?? 'unknown'} to ${data?.window.to ?? 'unknown'}. Total completed issues: ${totalCompleted}. Peak week: ${peak ? `${peak.boundary} ${peak.completed}` : 'N/A'}.`
 
   return (
     <section
       data-testid="productivity-trend"
+      data-state={status === 'empty' ? 'empty' : undefined}
       aria-label="Completion trend"
       className="rounded-lg border border-border bg-card/50 p-4"
     >
@@ -127,16 +105,28 @@ export function CompletionTrend() {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Completion trend
         </h3>
-        <span
-          data-testid="productivity-trend-meta"
-          className="text-xs text-muted-foreground tabular-nums"
-        >
-          {buckets.length} weeks
-        </span>
+        {status === 'resolved' && (
+          <span
+            data-testid="productivity-trend-meta"
+            className="text-xs text-muted-foreground tabular-nums"
+          >
+            {buckets.length} weeks
+          </span>
+        )}
       </div>
-      <div className="text-blue-600">
-        <Sparkline completedCounts={completedCounts} />
-      </div>
+      <ChartContainer
+        status={status}
+        emptyAction={
+          <p
+            data-testid="productivity-trend-empty"
+            className="text-sm text-muted-foreground"
+          >
+            No completion data yet - weekly completions appear once issues reach the done state.
+          </p>
+        }
+      >
+        <Sparkline completedCounts={completedCounts} summary={summary} />
+      </ChartContainer>
     </section>
   )
 }

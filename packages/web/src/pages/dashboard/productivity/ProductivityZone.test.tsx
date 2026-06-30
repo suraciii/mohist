@@ -23,6 +23,10 @@ vi.mock('./InvestmentPanel', () => ({
   InvestmentPanel: () => <section data-testid="investment-panel" />,
 }))
 
+vi.mock('./CostTrendChart', () => ({
+  CostTrendChart: () => <div data-testid="cost-trend-chart-mock" />,
+}))
+
 import { ProductivityZone } from './ProductivityZone'
 
 describe('ProductivityZone', () => {
@@ -37,5 +41,12 @@ describe('ProductivityZone', () => {
     expect(zone).toContainElement(screen.getByTestId('productivity-quality'))
     expect(zone).toContainElement(screen.getByTestId('completion-trend'))
     expect(zone).toContainElement(screen.getByTestId('investment-panel'))
+  })
+
+  it('mounts the cost trend chart after investment panel', () => {
+    render(<ProductivityZone />)
+
+    const zone = screen.getByTestId('productivity-zone')
+    expect(zone).toContainElement(screen.getByTestId('cost-trend-chart-mock'))
   })
 })

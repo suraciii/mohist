@@ -56,7 +56,7 @@ describe('CompletionTrend', () => {
     cleanup()
   })
 
-  it('renders an SVG sparkline with one polyline point per returned weekly bucket in order', () => {
+  it('renders through the shared chart baseline with one marker per returned weekly bucket in order', () => {
     const counts = [1, 2, 3, 5, 4, 6, 7, 9, 8, 11, 10, 12]
     useCompletionTrendMock.mockReturnValue({ data: makeTrendResponse(makeBuckets(counts)) })
 
@@ -66,17 +66,10 @@ describe('CompletionTrend', () => {
     expect(section).toBeInTheDocument()
     expect(section).not.toHaveAttribute('data-state', 'empty')
 
-    const sparkline = screen.getByTestId('productivity-trend-sparkline')
-    expect(sparkline).toBeInTheDocument()
-    expect(sparkline.tagName.toLowerCase()).toBe('svg')
+    expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
 
-    const polyline = screen.getByTestId('productivity-trend-polyline')
-    expect(polyline).toBeInTheDocument()
-    expect(polyline.tagName.toLowerCase()).toBe('polyline')
-
-    const pointsAttr = polyline.getAttribute('points') ?? ''
-    const pointPairs = pointsAttr.trim().split(/\s+/).filter(Boolean)
-    expect(pointPairs).toHaveLength(counts.length)
+    const markers = screen.getByTestId('line-series').querySelectorAll('circle')
+    expect(markers).toHaveLength(counts.length)
 
     expect(screen.getByTestId('productivity-trend-baseline')).toBeInTheDocument()
 
@@ -97,13 +90,8 @@ describe('CompletionTrend', () => {
 
     renderTrend()
 
-    const polyline = screen.getByTestId('productivity-trend-polyline')
-    const pointsAttr = polyline.getAttribute('points') ?? ''
-    const ys = pointsAttr
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((pair) => parseFloat(pair.split(',')[1]))
+    const markers = screen.getByTestId('line-series').querySelectorAll('circle')
+    const ys = [...markers].map((marker) => Number(marker.getAttribute('cy')))
 
     expect(ys).toHaveLength(3)
 
@@ -122,12 +110,11 @@ describe('CompletionTrend', () => {
     expect(section).toBeInTheDocument()
     expect(section).toHaveAttribute('data-state', 'empty')
 
-    const empty = screen.getByTestId('productivity-trend-empty')
+    const empty = screen.getByTestId('chart-container-empty')
     expect(empty).toBeInTheDocument()
     expect(empty.textContent ?? '').toMatch(/no completion data/i)
 
-    expect(screen.queryByTestId('productivity-trend-sparkline')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('productivity-trend-polyline')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
     expect(container.querySelector('svg')).toBeNull()
   })
 
@@ -142,15 +129,12 @@ describe('CompletionTrend', () => {
     const section = screen.getByTestId('productivity-trend')
     expect(section).not.toHaveAttribute('data-state', 'empty')
 
-    const sparkline = screen.getByTestId('productivity-trend-sparkline')
-    expect(sparkline).toBeInTheDocument()
+    expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
 
-    const polyline = screen.getByTestId('productivity-trend-polyline')
-    const pointsAttr = polyline.getAttribute('points') ?? ''
-    const pointPairs = pointsAttr.trim().split(/\s+/).filter(Boolean)
-    expect(pointPairs).toHaveLength(counts.length)
+    const markers = screen.getByTestId('line-series').querySelectorAll('circle')
+    expect(markers).toHaveLength(counts.length)
 
-    const ys = pointPairs.map((pair) => parseFloat(pair.split(',')[1]))
+    const ys = [...markers].map((marker) => Number(marker.getAttribute('cy')))
     expect(new Set(ys).size).toBe(1)
 
     expect(screen.getByTestId('productivity-trend-meta')).toHaveTextContent(`${counts.length} weeks`)
@@ -181,7 +165,40 @@ describe('CompletionTrend', () => {
     const section = screen.getByTestId('productivity-trend')
     expect(section).toHaveAttribute('data-state', 'empty')
 
-    expect(screen.getByTestId('productivity-trend-empty')).toBeInTheDocument()
+    expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
     expect(container.querySelector('svg')).toBeNull()
+  })
+
+  it('routes loading through the shared chart container without rendering chart content', () => {
+    useCompletionTrendMock.mockReturnValue({ data: undefined, isLoading: true, isError: false })
+
+    const { container } = renderTrend()
+
+    expect(screen.getByTestId('chart-container-loading')).toBeInTheDocument()
+    expect(screen.queryByTestId('chart-container-error')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
+    expect(container.querySelector('svg')).toBeNull()
+  })
+
+  it('routes fetch errors through the shared chart container without rendering chart content', () => {
+    useCompletionTrendMock.mockReturnValue({ data: undefined, isLoading: false, isError: true })
+
+    const { container } = renderTrend()
+
+    expect(screen.getByTestId('chart-container-error')).toBeInTheDocument()
+    expect(screen.queryByTestId('chart-container-loading')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
+    expect(container.querySelector('svg')).toBeNull()
+  })
+
+  it('uses chart accessibility summary and theme-token line colors', () => {
+    useCompletionTrendMock.mockReturnValue({ data: makeTrendResponse(makeBuckets([1, 2, 3])) })
+
+    renderTrend()
+
+    expect(screen.getByTestId('chart-sr-summary').textContent).toContain('Weekly completion trend')
+    const path = screen.getByTestId('line-series').querySelector('path')
+    expect(path?.getAttribute('class')).toContain('stroke-chart-1')
+    expect(path?.getAttribute('stroke')).toBeNull()
   })
 })
