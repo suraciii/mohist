@@ -21,3 +21,13 @@
 - SessionPage observability bar `contextWindowPct` now reads `usage?.contextUsagePercent` directly.
 - All widget tests updated: `healthStatus` added to test data where needed, used/size derivation tests replaced with server-value tests. 206 test files, 3106 tests pass.
 - Backward compat preserved: callers that pass `contextUsagePercent` without `healthStatus` (e.g. `SessionCard`, `CompactSessionCard`) still work via `classifyContextHealth` fallback.
+
+## T-003
+
+- Created `SessionUsageSummary` component (`packages/web/src/pages/session/ui/SessionUsageSummary.tsx`) that surfaces all usage fields in a single bordered region: input/output/total/cached/thought tokens, cost, context-window used/size, percentage, and health status via `ContextHealthIndicator`.
+- Omission rules: `cachedReadTokens` and `thoughtTokens` hidden when null/zero/undefined (no misleading zeros). Whole component returns null when no usage data exists (no dead-stub placeholder).
+- Observability bar in `SessionHeader` now renders `+X cached` and `+Y thought` alongside existing token display when they have accrued (> 0). Inapplicable fields omitted (no zero-value metrics).
+- Placement: `SessionUsageSummary` sits between `SessionHeader` and the scroll container (beneath-header, not right rail — the sibling-sessions sidebar occupies the right rail on xl).
+- Wired into all four render paths (main transcript, empty turns, waiting, legacy incomplete).
+- 22 vitest tests cover all-fields-visible, cache-saved-surfaced, reasoning-tokens-surfaced, missing-field graceful-omission, and no-placeholder-stub scenarios.
+- 207 test files, 3128 tests pass.

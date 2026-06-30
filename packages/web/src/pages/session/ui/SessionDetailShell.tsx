@@ -7,6 +7,7 @@ import { ContextHealthBar, CompactionLineageLink } from '../../../widgets/sessio
 import { Button } from '@/shared/ui/components/button'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
+import { SessionUsageSummary } from './SessionUsageSummary'
 
 export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) {
   const {
@@ -245,6 +246,7 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
       <div className="flex flex-col flex-1 min-h-0 xl:flex-row">
         <div className="flex flex-col flex-1 min-h-0">
           {headerWithRecovery}
+          <SessionUsageSummary usage={meta?.usage} />
           <SessionWaitingState />
           <SessionFollowupComposer onSend={sendFollowup} isSending={followupIsPending} disabled={!isRunning} />
         </div>
@@ -258,6 +260,7 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
       <div className="flex flex-col flex-1 min-h-0 xl:flex-row">
         <div className="flex flex-col flex-1 min-h-0">
           {headerWithRecovery}
+          <SessionUsageSummary usage={meta?.usage} />
           <SessionEmptyState />
         </div>
         {siblingSidebar}
@@ -269,6 +272,7 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
     <div className="flex flex-col flex-1 min-h-0 relative xl:flex-row">
       <div className="flex flex-col flex-1 min-h-0">
         {headerWithoutRecovery}
+        <SessionUsageSummary usage={meta.usage} />
         <div
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto min-w-0"
@@ -506,6 +510,12 @@ function SessionHeader({
                 : [usage?.inputTokens != null ? `${formatCompact(usage.inputTokens)} in` : '', usage?.outputTokens != null ? `${formatCompact(usage.outputTokens)} out` : '']
                     .filter(Boolean)
                     .join(' · ')}
+              {usage?.cachedReadTokens != null && usage.cachedReadTokens > 0 && (
+                <span className="ml-1 text-gray-400">+{formatCompact(usage.cachedReadTokens)} cached</span>
+              )}
+              {usage?.thoughtTokens != null && usage.thoughtTokens > 0 && (
+                <span className="ml-1 text-gray-400">+{formatCompact(usage.thoughtTokens)} thought</span>
+              )}
             </span>
           )}
           {usage?.costAmount != null && usage?.costCurrency && (
