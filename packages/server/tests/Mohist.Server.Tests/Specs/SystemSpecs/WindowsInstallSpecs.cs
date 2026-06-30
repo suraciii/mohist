@@ -781,19 +781,25 @@ public class WindowsInstallSpecs
         var output = new StringWriter();
         var watcher = new FakeFileSystemWatcher();
         var cts = new CancellationTokenSource();
+        var followStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var installer = CreateInstaller(
             files,
             new FakeCommandExecutor(),
             output: output,
             watcherFactory: _ => watcher);
         installer.TestFollowToken = cts.Token;
+        installer.TestFollowStarted = () => followStarted.TrySetResult();
 
         var task = installer.LogsServerAsync(CommandOptions(follow: true));
-        await Task.Delay(100);
+        await followStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         files.WriteAllText(ServerLog, "initial\nnew line 1\nnew line 2\n");
         watcher.RaiseChanged();
-        await Task.Delay(100);
+        await TestWait.ForAsync(
+            () => output.ToString().Contains("new line 1", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromMilliseconds(20),
+            "server log follow output to include new line");
 
         cts.Cancel();
         await task;
@@ -1160,19 +1166,25 @@ public class WindowsInstallSpecs
         var output = new StringWriter();
         var watcher = new FakeFileSystemWatcher();
         var cts = new CancellationTokenSource();
+        var followStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var installer = CreateInstaller(
             files,
             new FakeCommandExecutor(),
             output: output,
             watcherFactory: _ => watcher);
         installer.TestFollowToken = cts.Token;
+        installer.TestFollowStarted = () => followStarted.TrySetResult();
 
         var task = installer.LogsRunnerAsync(CommandOptions(follow: true));
-        await Task.Delay(100);
+        await followStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         files.WriteAllText(RunnerLog, "initial\nnew line 1\nnew line 2\n");
         watcher.RaiseChanged();
-        await Task.Delay(100);
+        await TestWait.ForAsync(
+            () => output.ToString().Contains("new line 1", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromMilliseconds(20),
+            "runner log follow output to include new line");
 
         cts.Cancel();
         await task;

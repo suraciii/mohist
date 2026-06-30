@@ -15,6 +15,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     private readonly Func<string, Task<bool>> _healthProbe;
 
     internal CancellationToken TestFollowToken { get; set; }
+    internal Action? TestFollowStarted { get; set; }
 
     private static readonly JsonSerializerOptions MetadataJsonOptions = new()
     {
@@ -586,6 +587,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
             };
             watcher.Changed += handler;
             watcher.EnableRaisingEvents = true;
+            TestFollowStarted?.Invoke();
             try
             {
                 await tcs.Task;

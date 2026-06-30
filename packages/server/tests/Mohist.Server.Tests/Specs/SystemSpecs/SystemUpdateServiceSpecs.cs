@@ -1216,34 +1216,25 @@ public class SystemUpdateServiceSpecs
 
     private sealed class RecordingCommandRunner : ISystemUpdateCommandRunner
     {
-        private readonly TaskCompletionSource _commandsSeen = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<SystemCommandRequest> Requests { get; } = [];
 
         public Task<SystemCommandResult> RunAsync(SystemCommandRequest command, CancellationToken cancellationToken = default)
         {
             Requests.Add(command);
-            _commandsSeen.TrySetResult();
 
             return Task.FromResult(new SystemCommandResult(0, $"ok:{command.Stage}"));
         }
 
-        public async Task WaitForCountAsync(int count)
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            while (Requests.Count < count)
-            {
-                cts.Token.ThrowIfCancellationRequested();
-                await _commandsSeen.Task.WaitAsync(cts.Token);
-                if (Requests.Count < count)
-                    await Task.Delay(25, cts.Token);
-            }
-        }
+        public Task WaitForCountAsync(int count) => TestWait.ForAsync(
+            () => Requests.Count >= count,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"system update command runner to observe {count} commands");
     }
 
     private sealed class ScriptedCommandRunner : ISystemUpdateCommandRunner
     {
         private readonly (int Index, string FileName, SystemCommandResult Result)[] _script;
-        private readonly TaskCompletionSource _commandsSeen = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<SystemCommandRequest> Requests { get; } = [];
 
         public ScriptedCommandRunner(params (int Index, string FileName, SystemCommandResult Result)[] script)
@@ -1255,7 +1246,6 @@ public class SystemUpdateServiceSpecs
         {
             var index = Requests.Count;
             Requests.Add(command);
-            _commandsSeen.TrySetResult();
 
             if (index >= _script.Length)
                 return Task.FromResult(new SystemCommandResult(0, "ok"));
@@ -1269,17 +1259,11 @@ public class SystemUpdateServiceSpecs
             return Task.FromResult(entry.Result);
         }
 
-        public async Task WaitForCountAsync(int count)
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            while (Requests.Count < count)
-            {
-                cts.Token.ThrowIfCancellationRequested();
-                await _commandsSeen.Task.WaitAsync(cts.Token);
-                if (Requests.Count < count)
-                    await Task.Delay(25, cts.Token);
-            }
-        }
+        public Task WaitForCountAsync(int count) => TestWait.ForAsync(
+            () => Requests.Count >= count,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"scripted system update command runner to observe {count} commands");
     }
 
     private sealed class StubReadinessProbe : ISystemReadinessProbe
@@ -1329,11 +1313,11 @@ public class SystemUpdateServiceSpecs
 
     private static async Task WaitUntilAsync(Func<Task<bool>> condition)
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (!await condition())
-        {
-            cts.Token.ThrowIfCancellationRequested();
-            await Task.Delay(25, cts.Token);
-        }
+        await TestWait.ForAsync(
+            condition,
+            value => value,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            "system update condition");
     }
 }
