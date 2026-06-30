@@ -2,34 +2,75 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Epic.Services;
+using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Issue.Services.IssueTemplates;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Label.Services;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Runner.Services;
+using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.Workflow.Services.Sessions;
+using Mohist.Server.SystemInfo;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Artifacts;
+using Mohist.Server.Workflow.Services.Prompts;
+using Mohist.Server.Workflow.Services.Sessions;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Foundation;
 
+/// <summary>
+/// Verifies that services migrated off the legacy registry are still
+/// registered through <see cref="MohistServiceRegistration"/> /
+/// <c>AddMohistServerCore</c> with their original lifetime, resolve
+/// correctly, and agree between the production service graph and the
+/// <see cref="MohistDbFixture"/> graph.
+/// </summary>
+/// <remarks>
+/// Consolidates the former per-domain MigratedDomainServices /
+/// MigratedWorkflowServices / MigratedRunnerSystemArtifactServices spec
+/// files, which shared an identical three-theory structure and differed
+/// only in their service lists. Grain-backed services (those that need an
+/// Orleans silo to resolve) are listed in <see cref="GrainBlocked"/> and
+/// are covered for resolution by
+/// <c>GrainBackedMigratedServicesRegistrationSpecs</c>.
+/// </remarks>
 [Collection("MohistDb")]
-public class MigratedDomainServicesRegistrationSpecs
+public class MigratedServicesRegistrationSpecs
 {
     private static IConfiguration EmptyConfig() =>
         new ConfigurationBuilder().Build();
 
     private readonly MohistDbFixture _fixture;
 
-    public MigratedDomainServicesRegistrationSpecs(MohistDbFixture fixture)
+    public MigratedServicesRegistrationSpecs(MohistDbFixture fixture)
     {
         _fixture = fixture;
     }
 
+    /// <summary>
+    /// Services that require a live Orleans silo and therefore cannot be
+    /// resolved through <see cref="MohistDbFixture"/> (which has no silo).
+    /// Their production registration is still asserted; their fixture-side
+    /// resolution is covered by the grain-backed specs.
+    /// </summary>
+    private static readonly HashSet<Type> GrainBlocked = new()
+    {
+        typeof(AgentSessionResolver),
+        typeof(WorkflowSessionHealthService),
+        typeof(WorkflowArtifactUploadService),
+        typeof(AgentJobArtifactUploadService),
+        typeof(RunnerStatusService),
+    };
+
     public static IEnumerable<object[]> MigratedServices()
     {
+        // Domain services (Project / Issue / Agent / Epic / Label / Sessions)
         yield return new object[] { typeof(ProjectQuerier), ServiceLifetime.Singleton };
         yield return new object[] { typeof(ProjectRefResolver), ServiceLifetime.Singleton };
         yield return new object[] { typeof(IssueRepositoryResolver), ServiceLifetime.Singleton };
@@ -43,18 +84,38 @@ public class MigratedDomainServicesRegistrationSpecs
         yield return new object[] { typeof(AgentSessionQuery), ServiceLifetime.Scoped };
         yield return new object[] { typeof(AgentSessionQuerier), ServiceLifetime.Scoped };
         yield return new object[] { typeof(AgentSessionResolver), ServiceLifetime.Scoped };
+
+        // Workflow services
+        yield return new object[] { typeof(PromptTemplateEngine), ServiceLifetime.Singleton };
+        yield return new object[] { typeof(WorkflowSessionHealthService), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(WorkflowActivityQuerier), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(WorkflowQuerier), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(WorkflowProfileManager), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(WorkflowRunProfileManager), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(WorkflowItemTranslator), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(ProjectWorkflowProfileManager), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(IssueWorkflowProfileManager), ServiceLifetime.Scoped };
+
+        // Runner / System / Artifact services
+        yield return new object[] { typeof(ConnectionSubscriptionRegistry), ServiceLifetime.Singleton };
+        yield return new object[] { typeof(ConfigService), ServiceLifetime.Singleton };
+        yield return new object[] { typeof(RuntimeBuildInfo), ServiceLifetime.Singleton };
+        yield return new object[] { typeof(SystemdInstallDetector), ServiceLifetime.Singleton };
+        yield return new object[] { typeof(SystemInfoService), ServiceLifetime.Singleton };
+        yield return new object[] { typeof(SystemUpdateService), ServiceLifetime.Singleton };
+        yield return new object[] { typeof(RunnerConnectionTracker), ServiceLifetime.Singleton };
+        yield return new object[] { typeof(AttachmentService), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(WorkflowArtifactUploadService), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(AgentJobArtifactUploadService), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(RunnerStatusService), ServiceLifetime.Scoped };
     }
 
     public static IEnumerable<object[]> MigratedServicesResolvableThroughDbFixture()
     {
-        var grainBlocked = new HashSet<Type>
-        {
-            typeof(AgentSessionResolver),
-        };
         foreach (var row in MigratedServices())
         {
             var type = (Type)row[0];
-            if (grainBlocked.Contains(type)) continue;
+            if (GrainBlocked.Contains(type)) continue;
             yield return row;
         }
     }
@@ -135,7 +196,7 @@ public class MigratedDomainServicesRegistrationSpecs
 
         Assert.Equal(expectedLifetime, prodMatching[0].Lifetime);
 
-        if (typeof(AgentSessionResolver).IsAssignableFrom(serviceType))
+        if (GrainBlocked.Contains(serviceType))
         {
             return;
         }
