@@ -22,6 +22,7 @@ vi.mock('../../../entities/project', async (importOriginal) => {
 
 vi.mock('../../../entities/agent', () => ({
   useAgentStatus: () => ({ data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } } }),
+  useAgent: () => ({ data: null, isLoading: false }),
 }))
 
 vi.mock('../../../entities/epic', async (importOriginal) => {

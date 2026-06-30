@@ -26,6 +26,8 @@ import { EpicListPage } from '../pages/epics/ui/EpicListPage'
 import { EpicDetailPage } from '../pages/epic-detail/ui/EpicDetailPage'
 import { RunnerDetailPage } from '../pages/runner-detail/ui/RunnerDetailPage'
 import { InboxPage } from '../pages/inbox/ui/InboxPage'
+import { AgentListPage } from '../pages/agent-list/ui/AgentListPage'
+import { AgentDetailPage } from '../pages/agent-detail/ui/AgentDetailPage'
 
 function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
@@ -62,6 +64,8 @@ function AppContent() {
                 <Route path="issues/:number/files" element={<IssueChangedFilesPage />} />
                 <Route path="issues/:number/session/:sessionId" element={<SessionPage />} />
                 <Route path="issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
+                <Route path="agents" element={<AgentListPage />} />
+                <Route path="agents/:agentId" element={<AgentDetailPage />} />
                 <Route path="agent-sessions/:sessionId" element={<GenericSessionPage />} />
                 <Route path="activity" element={<ActivityPage />} />
                 <Route path="runners" element={<RunnersPage />} />

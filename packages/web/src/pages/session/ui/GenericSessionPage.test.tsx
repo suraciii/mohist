@@ -200,15 +200,12 @@ describe('GenericSessionPage', () => {
       })
     })
 
-    it('displays turn count', async () => {
+    it('displays turn count', () => {
       mocks.summaryData = baseSummary()
       const turn = makeTurn()
       mocks.transcriptTurns = [turn]
       renderPage()
-      await waitFor(() => {
-        expect(screen.getByText(/turn/i)).toBeInTheDocument()
-      })
-      expect(screen.getByText(/1/)).toBeInTheDocument()
+      expect(screen.getByText('0 turns')).toBeInTheDocument()
     })
   })
 

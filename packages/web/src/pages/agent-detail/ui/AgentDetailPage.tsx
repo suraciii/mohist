@@ -1,0 +1,318 @@
+import { useMemo, useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import {
+  BotIcon,
+  PencilIcon,
+  ArchiveIcon,
+  PlayIcon,
+  ClockIcon,
+  XCircleIcon,
+  CheckCircleIcon,
+  AlertCircleIcon,
+} from 'lucide-react'
+import { useAgent, useAgentSessions, readAgentModelAndVariant } from '../../../entities/agent'
+import type { AgentSessionListItemDto } from '../../../entities/agent'
+import { useProjectPath } from '../../../entities/project'
+import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { Button } from '@/shared/ui/components/button'
+import { Badge } from '@/shared/ui/components/badge'
+import { AgentProfileEditor } from '../../../widgets/agent-profile-editor/ui/AgentProfileEditor'
+
+function formatTime(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return 'just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  const diffDay = Math.floor(diffHr / 24)
+  if (diffDay < 7) return `${diffDay}d ago`
+  return d.toLocaleDateString()
+}
+
+function statusIcon(status: string) {
+  switch (status) {
+    case 'running':
+      return <ClockIcon className="size-3.5 text-blue-500" />
+    case 'failed':
+      return <XCircleIcon className="size-3.5 text-red-500" />
+    case 'completed':
+    case 'stopped':
+      return <CheckCircleIcon className="size-3.5 text-emerald-500" />
+    default:
+      return <AlertCircleIcon className="size-3.5 text-muted-foreground" />
+  }
+}
+
+function SessionSection({
+  title,
+  sessions,
+  toProjectPath,
+}: {
+  title: string
+  sessions: AgentSessionListItemDto[]
+  toProjectPath: (path: string) => string
+}) {
+  if (sessions.length === 0) return null
+  return (
+    <div className="space-y-1">
+      <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-1">{title}</h4>
+      {sessions.map((s) => (
+        <a
+          key={s.sessionId}
+          href={toProjectPath(`/agent-sessions/${encodeURIComponent(s.sessionId)}`)}
+          data-testid={`session-row-${s.sessionId}`}
+          className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors text-sm"
+        >
+          {statusIcon(s.status)}
+          <span className="text-xs text-foreground font-medium truncate min-w-0 flex-1">
+            {s.agentName}
+          </span>
+          <span className="text-xs text-muted-foreground shrink-0">
+            {s.resolvedModel ?? 'unknown'}
+          </span>
+          <span className="text-[10px] text-muted-foreground/60 shrink-0">
+            {formatTime(s.lastActivityAt ?? s.createdAt)}
+          </span>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+export function AgentDetailPage() {
+  const { agentId } = useParams<{ agentId: string }>()
+  const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
+  const { data: agent, isLoading, isError } = useAgent(agentId ?? '')
+  const { data: allSessions = [], isLoading: sessionsLoading } = useAgentSessions({ agentRef: agentId ?? '' })
+  const [editorOpen, setEditorOpen] = useState(false)
+
+  useDocumentTitle(agent ? `${agent.name} — Mohist` : 'Agent — Mohist')
+
+  const { model, variant } = useMemo(() => readAgentModelAndVariant(agent), [agent])
+  const isArchived = agent?.status === 'archived'
+  const agentType = useMemo(() => {
+    if (!agent?.agentConfig) return 'opencode'
+    const config = agent.agentConfig
+    if (config && typeof config === 'object' && 'type' in config) {
+      return String(config.type)
+    }
+    return 'opencode'
+  }, [agent])
+
+  const runningSessions = useMemo(
+    () => allSessions.filter((s) => s.status === 'running'),
+    [allSessions],
+  )
+  const failedSessions = useMemo(
+    () => allSessions.filter((s) => s.status === 'failed'),
+    [allSessions],
+  )
+  const endedSessions = useMemo(
+    () => allSessions.filter((s) => s.status === 'completed' || s.status === 'stopped'),
+    [allSessions],
+  )
+  const recentSessions = useMemo(
+    () =>
+      [...allSessions]
+        .sort((a, b) => {
+          const aTime = a.lastActivityAt ?? a.createdAt
+          const bTime = b.lastActivityAt ?? b.createdAt
+          return new Date(bTime).getTime() - new Date(aTime).getTime()
+        })
+        .slice(0, 5),
+    [allSessions],
+  )
+
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-sm text-muted-foreground">Loading agent...</div>
+      </div>
+    )
+  }
+
+  if (isError || !agent) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-sm text-red-500">Failed to load agent.</div>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      data-testid="agent-detail-page"
+      data-agent-id={agent.id}
+      className="flex-1 overflow-y-auto bg-background"
+    >
+      <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className={`flex items-center justify-center size-12 rounded-xl shrink-0 ${isArchived ? 'bg-muted' : 'bg-blue-50'}`}>
+              <BotIcon className={`size-6 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-semibold text-foreground truncate">{agent.name}</h1>
+                {isArchived && (
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30">
+                    <ArchiveIcon className="size-3 mr-0.5" />
+                    Archived
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {agentType}
+                {model && ` · ${model}`}
+                {variant && ` · ${variant}`}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEditorOpen(true)}
+              data-testid="agent-detail-edit"
+            >
+              <PencilIcon />
+              Edit
+            </Button>
+            {!isArchived ? (
+              <Button
+                size="sm"
+                onClick={() => navigate(toProjectPath(`/agent-sessions/new?agent=${encodeURIComponent(agent.id)}`))}
+                data-testid="agent-detail-new-session"
+              >
+                <PlayIcon />
+                New Session
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                disabled
+                variant="outline"
+                data-testid="agent-detail-new-session"
+                className="opacity-50 cursor-not-allowed"
+              >
+                <PlayIcon />
+                New Session
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="md:col-span-2 space-y-6">
+            <div className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-medium text-foreground mb-3">Instructions</h3>
+              <div
+                data-testid="agent-detail-instructions"
+                className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed"
+              >
+                {agent.instructions || (
+                  <span className="italic text-muted-foreground/50">No instructions set</span>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-medium text-foreground mb-3">Sessions</h3>
+              {sessionsLoading ? (
+                <div className="text-xs text-muted-foreground py-4 text-center">Loading sessions...</div>
+              ) : allSessions.length === 0 ? (
+                <div className="text-xs text-muted-foreground py-4 text-center">
+                  No sessions yet. Start a new session to get started.
+                </div>
+              ) : (
+                <div className="space-y-4" data-testid="agent-detail-sessions">
+                  {runningSessions.length > 0 && (
+                    <SessionSection title="Running" sessions={runningSessions} toProjectPath={toProjectPath} />
+                  )}
+                  {failedSessions.length > 0 && (
+                    <SessionSection title="Failed" sessions={failedSessions} toProjectPath={toProjectPath} />
+                  )}
+                  {endedSessions.length > 0 && (
+                    <SessionSection title="Ended" sessions={endedSessions} toProjectPath={toProjectPath} />
+                  )}
+                  {recentSessions.length > 0 && (
+                    <SessionSection title="Recent" sessions={recentSessions} toProjectPath={toProjectPath} />
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-medium text-foreground mb-3">Agent Config</h3>
+              <div className="space-y-2" data-testid="agent-detail-config">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-muted-foreground">Model</span>
+                  <span className="text-xs font-medium text-foreground">{model ?? 'Default'}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-muted-foreground">Variant</span>
+                  <span className="text-xs font-medium text-foreground">{variant ?? 'Default'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-medium text-foreground mb-3">Skills</h3>
+              {agent.skills && agent.skills.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5" data-testid="agent-detail-skills">
+                  {agent.skills.map((skill) => (
+                    <Badge key={skill} variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                      {skill}
+                    </Badge>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-xs text-muted-foreground/50 italic">No skills configured</span>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-medium text-foreground mb-3">Actions</h3>
+              <div className="space-y-2">
+                {!isArchived ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setEditorOpen(true)}
+                    className="w-full justify-start"
+                    data-testid="agent-detail-archive-btn"
+                  >
+                    <ArchiveIcon />
+                    Archive
+                  </Button>
+                ) : (
+                  <div className="text-xs text-muted-foreground italic px-1">
+                    This agent is archived and cannot be launched.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {editorOpen && (
+        <AgentProfileEditor
+          agent={agent}
+          open={editorOpen}
+          onClose={() => setEditorOpen(false)}
+          onSaved={() => {
+            setEditorOpen(false)
+          }}
+        />
+      )}
+    </div>
+  )
+}

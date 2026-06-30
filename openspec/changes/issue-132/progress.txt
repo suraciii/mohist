@@ -110,3 +110,87 @@ Status: completed
   a `beforeEach` that resets ALL mock module variables
   (`mocks.summaryData`, `summaryLoading`, etc.) — `afterEach` + `cleanup()`
   is insufficient because mock closure references survive.
+
+# T-003 Agent list & detail pages with profile management UI
+
+Status: completed
+
+## Files changed
+
+### New files
+
+- **packages/web/src/pages/agent-list/ui/AgentListPage.tsx** — List page
+  enumerating all agent profiles (active and archived, visually distinguished),
+  with runtime/config summary (agent type, model, variant), availability status,
+  and empty state when no profiles exist.
+
+- **packages/web/src/pages/agent-list/ui/AgentListPage.test.tsx** — 6 tests
+  covering: loading state, empty state, active agent rendering, model/variant
+  display, archived distinction, availability status display.
+
+- **packages/web/src/pages/agent-detail/ui/AgentDetailPage.tsx** — Detail page
+  with profile summary (instructions, agent config, skills), session history
+  grouped into running/failed/ended sections (client-side grouping, no N
+  round-trips), new-session entry (disabled for archived), and edit button.
+
+- **packages/web/src/pages/agent-detail/ui/AgentDetailPage.test.tsx** — 10 tests
+  covering: loading/error states, profile summary rendering, skills metadata,
+  session grouping (running/failed/ended), empty sessions, new-session button
+  enable/disable for active/archived, edit button opening editor.
+
+- **packages/web/src/widgets/agent-profile-editor/ui/AgentProfileEditor.tsx** —
+  Dialog-based profile editor supporting create/edit/archive flows. Uses
+  ModelSelect for model+variant (reusing the same pattern as IssueModelSelector),
+  required-field validation (name + instructions), inline API error surfacing,
+  and archive confirmation dialog.
+
+- **packages/web/src/widgets/agent-profile-editor/ui/AgentProfileEditor.test.tsx** —
+  11 tests covering: create form rendering, validation blocking, create mutation,
+  success navigation, edit pre-fill, edit mutation, API error surfacing, archive
+  button visibility, archive confirmation, validation errors, API error display.
+
+### Modified files
+
+- **packages/web/src/app/App.tsx** — Added `agents` and `agents/:agentId` routes
+  with `AgentListPage` and `AgentDetailPage` components.
+
+- **packages/web/src/widgets/app-shell/ui/AppSidebar.tsx** — Added `Agents` entry
+  with `BotIcon` to `primaryNav` array between Issues and Inbox.
+
+- **packages/web/src/widgets/app-shell/ui/MobileBottomNav.tsx** — Added `Agents`
+  tab with `BotIcon` between Issues and Activity.
+
+- **packages/web/src/widgets/app-shell/ui/Header.tsx** — Extended `usePageTitle`
+  to handle agents routes (`/agents` → 'Agents', `/agents/:id` → agent name).
+
+- **packages/web/src/widgets/app-shell/ui/AppSidebar.test.tsx** — Updated nav
+  order test to include `nav-agents`.
+
+- **packages/web/src/widgets/app-shell/ui/Header.test.tsx** — Added `useAgent`
+  mock to prevent test failures from the new `usePageTitle` dependency.
+
+- **packages/web/src/pages/session/ui/GenericSessionPage.test.tsx** — Fixed
+  fragile turn count assertion (was failing due to regex matching multiple
+  elements and incorrect turn count expectation from generic session metadata).
+
+## Design decisions
+
+- `AgentProfileEditor` uses the `Dialog` component from the existing shared UI
+  library (base-ui/dialog), which renders content via portals. Tests require
+  `act()` wrappers around click/fireEvent to handle portal-based state updates.
+
+- The profile editor follows the IssueModelSelector pattern for ModelSelect:
+  reads models via `useAvailableModelIds`, model variants via `useModelVariants`,
+  and uses `onChangeModelVariant` atomic callback.
+
+- Session history on the detail page uses a single `useAgentSessions({ agentRef })`
+  query and groups client-side (running/failed/ended), matching the spec's
+  requirement to avoid N filtered round-trips. Recent is also derived client-side
+  (sorted by recency, capped at 5).
+
+## Gotchas
+
+- `displayTurnCount` in `SessionDetailShell` uses `meta?.turnCount ?? turns.length`.
+  Since `buildGenericSessionMetadata` hardcodes `turnCount: 0`, the `??` operator
+  does NOT fall through to `turns.length` (0 is not null/undefined). Tests must
+  check for "0 turns" rather than expecting the turns array length.
