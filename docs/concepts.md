@@ -79,16 +79,9 @@ Workflow 不是写死的。产品模型支持多个 **Workflow Profile**，每�
 
 ## Epic（产品里程碑）
 
-Epic 是一组相关 Issue 的集合，代表一个产品目标。
+Epic 是为一个产品目标做规划并驱动其自动推进的单位。新建的 Epic 默认 `idle`，通过 **Start** 启动自治推进——Epic 会自动在完成的 linked issue 之后启动下一个可推进的 issue。
 
-典型用法：
-
-- Epic: "Add user authentication" → 包含 #12 (login)、#13 (signup)、#14 (password reset)
-- Epic: "Performance pass" → 包含 #20 (DB index)、#21 (cache layer)、#22 (lazy load)
-
-Epic 让你做产品规划，而不是只响应 issue 流。
-
-详见 [用 Epic 规划](epics.md)。
+详见 [用 Epic 规划](epics.md) 了解完整生命周期。
 
 ## Skill（外部 agent 能力）
 

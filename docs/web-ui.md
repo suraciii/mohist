@@ -130,7 +130,48 @@ AI 在执行 task 时的对话回放。可以：
 
 URL: `/epics` 和 `/epics/<id>`
 
-列出所有 epic，点进详情看关联 issue 和进度。详见 [用 Epic 规划](epics.md)。
+### 列表页
+
+列表先展示 `idle` / `running` Epic 的当前工作进度分组，再展示独立的生命周期分区：
+
+| 分组 | 含义 | 展示方式 |
+|---|---|---|
+| **Running** | `idle` / `running` Epic 中有 linked issue 正在 in-progress；这是工作进度分组，不等同于所有卡片都是 `running` 生命周期状态 | 有内容时展开 |
+| **Ready to start** | `idle` / `running` Epic 中有可推进的 next issue，等待启动 | 有内容时展开 |
+| **Waiting / Blocked** | `idle` / `running` Epic 中有 open linked issue，但当前没有 startable issue，详情由 nextIssueReason 解释 | 有内容时展开 |
+| **Idle / Empty** | `idle` / `running` Epic 中无 next issue、无 blocker、无 linked issues | 有内容时展开 |
+| **Paused** | 暂停推进（当前 in-progress issue 不中断） | 有 paused Epic 时显示 |
+| **Done** | 已完成 | 有 done Epic 时折叠显示 |
+| **Closed** | 已关闭 | 有 closed Epic 时折叠显示 |
+
+每张卡片显示编号、状态、优先级、进度条（X / Y completed）、以及当前活动或下一步信息。状态为 Paused 的卡片半透明。
+
+详情页入口：点卡片跳转到 `/epics/<id>`。
+
+### 详情页
+
+页面顶部按钮区提供以下生命周期操作，按当前状态显示：
+
+| 按钮 | 出现条件 | 操作 |
+|---|---|---|
+| **Start Epic** | Epic 为 idle 状态 | 开始自动推进 linked issues |
+| **Pause** | Epic 为 running 状态 | 暂停推进（当前 in-progress issue 不中断） |
+| **Resume** | Epic 为 paused 状态 | 恢复推进，重新评估 readiness |
+| **Mark Done** | `readyToMarkDone` 为 true（所有 linked issues 都已进入终态，没有 open linked issues） | 标记完成 |
+| **Close Epic** | 非 terminal 状态 | 关闭 Epic |
+
+操作按钮带 pending 状态反馈（Starting... / Pausing... / Resuming... / Marking... / Closing...）。
+
+### 详情页信息
+
+详情页展示三个统计卡片：
+- **Progress** — X / Y delivered + 进度条 + Ready to mark done 标记。delivered 只统计已完成交付的 issue；`readyToMarkDone` 依据是否仍有 open linked issues 判断。
+- **Next Issue** — 下一个待推进 issue + 推进状态说明
+- **Current Activity** — 当前活动的 linked issues（按 health 分组）
+
+下方为 Linked Issues 列表，支持添加/移除 issue、单个 issue 的 Start 按钮、以及依赖图视图（Graph tab）。
+
+详见 [用 Epic 规划](epics.md)（生命周期状态机）。
 
 ## Activity 页
 
