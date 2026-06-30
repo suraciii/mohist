@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Inbox;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -31,6 +32,7 @@ public class InboxSubscriptionStoreSpecs
     public async Task SetAsync_FirstWrite_PersistsNewRow()
     {
         await using var database = CreateDatabase();
+        await SeedProjectAsync(database, "proj_a");
         var store = new InboxSubscriptionStore(database.Factory);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState(
@@ -54,6 +56,7 @@ public class InboxSubscriptionStoreSpecs
     public async Task SetAsync_ThenGetAsync_ReturnsPersistedToggleStates()
     {
         await using var database = CreateDatabase();
+        await SeedProjectAsync(database, "proj_a");
         var store = new InboxSubscriptionStore(database.Factory);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState(
@@ -76,6 +79,7 @@ public class InboxSubscriptionStoreSpecs
     public async Task SetAsync_SecondWrite_MutatesExistingRowInPlace()
     {
         await using var database = CreateDatabase();
+        await SeedProjectAsync(database, "proj_a");
         var store = new InboxSubscriptionStore(database.Factory);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState(
@@ -105,6 +109,7 @@ public class InboxSubscriptionStoreSpecs
     public async Task SetAsync_SecondWrite_UpdatesUpdatedAt()
     {
         await using var database = CreateDatabase();
+        await SeedProjectAsync(database, "proj_a");
         var store = new InboxSubscriptionStore(database.Factory);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState());
@@ -123,6 +128,7 @@ public class InboxSubscriptionStoreSpecs
     public async Task GetAsync_AfterDisablingAllKinds_ReturnsAllDisabled()
     {
         await using var database = CreateDatabase();
+        await SeedProjectAsync(database, "proj_a");
         var store = new InboxSubscriptionStore(database.Factory);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState(
@@ -145,6 +151,7 @@ public class InboxSubscriptionStoreSpecs
     public async Task GetAsync_ProjectIsolation_ReturnsDefaultForOtherProject()
     {
         await using var database = CreateDatabase();
+        await SeedProjectAsync(database, "proj_a");
         var store = new InboxSubscriptionStore(database.Factory);
 
         await store.SetAsync("proj_a", new InboxSubscriptionState(WorkflowFailedEnabled: false));
@@ -153,12 +160,38 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(stateB.WorkflowFailedEnabled); // proj_b has no row → all-enabled
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
+    public async Task SetAsync_MissingProject_FailsForeignKey()
+    {
+        await using var database = CreateDatabase();
+        var store = new InboxSubscriptionStore(database.Factory);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() =>
+            store.SetAsync("proj_missing", new InboxSubscriptionState()));
+    }
+
     private static async Task<DateTimeOffset> ReadUpdatedAtAsync(TestDatabase database, string projectId)
     {
         await using var db = database.CreateDbContext();
         var row = await db.InboxSubscriptions.AsNoTracking()
             .FirstAsync(r => r.ProjectId == projectId);
         return row.UpdatedAt;
+    }
+
+    private static async Task SeedProjectAsync(TestDatabase database, string projectId)
+    {
+        await using var db = database.CreateDbContext();
+        db.Projects.Add(new ProjectRow
+        {
+            Id = projectId,
+            Name = projectId.Replace('_', '-'),
+            RepositoriesJson = "[]",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
     }
 
     private static TestDatabase CreateDatabase()
