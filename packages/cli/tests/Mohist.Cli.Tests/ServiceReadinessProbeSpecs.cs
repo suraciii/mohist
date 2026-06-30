@@ -90,6 +90,34 @@ public class ServiceReadinessProbeSpecs
     }
 
     [Fact]
+    public async Task WaitForServerReadyAsync_TimeoutBeforeFirstProbeCompletes_CapturesFinalFailure()
+    {
+        var firstRequestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstRequest = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requestCount = 0;
+        var handler = new RecordingHttpHandler(async (_, ct) =>
+        {
+            if (Interlocked.Increment(ref requestCount) == 1)
+            {
+                firstRequestStarted.SetResult();
+                await releaseFirstRequest.Task.WaitAsync(ct);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
+        var probe = BuildProbe(http);
+
+        var wait = probe.WaitForServerReadyAsync(TimeSpan.FromMilliseconds(1), CancellationToken.None);
+        await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        releaseFirstRequest.SetResult();
+        var result = await wait;
+
+        Assert.False(result.Ready);
+        Assert.Equal("GET /api/health returned 500 InternalServerError", result.LastFailure);
+    }
+
+    [Fact]
     public async Task WaitForServerReadyAsync_BecomesReadyMidPoll_ReportsReady()
     {
         var pollCount = 0;

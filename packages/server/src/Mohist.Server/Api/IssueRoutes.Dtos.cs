@@ -180,13 +180,7 @@ public record UpdateIssueRequest
 
 public record CreateFeedbackRequest(string Stage, string Body);
 
-public sealed record RebaseRequest(string? BaseBranch = null, RuntimeTaskRequest? ConflictResolver = null);
-
-public sealed record RuntimeTaskRequest(
-    string? Id = null,
-    string? Title = null,
-    string? Uses = null,
-    Dictionary<string, object?>? With = null);
+public sealed record RebaseRequest(string? BaseBranch = null);
 
 public record AddPrerequisiteRequest(int PrerequisiteNumber);
 

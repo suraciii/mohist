@@ -134,10 +134,10 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("mohist/rebase", rebase.Uses);
         var rebaseWithJson = JsonSerializer.Serialize(rebase.With);
         Assert.Contains("${{ repository.baseBranch }}", rebaseWithJson);
-        Assert.Contains("\"conflictResolver\"", rebaseWithJson);
-        Assert.Contains("Resolve rebase conflicts", rebaseWithJson);
+        Assert.DoesNotContain("\"conflictResolver\"", rebaseWithJson);
         Assert.Contains("\"messageFrom\"", rebaseWithJson);
         Assert.Contains("issue.title", rebaseWithJson);
+        AssertRebaseConflictRecovery(rebase, "integrate");
         Assert.Equal("mohist/push", push.Uses);
         var pushWithJson = JsonSerializer.Serialize(push.With);
         Assert.Contains("workspace.branch", pushWithJson);
@@ -148,6 +148,15 @@ public class MohistLocalWorkflowProfileSpecs
         {
             Assert.NotEqual("mohist/merge", task.Uses);
         }
+
+        var mergeReady = definition.Stages[2].Checks.Single(c => c.Name == "merge-ready");
+        var rebaseRepair = mergeReady.OnFailure?.Repair?.Task;
+        Assert.NotNull(rebaseRepair);
+        Assert.Equal("rebase-onto-base", rebaseRepair!.Id);
+        Assert.Equal("mohist/rebase", rebaseRepair.Uses);
+        var repairWithJson = JsonSerializer.Serialize(rebaseRepair.With);
+        Assert.DoesNotContain("\"conflictResolver\"", repairWithJson);
+        AssertRebaseConflictRecovery(rebaseRepair, "check");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -1006,6 +1015,23 @@ public class MohistLocalWorkflowProfileSpecs
             .Select(t => t.Id)
             .ToList();
         Assert.Equal(new[] { "integrate:push" }, deliveryTasks);
+    }
+
+    private static void AssertRebaseConflictRecovery(TaskDefinition rebase, string session)
+    {
+        Assert.NotNull(rebase.Recovery);
+        var recovery = rebase.Recovery!;
+        Assert.Equal(2, recovery.Budget);
+        var handler = Assert.Single(recovery.Handlers);
+        Assert.Equal("errorCode=conflict", handler.When);
+        Assert.False(handler.RetrySelf);
+        var task = Assert.Single(handler.Tasks);
+        Assert.Equal("recover:resolve-rebase-conflicts", task.Id);
+        Assert.Equal("Resolve rebase conflicts", task.Title);
+        Assert.Equal("mohist/acp-agent", task.Uses);
+        Assert.Equal(session, task.With!["session"]!.Value.GetString());
+        Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", task.With!["prompt"]!.Value.GetString());
+        Assert.Equal("${{ vars.agent }}", task.With!["agent"]!.Value.GetString());
     }
 
     private static void AssertArtifactPaths(TaskDefinition task, params string[] expectedPathSuffixes)

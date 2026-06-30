@@ -257,10 +257,18 @@ stages:
           with:
             baseBranch: ${{ repository.baseBranch }}
             remote: origin
-            conflictResolver:
-              title: Resolve rebase conflicts
-              with:
-                description: "Resolve git rebase conflicts, stage resolved files, and continue the rebase until it completes."
+          recovery:
+            budget: 2
+            handlers:
+              - when: errorCode=conflict
+                tasks:
+                  - id: recover:resolve-rebase-conflicts
+                    title: Resolve rebase conflicts
+                    uses: mohist/acp-agent
+                    with:
+                      session: check
+                      prompt: ${{ prompts.resolve-rebase-conflicts }}
+                      agent: ${{ vars.agent }}
 
   - stage: integrate
     lockBehavior: sequential
@@ -295,10 +303,18 @@ stages:
           remote: origin
           squash: true
           messageFrom: issue.title
-          conflictResolver:
-            title: Resolve rebase conflicts
-            with:
-              description: "Resolve rebase conflicts, stage resolved files, and continue until the rebase completes."
+        recovery:
+          budget: 2
+          handlers:
+            - when: errorCode=conflict
+              tasks:
+                - id: recover:resolve-rebase-conflicts
+                  title: Resolve rebase conflicts
+                  uses: mohist/acp-agent
+                  with:
+                    session: integrate
+                    prompt: ${{ prompts.resolve-rebase-conflicts }}
+                    agent: ${{ vars.agent }}
       - id: integrate:push
         title: Push changes
         uses: mohist/push

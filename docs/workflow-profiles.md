@@ -149,7 +149,7 @@ stage 依次执行 `spec-sync` → `archive-change` → `push` → `merge-pr`，
                   limit: 1
                   cases:
                     - when:
-                        output.failureKind: conflict
+                        output.errorCode: conflict
                       tasks:
                         - id: recover:resolve-rebase-conflicts
                           uses: mohist/acp-agent
@@ -191,9 +191,9 @@ runtime variables，后续 stage 不需要重复打开 PR：
 查询确认 `state=MERGED` 才视为集成完成。`merge-verified` check 通过
 `mohist/github-pr-status` 的 `expect: merged` 做只读确认。
 
-rebase 在 `conflictMode: task` 下不会调用内置 `conflictResolver`，冲突时
-返回 `output.failureKind: conflict` 并保留 rebase 进行中；profile 的
-`recover:rebase.onFailure`（`output.failureKind: conflict` → 
+rebase 冲突只通过 task-level recovery 处理。冲突时返回
+`output.errorCode: conflict` 并保留 rebase 进行中；profile 的
+`recover:rebase` recovery（`output.errorCode: conflict` →
 `recover:resolve-rebase-conflicts`）由 agent 解决冲突、完成 rebase，然后
 workflow 继续走 `recover:push` 并 `retry: self` 重新合并。
 
