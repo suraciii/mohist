@@ -40,3 +40,9 @@
 - `SessionPage.sticky.test.tsx` updated: new test asserting the title strip shows identity info + usage摘要; re-scoped the "no pinned header outside" test to assert both the inner sticky strip AND the non-sticky outer header; updated the "first child" test to point at the title strip.
 - Existing `SessionPage.test.tsx` `getByText('Completed')` calls changed to `getAllByText` since the status badge now appears twice (outer header + sticky strip). Same fix in `SessionPage.endpoints.test.tsx`.
 - 207 test files, 3129 tests pass.
+
+## T-005
+
+- The issue-level aggregation (total tokens via `sumNullable`, total cost via `summarizeCost`) was already rendered in the WorkflowSessionsPanel header summary — no code changes needed to the component.
+- Added 3 new vitest tests covering multi-session summation with multi-currency grouping, no-usage scenario, and non-additive field exclusion.
+- 207 test files, 3132 tests pass.

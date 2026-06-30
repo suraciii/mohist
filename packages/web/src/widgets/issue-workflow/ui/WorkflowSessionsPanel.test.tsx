@@ -260,6 +260,95 @@ describe('WorkflowSessionsPanel', () => {
   })
 })
 
+describe('issue-level usage aggregation', () => {
+  it('sums total tokens and groups cost by currency across multiple sessions', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({
+          id: 's-plan', sessionName: 'plan', stage: 'plan', status: 'completed',
+          usage: { totalTokens: 100_000, costAmount: 0.05, costCurrency: 'USD' },
+          createdAt: '2026-06-12T10:00:00.000Z',
+        }),
+        session({
+          id: 's-build', sessionName: 'build', stage: 'build', status: 'completed',
+          usage: { totalTokens: 200_000, costAmount: 0.12, costCurrency: 'USD' },
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+        session({
+          id: 's-check', sessionName: 'check', stage: 'check', status: 'completed',
+          usage: { totalTokens: 50_000, costAmount: 0.03, costCurrency: 'EUR' },
+          createdAt: '2026-06-12T10:02:00.000Z',
+        }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    expect(screen.getByText(/3 sessions/)).toBeInTheDocument()
+    expect(screen.getByText(/350\.0k processed/)).toBeInTheDocument()
+    const headerEl = screen.getByText(/3 sessions/)
+    expect(headerEl.textContent).toContain('$0.17')
+    expect(headerEl.textContent).toContain('€0.03')
+  })
+
+  it('omits aggregate totals when no session has usage data', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({ id: 's-plan', sessionName: 'plan', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:00:00.000Z', usage: undefined }),
+        session({ id: 's-build', sessionName: 'build', stage: 'build', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z', usage: undefined }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const header = screen.getByText(/2 sessions/)
+    expect(header).toBeInTheDocument()
+    expect(header.textContent).toBe('2 sessions')
+    expect(screen.queryByText(/processed/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/€/)).not.toBeInTheDocument()
+  })
+
+  it('excludes non-additive fields from the aggregate total', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({
+          id: 's-plan', sessionName: 'plan', stage: 'plan', status: 'completed',
+          usage: {
+            totalTokens: 100_000,
+            costAmount: 0.05, costCurrency: 'USD',
+            cachedReadTokens: 30_000,
+            thoughtTokens: 10_000,
+            contextWindowUsed: 50_000, contextWindowSize: 200_000,
+          },
+          createdAt: '2026-06-12T10:00:00.000Z',
+        }),
+        session({
+          id: 's-build', sessionName: 'build', stage: 'build', status: 'completed',
+          usage: {
+            totalTokens: 200_000,
+            costAmount: 0.12, costCurrency: 'USD',
+            cachedReadTokens: 60_000,
+            thoughtTokens: 20_000,
+            contextWindowUsed: 100_000, contextWindowSize: 200_000,
+          },
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    expect(screen.getByText(/300\.0k processed/)).toBeInTheDocument()
+    expect(screen.getByText(/\$0\.17/)).toBeInTheDocument()
+    expect(screen.queryByText(/90k cached/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/30k thought/)).not.toBeInTheDocument()
+  })
+})
+
 describe('WorkflowSessionRow responsive layout', () => {
   it('applies min-w-0 to the row link and header so content can shrink', () => {
     mockedUseWorkflowRunSessions.mockReturnValue({
