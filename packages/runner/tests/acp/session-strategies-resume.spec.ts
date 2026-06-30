@@ -4,25 +4,29 @@ import { setPromptLoaderRegistryForTest } from "../../src/core/prompt.js"
 import {
   contextWithOverrides,
   createSharedSessionFixture,
+  resetAcpTestHooks,
+  runAcpActionUntilSettled,
+  useAcpFakeTimers,
 } from "./support.js"
 
 afterEach(() => {
   setAcpProcessFactoryForTest(null)
   setPromptLoaderRegistryForTest(null)
-  delete process.env.MOHIST_OPENCODE_LOG_DIR
+  resetAcpTestHooks()
 })
 
 describe("mohist/acp-agent resumed shared sessions", () => {
-  it.skip("ResumedSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText [SKIPPED: physical wall-clock]", async () => {
+  it("ResumedSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
+    useAcpFakeTimers()
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
 
-    const result = await acpAgentAction(contextWithOverrides({
+    const result = await runAcpActionUntilSettled(acpAgentAction(contextWithOverrides({
       prompt: "long resumed task",
       session: "shared-session",
-      livenessQuietThresholdMs: 30,
+      livenessQuietThresholdMs: 50,
       probeTimeoutMs: 80,
       timeout: 1_000,
-    }, undefined, shared.context()))
+    }, undefined, shared.context())))
 
     expect(result.status).toBe("success")
     expect(shared.serverConnection.calls.some((entry) => entry.event === "getWorkflowAgentSession" || entry.event === "openWorkflowAgentSession")).toBe(true)

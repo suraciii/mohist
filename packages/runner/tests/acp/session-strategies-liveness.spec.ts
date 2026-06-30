@@ -1,31 +1,34 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
 import { afterEach, describe, expect, it } from "vitest"
 import { acpAgentAction, setAcpProcessFactoryForTest } from "../../src/actions/acp-agent.js"
 import { setPromptLoaderRegistryForTest } from "../../src/core/prompt.js"
+import type { OpencodeProviderErrorDiagnostic } from "../../src/runtime/opencode-log-diagnostics.js"
 import {
   createFixture,
   createSharedSessionFixture,
+  resetAcpTestHooks,
+  runAcpActionUntilSettled,
+  useAcpProviderDiagnostic,
+  useAcpFakeTimers,
 } from "./support.js"
 
 afterEach(() => {
   setAcpProcessFactoryForTest(null)
   setPromptLoaderRegistryForTest(null)
-  delete process.env.MOHIST_OPENCODE_LOG_DIR
+  resetAcpTestHooks()
 })
 
-describe.skip("mohist/acp-agent strategy liveness routing [SKIPPED: relies on physical wall-clock; needs fake time]", () => {
+describe("mohist/acp-agent strategy liveness routing", () => {
   it("RunningSessionReceivesToolActivityAfterProbe_LivenessRecovers_WithExplainableMetadata", async () => {
+    useAcpFakeTimers()
     const fixture = createFixture("tool-liveness")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
       prompt: "long tool task",
       session: "tool-session",
       livenessQuietThresholdMs: 30,
       probeTimeoutMs: 80,
       timeout: 1_000,
-    }))
+    })))
 
     expect(result.status).toBe("success")
 
@@ -39,7 +42,7 @@ describe.skip("mohist/acp-agent strategy liveness routing [SKIPPED: relies on ph
     expect(probing?.probeDeadlineAt).toEqual(expect.any(String))
     expect(probing?.lastDataAt).toEqual(expect.any(String))
     expect(probing?.activeProbeVersion).toEqual(expect.any(Number))
-    expect(probing?.probeVersion).toEqual(probing?.activeProbeVersion)
+    expect(probing?.probeVersion).toBe(probing?.activeProbeVersion)
 
     const recovered = livenessEvents.find((payload) => payload.status === "running")
     expect(recovered).toBeTruthy()
@@ -53,15 +56,16 @@ describe.skip("mohist/acp-agent strategy liveness routing [SKIPPED: relies on ph
   })
 
   it("RunningSessionStaysQuietAfterProbe_LivenessTimeoutFails_WithProbeMetadata", async () => {
+    useAcpFakeTimers()
     const fixture = createFixture("probe-timeout")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
       prompt: "quiet task",
       session: "timeout-session",
       livenessQuietThresholdMs: 30,
       probeTimeoutMs: 60,
       timeout: 1_000,
-    }))
+    })))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Session liveness probe timed out")
@@ -94,55 +98,48 @@ describe.skip("mohist/acp-agent strategy liveness routing [SKIPPED: relies on ph
   })
 
   it("ProbeTimeoutWithOpencodeProviderError_AppendsProviderDiagnostic", async () => {
-    const logDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-"))
-    process.env.MOHIST_OPENCODE_LOG_DIR = logDir
-    try {
-      await writeFile(join(logDir, "2026-06-03T164901.log"), [
-        'ERROR 2026-06-03T16:49:06 service=llm providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=fake-session-1 small=false agent=build mode=primary error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"rate_limit_error\\",\\"message\\":\\"usage limit exceeded\\"}}","isRetryable":true}} stream error',
-        "",
-      ].join("\n"))
-      const fixture = createFixture("probe-timeout")
+    useAcpFakeTimers()
+    useAcpProviderDiagnostic(rateLimitDiagnostic())
+    const fixture = createFixture("probe-timeout")
 
-      const result = await acpAgentAction(fixture.context({
-        prompt: "quiet task",
-        session: "timeout-session",
-        livenessQuietThresholdMs: 30,
-        probeTimeoutMs: 60,
-        timeout: 1_000,
-      }))
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
+      prompt: "quiet task",
+      session: "timeout-session",
+      livenessQuietThresholdMs: 30,
+      probeTimeoutMs: 60,
+      timeout: 1_000,
+    })))
 
-      expect(result.status).toBe("failure")
-      expect(result.message ?? "").toContain("Session liveness probe timed out")
-      expect(result.message ?? "").toContain("Opencode provider error: 429 rate_limit_error on minimax-coding-plan/MiniMax-M3 - usage limit exceeded")
+    expect(result.status).toBe("failure")
+    expect(result.message ?? "").toContain("Session liveness probe timed out")
+    expect(result.message ?? "").toContain("Opencode provider error: 429 rate_limit_error on minimax-coding-plan/MiniMax-M3 - usage limit exceeded")
 
-      const failed = fixture.serverConnection.calls
-        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
-        .map((entry) => entry.payload as Record<string, unknown>)
-        .find((payload) => payload.status === "failed")
-      const terminal = fixture.serverConnection.calls
-        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
-        .map((entry) => entry.payload as Record<string, unknown>)
-        .at(-1)
+    const failed = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .find((payload) => payload.status === "failed")
+    const terminal = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .at(-1)
 
-      expect((failed?.providerError as Record<string, unknown>)?.statusCode).toBe(429)
-      expect((failed?.providerError as Record<string, unknown>)?.errorType).toBe("rate_limit_error")
-      expect(String(terminal?.failureReason)).toContain("Opencode provider error: 429 rate_limit_error")
-    } finally {
-      await rm(logDir, { recursive: true, force: true })
-    }
+    expect((failed?.providerError as Record<string, unknown>)?.statusCode).toBe(429)
+    expect((failed?.providerError as Record<string, unknown>)?.errorType).toBe("rate_limit_error")
+    expect(String(terminal?.failureReason)).toContain("Opencode provider error: 429 rate_limit_error")
   })
 
   it("ProbePromptSendRejects_LivenessFailsAsProbeSendFailed_InsteadOfTimingOut", async () => {
+    useAcpFakeTimers()
     const fixture = createFixture("basic")
     const shared = createSharedSessionFixture("probe-send-failed")
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
       prompt: "probe send fails",
       session: "probe-send-failed-session",
       livenessQuietThresholdMs: 30,
       probeTimeoutMs: 60,
       timeout: 1_000,
-    }, undefined, shared.context()))
+    }, undefined, shared.context())))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Failed to send liveness probe: probe transport failed")
@@ -164,17 +161,18 @@ describe.skip("mohist/acp-agent strategy liveness routing [SKIPPED: relies on ph
   })
 
   it("AbortSignalFiresDuringProbe_CancellationRemainsDistinctFromLivenessFailure", async () => {
+    useAcpFakeTimers()
     const fixture = createFixture("abort-during-probe")
     const controller = new AbortController()
     setTimeout(() => controller.abort(), 60)
 
-    const result = await acpAgentAction(fixture.context({
+    const result = await runAcpActionUntilSettled(acpAgentAction(fixture.context({
       prompt: "cancel during probe",
       session: "cancel-session",
       livenessQuietThresholdMs: 20,
       probeTimeoutMs: 200,
       timeout: 1_000,
-    }, controller.signal))
+    }, controller.signal)))
 
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toMatch(/stopped by user/i)
@@ -182,3 +180,18 @@ describe.skip("mohist/acp-agent strategy liveness routing [SKIPPED: relies on ph
     expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness" && (entry.payload as { failureReason?: string }).failureReason === "probe_timeout")).toBe(false)
   })
 })
+
+function rateLimitDiagnostic(): OpencodeProviderErrorDiagnostic {
+  return {
+    sessionId: "fake-session-1",
+    summary: "Opencode provider error: 429 rate_limit_error on minimax-coding-plan/MiniMax-M3 - usage limit exceeded",
+    providerId: "minimax-coding-plan",
+    modelId: "MiniMax-M3",
+    statusCode: 429,
+    errorName: "AI_APICallError",
+    errorType: "rate_limit_error",
+    message: "usage limit exceeded",
+    retryable: true,
+    occurredAt: "2026-06-03T16:49:06.000Z",
+  }
+}

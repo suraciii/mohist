@@ -72,6 +72,11 @@ const CANCEL_TIMEOUT_MS = 5_000
 const PROBE_PROMPT = "If this session is still alive, briefly report the current step and continue from existing context. Do not restart completed work."
 
 const PROVIDER_ERROR_CHECK_INTERVAL_MS = 1_000
+let cancelTimeoutMsForTest: number | null = null
+
+export function setAcpCancelTimeoutMsForTest(timeoutMs: number | null) {
+  cancelTimeoutMsForTest = timeoutMs
+}
 
 export async function monitorPrompt(context: ActionContext, connection: ClientSideConnection, sessionId: string, prompt: string, options: { timeoutMs: number; livenessQuietThresholdMs: number; probeTimeoutMs: number; livenessState: SessionLivenessState; waitForData(version: number): Promise<"data">; exitFailure?: Promise<never>; acpProcess?: AcpProcessHandle; providerErrorCheckIntervalMs?: number }): Promise<"completed" | { error: string; providerError?: OpencodeProviderErrorDiagnostic; failureReason?: PromptFailureReason }> {
   const startedAt = Date.now()
@@ -244,7 +249,7 @@ export async function cancelAndReturn(acpProcess: AcpProcessHandle | undefined, 
   try {
     await Promise.race([
       connection.cancel({ sessionId }).then(() => { cancelled = true }),
-      timeout(CANCEL_TIMEOUT_MS),
+      timeout(cancelTimeoutMsForTest ?? CANCEL_TIMEOUT_MS),
     ])
   } catch {}
   if (!cancelled && acpProcess) {
