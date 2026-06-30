@@ -42,7 +42,7 @@ public static partial class IssueRoutes
                 taskId,
                 $"Rebase onto {baseBranch}",
                 "mohist/rebase",
-                BuildRebaseTaskWith(baseBranch, issue.Repository!, req?.ConflictResolver),
+                BuildRebaseTaskWith(baseBranch, issue.Repository!),
                 InvalidateChecks: true,
                 Recovery: BuildRebaseRecovery(baseBranch));
 

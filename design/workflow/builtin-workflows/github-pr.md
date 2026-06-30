@@ -250,18 +250,18 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
                   baseBranch: ${{ repository.baseBranch }}
                   remote: origin
                   squash: false
-                  recovery:
-                    budget: 1
-                    handlers:
-                      - when: failureKind=conflict
-                        tasks:
-                          - id: recover:resolve-rebase-conflicts
-                            title: Resolve rebase conflicts
-                            uses: mohist/acp-agent
-                            with:
-                              session: integrate
-                              prompt: ${{ prompts.resolve-rebase-conflicts }}
-                              agent: ${{ vars.agent }}
+                recovery:
+                  budget: 1
+                  handlers:
+                    - when: errorCode=conflict
+                      tasks:
+                        - id: recover:resolve-rebase-conflicts
+                          title: Resolve rebase conflicts
+                          uses: mohist/acp-agent
+                          with:
+                            session: integrate
+                            prompt: ${{ prompts.resolve-rebase-conflicts }}
+                            agent: ${{ vars.agent }}
               - id: recover:push
                 title: Push
                 uses: mohist/push
@@ -324,8 +324,8 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
 - `merge-pr` 等待 GitHub PR checks，通过后 squash merge。
 - `base-moved` 属于 `merge-pr` 的 recovery（`when: errorCode=base-moved`）：rebase、push、
   然后 `retrySelf: true` 重新运行原 merge task。不重新 mark ready。
-- rebase 如果发生冲突，`mohist/rebase` 必须返回 `output.failureKind: conflict`，
-  并保留 rebase 进行中。随后 rebase 的 recovery handler（`when: failureKind=conflict`）
+- rebase 如果发生冲突，`mohist/rebase` 必须返回 `output.errorCode: conflict`，
+  并保留 rebase 进行中。随后 rebase 的 recovery handler（`when: errorCode=conflict`）
   触发显式 `recover:resolve-rebase-conflicts` task。
   该 task 负责解决冲突并完成正在进行的 rebase；随后 workflow 继续执行
   `recover:push`，再重试 merge。

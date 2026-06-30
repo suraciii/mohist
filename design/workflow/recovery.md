@@ -67,7 +67,7 @@ Recovery 匹配与 task 成功/失败状态无关。一个 task 即使执行成�
 
 - `recovery.budget`：允许的自动恢复次数。不声明时默认 0。
 - `recovery.handlers`：有序列表，first-match。
-- `handlers[].when`：`field=value` 表达式，匹配 action output 的任意字段（如 `errorCode=base-moved`、`promise=FAIL`、`failureKind=conflict`）。
+- `handlers[].when`：`field=value` 表达式，匹配 action output 的任意字段（如 `errorCode=base-moved`、`promise=FAIL`、`errorCode=conflict`）。
 - `handlers[].tasks`：用户自定义 recovery tasks（uses / with 可自定义）。
 - `handlers[].retrySelf`：runner 构造 budget-1 的 self-retry task 追加到 tasks 末尾。
 - runner 单独渲染 `recovery`（与 `artifacts` 同理），再 dispatch。
@@ -90,12 +90,12 @@ Recovery 匹配与 task 成功/失败状态无关。一个 task 即使执行成�
 ```yaml
 when: errorCode=base-moved       # output.errorCode == "base-moved"
 when: promise=FAIL               # output.promise == "FAIL"
-when: failureKind=conflict       # output.failureKind == "conflict"
+when: errorCode=conflict         # output.errorCode == "conflict"
 ```
 
 匹配逻辑：解析 `when` 为 `field` 和 `expected`，检查 `String(output[field]) === expected`。
 
-不限定字段名。每个 action 用自己的字段（`errorCode`、`failureKind`、`promise` 等），workflow YAML 的 `when` 表达式用对应字段。action 不感知 recovery，不设特殊字段。
+不限定字段名。每个 action 用自己的字段（`errorCode`、`promise` 等），workflow YAML 的 `when` 表达式用对应字段。action 不感知 recovery，不设特殊字段。
 
 Recovery 匹配只看 output 字段，不关心 task 是通过还是失败。`expect.failIf` 不是触发 recovery 的前提——`when: promise=FAIL` 直接匹配 output.promise 字段即可。`failIf` 的唯一作用是让 action 提前退出（不进入 expect 的修复循环），与 recovery 无关。
 

@@ -163,7 +163,7 @@ artifacts:
 - 不要求所有 action 都返回同一组错误码或字段名。
 - 不让 engine 理解 `base-moved`、`config-error` 等具体含义。
 
-Recovery handler 的 `when` 表达式匹配 action output 的任意字段（如 `errorCode=base-moved`、`promise=FAIL`、`failureKind=conflict`），不限定字段名。见 [`recovery.md`](recovery.md)。
+Recovery handler 的 `when` 表达式匹配 action output 的任意字段（如 `errorCode=base-moved`、`promise=FAIL`、`errorCode=conflict`），不限定字段名。见 [`recovery.md`](recovery.md)。
 
 ## GitHub PR Actions
 

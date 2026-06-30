@@ -91,7 +91,7 @@ public static partial class IssueRoutes
         return ApiResults.Ok(response!);
     }
 
-    internal static JsonElement? BuildRebaseTaskWith(string baseBranch, RepositoryInfo repository, RuntimeTaskRequest? conflictResolver)
+    internal static JsonElement? BuildRebaseTaskWith(string baseBranch, RepositoryInfo repository)
     {
         var with = new Dictionary<string, object?>
         {
@@ -103,61 +103,9 @@ public static partial class IssueRoutes
                 ["gitUrl"] = repository.GitUrl,
                 ["baseBranch"] = repository.BaseBranch,
             },
-            ["recovery"] = DefaultRebaseRecoveryConfig(baseBranch),
         };
-
-        if (conflictResolver?.With is not null || conflictResolver?.Uses is not null)
-        {
-            with["conflictResolver"] = new Dictionary<string, object?>
-            {
-                ["title"] = string.IsNullOrWhiteSpace(conflictResolver.Title) ? "Resolve rebase conflicts" : conflictResolver.Title,
-                ["with"] = conflictResolver.With,
-            };
-        }
-        else
-        {
-            with["conflictResolver"] = new Dictionary<string, object?>
-            {
-                ["title"] = "Resolve rebase conflicts",
-                ["with"] = DefaultConflictResolverWith(),
-            };
-        }
 
         return JsonSerializer.SerializeToElement(with, JSON.Options);
-    }
-
-    private static Dictionary<string, object?> DefaultRebaseRecoveryConfig(string baseBranch)
-    {
-        return new Dictionary<string, object?>
-        {
-            ["budget"] = 2,
-            ["handlers"] = new[]
-            {
-                new Dictionary<string, object?>
-                {
-                    ["when"] = "failureKind=conflict",
-                    ["tasks"] = new[]
-                    {
-                        new Dictionary<string, object?>
-                        {
-                            ["id"] = "recover:resolve-rebase-conflicts",
-                            ["title"] = "Resolve rebase conflicts",
-                            ["uses"] = "mohist/acp-agent",
-                            ["with"] = new Dictionary<string, object?>
-                            {
-                                ["session"] = "check",
-                                ["prompt"] = $"Resolve git rebase conflicts against {baseBranch}. Resolve conflicts, stage resolved files, and continue the rebase until it completes.",
-                                ["agent"] = new Dictionary<string, object?>
-                                {
-                                    ["type"] = "opencode",
-                                },
-                            },
-                        },
-                    },
-                    ["retrySelf"] = true,
-                },
-            },
-        };
     }
 
     internal static RecoveryDefinition BuildRebaseRecovery(string baseBranch)
@@ -182,7 +130,7 @@ public static partial class IssueRoutes
                             Uses: "mohist/acp-agent",
                             With: with),
                     ],
-                    RetrySelf: true),
+                    RetrySelf: false),
             ]);
     }
 
@@ -229,8 +177,4 @@ public static partial class IssueRoutes
             TemplateSource: templateSource);
     }
 
-    private static Dictionary<string, object?> DefaultConflictResolverWith() => new()
-    {
-        ["description"] = "Resolve git rebase conflicts, stage resolved files, and continue the rebase until it completes.",
-    };
 }

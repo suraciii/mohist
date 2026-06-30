@@ -15,7 +15,7 @@ mo issue show ${{ issue.number }} --project-id ${{ project.id }}
 `mohist/rebase` left an in-progress rebase against
 `${{ repository.baseBranch }}` because conflicts occurred during the
 post-`base-moved` recovery for the GitHub PR merge. `mohist/rebase` reported
-`failureKind: conflict` and left the rebase in progress so that an explicit
+`errorCode: conflict` and left the rebase in progress so that an explicit
 agent task — this one — can resolve the conflicts and complete the rebase.
 
 `${{ workspace.branch }}` is the workflow branch you must rebase.

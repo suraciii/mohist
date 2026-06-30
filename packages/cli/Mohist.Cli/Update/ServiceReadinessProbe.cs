@@ -22,6 +22,7 @@ internal sealed class ServiceReadinessProbe
 {
     private static readonly TimeSpan ServerReadyPollInterval = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ServerReadyProgressInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan FinalFailureProbeTimeout = TimeSpan.FromSeconds(1);
     private static readonly Regex AssetPathRegex = new(
         """(?:src|href)=["'](?<path>/assets/[^"']+)["']""",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -82,6 +83,7 @@ internal sealed class ServiceReadinessProbe
             }
         }
 
+        lastFailure ??= await TryCaptureFinalFailureAsync(cancellationToken);
         return new ServerReadinessResult(false, lastFailure);
     }
 
@@ -120,6 +122,7 @@ internal sealed class ServiceReadinessProbe
             }
         }
 
+        lastFailure ??= await TryCaptureFinalFailureAsync(cancellationToken);
         return new ServerReadinessResult(false, lastFailure);
     }
 
@@ -197,6 +200,28 @@ internal sealed class ServiceReadinessProbe
             ? ex.Message
             : $"{ex.Message} ({ex.InnerException.Message})";
         return $"{ex.GetType().Name}: {message}";
+    }
+
+    private async Task<string?> TryCaptureFinalFailureAsync(CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+            return null;
+
+        using var finalCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        finalCts.CancelAfter(FinalFailureProbeTimeout);
+
+        try
+        {
+            return await CheckServerReadyOnceAsync(finalCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return FormatReadinessException(ex);
+        }
     }
 
     private static string? FindFirstAssetPath(string html)
