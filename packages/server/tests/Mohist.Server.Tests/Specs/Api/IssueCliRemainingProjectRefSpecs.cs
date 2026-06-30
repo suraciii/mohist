@@ -41,6 +41,7 @@ public class IssueCliRemainingProjectRefSpecs
     [InlineData("reopen")]
     [InlineData("retry")]
     [InlineData("rerun")]
+    [InlineData("rerun-from-stage")]
     [InlineData("force-stop")]
     [InlineData("resume")]
     [InlineData("rebase")]

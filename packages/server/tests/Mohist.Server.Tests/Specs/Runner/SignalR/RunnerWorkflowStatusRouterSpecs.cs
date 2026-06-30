@@ -143,6 +143,8 @@ public class RunnerWorkflowStatusRouterSpecs
         public Task<string> RequestChangesAsync(string body) => Task.FromResult(string.Empty);
         public Task RetryAsync() => Task.CompletedTask;
         public Task RerunAsync() => Task.CompletedTask;
+        public Task<WorkflowControlResult> RerunFromStageAsync(string stageId) =>
+            Task.FromResult(WorkflowControlResult.Ok());
         public Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task) =>
             Task.FromResult(new RuntimeTaskAddedResult(string.Empty, string.Empty, string.Empty));
         public Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request) =>
