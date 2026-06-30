@@ -384,17 +384,12 @@ public class InboxApiSpecs
 
     private async Task<JsonElement[]> WaitForInboxItemsAsync(string projectId, int expectedCount)
     {
-        JsonElement[] items = [];
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            items = await _client.GetDataAsync<JsonElement[]>(
-                $"/api/projects/{projectId}/inbox");
-            if (items.Length == expectedCount)
-                return items;
-            await Task.Delay(20);
-        }
-
-        return items;
+        return await TestWait.ForAsync(
+            () => _client.GetDataAsync<JsonElement[]>($"/api/projects/{projectId}/inbox"),
+            items => items.Length == expectedCount,
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromMilliseconds(20),
+            $"project '{projectId}' inbox to contain {expectedCount} items");
     }
 
     private async Task<string> SeedAsync(
