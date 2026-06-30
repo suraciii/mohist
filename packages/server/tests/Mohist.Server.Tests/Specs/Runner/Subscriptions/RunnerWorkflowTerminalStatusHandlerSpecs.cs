@@ -174,12 +174,9 @@ public class RunnerWorkflowTerminalStatusHandlerSpecs : IAsyncLifetime
         var workflowRunId = await SeedRunningWorkflowAsync(runnerId);
 
         _hub.Clear();
-        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
-        await workflow.StopAsync("test-no-conn-stop");
+        var router = _fixture.Services.GetRequiredService<IRunnerWorkflowStatusRouter>();
+        await router.RouteAsync(workflowRunId, WorkflowRunStatus.Stopped);
 
-        // Give the bus a moment to deliver to subscribers; nothing should
-        // arrive because the runner has no connection id.
-        await Task.Delay(200);
         Assert.DoesNotContain(_hub.SentMessages, m => m.Method == "ReceiveWorkflowRunStatus");
     }
 
@@ -195,10 +192,9 @@ public class RunnerWorkflowTerminalStatusHandlerSpecs : IAsyncLifetime
         var workflowRunId = await SeedRunningWorkflowAsync("different-runner-id");
 
         _hub.Clear();
-        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
-        await workflow.StopAsync("test-no-assignment-stop");
+        var router = _fixture.Services.GetRequiredService<IRunnerWorkflowStatusRouter>();
+        await router.RouteAsync(workflowRunId, WorkflowRunStatus.Stopped);
 
-        await Task.Delay(200);
         Assert.DoesNotContain(_hub.SentMessages, m => m.Method == "ReceiveWorkflowRunStatus");
     }
 
@@ -206,26 +202,14 @@ public class RunnerWorkflowTerminalStatusHandlerSpecs : IAsyncLifetime
     {
         // The CloudEvent bus + workflow grain commit + SignalR push are
         // three asynchronous hops. Poll the recorded messages until the
-        // expected push lands, bounded by cancellation (not wall-clock
-        // comparison). Returns null only if the push never arrives.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        var token = cts.Token;
-        try
-        {
-            while (true)
-            {
-                var match = _hub.SentMessages.FirstOrDefault(m =>
-                    m.Method == "ReceiveWorkflowRunStatus" &&
-                    string.Equals(m.ConnectionId, connectionId, StringComparison.Ordinal));
-                if (match is not null)
-                    return match;
-
-                await Task.Delay(25, token);
-            }
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
-        {
-            return null;
-        }
+        // expected push lands.
+        return await TestWait.ForAsync(
+            () => Task.FromResult(_hub.SentMessages.FirstOrDefault(m =>
+                m.Method == "ReceiveWorkflowRunStatus" &&
+                string.Equals(m.ConnectionId, connectionId, StringComparison.Ordinal))),
+            match => match is not null,
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromMilliseconds(25),
+            $"terminal workflow status push for '{workflowRunId}' to connection '{connectionId}'");
     }
 }
