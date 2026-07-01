@@ -1,0 +1,56 @@
+import type { SessionTurn, AgentSessionTranscriptResponse, SessionMetadata, SessionStatusKind, RuntimeSessionLineageEntry } from '../../../entities/coder-session'
+import type { DisplayTurn } from '../../../widgets/session-transcript/model/session-transcript-display'
+
+export type StatusKind = SessionStatusKind
+
+export interface SessionDataSourceResult {
+  isLoading: boolean
+  isError: boolean
+  notFound: boolean
+
+  sessionKey: string
+  acpSessionId: string
+  meta: SessionMetadata | null
+  transcriptResponse: AgentSessionTranscriptResponse | null
+  initialTurns: SessionTurn[]
+
+  statusKind: StatusKind
+  isRunning: boolean
+
+  followupIsPending: boolean
+  sendFollowup: (text: string) => void
+
+  contextWindowUsed: number | null
+  contextWindowSize: number | null
+  contextUsagePercent: number | null
+
+  hasRecoveryActions: boolean
+  recoverySessionName: string | null
+  runtimeSessionLineage: RuntimeSessionLineageEntry[] | null
+  viewedRuntimeSessionId: string | null
+  buildLineageTargetPath: ((runtimeId: string) => string) | null
+
+  metadataQueryKey: readonly unknown[]
+  transcriptQueryKey: readonly unknown[]
+  handleRecoverySuccess: () => void
+
+  backPath: string
+  backLabel: string
+  issueTitle?: string
+
+  siblingNav: React.ReactNode | null
+  siblingSidebar: React.ReactNode | null
+
+  sessionTurns: SessionTurn[]
+  transcriptVersion: number
+  scrollToBottom: () => void
+  newContentAvailable: boolean
+  setIsNearBottom: (v: boolean) => void
+  isFinalizing: boolean
+  isThinking: boolean
+  isStreaming: boolean
+
+  displayTurns: DisplayTurn[]
+
+  issueNumber: number
+}

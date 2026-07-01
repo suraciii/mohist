@@ -101,6 +101,7 @@ describe('AppSidebar primary navigation', () => {
     expect(order).toEqual([
       'nav-dashboard',
       'nav-issues',
+      'nav-agents',
       'nav-inbox',
       'nav-activity',
       'nav-runners',

@@ -1,7 +1,24 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import type { AgentActivity, AgentSessionInfo } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
-import { getAgentActivity, getAgentSessions, getAgentStatus } from './client'
+import {
+  archiveAgent,
+  createAgent,
+  getAgent,
+  getAgentActivity,
+  getAgentSessions as getGlobalAgentSessions,
+  getAgentStatus,
+  listAgents,
+  updateAgent,
+} from './client'
+import type {
+  AgentCreateRequest,
+  AgentInfo,
+  AgentUpdateRequest,
+} from './client'
+import { getAgentSessions as getAgentScopedSessions } from './agent-sessions'
+import type { AgentSessionListItemDto } from './agent-sessions'
 
 export function useAgentStatus() {
   const { projectId } = useProject()
@@ -13,11 +30,11 @@ export function useAgentStatus() {
   })
 }
 
-export function useAgentSessions(params?: { status?: string; limit?: number }) {
+export function useGlobalAgentSessions(params?: { status?: string; limit?: number }) {
   const { projectId } = useProject()
   return useQuery<AgentSessionInfo[]>({
     queryKey: ['agent-sessions', params, projectId],
-    queryFn: () => getAgentSessions({ ...params, projectId }),
+    queryFn: () => getGlobalAgentSessions({ ...params, projectId }),
     enabled: !!projectId,
   })
 }
@@ -29,5 +46,82 @@ export function useAgentActivity(params?: { limit?: number }) {
     queryFn: () => getAgentActivity({ ...params, projectId }),
     enabled: !!projectId,
     refetchInterval: 5000,
+  })
+}
+
+/* ── Agent profile CRUD queries ─────────────────────────── */
+
+export function useAgents() {
+  const { projectId } = useProject()
+  return useQuery<AgentInfo[]>({
+    queryKey: ['agents', projectId],
+    queryFn: () => listAgents(projectId!),
+    enabled: !!projectId,
+  })
+}
+
+export function useAgent(agentRef: string) {
+  const { projectId } = useProject()
+  return useQuery<AgentInfo>({
+    queryKey: ['agents', projectId, agentRef],
+    queryFn: () => getAgent(projectId!, agentRef),
+    enabled: !!projectId && !!agentRef,
+  })
+}
+
+export function useCreateAgent() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<AgentInfo, Error, AgentCreateRequest>({
+    mutationFn: (data) => createAgent(projectId!, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      toast.success('Agent created')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useUpdateAgent() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<AgentInfo, Error, { agentRef: string; data: AgentUpdateRequest }>({
+    mutationFn: ({ agentRef, data }) => updateAgent(projectId!, agentRef, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      toast.success('Agent updated')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useArchiveAgent() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<AgentInfo, Error, string>({
+    mutationFn: (agentRef) => archiveAgent(projectId!, agentRef),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      toast.success('Agent archived')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+/* ── Agent-scoped session list (consumes #130) ──────────── */
+
+export function useAgentSessions({ agentRef }: { agentRef: string }) {
+  const { projectId } = useProject()
+  return useQuery<AgentSessionListItemDto[]>({
+    queryKey: ['agents', projectId, agentRef, 'sessions'],
+    queryFn: () => getAgentScopedSessions(projectId!, agentRef),
+    enabled: !!projectId && !!agentRef,
   })
 }

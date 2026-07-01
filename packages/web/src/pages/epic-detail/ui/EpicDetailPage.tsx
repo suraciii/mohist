@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { BotIcon } from 'lucide-react'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { IssueStatus, type Issue } from '../../../entities/issue'
 import { useIssues } from '../../../entities/issue'
@@ -710,6 +711,15 @@ export function EpicDetailPage() {
               data-testid="edit-epic-button"
             >
               Edit
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate(toProjectPath('/agent-sessions/new?epic=' + encodeURIComponent(epic.id)))}
+              data-testid="ask-agent-epic"
+            >
+              <BotIcon className="size-4 mr-2" />
+              Ask Agent
             </Button>
             {primaryAction?.kind === 'start-epic' && (
               <Button

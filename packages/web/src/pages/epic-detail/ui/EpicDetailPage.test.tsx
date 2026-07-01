@@ -36,6 +36,8 @@ function issue(overrides: Record<string, unknown>) {
   }
 }
 
+const mockUseNavigate = vi.hoisted(() => vi.fn())
+
 const mocks = vi.hoisted(() => ({
   useProject: vi.fn(),
   useEpic: vi.fn(),
@@ -81,6 +83,14 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
     useUpdateEpic: mocks.useUpdateEpic,
     usePauseEpic: mocks.usePauseEpic,
     useResumeEpic: mocks.useResumeEpic,
+  }
+})
+
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return {
+    ...actual,
+    useNavigate: () => mockUseNavigate,
   }
 })
 
@@ -4799,5 +4809,85 @@ describe('EpicDetailPage summary-first information architecture (T-002)', () => 
       expect(screen.getByTestId('linked-issues-view-list')).toHaveAttribute('aria-selected', 'true')
       expect(screen.getByTestId('linked-issues-view-graph')).toHaveAttribute('aria-selected', 'false')
     })
+  })
+})
+
+describe('EpicDetailPage Ask Agent entry (T-005)', () => {
+  function makeEpic(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'epic-12345678',
+      number: 7,
+      title: 'Epic title',
+      description: 'Epic description',
+      priority: 'p1',
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 1,
+        totalIssueCount: 2,
+        blockedIssues: [{ id: 'issue-2', number: 2, title: 'Blocked issue', health: 'blocked' }],
+        activeIssues: [],
+        nextIssue: { id: 'issue-2', number: 2, title: 'Blocked issue' },
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [],
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false })
+    mocks.usePauseEpic.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useResumeEpic.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: vi.fn(), isPending: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders an Ask Agent button in the action group', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic(), isLoading: false })
+
+    renderPage()
+
+    const button = screen.getByTestId('ask-agent-epic')
+    expect(button).toBeTruthy()
+    expect(button.textContent).toContain('Ask Agent')
+  })
+
+  it('navigates to the composer with ?epic=<id> on click', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic({ id: 'epic-12345678' }), isLoading: false })
+
+    renderPage()
+
+    const button = screen.getByTestId('ask-agent-epic')
+    fireEvent.click(button)
+
+    expect(mockUseNavigate).toHaveBeenCalledWith(
+      expect.stringContaining('/agent-sessions/new?epic='),
+    )
+  })
+
+  it('includes the epic id in the navigation URL', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic({ id: 'epic-abc-def' }), isLoading: false })
+
+    renderPage()
+
+    const button = screen.getByTestId('ask-agent-epic')
+    fireEvent.click(button)
+
+    const callArg = mockUseNavigate.mock.calls[0][0] as string
+    expect(callArg).toContain('epic=epic-abc-def')
   })
 })
