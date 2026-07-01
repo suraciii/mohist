@@ -11,7 +11,7 @@ When a workflow run that is bound to an issue reaches the `Completed` terminal s
 
 #### Scenario: Issue resolution derives from the workflow run
 - **WHEN** the completed-event handler processes a run
-- **THEN** it SHALL resolve the owning `issueId` from the completed workflow run's issue context
+- **THEN** it SHALL resolve the owning `issueId` via a reverse lookup keyed on the completed run's id (the `com.mohist.workflow.run.completed` event and `WorkflowRun` aggregate carry no issue context; the only workflow-run → issue link is on the issue itself, indexed on `IssueRow.WorkflowRunId`), filtered to the `InProgress` issue bound to that run
 - **AND** SHALL target that issue (and no other) for completion
 
 #### Scenario: Transition is verifiable with injected time
