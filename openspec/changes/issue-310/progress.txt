@@ -89,3 +89,41 @@ Page changes:
 - issue-detail suites: 6 files / 91 tests green (the existing 75 + 16 new).
 - `npm run test:run -w packages/web`: 3602 passed / 1 skipped across 235 files (was 3586 across 234; delta = +16 tests in +1 file).
 - `npm run build` (web): green.
+
+## T-004 — extract Actions card as thin renderer over pure actionsState derivation
+
+Lifted the ~300-line Actions state machine (L715-1013) out of `IssueDetailPage.tsx`. The branching is now a pure function in `model/actionsState.ts`; the card is a dumb renderer over the resulting description; the page calls `computeActionsState` once and hands the result to `<IssueActionsCard>`. The two `useConfirmOutsideClick` calls (and their refs) moved with the card; the page no longer mentions them.
+
+New files:
+- `pages/issue-detail/model/actionsState.ts` (212 lines) — pure `computeActionsState({ issue, agentStatus, workflowTimeline, errorMessages }) -> { showArchivedNote, startVariant, showForceStopPanel, forceStopContext, blockedActions, showStandaloneRerun, showClose, showError, errorMessages, showOtherAgents, otherAgentsCount }`. The `SHOW_CHECK_REPAIR_ACTIONS = false` constant and the `canStopWorkflow` expression (D3) are preserved verbatim inside the function. Derives `isAgentRunningOnThis` / `isCapacityFull` from `agentStatus` so the input stays a 4-field bag mirroring the design.
+- `pages/issue-detail/model/actionsState.test.ts` (696 lines, 41 specs) — pins every Actions state the existing tests already cover plus a couple of edge cases the card exposes (no React/DOM, undefined `agentStatus`/`workflowTimeline`/`recovery`, isInterrupted only when the outer Blocked/Interrupted wrapper fires). Runs in <10 ms (no jsdom, no fake timers).
+- `pages/issue-detail/ui/cards/IssueActionsCard.tsx` (393 lines) — thin renderer: destructures the description, calls `useConfirmOutsideClick` twice for the force-stop / stop panels (refs co-located with the card), then renders the original JSX in the original order. The single IIFE at the original L1170 is now a single conditional that wraps the same content as siblings in the same order (blockedReason → isInterrupted → showRetry → showResume → showRerun → showStop → showInspectCurrent), matching the design D3 acceptance. Also exports `extractActionsErrorMessages` so the page can feed the mutations through to `computeActionsState` without leaking React-Query error shapes.
+
+Page changes:
+- `IssueDetailPage.tsx`: dropped both `useConfirmOutsideClick` calls, the `forceStopPanelRef` / `stopPanelRef` declarations, and the entire Actions JSX block (~300 lines). Page no longer references `recoveryAttemptState` / `recoveryCanWait` / `recoveryCanStop` / `canRetryWorkflow` / `canResumeWorkflow` / `canRerunWorkflow` / `canStopWorkflow` / `showCheckRepairActions` / `agentProgress` / `isCapacityFull` / `runnerUnavailable` (all derivations of the state machine). Imports `computeActionsState` and `IssueActionsCard`; computes the state once after the early-returns; passes the result + the 9 relevant mutations + the two confirming flags + the Ask Agent navigation callback into the card. The ask-agent URL stays a closure built in the page (URL depends on `toProjectPath` + `issueNumber`), so the card receives it as a prop. Page line count: 1087 → 795 (−292 lines; −27% since T-001; cumulative since the proposal: 1375 → 795, −580 lines, −42%).
+
+### Codebase patterns confirmed for later tasks
+
+- D3's pure-derivation + thin-renderer split works exactly as predicted: the page's two-line `actionsState` computation is the only place that "knows" the rules; the card has no conditionals beyond `&&` / `?` over the description fields. Future cards (Details / Drift / Configuration / Prerequisites / Readiness) can use the same shape (`<Card>` over a small pure description in `model/`).
+- The `mutations` prop of `<IssueActionsCard>` uses `Pick<IssueDetailMutations, ...>` over the 9 mutations it consumes (start, markReady, close, forceStop, stop, reopen, resume, retry, rerun). Cards that need a different subset just import the named subset — no need to take the full `IssueDetailMutations`.
+- React-Query's `UseMutationResult` already returns `Error | null` for the `error` field, so the actions state machine's `ErrorMessages` type can use the built-in `Error` type without leaning on React-Query at all. The card extracts `.message` at the render site; the pure function only sees `Error | null`.
+- `useConfirmOutsideClick` lives at `model/`, but a card that is the **only** consumer of its refs (this card) is the right place to call the hook. The page is now free of click-outside knowledge entirely (`rg 'addEventListener.*mousedown|panelRef|useConfirmOutsideClick' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 0 matches).
+- The `useEffect` test-environment helper for jsdom is needed only when the test attaches to real DOM listeners; `actionsState.test.ts` is pure logic, so it does not declare `// @vitest-environment jsdom` and runs in the default `node` env.
+
+### Gotchas
+
+- The IIFE at the original L1170 wraps `canRetry / canResume / canRerun / canInspect / isInterrupted / showProjectedCheckRepair` and only renders when `!isArchived && (health === Blocked || health === Interrupted)`. The new `blockedActions.isInterrupted` field is therefore gated by the same outer condition; otherwise an Active-health issue with `recoveryAttemptState === 'interrupted'` would render the orange "interrupted" banner, which the original code did not. A test pins this (the "hides every blocked action when health is Active" case seeds an interrupted recovery on an Active issue and asserts `isInterrupted: false`).
+- The "ready" start variant now carries `runnerMessage` (was `agentStatus?.runnerMessage ?? 'No runner is connected. …'` inline at the call site) so the card can render the original message verbatim without re-deriving it.
+- The page's `actionsState` computation must happen *after* the early returns (so `issue` is non-null) but *before* the rest of the page body — the derivation needs the full `Issue` object. Placed it next to the other post-early-return derivations (`isBacklog`, `isArchived`, `workflowStage`, `prDeliveryMetadata`).
+
+### Verification
+
+- `rg 'useConfirmOutsideClick|forceStopPanelRef|stopPanelRef' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 0 matches.
+- `rg 'canRetryWorkflow|canResumeWorkflow|canRerunWorkflow|canStopWorkflow|showCheckRepairActions|recoveryAttemptState|recoveryCanWait|recoveryCanStop|agentProgress|isCapacityFull|runnerUnavailable|workflowAllowedActions|allowedActions' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 0 matches (all moved into `computeActionsState`).
+- `rg -c 'data-testid' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 33 (was 40; the 7 moved testids — `archived-actions-note`, `start-readiness`, `mark-ready-button`, `start-button`, `ask-agent-issue` — travel with their JSX into `IssueActionsCard`; the page-wide union of data-testids is unchanged).
+- `rg -c 'data-testid' packages/web/src/pages/issue-detail/ui/cards/IssueActionsCard.tsx`: 7.
+- `npm run typecheck -w packages/web`: green.
+- actionsState unit suite: 41/41 pass in <10 ms (well under the 50 ms unit budget; no jsdom).
+- issue-detail suites: 7 files / 132 tests green (the existing 91 + 41 new). All 4 component suites (`IssueDetailPage.test.tsx`, `.archived`, `.capacity-gating`, `.readiness`) including the density block and the archived-actions-note assertions pass.
+- `npm run test:run -w packages/web`: 3643 passed / 1 skipped across 236 files (was 3602 across 235; delta = +41 tests in +1 file).
+- `npm run build -w packages/web`: green.
