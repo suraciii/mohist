@@ -104,6 +104,30 @@ export function useWorkflowRunSessions(workflowRunId: string | null | undefined)
                         ...(detail.costCurrency !== undefined && { costCurrency: detail.costCurrency }),
                         ...(detail.contextWindowUsed !== undefined && { contextWindowUsed: detail.contextWindowUsed }),
                         ...(detail.contextWindowSize !== undefined && { contextWindowSize: detail.contextWindowSize }),
+                        ...(detail.contextUsagePercent !== undefined && { contextUsagePercent: detail.contextUsagePercent }),
+                        ...(detail.healthStatus !== undefined && { healthStatus: detail.healthStatus }),
+                      },
+                    }
+                  : session,
+              ),
+            }
+          : prev)
+      }),
+      onAgentEvent('context_health_update', (detail) => {
+        if (!mountedRef.current) return
+        setLiveState((prev) => prev.workflowRunId === workflowRunId
+          ? {
+              ...prev,
+              sessions: prev.sessions.map((session) =>
+                session.id === detail.coderSessionId || session.acpSessionId === detail.acpSessionId
+                  ? {
+                      ...session,
+                      usage: {
+                        ...(session.usage ?? {}),
+                        ...(detail.healthStatus !== undefined && { healthStatus: detail.healthStatus }),
+                        ...(detail.contextUsagePercent !== undefined && { contextUsagePercent: detail.contextUsagePercent }),
+                        ...(detail.contextWindowUsed !== undefined && { contextWindowUsed: detail.contextWindowUsed }),
+                        ...(detail.contextWindowSize !== undefined && { contextWindowSize: detail.contextWindowSize }),
                       },
                     }
                   : session,

@@ -10,7 +10,7 @@ describe('ContextHealthBar', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('renders nothing when only the explicit percent is null', () => {
+  it('renders nothing when contextUsagePercent is null', () => {
     const { container } = render(
       <ContextHealthBar
         contextWindowUsed={500_000}
@@ -18,9 +18,7 @@ describe('ContextHealthBar', () => {
         contextUsagePercent={null}
       />,
     )
-    // Percent is derived from used/size when the explicit value is null.
-    // The component should render in this case.
-    expect(container.firstChild).not.toBeNull()
+    expect(container.firstChild).toBeNull()
   })
 
   it('renders the standard "used / total (percent%)" label at low usage', () => {
@@ -29,61 +27,91 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={450_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={45}
+        healthStatus="green"
       />,
     )
     expect(screen.getByTestId('context-health-label')).toHaveTextContent('450.0k / 1.0M tokens (45%)')
   })
 
-  it('marks the bar with status="green" when usage is below 60%', () => {
+  it('marks the bar with the server-provided green status', () => {
     render(
       <ContextHealthBar
         contextWindowUsed={450_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={45}
+        healthStatus="green"
       />,
     )
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'green')
   })
 
-  it('marks the bar with status="yellow" when usage is at the 60% boundary', () => {
+  it('uses server-provided healthStatus when present over percent classification', () => {
     render(
       <ContextHealthBar
-        contextWindowUsed={600_000}
+        contextWindowUsed={450_000}
         contextWindowSize={1_000_000}
-        contextUsagePercent={60}
+        contextUsagePercent={45}
+        healthStatus="yellow"
       />,
     )
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'yellow')
   })
 
-  it('marks the bar with status="yellow" for usage between 60% and 80%', () => {
-    render(
+  it('renders nothing instead of classifying from percent when healthStatus is absent', () => {
+    const { container } = render(
       <ContextHealthBar
         contextWindowUsed={720_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={72}
       />,
     )
+    expect(container.firstChild).toBeNull()
+    expect(container.querySelector('[data-status="yellow"]')).toBeNull()
+  })
+
+  it('marks the bar with server-provided yellow status at the 60% boundary', () => {
+    render(
+      <ContextHealthBar
+        contextWindowUsed={600_000}
+        contextWindowSize={1_000_000}
+        contextUsagePercent={60}
+        healthStatus="yellow"
+      />,
+    )
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'yellow')
   })
 
-  it('marks the bar with status="red" when usage is at the 80% boundary', () => {
+  it('marks the bar with server-provided yellow status for usage between 60% and 80%', () => {
+    render(
+      <ContextHealthBar
+        contextWindowUsed={720_000}
+        contextWindowSize={1_000_000}
+        contextUsagePercent={72}
+        healthStatus="yellow"
+      />,
+    )
+    expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'yellow')
+  })
+
+  it('marks the bar with server-provided red status when usage is at the 80% boundary', () => {
     render(
       <ContextHealthBar
         contextWindowUsed={800_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={80}
+        healthStatus="red"
       />,
     )
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'red')
   })
 
-  it('marks the bar with status="red" for usage well above 80%', () => {
+  it('marks the bar with server-provided red status for usage well above 80%', () => {
     render(
       <ContextHealthBar
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
       />,
     )
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'red')
@@ -95,6 +123,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={450_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={45.4}
+        healthStatus="green"
       />,
     )
     const fill = screen.getByTestId('context-health-fill')
@@ -108,6 +137,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={1_500_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={150}
+        healthStatus="red"
       />,
     )
     const fill = screen.getByTestId('context-health-fill')
@@ -120,6 +150,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={450_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={45}
+        healthStatus="green"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -133,6 +164,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={799_999}
         contextWindowSize={1_000_000}
         contextUsagePercent={79.9}
+        healthStatus="yellow"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -146,6 +178,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={800_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={80}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -161,6 +194,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -176,6 +210,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -194,6 +229,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={onCompact}
         onReset={() => {}}
       />,
@@ -209,6 +245,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={onReset}
       />,
@@ -223,11 +260,10 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
       />,
     )
-    // The banner only appears when at least one recovery action is wired
-    // up; with just compact it should still show because onCompact is set.
     expect(screen.getByRole('status')).toBeInTheDocument()
   })
 
@@ -237,9 +273,9 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
       />,
     )
-    // No Compact/Reset wired up => no actionable banner, just the bar.
     expect(screen.queryByRole('status')).toBeNull()
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'red')
   })
@@ -250,6 +286,7 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
       />,
@@ -265,13 +302,13 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
         showWarning={false}
       />,
     )
     expect(screen.queryByRole('status')).toBeNull()
-    // The bar itself should still reflect the high-usage red state.
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'red')
   })
 
@@ -281,18 +318,19 @@ describe('ContextHealthBar', () => {
         contextWindowUsed={950_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={95}
+        healthStatus="red"
         onCompact={() => {}}
         onReset={() => {}}
       />,
     )
     expect(screen.getByRole('status')).toBeInTheDocument()
 
-    // After a new SSE update drops usage below 80%, the banner disappears.
     rerender(
       <ContextHealthBar
         contextWindowUsed={450_000}
         contextWindowSize={1_000_000}
         contextUsagePercent={45}
+        healthStatus="green"
         onCompact={() => {}}
         onReset={() => {}}
       />,

@@ -7,6 +7,7 @@ import { ContextHealthBar, CompactionLineageLink } from '../../../widgets/sessio
 import { Button } from '@/shared/ui/components/button'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
+import { SessionUsageSummary } from './SessionUsageSummary'
 
 export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) {
   const {
@@ -36,6 +37,7 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
     contextWindowUsed,
     contextWindowSize,
     contextUsagePercent,
+    healthStatus,
     hasRecoveryActions,
     recoverySessionName,
     runtimeSessionLineage,
@@ -72,6 +74,7 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
               contextWindowUsed={contextWindowUsed}
               contextWindowSize={contextWindowSize}
               contextUsagePercent={contextUsagePercent}
+              healthStatus={healthStatus}
             />
           </div>
           {recoverySessionName && (
@@ -243,6 +246,7 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
       <div className="flex flex-col flex-1 min-h-0 xl:flex-row">
         <div className="flex flex-col flex-1 min-h-0">
           {headerWithRecovery}
+          <SessionUsageSummary usage={meta?.usage} />
           <SessionWaitingState />
           <SessionFollowupComposer onSend={sendFollowup} isSending={followupIsPending} disabled={!isRunning} />
         </div>
@@ -256,6 +260,7 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
       <div className="flex flex-col flex-1 min-h-0 xl:flex-row">
         <div className="flex flex-col flex-1 min-h-0">
           {headerWithRecovery}
+          <SessionUsageSummary usage={meta?.usage} />
           <SessionEmptyState />
         </div>
         {siblingSidebar}
@@ -267,16 +272,22 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
     <div className="flex flex-col flex-1 min-h-0 relative xl:flex-row">
       <div className="flex flex-col flex-1 min-h-0">
         {headerWithoutRecovery}
+        <SessionUsageSummary usage={meta.usage} />
         <div
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto min-w-0"
           data-testid="session-transcript-scroll-container"
         >
+          <StickySessionTitle
+            meta={sessionMeta}
+            statusKind={displayStatusKind}
+            turnCount={displayTurnCount}
+          />
           {recoveryBarContent && (
             <div
               data-testid="session-recovery-bar"
               data-sticky="true"
-              className="sticky top-0 z-20 border-b border-gray-200 bg-white px-4 py-3"
+              className="sticky top-9 z-20 border-b border-gray-200 bg-white px-4 py-3"
             >
               {recoveryBarContent}
             </div>
@@ -404,8 +415,8 @@ function SessionHeader({
     usage?.thoughtTokens != null
 
   const contextWindowPct =
-    usage?.contextWindowUsed != null && usage?.contextWindowSize != null && usage.contextWindowSize > 0
-      ? Math.min(100, Math.round((usage.contextWindowUsed / usage.contextWindowSize) * 100))
+    usage?.contextUsagePercent != null
+      ? Math.round(Math.max(0, Math.min(100, usage.contextUsagePercent)))
       : null
 
   return (
@@ -504,6 +515,12 @@ function SessionHeader({
                 : [usage?.inputTokens != null ? `${formatCompact(usage.inputTokens)} in` : '', usage?.outputTokens != null ? `${formatCompact(usage.outputTokens)} out` : '']
                     .filter(Boolean)
                     .join(' · ')}
+              {usage?.cachedReadTokens != null && usage.cachedReadTokens > 0 && (
+                <span className="ml-1 text-gray-400">+{formatCompact(usage.cachedReadTokens)} cached</span>
+              )}
+              {usage?.thoughtTokens != null && usage.thoughtTokens > 0 && (
+                <span className="ml-1 text-gray-400">+{formatCompact(usage.thoughtTokens)} thought</span>
+              )}
             </span>
           )}
           {usage?.costAmount != null && usage?.costCurrency && (
@@ -536,6 +553,40 @@ function SessionHeader({
           {recoveryBar}
         </div>
       )}
+    </div>
+  )
+}
+
+function StickySessionTitle({ meta, statusKind, turnCount }: {
+  meta: import('../../../entities/coder-session').SessionMetadata
+  statusKind: StatusKind
+  turnCount: number
+}) {
+  const usage = meta?.usage
+  const totalTokens = usage?.totalTokens ?? null
+  const contextPct = usage?.contextUsagePercent != null
+    ? Math.round(Math.max(0, Math.min(100, usage.contextUsagePercent)))
+    : null
+
+  return (
+    <div className="sticky top-0 z-20 border-b border-gray-200 bg-white px-4 py-2" data-testid="session-sticky-title">
+      <div className="flex items-center gap-2 text-sm">
+        <span className="font-medium truncate">{meta?.sessionName ?? 'Session'}</span>
+        <StatusBadge kind={statusKind} />
+        <span className="text-gray-400 text-xs">{turnCount} turn{turnCount !== 1 ? 's' : ''}</span>
+        {totalTokens != null && (
+          <>
+            <span className="text-gray-300">·</span>
+            <span className="text-gray-500 text-xs">{formatCompact(totalTokens)} tokens</span>
+          </>
+        )}
+        {contextPct != null && (
+          <>
+            <span className="text-gray-300">·</span>
+            <span className="text-gray-500 text-xs">{contextPct}% ctx</span>
+          </>
+        )}
+      </div>
     </div>
   )
 }

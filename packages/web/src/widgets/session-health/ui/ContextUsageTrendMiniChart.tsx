@@ -1,4 +1,3 @@
-import { classifyContextHealth, type ContextHealthStatus } from '../model/context-health'
 import { cn } from '@/shared/lib/utils'
 
 /**
@@ -39,22 +38,8 @@ const VIEWBOX_HEIGHT = 20
 const PADDING_X = 1
 const PADDING_Y = 2
 
-/**
- * Stroke colour for each traffic-light band, matching the broader
- * `ContextHealthIndicator` treatment so the chart and the indicator
- * announce severity consistently on the same card.
- */
-const STROKE_CLASS: Record<ContextHealthStatus, string> = {
-  green: 'stroke-gray-400',
-  yellow: 'stroke-yellow-500',
-  red: 'stroke-red-500',
-}
-
-const FILL_CLASS: Record<ContextHealthStatus, string> = {
-  green: 'fill-gray-400/15',
-  yellow: 'fill-yellow-500/20',
-  red: 'fill-red-500/20',
-}
+const STROKE_CLASS = 'stroke-gray-400'
+const FILL_CLASS = 'fill-gray-400/15'
 
 /**
  * Build a polyline `d` attribute for the supplied samples, mapping the
@@ -112,9 +97,8 @@ function clamp(percent: number): number {
  * usable samples are available, so a freshly started session does not
  * show a broken or empty-axis chart.
  *
- * The stroke colour follows the canonical traffic-light band derived
- * from the latest sample, matching the `ContextHealthIndicator`
- * treatment on the same card for visual consistency.
+ * The stroke stays neutral because server-provided healthStatus is the
+ * only source for traffic-light context health classification.
  */
 export function ContextUsageTrendMiniChart({
   history,
@@ -130,7 +114,6 @@ export function ContextUsageTrendMiniChart({
   const linePath = buildPath(cleaned, innerWidth, innerHeight)
   const fillPath = buildFillPath(linePath, innerWidth, innerHeight)
   const latest = cleaned[cleaned.length - 1]!
-  const status: ContextHealthStatus = classifyContextHealth(latest.percent) ?? 'green'
 
   const offsetX = PADDING_X
   const offsetY = PADDING_Y
@@ -148,21 +131,20 @@ export function ContextUsageTrendMiniChart({
       data-testid="context-usage-trend-mini-chart"
       data-history-length={cleaned.length}
       data-latest-percent={latest.percent}
-      data-status={status}
       data-first-at={firstAt}
       data-last-at={lastAt}
       className={cn('block overflow-visible', className)}
     >
       <title>{headline}</title>
       <g transform={`translate(${offsetX}, ${offsetY})`}>
-        <path d={fillPath} className={FILL_CLASS[status]} aria-hidden="true" />
+        <path d={fillPath} className={FILL_CLASS} aria-hidden="true" />
         <path
           d={linePath}
           fill="none"
           strokeWidth="1.25"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={STROKE_CLASS[status]}
+          className={STROKE_CLASS}
         />
       </g>
     </svg>
