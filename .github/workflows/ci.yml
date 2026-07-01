@@ -38,5 +38,3 @@ jobs:
 
       - name: Build and test
         run: npm run verify
-        env:
-          VITEST_MAX_WORKERS: 1
