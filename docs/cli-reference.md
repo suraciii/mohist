@@ -1,6 +1,6 @@
 # CLI 参考
 
-`mo` 是 Mohist 的命令行入口。和 Web UI 功能等价，适合脚本、自动化、远程 SSH 场景。首次安装上手走 [快速上手](getting-started.md)；本文是完整命令参考。
+`mo` 是 Mohist 的命令行入口，面向脚本、自动化和远程 SSH 场景。文档化 Mohist 的功能入口命令组；完整命令树以 `mo --help` 为准（本文未覆盖到的子命令请直接查 `--help`）。首次安装上手走 [快速上手](getting-started.md)；CLI 与 Web UI 各有分工，本文不主张二者等价或一一对应。
 
 ## 全局
 
@@ -197,6 +197,90 @@ mo runner list               # 当前 project 的 runner 详情列表
 ```
 
 详见 [Runner 指南](runner.md)。
+
+## Agent 管理
+
+```bash
+mo agent create [options]                       # 创建 agent
+mo agent list                                   # 列出 agent（别名 ls）
+mo agent show <name-or-id>                      # 查看 agent 详情
+mo agent update <name-or-id> [options]          # 更新 agent
+mo agent delete <name-or-id>                    # 归档 agent
+
+# 通用 AgentSession（与 issue 解耦的 agent 主动调用）
+mo agent session list <agent>                   # 列出 agent 的 session
+mo agent session show <session-id>              # 查看 session 摘要
+mo agent session transcript <session-id>        # 查看 session 对话摘要
+mo agent session launch <agent>                 # 从 agent profile 启动 session
+mo agent session followup <session-id>          # 向运行中的 session 推送后续指令
+mo agent session cancel <session-id>            # 请求取消运行中的 session
+```
+
+`create`/`update` 常用选项：
+
+| 选项 | 含义 |
+|------|------|
+| `--name <name>` | agent 名（update 时为新名） |
+| `--description <text>` | 描述（`--clear-description` 可清空） |
+| `--instructions <text\|@file\|-` | 指令正文 |
+| `--instructions-stdin` | 从 stdin 读指令 |
+| `--agent-config <json\|@file>` | agent config JSON（`--clear-agent-config` 可清空） |
+| `--skills <a,b,c>` | 启用 skill 列表（`--clear-skills` 可清空） |
+| `--max-concurrent-runs <n>` | 并发上限（`--clear-max-concurrent-runs` 可清空） |
+
+`followup` 的文本源（与 issue session 一致）：`--text <text>` / `--text-file <path>` / `--text-stdin` 三选一。
+
+所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo agent --help` / `mo agent <sub> --help`。
+
+## Label 管理
+
+```bash
+mo label list                    # 列出 project 的 label 目录（别名 ls）
+mo label add <key> [options]     # 向 project 目录新增一条 label 定义
+mo label update <key> [options]  # 更新 label 定义（partial update）
+mo label remove <key>            # 从目录删除一条 label 定义（别名 rm）
+```
+
+`add`/`update` 选项：
+
+| 选项 | 含义 |
+|------|------|
+| `--description <text>` | 何时使用该 label |
+| `--supported-values <v1,v2,...>` | 推荐的取值列表 |
+
+所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo label --help`。
+
+## Workflow 管理
+
+```bash
+mo workflow list                 # 列出 workflow profile（别名 ls）
+```
+
+这是顶层 `mo workflow`，管理 workflow profile（profile 即 issue 创建时绑定的运行配置）。它**不同于** `mo project workflow template` / `mo project workflow config`（模板与运行时配置，见 [项目管理](#项目管理)）。
+
+所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo workflow --help`。
+
+## OTel 管理
+
+```bash
+mo otel query [<sql>]            # 直接查询 otel.db（无需 server）
+mo otel status                   # OTel collector 状态与数据库统计（需 server）
+```
+
+`query` 选项：
+
+| 选项 | 含义 |
+|------|------|
+| `-d, --db <path>` | otel.db 文件路径（默认 `~/.mohist/otel.db`） |
+
+典型查询：
+
+```bash
+mo otel query "SELECT COUNT(*) FROM traces"
+mo otel query "SELECT name, COUNT(*) FROM spans GROUP BY name ORDER BY 2 DESC LIMIT 10"
+```
+
+`status` 需 server 在跑。完整 flag 见 `mo otel --help` / `mo otel <sub> --help`。
 
 ## 只读诊断
 
