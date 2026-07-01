@@ -93,6 +93,39 @@ public class IssueQuerier : IScopedService
         return await LoadIssueAsync(db, projectId, number);
     }
 
+    /// <summary>
+    /// Reverse lookup: returns the <c>issueId</c> of the in-progress issue
+    /// bound to <paramref name="workflowRunId"/>, or <c>null</c> when no
+    /// in-progress issue is bound. Used by
+    /// <c>Events/Subscriptions/IssueWorkflowCompletionHandler</c> to
+    /// resolve the owning issue from a <c>com.mohist.workflow.run.completed</c>
+    /// CloudEvent (whose payload carries no issue context).
+    /// <para>
+    /// The query rides the existing indexed <c>IssueRow.WorkflowRunId</c>
+    /// computed column plus the <c>Status</c> index, so it is a single
+    /// cheap indexed query — no schema change, no new index. Filtering
+    /// to <c>Status = 'inProgress'</c> reuses the same predicate the
+    /// deleted <c>IssueWorkflowReconciliationService</c> documented: a
+    /// preserved <c>WorkflowRunId</c> on <c>Done</c>/archived issues is
+    /// execution history, not a stuck-run signal, so an unfiltered lookup
+    /// could match a stale binding. The status filter also makes the
+    /// post-<c>Done</c> idempotent path explicit at the handler level
+    /// (lookup returns <c>null</c> → no-op) instead of relying solely on
+    /// the grain guard.
+    /// </para>
+    /// </summary>
+    public async Task<string?> GetIssueIdForWorkflowRunAsync(string workflowRunId)
+    {
+        if (string.IsNullOrWhiteSpace(workflowRunId)) return null;
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.Issues.AsNoTracking()
+            .Where(r => r.WorkflowRunId == workflowRunId && r.Status == "inProgress")
+            .Select(r => new { r.IssueId })
+            .FirstOrDefaultAsync();
+        return row?.IssueId;
+    }
+
     private static async Task<Domain.Issue?> LoadIssueAsync(MohistDbContext db, string projectId, int number)
     {
         var row = await db.Issues.AsNoTracking()

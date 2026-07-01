@@ -1,0 +1,34 @@
+## T-001 — Event-driven issue completion on workflow-run Completed
+
+### Codebase Patterns
+- Handler placement: `packages/server/src/Mohist.Server/Events/Subscriptions/`
+- Spec placement: `packages/server/tests/Mohist.Server.Tests/Specs/Events/<aggregate>/<Handler>Specs.cs`
+- Subscription attribute: `[Subscription(Type = EventCatalog.ReverseDns.WorkflowRunCompleted)]`
+- Handler shape: `ICloudEventHandler` (non-generic). Generic form `ICloudEventHandler<T>` is reserved for typed payload handlers like `EpicAutoDoneHandler` (uses CloudEvent extensions to carry issue/project). The new handler parses the run id from `evt.Source` via `WorkflowEventSerializer.ExtractContextFromSource` — same approach as `RunnerWorkflowTerminalStatusHandler`.
+- Issue resolution: `IssueQuerier.GetIssueIdForWorkflowRunAsync(string workflowRunId)` is added as a new scoped dependency. Returns `null` when no in-progress issue is bound. SQL: `WHERE WorkflowRunId = @id AND Status = 'inProgress'`. Filter on status reuses the deleted sweep's documented wisdom about preserved `WorkflowRunId` on Done issues being history, not a stuck-run signal.
+- Dispatch: synchronous `_grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId)).CompleteWorkAsync(workflowRunId)` — same-grain-vs-different-grain analysis: workflow publish path → IssueGrain (different grain, no reentrancy). Matches `EpicAutoDoneHandler`'s posture (issue publish path → EpicGrain, sync).
+- Scoped resolution: handler is wired as a singleton by the bus, but `IssueQuerier` is scoped. Handler opens `IServiceScope` per delivery via `IServiceScopeFactory` — same pattern as `InboxProjectionHandler`.
+- Exception handling: handler has TWO try/catch blocks. The first guards the IssueQuerier lookup (DB-side fault); the second guards `CompleteWorkAsync`. Both swallow + `LogWarning` — never propagated.
+- TimeProvider: spec tests use `Microsoft.Extensions.Time.Testing.FakeTimeProvider` injected through the recording grain factory.
+- Test scope factory: minimal `IServiceScopeFactory` test double constructs `IssueQuerier` with `null!` for unused dependencies. Pattern documented inline (matches EpicQuerier unit-test pattern in EpicAutoDoneHandlerSpecs).
+- Single-type subscription: `[Subscription(Type = EventCatalog.ReverseDns.WorkflowRunCompleted)]` — NOT the pipe-separated terminal pattern. Failed/stopped are explicitly NOT subscribed; Filter() also hard-rejects non-Completed types as defense in depth.
+
+### Key files
+- `packages/server/src/Mohist.Server/Events/Subscriptions/IssueWorkflowCompletionHandler.cs` — new (123 lines)
+- `packages/server/src/Mohist.Server/Issue/Services/IssueQuerier.cs` — added `GetIssueIdForWorkflowRunAsync` (+33 lines incl. doc comment)
+- `packages/server/tests/Mohist.Server.Tests/Specs/Events/Issue/IssueWorkflowCompletionHandlerSpecs.cs` — new (783 lines, 17 specs, all pass)
+
+### Verification
+- `dotnet build Mohist.sln`: 0 warnings, 0 errors (TreatWarningsAsErrors enabled).
+- `dotnet test --filter IssueWorkflowCompletionHandlerSpecs`: 17/17 pass.
+- Full `npm test`: 3373 server tests pass, 0 failures. Runner/web suites also green.
+
+### Gotchas / Lessons
+- `IIssueGrain.CompleteWorkAsync` already guards on `Status == InProgress` and `workflowRunId` match. Spec test `HandleAsync_MismatchedWorkflowRunIdOnIssue_DoesNotMutateIssue` exercises this guard independently — the handler itself relies on the `Status = 'in_progress'` filter as the first line of defense (avoids activating the grain at all on stale bindings).
+- The handler swallows BOTH lookup exceptions and grain exceptions — without the lookup catch, a transient DB fault would otherwise bubble into the publish path. Mirrors the existing handler design.
+- The handler accepts events with `evt.Type == WorkflowRunCompleted` ONLY (via the single-type subscription attribute). The `Filter` method also hard-rejects other types — belt-and-suspenders.
+- `IssueWorkflowReconciliationService` is still present on disk but is left untouched (T-002's job to delete). T-001 only adds the new event-driven path.
+
+### Follow-ups
+- T-002 will delete `IssueWorkflowReconciliationService` and its hosted registration, simplify `IssueGrain.GetWorkflowStatusAsync` to a pure query.
+- T-003 is independent (Web UI).
