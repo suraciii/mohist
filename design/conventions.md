@@ -140,3 +140,42 @@ They answer "how should this workflow run work be parameterized?"
 Runtime context answers "what concrete run facts does this dispatch need?"
 
 Keep those lifecycles separate.
+
+## Display Surface vs Functional Entry Boundary
+
+This is the standing test for "should this capability get a CLI/skill entry, or
+stay Web-only?" Apply these three tiers in order:
+
+| Tier | Capability shape | Surface |
+|------|------------------|---------|
+| 1 | Display / read-only surface (dashboards, metrics, inbox, agent ops views) | **Web-only** — no CLI command, no skill entry |
+| 2 | State-changing functional entry point (create, start, approve, reject, retry, rerun, stop, force-stop, resume, rebase, done, close, ...) | **`mo` CLI command required** |
+| 3 | Multi-step methodology to encode (templates, decision points, confirmation gates, repeatable flow) | **Coder-agent skill entry** — only when methodology exists, not for every CLI command |
+
+Rules:
+
+- Tier 1 is the default for anything read-only. A read-only surface gets neither a
+  `mo` command nor a skill entry; it stays on the Web UI.
+- Tier 2 is mandatory for every state-changing entry point. If a workflow action
+  exists in the system, it MUST be reachable from the `mo` CLI. The cheat-sheet
+  in the dispatcher skill is the single source for which `mo` commands exist.
+- Tier 3 is conditional. A skill entry is added only when the capability carries
+  real methodology — a multi-step flow with templates, decisions, and/or
+  confirmation gates — not merely because a CLI command exists. Adding a skill
+  for every CLI command would expand the contract-bearing surface without
+  methodology gain and increase drift risk.
+- Operations that satisfy tier 2 but not tier 3 (e.g. issue/epic lifecycle
+  commands: `start`/`approve`/`reject`/`retry`/`rerun`/`stop`/`resume`/`rebase`,
+  epic `start`/`pause`/`resume`) belong in the dispatcher skill's command
+  surface, not in a dedicated operations skill. Re-elevate to a dedicated skill
+  only when those flows accumulate methodology that the dispatcher's
+  cheat-sheet cannot carry.
+
+Examples:
+
+- Metrics dashboard, inbox, agent ops views → tier 1, Web-only.
+- `mo issue start`, `mo epic pause`, `mo label add` → tier 2, CLI only.
+- `mohist-create-issue` skill → tier 3, the issue-creation flow has templates,
+  prerequisite linking, and confirmation gates worth encoding as a methodology.
+- `mohist-create-epic` skill → tier 3, epic scaffolding has description shape,
+  prerequisite linking, and autopilot framing worth encoding as a methodology.

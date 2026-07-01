@@ -132,8 +132,18 @@ public class IssueGrain : Grain, IIssueGrain
         var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(_issue!));
         var repo = resolution.Repository!;
         var undeliveredPrerequisites = await LoadUndeliveredPrerequisiteNumbersAsync();
+        ThrowIfStartBlocked(undeliveredPrerequisites);
         var wrId = $"wr_{Guid.NewGuid():N}";
         return await StartWorkflowAsync(project, wrId, repo, undeliveredPrerequisites);
+    }
+
+    private void ThrowIfStartBlocked(IReadOnlySet<int>? undeliveredPrerequisites)
+    {
+        var blocker = _issue!.StartBlocker(undeliveredPrerequisites);
+        if (blocker is IssueStartBlocker.Draft)
+            throw new IssueStartBlockedException(blocker, $"Issue #{_issue.Number} is still a draft and cannot be started");
+        if (blocker is IssueStartBlocker.WaitingFor waiting)
+            throw new IssueStartBlockedException(blocker, $"Issue #{_issue.Number} is waiting for prerequisite issue #{waiting.PrerequisiteNumber}");
     }
 
     private async Task<string> StartWorkflowAsync(

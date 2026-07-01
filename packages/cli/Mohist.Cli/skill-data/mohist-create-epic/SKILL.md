@@ -1,15 +1,14 @@
 ---
 name: mohist-create-epic
-description: 创建 Mohist epic 的机械执行：写里程碑描述（Goal/Background/Non-goals/Scope）、定优先级、确认后跑 mo epic create，并 link 子 issue、设 prerequisite、管理 done/close 生命周期。当用户要把一组已探索好的、共享同一里程碑目标的 issue 作为 epic 落地时使用。触发词包括 "创建 epic"、"建 epic"、"link issue to epic"、"mo epic create"、"epic 生命周期"。issue 还是 epic 的决策由 mohist-explore 完成。
+description: 创建 Mohist epic 的机械执行：写里程碑描述（Goal/Background/Non-goals/Scope）、定优先级、确认后跑 mo epic create，并 link 子 issue、设 prerequisite、管理 autopilot 生命周期（start/pause/resume + done/close 终态）。当用户要把一组已探索好的、共享同一里程碑目标的 issue 作为 epic 落地时使用。触发词包括 "创建 epic"、"建 epic"、"link issue to epic"、"mo epic create"、"epic 生命周期"、"autopilot"。issue 还是 epic 的决策由 mohist-explore 完成。
 ---
 
 # mohist-create-epic
 
-This skill owns the **mechanics** of creating a Mohist epic. An epic is an
-organizational milestone that groups 3+ issues toward a single product goal; it
-does **not** participate in workflow execution and has no risk or workflow
-fields. Epic content is a lightweight milestone description, not the five-section
-PRD used for issues.
+This skill owns the **mechanics** of creating a Mohist epic and driving it through
+its full lifecycle. An epic is an organizational milestone that groups 3+ issues
+toward a single product goal. Epic content is a lightweight milestone description,
+not the five-section PRD used for issues.
 
 Whether to create an epic (versus standalone issues) is decided upstream in
 `mohist-explore` — its Scope stage determines whether the work shares one
@@ -63,22 +62,80 @@ it as prerequisites so the epic can advance one issue at a time without false
 starts:
 
 ```bash
-# CLI does not yet have a prerequisite command — use the API:
-curl -X POST http://localhost:3456/api/projects/<project>/issues/<B>/prerequisites \
-  -H "Content-Type: application/json" \
-  -d '{"prerequisiteNumber": <A-number>}'
+mo issue prereq add <B-number> <A-number>
+mo issue prereq remove <B-number> <A-number>
 ```
 
 A starts first; B becomes start-blocked ("waiting for #A") until A is delivered,
-then B is free to start. Prefer fewer prerequisites — only real data/scaffold/invariant dependencies.
+then B is free to start. Prefer fewer prerequisites — only real data/scaffold/invariant dependencies. Use the API only as a fallback when the CLI is unavailable.
 
-### Lifecycle: done vs close
+### Lifecycle: prefer autopilot (start / pause / resume)
 
-- `mo epic done <id>` — marks the milestone shipped. Requires **all** linked
-  issues delivered; else fails with `EPIC_NOT_READY_TO_MARK_DONE`.
+After an epic is created and its linked issues are in place, **the default way
+to drive it is the autopilot lifecycle** — not manually starting each member
+issue one by one. A `running` epic auto-advances to the next startable linked
+issue whenever the current one reaches a terminal state, so you only step in
+when the plan itself changes (pause) or the milestone is done.
+
+The five lifecycle states (`idle` / `running` / `paused` / `done` / `closed`)
+are managed by five operations; the autopilot three drive day-to-day progression,
+`done` / `close` are the terminal tail.
+
+| Operation | CLI | Effect |
+|---|---|---|
+| Start | `mo epic start <id>` | `idle` → `running`; auto-advances to the first startable linked issue |
+| Pause | `mo epic pause <id>` | `running` → `paused`; stops future advancement, does NOT interrupt the in-progress issue |
+| Resume | `mo epic resume <id>` | `paused` → `running`; re-evaluates readiness and advances |
+| Done | `mo epic done <id>` | terminal `done` (requires no open linked issues / all linked issues terminal; fails with `EPIC_NOT_READY_TO_MARK_DONE` otherwise) |
+| Close | `mo epic close <id>` | terminal `closed` (abandon the milestone) |
+
+#### Idempotency
+
+Each autopilot operation is **idempotent against its current state**: starting an
+already-`running` epic is a no-op (does not error), pausing an already-`paused`
+epic is a no-op, and resuming an already-`running` epic is a no-op. Only an
+unexpected source state produces a conflict error (e.g. Start on a `paused`
+epic). This makes autopilot safe to retry from automation without bookkeeping.
+
+#### Running-but-idle
+
+A `running` epic can be observable-but-not-advancing when there are still open
+linked issues but **no startable next issue right now** (e.g. waiting on a
+dependency, next issue is blocked). This **running-but-idle** is NOT a separate
+state — the epic's `status` stays `running`, and `progress.nextIssueReason` in
+`mo epic show` explains why. Use it to decide whether to wait, set
+prerequisites, or `Pause` to stop the autopilot until you can unblock it.
+
+```bash
+# Drive the autopilot lifecycle
+mo epic start  <epic-id-or-number>   # idle → running; auto-advances first issue
+mo epic pause  <epic-id-or-number>   # running → paused (current issue keeps running)
+mo epic resume <epic-id-or-number>   # paused → running
+
+# Check why a running epic is idle
+mo epic show <epic-id-or-number>     # inspect progress.nextIssue + nextIssueReason
+```
+
+**Recommend autopilot over manual per-issue starts.** Manually `mo issue start`
+ing each member defeats the milestone model — you lose the running-but-idle
+signal, the idempotent retry, and the auto-advancement on terminal. Use Start
+once, then watch `mo epic show`; only fall back to manual issue commands when
+the autopilot is `paused` and you specifically want to start one out of order.
+
+### Lifecycle: terminal (done / close)
+
+- `mo epic done <id>` — marks the milestone shipped. Requires **no open linked
+  issues**: all linked issues must be terminal (`done` or `cancelled`); else
+  fails with `EPIC_NOT_READY_TO_MARK_DONE`. `deliveredCount` counts only
+  delivered issues, so cancelled linked issues satisfy readiness but do not
+  count as delivered. `done` and `closed` are terminal — once entered, the epic
+  cannot transition out.
 - `mo epic close <id>` — abandons the milestone (not done, just dropped).
 
-Use `done` for completed milestones, `close` for cancelled ones.
+Use `done` for completed milestones, `close` for cancelled ones. The system may
+also auto-transition a non-`paused`, non-terminal epic to `done` when it
+recomputes and finds no open linked issues, so observing `done` is not by itself
+evidence of a user action.
 
 ### User confirmation flow
 
@@ -88,6 +145,11 @@ Before creating, present to the user and wait for confirmation:
 2. The planned linked-issue list (numbers + titles) — or state "link later".
 3. On confirm, run `mo epic create`; then `mo epic link` for each planned issue.
 
+After creation, also confirm the autopilot posture:
+
+4. Whether to `mo epic start` immediately (default for active milestones) or
+   leave `idle` for now.
+
 Never create an epic without confirmation.
 
 ### End-to-end creation checklist
@@ -96,4 +158,6 @@ Never create an epic without confirmation.
 - [ ] `priority` is `p0`–`p3`.
 - [ ] No frontmatter/workflow/risk fields invented.
 - [ ] User confirmed title, description summary, priority, and link plan.
-- [ ] Lifecycle choice (done later vs close) is understood.
+- [ ] Autopilot posture confirmed: `mo epic start` now vs leave `idle`.
+- [ ] Lifecycle choice understood: autopilot (`start` / `pause` / `resume`) for
+      day-to-day driving; `done` / `close` only as terminal tail.
