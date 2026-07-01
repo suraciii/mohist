@@ -135,24 +135,23 @@ Plan / Check 完成后，issue 进入 `awaiting approval`。这时 AI 不工作�
 
 ```bash
 mo issue approve 42     # 通过，进下一阶段
-mo issue reject 42      # 打回，AI 重做当前阶段
+mo issue reject 42 --message "Missing error handling in proposal"  # 打回，AI 重做当前阶段
 ```
 
-**Reject 时的反馈**：reject 命令当前不带理由（roadmap）。如果你想让 AI 知道为什么 reject，先 add comment 再 reject：
+**Reject 时的反馈**：`reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
 
 ```bash
-mo issue comment 42 "Reject because: missing error handling in proposal"
-mo issue reject 42
+mo issue comment add 42 --body "Reject because: missing error handling in proposal"
+mo issue reject 42 -m "See comment: missing error handling"
 ```
 
 ## Comment（评论）
 
 ```bash
 # 加评论
-mo issue comment 42 "Looks good but check edge cases"
+mo issue comment add 42 --body "Looks good but check edge cases"
 
-# 删除评论（需要 comment id，从 mo issue show 拿）
-mo issue comment-delete 42 <comment-id>
+# 删除评论目前不提供 CLI 命令；使用 Web UI 或 API。
 ```
 
 Web UI 上 issue 详情页底部有 comment 区。
@@ -164,22 +163,22 @@ Comment 是你和 AI 协作的**轻量通道**——AI 在 plan 阶段会读 com
 "等 #10 完成再开始 #11"：
 
 ```bash
-mo issue prerequisite-add 11 10    # #11 等 #10
-mo issue prerequisite-remove 11 10 # 移除依赖
+mo issue prereq add 11 10    # #11 等 #10
+mo issue prereq remove 11 10 # 移除依赖
 ```
 
 有 prerequisite 的 issue，启动时会检查依赖是否完成。没完成就拒绝启动。
 
 Web UI 上 issue 详情页有 "Add Prerequisite" 区。
 
-## 暂停与停止
+## 中断、停止与关闭
 
 ```bash
-# 软暂停（stop）—— workflow 状态保留，可以 resume
-mo issue stop 42
-
-# 强制停止（force-stop）—— 终止运行中的 agent session
+# 可恢复中断（force-stop）—— 终止运行中的 agent session，后续用 resume 接着跑
 mo issue force-stop 42
+
+# 永久停止（stop）—— terminal，不能 resume
+mo issue stop 42
 
 # 完全关闭（close）—— issue 进入终态
 mo issue close 42
@@ -190,8 +189,8 @@ mo issue reopen 42
 
 | 操作 | 适用场景 | 后果 |
 |---|---|---|
-| `stop` | 暂时不想让它跑 | 状态保留，可 resume |
-| `force-stop` | agent 卡死、stop 不响应 | 强杀 agent，状态可能 interrupted |
+| `force-stop` | 暂时中断、agent 卡住、想保留恢复入口 | 终止运行中的 agent，issue 进入可 `resume` 的 interrupted 路径 |
+| `stop` | 确定不再继续这次 workflow | 永久停止 workflow run，terminal，不能 resume |
 | `close` | 这个 issue 不做了 | 进入 closed 终态，可 reopen |
 | `reopen` | 误关了，或想再做 | 回到 backlog |
 
@@ -204,6 +203,7 @@ mo issue reopen 42
 | Issue blocked，想重试当前阶段 | `mo issue retry 42` |
 | Issue interrupted（进程崩了），从断点继续 | `mo issue resume 42` |
 | 想完全重做当前阶段（丢弃产物） | `mo issue rerun 42` |
+| 想从指定阶段重做（丢弃该阶段及之后产物） | `mo issue rerun-from-stage 42 --stage build` |
 | Base branch drift 了，rebase issue 分支 | `mo issue rebase 42` |
 
 ## 归档
@@ -240,20 +240,21 @@ mo issue show <number>
 mo issue update <number> [options]
 mo issue start <number>
 mo issue approve <number>
-mo issue reject <number>
+mo issue reject <number> --message <message>
 mo issue close <number>
 mo issue reopen <number>
 mo issue retry <number>
 mo issue rerun <number>
+mo issue rerun-from-stage <number> --stage <stage>
 mo issue force-stop <number>
 mo issue resume <number>
 mo issue stop <number>
 mo issue rebase <number>
 mo issue archive <number>
 mo issue unarchive <number>
-mo issue comment <number> <body>
-mo issue prerequisite-add <number> <prereq-number>
-mo issue prerequisite-remove <number> <prereq-number>
+mo issue comment add <number> [--body <text>|--body-file <path>]
+mo issue prereq add <number> <prereq-number>
+mo issue prereq remove <number> <prereq-number>
 mo issue logs <number>
 mo issue events <number>
 mo issue diff <number>

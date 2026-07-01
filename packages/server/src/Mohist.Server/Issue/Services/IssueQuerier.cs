@@ -1052,6 +1052,7 @@ public class IssueQuerier : IScopedService
             CreatedAt = issue.CreatedAt.ToString("o"),
             UpdatedAt = issue.UpdatedAt.ToString("o"),
             ArchivedAt = issue.ArchivedAt?.ToString("o"),
+            CompletedAt = issue.CompletedAt?.ToString("o"),
             WorkflowRunId = issue.WorkflowRunId,
             WorkflowProfileId = resolved,
             PrerequisiteNumbers = issue.PrerequisiteNumbers,
