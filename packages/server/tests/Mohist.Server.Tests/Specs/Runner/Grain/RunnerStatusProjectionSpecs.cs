@@ -632,6 +632,106 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var view = await service.GetRunnerAsync("test-project", string.Empty);
         Assert.Null(view);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetCapacityAsync_AcrossOnlineRunners_SumsUsedAndTotalSlots()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+
+        var slotsA = 2;
+        var slotsB = 4;
+        var runnerA = $"runner-cap-a-{Guid.NewGuid():N}";
+        var runnerB = $"runner-cap-b-{Guid.NewGuid():N}";
+
+        var grainA = Grains.GetGrain<IRunnerGrain>(runnerA);
+        await grainA.RegisterAsync(new RunnerInfo(runnerA, ["spec/*"], "cap-a-host", "test-project"));
+        await grainA.UpdateAsync(slotsA);
+        var workflowA = $"wf-cap-a-{Guid.NewGuid():N}";
+        await AssignActiveWorkForTestAsync(runnerA, workflowA);
+
+        var grainB = Grains.GetGrain<IRunnerGrain>(runnerB);
+        await grainB.RegisterAsync(new RunnerInfo(runnerB, ["spec/*"], "cap-b-host", "test-project"));
+        await grainB.UpdateAsync(slotsB);
+        var workflowB1 = $"wf-cap-b1-{Guid.NewGuid():N}";
+        var workflowB2 = $"wf-cap-b2-{Guid.NewGuid():N}";
+        await AssignActiveWorkForTestAsync(runnerB, workflowB1);
+        await AssignActiveWorkForTestAsync(runnerB, workflowB2);
+
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
+        var capacity = await service.GetCapacityAsync("test-project");
+
+        Assert.Equal(3, capacity.UsedSlots);
+        Assert.Equal(slotsA + slotsB, capacity.TotalSlots);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetCapacityAsync_ExcludesRunnersNotRegisteredThroughRunnerGrain()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+
+        var runnerId = $"runner-cap-orphan-{Guid.NewGuid():N}";
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        await registry.RegisterAsync(new RunnerInfo(runnerId, [], "orphan-host", "test-project"));
+
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
+        var capacity = await service.GetCapacityAsync("test-project");
+
+        Assert.Equal(0, capacity.UsedSlots);
+        Assert.Equal(0, capacity.TotalSlots);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetOnlineRunnersAsync_OnlyReturnsRegisteredGrainsWithOnlineStatus()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+
+        var onlineRunner = $"runner-online-{Guid.NewGuid():N}";
+        await Grains.GetGrain<IRunnerGrain>(onlineRunner)
+            .RegisterAsync(new RunnerInfo(onlineRunner, ["spec/*"], "online-host", "test-project"));
+
+        var orphanRunner = $"runner-online-orphan-{Guid.NewGuid():N}";
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        await registry.RegisterAsync(new RunnerInfo(orphanRunner, [], "orphan-host", "test-project"));
+
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
+        var views = await service.GetOnlineRunnersAsync("test-project");
+
+        Assert.Single(views);
+        Assert.Equal(onlineRunner, views[0].Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetCapacityAsync_RunnerActiveWorksExceedVisibleSessions_CapacityFollowsRunner()
+    {
+        // The runner grain holds two active workflow works (distinct owner ids)
+        // yet no AgentSession is visible to the server; capacity.active must
+        // follow the runner active-works count, not be clamped to zero.
+        await ClearGlobalRunnerRegistryAsync();
+
+        var runnerId = $"runner-div-{Guid.NewGuid():N}";
+        await Grains.GetGrain<IRunnerGrain>(runnerId)
+            .RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "div-host", "test-project"));
+        await Grains.GetGrain<IRunnerGrain>(runnerId).UpdateAsync(5);
+
+        var workflowA = $"wf-div-a-{Guid.NewGuid():N}";
+        var workflowB = $"wf-div-b-{Guid.NewGuid():N}";
+        await AssignActiveWorkForTestAsync(runnerId, workflowA);
+        await AssignActiveWorkForTestAsync(runnerId, workflowB);
+
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(_fixture.TimeProvider.GetUtcNow()));
+        var capacity = await service.GetCapacityAsync("test-project");
+
+        Assert.Equal(2, capacity.UsedSlots);
+        Assert.Equal(5, capacity.TotalSlots);
+    }
 }
 
 internal class FixedTimeProvider : TimeProvider

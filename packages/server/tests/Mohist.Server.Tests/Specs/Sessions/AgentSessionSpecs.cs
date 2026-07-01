@@ -14,6 +14,7 @@ using Mohist.Server.Tests.Support;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Sessions;
@@ -910,6 +911,111 @@ public class AgentSessionSpecs
         Assert.Equal("probe_timeout", card.EventSummary.FailureCategory);
         Assert.Equal(1, card.EventSummary.ToolCallCount);
         Assert.Equal(1, card.EventSummary.ToolErrorCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task AgentActivity_WhenRunnerActiveWorksExceedVisibleSessions_SlotsReflectRunner()
+    {
+        // Divergence proof for issue-300/T-002: the runner grain carries more
+        // active workflow works than there are visible AgentSessions, so
+        // /agent/activity.summary.slots.active must follow the runner active-works
+        // count rather than be clamped to the visible AgentSession count.
+        var projectName = $"activity-divergence-{Guid.NewGuid():N}";
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
+
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        foreach (var staleId in await registry.ListRunnerIdsAsync())
+            await registry.UnregisterAsync(staleId);
+
+        var runnerId = $"activity-divergence-{Guid.NewGuid():N}";
+        try
+        {
+            await _client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+            await _client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 4 });
+
+            var workflowA = $"wf-activity-div-a-{Guid.NewGuid():N}";
+            var workflowB = $"wf-activity-div-b-{Guid.NewGuid():N}";
+            var workflowProjectId = $"wf-activity-div-project-{Guid.NewGuid():N}";
+            await SeedActivityDivergenceTemplateAsync(workflowProjectId);
+
+            var workflowAGrain = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowA);
+            var workflowBGrain = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowB);
+            var startInput = new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: DateTimeOffset.UtcNow,
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = workflowProjectId,
+                }));
+            await workflowAGrain.StartAsync(startInput);
+            await workflowBGrain.StartAsync(startInput);
+            await workflowAGrain.AssignRunnerAsync(runnerId);
+            await workflowBGrain.AssignRunnerAsync(runnerId);
+
+            var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+            var first = await runner.PollAsync();
+            Assert.NotNull(first);
+            var second = await runner.PollAsync();
+            Assert.NotNull(second);
+
+            var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
+
+            // summary.slots.active reflects the runner active-works count (2
+            // distinct workflow owners), NOT the visible AgentSession count (no
+            // AgentSessions were persisted in this scenario, so 0). max reflects
+            // the persisted runner slots (4).
+            Assert.Equal(2, activity.Summary.Slots.Active);
+            Assert.Equal(4, activity.Summary.Slots.Max);
+            // summary.active continues to reflect the visible AgentSession count;
+            // it does NOT participate in capacity derivation.
+            Assert.Equal(0, activity.Summary.Active);
+        }
+        finally
+        {
+            await _client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    private async Task SeedActivityDivergenceTemplateAsync(string projectId)
+    {
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var templateId = "spec/workflow";
+        var templateJson = JsonSerializer.Serialize(
+            new WorkflowDefinition(templateId,
+            [
+                new StageDefinition("build",
+                    [new TaskDefinition("task-1", "Task 1", "spec/task")],
+                    [])
+            ]),
+            WorkflowYamlSerializer.JsonOptions);
+
+        var existing = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
+        if (existing is null)
+        {
+            db.ProjectWorkflowTemplates.Add(new Mohist.Server.Infrastructure.Data.Workflow.ProjectWorkflowTemplateRow
+            {
+                ProjectId = projectId,
+                TemplateId = templateId,
+                Template = templateJson,
+            });
+        }
+        else
+        {
+            existing.Template = templateJson;
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        if (await db.ProjectWorkflowProfiles.FindAsync(projectId) is null)
+        {
+            db.ProjectWorkflowProfiles.Add(new Mohist.Server.Infrastructure.Data.Workflow.ProjectWorkflowProfile
+            {
+                ProjectId = projectId,
+                DefaultTemplateId = templateId,
+            });
+        }
+        await db.SaveChangesAsync();
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

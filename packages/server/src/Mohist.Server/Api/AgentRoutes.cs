@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Sessions;
 
@@ -13,14 +13,14 @@ public static class AgentRoutes
         var group = app.MapGroup("/api/projects/{projectRef}/agent")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        group.MapGet("/status", async (HttpContext context, IGrainFactory grains, WorkflowActivityQuerier projection) =>
+        group.MapGet("/status", async (HttpContext context, RunnerStatusService runnerStatus, WorkflowActivityQuerier projection) =>
         {
             var project = context.GetResolvedProject();
-            var runners = await ListAvailableRunnersAsync(grains, project.Id);
-            var persistedSlots = await LoadPersistedSlotsByRunnerAsync(grains, runners);
+            var runners = await runnerStatus.GetOnlineRunnersAsync(project.Id);
             var activeAgents = await projection.ListActiveAgentsAsync(project.Id);
+            var capacity = SumCapacity(runners);
 
-            return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runners, persistedSlots));
+            return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runners, capacity));
         });
 
         group.MapGet("/sessions", async (HttpContext context, string? status, int? limit, AgentSessionQuerier sessions) =>
@@ -29,12 +29,12 @@ public static class AgentRoutes
             return ApiResults.Ok(await sessions.ListCurrentAsync(project.Id, status, limit ?? 50));
         });
 
-        group.MapGet("/activity", async (HttpContext context, int? limit, AgentSessionQuerier sessions, IssueQuerier issues, IGrainFactory grains, WorkflowActivityQuerier projection, CancellationToken ct) =>
+        group.MapGet("/activity", async (HttpContext context, int? limit, AgentSessionQuerier sessions, IssueQuerier issues, RunnerStatusService runnerStatus, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-            var runnerIds = (await ListAvailableRunnersAsync(grains, project.Id)).Select(r => r.RunnerId).ToArray();
+            var capacity = await runnerStatus.GetCapacityAsync(project.Id);
             var waiting = await BuildWaitingCardsAsync(issues, project.Id, ct);
-            return ApiResults.Ok(await sessions.GetActivityAsync(project.Id, limit, waiting: waiting, runnerIds: runnerIds, ct: ct));
+            return ApiResults.Ok(await sessions.GetActivityAsync(project.Id, limit, waiting: waiting, capacity: capacity, ct: ct));
         });
 
         group.MapGet("/usage", async (HttpContext context, AgentSessionQuerier sessions, CancellationToken ct) =>
@@ -88,39 +88,20 @@ public static class AgentRoutes
             .ToList();
     }
 
-    private static async Task<IReadOnlyList<RunnerInfo>> ListAvailableRunnersAsync(IGrainFactory grains, string projectId)
+    private static RunnerCapacityView SumCapacity(IReadOnlyList<RunnerStatusView> runners)
     {
-        var globalRunners = await grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).ListRunnersAsync();
-        var available = new List<RunnerInfo>();
-        foreach (var runner in globalRunners)
-        {
-            var grain = grains.GetGrain<IRunnerGrain>(runner.RunnerId);
-            RunnerRuntimeState runtime;
-            try
-            {
-                runtime = await grain.GetRuntimeStateAsync();
-            }
-            catch
-            {
-                continue;
-            }
-            if (runtime.Status == RunnerStatus.Online)
-                available.Add(runner);
-        }
-        return available;
-    }
-
-    private static async Task<IReadOnlyDictionary<string, int>> LoadPersistedSlotsByRunnerAsync(
-        IGrainFactory grains,
-        IReadOnlyList<RunnerInfo> runners)
-    {
-        var slots = new Dictionary<string, int>(StringComparer.Ordinal);
+        var used = 0;
+        var total = 0;
         foreach (var runner in runners)
         {
-            var grain = grains.GetGrain<IRunnerGrain>(runner.RunnerId);
-            slots[runner.RunnerId] = await grain.GetSlotsAsync();
+            var capacity = runner.Capacity;
+            if (capacity is null)
+                continue;
+
+            used += capacity.UsedSlots;
+            total += capacity.TotalSlots;
         }
-        return slots;
+        return new RunnerCapacityView(used, total);
     }
 }
 
@@ -137,31 +118,27 @@ public sealed record AgentStatusResponse(
 {
     public static AgentStatusResponse Create(
         IReadOnlyList<ActiveAgentDto> activeAgents,
-        IReadOnlyList<RunnerInfo> runners,
-        IReadOnlyDictionary<string, int> persistedSlotsByRunner)
+        IReadOnlyList<RunnerStatusView> runners,
+        RunnerCapacityView capacity)
     {
         var runnerAvailable = runners.Count > 0;
-        var activeSlotsByRunner = activeAgents
-            .GroupBy(a => a.RunnerId, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
         var runnerResponses = runners
-            .Select(r =>
-            {
-                // Persisted slots are the sole authoritative source for
-                // dispatch capacity.
-                var maxSlots = persistedSlotsByRunner.TryGetValue(r.RunnerId, out var slots)
-                    ? slots
-                    : RunnerCapacity.DefaultMaxWorkflowSlots;
-                activeSlotsByRunner.TryGetValue(r.RunnerId, out var activeSlots);
-                return new RunnerStatusResponse(r.RunnerId, "external", activeSlots, maxSlots);
-            })
+            .Select(r => new RunnerStatusResponse(
+                r.Id,
+                r.Kind,
+                Active: r.Capacity?.UsedSlots ?? 0,
+                Max: r.Capacity?.TotalSlots ?? 0))
             .ToArray();
+        // Both the per-runner list and the top-level Capacity are derived from the
+        // same RunnerStatusService projection so the two views are guaranteed to
+        // agree. activeAgents retains its AgentSession visibility semantics and
+        // is intentionally NOT used for any slot count.
         return new AgentStatusResponse(
             Running: activeAgents.Count > 0,
             IssueId: activeAgents.FirstOrDefault()?.IssueId,
             IssueNumber: activeAgents.FirstOrDefault()?.IssueNumber,
             ActiveAgents: activeAgents,
-            Capacity: new AgentCapacityResponse(runnerResponses.Sum(r => r.Active), runnerResponses.Sum(r => r.Max)),
+            Capacity: new AgentCapacityResponse(capacity.UsedSlots, capacity.TotalSlots),
             RunnerAvailable: runnerAvailable,
             EmbeddedRunnerEnabled: false,
             RunnerMessage: runnerAvailable ? null : "No runner is connected. Start the Mohist runner process.",

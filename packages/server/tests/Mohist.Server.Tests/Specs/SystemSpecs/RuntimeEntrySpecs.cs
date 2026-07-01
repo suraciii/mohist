@@ -7,10 +7,14 @@ using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Sessions;
 using Xunit;
 
@@ -48,6 +52,13 @@ public class RuntimeEntrySpecs
         var projectName = $"runtime-status-{Guid.NewGuid():N}";
         var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
 
+        // Capacity is summed across every online runner in the global registry,
+        // which is shared across the integration collection. Drain it so the
+        // active/max assertions below reflect only this test's runner.
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        foreach (var staleId in await registry.ListRunnerIdsAsync())
+            await registry.UnregisterAsync(staleId);
+
         try
         {
             await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
@@ -63,7 +74,7 @@ public class RuntimeEntrySpecs
             Assert.False(status.EmbeddedRunnerEnabled);
             Assert.Null(status.RunnerMessage);
             Assert.Equal(0, status.Capacity.Active);
-            Assert.True(status.Capacity.Max >= 2);
+            Assert.Equal(2, status.Capacity.Max);
             var runner = Assert.Single(status.Runners, r => r.Id == "runtime-test-runner");
             Assert.Equal(0, runner.Active);
             Assert.Equal(2, runner.Max);
@@ -192,7 +203,10 @@ public class RuntimeEntrySpecs
     [Fact]
     public async Task AgentStatus_WhenNoRunnerConnected_ReportsUnavailableRuntime()
     {
-        var status = AgentStatusResponse.Create([], [], new Dictionary<string, int>(StringComparer.Ordinal));
+        var status = AgentStatusResponse.Create(
+            activeAgents: [],
+            runners: Array.Empty<RunnerStatusView>(),
+            capacity: new RunnerCapacityView(0, 0));
 
         Assert.False(status.Running);
         Assert.False(status.RunnerAvailable);
@@ -200,6 +214,115 @@ public class RuntimeEntrySpecs
         Assert.Equal(0, status.Capacity.Active);
         Assert.Equal(0, status.Capacity.Max);
         Assert.Equal("No runner is connected. Start the Mohist runner process.", status.RunnerMessage);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task AgentStatus_WhenRunnerActiveWorksExceedVisibleSessions_CapacityReflectsRunner()
+    {
+        // Divergence proof required by issue-300/T-001: the runner grain carries
+        // more active workflow works than there are visible AgentSessions, so
+        // /agent/status.capacity.active must follow the runner active-works
+        // count, not the (smaller) AgentSession count.
+        var projectName = $"runtime-divergence-{Guid.NewGuid():N}";
+        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        foreach (var staleId in await registry.ListRunnerIdsAsync())
+            await registry.UnregisterAsync(staleId);
+
+        var runnerId = $"runtime-divergence-{Guid.NewGuid():N}";
+
+        try
+        {
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+            await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 4 });
+
+            var workflowA = $"wf-div-a-{Guid.NewGuid():N}";
+            var workflowB = $"wf-div-b-{Guid.NewGuid():N}";
+            var workflowProjectId = $"wf-div-project-{Guid.NewGuid():N}";
+            await SeedRuntimeDivergenceTemplateAsync(workflowProjectId);
+
+            var workflowAGrain = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowA);
+            var workflowBGrain = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowB);
+            var startInput = new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: DateTimeOffset.UtcNow,
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = workflowProjectId,
+                }));
+            await workflowAGrain.StartAsync(startInput);
+            await workflowBGrain.StartAsync(startInput);
+            await workflowAGrain.AssignRunnerAsync(runnerId);
+            await workflowBGrain.AssignRunnerAsync(runnerId);
+
+            var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+            var first = await runner.PollAsync();
+            Assert.NotNull(first);
+            var second = await runner.PollAsync();
+            Assert.NotNull(second);
+
+            var httpStatus = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
+
+            // capacity.active reflects the runner active-works count (2
+            // distinct workflow owners), NOT the AgentSession visibility count
+            // (no AgentSessions were persisted in this scenario).
+            Assert.Equal(2, httpStatus.Capacity.Active);
+            Assert.Equal(4, httpStatus.Capacity.Max);
+            Assert.True(httpStatus.ActiveAgents is null || httpStatus.ActiveAgents.Value.GetArrayLength() == 0);
+            Assert.False(httpStatus.Running);
+
+            var runnerView = Assert.Single(httpStatus.Runners, r => r.Id == runnerId);
+            Assert.Equal(2, runnerView.Active);
+            Assert.Equal(4, runnerView.Max);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    private async Task SeedRuntimeDivergenceTemplateAsync(string projectId)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+        await using var db = new MohistDbContext(options);
+        var templateId = "spec/workflow";
+        var templateJson = JsonSerializer.Serialize(
+            new WorkflowDefinition(templateId,
+            [
+                new StageDefinition("build",
+                    [new TaskDefinition("task-1", "Task 1", "spec/task")],
+                    [])
+            ]),
+            WorkflowYamlSerializer.JsonOptions);
+
+        var existing = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
+        if (existing is null)
+        {
+            db.ProjectWorkflowTemplates.Add(new Mohist.Server.Infrastructure.Data.Workflow.ProjectWorkflowTemplateRow
+            {
+                ProjectId = projectId,
+                TemplateId = templateId,
+                Template = templateJson,
+            });
+        }
+        else
+        {
+            existing.Template = templateJson;
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        if (await db.ProjectWorkflowProfiles.FindAsync(projectId) is null)
+        {
+            db.ProjectWorkflowProfiles.Add(new Mohist.Server.Infrastructure.Data.Workflow.ProjectWorkflowProfile
+            {
+                ProjectId = projectId,
+                DefaultTemplateId = templateId,
+            });
+        }
+        await db.SaveChangesAsync();
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -222,7 +345,7 @@ public class RuntimeEntrySpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    private sealed record AgentStatusDto(bool Running, bool RunnerAvailable, bool EmbeddedRunnerEnabled, string? RunnerMessage, RunnerDto[] Runners, AgentCapacityDto Capacity);
+    private sealed record AgentStatusDto(bool Running, bool RunnerAvailable, bool EmbeddedRunnerEnabled, string? RunnerMessage, RunnerDto[] Runners, AgentCapacityDto Capacity, System.Text.Json.JsonElement? ActiveAgents = null);
     private sealed record AgentCapacityDto(int Active, int Max);
     private sealed record RunnerDto(string Id, string? Kind = null, int Active = 0, int Max = 0);
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);

@@ -34,6 +34,47 @@ public class RunnerStatusService : IScopedService
         return views;
     }
 
+    public async Task<IReadOnlyList<RunnerStatusView>> GetOnlineRunnersAsync(string projectId)
+    {
+        var registry = _grainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        var eligible = await registry.ListEligibleRunnersAsync(projectId);
+
+        var views = new List<RunnerStatusView>();
+        foreach (var info in eligible)
+        {
+            if (!await IsRunnerOnlineAsync(info.RunnerId))
+                continue;
+
+            var view = await ProjectRunnerAsync(info);
+            // ProjectRunnerAsync may have observed the grain becoming stale between
+            // the filter call and the projection; drop it if the projection no
+            // longer has a capacity (runtime was lost between reads).
+            if (view.Capacity is null)
+                continue;
+
+            views.Add(view);
+        }
+
+        return views;
+    }
+
+    public async Task<RunnerCapacityView> GetCapacityAsync(string projectId)
+    {
+        var runners = await GetOnlineRunnersAsync(projectId);
+        var used = 0;
+        var total = 0;
+        foreach (var runner in runners)
+        {
+            var capacity = runner.Capacity;
+            if (capacity is null)
+                continue;
+
+            used += capacity.UsedSlots;
+            total += capacity.TotalSlots;
+        }
+        return new RunnerCapacityView(used, total);
+    }
+
     public async Task<RunnerStatusView?> GetRunnerAsync(string projectId, string runnerId)
     {
         if (string.IsNullOrWhiteSpace(runnerId))
@@ -50,6 +91,20 @@ public class RunnerStatusService : IScopedService
         }
 
         return await ProjectRunnerAsync(info);
+    }
+
+    private async Task<bool> IsRunnerOnlineAsync(string runnerId)
+    {
+        var runnerGrain = _grainFactory.GetGrain<IRunnerGrain>(runnerId);
+        try
+        {
+            var runtime = await runnerGrain.GetRuntimeStateAsync();
+            return runtime.Status == RunnerStatus.Online;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task<RunnerStatusView> ProjectRunnerAsync(RunnerInfo info)

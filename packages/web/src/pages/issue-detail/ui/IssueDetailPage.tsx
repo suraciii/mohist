@@ -404,10 +404,10 @@ export function IssueDetailPage() {
     )
   }
 
-  const maxConcurrent = agentStatus?.capacity?.max ?? Infinity
+  const capacity = agentStatus?.capacity
   const thisAgent = activeAgents.find(a => a.issueNumber === issueNumber)
   const agentProgress = thisAgent?.progress
-  const isCapacityFull = activeAgents.length >= maxConcurrent
+  const isCapacityFull = !!capacity && capacity.max > 0 && capacity.active >= capacity.max
   const runnerUnavailable = agentStatus?.runnerAvailable === false
   const isBacklog = issue.status === IssueStatus.Backlog
   const isArchived = !!issue.archivedAt
