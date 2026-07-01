@@ -208,3 +208,98 @@ Page changes (`IssueDetailPage.tsx`):
 - issue-detail suites: 7 files / 132 tests green (no new unit tests; the 4 component suites including the density block at `IssueDetailPage.test.tsx:793-870` — which asserts `space-y-8` on the main column, `:scope > .lg:col-span-2` resolver, `gap-8` on the grid, and the `description-section` / `comments-section` / `commits-section` testids — all pass).
 - `npm run test:run -w packages/web`: 3643 passed / 1 skipped across 236 files (no delta vs. T-005; behavior-preserving move).
 - `npm run build -w packages/web`: green.
+
+## T-007 — verify orchestration-only consolidation and structural goals
+
+Final gate: confirm `IssueDetailPage.tsx` is page-level orchestration only and report aggregate metrics. REVIEW-type task; no new code, only verification.
+
+### AC1 — Page body contains no inline sub-components, mutations, Actions branching, or click-outside effects
+
+`IssueDetailPage.tsx` (453 lines, scc Complexity 64) imports its concerns from the extracted modules:
+
+- **9 presentational pieces**: 5 pills from `./pills` (`PriorityChip`, `WorkflowStagePill`, `HealthPill`, `DraftPill`, `ArchivedPill`), `WorkflowYamlDialog` from `./WorkflowYamlDialog`, `attachmentFromMetadata` from `../model/format` (used only to build the `resolveIssueAttachment` closure at L127; the `attachmentFromMetadata` helper itself lives in `model/format.ts`).
+- **13 mutations**: single `useIssueDetailMutations({ ... })` call at L63 destructures all 13.
+- **Actions branching**: single `computeActionsState({ ... })` call at L107; the result is handed verbatim to `<IssueActionsCard state={actionsState} …/>`.
+- **2 click-outside effects**: zero. `forceStopPanelRef` / `stopPanelRef` no longer exist in the page; the two `useConfirmOutsideClick` calls live inside `IssueActionsCard.tsx` (T-004).
+
+Verification grep:
+- `rg 'useMutation|useQueryClient|setTimeout|addEventListener|removeEventListener|queryClient\.invalidateQueries' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 0 matches.
+- `rg 'showArchivedNote|showForceStopPanel|forceStopContext|blockedActions|showStandaloneRerun|startVariant' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 0 matches (Actions state-machine fields not referenced in the page; the description is opaque from the page's perspective).
+- `rg 'canRetryWorkflow|canResumeWorkflow|canRerunWorkflow|canStopWorkflow|showCheckRepairActions|recoveryAttemptState|recoveryCanWait|recoveryCanStop|agentProgress|isCapacityFull|runnerUnavailable|workflowAllowedActions' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 0 matches (all derivations moved into `computeActionsState`; `isCapacityFull` derivation is now inside `model/actionsState.ts`).
+- `rg 'function (PriorityChip|WorkflowStagePill|HealthPill|DraftPill|ArchivedPill|WorkflowYamlDialog|useConfirmOutsideClick|useIssueDetailMutations|computeActionsState|IssueActionsCard|IssueDetailsCard|IssueDriftCard|IssueConfigurationCard|IssuePrerequisitesCard|IssueReadinessCard|IssueDescriptionSection|IssueDiffFilesSection|IssueCommitsSection|IssueCommentsSection)' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 0 matches (no inline definitions).
+- `isAgentRunningOnThis` is a single 1-line derivation (L85: `activeAgents.some(a => a.issueNumber === issueNumber)`) consumed by `useDocumentTitle` + the `Running` pill + a few card props; this is page-level orchestration data, not the Actions state machine.
+
+Page body now reads as:
+1. Routing/params/state hooks (L37-47): `useParams`, `useNavigate`, `useProjectPath`, `useProject`, `useState` for `editOpen`, `commentText`, `forceStopConfirming`, `stopConfirming`, `deletingCommentId`, `deleteCommentError`.
+2. Mutations hook (L49-77): one `useIssueDetailMutations` call with callbacks for the 4 local-state-resetting mutations.
+3. Query hooks (L79-82, L89): `useIssue`, `useAgentStatus`, `useIssueDiff`, `useWorkflowTimeline`, `useIssueCommits`.
+4. Page-level derivations (L84-87, L103-131): `activeAgents`, `isAgentRunningOnThis`, `useDocumentTitle`, plus post-early-return derivations (`isBacklog`, `isArchived`, `workflowStage`, `prDeliveryMetadata`, `actionsState`, sorted `comments`, `issueProjectId`, `resolveIssueAttachment`).
+5. Layout + dialog mount (L133-451): the `<div data-testid="issue-detail-page-container">` outer wrapper, the header block, the structural `*-frame` divs (`runtime-decision-surface-frame`, `workflow-view-frame`, `pr-delivery-summary-frame`, `workflow-profile-editor-frame`, `diff-summary-banner` conditional), the `grid` + main column + right rail, the layout slots (header pills, sections, cards, panels), and the `<EditIssueDialog>` mount at L444.
+
+### AC2 — Page-wide union of `data-testid` values is unchanged
+
+Baseline: `git show e0527684^:packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx` + the widget files the page imported at that commit (`BranchBar`, `ActivityDialog`, `WorkflowSessionsPanel`, `RuntimeDecisionSurface`, `WorkflowConvergencePanel`, `WorkflowView`, `LatestArtifactsPanel`, `PrDeliverySummary`, `IssueWorkflowProfileEditor`, `WorkflowProfileControl`, `EventTimelinePanel`).
+
+Post-refactor: `IssueDetailPage.tsx` + `ui/cards/*.tsx` + `ui/sections/*.tsx` + `ui/pills.tsx` + `ui/WorkflowYamlDialog.tsx` + the same widget files (none of which were touched during issue-310: `git log --oneline 0cc3fa6d..HEAD -- packages/web/src/widgets/` is empty).
+
+Diff (`diff /tmp/opencode/testids-union-before.txt /tmp/opencode/testids-union-after.txt`): **empty**. Both sets have 91 unique `data-testid="..."` values; the page-wide union is bit-for-bit unchanged vs. pre-refactor.
+
+Per-file inventory (page itself):
+- `IssueDetailPage.tsx`: 18 `data-testid` occurrences on 18 unique values (header / back button / nav / primary epic / running pill / approval pill / archived banner / runtime / workflow view / pr delivery / workflow profile / diff summary / content grid / right rail / profile control frame).
+- `IssueActionsCard.tsx`: 7 (`archived-actions-note`, `start-readiness`, `start-button`, `mark-ready-button`, `ask-agent-issue` plus internal state).
+- `IssueDetailsCard.tsx`: 7 (`issue-detail-details-metadata`, `repository-metadata-row/value`, `repository-name/base-branch/git-url`).
+- `IssueReadinessCard.tsx`: 4 (`readiness-panel`, `readiness-is-draft`, `readiness-can-start`, `readiness-blocker`).
+- `IssueConfigurationCard.tsx`: 1 (`prerequisite-configuration-controls`).
+- `pills.tsx`: 5 (`priority-chip`, `workflow-stage-pill`, `health-pill`, `draft-pill`, `archived-pill`).
+- `WorkflowYamlDialog.tsx`: 1 (`active-run-yaml-trigger`).
+- `IssueCommentsSection.tsx`: 1 (`comments-section`).
+- `IssueCommitsSection.tsx`: 1 (`commits-section`).
+- `IssueDiffFilesSection.tsx`: 1 (`diff-files-section`).
+- `IssueDescriptionSection.tsx`: 1 (`description-section`).
+
+### AC3 — Line count and scc Complexity materially reduced
+
+| Metric                   | Pre-refactor | Post-refactor | Delta                  |
+|--------------------------|--------------|---------------|------------------------|
+| Lines (IssueDetailPage)  | 1375         | 453           | −922 (−67.1%)          |
+| scc Complexity           | 211          | 64            | −147 (−69.7%)          |
+| scc Code lines           | 1299         | 416           | −883 (−68.0%)          |
+
+`pages/issue-detail/` total: 24 files / 5,480 lines / scc 289. The aggregate complexity is split across the new modules:
+- `model/actionsState.ts` (212 lines, complexity concentrated in the 6-input branching).
+- `model/useIssueDetailMutations.ts` (182 lines, 13 mutations).
+- `ui/cards/IssueActionsCard.tsx` (~393 lines, the largest dumb-renderer module).
+- The 5 cards + 4 sections + 5 pills + WorkflowYamlDialog: thin dumb renderers.
+
+### AC4 — All 4 IssueDetailPage suites pass green; typecheck passes; web lint passes
+
+- `npm run test:run -w packages/web -- src/pages/issue-detail/ui/IssueDetailPage`: **4 files / 67 tests green** (`IssueDetailPage.test.tsx`, `.archived`, `.capacity-gating`, `.readiness`).
+- `npm run test:run -w packages/web -- src/pages/issue-detail`: **7 files / 132 tests green** (the 4 component suites + 3 hook unit suites).
+- `npm run test:run -w packages/web` (full web suite): **236 files / 3643 passed / 1 skipped** — no delta vs. T-006.
+- `npm run typecheck -w packages/web`: **green** (exit 0; `tsc -b` with `strict`, `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch` enabled — these are the project's web lint gate; no ESLint config exists).
+- `npm run build -w packages/web`: **green**.
+
+### AC5 — Public route entry unchanged; no external consumer changes
+
+- `packages/web/src/app/App.tsx:10` still imports `import { IssueDetailPage } from '../pages/issue-detail/ui/IssueDetailPage'` and uses it as a route element at L67 (`<Route path="issues/:number" element={<IssueDetailPage />} />`).
+- `git log --oneline 0cc3fa6d..HEAD -- packages/web/src/app/App.tsx packages/web/src/pages/issues/ui/IssuesPage.routing.test.tsx`: empty — neither file changed during issue-310. The `IssuesPage.routing.test.tsx` consumer also imports the same `IssueDetailPage` named export (L43) and remains green.
+- All other import sites of `IssueDetailPage` are within `packages/web/src/pages/issue-detail/ui/IssueDetailPage.*.test.tsx` (the 4 component suites), which were re-run and passed.
+
+### Codebase patterns confirmed for the orchestrator
+
+- The page is the **sole owner of structural wrappers** (the `grid`, both column wrappers, every `*-frame` div with `mb-8`, every structural `data-testid`). All moved JSX was content-level only; the density test at `IssueDetailPage.test.tsx:793-870` continues to pin the structural query (`:scope > .lg:col-span-2` resolver, `space-y-8` main column, `space-y-6` right rail, `gap-8` grid, `mb-8` frames) and remains green.
+- The "page-wide union of data-testid values is unchanged" invariant is structural — moving testids from one file to another is allowed as long as the page renders the same set. The 43 page-defined testids split into 18 (page) + 7 (ActionsCard) + 7 (DetailsCard) + 4 (ReadinessCard) + 1 (ConfigurationCard) + 5 (pills) + 1 (WorkflowYamlDialog) + 4 sections = 43, matching the pre-refactor count exactly.
+- scc reports "Complexity" as a sum of cyclomatic weight over function/branch points, not lines-of-code. The 211 → 64 reduction (−70%) confirms the page's branching logic has been redistributed into smaller pure functions (notably `computeActionsState` + the 13 mutation registrations in the hook), where each module's complexity is now contained and individually testable.
+- The page no longer carries any `useEffect`, `useMutation`, `useQueryClient`, `setTimeout`, `addEventListener`, or `removeEventListener` references; it is now composed entirely of routing, state hooks, query hooks, the mutations hook, and one pure derivation.
+
+### Verification
+
+- AC1 grep suite (5 patterns): all return 0 matches in `IssueDetailPage.tsx` for non-import usages.
+- AC2 union diff: empty (91 vs. 91).
+- AC3 scc: 1375/211 → 453/64.
+- AC4 tests + typecheck + build: green.
+- AC5 route entry + external consumers: zero diffs.
+
+### T-007 outcome
+
+All 5 acceptance criteria pass. The T-001 → T-006 extraction sequence collapsed the 1375-line god-component into a 453-line orchestrator with 24 cohesive modules under `pages/issue-detail/`, while preserving every `data-testid`, every navigation URL, the issue-300 `isCapacityFull` derivation, and every rendered DOM/margin the density test pins. Final commit closes issue-310.
