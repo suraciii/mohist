@@ -1,0 +1,120 @@
+## Codebase Patterns
+
+### Runner capacity source of truth
+
+The authoritative runner capacity projection lives in
+`packages/server/src/Mohist.Server/Runner/Services/RunnerStatusService.cs`:
+
+- `ProjectRunnerAsync` builds `RunnerCapacityView(UsedSlots, TotalSlots)`:
+  - `UsedSlots` = count of `runtime.ActiveWorks` where `OwnerKind == Workflow`
+    **distinct by `OwnerId`** (matches `WorkflowGrainSpecs.AssignActiveWorkForTestAsync` setup pattern).
+  - `TotalSlots` = `await runnerGrain.GetSlotsAsync()` (persisted on the grain).
+- A view with `runtime is null` or `slots is null` returns `Capacity = null`.
+- `GetRunnersAsync` returns every runner in the global registry regardless of
+  online status; offline runners typically come back with `Capacity = null`.
+
+### Runner online filter
+
+`GetOnlineRunnersAsync` (new in T-001) reuses
+`IRunnerRegistryGrain.ListEligibleRunnersAsync` and additionally requires
+`runnerGrain.GetRuntimeStateAsync().Status == RunnerStatus.Online`. The status
+read is wrapped in try/catch so a missing/deactivated grain is filtered out
+without failing the whole call (matches the original
+`AgentRoutes.ListAvailableRunnersAsync` semantics). A runner is online as
+soon as `RunnerGrain.RegisterAsync` runs (it sets `_status = Online`
+unconditionally).
+
+### Aggregate accessor
+
+`GetCapacityAsync` walks `GetOnlineRunnersAsync` views and sums
+`(UsedSlots, TotalSlots)` of any view with non-null `Capacity`. This is the
+single aggregate accessor that `/agent/status` (and T-002's
+`/agent/activity`) consume. No separate capacity service or DTO is
+introduced.
+
+### `/agent/status` route rewiring
+
+`Api/AgentRoutes.cs` `GET /agent/status` now:
+- Calls `RunnerStatusService.GetOnlineRunnersAsync(project.Id)` once.
+- Reads `activeAgents` from `WorkflowActivityQuerier` only for the visibility
+  list and the `Running` flag — never for slot counts.
+- `AgentStatusResponse.Create` takes the views + a precomputed `RunnerCapacityView`
+  from `SumCapacity(runners)`; both the per-runner `Runners[].Active/Max` and
+  the top-level `Capacity` derive from the same views, so they are
+  guaranteed to agree.
+- `LoadPersistedSlotsByRunnerAsync` and `activeSlotsByRunner` are gone.
+
+### Test infrastructure gotchas
+
+- The integration collection (`MohistIntegrationFixture`) shares the global
+  runner registry across tests; any test asserting total `Capacity.Active/Max`
+  must drain `IRunnerRegistryGrain.ListRunnerIdsAsync()` first to stay
+  deterministic — see `AgentStatus_WhenRunnerRegisteredWithoutActiveWork_ReportsIdleRuntime`
+  in `RuntimeEntrySpecs.cs` and the divergence spec below.
+- `RunnerStatusProjectionSpecs` extends `WorkflowGrainSpecs` and already
+  exposes `ClearGlobalRunnerRegistryAsync`, `AssignActiveWorkForTestAsync`,
+  `RegisterRunnerForProjectAsync`, `CreateService`, and `TimeAt(...)`
+  helpers. Use them when adding capacity tests rather than re-wiring helpers.
+- `WorkflowStartInput(Metadata: new WorkflowRunMetadata(...))` works with
+  only `projectId` in `Annotations`; `WorkflowGrain.StartAsync` resolves the
+  template via `WorkflowProfileManager.LoadStructureAsync`, falling back to
+  `IssueWorkflowProfiles.LocalId` if no project/issue profile is set. The
+  `SeedRuntimeDivergenceTemplateAsync` helper inserts both
+  `ProjectWorkflowTemplates` and `ProjectWorkflowProfiles` rows to make
+  startup deterministic.
+
+## T-001 Specific Findings
+
+- The new divergence spec in `RuntimeEntrySpecs.cs` proves
+  `capacity.active == 2` while `activeAgents` is empty and `Running == false`
+  — i.e. capacity reflects runner active works even when no AgentSession is
+  visible.
+- The pre-existing `AgentStatus_WhenRunnerRegisteredWithoutActiveWork_ReportsIdleRuntime`
+  was changed from `Capacity.Max >= 2` to `Capacity.Max == 2` because we now
+  control the registry via a drain at the start of the test; the tightened
+  assertion is meaningful and stable.
+- `AgentCostRollupApiSpecs.GetCost_*` and
+  `AgentUsageTimeseriesApiSpecs.GetUsage_*` failures are pre-existing on
+  `master` (date-boundary tests anchored at 2026-07-01 — today's date is
+  2026-07-01, so they fail under the default fixture time). Not caused by
+  this change.
+## T-001 Verification
+
+- `dotnet build` (TreatWarningsAsErrors): clean (0 warnings, 0 errors).
+- `RunnerStatusProjectionSpecs` filter: 34/34 pass — includes the four
+  new capacity tests (`GetCapacityAsync_AcrossOnlineRunners_SumsUsedAndTotalSlots`,
+  `GetCapacityAsync_ExcludesRunnersNotRegisteredThroughRunnerGrain`,
+  `GetOnlineRunnersAsync_OnlyReturnsRegisteredGrainsWithOnlineStatus`,
+  `GetCapacityAsync_RunnerActiveWorksExceedVisibleSessions_CapacityFollowsRunner`).
+- `RuntimeEntrySpecs` filter: 10/10 pass — includes the new divergence spec
+  `AgentStatus_WhenRunnerActiveWorksExceedVisibleSessions_CapacityReflectsRunner`
+  (asserts `capacity.active == 2`, `ActiveAgents` empty, `Running == false`).
+- `ApiContractSpecs` filter: 27/27 pass — `AgentStatus_ReportsRegisteredRunnerWorkflowSlots`
+  already drains the registry and asserts exact 4/0 values.
+- `Runner` filter (broad): 343/346 pass — 3 skipped (pre-existing,
+  architecture + session lifecycle skips), 0 failures.
+- Full server test run (`npm test`): 3287 pass, 13 skipped, 3 fail. The 3
+  failures (`AgentCostRollupApiSpecs.GetCost_*` × 2,
+  `AgentUsageTimeseriesApiSpecs.GetUsage_RangeToBoundaryIsExclusive`) are the
+  pre-existing date-boundary failures already documented above.
+
+Acceptance criterion crosscheck:
+1. Single aggregate accessor (`RunnerStatusService.GetCapacityAsync`) — done.
+2. `/agent/status` route + per-runner `Runners[].Active/Max` derive from the
+   same runner-status views — done.
+3. `AgentStatusResponse.Create` signature change (drops `persistedSlotsByRunner`,
+   no longer computes `activeSlotsByRunner`) — done; the direct call site
+   `RuntimeEntrySpecs.cs:195` now passes `RunnerCapacityView(0, 0)` and
+   compiles.
+4. `activeAgents` only feeds `ActiveAgents[]` and `Running` — verified by
+   grep: only `Running: activeAgents.Count > 0` remains.
+5. `ApiContractSpecs` / `RuntimeEntrySpecs` capacity assertions rewritten to
+   the unified source — done; assertions that tied capacity to active
+   AgentSession count are removed.
+6. New divergence spec proving runner active works > visible AgentSessions
+   yields `capacity.active == runner active-works count` — done
+   (`AgentStatus_WhenRunnerActiveWorksExceedVisibleSessions_CapacityReflectsRunner`).
+7. `RunnerStatusProjectionSpecs.GetRunnersAsync_CapacityUsesPersistedSlots`
+   and the rest of the authoritative-source suite still pass (34/34).
+8. `npm test` passes (3 pre-existing date-boundary failures unrelated to
+   this change).
