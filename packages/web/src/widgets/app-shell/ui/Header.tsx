@@ -2,7 +2,7 @@ import { useLocation, useParams } from 'react-router-dom'
 import { SidebarTrigger, useSidebar } from '@/shared/ui/components/sidebar'
 import { Button } from '@/shared/ui/components/button'
 import { PlusIcon } from 'lucide-react'
-import { useAgentStatus } from '../../../entities/agent'
+import { useAgentStatus, useAgent } from '../../../entities/agent'
 import { useEpic } from '../../../entities/epic'
 
 function findEpicIdSegment(pathname: string): string | null {
@@ -26,12 +26,14 @@ function formatEpicTitle(
 
 function usePageTitle(): string {
   const location = useLocation()
-  const params = useParams<{ number?: string; id?: string; section?: string }>()
+  const params = useParams<{ number?: string; id?: string; section?: string; agentId?: string }>()
   const segments = location.pathname.split('/').filter(Boolean)
   const firstSegment = segments[0] ?? ''
   const section = segments.length > 1 ? `/${segments.slice(1).join('/')}` : '/'
   const epicIdSegment = findEpicIdSegment(location.pathname)
   const { data: epic, isLoading: epicLoading } = useEpic(epicIdSegment ?? '')
+  const agentId = params.agentId ?? (segments[0] === 'agents' ? segments[1] : undefined)
+  const { data: agent } = useAgent(agentId ?? '')
 
   if (firstSegment === 'issues') {
     return segments.length > 1 ? `Issue #${params.number ?? segments[1]}` : 'Issues'
@@ -40,6 +42,11 @@ function usePageTitle(): string {
   if (firstSegment === 'epics') {
     if (segments.length > 1) return formatEpicTitle(epicLoading, epic, epicIdSegment)
     return 'Epics'
+  }
+  if (firstSegment === 'agents') {
+    if (segments.length > 1 && agent) return agent.name
+    if (segments.length > 1) return `Agent #${agentId?.slice(0, 8)}`
+    return 'Agents'
   }
   if (firstSegment === 'archived') return 'Archived'
   if (firstSegment === 'logs') return 'Logs'
@@ -57,6 +64,10 @@ function usePageTitle(): string {
   }
   if (section.startsWith('/issues/')) {
     return `Issue #${params.number ?? section.split('/')[2]}`
+  }
+  if (section.startsWith('/agents')) {
+    if (section !== '/agents' && agent) return agent.name
+    return 'Agents'
   }
   if (section === '/archived') return 'Archived'
   if (section.startsWith('/logs')) return 'Logs'

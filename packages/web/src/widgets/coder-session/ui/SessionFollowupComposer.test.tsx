@@ -1,64 +1,23 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { ProjectProvider } from '../../../entities/project'
-import { ApiError } from '../../../shared/api/client'
+import { describe, expect, it, vi, beforeEach, type Mock } from 'vitest'
 import { SessionFollowupComposer } from './SessionFollowupComposer'
 
-const apiMocks = vi.hoisted(() => ({
-  postFollowup: vi.fn(),
-}))
-
-vi.mock('../../../entities/coder-session/api/client', () => ({
-  postFollowup: (...args: unknown[]) => apiMocks.postFollowup(...args),
-}))
-
-vi.mock('../../../entities/coder-session/model/useFollowupMutation', () => ({
-  useFollowupMutation: () => ({
-    mutate: (input: unknown, options?: { onSuccess?: (value: unknown) => void; onError?: (err: unknown) => void }) => {
-      const promise = apiMocks.postFollowup(input)
-      promise
-        .then((value: unknown) => options?.onSuccess?.(value))
-        .catch((err: unknown) => options?.onError?.(err))
-    },
-    isPending: false,
-  }),
-}))
-
-function createQueryClient() {
-  return new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
-}
+const onSendMock: Mock<(text: string) => Promise<void>> = vi.fn()
 
 function renderComposer(props: Partial<React.ComponentProps<typeof SessionFollowupComposer>> = {}) {
-  const queryClient = createQueryClient()
   return render(
-    <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1',
-        name: 'Test',
-        createdAt: '2026-01-01T00:00:00Z',
-        updatedAt: '2026-01-01T00:00:00Z',
-        repositories: [],
-      }]}>
-        <SessionFollowupComposer
-          issueNumber={42}
-          sessionName="session-abc"
-          {...props}
-        />
-      </ProjectProvider>
-    </QueryClientProvider>,
+    <SessionFollowupComposer
+      onSend={onSendMock}
+      {...props}
+    />,
   )
 }
 
 beforeEach(() => {
-  apiMocks.postFollowup.mockReset()
+  onSendMock.mockReset()
+  onSendMock.mockResolvedValue(undefined)
 })
 
 describe('SessionFollowupComposer — visibility and enabled state', () => {
@@ -99,15 +58,14 @@ describe('SessionFollowupComposer — disabled (terminal state)', () => {
     expect(screen.queryByTestId('session-followup-send')).not.toBeInTheDocument()
   })
 
-  it('does not call postFollowup when disabled', () => {
+  it('does not call onSend when disabled', () => {
     renderComposer({ disabled: true })
-    expect(apiMocks.postFollowup).not.toHaveBeenCalled()
+    expect(onSendMock).not.toHaveBeenCalled()
   })
 })
 
 describe('SessionFollowupComposer — sending and success state', () => {
-  it('calls postFollowup with trimmed text, issue number and session name on submit', async () => {
-    apiMocks.postFollowup.mockResolvedValue({ status: 'sent' })
+  it('calls onSend with trimmed text on submit', async () => {
     renderComposer()
 
     const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
@@ -115,17 +73,12 @@ describe('SessionFollowupComposer — sending and success state', () => {
     fireEvent.click(screen.getByTestId('session-followup-send'))
 
     await waitFor(() => {
-      expect(apiMocks.postFollowup).toHaveBeenCalledTimes(1)
+      expect(onSendMock).toHaveBeenCalledTimes(1)
     })
-    expect(apiMocks.postFollowup).toHaveBeenCalledWith({
-      issueNumber: 42,
-      sessionName: 'session-abc',
-      text: 'please add a logout button',
-    })
+    expect(onSendMock).toHaveBeenCalledWith('please add a logout button')
   })
 
   it('clears the textarea and shows a brief sent state on success', async () => {
-    apiMocks.postFollowup.mockResolvedValue({ status: 'sent' })
     renderComposer()
 
     const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
@@ -143,7 +96,6 @@ describe('SessionFollowupComposer — sending and success state', () => {
   })
 
   it('submits when Enter is pressed without Shift', async () => {
-    apiMocks.postFollowup.mockResolvedValue({ status: 'sent' })
     renderComposer()
 
     const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
@@ -151,33 +103,33 @@ describe('SessionFollowupComposer — sending and success state', () => {
     fireEvent.keyDown(input, { key: 'Enter', shiftKey: false })
 
     await waitFor(() => {
-      expect(apiMocks.postFollowup).toHaveBeenCalledTimes(1)
+      expect(onSendMock).toHaveBeenCalledTimes(1)
     })
   })
 
   it('does not submit when Enter is pressed with Shift held', () => {
-    apiMocks.postFollowup.mockResolvedValue({ status: 'sent' })
+    onSendMock.mockResolvedValue(undefined)
     renderComposer()
 
     const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
     fireEvent.change(input, { target: { value: 'multiline' } })
     fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
 
-    expect(apiMocks.postFollowup).not.toHaveBeenCalled()
+    expect(onSendMock).not.toHaveBeenCalled()
   })
 
-  it('does not call postFollowup when send button is clicked with empty text', () => {
+  it('does not call onSend when send button is clicked with empty text', () => {
     renderComposer()
     const button = screen.getByTestId('session-followup-send')
     expect(button).toBeDisabled()
     fireEvent.click(button)
-    expect(apiMocks.postFollowup).not.toHaveBeenCalled()
+    expect(onSendMock).not.toHaveBeenCalled()
   })
 
   it('clears inline error from a prior failed send before retrying', async () => {
-    apiMocks.postFollowup
-      .mockRejectedValueOnce(new ApiError('Session is no longer active.', 409))
-      .mockResolvedValueOnce({ status: 'sent' })
+    onSendMock
+      .mockRejectedValueOnce(new Error('Failed'))
+      .mockResolvedValueOnce(undefined)
 
     renderComposer()
     const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
@@ -192,21 +144,15 @@ describe('SessionFollowupComposer — sending and success state', () => {
     fireEvent.click(screen.getByTestId('session-followup-send'))
 
     await waitFor(() => {
-      expect(apiMocks.postFollowup).toHaveBeenCalledTimes(2)
+      expect(onSendMock).toHaveBeenCalledTimes(2)
     })
-    expect(apiMocks.postFollowup.mock.calls[1]?.[0]).toEqual({
-      issueNumber: 42,
-      sessionName: 'session-abc',
-      text: 'second attempt',
-    })
+    expect(onSendMock).toHaveBeenNthCalledWith(2, 'second attempt')
   })
 })
 
 describe('SessionFollowupComposer — error handling', () => {
-  it('shows an inline error and keeps the text when the server returns 409', async () => {
-    apiMocks.postFollowup.mockRejectedValue(
-      new ApiError('Session is no longer active.', 409),
-    )
+  it('shows an inline error when onSend rejects', async () => {
+    onSendMock.mockRejectedValue(new Error('Failed to send message'))
     renderComposer()
 
     const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
@@ -217,62 +163,15 @@ describe('SessionFollowupComposer — error handling', () => {
       expect(screen.getByTestId('session-followup-error')).toBeInTheDocument()
     })
     expect(screen.getByTestId('session-followup-error')).toHaveTextContent(
-      /session is no longer active/i,
+      /failed to send message/i,
     )
     expect((screen.getByTestId('session-followup-input') as HTMLTextAreaElement).value).toBe('add logout')
     expect(screen.getByTestId('session-followup-send')).not.toBeDisabled()
   })
 
-  it('shows an inline error when the server returns 503 (runner offline)', async () => {
-    apiMocks.postFollowup.mockRejectedValue(
-      new ApiError('Runner is offline.', 503),
-    )
-    renderComposer()
+  it('does not throw an uncaught exception when onSend rejects', async () => {
+    onSendMock.mockRejectedValue(new Error('Boom'))
 
-    const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
-    fireEvent.change(input, { target: { value: 'add logout' } })
-    fireEvent.click(screen.getByTestId('session-followup-send'))
-
-    await waitFor(() => {
-      expect(screen.getByTestId('session-followup-error')).toBeInTheDocument()
-    })
-    expect(screen.getByTestId('session-followup-error')).toHaveTextContent(/runner is offline/i)
-  })
-
-  it('falls back to a generic 409 message when the server body is empty', async () => {
-    apiMocks.postFollowup.mockRejectedValue(new ApiError('', 409))
-    renderComposer()
-
-    const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
-    fireEvent.change(input, { target: { value: 'hi' } })
-    fireEvent.click(screen.getByTestId('session-followup-send'))
-
-    await waitFor(() => {
-      expect(screen.getByTestId('session-followup-error')).toBeInTheDocument()
-    })
-    expect(screen.getByTestId('session-followup-error')).toHaveTextContent(
-      /session is no longer active/i,
-    )
-  })
-
-  it('falls back to a generic 503 message when the server body is empty', async () => {
-    apiMocks.postFollowup.mockRejectedValue(new ApiError('', 503))
-    renderComposer()
-
-    const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
-    fireEvent.change(input, { target: { value: 'hi' } })
-    fireEvent.click(screen.getByTestId('session-followup-send'))
-
-    await waitFor(() => {
-      expect(screen.getByTestId('session-followup-error')).toBeInTheDocument()
-    })
-    expect(screen.getByTestId('session-followup-error')).toHaveTextContent(
-      /runner is offline/i,
-    )
-  })
-
-  it('does not throw an uncaught exception when the mutation rejects', async () => {
-    apiMocks.postFollowup.mockRejectedValue(new ApiError('Boom', 503))
     renderComposer()
 
     const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
@@ -290,23 +189,10 @@ describe('SessionFollowupComposer — error handling', () => {
 
 describe('SessionFollowupComposer — disabled transition clears prior errors', () => {
   it('clears the inline error when the composer becomes disabled', async () => {
-    apiMocks.postFollowup.mockRejectedValue(new ApiError('Offline', 503))
+    onSendMock.mockRejectedValue(new Error('Offline'))
 
     const { rerender } = render(
-      <QueryClientProvider client={createQueryClient()}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-          id: 'proj-1',
-          name: 'Test',
-          createdAt: '2026-01-01T00:00:00Z',
-          updatedAt: '2026-01-01T00:00:00Z',
-          repositories: [],
-        }]}>
-          <SessionFollowupComposer
-            issueNumber={42}
-            sessionName="session-abc"
-          />
-        </ProjectProvider>
-      </QueryClientProvider>,
+      <SessionFollowupComposer onSend={onSendMock} />,
     )
 
     const input = screen.getByTestId('session-followup-input') as HTMLTextAreaElement
@@ -318,21 +204,7 @@ describe('SessionFollowupComposer — disabled transition clears prior errors', 
     })
 
     rerender(
-      <QueryClientProvider client={createQueryClient()}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-          id: 'proj-1',
-          name: 'Test',
-          createdAt: '2026-01-01T00:00:00Z',
-          updatedAt: '2026-01-01T00:00:00Z',
-          repositories: [],
-        }]}>
-          <SessionFollowupComposer
-            issueNumber={42}
-            sessionName="session-abc"
-            disabled
-          />
-        </ProjectProvider>
-      </QueryClientProvider>,
+      <SessionFollowupComposer onSend={onSendMock} disabled />,
     )
 
     expect(screen.queryByTestId('session-followup-error')).not.toBeInTheDocument()

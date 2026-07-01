@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/entities/agent/api/queries', () => ({
   useAgentActivity: mocks.useAgentActivity,
   useAgentStatus: () => ({ data: undefined }),
-  useAgentSessions: () => ({ data: [] }),
+  useGlobalAgentSessions: () => ({ data: [] }),
 }))
 
 const TEST_PROJECT = {

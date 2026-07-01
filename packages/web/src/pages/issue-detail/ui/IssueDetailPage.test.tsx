@@ -1003,3 +1003,66 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
     expect(commits.className).not.toContain('border-gray-200')
   })
 })
+
+describe('IssueDetailPage Ask Agent entry (T-005)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseIssueDiff.mockReturnValue({ data: undefined })
+    mockUseIssueCommits.mockReturnValue({ data: undefined })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders an Ask Agent button in the Actions card section', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue(),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const button = await waitFor(() => screen.getByTestId('ask-agent-issue'))
+    expect(button).toBeTruthy()
+    expect(button.textContent).toContain('Ask Agent')
+  })
+
+  it('navigates to the composer with ?issue=<number> on click', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({ number: 14 }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const button = await waitFor(() => screen.getByTestId('ask-agent-issue'))
+    fireEvent.click(button)
+
+    expect(mockUseNavigate).toHaveBeenCalledWith(
+      expect.stringContaining('/agent-sessions/new?issue=14'),
+    )
+  })
+
+  it('uses encodeURIComponent for the issue number in the navigation URL', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({ number: 14 }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const button = await waitFor(() => screen.getByTestId('ask-agent-issue'))
+    fireEvent.click(button)
+
+    const callArg = mockUseNavigate.mock.calls[0][0] as string
+    expect(callArg).toMatch(/\/agent-sessions\/new\?issue=14(&|$)/)
+  })
+})
