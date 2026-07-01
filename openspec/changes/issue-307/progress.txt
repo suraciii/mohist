@@ -32,3 +32,41 @@
 ### Follow-ups
 - T-002 will delete `IssueWorkflowReconciliationService` and its hosted registration, simplify `IssueGrain.GetWorkflowStatusAsync` to a pure query.
 - T-003 is independent (Web UI).
+
+## T-002 — Remove daily sweep + lazy read-path reconciliation; pure-query read path
+
+### Codebase Patterns
+- Test placement for grain-level specs: `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Grain/<Grain>Specs.cs` (mirrors `Specs/Epic/Grain/EpicProgressionSpecs.cs`, `Specs/Agent/Grain/AgentGrainSpecs.cs`). The `Grain/` tier was empty before this change.
+- Testability seam: `IssueGrain` gains `internal string GrainKeyForTest { get; set; } = string.Empty;` plus the existing `private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;`. Matches the EpicGrain/AgentGrain pattern. `Mohist.Server.Tests` already has `InternalsVisibleTo` via `AssemblyInfo.cs`.
+- Pure-query spec construction: `MohistDbFixture` provides the full production service graph (DI + EF + WorkflowQuerier) without spinning up `WebApplicationFactory` or an Orleans silo. IssueGrain is NOT registered in DI; the spec resolves its 14 dependencies from `scope.ServiceProvider.GetRequiredService<T>()` and constructs the grain manually — then sets `GrainKeyForTest` so `OnActivateAsync` can load `_issue` via `_issueStore.LoadAsync(GrainKey)` without the Orleans runtime.
+- State-store swap: spec swaps the scoped `IStateStore<Domain.Issue>` (IssueStore) for a `ReadOnlyTrackingStateStore` that delegates LoadAsync to IssueStore but records every SaveAsync call. The pure-query contract is asserted via `Assert.Empty(stateStore.SaveCalls)` — any write leaks into the read path fail the test.
+- Status filter invariant lives on `IssueQuerier.GetIssueIdForWorkflowRunAsync` doc comment ("preserved WorkflowRunId on Done issues is execution history") — the comment now stands on its own rationale, no longer references the deleted sweep.
+
+### Key files
+- `packages/server/src/Mohist.Server/Issue/Services/IssueWorkflowReconciliationService.cs` — DELETED
+- `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Services/IssueWorkflowReconciliationServiceSpecs.cs` — DELETED (and empty `Specs/Issue/Services/` directory removed; no old/new coexistence)
+- `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs` — removed `services.AddHostedService<IssueWorkflowReconciliationService>();`
+- `packages/server/src/Mohist.Server/Issue/Grains/IssueGrain.cs` — deleted `ReconcileWithWorkflowTerminalStateAsync` method + the `await ReconcileWithWorkflowTerminalStateAsync(wrId, wfStatus)` call site + the stale "if the bus subscription missed the Completed event" comment. Added `GrainKeyForTest` property (mirrors EpicGrain/AgentGrain). GetWorkflowStatusAsync is now ~13 lines: query workflow, project via default profile, return.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueQuerier.cs` — `GetIssueIdForWorkflowRunAsync` doc comment reworded to drop the reference to the deleted sweep (the predicate rationale stands alone).
+- `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Grain/IssueWorkflowReadPathSpecs.cs` — NEW (3 specs, all pass)
+
+### Verification
+- `dotnet build Mohist.sln`: 0 warnings, 0 errors (TreatWarningsAsErrors enabled).
+- `dotnet test --filter IssueWorkflowReadPathSpecs`: 3/3 pass.
+- `dotnet test --filter IssueWorkflowCompletionHandlerSpecs`: 17/17 pass (T-001 regression check).
+- `dotnet test --filter Issue`: 1053/1053 pass (broader Issue-domain regression check).
+- Full server `npm test`: 3371 pass, 0 fail, 13 skipped (1 unrelated flake observed and re-passed in isolation: `UpdateSpecs.UpdateServer_WaitsForReadinessAfterRestart`).
+- `grep -rn "ReconcileWithWorkflowTerminalStateAsync|IssueWorkflowReconciliationService" packages/server/` returns zero hits.
+
+### Gotchas / Lessons
+- The DB fixture is shared-cache SQLite across tests in a single fixture instance. Each spec must use **unique** `ProjectId` + `Number` tuples — initial run hit `UNIQUE constraint failed: Issues.ProjectId, Issues.Number` because all three tests seeded `project_readpath`/issue 1. Fix: include `Guid.NewGuid():N` suffix in the project id (issue id stays in the row's `IssueId` column, which is already unique).
+- `IssueGrain`'s 14 constructor params look intimidating but every single one is resolvable from the DI scope via `services.GetRequiredService<T>()`. Once the grain is constructed with `GrainKeyForTest` set, calling `OnActivateAsync` then the grain's own methods works without an Orleans silo. The cost is paid once per spec; tests stay in the unit-tier speed bucket.
+- The `ReadOnlyTrackingStateStore` pattern is reusable for any "this code path must not mutate state" assertion. It forwards Load to the real IssueStore (so seed/load round-trip works) and records Save calls without blocking the real DB write — that lets us detect the unwanted Save without breaking tests that need subsequent reads.
+- The `WorkflowStatusMapper.BuildStatusView` projection's `Status` field uses `FrontendStatus(run.Status.ToString())` which lowercases the enum name. So `WorkflowRunStatus.Completed` → `"completed"` (not `"Completed"`). Matches the existing `IssueGrain.GetControllableWorkflowStatusAsync` checks (`"completed"` literal).
+- `Issue.Status == InProgress` projects to `Stage = "in_progress"` (note the underscore) via `MohistDefaultWorkflowProjection.IssueStatusName`. The test asserts on `"in_progress"`, NOT `"inProgress"` — the projection's wire format differs from the enum's C# spelling.
+- No event-bus side-effects to assert against: `GetWorkflowStatusAsync` no longer touches `_issue.PendingEvents` (deleted path) and never calls `SaveIssueAsync`/`PublishIssueEventsAsync`. The RecordingEventStore from T-001's pattern isn't needed here — the state-store recording is sufficient.
+- `WorkflowRunStatus` enum is `Completed` (PascalCase). JSON serialization uses `JsonStringEnumConverter(JsonNamingPolicy.CamelCase)` per `JSON.Options`, so the stored/loaded value round-trips correctly.
+
+### Follow-ups
+- T-003 (Web Done stage removal) is independent and can proceed in parallel — no shared files with server.
+- The `GrainKeyForTest` testability seam is now established on IssueGrain. Future IssueGrain-level specs can follow the same construction pattern in `IssueWorkflowReadPathSpecs.CreateGrain`.

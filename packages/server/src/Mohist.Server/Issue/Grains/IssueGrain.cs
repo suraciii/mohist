@@ -77,7 +77,9 @@ public class IssueGrain : Grain, IIssueGrain
         _log = log;
     }
 
-    private string GrainKey => this.GetPrimaryKeyString();
+    private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;
+
+    internal string GrainKeyForTest { get; set; } = string.Empty;
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
@@ -472,11 +474,6 @@ public class IssueGrain : Grain, IIssueGrain
 
         var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);
 
-        // Lazy reconciliation: if the bus subscription missed the
-        // Completed event, the read path here is the next chance to bring
-        // the issue in sync with the workflow's actual state.
-        await ReconcileWithWorkflowTerminalStateAsync(wrId, wfStatus);
-
         var defaultProfile = _profiles.Get(IssueWorkflowProfiles.LocalId);
         var projection = defaultProfile.ProjectWorkflowState(_issue, wfStatus);
 
@@ -490,16 +487,6 @@ public class IssueGrain : Grain, IIssueGrain
             projection.ChangeDir,
             null,
             wfStatus);
-    }
-
-    private async Task ReconcileWithWorkflowTerminalStateAsync(string workflowRunId, WorkflowStatusView? wfStatus)
-    {
-        if (_issue is null || wfStatus is null) return;
-        if (_issue.Status != Domain.IssueStatus.InProgress) return;
-        if (_issue.WorkflowRunId != workflowRunId) return;
-
-        if (wfStatus.Status == "completed")
-            await CompleteWorkAsync(workflowRunId);
     }
 
 public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null)

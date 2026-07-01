@@ -104,9 +104,8 @@ public class IssueQuerier : IScopedService
     /// The query rides the existing indexed <c>IssueRow.WorkflowRunId</c>
     /// computed column plus the <c>Status</c> index, so it is a single
     /// cheap indexed query — no schema change, no new index. Filtering
-    /// to <c>Status = 'inProgress'</c> reuses the same predicate the
-    /// deleted <c>IssueWorkflowReconciliationService</c> documented: a
-    /// preserved <c>WorkflowRunId</c> on <c>Done</c>/archived issues is
+    /// to <c>Status = 'inProgress'</c> enforces a documented invariant:
+    /// a preserved <c>WorkflowRunId</c> on <c>Done</c>/archived issues is
     /// execution history, not a stuck-run signal, so an unfiltered lookup
     /// could match a stale binding. The status filter also makes the
     /// post-<c>Done</c> idempotent path explicit at the handler level
