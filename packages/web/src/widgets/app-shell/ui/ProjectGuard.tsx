@@ -4,6 +4,10 @@ import { CreateProjectDialog } from '../../create-project-dialog/ui/CreateProjec
 import { useEffect, useState } from 'react'
 import { Button } from '@/shared/ui/components/button'
 
+function isAppSettingsPath(pathname: string): boolean {
+  return pathname === '/settings' || pathname.startsWith('/settings/')
+}
+
 export function ProjectGuard() {
   const location = useLocation()
   const { projectId, setProjectId } = useProject()
@@ -16,7 +20,7 @@ export function ProjectGuard() {
     }
   }, [projectId, projects, setProjectId])
 
-  if (location.pathname === '/settings' || location.pathname === '/logs') {
+  if (isAppSettingsPath(location.pathname) || location.pathname === '/logs') {
     return <Outlet />
   }
 

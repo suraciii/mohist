@@ -15,6 +15,7 @@ import { Button } from '@/shared/ui/components/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 import { CardSection } from '@/shared/ui/components/card-section'
 import type { SettingsSearchEntry } from '@/features/settings-search'
+import { getSectionMeta } from '../lib/sections'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 import { ALL_LEVELS, type LogLevel } from '@/shared/lib/log-levels'
@@ -98,6 +99,7 @@ export function SystemSettingsSection() {
   const { data: updateStatusEnvelope, refetch: refetchUpdateStatus } = useSystemUpdateStatus(true)
   const [reconnectState, setReconnectState] = useState<string | null>(null)
   const updateStatus = updateStatusEnvelope?.job ?? null
+  const { label: sectionLabel, description: sectionDescription } = getSectionMeta('system')
 
   const persistedLevel = logLevelData?.level ?? null
   const [currentLevel, setCurrentLevel] = useState<LogLevel | null>(
@@ -213,15 +215,15 @@ export function SystemSettingsSection() {
     return (
       <SectionState
         variant="loading"
-        title="System"
-        description="Logging, runtime identity, and local-source update status."
+        title={sectionLabel}
+        description={sectionDescription}
         skeletonRows={6}
       />
     )
   }
 
   return (
-    <SettingsSection title="System">
+    <SettingsSection title={sectionLabel} description={sectionDescription}>
       <CardSection title="Logging" titleAs="h3">
         {logLevelError ? (
           <p className="text-xs text-muted-foreground">

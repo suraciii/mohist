@@ -7,6 +7,7 @@ import { includesWorkflowProfileId } from '../../../entities/settings/model/work
 import { CardSection } from '../../../shared/ui/components/card-section'
 import { Switch } from '../../../shared/ui/components/switch'
 import type { SettingsSearchEntry } from '@/features/settings-search'
+import { getSectionMeta } from '../lib/sections'
 import { ProjectDefaultWorkflowControl } from './ProjectDefaultWorkflowControl'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
@@ -65,6 +66,7 @@ function StageSummary({ stage }: { stage: { stage: string; requiresApproval: boo
 
 function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () => void }) {
   const { data: profile, isLoading, isError } = useWorkflowProfile(profileId)
+  const { label: sectionLabel } = getSectionMeta('workflows')
 
   if (isLoading) {
     return (
@@ -82,7 +84,7 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
   }
 
   return (
-    <SettingsSection title="Workflow Profiles">
+    <SettingsSection title={sectionLabel}>
       <div>
         <button
           onClick={onBack}
@@ -256,6 +258,7 @@ export function WorkflowProfilesSection() {
   const disableMutation = useDisableWorkflowProfile()
   const enableMutation = useEnableWorkflowProfile()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const { label: sectionLabel, description: sectionDescription } = getSectionMeta('workflows')
 
   const disabledIds = projectProfile?.disabledWorkflowProfileIds ?? []
   const enabledCount = allProfiles?.filter((p) => !includesWorkflowProfileId(disabledIds, p.id)).length ?? 0
@@ -270,7 +273,7 @@ export function WorkflowProfilesSection() {
 
   if (!currentProject) {
     return (
-      <SettingsSection title="Workflow Profiles">
+      <SettingsSection title={sectionLabel}>
         <ProjectDefaultWorkflowControl />
       </SettingsSection>
     )
@@ -281,14 +284,14 @@ export function WorkflowProfilesSection() {
   }
 
   if (profilesLoading || projectProfileLoading) {
-    return <SectionState variant="loading" title="Workflow Profiles" skeletonRows={2} />
+    return <SectionState variant="loading" title={sectionLabel} skeletonRows={2} />
   }
 
   if (profilesError || projectProfileError || !allProfiles || !projectProfile) {
     return (
       <SectionState
         variant="error"
-        title="Workflow Profiles"
+        title={sectionLabel}
         message="Failed to load workflow profile settings."
       />
     )
@@ -297,8 +300,8 @@ export function WorkflowProfilesSection() {
   return (
     <div id="workflow-profiles-section" tabIndex={-1}>
       <SettingsSection
-        title="Workflow Profiles"
-        description="Choose the workflow new issues inherit for this project, then browse the read-only system catalog below."
+        title={sectionLabel}
+        description={sectionDescription}
       >
         <div className="space-y-4">
           <div id="project-default-workflow" tabIndex={-1}>

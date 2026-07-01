@@ -2,9 +2,11 @@
 import '@testing-library/jest-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, waitForElementToBeRemoved } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Project } from '../../entities/project'
+import { ProjectProvider } from '../../entities/project'
 import { SettingsSearch, buildHaystack, groupEntriesByTab, NO_MATCHES_COPY } from './SettingsSearch'
 import {
   __resetShortcutHandlersForTesting,
@@ -89,6 +91,14 @@ function makeQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
 }
 
+const SELECTED_PROJECT: Project = {
+  id: 'proj-selected',
+  name: 'selected-project',
+  repositories: [],
+  createdAt: '2026-06-01T00:00:00Z',
+  updatedAt: '2026-06-01T00:00:00Z',
+}
+
 /**
  * Minimal placeholder for each Settings tab. We only need the focus target
  * element to mount after navigation; the real section component is exercised
@@ -102,7 +112,7 @@ function TabPlaceholder() {
     section === 'agent'
       ? ['agent-runtime-timeout']
       : section === 'ai'
-        ? ['settings-default-model']
+        ? ['settings-default-model', 'settings-stage-model-plan']
         : section === 'repositories'
           ? ['repository-add-name']
           : section === 'templates'
@@ -165,6 +175,46 @@ function renderSettingsSearchWithLocationSpy(initialEntry = '/settings/ai') {
           />
         </Routes>
       </MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
+
+/**
+ * Project-aware variant. Wraps the tree in `ProjectProvider` so `useSettingsSectionPath`
+ * resolves to the project's name prefix for project-scope sections and routes only the
+ * application-scope sections to `/settings/<section>` (no project segment). The
+ * `:projectName/settings/:section` route is added so the resulting URL still resolves
+ * to a real section placeholder for the post-Enter focus poll.
+ */
+function renderSettingsSearchWithProject(initialEntry = '/settings/ai') {
+  const queryClient = makeQueryClient()
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider initialProjectId={SELECTED_PROJECT.id} initialProjects={[SELECTED_PROJECT]}>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <LocationSpy />
+          <Routes>
+            <Route
+              path="/settings/:section"
+              element={
+                <>
+                  <TabPlaceholder />
+                  <SettingsSearch />
+                </>
+              }
+            />
+            <Route
+              path="/:projectName/settings/:section"
+              element={
+                <>
+                  <TabPlaceholder />
+                  <SettingsSearch />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </ProjectProvider>
     </QueryClientProvider>,
   )
 }
@@ -464,7 +514,7 @@ describe('SettingsSearch activation (Enter)', () => {
   it('Enter on a highlighted result closes the dialog, navigates to the owning tab, and focuses the field', async () => {
     arrangeAiLoaded()
     const user = userEvent.setup()
-    renderSettingsSearchWithLocationSpy('/settings/ai')
+    renderSettingsSearchWithProject('/settings/ai')
 
     await user.keyboard('{Meta>}k{/Meta}')
     await waitFor(() => {
@@ -497,7 +547,7 @@ describe('SettingsSearch activation (Enter)', () => {
   it('Enter on the focused command item calls onSelect and focuses via the rAF element-poll', async () => {
     arrangeAiLoaded()
     const user = userEvent.setup()
-    renderSettingsSearchWithLocationSpy('/settings/ai')
+    renderSettingsSearchWithProject('/settings/ai')
 
     await user.keyboard('{Meta>}k{/Meta}')
     await waitFor(() => {
@@ -540,7 +590,7 @@ describe('SettingsSearch activation (Enter)', () => {
   it('searching workflow and clicking a workflow result navigates to Workflows and focuses the target', async () => {
     arrangeAiLoaded()
     const user = userEvent.setup()
-    renderSettingsSearchWithLocationSpy('/settings/ai')
+    renderSettingsSearchWithProject('/settings/ai')
 
     await user.keyboard('{Meta>}k{/Meta}')
     await waitFor(() => {
@@ -555,7 +605,7 @@ describe('SettingsSearch activation (Enter)', () => {
       expect(screen.queryByTestId('settings-search-input')).not.toBeInTheDocument()
     })
     await waitFor(() => {
-      expect(screen.getByTestId('location-spy').getAttribute('data-pathname')).toBe('/settings/workflows')
+      expect(screen.getByTestId('location-spy').getAttribute('data-pathname')).toBe('/selected-project/settings/workflows')
     })
     await waitFor(() => {
       expect(document.activeElement?.id).toBe('workflow-profiles-section')
@@ -565,7 +615,7 @@ describe('SettingsSearch activation (Enter)', () => {
   it('clicking the project default workflow result focuses the default control target', async () => {
     arrangeAiLoaded()
     const user = userEvent.setup()
-    renderSettingsSearchWithLocationSpy('/settings/ai')
+    renderSettingsSearchWithProject('/settings/ai')
 
     await user.keyboard('{Meta>}k{/Meta}')
     await waitFor(() => {
@@ -576,11 +626,115 @@ describe('SettingsSearch activation (Enter)', () => {
     await user.click(screen.getByTestId('settings-search-result-project-default-workflow'))
 
     await waitFor(() => {
-      expect(screen.getByTestId('location-spy').getAttribute('data-pathname')).toBe('/settings/workflows')
+      expect(screen.getByTestId('location-spy').getAttribute('data-pathname')).toBe('/selected-project/settings/workflows')
     })
     await waitFor(() => {
       expect(document.activeElement?.id).toBe('project-default-workflow')
     })
+  })
+})
+
+describe('SettingsSearch scope-aware navigation', () => {
+  it('routes an application-level result (Coder Agent) to /settings/<section> without a project segment', async () => {
+    arrangeAiLoaded()
+    const user = userEvent.setup()
+    renderSettingsSearchWithProject('/settings/agent')
+
+    await user.keyboard('{Meta>}k{/Meta}')
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByTestId('settings-search-input'), 'default coder agent model')
+    await user.click(screen.getByTestId('settings-search-result-settings-default-model'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('settings-search-input')).not.toBeInTheDocument()
+    })
+    const pathname = screen.getByTestId('location-spy').getAttribute('data-pathname')
+    expect(pathname).toBe('/settings/ai')
+    expect(pathname ?? '').not.toContain('selected-project')
+  })
+
+  it('routes a project-level result (Repositories) to /:projectName/settings/<section>', async () => {
+    arrangeAiLoaded()
+    const user = userEvent.setup()
+    renderSettingsSearchWithProject('/settings/ai')
+
+    await user.keyboard('{Meta>}k{/Meta}')
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByTestId('settings-search-input'), 'e.g. frontend')
+    await user.click(screen.getByTestId('settings-search-result-repository-add-name'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('settings-search-input')).not.toBeInTheDocument()
+    })
+    const pathname = screen.getByTestId('location-spy').getAttribute('data-pathname')
+    expect(pathname).toBe('/selected-project/settings/repositories')
+    expect(pathname ?? '').toContain('selected-project')
+  })
+
+  it('routes another application-level result (Runtime) to /settings/<section> without a project segment', async () => {
+    arrangeAiLoaded()
+    const user = userEvent.setup()
+    renderSettingsSearchWithProject('/settings/ai')
+
+    await user.keyboard('{Meta>}k{/Meta}')
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByTestId('settings-search-input'), 'session timeout')
+    await user.click(screen.getByTestId('settings-search-result-agent-runtime-timeout'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('settings-search-input')).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId('location-spy').getAttribute('data-pathname')).toBe('/settings/agent')
+  })
+
+  it('routes a Workflows result (project scope) to /:projectName/settings/workflows', async () => {
+    arrangeAiLoaded()
+    const user = userEvent.setup()
+    renderSettingsSearchWithProject('/settings/ai')
+
+    await user.keyboard('{Meta>}k{/Meta}')
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByTestId('settings-search-input'), 'workflow')
+    await user.click(screen.getByTestId('settings-search-result-workflow-profiles-section'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('settings-search-input')).not.toBeInTheDocument()
+    })
+    const pathname = screen.getByTestId('location-spy').getAttribute('data-pathname')
+    expect(pathname).toBe('/selected-project/settings/workflows')
+    expect(pathname ?? '').toContain('selected-project')
+  })
+
+  it('does not route a project-level result to /settings/<section> when no project is selected', async () => {
+    arrangeAiLoaded()
+    const user = userEvent.setup()
+    renderSettingsSearchWithLocationSpy('/settings/ai')
+
+    await user.keyboard('{Meta>}k{/Meta}')
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByTestId('settings-search-input'), 'e.g. frontend')
+    const result = screen.getByTestId('settings-search-result-repository-add-name')
+    expect(result).toHaveAttribute('data-disabled', 'true')
+
+    fireEvent.click(result)
+
+    expect(screen.getByTestId('location-spy').getAttribute('data-pathname')).toBe('/settings/ai')
+    expect(screen.queryByTestId('placeholder-section-repositories')).not.toBeInTheDocument()
   })
 })
 
@@ -608,20 +762,20 @@ describe('SettingsSearch dismissal (Esc / overlay)', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithLocationSpy('/settings/agent')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    act(() => {
+      getShortcutHandler('settings-search')?.()
+    })
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })
-
     // Click on the overlay (outside the dialog content). base-ui's dialog
     // backdrop carries data-slot="dialog-overlay".
     const overlay = document.querySelector('[data-slot="dialog-overlay"]') as HTMLElement | null
     expect(overlay).not.toBeNull()
-    overlay?.click()
+    const removed = waitForElementToBeRemoved(() => screen.queryByTestId('settings-search-input'))
+    await user.click(overlay!)
 
-    await waitFor(() => {
-      expect(screen.queryByTestId('settings-search-input')).not.toBeInTheDocument()
-    })
+    await removed
     expect(screen.getByTestId('location-spy').getAttribute('data-pathname')).toBe('/settings/agent')
   })
 })

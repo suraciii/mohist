@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
 
@@ -22,6 +22,10 @@ const inboxMocks = vi.hoisted(() => ({
   useMarkInboxItemRead: vi.fn(),
   useMarkAllInboxRead: vi.fn(),
   useArchiveInboxItem: vi.fn(),
+}))
+
+const logsMocks = vi.hoisted(() => ({
+  useLogs: vi.fn(),
 }))
 
 const TEST_PROJECT = {
@@ -73,6 +77,10 @@ vi.mock('../entities/inbox', async (importOriginal) => {
   }
 })
 
+vi.mock('../pages/logs/model/useLogs', () => ({
+  useLogs: logsMocks.useLogs,
+}))
+
 function renderApp() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -101,6 +109,15 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
     inboxMocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     inboxMocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     inboxMocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    logsMocks.useLogs.mockReturnValue({
+      entries: [],
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      cursor: 0,
+      truncated: false,
+      file: null,
+    })
   })
 
   afterEach(() => {
@@ -137,5 +154,136 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
 
     expect(getByTestId('inbox-title')).toHaveTextContent('Inbox')
     expect(inboxMocks.useInbox).toHaveBeenCalled()
+  })
+})
+
+describe('App routing split for settings scopes', () => {
+  beforeEach(() => {
+    projectMocks.useProjects.mockReturnValue({
+      data: [TEST_PROJECT],
+      isLoading: false,
+    })
+    epicMocks.useEpic.mockReturnValue({ data: undefined, isLoading: false })
+    eventMocks.useEventsConnection.mockReturnValue('disconnected')
+    inboxMocks.useInbox.mockReturnValue({ data: [], isLoading: false })
+    inboxMocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    inboxMocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    inboxMocks.useArchiveInboxItem.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    logsMocks.useLogs.mockReturnValue({
+      entries: [],
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      cursor: 0,
+      truncated: false,
+      file: null,
+    })
+  })
+
+  afterEach(() => {
+    cleanup()
+    window.history.replaceState({}, '', '/')
+    window.localStorage.clear()
+  })
+
+  it('redirects legacy /:projectName/settings/ai (global section under project scope) to /settings/ai', () => {
+    window.history.replaceState({}, '', '/demo/settings/ai')
+
+    renderApp()
+
+    // After the replace navigation, the URL must be the application-scope URL.
+    expect(window.location.pathname).toBe('/settings/ai')
+  })
+
+  it('renders /settings/ai without showing the "No projects yet" gate even when projects exist', () => {
+    window.history.replaceState({}, '', '/settings/ai')
+
+    const { queryByText } = renderApp()
+
+    expect(queryByText('No projects yet')).not.toBeInTheDocument()
+  })
+
+  it('does not redirect project-scoped /:projectName/settings/repositories', () => {
+    window.history.replaceState({}, '', '/demo/settings/repositories')
+
+    renderApp()
+
+    // The project-scoped repositories URL must NOT be redirected to the
+    // application scope (D2 risk: project URLs must stay project-scoped).
+    expect(window.location.pathname).toBe('/demo/settings/repositories')
+  })
+
+  it('redirects legacy /:projectName/settings/agent, /system, /preferences to the application scope', () => {
+    for (const section of ['agent', 'system', 'preferences']) {
+      window.history.replaceState({}, '', `/demo/settings/${section}`)
+      renderApp()
+      expect(window.location.pathname).toBe(`/settings/${section}`)
+      cleanup()
+    }
+  })
+
+  it('does not redirect /:projectName/settings/<project-section> for any project section', () => {
+    for (const section of ['repositories', 'templates', 'label-catalog', 'workflows', 'inbox']) {
+      window.history.replaceState({}, '', `/demo/settings/${section}`)
+      renderApp()
+      expect(window.location.pathname).toBe(`/demo/settings/${section}`)
+      cleanup()
+    }
+  })
+
+  it('keeps application settings reachable when no project exists (no "No projects yet" prompt)', () => {
+    projectMocks.useProjects.mockReturnValue({ data: [], isLoading: false })
+    window.history.replaceState({}, '', '/settings/ai')
+
+    const { queryByText } = renderApp()
+
+    expect(queryByText('No projects yet')).not.toBeInTheDocument()
+  })
+
+  it('does not serve project settings from /settings/<project-section> when no project exists', () => {
+    projectMocks.useProjects.mockReturnValue({ data: [], isLoading: false })
+    window.history.replaceState({}, '', '/settings/repositories')
+
+    const { queryByText, queryByTestId } = renderApp()
+
+    expect(window.location.pathname).toBe('/settings/repositories')
+    expect(queryByTestId('repositories-section')).not.toBeInTheDocument()
+    expect(queryByText('No project selected')).toBeInTheDocument()
+  })
+
+  it('redirects /settings/<project-section> to the selected project scope once a project is available', async () => {
+    window.history.replaceState({}, '', '/settings/repositories')
+
+    renderApp()
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/demo/settings/repositories')
+    })
+  })
+
+  it('clicking Logs from the sidebar renders the project-scoped Logs page', async () => {
+    window.history.replaceState({}, '', '/demo')
+
+    renderApp()
+
+    await waitFor(() => {
+      expect(screen.getByText('demo')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByTestId('nav-logs'))
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/demo/logs')
+    })
+    expect(logsMocks.useLogs).toHaveBeenCalled()
+    expect(screen.getByText('No logs available')).toBeInTheDocument()
+  })
+
+  it('renders /settings/<app-section> on the application scope (no project prefix) for every global section', () => {
+    for (const section of ['ai', 'agent', 'system', 'preferences']) {
+      window.history.replaceState({}, '', `/settings/${section}`)
+      renderApp()
+      expect(window.location.pathname).toBe(`/settings/${section}`)
+      cleanup()
+    }
   })
 })

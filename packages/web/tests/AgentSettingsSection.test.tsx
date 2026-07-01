@@ -139,7 +139,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     renderSection()
 
     await waitFor(() => {
-      expect(screen.getByText('Coder Agent Runtime')).toBeInTheDocument()
+      expect(screen.getByText('Runtime')).toBeInTheDocument()
     })
     expect(screen.queryByText(/Failed to load settings/i)).not.toBeInTheDocument()
     const sessionInput = getInputByLabel('Session Timeout')

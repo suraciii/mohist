@@ -7,6 +7,7 @@ import { resolveVariantAgainstModel } from '../../../shared/ui/model-variants'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import type { SettingsSearchEntry } from '@/features/settings-search'
+import { getSectionMeta } from '../lib/sections'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
@@ -45,6 +46,7 @@ export function AiSettingsSection() {
   const [stageOverridesOpen, setStageOverridesOpen] = useState(false)
   const [localStageModels, setLocalStageModels] = useState<Record<string, string>>({})
   const [localStageModelVariants, setLocalStageModelVariants] = useState<Record<string, string>>({})
+  const { label: sectionLabel } = getSectionMeta('ai')
 
   useEffect(() => {
     if (stageModelsData?.stageModels) setLocalStageModels(stageModelsData.stageModels)
@@ -122,7 +124,7 @@ export function AiSettingsSection() {
   }
 
   if (runtimeLoading || modelsLoading) {
-    return <SectionState variant="loading" title="Coder Agent & Models" skeletonRows={2} />
+    return <SectionState variant="loading" title={sectionLabel} skeletonRows={2} />
   }
 
   const error = runtimeError ?? modelsError
@@ -130,7 +132,7 @@ export function AiSettingsSection() {
     return (
       <SectionState
         variant="error"
-        title="Coder Agent & Models"
+        title={sectionLabel}
         message={`Failed to load opencode runtime: ${(error as Error).message}`}
       />
     )
@@ -138,7 +140,7 @@ export function AiSettingsSection() {
 
   return (
     <div className="space-y-8">
-      <SettingsSection title="External Coder Agent">
+      <SettingsSection title={sectionLabel}>
         <CardSection>
           <div className="space-y-1.5">
             <div className="flex items-baseline justify-between gap-2">

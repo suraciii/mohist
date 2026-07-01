@@ -13,6 +13,7 @@ import { CardSection } from '@/shared/ui/components/card-section'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
 import { Textarea } from '@/shared/ui/components/textarea'
+import { getSectionMeta } from '../lib/sections'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
@@ -249,6 +250,7 @@ export function LabelCatalogSection() {
   const create = useCreateLabelDefinition()
   const update = useUpdateLabelDefinition()
   const remove = useDeleteLabelDefinition()
+  const { label: sectionLabel, description: sectionDescription } = getSectionMeta('label-catalog')
 
   const [addDraft, setAddDraft] = useState<DraftState>(emptyDraft)
   const [addError, setAddError] = useState<string | null>(null)
@@ -351,8 +353,8 @@ export function LabelCatalogSection() {
 
   return (
     <SettingsSection
-      title="Label catalog"
-      description="Define the labels your project suggests for issues. This catalog is advisory — issues can still carry any free-form label, and edits here do not change existing issue labels."
+      title={sectionLabel}
+      description={sectionDescription}
     >
       <div className="flex justify-end">
         <Button

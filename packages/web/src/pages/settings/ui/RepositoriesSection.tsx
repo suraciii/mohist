@@ -5,6 +5,7 @@ import { CardSection } from '@/shared/ui/components/card-section'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
 import type { SettingsSearchEntry } from '@/features/settings-search'
+import { getSectionMeta } from '../lib/sections'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
@@ -46,6 +47,7 @@ export function RepositoriesSection({ projectId }: Props) {
   const addRepo = useAddRepository()
   const removeRepo = useRemoveRepository()
   const setDefault = useSetDefaultRepository()
+  const { label: sectionLabel } = getSectionMeta('repositories')
 
   const [newName, setNewName] = useState('')
   const [newGitUrl, setNewGitUrl] = useState('')
@@ -81,7 +83,7 @@ export function RepositoriesSection({ projectId }: Props) {
   }
 
   return (
-    <SettingsSection title="Repositories">
+    <SettingsSection title={sectionLabel}>
       <div data-testid="repositories-section">
         {isLoading ? (
           <SectionState variant="loading" skeletonRows={2} />

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Project } from '../../../entities/project'
@@ -43,8 +43,6 @@ const projects: Project[] = [
   },
 ]
 
-const ONBOARDING_DISMISSED_KEY = 'mohist:settings-onboarding-dismissed'
-
 function renderSettings(initialEntry = '/settings/repositories') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -63,7 +61,11 @@ function renderSettings(initialEntry = '/settings/repositories') {
   )
 }
 
-describe('SettingsPage', () => {
+describe('SettingsPage sub-navigation', () => {
+  beforeEach(() => {
+    useRepositoriesMock.mockReturnValue({ data: [], isLoading: false })
+  })
+
   afterEach(() => {
     cleanup()
     window.localStorage.clear()
@@ -83,89 +85,340 @@ describe('SettingsPage', () => {
     expect(screen.queryByText('first')).not.toBeInTheDocument()
   })
 
-  it('shows onboarding banner on first visit to the Coder Agent tab', () => {
+  it('renders a left sub-navigation grouped into Application and Project sections (no horizontal tab bar)', () => {
     renderSettings('/settings/ai')
 
-    expect(screen.getByTestId('settings-onboarding-banner')).toHaveTextContent(
-      'Start here — select the coder agent model used for workflow tasks',
+    const subnav = screen.getByTestId('settings-subnav')
+    expect(subnav).toBeInTheDocument()
+
+    const applicationGroup = screen.getByTestId('settings-subnav-group-application')
+    const projectGroup = screen.getByTestId('settings-subnav-group-project')
+
+    expect(within(applicationGroup).getByTestId('settings-subnav-ai')).toBeInTheDocument()
+    expect(within(applicationGroup).getByTestId('settings-subnav-agent')).toBeInTheDocument()
+    expect(within(applicationGroup).getByTestId('settings-subnav-system')).toBeInTheDocument()
+    expect(within(applicationGroup).getByTestId('settings-subnav-preferences')).toBeInTheDocument()
+
+    expect(within(projectGroup).getByTestId('settings-subnav-repositories')).toBeInTheDocument()
+    expect(within(projectGroup).getByTestId('settings-subnav-templates')).toBeInTheDocument()
+    expect(within(projectGroup).getByTestId('settings-subnav-label-catalog')).toBeInTheDocument()
+    expect(within(projectGroup).getByTestId('settings-subnav-workflows')).toBeInTheDocument()
+    expect(within(projectGroup).getByTestId('settings-subnav-inbox')).toBeInTheDocument()
+
+    expect(screen.queryByTestId('settings-tab-ai')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+  })
+
+  it('renders each navigation group as a semantic list of links', () => {
+    renderSettings('/settings/ai')
+
+    const applicationList = screen.getByRole('list', { name: 'Application' })
+    const projectList = screen.getByRole('list', { name: 'Project' })
+
+    expect(within(applicationList).getAllByRole('listitem')).toHaveLength(4)
+    expect(within(projectList).getAllByRole('listitem')).toHaveLength(5)
+    expect(within(applicationList).getByRole('link', { name: 'Coder Agent' })).toBeInTheDocument()
+    expect(within(projectList).getByRole('link', { name: 'Repositories' })).toBeInTheDocument()
+  })
+
+  it('application items link to /settings/<section> without a project name segment', () => {
+    renderSettings('/settings/ai')
+
+    expect(screen.getByTestId('settings-subnav-ai')).toHaveAttribute('href', '/settings/ai')
+    expect(screen.getByTestId('settings-subnav-agent')).toHaveAttribute('href', '/settings/agent')
+    expect(screen.getByTestId('settings-subnav-system')).toHaveAttribute('href', '/settings/system')
+    expect(screen.getByTestId('settings-subnav-preferences')).toHaveAttribute(
+      'href',
+      '/settings/preferences',
     )
   })
 
-  it('dismisses onboarding banner and persists across remounts', () => {
-    const { unmount } = renderSettings('/settings/ai')
-
-    fireEvent.click(screen.getByRole('button', { name: /dismiss onboarding banner/i }))
-
-    expect(window.localStorage.getItem(ONBOARDING_DISMISSED_KEY)).toBe('true')
-    expect(screen.queryByTestId('settings-onboarding-banner')).not.toBeInTheDocument()
-
-    unmount()
+  it('project items link to /:projectName/settings/<section> with the selected project name segment', () => {
     renderSettings('/settings/ai')
 
-    expect(screen.queryByTestId('settings-onboarding-banner')).not.toBeInTheDocument()
+    expect(screen.getByTestId('settings-subnav-repositories')).toHaveAttribute(
+      'href',
+      '/selected-project/settings/repositories',
+    )
+    expect(screen.getByTestId('settings-subnav-templates')).toHaveAttribute(
+      'href',
+      '/selected-project/settings/templates',
+    )
+    expect(screen.getByTestId('settings-subnav-label-catalog')).toHaveAttribute(
+      'href',
+      '/selected-project/settings/label-catalog',
+    )
+    expect(screen.getByTestId('settings-subnav-workflows')).toHaveAttribute(
+      'href',
+      '/selected-project/settings/workflows',
+    )
+    expect(screen.getByTestId('settings-subnav-inbox')).toHaveAttribute(
+      'href',
+      '/selected-project/settings/inbox',
+    )
   })
 
-  it('shows onboarding banner again after localStorage is cleared', () => {
-    const { unmount } = renderSettings('/settings/ai')
+  it('marks only the active sub-nav item with aria-current="page"', () => {
+    renderSettings('/settings/agent')
 
-    fireEvent.click(screen.getByRole('button', { name: /dismiss onboarding banner/i }))
-    unmount()
-    window.localStorage.clear()
-    renderSettings('/settings/ai')
-
-    expect(screen.getByTestId('settings-onboarding-banner')).toBeInTheDocument()
-  })
-
-  it('does not show onboarding banner on non-ai tabs', () => {
-    renderSettings('/settings/repositories')
-
-    expect(screen.queryByTestId('settings-onboarding-banner')).not.toBeInTheDocument()
-  })
-
-  it('renders a navigable Preferences tab and resolves /settings/preferences', () => {
-    renderSettings('/settings/preferences')
-
-    expect(screen.getByTestId('settings-tab-preferences')).toBeInTheDocument()
-    expect(screen.getByTestId('preferences-theme-card')).toBeInTheDocument()
-    expect(screen.getByTestId('preferences-shortcuts-card')).toBeInTheDocument()
-  })
-
-  it('exposes the Preferences tab trigger alongside the other Settings tabs', () => {
-    renderSettings('/settings/ai')
-
+    expect(screen.getByTestId('settings-subnav-agent')).toHaveAttribute('aria-current', 'page')
     for (const key of [
-      'settings-tab-ai',
-      'settings-tab-agent',
-      'settings-tab-repositories',
-      'settings-tab-workflows',
-      'settings-tab-templates',
-      'settings-tab-label-catalog',
-      'settings-tab-inbox',
-      'settings-tab-system',
-      'settings-tab-preferences',
+      'ai',
+      'system',
+      'preferences',
+      'repositories',
+      'templates',
+      'label-catalog',
+      'workflows',
+      'inbox',
     ]) {
-      expect(screen.getByTestId(key)).toBeInTheDocument()
+      expect(screen.getByTestId(`settings-subnav-${key}`)).not.toHaveAttribute('aria-current')
     }
   })
 
-  it('renders the Inbox tab and /settings/inbox resolves', () => {
-    renderSettings('/settings/inbox')
+  it('active aria-current follows the URL when mounted on a project-scoped section', () => {
+    renderSettings('/selected-project/settings/repositories')
 
-    expect(screen.getByTestId('settings-tab-inbox')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-subnav-repositories')).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(screen.getByTestId('settings-subnav-ai')).not.toHaveAttribute('aria-current')
   })
 
-  it('navigates to the Preferences tab from another Settings tab via the trigger', () => {
+  it('clicking an application item navigates to its /settings/<section> route', () => {
     renderSettings('/settings/ai')
 
-    fireEvent.click(screen.getByTestId('settings-tab-preferences'))
+    fireEvent.click(screen.getByTestId('settings-subnav-preferences'))
 
     expect(screen.getByTestId('preferences-theme-card')).toBeInTheDocument()
-    expect(screen.getByTestId('preferences-shortcuts-card')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-subnav-preferences')).toHaveAttribute('aria-current', 'page')
   })
 
-  it('redirects an invalid section to the Coder Agent tab', () => {
+  it('clicking a project item navigates to its /:projectName/settings/<section> route', () => {
+    renderSettings('/settings/ai')
+
+    fireEvent.click(screen.getByTestId('settings-subnav-repositories'))
+
+    expect(useRepositoriesMock).toHaveBeenCalledWith('proj-selected')
+    expect(screen.getByTestId('settings-subnav-repositories')).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(screen.getByTestId('repositories-section')).toBeInTheDocument()
+  })
+
+  it('ArrowDown moves roving focus from the active item to the next item and updates tabIndex', () => {
+    renderSettings('/settings/ai')
+
+    const ai = screen.getByTestId('settings-subnav-ai')
+    const agent = screen.getByTestId('settings-subnav-agent')
+    ai.focus()
+    fireEvent.keyDown(ai, { key: 'ArrowDown' })
+
+    expect(agent).toHaveFocus()
+    expect(agent).toHaveProperty('tabIndex', 0)
+    expect(ai).toHaveProperty('tabIndex', -1)
+  })
+
+  it('ArrowDown moves from the last Application item to the first Project item', () => {
+    renderSettings('/settings/preferences')
+
+    const preferences = screen.getByTestId('settings-subnav-preferences')
+    const repositories = screen.getByTestId('settings-subnav-repositories')
+    preferences.focus()
+    fireEvent.keyDown(preferences, { key: 'ArrowDown' })
+
+    expect(repositories).toHaveFocus()
+    expect(repositories).toHaveProperty('tabIndex', 0)
+    expect(preferences).toHaveProperty('tabIndex', -1)
+  })
+
+  it('ArrowUp wraps from the first item to the last item across the full subnav', () => {
+    renderSettings('/settings/ai')
+
+    const ai = screen.getByTestId('settings-subnav-ai')
+    ai.focus()
+    fireEvent.keyDown(ai, { key: 'ArrowUp' })
+
+    expect(screen.getByTestId('settings-subnav-inbox')).toHaveFocus()
+    expect(screen.getByTestId('settings-subnav-inbox')).toHaveProperty('tabIndex', 0)
+    expect(ai).toHaveProperty('tabIndex', -1)
+  })
+
+  it('ArrowDown wraps from the last item to the first item across the full subnav', () => {
+    renderSettings('/selected-project/settings/inbox')
+
+    const inbox = screen.getByTestId('settings-subnav-inbox')
+    inbox.focus()
+    fireEvent.keyDown(inbox, { key: 'ArrowDown' })
+
+    expect(screen.getByTestId('settings-subnav-ai')).toHaveFocus()
+    expect(screen.getByTestId('settings-subnav-ai')).toHaveProperty('tabIndex', 0)
+    expect(inbox).toHaveProperty('tabIndex', -1)
+  })
+
+  it('only the active item has tabIndex=0; the others are -1', () => {
+    renderSettings('/settings/system')
+
+    const indices: Record<string, number> = {
+      ai: screen.getByTestId('settings-subnav-ai').tabIndex,
+      agent: screen.getByTestId('settings-subnav-agent').tabIndex,
+      system: screen.getByTestId('settings-subnav-system').tabIndex,
+      preferences: screen.getByTestId('settings-subnav-preferences').tabIndex,
+      repositories: screen.getByTestId('settings-subnav-repositories').tabIndex,
+      inbox: screen.getByTestId('settings-subnav-inbox').tabIndex,
+    }
+
+    expect(indices.system).toBe(0)
+    for (const [key, value] of Object.entries(indices)) {
+      if (key === 'system') continue
+      expect(value).toBe(-1)
+    }
+  })
+
+  it('does not render the onboarding banner on the Coder Agent section', () => {
+    renderSettings('/settings/ai')
+
+    expect(screen.queryByTestId('settings-onboarding-banner')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /dismiss onboarding banner/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/start here — select the coder agent model/i)).not.toBeInTheDocument()
+  })
+
+  it('redirects an invalid section to /settings/ai (application-scope fallback)', () => {
     renderSettings('/settings/not-a-real-section')
 
-    expect(screen.getByTestId('settings-onboarding-banner')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-subnav-ai')).toHaveAttribute('aria-current', 'page')
+    expect(screen.queryByTestId('settings-onboarding-banner')).not.toBeInTheDocument()
+  })
+})
+
+describe('SettingsSubNav overflow affordance', () => {
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  function withSimulatedOverflow(
+    { scrollHeight, clientHeight }: { scrollHeight: number; clientHeight: number },
+    run: () => void,
+  ) {
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'scrollHeight',
+    )
+    const originalClientHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'clientHeight',
+    )
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return scrollHeight
+      },
+    })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get() {
+        return clientHeight
+      },
+    })
+    try {
+      run()
+    } finally {
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight)
+      }
+      if (originalClientHeight) {
+        Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalClientHeight)
+      }
+    }
+  }
+
+  it('does not render a fade affordance when the sub-nav content fits (no overflow)', () => {
+    withSimulatedOverflow({ scrollHeight: 200, clientHeight: 400 }, () => {
+      renderSettings('/settings/ai')
+
+      const subnav = screen.getByTestId('settings-subnav')
+      expect(subnav.getAttribute('data-overflow')).toBe('contained')
+      expect(screen.queryByTestId('settings-subnav-fade-top')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('settings-subnav-fade-bottom')).not.toBeInTheDocument()
+    })
+  })
+
+  it('renders the bottom fade affordance when the sub-nav content overflows', () => {
+    withSimulatedOverflow({ scrollHeight: 1200, clientHeight: 400 }, () => {
+      renderSettings('/settings/ai')
+
+      const subnav = screen.getByTestId('settings-subnav')
+      expect(subnav.getAttribute('data-overflow')).toBe('overflowing')
+      expect(screen.getByTestId('settings-subnav-fade-bottom')).toBeInTheDocument()
+      expect(screen.getByTestId('settings-subnav-fade-bottom')).toHaveAttribute('data-visible', 'true')
+    })
+  })
+
+  it('toggles the top fade on once the user has scrolled away from the top of an overflowing list', () => {
+    withSimulatedOverflow({ scrollHeight: 1200, clientHeight: 400 }, () => {
+      renderSettings('/settings/ai')
+
+      const subnav = screen.getByTestId('settings-subnav') as HTMLElement
+      expect(screen.getByTestId('settings-subnav-fade-top')).toHaveAttribute('data-visible', 'false')
+
+      subnav.scrollTop = 100
+      fireEvent.scroll(subnav)
+
+      expect(screen.getByTestId('settings-subnav-fade-top')).toHaveAttribute('data-visible', 'true')
+      expect(screen.getByTestId('settings-subnav-fade-bottom')).toHaveAttribute('data-visible', 'true')
+    })
+  })
+
+  it('hides the bottom fade once the user has scrolled to the bottom of an overflowing list', () => {
+    withSimulatedOverflow({ scrollHeight: 1200, clientHeight: 400 }, () => {
+      renderSettings('/settings/ai')
+
+      const subnav = screen.getByTestId('settings-subnav') as HTMLElement
+      subnav.scrollTop = subnav.scrollHeight - subnav.clientHeight
+      fireEvent.scroll(subnav)
+
+      expect(screen.getByTestId('settings-subnav-fade-top')).toHaveAttribute('data-visible', 'true')
+      expect(screen.getByTestId('settings-subnav-fade-bottom')).toHaveAttribute(
+        'data-visible',
+        'false',
+      )
+    })
+  })
+
+  it('drops the fades after the measured overflow state transitions back to contained (resize)', () => {
+    withSimulatedOverflow({ scrollHeight: 1200, clientHeight: 400 }, () => {
+      renderSettings('/settings/ai')
+      expect(screen.getByTestId('settings-subnav-fade-bottom')).toBeInTheDocument()
+    })
+
+    // Simulate a viewport resize that shrinks the content below the container height.
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'scrollHeight',
+    )
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return 200
+      },
+    })
+
+    try {
+      // Triggering a scroll event runs the same measure() handler the hook
+      // attaches; the resize path runs the same handler. We just need to
+      // exercise it once with the new layout values.
+      const subnav = screen.getByTestId('settings-subnav') as HTMLElement
+      fireEvent.scroll(subnav)
+
+      expect(screen.queryByTestId('settings-subnav-fade-bottom')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('settings-subnav-fade-top')).not.toBeInTheDocument()
+    } finally {
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight)
+      }
+    }
   })
 })

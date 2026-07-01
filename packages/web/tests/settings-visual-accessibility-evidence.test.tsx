@@ -111,10 +111,10 @@ let artifacts: Record<string, string> = {}
 
 const beforeSummaries: Record<string, string> = {
   ai: 'Before: External Coder Agent used a hand-rolled rounded-md border bg-muted card and local h3 page title.',
-  agent: 'Before: Runtime used a rounded-md bg-muted border card plus text-foreground/80 and text-foreground/85 tokens.',
+  agent: 'Before: Runtime used a rounded-md bg-muted border card plus text-foreground/80 and text-foreground/85 tokens. Tab heading was "Coder Agent Runtime", differing from the nav label "Runtime".',
   preferences: 'Before: Preferences tab did not exist. The tab is new for Settings 2.0; page title is rendered by SettingsSection and cards are CardSection instances.',
   repositories: 'Before: Repository rows used rounded-lg border bg-card/50 and included hardcoded text-gray-500.',
-  workflows: 'Before: Workflow profile cards used rounded-md border wrappers and text-foreground/85 body/caption tokens.',
+  workflows: 'Before: Workflow profile cards used rounded-md border wrappers and text-foreground/85 body/caption tokens. Tab heading was "Workflow Profiles", differing from the nav label "Workflows".',
   templates: 'Before: Template rows and editor used rounded-lg border bg-card/50 or bg-card/60 wrappers.',
   system: 'Before: System card titles visually drove the page with h2 uppercase tracking-wider styling while other tabs used local h3 page titles.',
 }

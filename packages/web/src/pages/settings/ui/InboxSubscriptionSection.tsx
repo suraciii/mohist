@@ -9,6 +9,7 @@ import {
   useInboxSubscription,
   useUpdateInboxSubscription,
 } from '../../../entities/inbox'
+import { getSectionMeta } from '../lib/sections'
 import { SettingsSection } from './SettingsSection'
 
 const KIND_LABELS: Record<NotificationKind, string> = {
@@ -37,6 +38,7 @@ export function InboxSubscriptionSection() {
   const update = useUpdateInboxSubscription()
   const [draft, setDraft] = useState<InboxSubscription>(DEFAULT_SUBSCRIPTION)
   const draftRef = useRef<InboxSubscription>(DEFAULT_SUBSCRIPTION)
+  const { label: sectionLabel } = getSectionMeta('inbox')
 
   useEffect(() => {
     if (subscription) {
@@ -56,7 +58,7 @@ export function InboxSubscriptionSection() {
   }
 
   return (
-    <SettingsSection title="Inbox recording">
+    <SettingsSection title={sectionLabel}>
       <CardSection title="Workflow updates">
         <p className="mb-4 text-sm text-muted-foreground">
           Choose which workflow updates create future inbox items.
