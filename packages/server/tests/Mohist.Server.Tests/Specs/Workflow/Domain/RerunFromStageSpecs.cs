@@ -261,7 +261,7 @@ public class RerunFromStageSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void RerunFromStage_PendingCheckInRange_ThrowsWithActiveWorkCode()
+    public void RerunFromStage_PendingCheckInFailedRange_IsDiscardedByNewAttempt()
     {
         var run = BuildCompletedRun();
         run.Status = WorkflowRunStatus.Failed;
@@ -275,6 +275,32 @@ public class RerunFromStageSpecs
             Title = "Pending Check",
             Uses = "spec/check",
             Status = StageCheckStatus.Pending,
+        });
+
+        run.RerunFromStage("build");
+
+        var newBuild = run.Stages.Single(s => s.Id == "build");
+        Assert.Empty(newBuild.Checks);
+        Assert.Null(run.Failure);
+        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void RerunFromStage_RunningCheckInRange_ThrowsWithActiveWorkCode()
+    {
+        var run = BuildCompletedRun();
+        run.Status = WorkflowRunStatus.Failed;
+        run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
+
+        var buildStage = run.Stages[1];
+        buildStage.Checks.Add(new StageCheck
+        {
+            Name = "running-check",
+            Title = "Running Check",
+            Uses = "spec/check",
+            Status = StageCheckStatus.Running,
         });
 
         var ex = Assert.Throws<WorkflowControlRejectionException>(() =>
