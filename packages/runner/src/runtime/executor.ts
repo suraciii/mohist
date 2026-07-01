@@ -1,6 +1,7 @@
 import { isAbsolute, join, relative, resolve } from "node:path"
 import type { ActionContext, ActionResult, JsonObject, AddTaskInput, RenderedWorkItem, WorkItemResult } from "../core/types.js"
-import { stringInput } from "../core/json.js"
+import { isObject, safeParseObject, stringInput } from "../core/json.js"
+import { errorMessage } from "../core/errors.js"
 import { stringAt } from "../core/json-path.js"
 import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
 import { ensureDir } from "../system/process.js"
@@ -23,7 +24,19 @@ import {
   expectedWorkspaceBranch,
   type BranchStabilityEvidence,
 } from "./branch-stability.js"
+import { checkFailureDetails, type CheckResultRow } from "./check-verdict.js"
 import { cleanupAgentAction, enforceCleanWorktree } from "./worktree-enforcement.js"
+
+const COMPLETED_STATUSES = new Set(["completed", "success", "succeeded", "pass", "passed"])
+const CHECK_STATUS_BY_ACTION_STATUS = new Map([
+  ["pass", "pass"],
+  ["passed", "pass"],
+  ["success", "pass"],
+  ["succeeded", "pass"],
+  ["completed", "pass"],
+  ["pending", "pending"],
+])
+const CHECK_WORK_TYPES = new Set(["check", "checks"])
 
 export class WorkExecutor {
   constructor(
@@ -151,8 +164,8 @@ export class WorkExecutor {
     const userVariables = work.variables ?? {}
     const userRunner = userVariables.runner
     const mergedRunner: JsonObject = { ...runnerVariables() }
-    if (userRunner && typeof userRunner === "object" && !Array.isArray(userRunner)) {
-      Object.assign(mergedRunner, userRunner as JsonObject)
+    if (isObject(userRunner)) {
+      Object.assign(mergedRunner, userRunner)
     }
     return { ...userVariables, runner: mergedRunner, workspace }
   }
@@ -162,14 +175,13 @@ export class WorkExecutor {
   private workspaceFromVariables(work: RenderedWorkItem): ResolvedWorkspace {
     const variables = work.variables ?? {}
     const ws = variables["workspace"]
-    if (!ws || typeof ws !== "object" || Array.isArray(ws)) {
+    if (!isObject(ws)) {
       return { path: "", branch: null, changeDir: null }
     }
-    const obj = ws as JsonObject
     return {
-      path: typeof obj["path"] === "string" ? (obj["path"] as string) : "",
-      branch: typeof obj["branch"] === "string" ? (obj["branch"] as string) : null,
-      changeDir: typeof obj["changeDir"] === "string" ? (obj["changeDir"] as string) : null,
+      path: stringField(ws, "path") ?? "",
+      branch: stringField(ws, "branch"),
+      changeDir: stringField(ws, "changeDir"),
     }
   }
 
@@ -264,7 +276,7 @@ function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: Abor
 function workspaceSetupFailure(work: RenderedWorkItem, error: unknown): WorkItemResult {
   const message = error instanceof Error ? error.message : String(error)
   return {
-    status: work.workType === "check" || work.workType === "checks" ? "fail" : "failed",
+    status: failureStatus(work),
     message: `could not prepare workflow workspace (workspace-setup): ${message}`.slice(0, 4000),
     output: JSON.stringify({ kind: "workspace-setup" }),
   }
@@ -273,54 +285,25 @@ function workspaceSetupFailure(work: RenderedWorkItem, error: unknown): WorkItem
 function normalize(work: RenderedWorkItem, result: WorkItemResult): WorkItemResult {
   const status = result.status.toLowerCase()
   if (work.workType === "check") {
-    if (["pass", "passed", "success", "succeeded", "completed"].includes(status)) return { ...result, status: "pass" }
-    if (status === "pending") return { ...result, status: "pending" }
-    return { ...result, status: "fail" }
+    return { ...result, status: toCheckStatus(status) }
   }
-  if (["completed", "success", "succeeded", "pass", "passed"].includes(status)) return { ...result, status: "completed" }
-  return { ...result, status: "failed" }
+  return { ...result, status: COMPLETED_STATUSES.has(status) ? "completed" : "failed" }
 }
 
 function failure(work: RenderedWorkItem, message: string): WorkItemResult {
-  return { status: work.workType === "check" || work.workType === "checks" ? "fail" : "failed", message }
+  return { status: failureStatus(work), message }
+}
+
+function failureStatus(work: RenderedWorkItem): "fail" | "failed" {
+  return CHECK_WORK_TYPES.has(work.workType) ? "fail" : "failed"
 }
 
 function toCheckStatus(status: string) {
-  const normalized = status.toLowerCase()
-  if (["pass", "passed", "success", "succeeded", "completed"].includes(normalized)) return "pass"
-  if (normalized === "pending") return "pending"
-  return "fail"
+  return CHECK_STATUS_BY_ACTION_STATUS.get(status.toLowerCase()) ?? "fail"
 }
 
 function isCheck(value: unknown): value is { name?: string; title?: string; uses: string; with?: JsonObject | null } {
-  return typeof value === "object" && value !== null && "uses" in value && typeof (value as { uses?: unknown }).uses === "string"
-}
-
-interface CheckResultRow {
-  name?: string
-  status: string
-  message?: string | null
-}
-
-// Format the per-failed-check details for a `Check verdict failure: …` message.
-// For `core/marker` checks the runner renders a verdict-marker-specific hint
-// using the original `with.expect`/`with.contains` from the dispatch.
-function checkFailureDetails(
-  results: ReadonlyArray<CheckResultRow>,
-  checks: ReadonlyArray<{ name?: string; uses: string; with?: JsonObject | null }>,
-): string {
-  return results
-    .filter((r) => r.status === "fail")
-    .map((c) => {
-      const checkConfig = checks.find((ch) => ch.name === c.name)
-      const isMarkerCheck = checkConfig?.uses === "core/marker"
-      if (isMarkerCheck && checkConfig) {
-        const expectedMarker = checkConfig.with?.expect ?? checkConfig.with?.contains ?? "PASS"
-        return `${c.name}: expected verdict marker '${expectedMarker}' but it was not found in the artifact`
-      }
-      return `${c.name}: ${c.message}`
-    })
-    .join("; ")
+  return isObject(value) && typeof value.uses === "string"
 }
 
 function resolveWorkspacePath(workspaceRoot: string, requested: string) {
@@ -343,23 +326,6 @@ function formatCheckUnresolvedError(unresolved: string[]): string {
   const refs = unresolved.map((p) => "'${{ " + p + " }}'").join(", ")
   return "check references undefined variable(s): " + refs + ". " +
     "Add the variable to workflow.variables, define it in a parent stage, or escape the literal with \\${{ ... }}."
-}
-
-function safeParseJson(value: string): JsonObject | null {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as JsonObject) : null
-  } catch {
-    return null
-  }
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (error && typeof error === "object" && "name" in error && "message" in error) {
-    return String((error as { message: unknown }).message)
-  }
-  return String(error)
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +351,7 @@ function tryRecovery(
   const recovery = readRecoveryConfig(work.recovery)
   if (!recovery) return null
 
-  const output = safeParseJson(result.output ?? "")
+  const output = safeParseObject(result.output)
   if (!output) return null
 
   const handler = recovery.handlers.find((h) => matchesWhen(h.when, output))
@@ -434,9 +400,9 @@ function readRecoveryConfig(recovery: JsonObject | null | undefined): RecoveryCo
   if (!Array.isArray(rawHandlers)) return null
   const handlers: RecoveryHandler[] = []
   for (const raw of rawHandlers) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue
-    const h = raw as JsonObject
-    const when = typeof h["when"] === "string" ? h["when"] : null
+    if (!isObject(raw)) continue
+    const h = raw
+    const when = stringField(h, "when")
     if (!when) continue
     handlers.push({
       when,
@@ -451,21 +417,29 @@ function readAddTasks(raw: unknown): AddTaskInput[] {
   if (!Array.isArray(raw)) return []
   const tasks: AddTaskInput[] = []
   for (const entry of raw) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue
-    const t = entry as JsonObject
-    const id = typeof t["id"] === "string" ? t["id"] : null
+    if (!isObject(entry)) continue
+    const t = entry
+    const id = stringField(t, "id")
     if (!id) continue
-    const withValue = t["with"]
-    const recoveryValue = t["recovery"]
     tasks.push({
       id,
-      title: typeof t["title"] === "string" ? t["title"] : id,
-      uses: typeof t["uses"] === "string" ? t["uses"] : null,
-      with: withValue && typeof withValue === "object" && !Array.isArray(withValue) ? (withValue as JsonObject) : null,
-      recovery: recoveryValue && typeof recoveryValue === "object" && !Array.isArray(recoveryValue) ? (recoveryValue as JsonObject) : null,
+      title: stringField(t, "title") ?? id,
+      uses: stringField(t, "uses"),
+      with: objectField(t, "with"),
+      recovery: objectField(t, "recovery"),
     })
   }
   return tasks
+}
+
+function stringField(obj: JsonObject, key: string): string | null {
+  const value = obj[key]
+  return typeof value === "string" ? value : null
+}
+
+function objectField(obj: JsonObject, key: string): JsonObject | null {
+  const value = obj[key]
+  return isObject(value) ? value : null
 }
 
 function decrementRecoveryBudget(recovery: JsonObject | null | undefined, currentBudget: number): JsonObject | null {
