@@ -1,5 +1,5 @@
 import path from 'path'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -39,14 +39,8 @@ export default defineConfig({
     globals: true,
     testTimeout: 10_000,
     hookTimeout: 10_000,
-    forceExit: true,
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        maxForks: 1,
-        minForks: 1,
-      },
-    },
+    maxWorkers: 3,
     exclude: [
       '**/*.a11y.spec.ts',
       '**/node_modules/**',
