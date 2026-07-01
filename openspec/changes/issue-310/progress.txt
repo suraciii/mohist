@@ -127,3 +127,44 @@ Page changes:
 - issue-detail suites: 7 files / 132 tests green (the existing 91 + 41 new). All 4 component suites (`IssueDetailPage.test.tsx`, `.archived`, `.capacity-gating`, `.readiness`) including the density block and the archived-actions-note assertions pass.
 - `npm run test:run -w packages/web`: 3643 passed / 1 skipped across 236 files (was 3602 across 235; delta = +41 tests in +1 file).
 - `npm run build -w packages/web`: green.
+
+## T-005 — extract remaining right-rail cards (Details / Drift / Configuration / Prerequisites / Readiness)
+
+Lifted the 5 remaining right-rail cards out of `IssueDetailPage.tsx` into dumb-renderer components under `ui/cards/`. Each card receives only the props it needs and renders only inner content — every structural wrapper (the right-rail `space-y-6` column, the `mb-8` frames, the structural `data-testid`s like `issue-workflow-profile-control-frame`, `issue-detail-right-rail`, `issue-detail-content-grid`) stays owned by the page per D2.
+
+New files:
+- `pages/issue-detail/ui/cards/IssueDetailsCard.tsx` (67 lines) — `<CardSection title="Details">` rendering the `dl` with `issue-detail-details-metadata` testid and the repository metadata. Owns `issue-detail-details-metadata`, `repository-metadata-row`, `repository-metadata-value`, `repository-name`, `repository-base-branch`, `repository-git-url`. Receives `issue: Pick<Issue, 'status' | 'projectName' | 'repository' | 'workflowStage'>`.
+- `pages/issue-detail/ui/cards/IssueDriftCard.tsx` (66 lines) — `<CardSection title="Base Drift Detected" tone="amber">` for `issue.drift?.drifted`. Receives `drift: BaseDriftInfo`. No testid of its own — all inner testids in the original were inline `data-testid=` on spans (`span className="font-medium…"` etc., no testid).
+- `pages/issue-detail/ui/cards/IssueConfigurationCard.tsx` (99 lines) — `<CardSection title="Configuration">` wrapping `<IssueModelSelector>` plus, when `isBacklog`, the prerequisites `Add` / remove-prereq chip UI with the `prerequisite-configuration-controls` testid. The `prereqInput` / `prereqError` `useState` pairs move into the card (their only consumer was this block). Receives `issue` (number, model, stageModels, prerequisites, isBacklog) + `mutations: Pick<IssueDetailMutations, 'addPrerequisiteMutation' | 'removePrerequisiteMutation'>`.
+- `pages/issue-detail/ui/cards/IssuePrerequisitesCard.tsx` (30 lines) — `<CardSection title="Start Prerequisites" tone="amber">` listing `issue.prerequisites` with Completed / Waiting chip per entry. Receives `prerequisites: IssuePrerequisiteSummary[]`. No testid on the wrapper or chips.
+- `pages/issue-detail/ui/cards/IssueReadinessCard.tsx` (48 lines) — `<CardSection title="Readiness">` with the `readiness-panel` testid and the `readiness-is-draft`, `readiness-can-start`, `readiness-blocker` testids (and `data-blocker-kind` attribute). Tone is derived inline: `issue.isDraft ? 'default' : issue.canStart ? 'green' : 'amber'`. Receives `issue: Pick<Issue, 'isDraft' | 'canStart' | 'blocker'>`.
+
+Page changes:
+- `IssueDetailPage.tsx`: dropped the 5 inline card JSX blocks (~217 lines of right-rail content). Removed the `prereqInput` / `setPrereqInput` / `prereqError` / `setPrereqError` `useState`s (they moved into `IssueConfigurationCard`). Removed unused imports `formatStageName` from `model/format` (only used in DetailsCard now), `Input` from `@/shared/ui/components/input`, and `IssueModelSelector` from `features/select-issue-model` (only used in ConfigurationCard now). Page line count: 795 → 578 (−217 lines from T-005; cumulative since the proposal: 1375 → 578, −797 lines, −58%).
+- Right rail composition in the page: `<IssueDetailsCard />`, then the still-inline `LatestArtifactsPanel` + `WorkflowProfileControl` (kept because they're not in T-005's scope), then `<IssueDriftCard />` (gated by `issue.drift?.drifted`), then the still-inline Workflow Interrupted CardSection + `WorkflowConvergencePanel` + Runtime/Sessions CardSection, then `<IssueConfigurationCard />`, then `<IssueActionsCard />` (T-004), then `<IssuePrerequisitesCard />` (gated by `issue.prerequisites?.length > 0`), then `<IssueReadinessCard />` (gated by `isBacklog`).
+
+### Codebase patterns confirmed for later tasks
+
+- D2's structural-wrapper rule continues to hold: every card renders `CardSection` + inner content only; the `data-testid` for content-level elements (`issue-detail-details-metadata`, `prerequisite-configuration-controls`, `readiness-panel`, `readiness-is-draft`, etc.) travels with the JSX into the child component, while structural testids (`issue-detail-right-rail`, `issue-workflow-profile-control-frame`, etc.) stay in the page. The density test at `IssueDetailPage.test.tsx:793-870` pins the structural query (`.lg:col-span-2` resolver, `space-y-8` main column, `space-y-6` right rail, `mb-8` frames, structural testids) and stays green across each extraction.
+- Cards that need a small slice of the 13 mutations can `Pick<IssueDetailMutations, …>` over the names they use (precedent: `IssueActionsCard`'s 9-mutation `Pick`). `IssueConfigurationCard` uses a 2-mutation `Pick`; `IssueActionsCard` reuses the 9-mutation `Pick` from T-004.
+- A card that owns its local `useState` (the `prereqInput` / `prereqError` pair in `IssueConfigurationCard`) is fine — state stays co-located with its only consumer, mirroring the `forceStopConfirming` / `stopConfirming` state that lived in `IssueActionsCard` post-T-004.
+- The `issue` prop on a card can be narrowed with `Pick<Issue, …>` to make the contract explicit (e.g. `IssueReadinessCard` only needs `isDraft | canStart | blocker`). The page passes the full `issue` object where convenient and the structural typing is satisfied — TypeScript narrows correctly when only the picked fields are read.
+- A child component that conditionally renders `<CardSection title="…">` with conditional wrappers around it (e.g. `{issue.prerequisites && issue.prerequisites.length > 0 && <IssuePrerequisitesCard …/>}`) keeps the page-level conditional; the card itself assumes the list is non-empty (no defensive empty-render).
+
+### Gotchas
+
+- `IssueConfigurationCard` imports `Input` from `@/shared/ui/components/input`, which is the package alias path used in the rest of the codebase — not the relative-path style. When the page previously inlined this block, `Input` was imported with the same alias, so the relative depth doesn't change.
+- `IssueDetailsCard` and `IssueReadinessCard` keep `Pick<Issue, …>` types and accept the page's full `issue` object as the prop — TypeScript's structural typing makes this work without explicit `satisfies`. No `as` cast needed.
+- The `noUnusedLocals` flag (TypeScript strict mode) catches unused-import warnings immediately on each extraction. Verifying the typecheck right after each card prevents stale imports accumulating.
+- Re-running `npm run test:run -- src/pages/issue-detail` after each individual extraction (not only at the end) surfaced no density-test regressions — the design.md risk-mitigation recommendation was easy to honor because each card was a small atomic move.
+
+### Verification
+
+- `rg 'useState|useEffect|formatStageName|prereqInput|prereqError|IssueModelSelector' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx` for the moved pieces: `prereqInput`, `prereqError`, `IssueModelSelector` all return 0 matches in the page (state and import moved into `IssueConfigurationCard`).
+- `rg 'space-y-6|space-y-8|gap-8|mb-8' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: every match is on a structural wrapper in the page (the grid `gap-8`, main column `space-y-8`, right rail `space-y-6`, header / runtime / workflow / pr-delivery / workflow-profile / diff-summary `mb-8` frames); no card re-introduces one.
+- `rg -c 'data-testid' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 22 (was 33 in T-004; the 11 moved testids — `issue-detail-details-metadata`, `repository-metadata-row`, `repository-metadata-value`, `repository-name`, `repository-base-branch`, `repository-git-url`, `prerequisite-configuration-controls`, `readiness-panel`, `readiness-is-draft`, `readiness-can-start`, `readiness-blocker` — travel with the JSX into the 5 new cards).
+- Page-wide union of data-testid values (page + cards + pills + WorkflowYamlDialog): 43 unique values pre-T-005 = 43 unique values post-T-005 (bit-for-bit unchanged; verified with a stash + rg diff).
+- `npm run typecheck -w packages/web`: green.
+- issue-detail suites: 7 files / 132 tests green (no new unit tests; the 4 component suites including the density block at `IssueDetailPage.test.tsx:793-870` and the readiness assertions at `IssueDetailPage.readiness.test.tsx:240-289` all pass).
+- `npm run test:run -w packages/web`: 3643 passed / 1 skipped across 236 files (no delta vs. T-004; behavior-preserving move).
+- `npm run build -w packages/web`: green.

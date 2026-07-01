@@ -8,24 +8,27 @@ import { useAgentStatus } from '../../../entities/agent'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
-import { IssueModelSelector } from '../../../features/select-issue-model'
 import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
 import { ActivityDialog } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
-import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer, MarkdownReader } from '@/shared/ui'
 import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { CardSection } from '@/shared/ui/components/card-section'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { attachmentFromMetadata, formatRelativeTime, formatStageName } from '../model/format'
+import { attachmentFromMetadata, formatRelativeTime } from '../model/format'
 import { useIssueDetailMutations } from '../model/useIssueDetailMutations'
 import { computeActionsState } from '../model/actionsState'
 import { ArchivedPill, DraftPill, HealthPill, PriorityChip, WorkflowStagePill } from './pills'
 import { WorkflowYamlDialog } from './WorkflowYamlDialog'
 import { IssueActionsCard, extractActionsErrorMessages } from './cards/IssueActionsCard'
+import { IssueDetailsCard } from './cards/IssueDetailsCard'
+import { IssueDriftCard } from './cards/IssueDriftCard'
+import { IssueConfigurationCard } from './cards/IssueConfigurationCard'
+import { IssuePrerequisitesCard } from './cards/IssuePrerequisitesCard'
+import { IssueReadinessCard } from './cards/IssueReadinessCard'
 
 export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
@@ -37,8 +40,6 @@ export function IssueDetailPage() {
   const [commentText, setCommentText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
   const [stopConfirming, setStopConfirming] = useState(false)
-  const [prereqInput, setPrereqInput] = useState('')
-  const [prereqError, setPrereqError] = useState<string | null>(null)
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null)
   const [deleteCommentError, setDeleteCommentError] = useState<string | null>(null)
 
@@ -480,56 +481,7 @@ export function IssueDetailPage() {
             </div>
 
             <div className="min-w-0 space-y-6" data-testid="issue-detail-right-rail">
-              <CardSection title="Details">
-                <dl className="min-w-0 space-y-2 text-sm" data-testid="issue-detail-details-metadata">
-                  <div className="flex min-w-0 justify-between gap-3">
-                    <dt className="text-muted-foreground">Issue Stage</dt>
-                    <dd className="min-w-0 text-foreground font-medium text-right">
-                      {formatStageName(issue.status)}
-                    </dd>
-                  </div>
-                  {workflowStage && (
-                    <div className="flex min-w-0 justify-between gap-3">
-                      <dt className="text-muted-foreground">Workflow Stage</dt>
-                      <dd className="min-w-0 text-foreground font-medium text-right">
-                        {formatStageName(workflowStage)}
-                      </dd>
-                    </div>
-                  )}
-                  {issue.projectName && (
-                    <div className="flex min-w-0 justify-between gap-3">
-                      <dt className="text-muted-foreground">Project</dt>
-                      <dd className="min-w-0 text-foreground text-right break-words">
-                        {issue.projectName}
-                      </dd>
-                    </div>
-                  )}
-                  {issue.repository && (
-                    <div className="flex min-w-0 justify-between gap-3" data-testid="repository-metadata-row">
-                      <dt className="shrink-0 text-muted-foreground">Repository</dt>
-                      <dd className="min-w-0 text-foreground text-right" data-testid="repository-metadata-value">
-                        <span className="block min-w-0 break-words" data-testid="repository-name">
-                          {issue.repository.name}
-                        </span>
-                        {issue.repository.baseBranch && (
-                          <span className="block min-w-0 text-xs text-muted-foreground/80 break-words" data-testid="repository-base-branch">
-                            {issue.repository.baseBranch}
-                          </span>
-                        )}
-                        {issue.repository.gitUrl && (
-                          <span
-                            className="block min-w-0 break-all text-xs text-muted-foreground/70"
-                            title={issue.repository.gitUrl}
-                            data-testid="repository-git-url"
-                          >
-                            {issue.repository.gitUrl}
-                          </span>
-                        )}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              </CardSection>
+              <IssueDetailsCard issue={issue} />
 
               <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
 
@@ -538,62 +490,7 @@ export function IssueDetailPage() {
               </div>
 
               {issue.drift?.drifted && (
-                <CardSection title="Base Drift Detected" tone="amber">
-                  <div className="space-y-1.5 text-xs">
-                    {issue.drift.decision && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Rebase decision:</span>
-                        <span className={`font-medium ${issue.drift.decision === 'needs-attention' ? 'text-red-600' : issue.drift.decision === 'defer' ? 'text-orange-600' : 'text-amber-700'}`}>
-                          {issue.drift.decision === 'needs-attention' ? 'Needs Attention' :
-                           issue.drift.decision === 'defer' ? 'Deferred' :
-                           issue.drift.decision === 'suggest' ? 'Suggested' :
-                           issue.drift.decision === 'enqueue' ? 'Enqueued' : issue.drift.decision}
-                        </span>
-                      </div>
-                    )}
-                    {issue.drift.deferReason && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Defer reason:</span>
-                        <span className="text-orange-600 text-right">
-                          {issue.drift.deferReason === 'agent-running' ? 'Agent running' :
-                           issue.drift.deferReason === 'task-running' ? 'Task running' :
-                           issue.drift.deferReason === 'waiting-for-task-boundary' ? 'Waiting for task boundary' :
-                           issue.drift.deferReason === 'rebase-already-pending' ? 'Rebase already pending' :
-                           issue.drift.deferReason}
-                        </span>
-                      </div>
-                    )}
-                    {issue.drift.safeWindow !== null && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Safe window:</span>
-                        <span className={issue.drift.safeWindow ? 'text-green-600' : 'text-foreground/80'}>
-                          {issue.drift.safeWindow ? 'Yes' : 'No'}
-                        </span>
-                      </div>
-                    )}
-                    {issue.drift.observedBaseSha && issue.drift.currentBaseSha && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Base:</span>
-                        <span className="font-mono text-foreground/80">
-                          {issue.drift.observedBaseSha.slice(0, 7)} → {issue.drift.currentBaseSha.slice(0, 7)}
-                        </span>
-                      </div>
-                    )}
-                    {issue.drift.nextAction && (
-                      <div className="mt-2 pt-2 border-t border-amber-200 text-amber-800">
-                        {issue.drift.nextAction}
-                      </div>
-                    )}
-                    {issue.drift.conflicts && issue.drift.conflicts.length > 0 && (
-                      <div className="mt-2 pt-2 border-t border-red-200">
-                        <span className="font-medium text-red-800">Conflicts: </span>
-                        {issue.drift.conflicts.map((f) => (
-                          <span key={f} className="font-mono text-red-700 ml-1">{f}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </CardSection>
+                <IssueDriftCard drift={issue.drift} />
               )}
 
               {issue.health === IssueHealth.Interrupted && (
@@ -630,73 +527,10 @@ export function IssueDetailPage() {
                 </CardSection>
               )}
 
-              <CardSection title="Configuration">
-                <div className="space-y-4">
-                  <IssueModelSelector issueNumber={issue.number} currentModel={issue.model} currentStageModels={issue.stageModels} />
-
-                  {isBacklog && (
-                    <div className="border-t border-border/60 pt-4" data-testid="prerequisite-configuration-controls">
-                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Prerequisites</h3>
-                      <div className="flex gap-2">
-                        <Input
-                          type="number"
-                          value={prereqInput}
-                          onChange={(e) => {
-                            setPrereqInput(e.target.value)
-                            setPrereqError(null)
-                          }}
-                          placeholder="Issue #"
-                          className="min-w-0 flex-1"
-                        />
-                        <Button
-                          onClick={() => {
-                            const num = parseInt(prereqInput, 10)
-                            if (isNaN(num) || num === issueNumber) {
-                              setPrereqError('Enter a valid issue number')
-                              return
-                            }
-                            setPrereqError(null)
-                            addPrerequisiteMutation.mutate(num)
-                            setPrereqInput('')
-                          }}
-                          disabled={!prereqInput || addPrerequisiteMutation.isPending}
-                        >
-                          {addPrerequisiteMutation.isPending ? 'Adding...' : 'Add'}
-                        </Button>
-                      </div>
-                      {prereqError && (
-                        <p className="mt-1 text-xs text-red-600">{prereqError}</p>
-                      )}
-                      {addPrerequisiteMutation.error && (
-                        <p className="mt-1 text-xs text-red-600">
-                          {(addPrerequisiteMutation.error as Error).message?.includes('circular')
-                            ? 'Circular prerequisite: this would create a cycle'
-                            : (addPrerequisiteMutation.error as Error).message}
-                        </p>
-                      )}
-                      {issue.prerequisites && issue.prerequisites.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-border/60">
-                          <p className="text-xs text-muted-foreground mb-2">Remove prerequisite:</p>
-                          <div className="flex flex-wrap gap-1">
-                            {issue.prerequisites.map((prereq) => (
-                              <Button
-                                key={prereq.number}
-                                variant="secondary"
-                                size="xs"
-                                onClick={() => removePrerequisiteMutation.mutate(prereq.number)}
-                                disabled={removePrerequisiteMutation.isPending}
-                              >
-                                #{prereq.number}
-                                <span className="text-muted-foreground">×</span>
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </CardSection>
+              <IssueConfigurationCard
+                issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prerequisites, isBacklog }}
+                mutations={{ addPrerequisiteMutation, removePrerequisiteMutation }}
+              />
 
               <IssueActionsCard
                 state={actionsState}
@@ -721,62 +555,11 @@ export function IssueDetailPage() {
               />
 
               {issue.prerequisites && issue.prerequisites.length > 0 && (
-                <CardSection title="Start Prerequisites" tone="amber">
-                  <div className="space-y-2">
-                    {issue.prerequisites.map((prereq) => (
-                      <div key={prereq.number} className="flex items-center justify-between text-sm gap-2">
-                        <span className="text-amber-800 truncate">
-                          <span className="font-mono">#{prereq.number}</span> {prereq.title}
-                        </span>
-                        {prereq.completed ? (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-100 px-1.5 py-0.5 rounded shrink-0">
-                            Completed
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded shrink-0">
-                            Waiting
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </CardSection>
+                <IssuePrerequisitesCard prerequisites={issue.prerequisites} />
               )}
 
               {isBacklog && (
-                <CardSection
-                  title="Readiness"
-                  tone={issue.isDraft ? 'default' : issue.canStart ? 'green' : 'amber'}
-                >
-                  <div className="space-y-2 text-sm" data-testid="readiness-panel">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Draft</span>
-                      <span data-testid="readiness-is-draft">
-                        {issue.isDraft ? 'Yes' : 'No'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Can start</span>
-                      <span data-testid="readiness-can-start">
-                        {issue.canStart ? 'Yes' : 'No'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground">Blocker</span>
-                      <span
-                        data-testid="readiness-blocker"
-                        data-blocker-kind={issue.blocker?.kind ?? 'none'}
-                        className="text-right"
-                      >
-                        {issue.blocker?.kind === 'draft'
-                          ? 'Still a draft'
-                          : issue.blocker?.kind === 'waiting-for'
-                            ? `Waiting for #${issue.blocker.issue.number}`
-                            : 'None'}
-                      </span>
-                    </div>
-                  </div>
-                </CardSection>
+                <IssueReadinessCard issue={issue} />
               )}
             </div>
           </div>
