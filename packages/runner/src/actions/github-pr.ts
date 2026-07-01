@@ -26,6 +26,7 @@ const PR_CHECKS_POLL_INTERVAL_MS_DEFAULT = 15_000
 // push (GitHub hasn't turned the workflow run into a check run yet), short
 // enough that repos without CI don't wait forever.
 const PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT = 120_000
+const PR_CHECKS_UNAVAILABLE_RETRY_LIMIT_DEFAULT = 3
 
 // How long to poll mergeStateStatus after checks pass before giving up.
 // GitHub's merge eligibility can lag behind PR check rollup by a few seconds;
@@ -34,15 +35,18 @@ const PR_MERGE_STATUS_POLL_TIMEOUT_MS = 120_000
 
 let prChecksPollIntervalMs = PR_CHECKS_POLL_INTERVAL_MS_DEFAULT
 let prChecksNoChecksGraceMs = PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT
+let prChecksUnavailableRetryLimit = PR_CHECKS_UNAVAILABLE_RETRY_LIMIT_DEFAULT
 
-export function setGitHubPrChecksTimingForTest(timing: { pollIntervalMs?: number; noChecksGraceMs?: number } | null) {
+export function setGitHubPrChecksTimingForTest(timing: { pollIntervalMs?: number; noChecksGraceMs?: number; unavailableRetryLimit?: number } | null) {
   if (timing === null) {
     prChecksPollIntervalMs = PR_CHECKS_POLL_INTERVAL_MS_DEFAULT
     prChecksNoChecksGraceMs = PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT
+    prChecksUnavailableRetryLimit = PR_CHECKS_UNAVAILABLE_RETRY_LIMIT_DEFAULT
     return
   }
   if (timing.pollIntervalMs !== undefined) prChecksPollIntervalMs = timing.pollIntervalMs
   if (timing.noChecksGraceMs !== undefined) prChecksNoChecksGraceMs = timing.noChecksGraceMs
+  if (timing.unavailableRetryLimit !== undefined) prChecksUnavailableRetryLimit = Math.max(0, Math.floor(timing.unavailableRetryLimit))
 }
 
 export type GitHubPrErrorCode =
@@ -642,6 +646,11 @@ export async function waitChecksAndMergePr(
     }
   }
 
+  const initialMergeStateFailure = mergeStateStatusFailure(prNumber, view.mergeStateStatus, view.url ?? null, viewOutput)
+  if (initialMergeStateFailure) {
+    return initialMergeStateFailure
+  }
+
   const checksWait = await waitForPrChecks(gh, workDir, prNumber, signal, record)
   if (checksWait.kind === "failure") {
     const prefix = checksWait.errorCode === "pr-checks-unavailable"
@@ -668,8 +677,8 @@ export async function waitChecksAndMergePr(
   // waitForPrChecks tracks PR check rollup state, but branch protection may
   // also gate on reviews or check suites that aren't reported as check runs.
   // The PR's mergeStateStatus is the authoritative final signal.
-  // Poll it for up to PR_MERGE_STATUS_POLL_TIMEOUT_MS — BLOCKED/UNSTABLE right
-  // after checks settle is usually transient (checks hadn't fully registered).
+  // Poll it for up to PR_MERGE_STATUS_POLL_TIMEOUT_MS — BLOCKED/UNSTABLE/UNKNOWN
+  // right after checks settle is usually transient (checks hadn't fully registered).
   const mergeStatusPollStart = Date.now()
   for (;;) {
     if (signal.aborted) {
@@ -695,26 +704,12 @@ export async function waitChecksAndMergePr(
     }
     const mergeStatusView = parsePrView(mergeStatusResult.stdout)
     const mergeState = mergeStatusView?.mergeStateStatus
-    if (mergeState === "CLEAN" || mergeState === "HAS_HOOKS" || mergeState === "UNKNOWN") {
+    if (mergeState === "CLEAN" || mergeState === "HAS_HOOKS") {
       break
     }
-    if (mergeState === "DIRTY" || mergeState === "BEHIND") {
-      return {
-        kind: "failure",
-        errorCode: "base-moved",
-        message: `PR #${prNumber} is ${mergeState}; rebase required.`,
-        prUrl: view.url ?? null,
-        output: mergeStatusOutput,
-      }
-    }
-    if (mergeState === "DRAFT") {
-      return {
-        kind: "failure",
-        errorCode: "pr-state-conflict",
-        message: `PR #${prNumber} is still a draft.`,
-        prUrl: view.url ?? null,
-        output: mergeStatusOutput,
-      }
+    const mergeStateFailure = mergeStateStatusFailure(prNumber, mergeState, view.url ?? null, mergeStatusOutput)
+    if (mergeStateFailure) {
+      return mergeStateFailure
     }
     if (Date.now() - mergeStatusPollStart >= PR_MERGE_STATUS_POLL_TIMEOUT_MS) {
       return {
@@ -786,6 +781,33 @@ export async function waitChecksAndMergePr(
   }
 }
 
+function mergeStateStatusFailure(
+  prNumber: number,
+  mergeStateStatus: string | undefined,
+  prUrl: string | null,
+  output: string,
+): WaitChecksAndMergeFailure | null {
+  if (mergeStateStatus === "DIRTY" || mergeStateStatus === "BEHIND") {
+    return {
+      kind: "failure",
+      errorCode: "base-moved",
+      message: `PR #${prNumber} is ${mergeStateStatus}; rebase required.`,
+      prUrl,
+      output,
+    }
+  }
+  if (mergeStateStatus === "DRAFT") {
+    return {
+      kind: "failure",
+      errorCode: "pr-state-conflict",
+      message: `PR #${prNumber} is still a draft.`,
+      prUrl,
+      output,
+    }
+  }
+  return null
+}
+
 type PrChecksWaitResult =
   | { kind: "ok" }
   | { kind: "failure"; errorCode: "pr-checks-failed" | "pr-checks-unavailable"; message: string; output: string }
@@ -802,6 +824,7 @@ async function waitForPrChecks(
   // have appeared. Used to bound how long we wait before treating the branch
   // as genuinely check-less.
   let noChecksSince: number | null = null
+  let unavailableRetries = 0
   for (;;) {
     if (signal.aborted) {
       return {
@@ -818,53 +841,57 @@ async function waitForPrChecks(
     )
     const checksOutput = combinedGhOutput(checksResult)
     record("gh-pr-checks", `pr view ${prNumber} --json statusCheckRollup`, checksResult.exitCode, checksOutput)
+    let unavailable: { message: string; output: string } | null = null
     if (checksResult.exitCode !== 0) {
-      return {
-        kind: "failure",
-        errorCode: "pr-checks-unavailable",
-        message: checksOutput,
-        output: checksOutput,
-      }
+      unavailable = { message: checksOutput, output: checksOutput }
     } else {
       const parsed = parsePrStatusCheckRollupResult(checksResult.stdout)
       if (parsed.kind === "invalid") {
+        unavailable = { message: parsed.message, output: checksResult.stdout }
+      } else {
+        unavailableRetries = 0
+        const checks = parsed.checks
+        if (checks.length === 0) {
+          if (noChecksSince === null) noChecksSince = Date.now()
+          if (Date.now() - noChecksSince < prChecksNoChecksGraceMs) {
+            try {
+              await delayWithSignal(prChecksPollIntervalMs, signal)
+            } catch (error) {
+              return {
+                kind: "cancelled",
+                message: errorMessage(error),
+                output: `cancelled during wait: ${errorMessage(error)}`,
+              }
+            }
+            continue
+          }
+        } else {
+          noChecksSince = null
+        }
+        const classification = classifyPrChecks(checks)
+        if (classification.kind === "failed") {
+          return {
+            kind: "failure",
+            errorCode: "pr-checks-failed",
+            message: classification.message,
+            output: classification.message,
+          }
+        }
+        if (classification.kind === "passed") {
+          return { kind: "ok" }
+        }
+      }
+    }
+    if (unavailable) {
+      if (unavailableRetries >= prChecksUnavailableRetryLimit) {
         return {
           kind: "failure",
           errorCode: "pr-checks-unavailable",
-          message: parsed.message,
-          output: checksResult.stdout,
+          message: `check status unavailable after ${unavailableRetries + 1} attempts: ${unavailable.message}`,
+          output: unavailable.output,
         }
       }
-      const checks = parsed.checks
-      if (checks.length === 0) {
-        if (noChecksSince === null) noChecksSince = Date.now()
-        if (Date.now() - noChecksSince < prChecksNoChecksGraceMs) {
-          try {
-            await delayWithSignal(prChecksPollIntervalMs, signal)
-          } catch (error) {
-            return {
-              kind: "cancelled",
-              message: errorMessage(error),
-              output: `cancelled during wait: ${errorMessage(error)}`,
-            }
-          }
-          continue
-        }
-      } else {
-        noChecksSince = null
-      }
-      const classification = classifyPrChecks(checks)
-      if (classification.kind === "failed") {
-        return {
-          kind: "failure",
-          errorCode: "pr-checks-failed",
-          message: classification.message,
-          output: classification.message,
-        }
-      }
-      if (classification.kind === "passed") {
-        return { kind: "ok" }
-      }
+      unavailableRetries += 1
     }
     try {
       await delayWithSignal(prChecksPollIntervalMs, signal)

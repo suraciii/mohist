@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { acpAgentAction, setAcpProcessFactoryForTest } from "../../src/actions/acp-agent.js"
 import {
   createSessionLivenessState,
@@ -27,6 +27,35 @@ afterEach(() => {
 })
 
 describe("mohist/acp-agent monitorPrompt provider fail-fast", () => {
+  it("LongPollingPrompt_ReusesAbortSignalWatcher", async () => {
+    useAcpFakeTimers()
+    const controller = new AbortController()
+    const addSpy = vi.spyOn(controller.signal, "addEventListener")
+    const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+    const context = baseContext({ prompt: "hanging task" }, controller.signal)
+    const connection = {
+      async prompt() {
+        return await new Promise(() => {})
+      },
+      async cancel() {
+        return {}
+      },
+    }
+
+    const result = await runAcpActionUntilSettled(monitorPrompt(context, connection as never, "fake-session-1", "do the work", {
+      timeoutMs: 50,
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      livenessState: createSessionLivenessState(),
+      waitForData: () => new Promise<"data">(() => {}),
+      providerErrorCheckIntervalMs: 1,
+    }))
+
+    expect(result).not.toBe("completed")
+    expect(addSpy).toHaveBeenCalledTimes(1)
+    expect(removeSpy).toHaveBeenCalledTimes(1)
+  })
+
   it("TokenPlanProviderDiagnostic_MonitorFailsPromptImmediately", async () => {
     useAcpFakeTimers()
     useAcpProviderDiagnostic(tokenPlanDiagnostic(new Date().toISOString()))
