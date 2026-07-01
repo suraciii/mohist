@@ -54,3 +54,38 @@ Page changes:
 - Hook unit suite: 8/8 pass in 30 ms (well under the 50 ms unit budget per design/testing.md).
 - issue-detail suites: 5 files / 75 tests green (the existing 67 + 8 new).
 - `npm run test:run -w packages/web`: 3586 passed / 1 skipped across 234 files.
+
+## T-003 — centralize the 13 mutations into useIssueDetailMutations hook
+
+Lifted all 13 `useMutation` definitions out of `IssueDetailPage.tsx` into `pages/issue-detail/model/useIssueDetailMutations.ts`. The hook is the single owner of query-invalidation; mutations that also reset local UI state (forceStop, stop, addComment, deleteComment) take optional `onSuccess`/`onError` callbacks so the page (or any future consumer) wires the local reset.
+
+New files:
+- `pages/issue-detail/model/useIssueDetailMutations.ts` (182 lines) — 13 mutations + typed `IssueDetailMutations` return.
+- `pages/issue-detail/model/useIssueDetailMutations.test.ts` (16 specs, 27 ms) — pins the 13 `useMutation` registrations, mutationFn arg shapes, and exact `invalidateQueries` targets per the original page; covers the optional callbacks (incl. fallback to `'Failed to delete comment'` when the error is not an `Error` instance) and that hooks tolerate `projectId: undefined`.
+
+Page changes:
+- `IssueDetailPage.tsx`: dropped `useMutation` / `useQueryClient` imports and all 13 inline mutation definitions; `queryClient` local removed. Imports `useIssueDetailMutations` and destructures all 13 mutations. Local resets (forceStop / stop / addComment / deleteComment) moved into a 5-line callbacks block. State lifted up: `stopConfirming`, `deletingCommentId`, `deleteCommentError` now declared at the top with the other `useState`s (so the hook call sits between the state declarations and the `useIssue` query, keeping hook order stable). Removed imports for `startIssue`, `updateIssue`, `addPrerequisite`, `removePrerequisite`, `closeIssue`, `forceStopIssue`, `stopIssue`, `reopenIssue`, `resumeIssue`, `retryIssue`, `rerunIssue`, `addComment`, `deleteComment`, `extractAttachmentIds`. Kept `commentAttachmentContentPath` and `issueAttachmentContentPath` because they are still used in the page's `MarkdownReader.resolveAttachment` closures (per design D6).
+- Page line count: 1173 → 1087 (−86 lines; 1375 → 1087 cumulative since the proposal baseline, −288 lines / −20.9%).
+- `rg 'useMutation|useQueryClient' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 0 matches.
+
+### Codebase patterns confirmed for later tasks
+
+- For a hooks-bearing file that only calls React Query, the `model/` placement is fine (precedent: `useConfirmOutsideClick` from T-002). The hook returns a typed object; callers destructure with the original mutation names so no rename diff is required in `IssueDetailPage.tsx` body.
+- `useMutation` with a `mutationFn` whose return type is generic (e.g. `{ issue: Issue; message: string }`) infers the success type. Declaring `UseMutationResult<TData, Error, TVariables>` with `TData = unknown` is enough to satisfy the page's `.mutate()` / `.error` / `.isPending` consumers without pulling the `Issue` model into the hook module. The actual concrete return types are documented in the test file.
+- When mocking `useMutation` in unit tests, the inner `mutationFn` arrow is created fresh each `useMutation` call — don't try to compare the configured `mutationFn` to the inner API mock by reference. Instead, call the configured `mutationFn` and observe which inner API mock receives the call. The test uses `findMutationByApiCall` / `findMutationByApiCallWithArg` helpers for this.
+
+### Gotchas
+
+- The hook call must happen *before* the conditional `if (isError) return …` early return. In this iteration I reorganized the page state to put all `useState` declarations first, then the two `useConfirmOutsideClick` calls, then the `useIssueDetailMutations` call, then the query hooks, then the early returns. This keeps every hook in a stable order.
+- `deleteCommentMutation.onError` originally did `err instanceof Error ? err.message : 'Failed to delete comment'`. The hook mirrors that fallback by normalising non-Error values inside `onDeleteCommentError` — the test pins both branches.
+- The `start` mutation's `onError` is the only one that performs cache invalidation (when the error message contains `"waiting for"`). It's preserved inside the hook so no behavior change leaks out.
+
+### Verification
+
+- `rg 'useMutation|useQueryClient' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 0 matches.
+- `rg -c 'data-testid' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 40 (unchanged).
+- `npm run typecheck -w packages/web`: green.
+- Hook unit suite: 16/16 pass in 27 ms (well under the 50 ms unit budget).
+- issue-detail suites: 6 files / 91 tests green (the existing 75 + 16 new).
+- `npm run test:run -w packages/web`: 3602 passed / 1 skipped across 235 files (was 3586 across 234; delta = +16 tests in +1 file).
+- `npm run build` (web): green.

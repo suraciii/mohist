@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeftIcon, BotIcon, PencilIcon } from 'lucide-react'
 import { IssueStatus, IssueHealth, type RecoveryProjection } from '../../../entities/issue'
-import { addComment, addPrerequisite, closeIssue, commentAttachmentContentPath, deleteComment, extractAttachmentIds, forceStopIssue, issueAttachmentContentPath, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue, updateIssue } from '../../../entities/issue'
+import { commentAttachmentContentPath, issueAttachmentContentPath } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
 import { EditIssueDialog } from '../../../features/edit-issue'
@@ -23,6 +22,7 @@ import { CardSection } from '@/shared/ui/components/card-section'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { attachmentFromMetadata, formatRelativeTime, formatStageName } from '../model/format'
 import { useConfirmOutsideClick } from '../model/useConfirmOutsideClick'
+import { useIssueDetailMutations } from '../model/useIssueDetailMutations'
 import { ArchivedPill, DraftPill, HealthPill, PriorityChip, WorkflowStagePill } from './pills'
 import { WorkflowYamlDialog } from './WorkflowYamlDialog'
 
@@ -30,19 +30,55 @@ export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
-  const queryClient = useQueryClient()
   const { projectId } = useProject()
   const issueNumber = parseInt(number ?? '0', 10)
   const [editOpen, setEditOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
+  const [stopConfirming, setStopConfirming] = useState(false)
+  const [prereqInput, setPrereqInput] = useState('')
+  const [prereqError, setPrereqError] = useState<string | null>(null)
+  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null)
+  const [deleteCommentError, setDeleteCommentError] = useState<string | null>(null)
+
   const forceStopPanelRef = useConfirmOutsideClick({
     confirming: forceStopConfirming,
     setConfirming: setForceStopConfirming,
   })
+  const stopPanelRef = useConfirmOutsideClick({
+    confirming: stopConfirming,
+    setConfirming: setStopConfirming,
+  })
 
-  const [prereqInput, setPrereqInput] = useState('')
-  const [prereqError, setPrereqError] = useState<string | null>(null)
+  const {
+    startMutation,
+    markReadyMutation,
+    addPrerequisiteMutation,
+    removePrerequisiteMutation,
+    closeMutation,
+    forceStopMutation,
+    stopMutation,
+    reopenMutation,
+    resumeMutation,
+    retryMutation,
+    rerunMutation,
+    addCommentMutation,
+    deleteCommentMutation,
+  } = useIssueDetailMutations({
+    issueNumber,
+    projectId,
+    onForceStopSuccess: () => setForceStopConfirming(false),
+    onStopSuccess: () => setStopConfirming(false),
+    onAddCommentSuccess: () => setCommentText(''),
+    onDeleteCommentSuccess: () => {
+      setDeletingCommentId(null)
+      setDeleteCommentError(null)
+    },
+    onDeleteCommentError: (err) => {
+      setDeleteCommentError(err.message)
+      setDeletingCommentId(null)
+    },
+  })
 
   const { data: issue, isLoading, isError } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
@@ -62,133 +98,11 @@ export function IssueDetailPage() {
   const { data: commitsData } = useIssueCommits(issueNumber)
   const showCheckRepairActions = false
 
-  const startMutation = useMutation({
-    mutationFn: () => startIssue(issueNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    },
-    onError: (err: Error) => {
-      if (err.message.includes('waiting for')) {
-        queryClient.invalidateQueries({ queryKey: ['issues'] })
-      }
-    },
-  })
-
-  const markReadyMutation = useMutation({
-    mutationFn: () => updateIssue(issueNumber, { isDraft: false }, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-    },
-  })
-
-  const addPrerequisiteMutation = useMutation({
-    mutationFn: (prerequisiteNumber: number) => addPrerequisite(issueNumber, prerequisiteNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-    },
-  })
-
-  const removePrerequisiteMutation = useMutation({
-    mutationFn: (prerequisiteNumber: number) => removePrerequisite(issueNumber, prerequisiteNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-    },
-  })
-
-  const closeMutation = useMutation({
-    mutationFn: () => closeIssue(issueNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-    },
-  })
-
-  const forceStopMutation = useMutation({
-    mutationFn: () => forceStopIssue(issueNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      setForceStopConfirming(false)
-    },
-  })
-
-  const [stopConfirming, setStopConfirming] = useState(false)
-  const stopPanelRef = useConfirmOutsideClick({
-    confirming: stopConfirming,
-    setConfirming: setStopConfirming,
-  })
-  const stopMutation = useMutation({
-    mutationFn: () => stopIssue(issueNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      setStopConfirming(false)
-    },
-  })
-
   const canStopWorkflow = !!issue?.workflowRunId
     && issue.health !== IssueHealth.Done
     && issue.status !== IssueStatus.Done
     && issue.status !== IssueStatus.Cancelled
     && issue.health !== IssueHealth.Paused
-
-  const reopenMutation = useMutation({
-    mutationFn: () => reopenIssue(issueNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-    },
-  })
-
-  const resumeMutation = useMutation({
-    mutationFn: () => resumeIssue(issueNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    },
-  })
-
-  const retryMutation = useMutation({
-    mutationFn: () => retryIssue(issueNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    },
-  })
-
-  const rerunMutation = useMutation({
-    mutationFn: () => rerunIssue(issueNumber, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    },
-  })
-
-  const addCommentMutation = useMutation({
-    mutationFn: (body: string) => addComment(issueNumber, body, projectId, extractAttachmentIds(body)),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      setCommentText('')
-    },
-  })
-
-  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null)
-  const [deleteCommentError, setDeleteCommentError] = useState<string | null>(null)
-
-  const deleteCommentMutation = useMutation({
-    mutationFn: (commentId: string) => deleteComment(issueNumber, commentId, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      setDeletingCommentId(null)
-      setDeleteCommentError(null)
-    },
-    onError: (err) => {
-      setDeleteCommentError(err instanceof Error ? err.message : 'Failed to delete comment')
-      setDeletingCommentId(null)
-    },
-  })
 
   if (isError) {
     return <NotFoundPage />
