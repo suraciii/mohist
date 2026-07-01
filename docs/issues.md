@@ -141,7 +141,7 @@ mo issue reject 42      # 打回，AI 重做当前阶段
 **Reject 时的反馈**：reject 命令当前不带理由（roadmap）。如果你想让 AI 知道为什么 reject，先 add comment 再 reject：
 
 ```bash
-mo issue comment 42 "Reject because: missing error handling in proposal"
+mo issue comment add 42 --body "Reject because: missing error handling in proposal"
 mo issue reject 42
 ```
 
@@ -149,10 +149,9 @@ mo issue reject 42
 
 ```bash
 # 加评论
-mo issue comment 42 "Looks good but check edge cases"
+mo issue comment add 42 --body "Looks good but check edge cases"
 
-# 删除评论（需要 comment id，从 mo issue show 拿）
-mo issue comment-delete 42 <comment-id>
+# 删除评论目前不提供 CLI 命令；使用 Web UI 或 API。
 ```
 
 Web UI 上 issue 详情页底部有 comment 区。
@@ -164,8 +163,8 @@ Comment 是你和 AI 协作的**轻量通道**——AI 在 plan 阶段会读 com
 "等 #10 完成再开始 #11"：
 
 ```bash
-mo issue prerequisite-add 11 10    # #11 等 #10
-mo issue prerequisite-remove 11 10 # 移除依赖
+mo issue prereq add 11 10    # #11 等 #10
+mo issue prereq remove 11 10 # 移除依赖
 ```
 
 有 prerequisite 的 issue，启动时会检查依赖是否完成。没完成就拒绝启动。
@@ -251,9 +250,9 @@ mo issue stop <number>
 mo issue rebase <number>
 mo issue archive <number>
 mo issue unarchive <number>
-mo issue comment <number> <body>
-mo issue prerequisite-add <number> <prereq-number>
-mo issue prerequisite-remove <number> <prereq-number>
+mo issue comment add <number> [--body <text>|--body-file <path>]
+mo issue prereq add <number> <prereq-number>
+mo issue prereq remove <number> <prereq-number>
 mo issue logs <number>
 mo issue events <number>
 mo issue diff <number>

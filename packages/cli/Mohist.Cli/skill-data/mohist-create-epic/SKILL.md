@@ -80,7 +80,7 @@ issue whenever the current one reaches a terminal state, so you only step in
 when the plan itself changes (pause) or the milestone is done.
 
 The five lifecycle states (`idle` / `running` / `paused` / `done` / `closed`)
-are managed by four operations; the autopilot three drive day-to-day progression,
+are managed by five operations; the autopilot three drive day-to-day progression,
 `done` / `close` are the terminal tail.
 
 | Operation | CLI | Effect |
@@ -88,7 +88,7 @@ are managed by four operations; the autopilot three drive day-to-day progression
 | Start | `mo epic start <id>` | `idle` → `running`; auto-advances to the first startable linked issue |
 | Pause | `mo epic pause <id>` | `running` → `paused`; stops future advancement, does NOT interrupt the in-progress issue |
 | Resume | `mo epic resume <id>` | `paused` → `running`; re-evaluates readiness and advances |
-| Done | `mo epic done <id>` | terminal `done` (requires all linked issues delivered; fails with `EPIC_NOT_READY_TO_MARK_DONE` otherwise) |
+| Done | `mo epic done <id>` | terminal `done` (requires no open linked issues / all linked issues terminal; fails with `EPIC_NOT_READY_TO_MARK_DONE` otherwise) |
 | Close | `mo epic close <id>` | terminal `closed` (abandon the milestone) |
 
 #### Idempotency
@@ -126,9 +126,12 @@ the autopilot is `paused` and you specifically want to start one out of order.
 
 ### Lifecycle: terminal (done / close)
 
-- `mo epic done <id>` — marks the milestone shipped. Requires **all** linked
-  issues delivered; else fails with `EPIC_NOT_READY_TO_MARK_DONE`. `done` and
-  `closed` are terminal — once entered, the epic cannot transition out.
+- `mo epic done <id>` — marks the milestone shipped. Requires **no open linked
+  issues**: all linked issues must be terminal (`done` or `cancelled`); else
+  fails with `EPIC_NOT_READY_TO_MARK_DONE`. `deliveredCount` counts only
+  delivered issues, so cancelled linked issues satisfy readiness but do not
+  count as delivered. `done` and `closed` are terminal — once entered, the epic
+  cannot transition out.
 - `mo epic close <id>` — abandons the milestone (not done, just dropped).
 
 Use `done` for completed milestones, `close` for cancelled ones. The system may

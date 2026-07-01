@@ -107,9 +107,9 @@ mo issue rebase <number>
 mo issue archive <number>
 mo issue archive --all-completed [options]
 mo issue unarchive <number>
-mo issue comment <number> <body>
-mo issue prerequisite-add <number> <prereq>
-mo issue prerequisite-remove <number> <prereq>
+mo issue comment add <number> [--body <text>|--body-file <path>]
+mo issue prereq add <number> <prereq-number>
+mo issue prereq remove <number> <prereq-number>
 mo issue logs <number>
 mo issue events <number>
 mo issue diff <number>
@@ -230,7 +230,7 @@ mo agent session cancel <session-id>            # 请求取消运行中的 sessi
 
 `followup` 的文本源（与 issue session 一致）：`--text <text>` / `--text-file <path>` / `--text-stdin` 三选一。
 
-所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo agent --help` / `mo agent <sub> --help`。
+`list`、`show` 和 session 子命令支持 `-o table|json`；agent 子命令支持 `--project`/`--project-id`。完整 flag 见 `mo agent --help` / `mo agent <sub> --help`。
 
 ## Label 管理
 
@@ -248,7 +248,7 @@ mo label remove <key>            # 从目录删除一条 label 定义（别名 r
 | `--description <text>` | 何时使用该 label |
 | `--supported-values <v1,v2,...>` | 推荐的取值列表 |
 
-所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo label --help`。
+`list` 支持 `-o table|json`；所有子命令支持 `--project`/`--project-id`。完整 flag 见 `mo label --help` / `mo label <sub> --help`。
 
 ## Workflow 管理
 
@@ -258,7 +258,7 @@ mo workflow list                 # 列出 workflow profile（别名 ls）
 
 这是顶层 `mo workflow`，管理 workflow profile（profile 即 issue 创建时绑定的运行配置）。它**不同于** `mo project workflow template` / `mo project workflow config`（模板与运行时配置，见 [项目管理](#项目管理)）。
 
-所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo workflow --help`。
+`list` 支持 `-o table|json` 和 `--described`；顶层 `mo workflow` 不接受 `--project`/`--project-id`。完整 flag 见 `mo workflow --help` / `mo workflow list --help`。
 
 ## OTel 管理
 

@@ -109,7 +109,7 @@ auto-advancement). Below is the command surface only.
 | Start | `mo epic start <id-or-number>` | `idle` → `running`; auto-advances to the first startable linked issue. Idempotent against `running`. |
 | Pause | `mo epic pause <id-or-number>` | `running` → `paused`; stops future advancement, does NOT interrupt the in-progress issue. Idempotent against `paused`. |
 | Resume | `mo epic resume <id-or-number>` | `paused` → `running`; re-evaluates readiness and advances. Idempotent against `running`. |
-| Done | `mo epic done <id-or-number>` | Terminal `done` (requires all linked issues delivered; fails with `EPIC_NOT_READY_TO_MARK_DONE` otherwise). |
+| Done | `mo epic done <id-or-number>` | Terminal `done` (requires no open linked issues / all linked issues terminal; cancelled issues satisfy readiness but do not count as delivered). |
 | Close | `mo epic close <id-or-number>` | Terminal `closed` (abandon the milestone). |
 | Link | `mo epic link <epic> <issue>` | Link an issue to the epic as a member. |
 | Unlink | `mo epic unlink <epic> <issue>` | Unlink a member issue. |
