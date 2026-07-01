@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isCurrentSiblingSession } from './SessionPage'
+import { isCurrentSiblingSession } from '../data/useIssueSessionDataSource'
 
 describe('isCurrentSiblingSession', () => {
   it('matches the current session by workflow session name', () => {

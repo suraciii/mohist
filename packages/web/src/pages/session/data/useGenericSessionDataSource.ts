@@ -126,6 +126,7 @@ export function useGenericSessionDataSource(): SessionDataSourceResult {
     contextWindowUsed: meta?.usage?.contextWindowUsed ?? null,
     contextWindowSize: meta?.usage?.contextWindowSize ?? null,
     contextUsagePercent: meta?.usage?.contextUsagePercent ?? null,
+    healthStatus: meta?.usage?.healthStatus ?? null,
     hasRecoveryActions: hasData,
     recoverySessionName: null,
     runtimeSessionLineage: null,

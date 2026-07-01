@@ -346,7 +346,7 @@ function SiblingNavigation({
   )
 }
 
-function isCurrentSiblingSession(sibling: Pick<WorkflowRunSession, 'id' | 'sessionName'>, currentKey: string | null): boolean {
+export function isCurrentSiblingSession(sibling: Pick<WorkflowRunSession, 'id' | 'sessionName'>, currentKey: string | null): boolean {
   return sibling.sessionName === currentKey || sibling.id === currentKey
 }
 
