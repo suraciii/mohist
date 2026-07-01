@@ -318,6 +318,15 @@ internal sealed class UpdateOperations
         return 0;
     }
 
+    public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteCommandAsync(
+        string fileName,
+        string[] args,
+        string? workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        return _commandExecutor.ExecuteAsync(fileName, args, workingDirectory, cancellationToken);
+    }
+
     public async Task WriteServerScopeMessageAsync()
     {
         _out.WriteLine("Note: 'mo update server' did not refresh the runner build output or runner runtime.");

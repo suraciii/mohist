@@ -14,16 +14,23 @@ internal static class UpdateCommands
         var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
         var cliPathOpt = new Option<string?>("--cli-path") { Description = "mo executable path" };
         var dryRunOpt = MohistCliCommands.DryRunOption();
+        var continueAfterCliUpdateOpt = new Option<bool>("--continue-after-cli-update")
+        {
+            Description = "Internal: continue the update after the CLI self-update stage",
+            Hidden = true,
+        };
 
         update.Options.Add(repoRootOpt);
         update.Options.Add(cliPathOpt);
         update.Options.Add(dryRunOpt);
+        update.Options.Add(continueAfterCliUpdateOpt);
         update.SetAction(async (ctx, token) =>
         {
             var repoRoot = ctx.GetValue(repoRootOpt);
             var cliPath = ctx.GetValue(cliPathOpt);
             var dryRun = ctx.GetValue(dryRunOpt);
-            return await updater.UpdateAllAsync(repoRoot, dryRun, cliPath, token);
+            var continueAfterCliUpdate = ctx.GetValue(continueAfterCliUpdateOpt);
+            return await updater.UpdateAllAsync(repoRoot, dryRun, cliPath, token, continueAfterCliUpdate);
         });
 
         update.Subcommands.Add(BuildCliUpdate(updater));
@@ -186,7 +193,12 @@ internal sealed partial class SourceCodeUpdater
         return await _operations.SyncSkillsAsync(repoRoot, sourceSkillData, dryRun, cancellationToken);
     }
 
-    public async Task<int> UpdateAllAsync(string? repoRoot, bool dryRun, string? cliPath = null, CancellationToken cancellationToken = default)
+    public async Task<int> UpdateAllAsync(
+        string? repoRoot,
+        bool dryRun,
+        string? cliPath = null,
+        CancellationToken cancellationToken = default,
+        bool continueAfterCliUpdate = false)
     {
         var resolvedCliPath = await ResolveCliPathAsync(cliPath);
         var context = new UpdateContext(dryRun, repoRoot, resolvedCliPath, cancellationToken);
@@ -196,29 +208,48 @@ internal sealed partial class SourceCodeUpdater
             return await FinalizeAsync(context, 1);
         }
 
-        var outcome = await RunStageMachineAsync(context, async (ctx, token) =>
+        if (!continueAfterCliUpdate)
         {
-            return await UpdateCliStageAsync(ctx, token);
-        });
-
-        if (context.Interrupted)
-        {
-            if (!context.RunnerStopped)
+            var cliOutcome = await RunStageMachineAsync(context, async (ctx, token) =>
             {
-                _out.WriteLine("Update cancelled before the runner was stopped. No recovery needed.");
+                return await UpdateCliStageAsync(ctx, token);
+            });
+
+            if (context.Interrupted)
+            {
+                if (!context.RunnerStopped)
+                {
+                    _out.WriteLine("Update cancelled before the runner was stopped. No recovery needed.");
+                }
+                return await FinalizeAsync(context, 130);
             }
-            return await FinalizeAsync(context, 130);
+
+            if (!cliOutcome.Success)
+            {
+                return await FinalizeAsync(context, cliOutcome.ExitCode);
+            }
+
+            if (!context.DryRun)
+            {
+                return await ContinueWithUpdatedCliAsync(context);
+            }
         }
 
-        if (!outcome.Success)
-        {
-            return await FinalizeAsync(context, outcome.ExitCode);
-        }
+        return await RunPostCliUpdateStagesAsync(context);
+    }
 
-        outcome = await RunStageMachineAsync(context, async (ctx, token) =>
+    private async Task<int> RunPostCliUpdateStagesAsync(UpdateContext context)
+    {
+        var outcome = await RunStageMachineAsync(context, async (ctx, token) =>
         {
             return await PrepareRunnerStageAsync(ctx, token);
         });
+
+        if (context.Interrupted && !context.RunnerStopped)
+        {
+            _out.WriteLine("Update cancelled before the runner was stopped. No recovery needed.");
+            return await FinalizeAsync(context, 130);
+        }
 
         if (context.Interrupted || !outcome.Success)
         {
@@ -266,6 +297,50 @@ internal sealed partial class SourceCodeUpdater
     private async Task<string?> ResolveCliPathAsync(string? explicitPath)
     {
         return await _operations.ResolveCliPathAsync(explicitPath);
+    }
+
+    private async Task<int> ContinueWithUpdatedCliAsync(UpdateContext context)
+    {
+        if (string.IsNullOrWhiteSpace(context.CliPath))
+        {
+            _err.WriteLine("CLI was updated, but the mo executable path is no longer known. Run 'mo update' again to finish.");
+            return await FinalizeAsync(context, 1);
+        }
+
+        _out.WriteLine("Continuing update with the refreshed CLI process.");
+
+        var args = new List<string>
+        {
+            "update",
+            "--continue-after-cli-update",
+            "--cli-path",
+            context.CliPath!,
+        };
+
+        if (!string.IsNullOrWhiteSpace(context.RepoRoot))
+        {
+            args.Add("--repo-root");
+            args.Add(context.RepoRoot!);
+        }
+
+        var root = _operations.ResolveRepoRoot(context.RepoRoot);
+        var (exitCode, stdout, stderr) = await _operations.ExecuteCommandAsync(
+            context.CliPath!,
+            args.ToArray(),
+            root,
+            context.CancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(stdout))
+            _out.Write(stdout);
+        if (!string.IsNullOrWhiteSpace(stderr))
+            _err.Write(stderr);
+
+        if (exitCode != 0)
+        {
+            _err.WriteLine("The refreshed CLI process did not complete the update successfully.");
+        }
+
+        return exitCode;
     }
 
 
