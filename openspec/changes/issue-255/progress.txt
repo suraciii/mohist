@@ -55,3 +55,66 @@
 - The two `BranchStabilityEvidence` / `BranchInvariantViolationEvidence` exports from `executor.ts` were non-strict — no other file imported them. Removing them is safe; `host.ts` only imports `WorkExecutor`.
 - Two specs (`executor-cleanup.spec.ts`, `workspace-prepare-workflow.spec.ts`) had to update only their git-stub import source for T-001 because the stub physically moved. T-002 must then move cleanup/lock-probe stubs similarly.
 
+
+# T-002 progress — extract `worktree-enforcement.ts`
+
+## Observations (verified by grep / read)
+
+- After T-001, executor.ts has `cleanupAgentAction` (let), `lockHolderProbe` (let), the `setCleanupAgentActionForTest` and `setExecutorLockHolderProbeForTest` stubs (lines 41-50), `DirtyWorktreeEvidence` interface (52-58), the inlined `enforceCleanWorktree`/`runAgentCleanupAttempt` methods (152-215), the stale-lock recovery state machine (`resolveStaleIndexLockMs`/`recoverStaleIndexLock`/`defaultLockHolderProbe`/`readWorktreeSnapshot`/`WorktreeProbeError` class), the evidence/failure constructors (`dirtyWorktreeFailure`/`gitIndexLockFailure`/`worktreeProbeFailure`/`parseFileList`/`formatDirtyWorktreeSummary`), the pure helper `mergeCleanupCount`, and `isNotFoundError` — total ~310 lines from 902 → 552.
+- `executeOne`'s outer catch still references `WorktreeProbeError` at line 136-138 (to be removed by T-002 per Decision 2).
+- `git-probe.ts` already exists from T-001. worktree-enforcement imports `git` from there — same shared injection point as branch-stability.
+- `worktree-cleanup.ts` is untouched (pure-data module) — worktree-enforcement imports `isAgentBackedTask` / `resolveMaxCleanupAttempts` / `buildCleanupWith` / `WorktreeSnapshot` from it.
+
+## Design choices for T-002
+
+- **Signature** for `enforceCleanWorktree`: 8 positional params per spec + Decision 5: `(work, workDir, result, renderedWith, variables, signal, cleanupAction, contextParts)`. `cleanupAction` is the `CleanupAgentAction` (mutable binding) and `contextParts` is a `{ sessionManager, acpConnection, connection }` record (the three dependencies needed to build `baseContext`).
+- **`cleanupAgentAction` value is exported** from `worktree-enforcement.ts` (live ESM binding). The executor imports the value and passes it as the `cleanupAction` parameter, so tests setting the stub see the same value. This avoids exporting the `let` directly (re-exports are forbidden per Decision 3) while still letting the executor read the current value at call time.
+- **`WorktreeProbeError` sinking** (Decision 2): `enforceCleanWorktree` wraps its body in `try { ... } catch (error) { if (error instanceof WorktreeProbeError) return worktreeProbeFailure(work, error); throw error }`. `readWorktreeSnapshot` is the only throw source in that try block (verified — `readCurrentBranch` folds errors into `CurrentBranchResult.error`). executor's outer catch now just `return failure(work, errorMessage(error))`.
+- **`baseContext` duplication**: Decision 5 says `worktree-enforcement.ts` must not reverse-import executor. The simplest path is for the module to own its own `baseContext` builder using `ContextParts`. It's a small duplication of ~20 lines — kept to avoid a circular import.
+- **`safeParseJson` / `errorMessage` keep living in executor.ts**: per Open Questions, executor's `tryRecovery` still uses `safeParseJson`, and `executeOne` outer catch still uses `errorMessage`. Both are 6-line helpers — kept private to each module's natural consumer.
+- **`isNotFoundError` migrated** to worktree-enforcement.ts (only used by the moved `recoverStaleIndexLock`).
+
+## Implementation results (T-002)
+
+- `worktree-enforcement.ts`: 431 lines. Exports `enforceCleanWorktree`, `runAgentCleanupAttempt`, `readWorktreeSnapshot`, `recoverStaleIndexLock`, `defaultLockHolderProbe`, `resolveStaleIndexLockMs`, `dirtyWorktreeFailure`, `gitIndexLockFailure`, `formatDirtyWorktreeSummary`, `worktreeProbeFailure`, `parseFileList`, `WorktreeProbeError`, types `DirtyWorktreeEvidence` / `GitIndexLockRecovery` / `ContextParts` / `CleanupAgentAction`, the `cleanupAgentAction` value binding, and constant `DEFAULT_STALE_INDEX_LOCK_MS`. Test stubs `setCleanupAgentActionForTest` and `setExecutorLockHolderProbeForTest` exported with byte-identical signatures. Internal `safeParseJson` / `errorMessage` / `isNotFoundError` / `baseContext` are module-private.
+- `executor.ts`: 902 → 552 (-350 lines). Removed:
+  - `let cleanupAgentAction` / `let lockHolderProbe` and both `setXxxForTest` stubs (now in worktree-enforcement.ts)
+  - `interface DirtyWorktreeEvidence` (moved)
+  - `const DEFAULT_STALE_INDEX_LOCK_MS` (moved)
+  - `WorkExecutor.enforceCleanWorktree` / `runAgentCleanupAttempt` methods (~110 lines)
+  - Module-level `resolveStaleIndexLockMs`, `recoverStaleIndexLock`, `defaultLockHolderProbe`, `readWorktreeSnapshot`, `WorktreeProbeError` class, `parseFileList`, `dirtyWorktreeFailure`, `gitIndexLockFailure`, `formatDirtyWorktreeSummary`, `worktreeProbeFailure`, `mergeCleanupCount`, `isNotFoundError` (~260 lines)
+  - `WorktreeProbeError` instanceof branch in `executeOne`'s outer catch (~3 lines)
+- Imports cleaned up: dropped `rm`, `stat` from `node:fs/promises`, `runCommand` from `../system/process.js`, and `acpAgentAction` from `../actions/acp-agent.js` (none needed in executor anymore).
+- Test files: 3 specs updated import paths for `setCleanupAgentActionForTest` and `setExecutorLockHolderProbeForTest`:
+  - `executor-cleanup.spec.ts` (both stubs → worktree-enforcement)
+  - `executor-branch-stability.spec.ts` (both stubs → worktree-enforcement; git stub stays at git-probe)
+  - `issue-112-regression.spec.ts` (`setCleanupAgentActionForTest` → worktree-enforcement)
+  - No assertions / scenarios weakened. Spec scenarios match pre-split behavior.
+
+## Verification
+
+- `npm run typecheck -w packages/runner` ✓ passes
+- `npm run build -w packages/runner` ✓ clean build (postbuild writes build-info.json)
+- `npm test -w packages/runner` (full suite): 753 tests / 55 files ✓ all passing
+- `executor-cleanup.spec.ts`: 19/19
+- `issue-112-regression.spec.ts`: 2/2
+- `executor-branch-stability.spec.ts`: 15/15
+
+## scc snapshot (after T-002)
+
+- `executor.ts`: 552 lines, complexity 143 (down from 1106 lines pre-T-001, with T-001 already having extracted branch-stability)
+- `worktree-enforcement.ts`: 431 lines, complexity 69
+- `branch-stability.ts`: 193 lines, complexity 35
+- `git-probe.ts`: 17 lines, complexity ~3
+- `worktree-cleanup.ts`: untouched (pure-data, 99 lines)
+
+All three extracted modules are well below the runner package complexity front ranks (acp-connection, github-pr, openspec are still top). T-003 will measure formally but the rough trend is correct.
+
+## Gotchas / things T-003 should know
+
+- executor.ts no longer exports `setCleanupAgentActionForTest` / `setExecutorLockHolderProbeForTest` / `CleanupAgentAction` / `DirtyWorktreeEvidence` / `WorktreeProbeError` (Decision 3: no re-export shims). Spec files must import directly from worktree-enforcement.ts.
+- The `cleanupAgentAction` value is exported as a **mutable ESM binding** — `executor.ts` reads it via `import { cleanupAgentAction } from "./worktree-enforcement.js"`. Tests setting the stub via `setCleanupAgentActionForTest` see the same live binding because both modules import the same module record. This was tested implicitly: all 19 executor-cleanup tests that mutate the stub still see the mutation.
+- executor.ts still has `executeOne`'s outer `catch (error) { return failure(work, errorMessage(error)) }` — `WorktreeProbeError` sinking into `enforceCleanWorktree` means executor's catch no longer needs a special branch. The catch does NOT re-throw; a non-WorktreeProbeError thrown from `enforceCleanWorktree` would be reported as a generic failure. Verified no such throws exist (only `readWorktreeSnapshot` can throw, and it throws `WorktreeProbeError`).
+- `baseContext` is now duplicated in executor.ts (for action execution) and worktree-enforcement.ts (for cleanup execution). Both copies produce identical `Omit<ActionContext, "with" | "workDir">`. If a future change updates baseContext, both copies must be updated in lockstep. Acceptable trade-off vs. extracting a 4th helper module just for 20 lines.
+- The `WorktreeProbeError` class is still exported from worktree-enforcement.ts (per the task spec which lists it as a required export). Tests can `instanceof`-check it if needed. executor.ts no longer references it.
+- Recovery (`tryRecovery` + helpers) stays in executor.ts (Decision per task notes; no independent spec). T-003 will leave it as-is.
