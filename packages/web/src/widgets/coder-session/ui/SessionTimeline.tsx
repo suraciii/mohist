@@ -520,6 +520,7 @@ export function SessionTimeline({
 
   const taskEntries = Array.from(taskProgress.values())
   const showContextHealth = contextHealth != null
+    && contextHealth.status != null
     && contextHealth.contextUsagePercent != null
     && contextHealth.contextWindowSize != null
     && contextHealth.contextWindowSize > 0
@@ -551,6 +552,7 @@ export function SessionTimeline({
               contextWindowUsed={contextHealth.contextWindowUsed}
               contextWindowSize={contextHealth.contextWindowSize}
               contextUsagePercent={contextHealth.contextUsagePercent}
+              healthStatus={contextHealth.status}
               onCompact={onCompact}
               onReset={onReset}
             />

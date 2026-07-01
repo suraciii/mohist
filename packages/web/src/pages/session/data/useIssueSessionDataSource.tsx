@@ -63,6 +63,7 @@ function buildSessionMetadata(
           contextWindowUsed: meta.usage.contextWindowUsed ?? null,
           contextWindowSize: meta.usage.contextWindowSize ?? null,
           contextUsagePercent: meta.usage.contextUsagePercent ?? null,
+          healthStatus: meta.usage.healthStatus ?? null,
         }
       : undefined,
   }
@@ -258,6 +259,7 @@ export function useIssueSessionDataSource(): SessionDataSourceResult {
     contextWindowUsed: detail?.metadata?.usage?.contextWindowUsed ?? null,
     contextWindowSize: detail?.metadata?.usage?.contextWindowSize ?? null,
     contextUsagePercent: detail?.metadata?.usage?.contextUsagePercent ?? null,
+    healthStatus: detail?.metadata?.usage?.healthStatus ?? null,
     hasRecoveryActions,
     recoverySessionName: recoverySessionNameStr,
     runtimeSessionLineage: runtimeLineage,
@@ -344,7 +346,7 @@ function SiblingNavigation({
   )
 }
 
-function isCurrentSiblingSession(sibling: Pick<WorkflowRunSession, 'id' | 'sessionName'>, currentKey: string | null): boolean {
+export function isCurrentSiblingSession(sibling: Pick<WorkflowRunSession, 'id' | 'sessionName'>, currentKey: string | null): boolean {
   return sibling.sessionName === currentKey || sibling.id === currentKey
 }
 

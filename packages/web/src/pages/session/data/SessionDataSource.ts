@@ -23,6 +23,7 @@ export interface SessionDataSourceResult {
   contextWindowUsed: number | null
   contextWindowSize: number | null
   contextUsagePercent: number | null
+  healthStatus: string | null
 
   hasRecoveryActions: boolean
   recoverySessionName: string | null

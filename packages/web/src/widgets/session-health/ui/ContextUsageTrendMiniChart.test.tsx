@@ -73,14 +73,14 @@ describe('ContextUsageTrendMiniChart', () => {
     expect(svg!.getAttribute('role')).toBe('img')
     expect(svg!.getAttribute('data-testid')).toBe('context-usage-trend-mini-chart')
     expect(svg!.getAttribute('data-history-length')).toBe('4')
-    expect(svg!.getAttribute('data-status')).toBe('yellow')
+    expect(svg!.getAttribute('data-status')).toBeNull()
     expect(svg!.getAttribute('data-latest-percent')).toBe('60')
     const paths = svg!.querySelectorAll('path')
     expect(paths.length).toBe(2)
     expect(paths[0]!.getAttribute('d')).toMatch(/^M/) // fill area
     expect(paths[1]!.getAttribute('d')).toMatch(/^M/) // polyline
     expect(paths[1]!.getAttribute('stroke')).toBeNull()
-    expect(paths[1]!.getAttribute('class')).toContain('stroke-yellow-500')
+    expect(paths[1]!.getAttribute('class')).toContain('stroke-gray-400')
   })
 
   it('plots a polyline connecting the available samples (oldest left, newest right)', () => {
@@ -144,37 +144,37 @@ describe('ContextUsageTrendMiniChart', () => {
     expect(svg!.getAttribute('data-history-length')).toBe('3')
   })
 
-  it('uses green stroke when the latest sample is below 60%', () => {
+  it('uses neutral stroke when the latest sample is below 60%', () => {
     const history = makeHistory(3, { firstPercent: 10, lastPercent: 40 })
 
     render(<ContextUsageTrendMiniChart history={history} />)
 
     const svg = queryChart()!
-    expect(svg.getAttribute('data-status')).toBe('green')
+    expect(svg.getAttribute('data-status')).toBeNull()
     const linePath = svg.querySelectorAll('path')[1]!
     expect(linePath.getAttribute('class')).toContain('stroke-gray-400')
   })
 
-  it('uses yellow stroke when the latest sample is in [60, 80)', () => {
+  it('uses neutral stroke when the latest sample is in [60, 80)', () => {
     const history = makeHistory(3, { firstPercent: 30, lastPercent: 72 })
 
     render(<ContextUsageTrendMiniChart history={history} />)
 
     const svg = queryChart()!
-    expect(svg.getAttribute('data-status')).toBe('yellow')
+    expect(svg.getAttribute('data-status')).toBeNull()
     const linePath = svg.querySelectorAll('path')[1]!
-    expect(linePath.getAttribute('class')).toContain('stroke-yellow-500')
+    expect(linePath.getAttribute('class')).toContain('stroke-gray-400')
   })
 
-  it('uses red stroke when the latest sample is 80% or above', () => {
+  it('uses neutral stroke when the latest sample is 80% or above', () => {
     const history = makeHistory(3, { firstPercent: 40, lastPercent: 90 })
 
     render(<ContextUsageTrendMiniChart history={history} />)
 
     const svg = queryChart()!
-    expect(svg.getAttribute('data-status')).toBe('red')
+    expect(svg.getAttribute('data-status')).toBeNull()
     const linePath = svg.querySelectorAll('path')[1]!
-    expect(linePath.getAttribute('class')).toContain('stroke-red-500')
+    expect(linePath.getAttribute('class')).toContain('stroke-gray-400')
   })
 
   it('exposes the first and last sample timestamps and the sample count via data attributes', () => {

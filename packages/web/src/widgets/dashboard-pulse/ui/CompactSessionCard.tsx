@@ -93,6 +93,7 @@ export function CompactSessionCard({ card }: CompactSessionCardProps) {
               contextWindowUsed={card.contextWindowUsed ?? null}
               contextWindowSize={card.contextWindowSize ?? null}
               contextUsagePercent={card.contextUsagePercent ?? null}
+              healthStatus={card.healthStatus ?? null}
             />
           </div>
         )}

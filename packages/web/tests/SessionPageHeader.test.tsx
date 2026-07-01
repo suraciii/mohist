@@ -574,7 +574,9 @@ describe('SessionPage header and states', () => {
       // Same SessionHeader shared with the empty/waiting/incomplete branches.
       expect(screen.getByText('Test Issue')).toBeInTheDocument()
       expect(screen.getByText('Build')).toBeInTheDocument()
-      expect(screen.getByText('Completed')).toBeInTheDocument()
+      // "Completed" appears in both the SessionHeader and the sticky title strip.
+      const completedBadges = screen.getAllByText('Completed')
+      expect(completedBadges.length).toBeGreaterThanOrEqual(1)
       // h1 always renders a non-empty session title.
       const h1 = document.querySelector('h1')
       expect(h1).not.toBeNull()
@@ -628,7 +630,8 @@ describe('SessionPage header and states', () => {
       // Wait for the transcript query to populate the header (turn count from transcript).
       await screen.findByText('1 turn')
       expect(screen.getByText('Build')).toBeInTheDocument()
-      expect(screen.getByText('Completed')).toBeInTheDocument()
+      const completedBadges = screen.getAllByText('Completed')
+      expect(completedBadges.length).toBeGreaterThanOrEqual(1)
       expect(screen.queryByText(/Jump to bottom/i)).not.toBeInTheDocument()
       expect(screen.queryByText(/No activity recorded/i)).not.toBeInTheDocument()
       unmount()
@@ -647,7 +650,8 @@ describe('SessionPage header and states', () => {
 
       await screen.findByText('Issue #123')
       expect(screen.getByText('Build')).toBeInTheDocument()
-      expect(screen.getByText('Completed')).toBeInTheDocument()
+      const emptyCompletedBadges = screen.getAllByText('Completed')
+      expect(emptyCompletedBadges.length).toBeGreaterThanOrEqual(1)
       // Empty branch shows the "No activity" sub-region.
       expect(screen.getByText(/No activity recorded/i)).toBeInTheDocument()
     })
@@ -999,4 +1003,3 @@ describe('SessionPage header and states', () => {
     })
   })
 })
-

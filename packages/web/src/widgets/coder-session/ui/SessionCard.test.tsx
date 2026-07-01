@@ -34,6 +34,7 @@ function makeCard(overrides: Partial<SessionCardType> = {}): SessionCardType {
     contextWindowUsed: null,
     contextWindowSize: null,
     contextUsagePercent: null,
+    healthStatus: null,
     toolCallCount: null,
     toolErrorCount: null,
     ...overrides,
@@ -115,6 +116,7 @@ describe('ActiveSessionCard context health', () => {
             contextWindowUsed: 300_000,
             contextWindowSize: 1_000_000,
             contextUsagePercent: 30,
+            healthStatus: 'green',
           })}
           now={NOW}
         />
@@ -139,6 +141,7 @@ describe('ActiveSessionCard context health', () => {
             contextWindowUsed: 720_000,
             contextWindowSize: 1_000_000,
             contextUsagePercent: 72,
+            healthStatus: 'yellow',
           })}
           now={NOW}
         />
@@ -163,6 +166,7 @@ describe('ActiveSessionCard context health', () => {
             contextWindowUsed: 950_000,
             contextWindowSize: 1_000_000,
             contextUsagePercent: 95,
+            healthStatus: 'red',
           })}
           now={NOW}
         />

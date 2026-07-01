@@ -1,11 +1,16 @@
 import { AlertTriangleIcon, CircleAlertIcon } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
-import { resolveContextUsage, type ContextHealthStatus } from '../model/context-health'
+import { clampPercent, isContextHealthStatus, type ContextHealthStatus } from '../model/context-health'
 
 export interface ContextHealthIndicatorProps {
   contextWindowUsed?: number | null
   contextWindowSize?: number | null
   contextUsagePercent?: number | null
+  /**
+   * Server-provided health classification. When absent or invalid, the
+   * indicator hides rather than fabricating a client-side classification.
+   */
+  healthStatus?: string | null
   className?: string
   /**
    * Render the absolute token count next to the percent. Defaults to
@@ -87,19 +92,19 @@ export function ContextHealthIndicator({
   contextWindowUsed,
   contextWindowSize,
   contextUsagePercent,
+  healthStatus,
   className,
   showTokens = false,
   ariaLabel,
 }: ContextHealthIndicatorProps) {
-  const usage = resolveContextUsage({ contextWindowUsed, contextWindowSize, contextUsagePercent })
+  if (contextUsagePercent == null || !Number.isFinite(contextUsagePercent)) return null
+  if (!isContextHealthStatus(healthStatus)) return null
 
-  if (usage.percent == null || usage.status == null) {
-    return null
-  }
+  const percent = clampPercent(contextUsagePercent)
+  const status = healthStatus
 
-  const label = `${Math.round(usage.percent)}%`
-  const description = ariaLabel ?? buildSeverityTooltip(usage.status, usage.percent)
-  const status = usage.status
+  const label = `${Math.round(percent)}%`
+  const description = ariaLabel ?? buildSeverityTooltip(status, percent)
   const severity = SEVERITY_LABEL[status]
 
   return (
@@ -137,9 +142,9 @@ export function ContextHealthIndicator({
         aria-hidden="true"
       />
       <span className="tabular-nums">{label}</span>
-      {showTokens && usage.used != null && usage.size != null && (
+      {showTokens && contextWindowUsed != null && contextWindowSize != null && (
         <span className="text-gray-500 font-normal ml-0.5">
-          ({formatCompactPair(usage.used, usage.size)})
+          ({formatCompactPair(contextWindowUsed, contextWindowSize)})
         </span>
       )}
     </span>

@@ -67,14 +67,10 @@ function usageText(session: WorkflowRunSession): string {
 }
 
 function contextText(session: WorkflowRunSession): string | null {
-  const used = session.usage?.contextWindowUsed
-  const size = session.usage?.contextWindowSize
-  if (used == null) return null
-  if (size == null || size <= 0) {
-    return `${formatCompact(used)} ctx`
-  }
-  const pct = Math.min(100, Math.round((used / size) * 100))
-  return `${pct}% ctx`
+  const pct = session.usage?.contextUsagePercent
+  if (pct == null) return null
+  const clamped = Math.max(0, Math.min(100, pct))
+  return `${Math.round(clamped)}% ctx`
 }
 
 function modelLabel(session: WorkflowRunSession): string | null {
@@ -120,10 +116,9 @@ function summarizeCost(sessions: WorkflowRunSession[]): string | null {
 function summarizePeakContext(sessions: WorkflowRunSession[]): string | null {
   let peak: { pct: number; sessionName: string } | null = null
   for (const session of sessions) {
-    const used = session.usage?.contextWindowUsed
-    const size = session.usage?.contextWindowSize
-    if (used == null || size == null || size <= 0) continue
-    const pct = Math.min(100, Math.round((used / size) * 100))
+    const rawPct = session.usage?.contextUsagePercent
+    if (rawPct == null || !Number.isFinite(rawPct)) continue
+    const pct = Math.max(0, Math.min(100, Math.round(rawPct)))
     if (!peak || pct > peak.pct) {
       peak = { pct, sessionName: session.sessionName }
     }

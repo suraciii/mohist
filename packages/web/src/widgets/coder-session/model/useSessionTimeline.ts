@@ -29,11 +29,15 @@ export interface RecoveryEvent {
 export type ContextHealthStatus = 'green' | 'yellow' | 'red'
 
 export interface ContextHealthState {
-  status: ContextHealthStatus
+  status: ContextHealthStatus | null
   contextWindowUsed: number | null
   contextWindowSize: number | null
   contextUsagePercent: number | null
   recordedAt: string | null
+}
+
+function toContextHealthStatus(value: string | null | undefined): ContextHealthStatus | null {
+  return value === 'green' || value === 'yellow' || value === 'red' ? value : null
 }
 
 export interface CompactionEntry {
@@ -668,20 +672,14 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     unsubs.push(
       onAgentEvent('usage.updated', (detail) => {
         if (!isCurrentSessionEvent(detail)) return
-        if (detail.contextWindowUsed == null && detail.contextWindowSize == null) return
+        if (detail.contextWindowUsed == null && detail.contextWindowSize == null && detail.contextUsagePercent == null && detail.healthStatus == null) return
         const used = detail.contextWindowUsed ?? null
         const size = detail.contextWindowSize ?? null
-        const percent = used != null && size != null && size > 0
-          ? Math.min(100, Math.round((used / size) * 100))
-          : null
-        const status: ContextHealthStatus = percent == null
-          ? 'green'
-          : percent >= 80 ? 'red' : percent >= 60 ? 'yellow' : 'green'
         applyContextHealth({
-          status,
+          status: toContextHealthStatus(detail.healthStatus),
           contextWindowUsed: used,
           contextWindowSize: size,
-          contextUsagePercent: percent,
+          contextUsagePercent: detail.contextUsagePercent ?? null,
           recordedAt: new Date().toISOString(),
         })
       }),
@@ -690,17 +688,11 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     unsubs.push(
       onAgentEvent('context_health_update', (detail) => {
         if (!isCurrentSessionEvent(detail)) return
-        const percent = detail.contextUsagePercent ?? null
-        const status: ContextHealthStatus = detail.healthStatus === 'red' || detail.healthStatus === 'yellow' || detail.healthStatus === 'green'
-          ? detail.healthStatus
-          : (percent == null
-              ? 'green'
-              : percent >= 80 ? 'red' : percent >= 60 ? 'yellow' : 'green')
         applyContextHealth({
-          status,
+          status: toContextHealthStatus(detail.healthStatus),
           contextWindowUsed: detail.contextWindowUsed ?? null,
           contextWindowSize: detail.contextWindowSize ?? null,
-          contextUsagePercent: percent,
+          contextUsagePercent: detail.contextUsagePercent ?? null,
           recordedAt: detail.recordedAt ?? new Date().toISOString(),
         })
       }),
@@ -743,17 +735,11 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
           return next
         })
         const size = detail.contextWindowSize ?? null
-        const percent = detail.contextWindowUsedAfter != null && size != null && size > 0
-          ? Math.min(100, Math.round((detail.contextWindowUsedAfter / size) * 100))
-          : null
-        const status: ContextHealthStatus = percent == null
-          ? 'green'
-          : percent >= 80 ? 'red' : percent >= 60 ? 'yellow' : 'green'
         applyContextHealth({
-          status,
+          status: null,
           contextWindowUsed: detail.contextWindowUsedAfter ?? null,
           contextWindowSize: size,
-          contextUsagePercent: percent,
+          contextUsagePercent: null,
           recordedAt,
         })
       }),
@@ -796,17 +782,11 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
           return next
         })
         const size = detail.contextWindowSize ?? null
-        const percent = detail.contextWindowUsedAfter != null && size != null && size > 0
-          ? Math.min(100, Math.round((detail.contextWindowUsedAfter / size) * 100))
-          : null
-        const status: ContextHealthStatus = percent == null
-          ? 'green'
-          : percent >= 80 ? 'red' : percent >= 60 ? 'yellow' : 'green'
         applyContextHealth({
-          status,
+          status: null,
           contextWindowUsed: detail.contextWindowUsedAfter ?? null,
           contextWindowSize: size,
-          contextUsagePercent: percent,
+          contextUsagePercent: null,
           recordedAt,
         })
       }),
@@ -815,18 +795,11 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     unsubs.push(
       onAgentEvent('com.mohist.agent-session.context-health-updated', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
-        const percent = detail.contextUsagePercent ?? null
-        const rawStatus = detail.healthStatus
-        const status: ContextHealthStatus = rawStatus === 'red' || rawStatus === 'yellow' || rawStatus === 'green'
-          ? rawStatus
-          : (percent == null
-              ? 'green'
-              : percent >= 80 ? 'red' : percent >= 60 ? 'yellow' : 'green')
         applyContextHealth({
-          status,
+          status: toContextHealthStatus(detail.healthStatus),
           contextWindowUsed: detail.contextWindowUsed ?? null,
           contextWindowSize: detail.contextWindowSize ?? null,
-          contextUsagePercent: percent,
+          contextUsagePercent: detail.contextUsagePercent ?? null,
           recordedAt: detail.recordedAt ?? new Date().toISOString(),
         })
       }),

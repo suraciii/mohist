@@ -62,6 +62,7 @@ vi.mock('../../../widgets/coder-session', () => ({
 
 vi.mock('../../../widgets/session-health', () => ({
   ContextHealthBar: () => <div data-testid="context-health-bar" />,
+  ContextHealthIndicator: () => <div data-testid="context-health-indicator" />,
   CompactionLineageLink: () => <div data-testid="compaction-lineage-link" />,
 }))
 
@@ -205,7 +206,7 @@ describe('GenericSessionPage', () => {
       const turn = makeTurn()
       mocks.transcriptTurns = [turn]
       renderPage()
-      expect(screen.getByText('0 turns')).toBeInTheDocument()
+      expect(screen.getAllByText('0 turns').length).toBeGreaterThanOrEqual(1)
     })
   })
 
@@ -245,7 +246,7 @@ describe('GenericSessionPage', () => {
   describe('recovery region', () => {
     it('renders ContextHealthBar when usage data is present and turns exist', async () => {
       mocks.summaryData = baseSummary({
-        usage: { contextWindowUsed: 12000, contextWindowSize: 32000, contextUsagePercent: 37.5 },
+        usage: { contextWindowUsed: 12000, contextWindowSize: 32000, contextUsagePercent: 37.5, healthStatus: 'green' },
       })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
