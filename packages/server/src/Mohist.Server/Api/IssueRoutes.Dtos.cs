@@ -287,3 +287,29 @@ public sealed record StageReworkRateDto(
     string Stage,
     int EnteredCount,
     double? ReworkRate);
+
+/// <summary>
+/// One per-issue sample in the delivery-time series. <see cref="IssueNumber"/>
+/// is the project's display number. <see cref="CompletedAt"/> is the ISO-8601
+/// formatted completion moment. <see cref="LeadDays"/> is always defined
+/// (<c>CompletedAt − CreatedAt</c>). <see cref="CycleDays"/> is the
+/// earliest-<c>IssueWorkStarted</c> to <c>CompletedAt</c> duration when at
+/// least one work-start event exists for the issue, or <c>null</c> when the
+/// issue has no recorded work-start (the <c>null</c> value is the "undefined"
+/// marker, structurally distinguishable from a genuine zero-duration cycle).
+/// </summary>
+public sealed record DeliveryTimePointDto(
+    int IssueNumber,
+    string CompletedAt,
+    double LeadDays,
+    double? CycleDays);
+
+/// <summary>
+/// Response shape for the delivery-time metrics endpoint. The endpoint
+/// returns one entry per delivered issue in the fixed 30-day trailing
+/// window anchored on completion time. <see cref="Points"/> is empty
+/// (not an error, not a fabricated zero) when no delivered issues fall
+/// in the window.
+/// </summary>
+public sealed record DeliveryTimeMetricsResponse(
+    DeliveryTimePointDto[] Points);

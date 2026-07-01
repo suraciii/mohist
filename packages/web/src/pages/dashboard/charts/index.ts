@@ -19,4 +19,7 @@ export type { ChartLegendProps, LegendEntry, LegendShape } from './ChartLegend'
 export { SegmentedBarSeries } from './SegmentedBarSeries'
 export type { SegmentedBarSeriesProps, SegmentedBarDatum, Segment } from './SegmentedBarSeries'
 
+export { ScatterSeries } from './ScatterSeries'
+export type { ScatterSeriesProps, ScatterPoint } from './ScatterSeries'
+
 export { useReducedMotion } from './useReducedMotion'
