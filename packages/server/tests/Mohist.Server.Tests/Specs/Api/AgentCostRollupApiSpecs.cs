@@ -282,6 +282,8 @@ public class AgentCostRollupApiSpecs
         return project;
     }
 
+    private DateTime Today => _fixture.TimeProvider.GetUtcNow().UtcDateTime.Date;
+
     private async Task InsertSessionAsync(
         string projectId,
         DateTime createdAt,
