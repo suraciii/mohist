@@ -12,7 +12,7 @@ public class UpdateSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task UpdateAll_UpdatesCliServerAndRunnerWithoutPulling()
+    public async Task UpdateAll_UpdatesCliThenContinuesWithRefreshedProcess()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
@@ -23,9 +23,17 @@ public class UpdateSpecs
         {
 
             var commands = new FakeCommandExecutor();
-            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-            commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+testsha");
-            commands.SetStdoutFor("git", _ => true, "testsha");
+            commands.SetStdoutFor(
+                "/home/user/.local/bin/mo",
+                args => args.SequenceEqual([
+                    "update",
+                    "--continue-after-cli-update",
+                    "--cli-path",
+                    "/home/user/.local/bin/mo",
+                    "--repo-root",
+                    tempRoot,
+                ]),
+                "continued update output\n");
             var installer = new SystemdServiceInstaller(
                 new StringWriter(),
                 new StringWriter(),
@@ -60,6 +68,77 @@ public class UpdateSpecs
             Assert.Equal(explicitCli, commands.ExecutedCommands[3].Args[1]);
             Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "chmod" && c.Args.SequenceEqual(["+x", wrapper]));
             Assert.Contains(commands.ExecutedCommands, c =>
+                c.FileName == explicitCli
+                && c.WorkingDirectory == tempRoot
+                && c.Args.SequenceEqual([
+                    "update",
+                    "--continue-after-cli-update",
+                    "--cli-path",
+                    explicitCli,
+                    "--repo-root",
+                    tempRoot,
+                ]));
+            Assert.DoesNotContain(commands.ExecutedCommands, c =>
+                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+            Assert.DoesNotContain(commands.ExecutedCommands, c =>
+                c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
+            Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "npm");
+            Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "git" && c.Args.SequenceEqual(["pull"]));
+            AssertManagedSkillAssetsSynced(files, tempRoot);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task UpdateAll_WhenContinuingAfterCliUpdate_UpdatesServerAndRunnerWithoutPulling()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-continue-{Guid.NewGuid():N}");
+        var files = new FakeFileSystem();
+        WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        WriteRunnerUnit(files, "/units");
+
+        try
+        {
+            var commands = new FakeCommandExecutor();
+            commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
+            commands.SetStdoutFor("/home/user/.local/bin/mo", _ => true, "1.0.0+testsha");
+            commands.SetStdoutFor("git", _ => true, "testsha");
+            var installer = new SystemdServiceInstaller(
+                new StringWriter(),
+                new StringWriter(),
+                files,
+                commands);
+            var http = new HttpClient(SequenceHttpHandler.WithSystemInfo(HealthySystemInfoJson(runningGitHash: "testsha"), new ResponseSpec(HttpStatusCode.OK)))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            };
+            var updater = SourceCodeUpdater.CreateWithDefaults(
+                new StringWriter(),
+                new StringWriter(),
+                installer,
+                commands,
+                files,
+                new MockEnvironmentVariableProvider(),
+                http,
+                getUserHome: () => tempRoot,
+                unitDir: "/units");
+
+            var exitCode = await updater.UpdateAllAsync(
+                tempRoot,
+                dryRun: false,
+                cliPath: "/home/user/.local/bin/mo",
+                continueAfterCliUpdate: true);
+
+            Assert.Equal(0, exitCode);
+            Assert.DoesNotContain(commands.ExecutedCommands, c =>
+                c.FileName == "dotnet" && c.Args.Length > 0 && c.Args[0] == "publish");
+            Assert.Contains(commands.ExecutedCommands, c =>
                 c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
             Assert.Contains(commands.ExecutedCommands, c =>
                 c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
@@ -73,7 +152,6 @@ public class UpdateSpecs
             Assert.Contains(commands.ExecutedCommands, c =>
                 c.FileName == "git" && c.Args.SequenceEqual(["rev-parse", "HEAD"]));
             Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "git" && c.Args.SequenceEqual(["pull"]));
-            AssertManagedSkillAssetsSynced(files, tempRoot);
         }
         finally
         {
@@ -114,7 +192,7 @@ public class UpdateSpecs
                 },
                 getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             Assert.Equal(0, exitCode);
             Assert.DoesNotContain(commands.ExecutedCommands, c =>
@@ -126,7 +204,6 @@ public class UpdateSpecs
             Assert.Contains("Runner service is not installed; skipping pre-server runner stop.", output);
             Assert.Contains("Runner refresh skipped: runner service is not installed", output);
             Assert.Contains("runner-refresh-skipped(runner service is not installed)", output);
-            AssertManagedSkillAssetsSynced(files, tempRoot);
         }
         finally
         {
@@ -779,7 +856,7 @@ public class UpdateSpecs
                 getUserHome: () => tempRoot,
                 unitDir: "/units");
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             Assert.Equal(1, exitCode);
             Assert.Contains(commands.ExecutedCommands, c =>
@@ -789,7 +866,6 @@ public class UpdateSpecs
             Assert.Contains(commands.ExecutedCommands, c =>
                 c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
             Assert.Contains("Restoring workflow runner", stdout.ToString());
-            AssertManagedSkillAssetsSynced(files, tempRoot);
         }
         finally
         {
@@ -833,7 +909,7 @@ public class UpdateSpecs
                 getUserHome: () => tempRoot,
                 unitDir: "/units");
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             Assert.Equal(1, exitCode);
             Assert.Contains(commands.ExecutedCommands, c =>
@@ -842,7 +918,6 @@ public class UpdateSpecs
                 c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
             Assert.DoesNotContain(commands.ExecutedCommands, c =>
                 c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
-            AssertManagedSkillAssetsSynced(files, tempRoot);
         }
         finally
         {
@@ -889,7 +964,7 @@ public class UpdateSpecs
                 getUserHome: () => tempRoot,
                 unitDir: "/units");
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             Assert.Equal(1, exitCode);
             Assert.Contains(commands.ExecutedCommands, c =>
@@ -947,7 +1022,7 @@ public class UpdateSpecs
                 if (fileName == "systemctl" && args.SequenceEqual(["--user", "stop", "mohist-runner.service"]))
                     cts.Cancel();
             };
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token);
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token, continueAfterCliUpdate: true);
 
             Assert.Equal(130, exitCode);
             Assert.Contains(commands.ExecutedCommands, c =>
@@ -998,7 +1073,7 @@ public class UpdateSpecs
 
             using var cts = new CancellationTokenSource();
             cts.Cancel();
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token);
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token, continueAfterCliUpdate: true);
 
             Assert.Equal(130, exitCode);
             Assert.Contains("No recovery needed", stdout.ToString());
@@ -1052,7 +1127,7 @@ public class UpdateSpecs
                 getUserHome: () => tempRoot,
                 unitDir: "/units");
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             Assert.Equal(1, exitCode);
             Assert.Contains("Runner unavailable", stderr.ToString());
@@ -1188,6 +1263,7 @@ public class UpdateSpecs
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-verify-allpass-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        WriteManagedSkillAssets(files, tempRoot);
 
         try
         {
@@ -1217,7 +1293,7 @@ public class UpdateSpecs
                 },
                 getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             Assert.Equal(0, exitCode);
             var output = stdout.ToString();
@@ -1269,7 +1345,7 @@ public class UpdateSpecs
                 },
                 getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             Assert.Equal(0, exitCode);
             var output = stdout.ToString();
@@ -1322,7 +1398,7 @@ public class UpdateSpecs
                 },
                 getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             Assert.Equal(1, exitCode);
             var errOutput = stderr.ToString();
@@ -1379,7 +1455,7 @@ public class UpdateSpecs
                     },
                     getUserHome: () => emptyHome);
 
-                var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+                var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
                 Assert.Equal(0, exitCode);
                 var output = stdout.ToString();
@@ -1446,7 +1522,7 @@ public class UpdateSpecs
                 },
                 getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             // Verification detects web assets unavailability; the outcome is
             // failed with the Web assets capability reported.
@@ -1953,6 +2029,7 @@ public class UpdateSpecs
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-outcome-posted-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        WriteManagedSkillAssets(files, tempRoot);
 
         try
         {
@@ -1982,7 +2059,7 @@ public class UpdateSpecs
                 },
                 getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             Assert.Equal(0, exitCode);
             Assert.NotNull(handler.LastOutcomeRequest);
@@ -1993,7 +2070,8 @@ public class UpdateSpecs
             Assert.Null(outcome.UnavailableCapability);
             Assert.NotNull(outcome.Logs);
             Assert.NotEmpty(outcome.Logs!);
-            Assert.Contains(outcome.Logs!, l => l.Stage == "Updating CLI");
+            Assert.DoesNotContain(outcome.Logs!, l => l.Stage == "Updating CLI");
+            Assert.Contains(outcome.Logs!, l => l.Stage == "Preparing workflow runner");
             Assert.Contains(outcome.Logs!, l => l.Stage == "Verifying workflow runtime");
             Assert.Equal("abc123", outcome.SourceHead);
             Assert.Contains("Update outcome persisted to server.", stdout.ToString());
@@ -2013,6 +2091,7 @@ public class UpdateSpecs
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-outcome-unreachable-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        WriteManagedSkillAssets(files, tempRoot);
 
         try
         {
@@ -2045,7 +2124,7 @@ public class UpdateSpecs
                 },
                 getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             Assert.Equal(0, exitCode);
             var output = stdout.ToString();
@@ -2095,7 +2174,7 @@ public class UpdateSpecs
 
             using var cts = new CancellationTokenSource();
             cts.Cancel();
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token);
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", cts.Token, continueAfterCliUpdate: true);
 
             Assert.Equal(130, exitCode);
             Assert.Contains("No recovery needed", stdout.ToString());
@@ -2117,6 +2196,7 @@ public class UpdateSpecs
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-outcome-webui-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        WriteManagedSkillAssets(files, tempRoot);
 
         try
         {
@@ -2146,7 +2226,7 @@ public class UpdateSpecs
                 },
                 getUserHome: () => tempRoot);
 
-            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
             Assert.Equal(0, exitCode);
             Assert.NotNull(handler.LastOutcomeRequest);
@@ -2271,7 +2351,7 @@ public class UpdateSpecs
                 });
             }
 
-            if (_systemInfoJson is not null && string.Equals(path, "/api/runner/identity", StringComparison.Ordinal))
+            if (_systemInfoJson is not null && path.StartsWith("/api/runner/identity", StringComparison.Ordinal))
             {
                 Requests++;
                 var runnerHash = ExtractRunningGitHash(_systemInfoJson);
@@ -2384,6 +2464,11 @@ public class UpdateSpecs
             "---\nname: mohist-explore\ndescription: test\n---\n\n# mohist-explore\n");
     }
 
+    private static void WriteManagedSkillAssets(FakeFileSystem files, string homeRoot)
+    {
+        WritePackagedSkillAssets(files, Path.Combine(homeRoot, ".mohist", "cli", "skill-data"));
+    }
+
     private static void WriteRunnerUnit(FakeFileSystem files, string unitDir)
     {
         files.AddDirectory(unitDir);
@@ -2473,7 +2558,7 @@ public class UpdateSpecs
                 };
             }
 
-            if (string.Equals(path, "/api/runner/identity", StringComparison.Ordinal))
+            if (path.StartsWith("/api/runner/identity", StringComparison.Ordinal))
             {
                 var runnerHash = ExtractRunningGitHash(_systemInfoJson);
                 var identityJson = $"{{\"success\":true,\"data\":{{\"buildGitHash\":\"{runnerHash}\"}}}}";
