@@ -1,9 +1,5 @@
-import type { JsonObject, JsonValue, WorkItemResult } from "../core/types.js"
+import type { JsonObject, JsonValue } from "../core/types.js"
 import { getPath, setPath } from "../core/json-path.js"
-
-export interface SetVarsPatcher {
-  patchRunVars(workflowRunId: string, vars: JsonObject, signal: AbortSignal): Promise<unknown>
-}
 
 export interface SetVarsResult {
   vars: JsonObject | null
@@ -37,31 +33,6 @@ export function extractSetVars(
   }
 
   return { vars: result }
-}
-
-/**
- * Apply an extracted {@link SetVarsResult} to the server via the
- * provided patcher. Returns `null` when the extraction has nothing to
- * patch (no vars), letting the caller leave the task result unchanged.
- * On patch failure returns a `failed` {@link WorkItemResult} that the
- * executor merges into its result.
- */
-export async function applyExtractedSetVars(
-  patcher: SetVarsPatcher,
-  workflowRunId: string,
-  extraction: SetVarsResult,
-  signal: AbortSignal,
-): Promise<{ status: "failed"; message: string } | null> {
-  if (!extraction.vars) return null
-  try {
-    await patcher.patchRunVars(workflowRunId, extraction.vars, signal)
-    return null
-  } catch (error) {
-    return {
-      status: "failed",
-      message: `setVars patch failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 4000),
-    }
-  }
 }
 
 function stripOutputPrefix(path: string): string {

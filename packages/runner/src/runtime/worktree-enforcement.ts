@@ -1,9 +1,9 @@
 import { rm, stat } from "node:fs/promises"
 import { isAbsolute, resolve } from "node:path"
 import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import { numberInput, objectInput, safeParseObject } from "../core/json.js"
+import { errorMessage, isNotFoundError } from "../core/errors.js"
 import { runCommand } from "../system/process.js"
-import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
-import type { ServerConnection } from "../server/connection.js"
 import { acpAgentAction } from "../actions/acp-agent.js"
 import {
   buildCleanupWith,
@@ -37,11 +37,10 @@ export class WorktreeProbeError extends Error {
 export type CleanupAgentAction = (context: ActionContext) => Promise<ActionResult>
 
 type LockHolderProbe = (workDir: string, lockPath: string, signal: AbortSignal) => Promise<{ held: boolean; detail?: string }>
+type BaseContextFactory = (work: RenderedWorkItem, variables: JsonObject, signal: AbortSignal) => Omit<ActionContext, "with" | "workDir">
 
 export type ContextParts = {
-  sessionManager: AcpSessionManager
-  acpConnection: SharedAcpConnection | null
-  connection: ServerConnection
+  baseContext: BaseContextFactory
 }
 
 let cleanupAgentAction: CleanupAgentAction = acpAgentAction
@@ -58,19 +57,9 @@ export function setExecutorLockHolderProbeForTest(probe: LockHolderProbe | null)
 }
 
 export function resolveStaleIndexLockMs(variables: JsonObject): number {
-  const candidate = variables["runner"]
-  if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
-    const cleanup = (candidate as JsonObject)["cleanup"]
-    if (cleanup && typeof cleanup === "object" && !Array.isArray(cleanup)) {
-      const value = (cleanup as JsonObject)["staleIndexLockMs"]
-      if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.floor(value)
-      if (typeof value === "string") {
-        const parsed = Number(value)
-        if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed)
-      }
-    }
-  }
-  return DEFAULT_STALE_INDEX_LOCK_MS
+  const cleanup = objectInput(objectInput(variables, "runner"), "cleanup")
+  const staleMs = numberInput(cleanup, "staleIndexLockMs")
+  return staleMs !== undefined && staleMs >= 0 ? Math.floor(staleMs) : DEFAULT_STALE_INDEX_LOCK_MS
 }
 
 export async function recoverStaleIndexLock(workDir: string, variables: JsonObject, signal: AbortSignal): Promise<GitIndexLockRecovery> {
@@ -160,23 +149,22 @@ export async function readWorktreeSnapshot(workDir: string, signal: AbortSignal)
     }
     return { staged: [], unstaged: [], untracked: [], isClean: true }
   }
-  const staged = await git(workDir, ["diff", "--cached", "--name-only"], signal)
-  const unstaged = await git(workDir, ["diff", "--name-only"], signal)
-  const untracked = await git(workDir, ["ls-files", "--others", "--exclude-standard"], signal)
+  const checks = await Promise.all([
+    git(workDir, ["diff", "--cached", "--name-only"], signal).then((result) => ({ name: "staged", result })),
+    git(workDir, ["diff", "--name-only"], signal).then((result) => ({ name: "unstaged", result })),
+    git(workDir, ["ls-files", "--others", "--exclude-standard"], signal).then((result) => ({ name: "untracked", result })),
+  ])
 
-  if (!staged.success || !unstaged.success || !untracked.success) {
+  if (checks.some(({ result }) => !result.success)) {
     throw new WorktreeProbeError(
-      `git worktree status check failed: ` +
-      `staged(exit=${staged.exitCode}), ` +
-      `unstaged(exit=${unstaged.exitCode}), ` +
-      `untracked(exit=${untracked.exitCode})`,
+      `git worktree status check failed: ${checks.map(({ name, result }) => `${name}(exit=${result.exitCode})`).join(", ")}`,
       null,
     )
   }
 
-  const stagedList = parseFileList(staged.stdout)
-  const unstagedList = parseFileList(unstaged.stdout)
-  const untrackedList = parseFileList(untracked.stdout)
+  const stagedList = parseFileList(checks[0].result.stdout)
+  const unstagedList = parseFileList(checks[1].result.stdout)
+  const untrackedList = parseFileList(checks[2].result.stdout)
   return {
     staged: stagedList,
     unstaged: unstagedList,
@@ -207,7 +195,7 @@ export function dirtyWorktreeFailure(
   const message = detail
     ? `${baseMessage}; ${detail}; ${summary}`.slice(0, 4000)
     : `${baseMessage}; ${summary}`.slice(0, 4000)
-  const existingOutput = result.output ? safeParseJson(result.output) : null
+  const existingOutput = safeParseObject(result.output)
   const output = JSON.stringify({
     ...(existingOutput ?? {}),
     kind: "dirty-worktree",
@@ -231,7 +219,7 @@ export function gitIndexLockFailure(
   cleanupAttempts: number,
   recovery: Extract<GitIndexLockRecovery, { status: "blocked" }>,
 ): WorkItemResult {
-  const existingOutput = result.output ? safeParseJson(result.output) : null
+  const existingOutput = safeParseObject(result.output)
   const message = `${result.message?.trim() || "Task completed by action but Git index is locked"}; git index lock blocked cleanup: ${recovery.reason}`.slice(0, 4000)
   return {
     ...result,
@@ -363,7 +351,7 @@ export async function runAgentCleanupAttempt(
   contextParts: ContextParts,
 ): Promise<WorkItemResult | "ok"> {
   const cleanupContext: ActionContext = {
-    ...baseContext(work, variables, signal, contextParts),
+    ...contextParts.baseContext(work, variables, signal),
     workDir,
     workType: "task",
     with: buildCleanupWith(work, renderedWith, snapshot, attempt),
@@ -380,52 +368,4 @@ export async function runAgentCleanupAttempt(
     return dirtyWorktreeFailure(mergeCleanupCount({ status: "completed" }, attempt - 1), snapshot, attempt, `Cleanup attempt ${attempt} failed: ${result.message ?? result.status}`)
   }
   return "ok"
-}
-
-function baseContext(
-  work: RenderedWorkItem,
-  variables: JsonObject,
-  signal: AbortSignal,
-  contextParts: ContextParts,
-): Omit<ActionContext, "with" | "workDir"> {
-  return {
-    workflowRunId: work.workflowRunId,
-    workId: work.workId,
-    workType: work.workType,
-    stage: work.stage,
-    title: work.title,
-    uses: work.uses,
-    variables,
-    signal,
-    recovery: work.recovery,
-    projectId: work.projectId,
-    issueNumber: work.issueNumber,
-    ownerKind: work.ownerKind,
-    agentSessionId: work.agentSessionId,
-    acpSessionManager: contextParts.sessionManager,
-    acpConnection: contextParts.acpConnection,
-    serverConnection: contextParts.connection,
-    writeVars: async (vars) => contextParts.connection.patchRunVars(work.workflowRunId, vars, signal),
-  }
-}
-
-function safeParseJson(value: string): JsonObject | null {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as JsonObject) : null
-  } catch {
-    return null
-  }
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (error && typeof error === "object" && "name" in error && "message" in error) {
-    return String((error as { message: unknown }).message)
-  }
-  return String(error)
-}
-
-function isNotFoundError(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "ENOENT")
 }

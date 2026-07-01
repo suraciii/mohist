@@ -8,7 +8,7 @@ import { WorkExecutor } from "../src/runtime/executor.js"
 import { setCleanupAgentActionForTest, setExecutorLockHolderProbeForTest } from "../src/runtime/worktree-enforcement.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { ActionRegistry } from "../src/actions/registry.js"
-import type { ActionContext, ActionResult, WorkItem } from "../src/core/types.js"
+import type { ActionContext, ActionResult, RenderedWorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
@@ -90,7 +90,7 @@ function buildExecutor(registry: ActionRegistry): WorkExecutor {
   )
 }
 
-function buildWork(overrides: Partial<WorkItem> = {}): WorkItem {
+function buildWork(overrides: Partial<RenderedWorkItem> = {}): RenderedWorkItem {
   return {
     workflowRunId: "wf-1",
     workId: "work-1",
@@ -428,6 +428,14 @@ describe("WorkExecutor clean worktree invariant", () => {
       observedWorkIds.push(ctx.workId)
       const session = typeof ctx.with?.["session"] === "string" ? ctx.with["session"] : undefined
       observedSessions.push(session)
+      expect(ctx.workflowRunId).toBe("wf-1")
+      expect(ctx.stage).toBe("integrate")
+      expect(ctx.projectId).toBe("project-1")
+      expect(ctx.issueNumber).toBe(255)
+      expect(ctx.ownerKind).toBe("workflow")
+      expect(ctx.agentSessionId).toBe("agent-session-1")
+      expect(ctx.serverConnection).toBe(connection)
+      expect(typeof ctx.writeVars).toBe("function")
       const prompt = String(ctx.with?.prompt ?? "")
       // The runner must NOT add a new session; it must preserve
       // either the explicit `with.session` from the original task
@@ -440,14 +448,19 @@ describe("WorkExecutor clean worktree invariant", () => {
       return { status: "success" }
     })
 
-    const work: WorkItem = {
+    const work: RenderedWorkItem = {
       workflowRunId: "wf-1",
       workId: "work-session-test",
       workType: "task",
+      stage: "integrate",
       title: "Session reuse test",
       uses: "mohist/acp-agent",
       with: { session: "named-session", prompt: "do the work" },
       variables: { workspace: { path: workDir, branch: "main", changeDir: null } },
+      projectId: "project-1",
+      issueNumber: 255,
+      ownerKind: "workflow",
+      agentSessionId: "agent-session-1",
     }
     const executor = buildExecutor(makeRegistry(async () => ({ status: "success" })))
 
@@ -473,7 +486,7 @@ describe("WorkExecutor clean worktree invariant", () => {
       return { status: "success" }
     })
 
-    const work: WorkItem = {
+    const work: RenderedWorkItem = {
       workflowRunId: "wf-1",
       workId: "work-default-session",
       workType: "task",
@@ -543,7 +556,7 @@ describe("WorkExecutor clean worktree invariant", () => {
         plainDir,
       )
 
-      const work: WorkItem = {
+      const work: RenderedWorkItem = {
         workflowRunId: "wf-1",
         workId: "work-plain",
         workType: "task",
@@ -648,7 +661,7 @@ describe("WorkExecutor clean worktree invariant", () => {
       return { status: "success" }
     })
 
-    const work: WorkItem = {
+    const work: RenderedWorkItem = {
       workflowRunId: "wf-1",
       workId: "work-loader",
       workType: "task",

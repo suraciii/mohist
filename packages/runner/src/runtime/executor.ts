@@ -1,6 +1,6 @@
 import { isAbsolute, join, relative, resolve } from "node:path"
-import type { ActionContext, ActionResult, JsonObject, AddTaskInput, RenderedWorkItem, WorkItemResult } from "../core/types.js"
-import { isObject, safeParseObject, stringInput } from "../core/json.js"
+import type { ActionContext, ActionResult, JsonObject, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import { isObject, stringInput } from "../core/json.js"
 import { errorMessage } from "../core/errors.js"
 import { stringAt } from "../core/json-path.js"
 import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
@@ -9,14 +9,8 @@ import { runnerVariables, WorkspaceManager } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
-import {
-  appendArtifactWarning,
-  captureArtifactsForWork,
-  renderArtifactDeclarations,
-  uploadCapturesForWork,
-  withArtifactFailure,
-} from "./artifact-capture.js"
-import { applyExtractedSetVars, extractSetVars } from "./set-vars.js"
+import { captureAndUploadArtifactsForWork } from "./artifact-side-effects.js"
+import { applySetVarsForWork } from "./set-vars-apply.js"
 import { captureOutputs } from "./output-capture.js"
 import {
   attachBranchStabilityEvidence,
@@ -24,7 +18,8 @@ import {
   expectedWorkspaceBranch,
   type BranchStabilityEvidence,
 } from "./branch-stability.js"
-import { checkFailureDetails, type CheckResultRow } from "./check-verdict.js"
+import { executeCheckDispatch, type CheckDeclaration } from "./check-execution.js"
+import { tryRecovery } from "./recovery.js"
 import { cleanupAgentAction, enforceCleanWorktree } from "./worktree-enforcement.js"
 
 const COMPLETED_STATUSES = new Set(["completed", "success", "succeeded", "pass", "passed"])
@@ -113,15 +108,15 @@ export class WorkExecutor {
         variables,
         signal,
         cleanupAgentAction,
-        { sessionManager: this.sessionManager, acpConnection: this.acpConnection, connection: this.connection },
+        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.sessionManager, this.acpConnection, this.connection) },
       )
       if (worktreeResult.status !== "completed") {
         return attachBranchStabilityEvidence(worktreeResult, evidenceStack)
       }
       const withEvidence = attachBranchStabilityEvidence(worktreeResult, evidenceStack)
-      const finalResult = await this.captureAndUploadArtifacts(work, workspaceRoot, workDir, withEvidence, result, variables, signal)
+      const finalResult = await captureAndUploadArtifactsForWork(this.connection, work, workspaceRoot, workDir, withEvidence, result, variables, signal)
       const withCapturedOutputs = this.captureDeclaredOutputs(work, finalResult, result)
-      return await this.applySetVars(work, withCapturedOutputs, signal)
+      return await applySetVarsForWork(this.connection, work, withCapturedOutputs, signal)
     } catch (error) {
       return failure(work, errorMessage(error))
     }
@@ -129,34 +124,16 @@ export class WorkExecutor {
 
   private async executeChecks(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<WorkItemResult> {
     const variables = await this.variables(work, resolvedWorkspace, signal)
-    const checks = Array.isArray(work.with?.checks) ? work.with.checks.filter(isCheck) : []
-    if (checks.length === 0) return failure(work, "No checks found in dispatch")
-
-    const results = await Promise.all(checks.map((check) => this.runOneCheck(work, check, variables, signal)))
-
-    const verdict = results.every((result) => result.status === "pass") ? "pass" : "fail"
-    const output = JSON.stringify(results)
-    if (verdict === "fail") {
-      return { status: "fail", message: `Check verdict failure: ${checkFailureDetails(results, checks)}`, output }
-    }
-    return { status: "pass", output }
-  }
-
-  private async runOneCheck(work: RenderedWorkItem, check: { name?: string; title?: string; uses: string; with?: JsonObject | null }, variables: JsonObject, signal: AbortSignal): Promise<CheckResultRow & { output?: string | null }> {
-    const action = this.actions.resolve(check.uses)
-    if (!action) return { name: check.name, status: "fail", message: `No action found for '${check.uses}'` }
-    try {
-      const unresolved = wholeStringUnresolvedReferences(check.with ?? null, variables)
-      if (unresolved.length > 0) {
-        return { name: check.name, status: "fail", message: formatCheckUnresolvedError(unresolved) }
-      }
-      const renderedWith = renderTemplate(check.with ?? null, variables)
-      const workDir = await this.resolveWorkDir(renderedWith, this.workspaceRoot(variables))
-      const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir })
-      return { name: check.name, status: toCheckStatus(result.status), message: result.message, output: result.output }
-    } catch (error) {
-      return { name: check.name, status: "fail", message: error instanceof Error ? error.message : String(error) }
-    }
+    const rawChecks: unknown[] = Array.isArray(work.with?.checks) ? work.with.checks : []
+    const checks = rawChecks.filter(isCheck)
+    const workspaceRoot = this.workspaceRoot(variables)
+    return await executeCheckDispatch(checks, variables, {
+      actions: this.actions,
+      context: baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection),
+      formatUnresolved: formatCheckUnresolvedError,
+      resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
+      toCheckStatus,
+    })
   }
 
   private async variables(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<JsonObject> {
@@ -195,41 +172,6 @@ export class WorkExecutor {
     const workDir = requested ? resolveWorkspacePath(root, requested) : root
     await ensureDir(workDir)
     return workDir
-  }
-
-  /** Thin orchestration layer over artifact-capture.ts: render declared paths,
-   * capture dynamic + declared files, upload each, attach upload ids. */
-  private async captureAndUploadArtifacts(
-    work: RenderedWorkItem,
-    workspaceRoot: string,
-    workDir: string,
-    result: WorkItemResult,
-    actionResult: ActionResult,
-    variables: JsonObject,
-    signal: AbortSignal,
-  ): Promise<WorkItemResult> {
-    const rendered = renderArtifactDeclarations(work, variables)
-    if (rendered.kind === "failure") return withArtifactFailure(result, rendered.status, rendered.message)
-
-    const captured = await captureArtifactsForWork(work, workspaceRoot, workDir, rendered.artifacts, actionResult)
-    if (captured.kind === "failure") return withArtifactFailure(result, "failed", captured.message)
-    if (captured.captures.length === 0) {
-      return appendArtifactWarning(result, captured.failures, "artifact capture warnings")
-    }
-    const uploads = await uploadCapturesForWork(this.connection, work, captured.captures, signal)
-    if (uploads.kind === "failure") return withArtifactFailure(result, uploads.status, uploads.message)
-    const allFailures = [...captured.failures, ...uploads.failures]
-    return { ...appendArtifactWarning(result, allFailures, "artifact warnings"), artifactUploadIds: uploads.uploadIds }
-  }
-
-  private async applySetVars(work: RenderedWorkItem, result: WorkItemResult, signal: AbortSignal): Promise<WorkItemResult> {
-    if (result.status !== "completed") return result
-    if (!work.setVars || Object.keys(work.setVars).length === 0) return result
-
-    const extraction = extractSetVars(work.setVars, result.output)
-    if (extraction.error) return { ...result, status: "failed", message: `setVars: ${extraction.error}` }
-    const patchFailure = await applyExtractedSetVars(this.connection, work.workflowRunId, extraction, signal)
-    return patchFailure ? { ...result, ...patchFailure } : result
   }
 
   private captureDeclaredOutputs(work: RenderedWorkItem, result: WorkItemResult, actionResult: ActionResult): WorkItemResult {
@@ -302,7 +244,7 @@ function toCheckStatus(status: string) {
   return CHECK_STATUS_BY_ACTION_STATUS.get(status.toLowerCase()) ?? "fail"
 }
 
-function isCheck(value: unknown): value is { name?: string; title?: string; uses: string; with?: JsonObject | null } {
+function isCheck(value: unknown): value is CheckDeclaration {
   return isObject(value) && typeof value.uses === "string"
 }
 
@@ -328,124 +270,7 @@ function formatCheckUnresolvedError(unresolved: string[]): string {
     "Add the variable to workflow.variables, define it in a parent stage, or escape the literal with \\${{ ... }}."
 }
 
-// ---------------------------------------------------------------------------
-// Task recovery — match action output against task-level `recovery` config;
-// on match (and budget remaining), convert failure to `completed`+`addTasks`.
-// ---------------------------------------------------------------------------
-
-interface RecoveryHandler {
-  when: string
-  tasks: AddTaskInput[]
-  retrySelf: boolean
-}
-
-interface RecoveryConfig {
-  budget: number
-  handlers: RecoveryHandler[]
-}
-
-function tryRecovery(
-  work: RenderedWorkItem,
-  result: WorkItemResult,
-): WorkItemResult | null {
-  const recovery = readRecoveryConfig(work.recovery)
-  if (!recovery) return null
-
-  const output = safeParseObject(result.output)
-  if (!output) return null
-
-  const handler = recovery.handlers.find((h) => matchesWhen(h.when, output))
-  if (!handler) return null
-
-  if (recovery.budget <= 0) return null
-
-  const addTasks: AddTaskInput[] = [...handler.tasks]
-
-  if (handler.retrySelf) {
-    const retryId = work.workId.includes(".")
-      ? work.workId.substring(0, work.workId.lastIndexOf("."))
-      : work.workId
-    const nextRecovery = decrementRecoveryBudget(work.recovery, recovery.budget)
-    addTasks.push({
-      id: retryId,
-      title: work.title ?? work.workId,
-      uses: work.uses ?? null,
-      with: work.with,
-      recovery: nextRecovery,
-    })
-  }
-
-  const label = work.title?.trim() || work.uses || work.workId
-  return {
-    status: "completed",
-    message: `${label} failed (${handler.when}); recovery scheduled`,
-    output: result.output,
-    addTasks,
-  }
-}
-
-function matchesWhen(when: string, output: JsonObject): boolean {
-  const eq = when.indexOf("=")
-  if (eq === -1) return false
-  const field = when.slice(0, eq).trim()
-  const expected = when.slice(eq + 1).trim()
-  return String(output[field]) === expected
-}
-
-function readRecoveryConfig(recovery: JsonObject | null | undefined): RecoveryConfig | null {
-  if (!recovery) return null
-  const rawBudget = recovery["budget"]
-  const budget = typeof rawBudget === "number" && Number.isFinite(rawBudget) ? Math.floor(rawBudget) : 0
-  const rawHandlers = recovery["handlers"]
-  if (!Array.isArray(rawHandlers)) return null
-  const handlers: RecoveryHandler[] = []
-  for (const raw of rawHandlers) {
-    if (!isObject(raw)) continue
-    const h = raw
-    const when = stringField(h, "when")
-    if (!when) continue
-    handlers.push({
-      when,
-      tasks: readAddTasks(h["tasks"]),
-      retrySelf: h["retrySelf"] === true,
-    })
-  }
-  return { budget, handlers }
-}
-
-function readAddTasks(raw: unknown): AddTaskInput[] {
-  if (!Array.isArray(raw)) return []
-  const tasks: AddTaskInput[] = []
-  for (const entry of raw) {
-    if (!isObject(entry)) continue
-    const t = entry
-    const id = stringField(t, "id")
-    if (!id) continue
-    tasks.push({
-      id,
-      title: stringField(t, "title") ?? id,
-      uses: stringField(t, "uses"),
-      with: objectField(t, "with"),
-      recovery: objectField(t, "recovery"),
-    })
-  }
-  return tasks
-}
-
 function stringField(obj: JsonObject, key: string): string | null {
   const value = obj[key]
   return typeof value === "string" ? value : null
-}
-
-function objectField(obj: JsonObject, key: string): JsonObject | null {
-  const value = obj[key]
-  return isObject(value) ? value : null
-}
-
-function decrementRecoveryBudget(recovery: JsonObject | null | undefined, currentBudget: number): JsonObject | null {
-  if (!recovery) return null
-  return {
-    ...recovery,
-    budget: currentBudget - 1,
-  }
 }

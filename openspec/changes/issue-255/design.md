@@ -8,7 +8,7 @@ Runner 的工作流执行器 `packages/runner/src/runtime/executor.ts`（1106 �
 - `WorktreeProbeError`（executor.ts:779）由 `readWorktreeSnapshot` 抛出（executor.ts:747/759），被 `executeOne` 的外层 try/catch 捕获并转成 `worktreeProbeFailure`（executor.ts:159-161）。这是一个**跨函数的异常边界**——抛出方在工作树清洁路径里，捕获方在编排入口里。
 - 纯数据模块 `worktree-cleanup.ts`（99 行，只做 prompt 构造 + 配置读取 + `WorktreeSnapshot` 类型，无 I/O）已经独立存在，执行器通过它拿 `isAgentBackedTask` / `resolveMaxCleanupAttempts` / `buildCleanupWith` / `WorktreeSnapshot`。
 - 测试注入面有 4 个 spec 文件直接 import 这三个桩：`executor-branch-stability.spec.ts`、`executor-cleanup.spec.ts`、`workspace-prepare-workflow.spec.ts`、`issue-112-regression.spec.ts`。其中 `executor-cleanup.spec.ts` 与 `executor-branch-stability.spec.ts` 在 `afterEach` 里同时复位全部三个桩。
-- recovery（`tryRecovery` 等，executor.ts:1010-1106）目前**无独立 spec**，仅被 artifact/branch-stability 等 spec 间接覆盖。
+- recovery（`tryRecovery` 等）已有 `executor-recovery.spec.ts` 覆盖预算递减与 retry-self 展开；为满足复杂度门槛，恢复匹配逻辑可独立为 `runtime/recovery.ts`，执行器保持原管线位置委托调用。
 - 唯一外部消费者是 `runtime/host.ts`（import `WorkExecutor`）。无 server/web/cli 依赖，无持久化、无 runner↔server 协议字段变化。
 
 **约束：** 执行语义、容错/重试行为、工作分发契约完全不变；测试注入机制（mutable-let）保持，仅迁移位置；这是行为保持重构，无 breaking change。`design/testing.md` 已把 `setExecutorGitRunnerForTest` 列为 runner 端 git fake 的规范入口。
@@ -21,13 +21,13 @@ Runner 的工作流执行器 `packages/runner/src/runtime/executor.ts`（1106 �
 - 把工作树清洁不变式（有界清理循环 + 陈旧锁恢复 + 证据构造）提取为 `runtime/worktree-enforcement.ts`，执行器降为单次委托调用。
 - 让两个不变式模块共用**同一** git 探测注入点（不得拆成两份互不可见的私有 `let git`）。
 - 三个测试注入桩迁移到归属模块，签名逐字不变，4 个 spec 仅改 import 路径即可通过。
-- `executor.ts` 收敛到编排入口规模（~350 行），三个模块各自脱离 runner 包 scc 前列。
+- `executor.ts` 收敛到编排入口规模（~275 行），三个核心模块各自达到 scc complexity <= 40 且排名在前 20 名之外。
 - `executeOne` 收敛为线性管线，每个不变式阶段是一次函数调用。
 
 **Non-Goals:**
 
 - 不改执行语义、任务调度规则、容错/重试策略、runner↔server 契约。
-- 不提取 recovery 为独立模块（无独立 spec，保留在编排入口侧）。
+- 不改变 recovery 行为；恢复匹配可在有独立 spec 守护后提取为专门模块。
 - 不合并 `worktree-cleanup.ts`（纯数据模块保持独立）。
 - 不引入新依赖注入框架、不改 mutable-let 注入范式。
 - 不做性能优化、不新增执行阶段或工作项类型。
@@ -83,7 +83,7 @@ Runner 的工作流执行器 `packages/runner/src/runtime/executor.ts`（1106 �
 
 ### Decision 6：执行器收敛后保留的内容与 `executeOne` 线性管线
 
-executor.ts 保留（~350 行）：`WorkExecutor.execute` / `executeOne` / `executeChecks`、`variables` / `prepareWorkspace` / `workspaceFromVariables` / `workspaceRoot` / `resolveWorkDir`、`captureAndUploadArtifacts` / `applySetVars` / `captureDeclaredOutputs`（薄层）、`tryRecovery` / `matchesWhen` / `readRecoveryConfig` / `readAddTasks` / `decrementRecoveryBudget`、以及 `normalize` / `failure` / `baseContext` / `toCheckStatus` / `isCheck` / `resolveWorkspacePath` / `formatUnresolvedError` / `formatCheckUnresolvedError` / `workspaceSetupFailure` 等 helper。recovery 无独立 spec → 保留在编排入口侧由现有间接测试守护（spec 硬要求）。
+executor.ts 保留（~275 行）：`WorkExecutor.execute` / `executeOne` / `executeChecks`、`variables` / `prepareWorkspace` / `workspaceFromVariables` / `workspaceRoot` / `resolveWorkDir`、`captureDeclaredOutputs`、以及 `normalize` / `failure` / `baseContext` / `toCheckStatus` / `isCheck` / `resolveWorkspacePath` / `formatUnresolvedError` / `formatCheckUnresolvedError` / `workspaceSetupFailure` 等 helper。checks fan-out/裁决委托 `check-execution.ts`，post-side-effect glue 委托 `artifact-side-effects.ts` / `set-vars-apply.ts` / `output-capture.ts`，recovery 委托 `recovery.ts`，以满足明确的 scc 门槛且保持执行语义不变。
 
 提取后 `executeOne` 管线（每段不变式 = 一次函数调用）：
 
@@ -92,12 +92,12 @@ resolve action → variables → render with → resolve workDir
   → checkBranchStability(start)           [branch-stability.ts]
   → action(...)
   → normalize
-  → tryRecovery                           [保留于 executor]
+  → tryRecovery                           [recovery.ts]
   → checkBranchStability(end)             [branch-stability.ts]
   → enforceCleanWorktree(...)             [worktree-enforcement.ts，内部消化 WorktreeProbeError]
-  → captureAndUploadArtifacts(...)        [保留]
+  → captureAndUploadArtifactsForWork(...) [artifact-side-effects.ts]
   → captureDeclaredOutputs(...)           [保留]
-  → applySetVars(...)                     [保留]
+  → applySetVarsForWork(...)              [set-vars-apply.ts]
 ```
 
 ## Risks / Trade-offs
@@ -106,7 +106,7 @@ resolve action → variables → render with → resolve workDir
 - **[Risk] `WorktreeProbeError` 下沉后异常路径行为偏移** → 下沉若漏掉某个抛出点，探测失败会冒泡成 generic `failure` 而非结构化 `worktreeProbeFailure`。**Mitigation**：Decision 2 已核对 `readWorktreeSnapshot` 是 try 块内唯一抛出源；`executor-cleanup.spec.ts` 的 probe-failure 场景（git status 非 git 仓库以外的失败）作为回归守护。
 - **[Risk] `enforceCleanWorktree` 入参膨胀** → 它要承接 `cleanupAction` / `baseContext` 工厂 / `contextParts`，签名变长，易传错顺序。**Mitigation**：保持参数为位置参数与现有调用点对齐（spec 要求签名语义不变），并在 executor 调用点保留与今天一致的实参顺序；类型系统兜底（`RenderedWorkItem` / `JsonObject` 等强类型）。
 - **[Risk] 循环 import** → 若任一不变式模块反向 import executor 的 `baseContext`/helper。**Mitigation**：Decision 5 规定 executor 把 `baseContext`/`cleanupAction` 作为参数**传入** `enforceCleanWorktree`，worktree-enforcement 不 import executor；两个不变式模块互不 import，只共同 import `git-probe.ts` 与（仅 worktree）`worktree-cleanup.ts`。无环。
-- **[Risk] scc 未达预期改善** → 若 evidence/失败构造函数留太多在 executor。**Mitigation**：按 proposal 行数预算（branch-stability ~180 / worktree-enforcement ~320 / executor ~350）切分；提取后跑 `scc packages/runner/src/` 确认三模块均脱离前列。
+- **[Risk] scc 未达预期改善** → 若 recovery/check/post-side-effect 分支留太多在 executor。**Mitigation**：门槛明确为 `executor.ts` / `branch-stability.ts` / `worktree-enforcement.ts` complexity <= 40 且排名在前 20 名之外；提取后跑 `scc --by-file --sort complexity packages/runner/src` 记录证据。
 - **[Trade-off] 4 个 spec 的 import 路径要改** → 测试代码动得比"纯内部重构"多一点。可接受：spec 文案与断言不动，只动 import 来源；这恰好让 spec 的依赖图反映真实模块归属。
 
 ## Migration Plan
@@ -116,12 +116,13 @@ resolve action → variables → render with → resolve workDir
 1. **提取 `git-probe.ts`**：把 `GitRunner` 类型、`let git`、`setExecutorGitRunnerForTest`、`defaultGit` import 从 executor 迁出；executor 改为 `import { git } from "./git-probe.js"`。跑 `executor-branch-stability` + `executor-cleanup` + `workspace-prepare-workflow` spec。
 2. **提取 `branch-stability.ts`**：迁移 `checkBranchStability` / `readCurrentBranch` / `expectedWorkspaceBranch` / `branchInvariantViolationFailure` / `attachBranchStabilityEvidence` / `branchStabilityToJson` + 三类证据类型。executor 调用点换前缀。跑 `executor-branch-stability` spec。
 3. **提取 `worktree-enforcement.ts`**：迁移清理循环 + 陈旧锁恢复 + 证据构造 + `WorktreeProbeError` + `DEFAULT_STALE_INDEX_LOCK_MS` + `mergeCleanupCount`；按 Decision 2 把 probe-error 捕获下沉进 `enforceCleanWorktree`；按 Decision 5 接收 `cleanupAction`/`baseContext`/`contextParts` 参数；import `worktree-cleanup.ts` 与 `git-probe.ts`。跑 `executor-cleanup` + `issue-112-regression` spec。
-4. **更新 4 个 spec 的 import 路径**（Decision 3），改完跑全套 runner 测试。
-5. **验证**：`npm run typecheck -w packages/runner`；`npm test -w packages/runner`；`scc packages/runner/src/` 确认 `executor.ts` / `branch-stability.ts` / `worktree-enforcement.ts` 三者均不在复杂度前列，且 `tryRecovery` 路径行为一致（由 artifact/branch-stability spec 间接守护）。
+4. **提取执行器剩余高分支 helper**：checks 委托 `check-execution.ts`，post-side-effect glue 委托 `artifact-side-effects.ts` / `set-vars-apply.ts`，recovery 委托 `recovery.ts`，并用 `executor-recovery.spec.ts` 守护恢复路径。
+5. **更新 4 个 spec 的 import 路径**（Decision 3），改完跑全套 runner 测试。
+6. **验证**：`npm run typecheck -w packages/runner`；`npm test -w packages/runner`；`scc --by-file --sort complexity packages/runner/src` 确认 `executor.ts` / `branch-stability.ts` / `worktree-enforcement.ts` 三者 complexity <= 40 且排名在前 20 名之外，且 `tryRecovery` 路径行为一致。
 
 **回滚**：任一步失败直接 revert 该步 commit；因无外部契约变化，revert 不影响已部署的 server/web/cli。
 
 ## Open Questions
 
 - **`mergeCleanupCount` 的最终归属**：它既被清理循环（worktree-enforcement 内部）用，又用于构造 dirty-worktree 证据。当前倾向随 `enforceCleanWorktree` 一起进 `worktree-enforcement.ts`（Decision 5）。若提取后发现 executor 侧仍有残留引用，则改为两模块都不会用到的纯函数独立放置——预计不会发生，但留作实现期确认点。
-- **`safeParseJson` / `errorMessage` / `isNotFoundError` 的小工具归属**：它们被分支稳定性（`attachBranchStabilityEvidence` 用 `safeParseJson`，executor.ts:971）和工作树清洁（`dirtyWorktreeFailure` executor.ts:808 / `gitIndexLockFailure` executor.ts:832 用 `safeParseJson`；`recoverStaleIndexLock` / `defaultLockHolderProbe` 用 `errorMessage` / `isNotFoundError`）共享。实现期判断：executor 侧保留的 `tryRecovery` 仍用 `safeParseJson`（executor.ts:1017），`executeOne` 外层 catch 仍用 `errorMessage`，故这两个小工具保留在 executor；两个不变式模块按需 import 或自带短副本（避免为 3 行函数造第 4 个文件）。`isNotFoundError` 仅被工作树清洁路径用，随 `enforceCleanWorktree` 一起进 `worktree-enforcement.ts`。实现期定。
+- **`safeParseJson` / `errorMessage` / `isNotFoundError` 的小工具归属**：实现后统一为共享小工具：`safeParseObject` 位于 `core/json.ts`，`errorMessage` / `isNotFoundError` 位于 `core/errors.ts`，分支稳定性、工作树清洁与 recovery 模块按需导入，避免在执行器和不变式模块之间复制实现。

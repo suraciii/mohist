@@ -74,7 +74,7 @@
 
 ### Requirement: 执行器入口聚焦编排与阶段串联
 
-`WorkExecutor.execute` / `executeOne` / `executeChecks` SHALL 聚焦编排与阶段串联。`executeOne` SHALL 收敛为线性管线：解析 action → 装配 variables → render with → 解析 workDir → `checkBranchStability(start)` → 执行 action → `normalize` → `tryRecovery` → `checkBranchStability(end)` → `enforceCleanWorktree` → `captureAndUploadArtifacts` → `captureDeclaredOutputs` → `applySetVars`，其中每个不变式各为一次函数调用。任务失败恢复（`tryRecovery` / `matchesWhen` / `readRecoveryConfig` / `readAddTasks` / `decrementRecoveryBudget`）SHALL 保留在编排入口侧。后置副作用编排（`captureAndUploadArtifacts` / `applySetVars` / `captureDeclaredOutputs`）SHALL 保持为对已提取的 `artifact-capture.ts` / `set-vars.ts` / `output-capture.ts` 的薄层。工作区解析（`prepareWorkspace` / `workspaceFromVariables` / `workspaceRoot` / `resolveWorkDir`）与 helper（`normalize` / `failure` / `baseContext` / `toCheckStatus` / `isCheck` / `resolveWorkspacePath` 等）SHALL 保留在执行器内。
+`WorkExecutor.execute` / `executeOne` / `executeChecks` SHALL 聚焦编排与阶段串联。`executeOne` SHALL 收敛为线性管线：解析 action → 装配 variables → render with → 解析 workDir → `checkBranchStability(start)` → 执行 action → `normalize` → `tryRecovery` → `checkBranchStability(end)` → `enforceCleanWorktree` → `captureAndUploadArtifactsForWork` → `captureDeclaredOutputs` → `applySetVarsForWork`，其中每个提取关注点各为一次函数调用。任务失败恢复（`tryRecovery` / `matchesWhen` / `readRecoveryConfig` / `readAddTasks` / `decrementRecoveryBudget`）SHALL 位于 `recovery.ts` 并由执行器在原管线位置委托调用。后置副作用编排 SHALL 位于 `artifact-side-effects.ts` / `set-vars-apply.ts` / `output-capture.ts` 的薄层 helper。工作区解析（`prepareWorkspace` / `workspaceFromVariables` / `workspaceRoot` / `resolveWorkDir`）与 helper（`normalize` / `failure` / `baseContext` / `toCheckStatus` / `isCheck` / `resolveWorkspacePath` 等）SHALL 保留在执行器内。
 
 #### Scenario: executeOne 为线性阶段管线
 
@@ -83,16 +83,17 @@
 - **AND** 每个不变式阶段 SHALL 为一次对已提取模块的函数调用
 - **AND** SHALL NOT 在阶段之间内联不变式细节
 
-#### Scenario: 任务失败恢复保留在编排入口侧
+#### Scenario: 任务失败恢复由专门模块承载且行为不变
 
 - **WHEN** 检查 `tryRecovery` 及其辅助函数（`matchesWhen` / `readRecoveryConfig` / `readAddTasks` / `decrementRecoveryBudget`）所在位置
-- **THEN** 这些实现 SHALL 保留在执行器（编排入口）内
-- **AND** SHALL NOT 被提取为独立模块（因其尚无独立 spec）
+- **THEN** 这些实现 SHALL 位于 `recovery.ts`
+- **AND** 执行器 SHALL 在 `normalize` 之后、end 分支检查之前委托调用 `tryRecovery`
+- **AND** `executor-recovery.spec.ts` SHALL 覆盖预算递减与 retry-self 展开行为
 
 #### Scenario: 后置副作用为薄编排层
 
-- **WHEN** 检查 `captureAndUploadArtifacts` / `applySetVars` / `captureDeclaredOutputs` 的实现
-- **THEN** 它们 SHALL 保持为对已提取的 `artifact-capture.ts` / `set-vars.ts` / `output-capture.ts` 的薄层编排
+- **WHEN** 检查 `captureAndUploadArtifactsForWork` / `applySetVarsForWork` / `captureDeclaredOutputs` 的实现
+- **THEN** 它们 SHALL 保持为对 `artifact-capture.ts` / `set-vars.ts` / `output-capture.ts` 的薄层编排
 - **AND** SHALL NOT 重新内联其底层细节
 
 ### Requirement: 执行、容错与调度行为逐字保持不变
@@ -118,16 +119,16 @@
 
 ### Requirement: 各模块脱离 runner 包复杂度前列
 
-拆分后 `executor.ts` 与两个新模块（`branch-stability.ts`、`worktree-enforcement.ts`）SHALL 各自脱离 runner 包圈复杂度（scc）前列。`executor.ts` SHALL 从约 1106 行收敛至编排入口规模，SHALL NOT 仍居 runner 包复杂度前列。
+拆分后 `executor.ts` 与两个新模块（`branch-stability.ts`、`worktree-enforcement.ts`）SHALL 各自脱离 runner 包圈复杂度（scc）前列。具体门槛：在 `scc --by-file --sort complexity packages/runner/src` 中三者 SHALL 均为 complexity <= 40，且 SHALL 均排在前 20 名之外。`executor.ts` SHALL 从约 1106 行收敛至编排入口规模，SHALL NOT 仍居 runner 包复杂度前列。
 
 #### Scenario: 执行器收敛并脱离复杂度前列
 
 - **WHEN** 在拆分后用 scc 对 `packages/runner/src/` 按单文件圈复杂度排序
-- **THEN** `executor.ts` SHALL 不在前排（脱离 runner 包复杂度前列）
+- **THEN** `executor.ts` SHALL complexity <= 40 且排名在前 20 名之外
 - **AND** 其行数 SHALL 较拆分前的 ~1106 行显著下降至编排入口规模
 
 #### Scenario: 两个新模块各自脱离复杂度前列
 
 - **WHEN** 在拆分后用 scc 对 `packages/runner/src/` 按单文件圈复杂度排序
-- **THEN** `branch-stability.ts` 与 `worktree-enforcement.ts` SHALL 各自脱离 runner 包复杂度前列
+- **THEN** `branch-stability.ts` 与 `worktree-enforcement.ts` SHALL 各自 complexity <= 40 且排名在前 20 名之外
 - **AND** 各自 SHALL 聚焦单一执行关注点（前者：分支稳定性断言；后者：工作树清洁与陈旧锁恢复）
