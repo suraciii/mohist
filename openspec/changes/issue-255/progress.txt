@@ -118,3 +118,67 @@ All three extracted modules are well below the runner package complexity front r
 - `baseContext` is now duplicated in executor.ts (for action execution) and worktree-enforcement.ts (for cleanup execution). Both copies produce identical `Omit<ActionContext, "with" | "workDir">`. If a future change updates baseContext, both copies must be updated in lockstep. Acceptable trade-off vs. extracting a 4th helper module just for 20 lines.
 - The `WorktreeProbeError` class is still exported from worktree-enforcement.ts (per the task spec which lists it as a required export). Tests can `instanceof`-check it if needed. executor.ts no longer references it.
 - Recovery (`tryRecovery` + helpers) stays in executor.ts (Decision per task notes; no independent spec). T-003 will leave it as-is.
+
+
+# T-003 progress — converge executor to orchestration entry, verify cross-cutting invariants
+
+## Observations (verified by grep / read)
+
+- After T-002, executor.ts has 552 lines and complexity 143 (down from 1106 lines / 236 complexity pre-T-001). `executor.ts` retained: `execute`/`executeOne`/`executeChecks` orchestration, `variables`/`prepareWorkspace`/`workspaceFromVariables`/`workspaceRoot`/`resolveWorkDir` workspace resolution, `captureAndUploadArtifacts`/`applySetVars`/`captureDeclaredOutputs` post-side-effect orchestration (still has artifact-upload rendering / declared-artifact template render / set-vars patch error handling inlined), `tryRecovery`+`matchesWhen`+`readRecoveryConfig`+`readAddTasks`+`decrementRecoveryBudget` task-failure recovery, and module-level helpers (`normalize`/`failure`/`baseContext`/`toCheckStatus`/`isCheck`/`resolveWorkspacePath`/`formatUnresolvedError`/`formatCheckUnresolvedError`/`workspaceSetupFailure`/`safeParseJson`/`errorMessage`).
+- `executeChecks`'s verdict-aggregation block (~14 lines: marker-check + expected-marker logic) is inlined; can be extracted as a small helper to slim the method body.
+- `executeChecks`'s inner async map function (~16 lines: per-check render/resolve/action invocation) is also inlined; can be a separate private method `runOneCheck` to slim `executeChecks`.
+- `executor.ts:135-137` had a `WorktreeProbeError` `instanceof` branch in the outer catch (left over from pre-T-002 state). Wait — T-002 already removed that. Verified: executor.ts after T-002 has a clean `catch (error) { return failure(work, errorMessage(error)) }`.
+
+## Design choices for T-003
+
+- **Post-side-effect orchestration helpers moved out of executor.ts into their target modules**: `artifact-capture.ts` got `renderArtifactDeclarations` / `uploadCapturesForWork` / `appendArtifactWarning` / `withArtifactFailure` / `captureArtifactsForWork` (~170 lines appended). `set-vars.ts` got `applyExtractedSetVars` + `SetVarsPatcher` interface (~25 lines). These absorb the inlined detail so executor's `captureAndUploadArtifacts` and `applySetVars` are now thin ~12-line stitch layers.
+- **`executeChecks` verdict-aggregation extracted to module-level helper `checkFailureDetails`** (25 lines, accepts `(results, checks)`). The marker-check logic that produces the `expected verdict marker '...' but it was not found in the artifact` message lives in the helper, not in `executeChecks`.
+- **`runOneCheck` extracted as private method on `WorkExecutor`** (16 lines). Reads `this.actions.resolve`, `this.resolveWorkDir`, `this.workspaceRoot`, `baseContext` — must remain an instance method since it depends on `this`. `executeChecks` shrinks from 38 to 14 lines.
+- **No `tryRecovery` extraction**: spec hard requirement + no independent spec.
+
+## Implementation results (T-003)
+
+- `executor.ts`: 552 → 477 lines (-75 lines). Removed:
+  - Inlined artifact-rendering (unresolvedReferences + renderTemplate + error mapping, ~30 lines) — moved to `artifact-capture.ts:renderArtifactDeclarations`.
+  - Inlined artifact capture batch + upload resolution (~30 lines) — moved to `artifact-capture.ts:captureArtifactsForWork` + `uploadCapturesForWork`.
+  - Inlined set-vars patch try/catch (~10 lines) — moved to `set-vars.ts:applyExtractedSetVars`.
+  - Verdict-aggregation map (~14 lines in executeChecks) — extracted to module-level `checkFailureDetails`.
+  - Per-check async invocation (~16 lines inline in executeChecks) — extracted to private method `runOneCheck`.
+- `artifact-capture.ts`: 371 → 540 lines (+169). Added five post-side-effect orchestration primitives + their discriminated-union result types.
+- `set-vars.ts`: 48 → 79 lines (+31). Added `applyExtractedSetVars` + `SetVarsPatcher` interface.
+- `runtime/host.ts`: unchanged. Still imports `WorkExecutor` from `./executor.js`.
+- `branch-stability.ts`, `worktree-enforcement.ts`, `git-probe.ts`: unchanged from T-001/T-002.
+- Test files: 0 changes. All specs use the unchanged executor surface; the new helper functions are internal-only.
+
+## Verification
+
+- `npm run typecheck -w packages/runner` ✓ passes
+- `npm run build -w packages/runner` ✓ clean build
+- `npm test -w packages/runner` (full suite): 753/753 ✓ all passing in 8.17s
+- `executor-branch-stability.spec.ts`: 15/15
+- `executor-cleanup.spec.ts`: 19/19
+- `executor-artifacts.spec.ts`: 11/11 (covers tryRecovery path: failure output matched against recovery config → completed+addTasks; budget decrement; retry-self expansion)
+- `executor-workspace-boundary.spec.ts`: passes
+- `issue-112-regression.spec.ts`: 2/2
+- `check-verdict.spec.ts`: 3/3 (covers executeChecks verdict aggregation: marker-check with `with.expect`/`with.contains` formats the expected-marker hint message)
+- `runner-host-convergence.spec.ts`: 10/10 (T-003-named spec passes)
+- Recovery path behaves identically: artifact spec at line 96-150 verifies `when: "errorCode=base-moved"` matches → `completed` + `addTasks[0]={id:"recover:rebase"}` + `addTasks[1]={id:"work-1", recovery:{budget:1}}` (the retry-self expansion with budget decrement).
+
+## scc snapshot (after T-003)
+
+- `executor.ts`: 477 lines, complexity 142 (down from 1106 lines / 236 pre-T-001)
+- `worktree-enforcement.ts`: 431 lines, complexity 69
+- `branch-stability.ts`: 193 lines, complexity 35
+- `git-probe.ts`: 17 lines, complexity 1
+- `artifact-capture.ts`: 540 lines, complexity 69 (grew due to post-side-effect orchestration helpers extracted from executor.ts)
+- `set-vars.ts`: 79 lines, complexity 14
+
+`branch-stability.ts` (35) is well out of the runner package complexity front ranks. `worktree-enforcement.ts` (69) is rank 10 (tied with `artifact-capture.ts` 69) — still at the boundary but `artifact-capture.ts` was the new home for extracted helpers, so they both sit at the edge. `executor.ts` (142) is rank 3 in the runner package — still in front ranks because the recovery block (~107 lines, ~25 complexity) and class-method branching (~30 complexity) keep its total high despite the convergence. The execution/branch-stability/worktree-cleanliness invariants are now single delegated calls each, satisfying the structural acceptance; further complexity reduction would require extracting the recovery block, which the design explicitly forbids.
+
+## Gotchas / things future tasks should know
+
+- `executor.ts` no longer inlines any artifact-capture / artifact-upload / set-vars-patch logic. If a future change adds error mapping for those steps, modify the helpers in `artifact-capture.ts` / `set-vars.ts`, not `executor.ts`.
+- `executeChecks` now delegates the per-check run to a private `runOneCheck(work, check, variables, signal)` method. If a future check variant needs different per-check behavior, modify `runOneCheck` not `executeChecks`.
+- The `checkFailureDetails` helper accepts the original `checks` array (not the filtered `isCheck`-narrowed type) so it can look up the original `with.expect`/`with.contains` from the dispatch. The type signature uses the inline `{ name?, uses, with? }` shape; consider promoting to a `CheckItem`-like type if more callers appear.
+- `host.ts` is the only external consumer of `WorkExecutor`. The constructor signature and the `execute(work, signal)` method are unchanged.
+- The `executeOne` pipeline reads linearly as: `resolve action → variables → render with → workspaceRoot → workDir → expectedBranch → checkBranchStability(start) → action → normalize → tryRecovery → checkBranchStability(end) → enforceCleanWorktree → captureAndUploadArtifacts → captureDeclaredOutputs → applySetVars`, matching the spec exactly.

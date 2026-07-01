@@ -1,20 +1,21 @@
 import { isAbsolute, join, relative, resolve } from "node:path"
-import type { ActionContext, ActionResult, JsonObject, JsonValue, AddTaskInput, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject, AddTaskInput, RenderedWorkItem, WorkItemResult } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
-import { renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../core/template.js"
+import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
 import { ensureDir } from "../system/process.js"
 import { runnerVariables, WorkspaceManager } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
 import {
-  actionProducedArtifacts,
-  captureArtifacts,
-  summarizeCaptureFailures,
-  uploadCapturedArtifacts,
+  appendArtifactWarning,
+  captureArtifactsForWork,
+  renderArtifactDeclarations,
+  uploadCapturesForWork,
+  withArtifactFailure,
 } from "./artifact-capture.js"
-import { extractSetVars } from "./set-vars.js"
+import { applyExtractedSetVars, extractSetVars } from "./set-vars.js"
 import { captureOutputs } from "./output-capture.js"
 import {
   attachBranchStabilityEvidence,
@@ -22,7 +23,7 @@ import {
   expectedWorkspaceBranch,
   type BranchStabilityEvidence,
 } from "./branch-stability.js"
-import { cleanupAgentAction, enforceCleanWorktree, type ContextParts } from "./worktree-enforcement.js"
+import { cleanupAgentAction, enforceCleanWorktree } from "./worktree-enforcement.js"
 
 export class WorkExecutor {
   constructor(
@@ -91,12 +92,16 @@ export class WorkExecutor {
         return endCheck.result
       }
       const evidenceStack: BranchStabilityEvidence[] = [startCheck.evidence, endCheck.evidence]
-      const contextParts: ContextParts = {
-        sessionManager: this.sessionManager,
-        acpConnection: this.acpConnection,
-        connection: this.connection,
-      }
-      const worktreeResult = await enforceCleanWorktree(work, workDir, normalized, renderedWith, variables, signal, cleanupAgentAction, contextParts)
+      const worktreeResult = await enforceCleanWorktree(
+        work,
+        workDir,
+        normalized,
+        renderedWith,
+        variables,
+        signal,
+        cleanupAgentAction,
+        { sessionManager: this.sessionManager, acpConnection: this.acpConnection, connection: this.connection },
+      )
       if (worktreeResult.status !== "completed") {
         return attachBranchStabilityEvidence(worktreeResult, evidenceStack)
       }
@@ -114,39 +119,31 @@ export class WorkExecutor {
     const checks = Array.isArray(work.with?.checks) ? work.with.checks.filter(isCheck) : []
     if (checks.length === 0) return failure(work, "No checks found in dispatch")
 
-    const results = await Promise.all(checks.map(async (check) => {
-      const action = this.actions.resolve(check.uses)
-      if (!action) return { name: check.name, status: "fail", message: `No action found for '${check.uses}'` }
-      try {
-        const unresolved = wholeStringUnresolvedReferences(check.with ?? null, variables)
-        if (unresolved.length > 0) {
-          return { name: check.name, status: "fail", message: formatCheckUnresolvedError(unresolved) }
-        }
-        const renderedWith = renderTemplate(check.with ?? null, variables)
-        const workDir = await this.resolveWorkDir(renderedWith, this.workspaceRoot(variables))
-        const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir })
-        return { name: check.name, status: toCheckStatus(result.status), message: result.message, output: result.output }
-      } catch (error) {
-        return { name: check.name, status: "fail", message: error instanceof Error ? error.message : String(error) }
-      }
-    }))
+    const results = await Promise.all(checks.map((check) => this.runOneCheck(work, check, variables, signal)))
 
     const verdict = results.every((result) => result.status === "pass") ? "pass" : "fail"
     const output = JSON.stringify(results)
     if (verdict === "fail") {
-      const failedChecks = results.filter((r) => r.status === "fail")
-      const checkDetails = failedChecks.map((c) => {
-        const isMarkerCheck = checks.find((ch) => ch.name === c.name)?.uses === "core/marker"
-        if (isMarkerCheck) {
-          const checkConfig = checks.find((ch) => ch.name === c.name)
-          const expectedMarker = checkConfig?.with?.expect ?? checkConfig?.with?.contains ?? "PASS"
-          return `${c.name}: expected verdict marker '${expectedMarker}' but it was not found in the artifact`
-        }
-        return `${c.name}: ${c.message}`
-      }).join("; ")
-      return { status: "fail", message: `Check verdict failure: ${checkDetails}`, output }
+      return { status: "fail", message: `Check verdict failure: ${checkFailureDetails(results, checks)}`, output }
     }
     return { status: "pass", output }
+  }
+
+  private async runOneCheck(work: RenderedWorkItem, check: { name?: string; title?: string; uses: string; with?: JsonObject | null }, variables: JsonObject, signal: AbortSignal): Promise<CheckResultRow & { output?: string | null }> {
+    const action = this.actions.resolve(check.uses)
+    if (!action) return { name: check.name, status: "fail", message: `No action found for '${check.uses}'` }
+    try {
+      const unresolved = wholeStringUnresolvedReferences(check.with ?? null, variables)
+      if (unresolved.length > 0) {
+        return { name: check.name, status: "fail", message: formatCheckUnresolvedError(unresolved) }
+      }
+      const renderedWith = renderTemplate(check.with ?? null, variables)
+      const workDir = await this.resolveWorkDir(renderedWith, this.workspaceRoot(variables))
+      const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir })
+      return { name: check.name, status: toCheckStatus(result.status), message: result.message, output: result.output }
+    } catch (error) {
+      return { name: check.name, status: "fail", message: error instanceof Error ? error.message : String(error) }
+    }
   }
 
   private async variables(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<JsonObject> {
@@ -160,10 +157,8 @@ export class WorkExecutor {
     return { ...userVariables, runner: mergedRunner, workspace }
   }
 
-  // Read the workspace triple (path, branch, changeDir) directly from
-  // the dispatch's variables. Used by agent-job dispatches whose
-  // workspace is caller-owned and must NOT be re-cloned or verified by
-  // the runner (issue #126 standalone-workspace contract).
+  // Read the workspace triple from dispatch variables (agent-job: caller-owned,
+  // not re-cloned/verified by the runner — issue #126 standalone-workspace).
   private workspaceFromVariables(work: RenderedWorkItem): ResolvedWorkspace {
     const variables = work.variables ?? {}
     const ws = variables["workspace"]
@@ -190,111 +185,29 @@ export class WorkExecutor {
     return workDir
   }
 
-  /**
-   * Capture the task's declared `artifacts.files` plus any
-   * action-produced dynamic artifacts from the runner workspace, upload
-   * each to the server, and attach the resulting upload ids to the task
-   * result. A failure to capture or upload any declared artifact fails
-   * the task through the normal task failure path; dynamic artifact
-   * failures are reported on the message but do not fail the task.
-   */
+  /** Thin orchestration layer over artifact-capture.ts: render declared paths,
+   * capture dynamic + declared files, upload each, attach upload ids. */
   private async captureAndUploadArtifacts(
     work: RenderedWorkItem,
     workspaceRoot: string,
     workDir: string,
     result: WorkItemResult,
-    actionResult: import("../core/types.js").ActionResult,
+    actionResult: ActionResult,
     variables: JsonObject,
     signal: AbortSignal,
   ): Promise<WorkItemResult> {
-    // Render the declared artifacts object so template variables
-    // (e.g. `${{ openspecChangeDir }}/review.md` from the default
-    // workflow) resolve to workspace-relative paths before the
-    // capture layer hands them to the filesystem. Without this
-    // substitution the runner would read from a literal
-    // `${{ openspecChangeDir }}` directory and fail every declared
-    // artifact capture with ENOENT.
-    //
-    // Artifact `path` strings must resolve every embedded reference;
-    // unlike `with.prompt` they are real workspace paths, not
-    // documentation, so an embedded `${{ unknown }}` left in place
-    // is a bug rather than a tolerated literal. We use
-    // `unresolvedReferences` (which catches both whole-string and
-    // embedded) to surface the failure before the capture layer
-    // would otherwise encounter an ENOENT.
-    let renderedArtifacts: JsonObject | null = null
-    if (work.artifacts) {
-      try {
-        const unresolved = unresolvedReferences(work.artifacts, variables)
-        if (unresolved.length > 0) {
-          return {
-            ...result,
-            status: "failed",
-            message: `${result.message ? result.message + "; " : ""}artifact declaration references undefined variable(s): ${unresolved.map((p) => "'${{ " + p + " }}'").join(", ")}. Add the variable to workflow.variables or a parent stage.`.slice(0, 4000),
-          }
-        }
-        renderedArtifacts = renderTemplate(work.artifacts, variables) as JsonObject | null
-      } catch (error) {
-        return {
-          ...result,
-          status: "failed",
-          message: `${result.message ? result.message + "; " : ""}artifact template render failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 4000),
-        }
-      }
-    }
+    const rendered = renderArtifactDeclarations(work, variables)
+    if (rendered.kind === "failure") return withArtifactFailure(result, rendered.status, rendered.message)
 
-    const dynamicInputs = actionProducedArtifacts(actionResult)
-    let captureOutcome
-    try {
-      const declaredOutcome = await captureArtifacts({ work, workDir: workspaceRoot, renderedArtifacts })
-      const dynamicOutcome = dynamicInputs.length === 0
-        ? { captures: [], failures: [] }
-        : await captureArtifacts({ work: { ...work, artifacts: null }, workDir, dynamicArtifacts: dynamicInputs })
-      captureOutcome = {
-        captures: [...declaredOutcome.captures, ...dynamicOutcome.captures],
-        failures: [...declaredOutcome.failures, ...dynamicOutcome.failures],
-      }
-    } catch (error) {
-      return {
-        ...result,
-        status: "failed",
-        message: `${result.message ? result.message + "; " : ""}artifact capture failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 4000),
-      }
+    const captured = await captureArtifactsForWork(work, workspaceRoot, workDir, rendered.artifacts, actionResult)
+    if (captured.kind === "failure") return withArtifactFailure(result, "failed", captured.message)
+    if (captured.captures.length === 0) {
+      return appendArtifactWarning(result, captured.failures, "artifact capture warnings")
     }
-    if (captureOutcome.captures.length === 0) {
-      const captureWarnings = captureOutcome.failures.length > 0
-        ? `${result.message ? result.message + "; " : ""}artifact capture warnings: ${summarizeCaptureFailures(captureOutcome.failures)}`.slice(0, 4000)
-        : result.message
-      return { ...result, message: captureWarnings }
-    }
-    let uploads
-    try {
-      const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
-      const ownerId = ownerKind === "agent-job" ? work.agentJobId : work.workflowRunId
-      if (!ownerId) {
-        return {
-          ...result,
-          status: "failed",
-          message: `${result.message ? result.message + "; " : ""}artifact upload failed: missing ${ownerKind === "agent-job" ? "agentJobId" : "workflowRunId"}`.slice(0, 4000),
-        }
-      }
-      uploads = await uploadCapturedArtifacts(this.connection, ownerId, work.workId, captureOutcome.captures, signal, ownerKind)
-    } catch (error) {
-      return {
-        ...result,
-        status: "failed",
-        message: `${result.message ? result.message + "; " : ""}artifact upload failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 4000),
-      }
-    }
-    const allFailures = [...captureOutcome.failures, ...uploads.failures]
-    const message = allFailures.length > 0
-      ? `${result.message ? result.message + "; " : ""}artifact warnings: ${summarizeCaptureFailures(allFailures)}`.slice(0, 4000)
-      : result.message
-    return {
-      ...result,
-      message,
-      artifactUploadIds: uploads.uploads.map((upload) => upload.uploadId),
-    }
+    const uploads = await uploadCapturesForWork(this.connection, work, captured.captures, signal)
+    if (uploads.kind === "failure") return withArtifactFailure(result, uploads.status, uploads.message)
+    const allFailures = [...captured.failures, ...uploads.failures]
+    return { ...appendArtifactWarning(result, allFailures, "artifact warnings"), artifactUploadIds: uploads.uploadIds }
   }
 
   private async applySetVars(work: RenderedWorkItem, result: WorkItemResult, signal: AbortSignal): Promise<WorkItemResult> {
@@ -302,21 +215,9 @@ export class WorkExecutor {
     if (!work.setVars || Object.keys(work.setVars).length === 0) return result
 
     const extraction = extractSetVars(work.setVars, result.output)
-    if (extraction.error) {
-      return { ...result, status: "failed", message: `setVars: ${extraction.error}` }
-    }
-    if (extraction.vars) {
-      try {
-        await this.connection.patchRunVars(work.workflowRunId, extraction.vars, signal)
-      } catch (error) {
-        return {
-          ...result,
-          status: "failed",
-          message: `setVars patch failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 4000),
-        }
-      }
-    }
-    return result
+    if (extraction.error) return { ...result, status: "failed", message: `setVars: ${extraction.error}` }
+    const patchFailure = await applyExtractedSetVars(this.connection, work.workflowRunId, extraction, signal)
+    return patchFailure ? { ...result, ...patchFailure } : result
   }
 
   private captureDeclaredOutputs(work: RenderedWorkItem, result: WorkItemResult, actionResult: ActionResult): WorkItemResult {
@@ -358,10 +259,8 @@ function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: Abor
   }
 }
 
-// Build a failure result for when the runner could not prepare the
-// workflow workspace (clone failed, base branch missing, checkout could
-// not be restored). The `kind` is the structured `output.kind` so the
-// CLI / API / UI can render it distinctly from ordinary task failures.
+// Workspace-prepare failure (clone/base-branch/checkout): `output.kind` is
+// structured so the CLI/API/UI render it distinctly from ordinary task failures.
 function workspaceSetupFailure(work: RenderedWorkItem, error: unknown): WorkItemResult {
   const message = error instanceof Error ? error.message : String(error)
   return {
@@ -395,6 +294,33 @@ function toCheckStatus(status: string) {
 
 function isCheck(value: unknown): value is { name?: string; title?: string; uses: string; with?: JsonObject | null } {
   return typeof value === "object" && value !== null && "uses" in value && typeof (value as { uses?: unknown }).uses === "string"
+}
+
+interface CheckResultRow {
+  name?: string
+  status: string
+  message?: string | null
+}
+
+// Format the per-failed-check details for a `Check verdict failure: …` message.
+// For `core/marker` checks the runner renders a verdict-marker-specific hint
+// using the original `with.expect`/`with.contains` from the dispatch.
+function checkFailureDetails(
+  results: ReadonlyArray<CheckResultRow>,
+  checks: ReadonlyArray<{ name?: string; uses: string; with?: JsonObject | null }>,
+): string {
+  return results
+    .filter((r) => r.status === "fail")
+    .map((c) => {
+      const checkConfig = checks.find((ch) => ch.name === c.name)
+      const isMarkerCheck = checkConfig?.uses === "core/marker"
+      if (isMarkerCheck && checkConfig) {
+        const expectedMarker = checkConfig.with?.expect ?? checkConfig.with?.contains ?? "PASS"
+        return `${c.name}: expected verdict marker '${expectedMarker}' but it was not found in the artifact`
+      }
+      return `${c.name}: ${c.message}`
+    })
+    .join("; ")
 }
 
 function resolveWorkspacePath(workspaceRoot: string, requested: string) {
@@ -437,10 +363,9 @@ function errorMessage(error: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// Task recovery — runner-side matching of action output against task-level
-// `recovery` config. When a handler matches and budget remains, the failure
-// is converted to `completed` + `addTasks` for the server to insert.
-// -----------------------------------------------------------------------
+// Task recovery — match action output against task-level `recovery` config;
+// on match (and budget remaining), convert failure to `completed`+`addTasks`.
+// ---------------------------------------------------------------------------
 
 interface RecoveryHandler {
   when: string
