@@ -157,7 +157,8 @@ public static partial class WorkflowRunExtensions
                 failedTask.Uses,
                 failedTask.WithInput,
                 failedTask.Artifacts,
-                failedTask.SetVars);
+                failedTask.SetVars,
+                failedTask.Recovery);
             var newTask = TaskRun.MakeTask(stage.Tasks, input);
             var failedTaskIndex = stage.Tasks.IndexOf(failedTask);
             stage.Tasks.Insert(failedTaskIndex + 1, newTask);
