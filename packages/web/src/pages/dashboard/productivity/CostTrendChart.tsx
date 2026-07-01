@@ -111,13 +111,13 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
 
   const trendValues = (cumulativeCostPerShip ?? [])
     .map((p) => p.costPerShip)
-    .filter((v): v is number => v !== null)
+    .filter((v): v is number => v != null)
   const hasTrend = trendValues.length > 0
   const maxTrend = hasTrend ? Math.max(...trendValues.map(Math.abs), 0) || 1 : 1
 
   const trendPoints: (LinePoint | null)[] = hasTrend
     ? cumulativeCostPerShip!.map((point, i) => {
-        if (point.costPerShip === null) return null
+        if (point.costPerShip == null) return null
         const x = plotX + i * (barWidth + barGap) + barWidth / 2
         const y = MARGIN.top + plotHeight - (point.costPerShip / maxTrend) * plotHeight
         return { x, y }
@@ -130,10 +130,10 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
   const totalCost = buckets.reduce((s, b) => s + b.costAmount, 0)
   const peakBucket = [...buckets].sort((a, b) => b.costAmount - a.costAmount)[0]
   const firstTrend = hasTrend
-    ? cumulativeCostPerShip!.find((p) => p.costPerShip !== null)
+    ? cumulativeCostPerShip!.find((p) => p.costPerShip != null)
     : null
   const lastTrend = hasTrend
-    ? [...cumulativeCostPerShip!].reverse().find((p) => p.costPerShip !== null)
+    ? [...cumulativeCostPerShip!].reverse().find((p) => p.costPerShip != null)
     : null
 
   const firstBucket = buckets[0]
