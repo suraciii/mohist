@@ -168,3 +168,43 @@ Page changes:
 - issue-detail suites: 7 files / 132 tests green (no new unit tests; the 4 component suites including the density block at `IssueDetailPage.test.tsx:793-870` and the readiness assertions at `IssueDetailPage.readiness.test.tsx:240-289` all pass).
 - `npm run test:run -w packages/web`: 3643 passed / 1 skipped across 236 files (no delta vs. T-004; behavior-preserving move).
 - `npm run build -w packages/web`: green.
+
+## T-006 — extract main-column sections (Description / DiffFiles / Commits / Comments)
+
+Lifted the four main-column sections out of `IssueDetailPage.tsx` into dumb-renderer components under `ui/sections/`. Each receives only the props it needs and renders only its inner content — the `space-y-8` main column and the `<div className="min-w-0 lg:col-span-2 space-y-8">` grid wrapper stay owned by the page per D2.
+
+New files:
+- `pages/issue-detail/ui/sections/IssueDescriptionSection.tsx` (24 lines) — returns `null` when `issue.body` is empty; otherwise renders the `data-testid="description-section"` card with the `MarkdownReader`. Receives `issue: Pick<Issue, 'body'>` and `resolveIssueAttachment: (id: string) => MarkdownAttachment | null`. The `MarkdownReader` props (`mode="collapsible"`, `collapsedHeight={600}`, `baseHeadingLevel={2}`, `resolveAttachment`) are preserved verbatim.
+- `pages/issue-detail/ui/sections/IssueDiffFilesSection.tsx` (34 lines) — returns `null` when `diffData?.available !== true`; otherwise renders the `data-testid="diff-files-section"` card with the "View files" `Button` calling the `onViewFiles` callback. The page passes `() => navigate(toProjectPath('/issues/${issueNumber}/files'))` so the navigation URL stays owned by the page (per task AC: "View files navigation URLs are unchanged").
+- `pages/issue-detail/ui/sections/IssueCommitsSection.tsx` (47 lines) — returns `null` when `commitsData?.available !== true`; otherwise renders the `data-testid="commits-section"` card with the first-5 commit list and the "View all commits" `Button`. Uses `formatRelativeTime` from `model/format` for the date label. The `onViewAllCommits` callback has the same URL shape as `onViewFiles` (the page calls `navigate(toProjectPath('/issues/${issueNumber}/files'))` for both).
+- `pages/issue-detail/ui/sections/IssueCommentsSection.tsx` (116 lines) — the most stateful section. Receives `comments`, `issueNumber`, `issueProjectId`, the `commentText` / `deletingCommentId` / `deleteCommentError` local state and their setters (3 pairs, mirroring T-004's `confirmState` bundle for `IssueActionsCard`), and the `Pick<IssueDetailMutations, 'addCommentMutation' | 'deleteCommentMutation'>` subset. Builds the per-comment attachment resolver inline using `commentAttachmentContentPath(issueNumber, comment.id, id, issueProjectId)` + `attachmentFromMetadata` (page-level `resolveIssueAttachment` is not used here — comment bodies use `comment.attachments`, not `issue.attachments`).
+
+Page changes (`IssueDetailPage.tsx`):
+- Added imports for `IssueDescriptionSection`, `IssueDiffFilesSection`, `IssueCommitsSection`, `IssueCommentsSection`.
+- Removed unused imports: `MarkdownReader`, `AttachmentComposer` from `@/shared/ui`; `formatRelativeTime` from `../model/format`; `commentAttachmentContentPath` from `entities/issue` (kept `issueAttachmentContentPath` because the page still uses it for `resolveIssueAttachment`). Kept `Button` (still used by the Edit issue button at L190) and `attachmentFromMetadata` (still used by `resolveIssueAttachment`).
+- Replaced the four section JSX blocks (lines 315-326 description, 332-354 diff files, 356-390 commits, 402-480 comments) with the four section components; the `(diffData?.available === false || commitsData?.available === false) "diff/commits unavailable" card` (392-400) stays in the page because it's the cross-section fallback, not its own section.
+- Page line count: 578 → 453 (−125 lines from T-006; cumulative since the proposal: 1375 → 453, −922 lines, −67%).
+
+### Codebase patterns confirmed for later tasks
+
+- D2's "move only content, keep wrappers in the page" rule continues to hold: every section returns a `null` or a `<div data-testid="…-section" className="…">` wrapper that has no `space-y-*` / `gap-*` / `lg:col-span-*` class; the structural `<div className="min-w-0 lg:col-span-2 space-y-8">` main column stays in the page and the density test's `grid.querySelector(':scope > .lg\\:col-span-2')` resolver still finds it.
+- A `null`-returning early-exit keeps the existing "no body → no description section" behavior bit-for-bit (T-001 was a `&&` in the JSX; the early return is equivalent). The `data-testid="description-section"` is not present when `issue.body` is empty, matching the old render output.
+- Local state for a single-purpose section moves into the section; the page-level mutation hook callbacks reset the section's state by passing setters as props (`IssueCommentsSection`'s `commentText`/`deletingCommentId`/`deleteCommentError` props mirror the `confirmState` pattern from `IssueActionsCard`). The page's `useIssueDetailMutations({ onAddCommentSuccess, onDeleteCommentSuccess, onDeleteCommentError })` options still point at the same setters — the `useState` declarations and the `useIssueDetailMutations` hook call remain page-level so the hook order stays stable.
+- Navigation callbacks that need `toProjectPath` / `issueNumber` are built in the page and passed as `onViewFiles: () => void` / `onViewAllCommits: () => void` / `onAskAgent: () => void` props, so the section doesn't have to know about routing. The `URL encoding` (`encodeURIComponent(issueNumber)`) stays in the page per the Ask Agent AC. The "View files" URL doesn't need encoding (issueNumber is integer-typed here) so the same pattern works.
+
+### Gotchas
+
+- `Pick<Issue, 'body'>` for `IssueDescriptionSection` narrowly captures the contract; the page passes the full `issue` object and TS narrows correctly. Same trick as T-004/T-005's `Pick` over `Issue`.
+- `IssueCommentsSection` imports `formatTime` from `shared/lib/format-time` and `commentAttachmentContentPath` from `entities/issue` itself, not from a barrel — both pieces already in use by the rest of the codebase. The section uses 3 of the 13 mutations (`addCommentMutation`, `deleteCommentMutation`); the page destructures those two from `useIssueDetailMutations` and passes them through.
+- The two unused-import removals (`MarkdownReader`, `AttachmentComposer`, `formatRelativeTime`, `commentAttachmentContentPath`) surface immediately under `tsconfig.noUnusedLocals` on the post-extraction typecheck — none were lingering references.
+- "View files" and "View all commits" buttons both navigate to `toProjectPath('/issues/${issueNumber}/files')` — the page wires two separate callbacks but they call `navigate` with the same URL; preserving this verbatim is required because the existing tests/UX do not collapse them.
+
+### Verification
+
+- `rg 'MarkdownReader|AttachmentComposer|formatRelativeTime|commentAttachmentContentPath' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 0 matches (4 imports removed cleanly).
+- `rg -c 'data-testid' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 18 (was 22 in T-005; the 4 moved testids — `description-section`, `diff-files-section`, `commits-section`, `comments-section` — travel with the JSX into the 4 new sections).
+- Page-wide union of data-testid values (page + cards + sections + pills + WorkflowYamlDialog): 43 unique values pre-T-006 = 43 unique values post-T-006 (bit-for-bit unchanged; verified with a stash + rg diff).
+- `npm run typecheck -w packages/web`: green.
+- issue-detail suites: 7 files / 132 tests green (no new unit tests; the 4 component suites including the density block at `IssueDetailPage.test.tsx:793-870` — which asserts `space-y-8` on the main column, `:scope > .lg:col-span-2` resolver, `gap-8` on the grid, and the `description-section` / `comments-section` / `commits-section` testids — all pass).
+- `npm run test:run -w packages/web`: 3643 passed / 1 skipped across 236 files (no delta vs. T-005; behavior-preserving move).
+- `npm run build -w packages/web`: green.

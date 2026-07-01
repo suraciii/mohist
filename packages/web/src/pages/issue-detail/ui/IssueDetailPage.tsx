@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
 import { IssueStatus, IssueHealth } from '../../../entities/issue'
-import { commentAttachmentContentPath, issueAttachmentContentPath } from '../../../entities/issue'
+import { issueAttachmentContentPath } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
 import { EditIssueDialog } from '../../../features/edit-issue'
@@ -13,12 +13,11 @@ import { ActivityDialog } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
-import { AttachmentComposer, MarkdownReader } from '@/shared/ui'
 import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { CardSection } from '@/shared/ui/components/card-section'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { attachmentFromMetadata, formatRelativeTime } from '../model/format'
+import { attachmentFromMetadata } from '../model/format'
 import { useIssueDetailMutations } from '../model/useIssueDetailMutations'
 import { computeActionsState } from '../model/actionsState'
 import { ArchivedPill, DraftPill, HealthPill, PriorityChip, WorkflowStagePill } from './pills'
@@ -29,6 +28,10 @@ import { IssueDriftCard } from './cards/IssueDriftCard'
 import { IssueConfigurationCard } from './cards/IssueConfigurationCard'
 import { IssuePrerequisitesCard } from './cards/IssuePrerequisitesCard'
 import { IssueReadinessCard } from './cards/IssueReadinessCard'
+import { IssueDescriptionSection } from './sections/IssueDescriptionSection'
+import { IssueDiffFilesSection } from './sections/IssueDiffFilesSection'
+import { IssueCommitsSection } from './sections/IssueCommitsSection'
+import { IssueCommentsSection } from './sections/IssueCommentsSection'
 
 export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
@@ -312,82 +315,21 @@ export function IssueDetailPage() {
 
           <div className="grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-8" data-testid="issue-detail-content-grid">
             <div className="min-w-0 lg:col-span-2 space-y-8">
-              {issue.body && (
-                  <div className="rounded-lg bg-white p-4" data-testid="description-section">
-                    <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
-                    <MarkdownReader
-                      content={issue.body}
-                      mode="collapsible"
-                      collapsedHeight={600}
-                      baseHeadingLevel={2}
-                      resolveAttachment={resolveIssueAttachment}
-                    />
-                  </div>
-              )}
+              <IssueDescriptionSection issue={issue} resolveIssueAttachment={resolveIssueAttachment} />
 
               {issue.workflowRunId && (
                 <WorkflowYamlDialog workflowRunId={issue.workflowRunId} isArchived={isArchived} />
               )}
 
-              {diffData?.available === true && (
-                <div className="min-w-0 rounded-lg bg-white p-4" data-testid="diff-files-section">
-                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-                      <span className="min-w-0 break-words">
-                        <span className="font-medium text-gray-700 break-all" title={diffData.head}>{diffData.head}</span>
-                        {' → '}
-                        <span className="font-medium text-gray-700 break-all" title={diffData.base}>{diffData.base}</span>
-                      </span>
-                      <span className="text-gray-300">·</span>
-                      <span>{diffData.summary.filesChanged} files changed · +{diffData.summary.additions} -{diffData.summary.deletions}</span>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
-                      className="border-blue-200 text-blue-600 hover:border-blue-300 hover:text-blue-700"
-                    >
-                      View files
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <IssueDiffFilesSection
+                diffData={diffData}
+                onViewFiles={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
+              />
 
-              {commitsData?.available === true && (
-                <div className="rounded-lg bg-white p-4" data-testid="commits-section">
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-sm font-semibold text-gray-700">
-                      Commits ({commitsData.summary.commits})
-                    </h2>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
-                      className="border-blue-200 text-blue-600 hover:border-blue-300 hover:text-blue-700"
-                    >
-                      View all commits
-                    </Button>
-                  </div>
-                  {commitsData.commits.length === 0 ? (
-                    <p className="text-sm text-gray-400">No commits yet.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {commitsData.commits.slice(0, 5).map((commit) => (
-                        <div
-                          key={commit.hash}
-                          className="flex items-center justify-between text-sm group"
-                        >
-                          <div className="flex items-center gap-3 flex-1 min-w-0">
-                            <code className="text-xs text-gray-500 font-mono shrink-0">{commit.shortHash}</code>
-                            <span className="text-gray-700 truncate">{commit.message}</span>
-                          </div>
-                          <span className="text-xs text-gray-400 ml-3 shrink-0">{formatRelativeTime(commit.date)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+              <IssueCommitsSection
+                commitsData={commitsData}
+                onViewAllCommits={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
+              />
 
               {(diffData?.available === false || commitsData?.available === false) && (
                 <div className="rounded-lg bg-white p-4">
@@ -399,85 +341,18 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              <div className="rounded-lg bg-white p-4" data-testid="comments-section">
-                <h2 className="text-sm font-semibold text-gray-700 mb-3">
-                  Comments ({comments.length})
-                </h2>
-                {comments.length === 0 ? (
-                  <p className="text-sm text-gray-400">No comments yet.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {comments.map((comment) => (
-                      <div
-                        key={comment.id}
-                        className="border-b border-gray-100 pb-3 last:border-0 last:pb-0"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1">
-                            <div className="text-xs text-gray-400 mb-1">
-                              {formatTime(comment.createdAt)}
-                            </div>
-                            <MarkdownReader
-                              content={comment.body}
-                              baseHeadingLevel={3}
-                              resolveAttachment={(id) => attachmentFromMetadata(
-                                id,
-                                comment.attachments,
-                                `/api${commentAttachmentContentPath(issueNumber, comment.id, id, issueProjectId)}`,
-                              )}
-                            />
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            onClick={() => {
-                              setDeleteCommentError(null)
-                              if (window.confirm('Delete this comment?')) {
-                                setDeletingCommentId(comment.id)
-                                deleteCommentMutation.mutate(comment.id)
-                              }
-                            }}
-                            disabled={deletingCommentId === comment.id}
-                            className="text-muted-foreground hover:text-red-500"
-                            title="Delete comment"
-                          >
-                            {deletingCommentId === comment.id ? 'Deleting...' : 'Delete'}
-                          </Button>
-                        </div>
-                        {deleteCommentError && deletingCommentId === null && (
-                          <div className="mt-1 text-xs text-red-500">{deleteCommentError}</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="mt-4 pt-3 border-t border-gray-100">
-                  <AttachmentComposer
-                    projectId={issueProjectId}
-                    value={commentText}
-                    onChange={setCommentText}
-                    placeholder="Add a comment..."
-                    rows={2}
-                    className="resize-none"
-                  />
-                  <div className="flex items-center justify-between mt-2">
-                    {addCommentMutation.error && (
-                      <span className="text-xs text-red-500">
-                        {addCommentMutation.error.message}
-                      </span>
-                    )}
-                    <div className="ml-auto">
-                      <Button
-                        onClick={() => addCommentMutation.mutate(commentText)}
-                        disabled={!commentText.trim() || addCommentMutation.isPending}
-                      >
-                        {addCommentMutation.isPending ? 'Sending...' : 'Comment'}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <IssueCommentsSection
+                comments={comments}
+                issueNumber={issueNumber}
+                issueProjectId={issueProjectId}
+                commentText={commentText}
+                setCommentText={setCommentText}
+                deletingCommentId={deletingCommentId}
+                setDeletingCommentId={setDeletingCommentId}
+                deleteCommentError={deleteCommentError}
+                setDeleteCommentError={setDeleteCommentError}
+                mutations={{ addCommentMutation, deleteCommentMutation }}
+              />
             </div>
 
             <div className="min-w-0 space-y-6" data-testid="issue-detail-right-rail">
