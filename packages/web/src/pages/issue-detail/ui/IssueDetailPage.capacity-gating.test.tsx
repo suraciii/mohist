@@ -151,7 +151,7 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
     expect(startButton).toHaveTextContent(/^Start$/)
   })
 
-  it('does not gate Start on activeAgents.length — Start stays enabled when activeAgents is long but capacity is not full', async () => {
+  it('does not gate Start on activeAgents.length - Start stays enabled when activeAgents is long but capacity is not full', async () => {
     mockUseIssue.mockReturnValue({
       data: makeIssue(),
       isLoading: false,

@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Sessions;
@@ -87,28 +86,6 @@ public static class AgentRoutes
                 RequestedAt: issue.StageApproval is null ? null : issue.StageApproval.RequestedAt.ToString("o"),
                 Preview: null))
             .ToList();
-    }
-
-    private static async Task<IReadOnlyList<RunnerInfo>> ListAvailableRunnersAsync(IGrainFactory grains, string projectId)
-    {
-        var globalRunners = await grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).ListRunnersAsync();
-        var available = new List<RunnerInfo>();
-        foreach (var runner in globalRunners)
-        {
-            var grain = grains.GetGrain<IRunnerGrain>(runner.RunnerId);
-            RunnerRuntimeState runtime;
-            try
-            {
-                runtime = await grain.GetRuntimeStateAsync();
-            }
-            catch
-            {
-                continue;
-            }
-            if (runtime.Status == RunnerStatus.Online)
-                available.Add(runner);
-        }
-        return available;
     }
 
     private static RunnerCapacityView SumCapacity(IReadOnlyList<RunnerStatusView> runners)
