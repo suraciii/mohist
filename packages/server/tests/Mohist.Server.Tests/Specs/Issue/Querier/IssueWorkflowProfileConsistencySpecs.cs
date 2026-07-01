@@ -238,4 +238,56 @@ public class IssueWorkflowProfileConsistencySpecs
         Assert.NotNull(detail);
         Assert.Equal(IssueWorkflowProfiles.LocalId, detail!.WorkflowProfileId);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetAndListAsync_WhenAllProfilesDisabled_ReportUnresolvedInsteadOfLocalFallback()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-wfp-none-{Guid.NewGuid():N}", Name = "No Enabled Project" };
+        await db.Projects.AddAsync(new ProjectRow
+        {
+            Id = project.Id,
+            Name = project.Name,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+        {
+            ProjectId = project.Id,
+            Variables = "{}",
+            DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"],
+        });
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = $"issue_wfp_none_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Number = 1,
+            Title = "No enabled profile",
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal),
+            Priority = "p2",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
+        };
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var detail = await service.GetAsync(project.Id, issue.Number, project);
+        var info = await service.GetInfoAsync(project.Id, issue.Number, project);
+        var list = await service.ListAsync(project.Id, project);
+
+        Assert.NotNull(detail);
+        Assert.Null(detail!.WorkflowProfileId);
+        Assert.NotNull(info);
+        Assert.Null(info!.WorkflowProfileId);
+        var item = Assert.Single(list);
+        Assert.Null(item.WorkflowProfileId);
+    }
 }

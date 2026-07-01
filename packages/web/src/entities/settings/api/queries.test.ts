@@ -219,7 +219,30 @@ describe('useEffectiveDefaultWorkflowProfile', () => {
   function mockQueryData(projectDefault: string | null, profiles: Array<{ id: string; isDefault: boolean }>) {
     useQueryMock.mockImplementation((config) => {
       if (config.queryKey[0] === 'project-workflow-profile') {
-        return { data: { projectId: 'proj-1', defaultTemplateId: projectDefault } }
+        return { data: { projectId: 'proj-1', defaultTemplateId: projectDefault, disabledWorkflowProfileIds: [] } }
+      }
+      if (config.queryKey[0] === 'workflow-templates') {
+        return {
+          data: profiles.map((p) => ({
+            id: p.id,
+            displayName: p.id,
+            description: '',
+            isDefault: p.isDefault,
+          })),
+        }
+      }
+      return { data: undefined }
+    })
+  }
+
+  function mockQueryDataWithDisabled(
+    projectDefault: string | null,
+    disabledWorkflowProfileIds: string[],
+    profiles: Array<{ id: string; isDefault: boolean }>,
+  ) {
+    useQueryMock.mockImplementation((config) => {
+      if (config.queryKey[0] === 'project-workflow-profile') {
+        return { data: { projectId: 'proj-1', defaultTemplateId: projectDefault, disabledWorkflowProfileIds } }
       }
       if (config.queryKey[0] === 'workflow-templates') {
         return {
@@ -259,13 +282,57 @@ describe('useEffectiveDefaultWorkflowProfile', () => {
     })
   })
 
-  it('returns none source with the fallback id when no project or system default exists', () => {
+  it('skips a disabled configured default and falls through to the filtered enabled profile list', () => {
+    mockQueryDataWithDisabled(
+      'mohist/local',
+      ['mohist/local'],
+      [{ id: 'mohist/github-pr', isDefault: false }],
+    )
+
+    const result = useEffectiveDefaultWorkflowProfile()
+
+    expect(result).toEqual({
+      effectiveTemplateId: 'mohist/github-pr',
+      source: 'system',
+      configuredTemplateId: 'mohist/local',
+    })
+  })
+
+  it('skips a mixed-case configured default that matches a disabled profile id', () => {
+    mockQueryDataWithDisabled(
+      'MOHIST/LOCAL',
+      ['mohist/local'],
+      [{ id: 'mohist/github-pr', isDefault: false }],
+    )
+
+    const result = useEffectiveDefaultWorkflowProfile()
+
+    expect(result).toEqual({
+      effectiveTemplateId: 'mohist/github-pr',
+      source: 'system',
+      configuredTemplateId: 'MOHIST/LOCAL',
+    })
+  })
+
+  it('returns the first enabled profile as effective default when no project or system default exists', () => {
     mockQueryData(null, [{ id: 'mohist/github-pr', isDefault: false }])
 
     const result = useEffectiveDefaultWorkflowProfile()
 
     expect(result).toEqual({
-      effectiveTemplateId: 'mohist/local',
+      effectiveTemplateId: 'mohist/github-pr',
+      source: 'system',
+      configuredTemplateId: null,
+    })
+  })
+
+  it('returns none source when the filtered list is empty', () => {
+    mockQueryData(null, [])
+
+    const result = useEffectiveDefaultWorkflowProfile()
+
+    expect(result).toEqual({
+      effectiveTemplateId: '',
       source: 'none',
       configuredTemplateId: null,
     })

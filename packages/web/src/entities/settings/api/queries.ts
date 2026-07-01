@@ -2,9 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
 import { isActiveUpdateStatus, isSupersededStatus, isTerminalUpdateStatus } from '../model/updateOutcome'
+import { includesWorkflowProfileId } from '../model/workflowProfileIds'
 import { useProject } from '../../project/@x/project-context'
 import type { OpencodeModelVariants, ProjectDefaultWorkflowProfile } from './client'
-import { clearProjectDefaultWorkflowProfile, getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getProjectDefaultWorkflowProfile, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setProjectDefaultWorkflowProfile, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
+import { clearProjectDefaultWorkflowProfile, disableWorkflowProfile, enableWorkflowProfile, getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getProjectDefaultWorkflowProfile, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setProjectDefaultWorkflowProfile, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
 
 export function useConfig() {
   return useQuery<GeneralConfig, Error>({
@@ -268,6 +269,15 @@ export function useRuntimeConsistency(enabled = true) {
 }
 
 export function useWorkflowProfiles() {
+  const { projectId } = useProject()
+  return useQuery<WorkflowProfileInfo[]>({
+    queryKey: ['workflow-templates', 'system', projectId],
+    queryFn: () => getWorkflowProfiles(projectId),
+    enabled: !!projectId,
+  })
+}
+
+export function useAllWorkflowProfiles() {
   return useQuery<WorkflowProfileInfo[]>({
     queryKey: ['workflow-templates', 'system'],
     queryFn: () => getWorkflowProfiles(),
@@ -321,6 +331,36 @@ export function useClearProjectDefaultWorkflowProfile() {
   })
 }
 
+export function useDisableWorkflowProfile() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<void, Error, string>({
+    mutationFn: (profileId) => disableWorkflowProfile(projectId, profileId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflow-templates', 'system', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['project-workflow-profile', projectId] })
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to disable workflow profile')
+    },
+  })
+}
+
+export function useEnableWorkflowProfile() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<void, Error, string>({
+    mutationFn: (profileId) => enableWorkflowProfile(projectId, profileId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflow-templates', 'system', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['project-workflow-profile', projectId] })
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to enable workflow profile')
+    },
+  })
+}
+
 export interface EffectiveDefaultWorkflowProfile {
   effectiveTemplateId: string
   source: 'project' | 'system' | 'none'
@@ -332,8 +372,9 @@ export function useEffectiveDefaultWorkflowProfile(): EffectiveDefaultWorkflowPr
   const { data: profiles } = useWorkflowProfiles()
 
   const configuredTemplateId = projectProfile?.defaultTemplateId ?? null
+  const disabledIds = projectProfile?.disabledWorkflowProfileIds ?? []
 
-  if (configuredTemplateId) {
+  if (configuredTemplateId && !includesWorkflowProfileId(disabledIds, configuredTemplateId)) {
     return {
       effectiveTemplateId: configuredTemplateId,
       source: 'project',
@@ -350,8 +391,17 @@ export function useEffectiveDefaultWorkflowProfile(): EffectiveDefaultWorkflowPr
     }
   }
 
+  const firstEnabledId = profiles?.[0]?.id
+  if (firstEnabledId) {
+    return {
+      effectiveTemplateId: firstEnabledId,
+      source: 'system',
+      configuredTemplateId,
+    }
+  }
+
   return {
-    effectiveTemplateId: 'mohist/local',
+    effectiveTemplateId: '',
     source: 'none',
     configuredTemplateId,
   }

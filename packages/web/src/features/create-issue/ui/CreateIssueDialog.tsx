@@ -159,11 +159,19 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     }
   }, [repositories])
 
+  const enabledWorkflowIds = useMemo(
+    () => new Set((workflowProfiles ?? []).map((profile) => profile.id)),
+    [workflowProfiles],
+  )
+  const recommendationIsEnabled = recommendation
+    ? enabledWorkflowIds.has(recommendation.workflow)
+    : false
+  const recommendationUnavailable = recommendation && !recommendationIsEnabled
+
   useEffect(() => {
-    if (recommendation && !workflowTouched) {
-      setWorkflowProfileId(recommendation.workflow)
-    }
-  }, [recommendation, workflowTouched])
+    if (!recommendation || workflowTouched || !recommendationIsEnabled) return
+    setWorkflowProfileId(recommendation.workflow)
+  }, [recommendation, recommendationIsEnabled, workflowTouched])
 
   useEffect(() => {
     if (frontmatterRisk && !riskTouched) {
@@ -182,7 +190,6 @@ export function CreateIssueDialog({ open, onClose }: Props) {
 
   const mutation = useMutation({
     mutationFn: () => {
-      const selectedWorkflowProfileId = workflowProfileId ?? defaultProfileId ?? null
       return createIssue({
         title,
         body: body || undefined,
@@ -193,7 +200,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         ...(projectId ? { projectId } : {}),
         priority,
         ...(repositoryName ? { repositoryName } : {}),
-        ...(selectedWorkflowProfileId ? { workflowProfileId: selectedWorkflowProfileId } : {}),
+        ...(workflowProfileId ? { workflowProfileId } : {}),
         ...(risk ? { risk } : {}),
       })
     },
@@ -223,15 +230,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     onClose()
   }
 
-  const profileOptions: WorkflowProfileInfo[] = useMemo(() => {
-    const list = workflowProfiles ?? []
-    const known = new Set(list.map((p) => p.id))
-    const extras: WorkflowProfileInfo[] =
-      workflowProfileId && !known.has(workflowProfileId)
-        ? [{ id: workflowProfileId, displayName: workflowProfileId, description: '', isDefault: false }]
-        : []
-    return [...list, ...extras]
-  }, [workflowProfiles, workflowProfileId])
+  const profileOptions: WorkflowProfileInfo[] = workflowProfiles ?? []
   return (
     <Dialog open={open} onOpenChange={(v) => !v && resetAndClose()}>
       <DialogContent>
@@ -288,9 +287,15 @@ export function CreateIssueDialog({ open, onClose }: Props) {
                   {recommendation.reason}
                 </p>
               )}
-              <p className="text-[11px] text-blue-600/80 mt-1">
-                Pre-filled below. Change the selector to override.
-              </p>
+              {recommendationUnavailable ? (
+                <p className="text-[11px] text-amber-700 mt-1" data-testid="workflow-recommendation-unavailable">
+                  This workflow is not enabled for the current project. Choose an enabled workflow or use the project default.
+                </p>
+              ) : (
+                <p className="text-[11px] text-blue-600/80 mt-1">
+                  Pre-filled below. Change the selector to override.
+                </p>
+              )}
             </div>
           )}
 

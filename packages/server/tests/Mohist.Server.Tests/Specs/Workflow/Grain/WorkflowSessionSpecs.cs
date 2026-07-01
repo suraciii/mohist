@@ -2,6 +2,8 @@ using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -22,6 +24,67 @@ public class WorkflowSessionSpecs
     {
         _fixture = fixture;
         _client = fixture.Client;
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task GivenPersistedIssueWhenAllProfilesDisabled_ThenReadSurfacesAreUnresolvedAndStartFails()
+    {
+        var project = await _client.PostProjectWithRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            new { name = $"all-disabled-start-{Guid.NewGuid():N}" },
+            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main", isDefault = true });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
+        {
+            title = "Persisted issue in all-disabled project",
+            body = "Created before the project lost every enabled workflow.",
+            labels = new Dictionary<string, string>(StringComparer.Ordinal),
+            priority = "p2",
+            isDraft = false
+        });
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var projectProfile = await db.ProjectWorkflowProfiles
+                .FirstOrDefaultAsync(x => x.ProjectId == project.Id);
+            if (projectProfile is null)
+            {
+                projectProfile = new ProjectWorkflowProfile
+                {
+                    ProjectId = project.Id,
+                    Variables = "{}",
+                };
+                db.ProjectWorkflowProfiles.Add(projectProfile);
+            }
+
+            projectProfile.DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"];
+            await db.SaveChangesAsync();
+        }
+
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+        var workflowProfile = await _client.GetDataAsync<IssueWorkflowProfileDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+
+        Assert.Null(detail.WorkflowProfileId);
+        Assert.Null(workflowProfile.ProfileId);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
+        Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        var retryEx = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
+        Assert.Contains("Enable a workflow first", retryEx.Message, StringComparison.OrdinalIgnoreCase);
+
+        var afterFailure = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+        Assert.Equal("backlog", afterFailure.Status);
+        Assert.Null(afterFailure.WorkflowRunId);
+
+        await using var eventScope = _fixture.Services.CreateAsyncScope();
+        var events = await eventScope.ServiceProvider.GetRequiredService<IEventStore>()
+            .ListIssueEventsAsync(issue.Id);
+        Assert.DoesNotContain(events, e => string.Equals(
+            e.Envelope.Type,
+            EventCatalog.ReverseDns.IssueWorkStarted,
+            StringComparison.Ordinal));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -272,7 +335,14 @@ labels = new Dictionary<string, string>(StringComparer.Ordinal),
     private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IssueSessionTranscriptTestResponse Transcript);
     private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
-    private sealed record IssueDto(string Id, int Number, string Title);
+    private sealed record IssueDto(
+        string Id,
+        int Number,
+        string Title,
+        string Status,
+        string? WorkflowRunId,
+        string? WorkflowProfileId = null);
+    private sealed record IssueWorkflowProfileDto(string? ProfileId);
     private sealed record IssueSessionMetadataTestDto(string Id, string SessionName, IssueSessionMetadataCountsTestDto Metadata);
     private sealed record IssueSessionMetadataCountsTestDto(int PartCount, int ToolCount);
     private sealed record IssueSessionTranscriptTestResponse(IssueSessionTranscriptTurnTestDto[] Turns, int PartCount, string? LastActivityAt);

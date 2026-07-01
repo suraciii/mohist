@@ -29,6 +29,11 @@ public class MohistDbContext : DbContext
         value => DictionaryHash(value),
         value => value.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal));
 
+    private static readonly ValueComparer<List<string>> ListStringComparer = new(
+        (left, right) => (left == null && right == null) || (left != null && right != null && left.SequenceEqual(right)),
+        value => value == null ? 0 : value.Aggregate(0, (hash, s) => hash ^ (s == null ? 0 : StringComparer.Ordinal.GetHashCode(s))),
+        value => value == null ? new List<string>() : new List<string>(value));
+
     public DbSet<ProjectRow> Projects { get; set; } = null!;
     public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
@@ -406,6 +411,14 @@ public class MohistDbContext : DbContext
                 .IsRequired()
                 .HasDefaultValue(new Dictionary<string, string>());
             entity.Property(e => e.Prompts).Metadata.SetValueComparer(DictionaryStringComparer);
+
+            entity.Property(e => e.DisabledWorkflowProfileIds)
+                .HasConversion(
+                    v => JSON.Serialize(v),
+                    v => JSON.Deserialize<List<string>>(v) ?? new List<string>())
+                .IsRequired()
+                .HasDefaultValue(new List<string>());
+            entity.Property(e => e.DisabledWorkflowProfileIds).Metadata.SetValueComparer(ListStringComparer);
         });
 
         modelBuilder.Entity<ProjectWorkflowTemplateRow>(entity =>

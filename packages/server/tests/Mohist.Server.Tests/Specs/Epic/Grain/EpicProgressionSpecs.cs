@@ -508,7 +508,7 @@ public class EpicProgressionSpecs
             .Options;
         var factory = new TestDbContextFactory(options);
         using (var db = factory.CreateDbContext())
-            db.Database.Migrate();
+            GrainTestConfig.MigrateWithSchemaFix(db);
         return new TestDatabase(connection, factory);
     }
 

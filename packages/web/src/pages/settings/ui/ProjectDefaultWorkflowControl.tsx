@@ -3,15 +3,21 @@ import {
   useClearProjectDefaultWorkflowProfile,
   useProjectDefaultWorkflowProfile,
   useSetProjectDefaultWorkflowProfile,
+  useAllWorkflowProfiles,
   useWorkflowProfiles,
 } from '../../../entities/settings'
+import { includesWorkflowProfileId, workflowProfileIdEquals } from '../../../entities/settings/model/workflowProfileIds'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Label } from '@/shared/ui/components/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
+
+const DEFAULT_VALUE = '__inherit__'
 
 export function ProjectDefaultWorkflowControl() {
   const { currentProject } = useProject()
-  const { data: profiles, isLoading: profilesLoading } = useWorkflowProfiles()
+  const { data: profiles, isLoading: profilesLoading, isError: profilesError } = useAllWorkflowProfiles()
+  const { data: enabledProfiles, isLoading: enabledProfilesLoading, isError: enabledProfilesError } = useWorkflowProfiles()
   const {
     data: projectProfile,
     isLoading: profileLoading,
@@ -32,17 +38,39 @@ export function ProjectDefaultWorkflowControl() {
   }
 
   const configuredTemplateId = projectProfile?.defaultTemplateId ?? null
-  const systemDefaultId = profiles?.find((p) => p.isDefault)?.id ?? 'mohist/local'
+  const disabledIds = projectProfile?.disabledWorkflowProfileIds ?? []
+  const inheritedDefaultId = enabledProfiles?.find((p) => p.isDefault)?.id
+    ?? enabledProfiles?.[0]?.id
+    ?? 'none'
   const isConfiguredInCatalog = configuredTemplateId
-    ? profiles?.some((p) => p.id === configuredTemplateId) ?? true
+    ? profiles?.some((p) => workflowProfileIdEquals(p.id, configuredTemplateId)) ?? true
     : true
-  const isLoading = profileLoading || profilesLoading
+  const isDefaultDisabled = configuredTemplateId
+    ? includesWorkflowProfileId(disabledIds, configuredTemplateId)
+    : false
+  const isLoading = profileLoading || profilesLoading || enabledProfilesLoading
+
+  function handleValueChange(value: string | null) {
+    if (!value || value === DEFAULT_VALUE) {
+      if (configuredTemplateId) {
+        clearDefault.mutate()
+      }
+    } else {
+      setDefault.mutate({ templateId: value })
+    }
+  }
+
+  function handleClear() {
+    clearDefault.mutate()
+  }
+
+  const selectValue = configuredTemplateId ?? DEFAULT_VALUE
 
   return (
     <CardSection title="Project default workflow" titleAs="h3" tone="blue">
       {isLoading ? (
         <div className="text-sm text-muted-foreground">Loading...</div>
-      ) : isError ? (
+      ) : isError || profilesError || enabledProfilesError ? (
         <div className="text-sm text-red-700">Failed to load project default workflow.</div>
       ) : (
         <div className="space-y-3">
@@ -66,7 +94,7 @@ export function ProjectDefaultWorkflowControl() {
                   className="font-mono text-xs"
                   data-testid="project-default-workflow-system-default"
                 >
-                  {systemDefaultId}
+                  {inheritedDefaultId}
                 </span>
                 ).
               </span>
@@ -84,40 +112,64 @@ export function ProjectDefaultWorkflowControl() {
             </div>
           )}
 
+          {isDefaultDisabled && (
+            <div
+              data-testid="project-default-workflow-disabled-warning"
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+            >
+              The current project default{' '}
+              <span className="font-mono">{configuredTemplateId}</span> is currently disabled. New
+              issues will fall through to the first enabled system profile.
+            </div>
+          )}
+
           <div className="flex items-end gap-2">
             <div className="flex-1 min-w-0">
               <Label className="text-xs" htmlFor="project-default-workflow-select">
                 Default workflow
               </Label>
-              <select
-                id="project-default-workflow-select"
-                data-testid="project-default-workflow-select"
-                value={configuredTemplateId ?? ''}
+              <Select
+                value={selectValue}
+                onValueChange={handleValueChange}
                 disabled={setDefault.isPending || clearDefault.isPending}
-                onChange={(event) => {
-                  const value = event.target.value
-                  if (value) {
-                    setDefault.mutate({ templateId: value })
-                  } else if (configuredTemplateId) {
-                    clearDefault.mutate()
-                  }
-                }}
-                className="flex h-8 w-full items-center rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <option value="">Inherit system default ({systemDefaultId})</option>
-                {profiles?.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.displayName} ({profile.id})
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger
+                  id="project-default-workflow-select"
+                  data-testid="project-default-workflow-select"
+                  className="w-full max-w-full"
+                >
+                  <SelectValue placeholder="Select workflow" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_VALUE}>
+                    Inherit system default ({inheritedDefaultId})
+                  </SelectItem>
+                  {profiles?.map((profile) => {
+                    const isDisabled = includesWorkflowProfileId(disabledIds, profile.id)
+                    return (
+                      <SelectItem
+                        key={profile.id}
+                        value={profile.id}
+                        disabled={isDisabled}
+                      >
+                        <span className={isDisabled ? 'text-muted-foreground' : ''}>
+                          {profile.displayName}
+                        </span>
+                        <span className="text-muted-foreground/60">
+                          {' '}({profile.id})
+                        </span>
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
             </div>
             <Button
               variant="outline"
               size="sm"
               data-testid="project-default-workflow-clear"
               disabled={!configuredTemplateId || clearDefault.isPending || setDefault.isPending}
-              onClick={() => clearDefault.mutate()}
+              onClick={handleClear}
             >
               Clear
             </Button>

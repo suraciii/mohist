@@ -36,7 +36,8 @@ public class IssueInfo
     public bool IsDraft { get; set; }
     public bool CanStart { get; set; }
     public IssueStartBlockerDto? Blocker { get; set; }
-    public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.LocalId;
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? WorkflowProfileId { get; set; } = IssueWorkflowProfiles.LocalId;
     public string? WorkflowProfileMode { get; set; }
     public WorkflowAttention? Attention { get; set; }
     public string? WorkflowStage { get; set; }

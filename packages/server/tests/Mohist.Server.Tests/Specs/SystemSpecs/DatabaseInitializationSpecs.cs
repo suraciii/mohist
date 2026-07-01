@@ -63,6 +63,26 @@ public class DatabaseInitializationSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
+    public async Task Migrate_WhenEmptyDatabase_AppliesDisabledWorkflowProfileIdsMigration()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        await db.Database.MigrateAsync();
+
+        Assert.True(await ColumnExistsAsync(connection, "ProjectWorkflowProfiles", "DisabledWorkflowProfileIds"));
+        var applied = await db.Database.GetAppliedMigrationsAsync();
+        Assert.Contains("20260629000000_AddDisabledWorkflowProfileIds", applied);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
     public async Task Migrate_WhenCalledTwiceOnProjectPromptTemplates_IsIdempotent()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

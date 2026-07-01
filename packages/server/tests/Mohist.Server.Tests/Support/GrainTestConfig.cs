@@ -33,6 +33,11 @@ public static class GrainTestConfig
         return new MohistDbContext(options);
     }
 
+    public static void MigrateWithSchemaFix(MohistDbContext db)
+    {
+        db.Database.Migrate();
+    }
+
     public static void ConfigureSilo(
         ISiloBuilder siloBuilder,
         string connectionString,

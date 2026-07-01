@@ -856,11 +856,27 @@ internal sealed class MohistCliApi
         return await ReadSuccessDataAsync(response);
     }
 
-    public async Task<int> PrintWorkflowProfilesDescribedAsync()
+    public async Task<int> PrintWorkflowProfilesDescribedAsync(string? projectId = null)
     {
-        var data = await GetDataAsync("/api/workflow-profiles");
-        RenderWorkflowProfilesDescribed(data);
-        return 0;
+        var path = projectId is not null
+            ? $"/api/workflow-profiles?project={Uri.EscapeDataString(projectId)}"
+            : "/api/workflow-profiles";
+        try
+        {
+            var data = await GetDataAsync(path);
+            RenderWorkflowProfilesDescribed(data);
+            return 0;
+        }
+        catch (ApiResponseException ex)
+        {
+            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            return ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
     }
 
     private void RenderWorkflowProfilesDescribed(JsonNode? data)

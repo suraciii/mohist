@@ -10,6 +10,7 @@ using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Xunit;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Tests.Specs.Workflow.Querier;
 
@@ -149,6 +150,85 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.NotNull(result.Structure);
         Assert.Contains("system-template:mohist/local", result.Id ?? "");
         Assert.Contains(result.Structure.Stages, s => s.Stage == "plan");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadTemplate_DisabledProjectDefaultSystemTemplate_UsesFirstEnabledProfile()
+    {
+        var runId = "wr_disabled_default01";
+        await SeedWithoutRunAsync(projectId: "proj-disabled-default", issueId: "issue_disabled_default",
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: "mohist/local",
+            disabledWorkflowProfileIds: ["mohist/local"]);
+
+        var result = await _manager.LoadTemplateAsync(runId, "proj-disabled-default", "issue_disabled_default");
+
+        Assert.NotNull(result.Structure);
+        Assert.Contains("system-template:mohist/github-pr", result.Id ?? "");
+        var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
+        Assert.Contains(integrate.Tasks, t => t.Id == "merge-pr");
+        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadTemplate_WhenAllProfilesDisabled_ThrowsActionableErrorInsteadOfFallingBackToLocal()
+    {
+        var runId = "wr_all_disabled_template";
+        await SeedWithoutRunAsync(projectId: "proj-all-disabled-template", issueId: "issue_all_disabled_template",
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _manager.LoadTemplateAsync(runId, "proj-all-disabled-template", "issue_all_disabled_template"));
+
+        Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadTemplate_WhenAllProfilesDisabled_ThrowsBeforeIssueCustomTemplate()
+    {
+        var runId = "wr_all_disabled_custom_template";
+        await SeedWithoutRunAsync(projectId: "proj-all-disabled-custom-template", issueId: "issue_all_disabled_custom_template",
+            issueTemplateJson: SerializeDefinition("issue-custom-disabled", stageCount: 1),
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _manager.LoadTemplateAsync(runId, "proj-all-disabled-custom-template", "issue_all_disabled_custom_template"));
+
+        Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadTemplate_ExistingRunIgnoresLaterDisabledProfiles()
+    {
+        var runId = "wr_existing_disabled_template";
+        await SeedAsync(projectId: "proj-existing-disabled-template", issueId: "issue_existing_disabled_template", runId: runId,
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            issueWorkflowProfileId: "mohist/local",
+            disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        var result = await _manager.LoadTemplateAsync(runId);
+
+        Assert.NotNull(result.Structure);
+        Assert.Contains("system-template:mohist/local", result.Id ?? "");
+        var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
+        Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
+        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -778,6 +858,43 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task LoadStageSpecsAsync_WhenAllProfilesDisabled_ThrowsActionableErrorInsteadOfFallingBackToLocal()
+    {
+        var runId = "wr_all_disabled_stage_specs";
+        await SeedWithoutRunAsync(projectId: "proj-all-disabled-stage-specs", issueId: "issue_all_disabled_stage_specs",
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _manager.LoadStageSpecsAsync(runId, "plan", "proj-all-disabled-stage-specs", "issue_all_disabled_stage_specs"));
+
+        Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadStageSpecsAsync_ExistingRunKeepsOriginalProfileAfterItIsDisabled()
+    {
+        var runId = "wr_existing_disabled_stage_specs";
+        await SeedAsync(projectId: "proj-existing-disabled-stage-specs", issueId: "issue_existing_disabled_stage_specs", runId: runId,
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            issueWorkflowProfileId: "mohist/local",
+            disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        var integrate = await _manager.LoadStageSpecsAsync(runId, "integrate");
+
+        Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
+        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task LoadStructureAsync_ReturnsStageSequenceAndApprovalFlags_WithoutTasks()
     {
         // The narrow structure projection must NOT carry tasks or checks.
@@ -868,6 +985,92 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         Assert.NotEmpty(structure.Stages);
         Assert.Contains(structure.Stages, s => s.Stage == "plan");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadStructureAsync_WhenAllProfilesDisabled_ThrowsActionableErrorInsteadOfFallingBackToLocal()
+    {
+        var runId = "wr_all_disabled_structure";
+        await SeedWithoutRunAsync(projectId: "proj-all-disabled-structure", issueId: "issue_all_disabled_structure",
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _manager.LoadStructureAsync(runId, "proj-all-disabled-structure", "issue_all_disabled_structure"));
+
+        Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadStructureAsync_ExistingRunKeepsOriginalProfileAfterItIsDisabled()
+    {
+        var runId = "wr_existing_disabled_structure";
+        await SeedAsync(projectId: "proj-existing-disabled-structure", issueId: "issue_existing_disabled_structure", runId: runId,
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            issueWorkflowProfileId: "mohist/local",
+            disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        var structure = await _manager.LoadStructureAsync(runId);
+
+        Assert.Equal("mohist/local", structure.Id);
+        Assert.Contains(structure.Stages, s => s.Stage == "integrate");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task WorkflowQuerier_ExistingRunYamlAndStatusUseOriginalProfileAfterItIsDisabled()
+    {
+        var runId = "wr_existing_disabled_query";
+        await SeedAsync(projectId: "proj-existing-disabled-query", issueId: "issue_existing_disabled_query", runId: runId,
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            issueWorkflowProfileId: "mohist/local",
+            disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
+        await ReplaceRunStateAsync(runId, "proj-existing-disabled-query", "issue_existing_disabled_query", "mohist/local");
+        var querier = new WorkflowQuerier(
+            new TestDbContextFactory(_options),
+            _manager,
+            new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(_options)));
+
+        var yaml = await querier.GetDefinitionYamlAsync(runId);
+        var status = await querier.GetStatusAsync(runId);
+
+        Assert.NotNull(yaml);
+        Assert.Contains("integrate:rebase", yaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("merge-pr", yaml, StringComparison.Ordinal);
+        Assert.NotNull(status);
+        var integrate = Assert.Single(status!.Stages, s => s.Stage == "integrate");
+        Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
+        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadApprovalConfigAsync_ExistingRunIgnoresLaterDisabledProfiles()
+    {
+        var runId = "wr_existing_disabled_approval";
+        await SeedAsync(projectId: "proj-existing-disabled-approval", issueId: "issue_existing_disabled_approval", runId: runId,
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            issueWorkflowProfileId: "mohist/local",
+            disabledWorkflowProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        var approval = await _manager.LoadApprovalConfigAsync(runId);
+
+        Assert.NotNull(approval?.Feedback?.Task);
+        Assert.Equal("apply-feedback", approval!.Feedback!.Task!.Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -1039,7 +1242,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         string? issueSourceTemplateId = null,
         string? projectDefaultTemplateId = null,
         string? projectTemplateJson = null,
-        string? issueWorkflowProfileId = null)
+        string? issueWorkflowProfileId = null,
+        string[]? disabledWorkflowProfileIds = null)
     {
         await using var db = new MohistDbContext(_options);
         SeedRunContext(db, projectId, issueId, runId, issueWorkflowProfileId);
@@ -1049,6 +1253,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             ProjectId = projectId,
             DefaultTemplateId = projectDefaultTemplateId,
             Variables = "{}",
+            DisabledWorkflowProfileIds = disabledWorkflowProfileIds?.ToList() ?? [],
         });
 
         if (projectDefaultTemplateId is not null && projectTemplateJson is not null)
@@ -1078,6 +1283,75 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             Variables = "{}",
         });
 
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SeedWithoutRunAsync(
+        string projectId, string issueId,
+        string? issueTemplateJson,
+        string? issueSourceTemplateId = null,
+        string? projectDefaultTemplateId = null,
+        string? projectTemplateJson = null,
+        string[]? disabledWorkflowProfileIds = null)
+    {
+        await using var db = new MohistDbContext(_options);
+
+        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+        {
+            ProjectId = projectId,
+            DefaultTemplateId = projectDefaultTemplateId,
+            Variables = "{}",
+            DisabledWorkflowProfileIds = disabledWorkflowProfileIds?.ToList() ?? [],
+        });
+
+        if (projectDefaultTemplateId is not null && projectTemplateJson is not null)
+        {
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            {
+                ProjectId = projectId,
+                TemplateId = projectDefaultTemplateId,
+                Template = projectTemplateJson,
+            });
+        }
+        if (issueSourceTemplateId is not null && projectTemplateJson is not null)
+        {
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            {
+                ProjectId = projectId,
+                TemplateId = issueSourceTemplateId,
+                Template = projectTemplateJson,
+            });
+        }
+
+        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
+        {
+            IssueId = issueId,
+            SourceTemplateId = issueSourceTemplateId,
+            Template = issueTemplateJson,
+            Variables = "{}",
+        });
+
+        await db.SaveChangesAsync();
+    }
+
+    private async Task ReplaceRunStateAsync(string runId, string projectId, string issueId, string systemProfileId)
+    {
+        await using var db = new MohistDbContext(_options);
+        var row = await db.WorkflowRuns.FirstAsync(x => x.WorkflowRunId == runId);
+        var definition = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(systemProfileId)
+            ?? throw new InvalidOperationException($"Unknown system profile '{systemProfileId}'");
+        var run = WorkflowRun.Create(
+            runId,
+            definition,
+            new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: DateTimeOffset.UtcNow,
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = projectId,
+                    ["issueId"] = issueId,
+                }));
+        row.State = JSON.Serialize(run);
         await db.SaveChangesAsync();
     }
 

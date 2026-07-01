@@ -227,7 +227,8 @@ public static class ProjectRoutes
             var project = context.GetResolvedProject();
             var templateId = await manager.GetDefaultTemplateAsync(project.Id);
             var variables = await manager.GetVariablesAsync(project.Id);
-            return ApiResults.Ok(new { projectId = project.Id, defaultTemplateId = templateId, variables });
+            var disabledIds = await manager.GetDisabledWorkflowProfileIdsAsync(project.Id);
+            return ApiResults.Ok(new { projectId = project.Id, defaultTemplateId = templateId, variables, disabledWorkflowProfileIds = disabledIds });
         });
 
         byRef.MapPut("/workflow-profile/default-template", async (HttpContext context, SetDefaultTemplateRequest req, ProjectWorkflowProfileManager manager) =>
@@ -268,6 +269,48 @@ public static class ProjectRoutes
             var project = context.GetResolvedProject();
             var result = await manager.PatchVariablesAsync(project.Id, patch);
             return ApiResults.Ok(result);
+        });
+
+        // =======================================================================
+        // Workflow profile enable/disable
+        // =======================================================================
+
+        byRef.MapPost("/workflow-profile/disable", async (HttpContext context, ToggleWorkflowProfileRequest req, ProjectWorkflowProfileManager manager) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.ProfileId))
+                return ApiResults.BadRequest("profileId is required");
+
+            var project = context.GetResolvedProject();
+            try
+            {
+                await manager.SetProfileEnabledAsync(project.Id, req.ProfileId, enabled: false);
+                return ApiResults.Ok();
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "last_enabled_workflow_profile");
+            }
+        });
+
+        byRef.MapPost("/workflow-profile/enable", async (HttpContext context, ToggleWorkflowProfileRequest req, ProjectWorkflowProfileManager manager) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.ProfileId))
+                return ApiResults.BadRequest("profileId is required");
+
+            var project = context.GetResolvedProject();
+            try
+            {
+                await manager.SetProfileEnabledAsync(project.Id, req.ProfileId, enabled: true);
+                return ApiResults.Ok();
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
+            }
         });
 
         byRef.MapGet("/templates", async (HttpContext context, ProjectWorkflowProfileManager manager) =>
@@ -423,3 +466,5 @@ public record UpdateRepositoryRequest(
 public record CreateProjectTemplateRequest(string Yaml);
 public record UpdateProjectTemplateRequest(string Yaml);
 public record SetDefaultTemplateRequest(string TemplateId);
+
+public sealed record ToggleWorkflowProfileRequest(string ProfileId);

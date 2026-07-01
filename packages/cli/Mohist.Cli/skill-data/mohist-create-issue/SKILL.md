@@ -49,12 +49,12 @@ If two profiles tie, prefer the more specific one (fewer, more targeted tags). I
 
 ### Default fallback when nothing matches
 
-When no profile's `suitable_for` description matches the content (every candidate scores zero, `suitable_for` is unspecified for all profiles, or `mo workflow list --described` is unavailable), default to:
+When no profile's `suitable_for` description matches the content (every candidate scores zero, or `suitable_for` is unspecified for all profiles), default to:
 
-- `recommended_workflow: mohist/local`
-- `recommended_workflow_reason: No specific workflow matched the issue content; falling back to mohist/local.`
+- `recommended_workflow`: the first enabled profile, else fail with an actionable error.
+- `recommended_workflow_reason: No specific workflow matched the issue content; using the first enabled profile.`
 
-Never leave `recommended_workflow` blank. The default profile is always a safe choice because it is guaranteed to exist.
+If workflow discovery is unavailable, stop before writing frontmatter and ask the user to fix discovery first. If no profile is enabled for the project, stop before writing frontmatter and ask the user to enable a workflow first. Do not invent a recommendation or create frontmatter until discovery returns at least one enabled profile.
 
 ### Risk assessment
 
@@ -74,7 +74,7 @@ Supported fields:
 
 | Field | Required | Description |
 |---|---|---|
-| `recommended_workflow` | yes | Profile id from `mo workflow list --described`, or `mohist/local` as fallback. |
+| `recommended_workflow` | yes | Profile id from `mo workflow list --described`, or the first enabled profile as fallback. |
 | `recommended_workflow_reason` | yes | One sentence explaining why this workflow was chosen, referencing matched `suitable_for` tags or the fallback rationale. Multi-line values use the YAML `\|` block scalar. |
 | `risk` | yes | One of `low`, `medium`, `high`. |
 
@@ -119,7 +119,7 @@ Never run `mo issue create --body-file` without confirmation. The body file is a
 ### End-to-end creation checklist
 
 - [ ] `mo workflow list --described` was run and parsed.
-- [ ] `recommended_workflow` is populated (best match or `mohist/local`).
+- [ ] `recommended_workflow` is populated (best match or first enabled profile).
 - [ ] `recommended_workflow_reason` references the matched `suitable_for` tags or states the fallback.
 - [ ] `risk` is `low`, `medium`, or `high`, with the driver noted in the body.
 - [ ] The body's sections appear in order: User Voice, Product Shape, [Domain Model], Acceptance Criteria, Non-Goals. Domain Model is optional (omit for pure technical changes).

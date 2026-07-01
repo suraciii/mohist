@@ -530,7 +530,7 @@ public class EpicMembershipSpecs
             .Options;
         var factory = new TestDbContextFactory(options);
         using (var db = factory.CreateDbContext())
-            db.Database.Migrate();
+            GrainTestConfig.MigrateWithSchemaFix(db);
         return new TestDatabase(connection, factory);
     }
 
@@ -568,7 +568,7 @@ public class EpicMembershipSpecs
     /// </summary>
     private sealed class ThrowingIssueQuerier : IssueQuerier
     {
-        public ThrowingIssueQuerier() : base(null!, null!, null!, null!, null!, null!) { }
+        public ThrowingIssueQuerier() : base(null!, null!, null!, null!, null!, null!, null!) { }
 
         public new Task<List<IssueReadModel>> ListAsync(
             string projectId,

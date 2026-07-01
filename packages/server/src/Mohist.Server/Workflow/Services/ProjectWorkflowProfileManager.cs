@@ -76,16 +76,16 @@ public class ProjectWorkflowProfileManager : IScopedService
     public static SystemTemplateInfo? GetSystemTemplateInfo(string templateId)
     {
         foreach (var template in SystemTemplates)
-            if (string.Equals(template.Id, templateId, StringComparison.Ordinal))
+            if (IssueWorkflowProfiles.IdComparer.Equals(template.Id, templateId))
                 return template;
         return null;
     }
 
     public static WorkflowDefinition? GetSystemTemplateDefinition(string templateId)
     {
-        if (string.Equals(templateId, IssueWorkflowProfiles.LocalId, StringComparison.Ordinal))
+        if (IssueWorkflowProfiles.IdComparer.Equals(templateId, IssueWorkflowProfiles.LocalId))
             return MohistWorkflow.Definition;
-        if (string.Equals(templateId, IssueWorkflowProfiles.GithubPrId, StringComparison.Ordinal))
+        if (IssueWorkflowProfiles.IdComparer.Equals(templateId, IssueWorkflowProfiles.GithubPrId))
             return MohistWorkflow.GithubPrWorkflowDefinition;
         return null;
     }
@@ -444,6 +444,75 @@ public class ProjectWorkflowProfileManager : IScopedService
 
         var (rendered, missing, depth) = _engine.Render(effective.Body, variables);
         return new PromptPreviewResult(rendered, missing, depth);
+    }
+
+    // =======================================================================
+    // Disabled workflow profiles
+    // =======================================================================
+
+    public async Task<IReadOnlySet<string>> GetDisabledWorkflowProfileIdsAsync(string projectId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.ProjectWorkflowProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
+        return row?.DisabledWorkflowProfileIds?.ToHashSet(IssueWorkflowProfiles.IdComparer)
+            ?? new HashSet<string>(IssueWorkflowProfiles.IdComparer);
+    }
+
+    public async Task SetProfileEnabledAsync(string projectId, string profileId, bool enabled)
+    {
+        var canonicalProfileId = GetSystemTemplateInfo(profileId)?.Id;
+        if (canonicalProfileId is null)
+            throw new ArgumentException($"Unknown workflow profile '{profileId}'", nameof(profileId));
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.ProjectWorkflowProfiles
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
+
+        if (row is null)
+        {
+            if (enabled)
+                return;
+
+            var allSystemIds = SystemTemplates.Select(t => t.Id).ToHashSet(IssueWorkflowProfiles.IdComparer);
+            if (allSystemIds.Count <= 1)
+                throw new InvalidOperationException(
+                    $"Cannot disable '{profileId}': at least one workflow profile must remain enabled. " +
+                    "Enable a different profile first or leave the current profile enabled.");
+
+            row = new ProjectWorkflowProfile
+            {
+                ProjectId = projectId,
+                Variables = VariableBundle.Empty.ToJson(),
+                DisabledWorkflowProfileIds = [canonicalProfileId],
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            db.ProjectWorkflowProfiles.Add(row);
+        }
+        else
+        {
+            var disabled = new HashSet<string>(row.DisabledWorkflowProfileIds, IssueWorkflowProfiles.IdComparer);
+
+            if (enabled)
+                disabled.Remove(canonicalProfileId);
+            else
+                disabled.Add(canonicalProfileId);
+
+            if (!enabled)
+            {
+                var allSystemIds = SystemTemplates.Select(t => t.Id).ToHashSet(IssueWorkflowProfiles.IdComparer);
+                var enabledCount = allSystemIds.Count(id => !disabled.Contains(id));
+                if (enabledCount == 0)
+                    throw new InvalidOperationException(
+                        $"Cannot disable '{profileId}': at least one workflow profile must remain enabled. " +
+                        "Enable a different profile first or leave the current profile enabled.");
+            }
+
+            row.DisabledWorkflowProfileIds = [..disabled];
+            row.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
     }
 
     // =======================================================================

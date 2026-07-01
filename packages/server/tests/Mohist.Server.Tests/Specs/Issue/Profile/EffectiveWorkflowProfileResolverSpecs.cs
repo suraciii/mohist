@@ -172,4 +172,112 @@ public class EffectiveWorkflowProfileResolverSpecs
 
         Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
+
+    // ===================== Disabled-profile skipping (core) =====================
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void ResolveCore_DisabledIssueSelection_FallsThroughToProjectDefault()
+    {
+        var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
+            issueSelection: "MOHIST/GITHUB-PR",
+            projectDefaultId: "mohist/local",
+            exists: id => id.Equals("mohist/github-pr", StringComparison.OrdinalIgnoreCase)
+                || id.Equals("mohist/local", StringComparison.OrdinalIgnoreCase),
+            disabledIds: new[] { "mohist/github-pr" },
+            systemProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        Assert.Equal("mohist/local", resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void ResolveCore_DisabledIssueSelectionAndProjectDefault_FallsThroughToFirstEnabledSystem()
+    {
+        var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
+            issueSelection: "mohist/github-pr",
+            projectDefaultId: "mohist/local",
+            exists: _ => true,
+            disabledIds: new[] { "mohist/github-pr", "mohist/local" },
+            systemProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        // both are disabled, so both are skipped — no enabled system profile
+        Assert.Null(resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void ResolveCore_DisabledProjectDefault_WithOtherEnabledSystem_SkipsToOther()
+    {
+        var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
+            issueSelection: null,
+            projectDefaultId: "mohist/local",
+            exists: _ => true,
+            disabledIds: new[] { "mohist/local" },
+            systemProfileIds: ["mohist/local", "mohist/github-pr"]);
+
+        Assert.Equal("mohist/github-pr", resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void ResolveCore_NoDisabledIds_BehavesAsBefore()
+    {
+        var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
+            issueSelection: null,
+            projectDefaultId: null,
+            exists: _ => true);
+
+        Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void ResolveCore_BlacklistAwareWithoutSystemProfileIds_ReturnsNull()
+    {
+        var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
+            issueSelection: null,
+            projectDefaultId: null,
+            exists: _ => true,
+            disabledIds: ["mohist/local"]);
+
+        Assert.Null(resolved);
+    }
+
+    // ===================== Instance Resolve with disabled set =====================
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void Resolve_WithDisabledSet_SkipsDisabledProfiles()
+    {
+        var resolver = BuildResolver();
+
+        var resolved = resolver.Resolve(
+            issueSelection: "mohist/github-pr",
+            projectDefaultId: null,
+            disabledIds: new[] { "mohist/github-pr" });
+
+        Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void Resolve_AllSystemProfilesDisabled_ReturnsNull()
+    {
+        var resolver = BuildResolver();
+
+        var resolved = resolver.Resolve(
+            issueSelection: null,
+            projectDefaultId: null,
+            disabledIds: new[] { "mohist/local", "mohist/github-pr" });
+
+        Assert.Null(resolved);
+    }
 }

@@ -133,11 +133,14 @@ public class IssueGrain : Grain, IIssueGrain
         var repo = resolution.Repository!;
         var undeliveredPrerequisites = await LoadUndeliveredPrerequisiteNumbersAsync();
         var wrId = $"wr_{Guid.NewGuid():N}";
-        _issue!.Start(wrId, undeliveredPrerequisites);
-        return await StartWorkflowAsync(project, wrId, repo);
+        return await StartWorkflowAsync(project, wrId, repo, undeliveredPrerequisites);
     }
 
-    private async Task<string> StartWorkflowAsync(WorkflowProjectContext? project, string wrId, RepositoryInfo repo)
+    private async Task<string> StartWorkflowAsync(
+        WorkflowProjectContext? project,
+        string wrId,
+        RepositoryInfo repo,
+        IReadOnlySet<int>? undeliveredPrerequisites)
     {
         var issue = _issue!;
 
@@ -156,7 +159,8 @@ public class IssueGrain : Grain, IIssueGrain
         // without a configured default.
 
         var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issue.Id);
-        var definition = resolvedTemplate.Structure ?? _profiles.Get(IssueWorkflowProfiles.LocalId).Definition;
+        var definition = resolvedTemplate.Structure
+            ?? throw new InvalidOperationException(WorkflowProfileManager.NoEnabledWorkflowProfileMessage);
 
         // Resolve the effective profile (issue selection → project default →
         // system default) so prompts are merged from the same profile that
@@ -165,10 +169,16 @@ public class IssueGrain : Grain, IIssueGrain
         // inherit default prompts even though the run used the GitHub PR
         // definition.
         var projectDefaultTemplateId = await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id);
+        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectContext.Id);
         var effectiveProfileId = EffectiveWorkflowProfileResolver.ResolveCore(
             issue.WorkflowProfileId,
             projectDefaultTemplateId,
-            _profiles.Exists);
+            _profiles.Exists,
+            disabledIds,
+            _profiles.List().Select(p => p.Id).ToList());
+        if (string.IsNullOrWhiteSpace(effectiveProfileId))
+            throw new InvalidOperationException(WorkflowProfileManager.NoEnabledWorkflowProfileMessage);
+
         var effectiveProfile = _profiles.Get(effectiveProfileId);
         var mergedPrompts = effectiveProfile is MohistIssueWorkflowProfileBase mohistProfile
             ? await mohistProfile.GetMergedPromptsAsync(issue.ProjectId)
@@ -210,6 +220,7 @@ public class IssueGrain : Grain, IIssueGrain
                     }),
                 Workspace: workspace));
 
+        _issue!.Start(wrId, undeliveredPrerequisites);
         await SaveIssueAsync();
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;

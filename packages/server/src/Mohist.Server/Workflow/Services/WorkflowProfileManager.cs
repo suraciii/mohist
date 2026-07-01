@@ -22,12 +22,15 @@ namespace Mohist.Server.Workflow.Services;
 ///   1. Issue custom YAML (issue_workflow_profile.Template)
 ///   2. Issue referenced template (issue_workflow_profile.SourceTemplateId)
 ///   3. Issue's effective workflow profile (issue.WorkflowProfileId →
-///      project default template → mohist/local), resolved through the centralized
+///      project default template → first enabled system profile), resolved through the centralized
 ///      <see cref="EffectiveWorkflowProfileResolver"/> so the running
 ///      workflow agrees with the profile id projected by every read surface.
 /// </summary>
 public class WorkflowProfileManager : IScopedService
 {
+    internal const string NoEnabledWorkflowProfileMessage =
+        "No enabled workflow profile is available. Enable a workflow first.";
+
     private static readonly Regex WholeTemplateTokenRegex = new(
         @"^\s*\$\{\{\s*(?<path>[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}\s*$",
         RegexOptions.Compiled);
@@ -64,7 +67,15 @@ public class WorkflowProfileManager : IScopedService
         var resolvedContext = await ResolveRunContextAsync(db, runId);
         var context = new RunContext(
             string.IsNullOrWhiteSpace(projectId) ? resolvedContext.ProjectId : projectId,
-            string.IsNullOrWhiteSpace(issueId) ? resolvedContext.IssueId : issueId);
+            string.IsNullOrWhiteSpace(issueId) ? resolvedContext.IssueId : issueId,
+            resolvedContext.RunExists);
+
+        var profileContext = await ResolveEffectiveProfileContextAsync(db, context);
+        if (!string.IsNullOrWhiteSpace(context.ProjectId)
+            && string.IsNullOrWhiteSpace(profileContext.EffectiveProfileId))
+        {
+            throw new InvalidOperationException(NoEnabledWorkflowProfileMessage);
+        }
 
         var issueProfile = await LoadIssueProfileAsync(db, context);
 
@@ -84,15 +95,19 @@ public class WorkflowProfileManager : IScopedService
                 return template;
         }
 
-        var profileContext = await ResolveEffectiveProfileContextAsync(db, context);
         if (string.IsNullOrWhiteSpace(profileContext.IssueSelection)
             && !string.IsNullOrWhiteSpace(profileContext.ProjectDefaultId)
+            && (ProjectWorkflowProfileManager.GetSystemTemplateInfo(profileContext.ProjectDefaultId) is null
+                || string.Equals(profileContext.ProjectDefaultId, profileContext.EffectiveProfileId, StringComparison.Ordinal))
             && !string.IsNullOrWhiteSpace(context.ProjectId))
         {
             var projectDefault = await LoadTemplateReferenceAsync(db, context.ProjectId, profileContext.ProjectDefaultId);
             if (projectDefault is not null)
                 return projectDefault;
         }
+
+        if (string.IsNullOrWhiteSpace(profileContext.EffectiveProfileId))
+            throw new InvalidOperationException(NoEnabledWorkflowProfileMessage);
 
         var effectiveDefinition = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(profileContext.EffectiveProfileId);
         if (effectiveDefinition is not null)
@@ -102,9 +117,7 @@ public class WorkflowProfileManager : IScopedService
                 effectiveDefinition);
         }
 
-        return ResolvedTemplate.FromDefinition(
-            $"system-template:{IssueWorkflowProfiles.LocalId}",
-            ProjectWorkflowProfileManager.GetSystemTemplateDefinition(IssueWorkflowProfiles.LocalId));
+        throw new InvalidOperationException(NoEnabledWorkflowProfileMessage);
     }
 
     // =======================================================================
@@ -182,23 +195,23 @@ public class WorkflowProfileManager : IScopedService
         }
 
         string? projectDefaultId = null;
+        IReadOnlyCollection<string>? disabledIds = null;
         if (!string.IsNullOrWhiteSpace(context.ProjectId))
         {
             var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.ProjectId == context.ProjectId);
             projectDefaultId = projectProfile?.DefaultTemplateId;
+            disabledIds = context.RunExists ? null : projectProfile?.DisabledWorkflowProfileIds;
         }
 
-        return new EffectiveProfileContext(
-            issueSelection,
-            projectDefaultId,
-            _effectiveProfileResolver.Resolve(issueSelection, projectDefaultId));
+        var effectiveProfileId = _effectiveProfileResolver.Resolve(issueSelection, projectDefaultId, disabledIds);
+        return new EffectiveProfileContext(issueSelection, projectDefaultId, effectiveProfileId);
     }
 
     private sealed record EffectiveProfileContext(
         string? IssueSelection,
         string? ProjectDefaultId,
-        string EffectiveProfileId);
+        string? EffectiveProfileId);
 
     private async Task<VariableBundle> ResolveConfiguredVariablesAsync(string runId)
     {
@@ -242,7 +255,7 @@ public class WorkflowProfileManager : IScopedService
         projectId = string.IsNullOrWhiteSpace(projectId) ? issue?.ProjectId : projectId;
         issueId = string.IsNullOrWhiteSpace(issueId) ? issue?.IssueId : issueId;
 
-        return new RunContext(projectId, issueId);
+        return new RunContext(projectId, issueId, workflowRun is not null);
     }
 
     private static string? TryReadAnnotation(string? stateJson, string key)
@@ -354,7 +367,7 @@ public class WorkflowProfileManager : IScopedService
         var iid = string.IsNullOrWhiteSpace(issueId) ? context.IssueId : issueId;
 
         // 1. issue prompts
-        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid));
+        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, context.RunExists));
         if (issueProfile is not null)
         {
             if (issueProfile.Prompts.TryGetValue(key, out var body))
@@ -408,7 +421,7 @@ public class WorkflowProfileManager : IScopedService
         }
 
         Dictionary<string, string> issuePrompts;
-        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid));
+        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, context.RunExists));
         if (issueProfile is not null)
             issuePrompts = issueProfile.Prompts;
         else
@@ -568,6 +581,6 @@ public class WorkflowProfileManager : IScopedService
         }
     }
 
-    private sealed record RunContext(string? ProjectId, string? IssueId);
+    private sealed record RunContext(string? ProjectId, string? IssueId, bool RunExists = false);
     private sealed record IssueRunRef(string IssueId, string ProjectId, int Number);
 }

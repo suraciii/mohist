@@ -119,7 +119,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
         {
             var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
             using var db = dbFactory.CreateDbContext();
-            db.Database.Migrate();
+            GrainTestConfig.MigrateWithSchemaFix(db);
             db.Database.ExecuteSqlRaw("""
                 CREATE TABLE IF NOT EXISTS "Attachments" (
                     "Id" TEXT NOT NULL CONSTRAINT "PK_Attachments" PRIMARY KEY,

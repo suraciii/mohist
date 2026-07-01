@@ -9,7 +9,7 @@ import {
   it,
 } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from './test-utils'
-import { DEFAULT_WORKFLOW_STAGES, WorkflowProfilesSection } from '../src/pages/settings/ui/WorkflowProfilesSection'
+import { WorkflowProfilesSection, WORKFLOW_DESCRIPTORS } from '../src/pages/settings/ui/WorkflowProfilesSection'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 
@@ -83,8 +83,11 @@ const handlers = [
         name: 'Mohist Quick Fix',
         description: SYSTEM_TEMPLATES[1].description,
         isDefault: false,
-        yaml: 'description: quick-fix\nstages: []\n',
-        stages: [],
+        yaml: 'description: quick-fix\nstages:\n  - stage: check\n    checks:\n      - merge-ready\n  - stage: integrate\n    requiresApproval: true\n',
+        stages: [
+          { stage: 'check', requiresApproval: false, tasks: [], checks: ['merge-ready'] },
+          { stage: 'integrate', requiresApproval: true, tasks: [], checks: [] },
+        ],
       },
     }),
   ),
@@ -124,6 +127,31 @@ afterEach(() => {
 
 describe('WorkflowProfilesSection', () => {
   describe('Profile list (cards)', () => {
+    it('disables an enabled non-last profile through the switch', async () => {
+      const disableRequests: string[] = []
+      server.use(
+        http.post('/api/projects/test-project/workflow-profile/disable', async ({ request }) => {
+          const body = await request.json() as { profileId?: string }
+          disableRequests.push(body.profileId ?? '')
+          return HttpResponse.json({ success: true, data: null })
+        }),
+      )
+
+      render(<WorkflowProfilesSection />)
+
+      const quickFixCard = await waitFor(() =>
+        screen.getByTestId('workflow-profile-mohist/quick-fix'),
+      )
+      fireEvent.click(
+        within(quickFixCard).getByRole('switch', { name: 'Disable workflow profile Mohist Quick Fix' }),
+      )
+
+      await waitFor(() => {
+        expect(disableRequests).toEqual(['mohist/quick-fix'])
+      })
+      expect(screen.queryByText('At least one workflow profile must remain enabled.')).not.toBeInTheDocument()
+    })
+
     it('renders one card per profile with display name, id, and multi-line description', async () => {
       render(<WorkflowProfilesSection />)
 
@@ -154,13 +182,20 @@ describe('WorkflowProfilesSection', () => {
       expect(within(defaultCard).getByText('mohist/local')).toBeInTheDocument()
       expect(within(quickFixCard).getByText('mohist/quick-fix')).toBeInTheDocument()
 
-      for (const profile of SYSTEM_TEMPLATES) {
-        const card = screen.getByTestId(`workflow-profile-${profile.id}`)
-        expect(within(card).getAllByLabelText('Workflow stages')).toHaveLength(1)
-        for (const stage of DEFAULT_WORKFLOW_STAGES) {
-          expect(within(card).getByText(stage)).toBeInTheDocument()
-        }
-      }
+      await waitFor(() => {
+        expect(within(defaultCard).getByText('plan')).toBeInTheDocument()
+        expect(within(defaultCard).getByText('build')).toBeInTheDocument()
+      })
+
+      await waitFor(() => {
+        expect(within(quickFixCard).getByText('check')).toBeInTheDocument()
+        expect(within(quickFixCard).getByText('integrate')).toBeInTheDocument()
+      })
+
+      const experimentCard = screen.getByTestId('workflow-profile-mohist/experiment')
+      await waitFor(() => {
+        expect(within(experimentCard).getByText('No stages')).toBeInTheDocument()
+      })
     })
 
     it('renders single-line descriptions without truncation or layout issues', async () => {
@@ -293,5 +328,33 @@ describe('WorkflowProfilesSection', () => {
         expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument(),
       )
     })
+  })
+})
+
+describe('WORKFLOW_DESCRIPTORS (T-003 registry entry)', () => {
+  it('contains at least one workflow-related entry', () => {
+    expect(WORKFLOW_DESCRIPTORS.length).toBeGreaterThan(0)
+    for (const entry of WORKFLOW_DESCRIPTORS) {
+      expect(entry.tab).toBe('workflows')
+      expect(entry.label).toBeTruthy()
+      expect(entry.description).toBeTruthy()
+      expect(entry.focusTargetId).toBeTruthy()
+    }
+  })
+
+  it('includes a Workflow Profiles entry that navigates to the section', () => {
+    const profileEntry = WORKFLOW_DESCRIPTORS.find(
+      (e) => e.focusTargetId === 'workflow-profiles-section',
+    )
+    expect(profileEntry).toBeDefined()
+    expect(profileEntry!.label).toBe('Workflow Profiles')
+  })
+
+  it('includes a Project Default Workflow entry', () => {
+    const defaultEntry = WORKFLOW_DESCRIPTORS.find(
+      (e) => e.focusTargetId === 'project-default-workflow',
+    )
+    expect(defaultEntry).toBeDefined()
+    expect(defaultEntry!.label).toBe('Project Default Workflow')
   })
 })

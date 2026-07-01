@@ -98,23 +98,25 @@ function makeQueryClient() {
  */
 function TabPlaceholder() {
   const { section } = useParams<{ section: string }>()
-  const id =
+  const ids =
     section === 'agent'
-      ? 'agent-runtime-timeout'
+      ? ['agent-runtime-timeout']
       : section === 'ai'
-        ? 'settings-default-model'
+        ? ['settings-default-model']
         : section === 'repositories'
-          ? 'repository-add-name'
+          ? ['repository-add-name']
           : section === 'templates'
-            ? 'templates-search'
+            ? ['templates-search']
             : section === 'system'
-              ? 'system-log-level'
+              ? ['system-log-level']
               : section === 'preferences'
-                ? 'preferences-theme'
-                : 'workflow-profile-mohist/local'
+                ? ['preferences-theme']
+                : ['workflow-profiles-section', 'project-default-workflow']
   return (
     <div data-testid={`placeholder-section-${section}`}>
-      <input data-testid={`placeholder-input-${section}`} id={id} />
+      {ids.map((id) => (
+        <input key={id} data-testid={`placeholder-input-${id}`} id={id} />
+      ))}
     </div>
   )
 }
@@ -533,6 +535,52 @@ describe('SettingsSearch activation (Enter)', () => {
       )
     })
     dispatchSpy.mockRestore()
+  })
+
+  it('searching workflow and clicking a workflow result navigates to Workflows and focuses the target', async () => {
+    arrangeAiLoaded()
+    const user = userEvent.setup()
+    renderSettingsSearchWithLocationSpy('/settings/ai')
+
+    await user.keyboard('{Meta>}k{/Meta}')
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByTestId('settings-search-input'), 'workflow')
+    expect(screen.getByTestId('settings-search-group-workflows')).toBeInTheDocument()
+    await user.click(screen.getByTestId('settings-search-result-workflow-profiles-section'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('settings-search-input')).not.toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('location-spy').getAttribute('data-pathname')).toBe('/settings/workflows')
+    })
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe('workflow-profiles-section')
+    })
+  })
+
+  it('clicking the project default workflow result focuses the default control target', async () => {
+    arrangeAiLoaded()
+    const user = userEvent.setup()
+    renderSettingsSearchWithLocationSpy('/settings/ai')
+
+    await user.keyboard('{Meta>}k{/Meta}')
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByTestId('settings-search-input'), 'default workflow')
+    await user.click(screen.getByTestId('settings-search-result-project-default-workflow'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-spy').getAttribute('data-pathname')).toBe('/settings/workflows')
+    })
+    await waitFor(() => {
+      expect(document.activeElement?.id).toBe('project-default-workflow')
+    })
   })
 })
 

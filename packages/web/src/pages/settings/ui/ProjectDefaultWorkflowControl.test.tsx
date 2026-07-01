@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
+import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -29,18 +30,54 @@ const SYSTEM_TEMPLATES = [
 ]
 
 let currentDefault: string | null = null
+let currentDisabledIds: string[] = []
 const requests: { method: string; url: string; body: unknown }[] = []
 
 const handlers = [
-  http.get('/api/workflow-templates/system', () =>
-    HttpResponse.json({ success: true, data: SYSTEM_TEMPLATES }),
-  ),
+  http.get('/api/workflow-templates/system', ({ request }) => {
+    const url = new URL(request.url)
+    if (url.searchParams.has('project')) {
+      return HttpResponse.json({
+        success: true,
+        data: SYSTEM_TEMPLATES.filter((template) => !currentDisabledIds.includes(template.id)),
+      })
+    }
+    return HttpResponse.json({ success: true, data: SYSTEM_TEMPLATES })
+  }),
   http.get('/api/projects/test-project/workflow-profile', () =>
     HttpResponse.json({
       success: true,
-      data: { projectId: 'test-project', defaultTemplateId: currentDefault },
+      data: { projectId: 'test-project', defaultTemplateId: currentDefault, disabledWorkflowProfileIds: currentDisabledIds },
     }),
   ),
+  http.get('/api/workflow-templates/system/:scope/:name', ({ params }) => {
+    const id = `${params.scope}/${params.name}`
+    const stageMap: Record<string, Array<{ stage: string; requiresApproval: boolean; tasks: string[]; checks: string[] }>> = {
+      'mohist/local': [
+        { stage: 'plan', requiresApproval: true, tasks: [], checks: [] },
+        { stage: 'build', requiresApproval: false, tasks: [], checks: [] },
+      ],
+      'mohist/github-pr': [
+        { stage: 'review', requiresApproval: true, tasks: [], checks: [] },
+        { stage: 'merge', requiresApproval: false, tasks: [], checks: [] },
+      ],
+      'mohist/quick-fix': [
+        { stage: 'fix', requiresApproval: false, tasks: [], checks: [] },
+      ],
+    }
+    const template = SYSTEM_TEMPLATES.find((item) => item.id === id)
+    return HttpResponse.json({
+      success: true,
+      data: {
+        id,
+        displayName: template?.name ?? id,
+        description: template?.description ?? '',
+        isDefault: template?.isDefault ?? false,
+        stages: stageMap[id] ?? [],
+        yaml: `id: ${id}`,
+      },
+    })
+  }),
   http.put('/api/projects/test-project/workflow-profile/default-template', async ({ request }) => {
     const body = await request.json()
     requests.push({ method: 'PUT', url: request.url, body })
@@ -58,6 +95,18 @@ const handlers = [
       data: { projectId: 'test-project', defaultTemplateId: null },
     })
   }),
+  http.post('/api/projects/test-project/workflow-profile/disable', async ({ request }) => {
+    const body = await request.json() as { profileId: string }
+    requests.push({ method: 'POST', url: request.url, body })
+    currentDisabledIds = Array.from(new Set([...currentDisabledIds, body.profileId]))
+    return HttpResponse.json({ success: true, data: null })
+  }),
+  http.post('/api/projects/test-project/workflow-profile/enable', async ({ request }) => {
+    const body = await request.json() as { profileId: string }
+    requests.push({ method: 'POST', url: request.url, body })
+    currentDisabledIds = currentDisabledIds.filter((id) => id !== body.profileId)
+    return HttpResponse.json({ success: true, data: null })
+  }),
 ]
 
 const server = setupServer(...handlers)
@@ -72,6 +121,7 @@ afterAll(() => {
 
 beforeEach(() => {
   currentDefault = null
+  currentDisabledIds = []
   requests.length = 0
   server.resetHandlers(...handlers)
 })
@@ -114,14 +164,18 @@ describe('ProjectDefaultWorkflowControl', () => {
   })
 
   it('selecting mohist/github-pr sends PUT and reads back the new default', async () => {
+    const user = userEvent.setup()
     currentDefault = null
     renderSection()
 
-    const select = await waitFor(() =>
+    const trigger = await waitFor(() =>
       screen.getByTestId('project-default-workflow-select'),
     )
 
-    fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
+    await user.click(trigger)
+
+    const option = await screen.findByRole('option', { name: /Mohist GitHub PR/ })
+    await user.click(option)
 
     await waitFor(() => expect(requests).toHaveLength(1),
     )
@@ -156,13 +210,16 @@ describe('ProjectDefaultWorkflowControl', () => {
   })
 
   it('selecting inherit system default sends DELETE and returns to the inherit state', async () => {
+    const user = userEvent.setup()
     currentDefault = 'mohist/github-pr'
     renderSection()
 
-    const select = await screen.findByTestId('project-default-workflow-select') as HTMLSelectElement
-    await waitFor(() => expect(select.value).toBe('mohist/github-pr'))
+    const trigger = await screen.findByTestId('project-default-workflow-select')
 
-    fireEvent.change(select, { target: { value: '' } })
+    await user.click(trigger)
+
+    const option = await screen.findByRole('option', { name: /Inherit system default/ })
+    await user.click(option)
 
     await waitFor(() => expect(requests).toHaveLength(1))
     expect(requests[0].method).toBe('DELETE')
@@ -172,7 +229,6 @@ describe('ProjectDefaultWorkflowControl', () => {
         'mohist/local',
       ),
     )
-    expect(select.value).toBe('')
   })
 
   it('warns when the configured default is absent from the system catalog and offers Clear', async () => {
@@ -186,6 +242,146 @@ describe('ProjectDefaultWorkflowControl', () => {
     )
 
     expect(screen.getByTestId('project-default-workflow-clear')).not.toBeDisabled()
+  })
+
+  it('shows the inherited default from the filtered enabled profiles when the system default is disabled', async () => {
+    currentDefault = null
+    currentDisabledIds = ['mohist/local']
+
+    renderSection()
+
+    await waitFor(() =>
+      expect(screen.getByTestId('project-default-workflow-system-default')).toHaveTextContent(
+        'mohist/github-pr',
+      ),
+    )
+  })
+
+  it('shows an error when the project-scoped enabled profiles query fails', async () => {
+    server.use(
+      http.get('/api/workflow-templates/system', ({ request }) => {
+        const url = new URL(request.url)
+        if (url.searchParams.has('project')) {
+          return HttpResponse.json({ success: false, error: 'boom' }, { status: 500 })
+        }
+        return HttpResponse.json({ success: true, data: SYSTEM_TEMPLATES })
+      }),
+    )
+
+    renderSection()
+
+    await waitFor(() =>
+      expect(screen.getByText('Failed to load project default workflow.')).toBeInTheDocument(),
+    )
+    expect(screen.queryByTestId('project-default-workflow-system-default')).not.toBeInTheDocument()
+  })
+
+  it('shows an amber warning and disabled dropdown item when the configured default is disabled', async () => {
+    const user = userEvent.setup()
+    currentDefault = 'mohist/local'
+    currentDisabledIds = ['mohist/local']
+
+    renderSection()
+
+    await waitFor(() =>
+      expect(screen.getByTestId('project-default-workflow-disabled-warning')).toHaveTextContent(
+        'mohist/local',
+      ),
+    )
+
+    await user.click(screen.getByTestId('project-default-workflow-select'))
+
+    const disabledOption = await screen.findByRole('option', { name: /Mohist Local/ })
+    expect(disabledOption).toHaveAttribute('aria-disabled', 'true')
+    expect(within(disabledOption).getByText('Mohist Local')).toHaveClass('text-muted-foreground')
+  })
+
+  it('shows the disabled-default warning when the configured default casing differs from the disabled id', async () => {
+    const user = userEvent.setup()
+    currentDefault = 'MOHIST/LOCAL'
+    currentDisabledIds = ['mohist/local']
+
+    renderSection()
+
+    await waitFor(() =>
+      expect(screen.getByTestId('project-default-workflow-disabled-warning')).toHaveTextContent(
+        'MOHIST/LOCAL',
+      ),
+    )
+    expect(screen.queryByTestId('project-default-workflow-orphan-warning')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('project-default-workflow-select'))
+
+    const disabledOption = await screen.findByRole('option', { name: /Mohist Local/ })
+    expect(disabledOption).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('keeps workflow switches inactive until the project blacklist has loaded', async () => {
+    server.use(
+      http.get('/api/projects/test-project/workflow-profile', async () => {
+        await new Promise((resolve) => setTimeout(resolve, 80))
+        return HttpResponse.json({
+          success: true,
+          data: { projectId: 'test-project', defaultTemplateId: null, disabledWorkflowProfileIds: ['mohist/local'] },
+        })
+      }),
+    )
+
+    renderSection()
+
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.queryByRole('switch', { name: /Disable workflow profile Mohist Local/ })).not.toBeInTheDocument()
+
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: /Enable workflow profile Mohist Local/ })).toBeInTheDocument(),
+    )
+  })
+
+  it('shows an error instead of defaulting switches to enabled when the blacklist fails to load', async () => {
+    server.use(
+      http.get('/api/projects/test-project/workflow-profile', () =>
+        HttpResponse.json({ success: false, error: 'boom' }, { status: 500 }),
+      ),
+    )
+
+    renderSection()
+
+    await waitFor(() =>
+      expect(screen.getByText('Failed to load workflow profile settings.')).toBeInTheDocument(),
+    )
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+  })
+
+  it('renders accessible switches that write enable and disable mutations', async () => {
+    const user = userEvent.setup()
+    currentDisabledIds = ['mohist/github-pr']
+
+    renderSection()
+
+    const disabledSwitch = await screen.findByRole('switch', { name: /Enable workflow profile Mohist GitHub PR/ })
+    await user.click(disabledSwitch)
+
+    await waitFor(() =>
+      expect(requests).toContainEqual(expect.objectContaining({
+        method: 'POST',
+        body: { profileId: 'mohist/github-pr' },
+      })),
+    )
+  })
+
+  it('blocks disabling the only enabled workflow inline', async () => {
+    const user = userEvent.setup()
+    currentDisabledIds = ['mohist/local', 'mohist/quick-fix']
+
+    renderSection()
+
+    const onlyEnabledSwitch = await screen.findByRole('switch', { name: /Disable workflow profile Mohist GitHub PR/ })
+    await user.click(onlyEnabledSwitch)
+
+    expect(await screen.findByTestId('workflow-profile-mohist/github-pr-blocked')).toHaveTextContent(
+      'At least one workflow profile must remain enabled.',
+    )
+    expect(requests.filter((request) => request.url.includes('/workflow-profile/disable'))).toHaveLength(0)
   })
 
   it('renders the system-default badge with styling distinct from the project-default badge', async () => {

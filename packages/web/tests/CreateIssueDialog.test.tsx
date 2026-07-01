@@ -141,7 +141,7 @@ describe('CreateIssueDialog frontmatter detection', () => {
       expect(createIssue).toHaveBeenCalledTimes(1)
     })
     const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(payload.workflowProfileId).toBe('mohist/local')
+    expect(payload.workflowProfileId).toBeUndefined()
   })
 })
 
@@ -186,7 +186,7 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
     expect(payload.workflowProfileId).toBe('mohist/local')
   })
 
-  it('sends the displayed effective workflowProfileId when no frontmatter recommendation is present', async () => {
+  it('shows the displayed effective workflowProfileId but lets the server inherit it when no frontmatter recommendation is present', async () => {
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'No selection' } })
@@ -197,10 +197,10 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
       expect(createIssue).toHaveBeenCalledTimes(1)
     })
     const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(payload.workflowProfileId).toBe('mohist/local')
+    expect(payload.workflowProfileId).toBeUndefined()
   })
 
-  it('sends the project-configured default workflowProfileId when the selector is not manually changed', async () => {
+  it('shows the project-configured default workflowProfileId but does not serialize it unless manually changed', async () => {
     ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({
       data: [
         { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
@@ -225,7 +225,7 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
       expect(createIssue).toHaveBeenCalledTimes(1)
     })
     const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(payload.workflowProfileId).toBe('mohist/github-pr')
+    expect(payload.workflowProfileId).toBeUndefined()
   })
 
   it('sends workflowProfileId=mohist/github-pr when the user explicitly selects it', async () => {

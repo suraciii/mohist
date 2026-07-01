@@ -1,21 +1,30 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowLeftIcon } from 'lucide-react'
 import { useProject } from '../../../entities/project'
-import { useWorkflowProfiles, useWorkflowProfile } from '../../../entities/settings'
+import { useDisableWorkflowProfile, useEnableWorkflowProfile, useProjectDefaultWorkflowProfile, useWorkflowProfile, useAllWorkflowProfiles } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
+import { includesWorkflowProfileId } from '../../../entities/settings/model/workflowProfileIds'
 import { CardSection } from '../../../shared/ui/components/card-section'
+import { Switch } from '../../../shared/ui/components/switch'
 import type { SettingsSearchEntry } from '@/features/settings-search'
 import { ProjectDefaultWorkflowControl } from './ProjectDefaultWorkflowControl'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
-// Isolated until workflow profile list data can provide per-profile stages.
-export const DEFAULT_WORKFLOW_STAGES = ['plan', 'build', 'check', 'integrate'] as const
-
-// Workflows has no configurable fields (profiles are read-only with per-row
-// view-detail actions); the search registry keeps an empty array so the tab
-// is still discoverable but exposes nothing to filter on.
-export const WORKFLOW_DESCRIPTORS: SettingsSearchEntry[] = []
+export const WORKFLOW_DESCRIPTORS: SettingsSearchEntry[] = [
+  {
+    tab: 'workflows',
+    label: 'Workflow Profiles',
+    description: 'Browse and manage system workflow profiles.',
+    focusTargetId: 'workflow-profiles-section',
+  },
+  {
+    tab: 'workflows',
+    label: 'Project Default Workflow',
+    description: 'Set the default workflow profile for new issues in this project.',
+    focusTargetId: 'project-default-workflow',
+  },
+]
 
 function YamlViewer({ yaml }: { yaml: string }) {
   return (
@@ -118,10 +127,26 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
   )
 }
 
-function ProfileCard({ profile, onClick }: { profile: WorkflowProfileInfo; onClick: () => void }) {
+function ProfileCard({
+  profile,
+  onClick,
+  isDisabled,
+  isLastEnabled,
+  toggleDisabled,
+  onToggleDisabled,
+}: {
+  profile: WorkflowProfileInfo
+  onClick: () => void
+  isDisabled: boolean
+  isLastEnabled: boolean
+  toggleDisabled: boolean
+  onToggleDisabled: (profileId: string, currentlyDisabled: boolean) => void
+}) {
   const descriptionRef = useRef<HTMLParagraphElement>(null)
   const [isExpanded, setIsExpanded] = useState(false)
   const [hasOverflow, setHasOverflow] = useState(false)
+  const [blockedMessage, setBlockedMessage] = useState<string | null>(null)
+  const { data: detail, isLoading: detailLoading } = useWorkflowProfile(profile.id)
 
   useLayoutEffect(() => {
     const description = descriptionRef.current
@@ -129,6 +154,17 @@ function ProfileCard({ profile, onClick }: { profile: WorkflowProfileInfo; onCli
 
     setHasOverflow(description.scrollHeight > description.clientHeight)
   }, [profile.description])
+
+  const stages = detail?.stages ?? []
+
+  const handleToggle = useCallback(() => {
+    if (!isDisabled && isLastEnabled) {
+      setBlockedMessage('At least one workflow profile must remain enabled.')
+      return
+    }
+    setBlockedMessage(null)
+    onToggleDisabled(profile.id, isDisabled)
+  }, [isDisabled, isLastEnabled, profile.id, onToggleDisabled])
 
   return (
     <CardSection className="p-0 hover:bg-muted/50 transition-colors">
@@ -145,13 +181,21 @@ function ProfileCard({ profile, onClick }: { profile: WorkflowProfileInfo; onCli
             </div>
             <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono">{profile.id}</p>
           </div>
-          <button
-            type="button"
-            onClick={onClick}
-            className="shrink-0 text-xs font-medium text-primary hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
-          >
-            View details
-          </button>
+          <div className="flex items-center gap-2">
+            <Switch
+              aria-label={`${isDisabled ? 'Enable' : 'Disable'} workflow profile ${profile.displayName}`}
+              checked={!isDisabled}
+              onCheckedChange={handleToggle}
+              disabled={toggleDisabled}
+            />
+            <button
+              type="button"
+              onClick={onClick}
+              className="shrink-0 text-xs font-medium text-primary hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
+            >
+              View details
+            </button>
+          </div>
         </div>
         <p
           ref={descriptionRef}
@@ -173,15 +217,33 @@ function ProfileCard({ profile, onClick }: { profile: WorkflowProfileInfo; onCli
           </button>
         )}
         <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Workflow stages">
-          {DEFAULT_WORKFLOW_STAGES.map((stage) => (
-            <span
-              key={stage}
-              className="inline-flex items-center rounded-full border bg-muted/50 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-            >
-              {stage}
+          {detailLoading ? (
+            <span className="inline-flex items-center rounded-full border bg-muted/50 px-2 py-0.5 text-[10px] font-medium text-muted-foreground animate-pulse">
+              Loading...
             </span>
-          ))}
+          ) : stages.length === 0 ? (
+            <span className="inline-flex items-center rounded-full border bg-muted/50 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              No stages
+            </span>
+          ) : (
+            stages.map((s) => (
+              <span
+                key={s.stage}
+                className="inline-flex items-center rounded-full border bg-muted/50 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+              >
+                {s.stage}
+              </span>
+            ))
+          )}
         </div>
+        {blockedMessage && (
+          <div
+            data-testid={`workflow-profile-${profile.id}-blocked`}
+            className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          >
+            {blockedMessage}
+          </div>
+        )}
       </div>
     </CardSection>
   )
@@ -189,8 +251,22 @@ function ProfileCard({ profile, onClick }: { profile: WorkflowProfileInfo; onCli
 
 export function WorkflowProfilesSection() {
   const { currentProject } = useProject()
-  const { data: profiles, isLoading, isError } = useWorkflowProfiles()
+  const { data: allProfiles, isLoading: profilesLoading, isError: profilesError } = useAllWorkflowProfiles()
+  const { data: projectProfile, isLoading: projectProfileLoading, isError: projectProfileError } = useProjectDefaultWorkflowProfile()
+  const disableMutation = useDisableWorkflowProfile()
+  const enableMutation = useEnableWorkflowProfile()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const disabledIds = projectProfile?.disabledWorkflowProfileIds ?? []
+  const enabledCount = allProfiles?.filter((p) => !includesWorkflowProfileId(disabledIds, p.id)).length ?? 0
+
+  const handleToggleDisabled = useCallback((profileId: string, currentlyDisabled: boolean) => {
+    if (currentlyDisabled) {
+      enableMutation.mutate(profileId)
+    } else {
+      disableMutation.mutate(profileId)
+    }
+  }, [enableMutation, disableMutation])
 
   if (!currentProject) {
     return (
@@ -204,31 +280,43 @@ export function WorkflowProfilesSection() {
     return <ProfileDetail profileId={selectedId} onBack={() => setSelectedId(null)} />
   }
 
-  if (isLoading) {
+  if (profilesLoading || projectProfileLoading) {
     return <SectionState variant="loading" title="Workflow Profiles" skeletonRows={2} />
   }
 
-  if (isError || !profiles) {
+  if (profilesError || projectProfileError || !allProfiles || !projectProfile) {
     return (
       <SectionState
         variant="error"
         title="Workflow Profiles"
-        message="Failed to load profiles."
+        message="Failed to load workflow profile settings."
       />
     )
   }
 
   return (
-    <SettingsSection
-      title="Workflow Profiles"
-      description="Choose the workflow new issues inherit for this project, then browse the read-only system catalog below."
-    >
-      <div className="space-y-4">
-        <ProjectDefaultWorkflowControl />
-        {profiles.map((p) => (
-          <ProfileCard key={p.id} profile={p} onClick={() => setSelectedId(p.id)} />
-        ))}
-      </div>
-    </SettingsSection>
+    <div id="workflow-profiles-section" tabIndex={-1}>
+      <SettingsSection
+        title="Workflow Profiles"
+        description="Choose the workflow new issues inherit for this project, then browse the read-only system catalog below."
+      >
+        <div className="space-y-4">
+          <div id="project-default-workflow" tabIndex={-1}>
+            <ProjectDefaultWorkflowControl />
+          </div>
+          {allProfiles.map((p) => (
+            <ProfileCard
+              key={p.id}
+              profile={p}
+              onClick={() => setSelectedId(p.id)}
+              isDisabled={includesWorkflowProfileId(disabledIds, p.id)}
+              isLastEnabled={enabledCount <= 1 && !includesWorkflowProfileId(disabledIds, p.id)}
+              toggleDisabled={disableMutation.isPending || enableMutation.isPending}
+              onToggleDisabled={handleToggleDisabled}
+            />
+          ))}
+        </div>
+      </SettingsSection>
+    </div>
   )
 }
