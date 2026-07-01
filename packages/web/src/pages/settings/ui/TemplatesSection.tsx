@@ -11,6 +11,7 @@ import {
 } from '../../../entities/template'
 import type { ProjectTemplate, SystemTemplate } from '../../../entities/template'
 import type { SettingsSearchEntry } from '@/features/settings-search'
+import { getSectionMeta } from '../lib/sections'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 import { TemplateEditor, type TemplateEditorTarget, type EditorMode } from './TemplateEditor'
@@ -241,6 +242,7 @@ export function TemplatesSection() {
   const [search, setSearch] = useState('')
   const [editorTarget, setEditorTarget] = useState<TemplateEditorTarget | null>(null)
   const [newDialogOpen, setNewDialogOpen] = useState(false)
+  const { label: sectionLabel, description: sectionDescription } = getSectionMeta('templates')
 
   const systemByKey = useMemo(() => {
     const map = new Map<string, SystemTemplate>()
@@ -266,8 +268,8 @@ export function TemplatesSection() {
 
   return (
     <SettingsSection
-      title="Templates"
-      description="Manage prompt templates for this project. Override system templates or add project-unique keys."
+      title={sectionLabel}
+      description={sectionDescription}
     >
       <div className="flex justify-end">
         <Button

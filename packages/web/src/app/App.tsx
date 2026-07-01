@@ -29,6 +29,7 @@ import { InboxPage } from '../pages/inbox/ui/InboxPage'
 import { AgentListPage } from '../pages/agent-list/ui/AgentListPage'
 import { AgentDetailPage } from '../pages/agent-detail/ui/AgentDetailPage'
 import { AgentSessionComposerPage } from '../pages/agent-session-composer/ui/AgentSessionComposerPage'
+import { isApplicationSection, isProjectSection, isSettingsSectionKey } from '../pages/settings/lib/sections'
 
 function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
@@ -56,6 +57,8 @@ function AppContent() {
         <Header onCreateIssue={() => setCreateIssueOpen(true)} />
         <div className="flex-1 min-h-0 flex flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
           <Routes>
+            <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
+            <Route path="/settings/:section" element={<ApplicationSettingsSection />} />
             <Route element={<ProjectGuard />}>
               <Route path="/" element={<NavigateToCurrentProject />} />
               <Route path="/:projectName" element={<ProjectRouteScope />}>
@@ -71,8 +74,8 @@ function AppContent() {
                 <Route path="agent-sessions/:sessionId" element={<GenericSessionPage />} />
                 <Route path="activity" element={<ActivityPage />} />
                 <Route path="runners" element={<RunnersPage />} />
-                <Route path="settings" element={<Navigate to="settings/ai" replace />} />
-                <Route path="settings/:section" element={<SettingsPage />} />
+                <Route path="settings" element={<LegacySettingsRedirect />} />
+                <Route path="settings/:section" element={<LegacyProjectSettingsSection />} />
                 <Route path="logs" element={<LogsPage />} />
                 <Route path="archived" element={<ArchivedPage />} />
                 <Route path="epics" element={<EpicListPage />} />
@@ -95,6 +98,30 @@ function AppContent() {
 function NavigateToCurrentProject() {
   const { currentProject } = useProject()
   return <Navigate to={projectPath(currentProject?.name)} replace />
+}
+
+function ApplicationSettingsSection() {
+  const { section } = useParams<{ section: string }>()
+  const { currentProject } = useProject()
+
+  if (section && isSettingsSectionKey(section) && isProjectSection(section)) {
+    if (currentProject) {
+      return <Navigate to={`/${encodeURIComponent(currentProject.name)}/settings/${section}`} replace />
+    }
+  }
+  return <SettingsPage />
+}
+
+function LegacySettingsRedirect() {
+  return <Navigate to="/settings/ai" replace />
+}
+
+function LegacyProjectSettingsSection() {
+  const { section } = useParams<{ section: string }>()
+  if (section && isSettingsSectionKey(section) && isApplicationSection(section)) {
+    return <Navigate to={`/settings/${section}`} replace />
+  }
+  return <SettingsPage />
 }
 
 function ProjectRouteScope() {

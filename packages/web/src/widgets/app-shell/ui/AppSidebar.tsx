@@ -38,33 +38,48 @@ import {
 import { Button } from '@/shared/ui/components/button'
 import { CreateProjectDialog } from '../../create-project-dialog/ui/CreateProjectDialog'
 import type { Project } from '../../../entities/project'
+import type { ComponentType } from 'react'
 
 interface AppSidebarProps {
   onCreateIssue: () => void
 }
 
-const primaryNav = [
-  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, to: '/' },
-  { key: 'issues', label: 'Issues', icon: ListTodoIcon, to: '/issues' },
-  { key: 'agents', label: 'Agents', icon: BotIcon, to: '/agents' },
-  { key: 'inbox', label: 'Inbox', icon: InboxIcon, to: '/inbox' },
-  { key: 'activity', label: 'Activity', icon: ActivityIcon, to: '/activity' },
-  { key: 'runners', label: 'Runners', icon: ServerIcon, to: '/runners' },
-  { key: 'epics', label: 'Epics', icon: ListTodoIcon, to: '/epics' },
-] as const
+type NavScope = 'application' | 'project'
 
-const archivedNav = [
-  { key: 'archived', label: 'Archived', icon: ArchiveIcon, to: '/archived' },
-] as const
+interface NavItem {
+  key: string
+  label: string
+  icon: ComponentType<{ className?: string }>
+  to: string
+  scope: NavScope
+}
 
-const configureNav = [
-  { key: 'logs', label: 'Logs', icon: FileTextIcon, to: '/logs' },
-  { key: 'settings', label: 'Settings', icon: SettingsIcon, to: '/settings/ai' },
-] as const
+const primaryNav: readonly NavItem[] = [
+  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, to: '/', scope: 'project' },
+  { key: 'issues', label: 'Issues', icon: ListTodoIcon, to: '/issues', scope: 'project' },
+  { key: 'agents', label: 'Agents', icon: BotIcon, to: '/agents', scope: 'project' },
+  { key: 'inbox', label: 'Inbox', icon: InboxIcon, to: '/inbox', scope: 'project' },
+  { key: 'activity', label: 'Activity', icon: ActivityIcon, to: '/activity', scope: 'project' },
+  { key: 'runners', label: 'Runners', icon: ServerIcon, to: '/runners', scope: 'project' },
+  { key: 'epics', label: 'Epics', icon: ListTodoIcon, to: '/epics', scope: 'project' },
+]
+
+const archivedNav: readonly NavItem[] = [
+  { key: 'archived', label: 'Archived', icon: ArchiveIcon, to: '/archived', scope: 'project' },
+]
+
+const configureNav: readonly NavItem[] = [
+  { key: 'logs', label: 'Logs', icon: FileTextIcon, to: '/logs', scope: 'project' },
+  { key: 'settings', label: 'Settings', icon: SettingsIcon, to: '/settings/ai', scope: 'application' },
+]
 
 function isNavActive(pathname: string, to: string): boolean {
   if (to === '/') return pathname === '/'
   return pathname === to || pathname.startsWith(`${to}/`)
+}
+
+function isSettingsPathActive(pathname: string): boolean {
+  return pathname.split('/').filter(Boolean).includes('settings')
 }
 
 function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
@@ -268,16 +283,15 @@ function AgentStatusFooter() {
 export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
   const location = useLocation()
   const navigate = useNavigate()
-  const { currentProject } = useProject()
   const toProjectPath = useProjectPath()
   const { data: unreadCount } = useUnreadInboxCount()
-  const visibleConfigureNav = configureNav.filter(
-    (item) => item.key !== 'settings' || currentProject !== null,
-  )
 
-  function renderNavItem(item: (typeof primaryNav)[number] | (typeof configureNav)[number] | (typeof archivedNav)[number]) {
-    const to = toProjectPath(item.to)
-    const active = isNavActive(location.pathname, to)
+  function renderNavItem(item: NavItem) {
+    const to = item.scope === 'application' ? item.to : toProjectPath(item.to)
+    const active = item.key === 'settings'
+      ? isSettingsPathActive(location.pathname)
+      : isNavActive(location.pathname, to)
+    const Icon = item.icon
     return (
       <SidebarMenuItem key={item.key}>
         <SidebarMenuButton
@@ -285,7 +299,7 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
           onClick={() => navigate(to)}
           data-testid={`nav-${item.key}`}
         >
-          <item.icon />
+          <Icon />
           <span>{item.label}</span>
         </SidebarMenuButton>
         {item.key === 'inbox' && unreadCount != null && unreadCount > 0 && (
@@ -351,7 +365,7 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
           <SidebarGroupLabel>Configure</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {visibleConfigureNav.map((item) => renderNavItem(item))}
+              {configureNav.map((item) => renderNavItem(item))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

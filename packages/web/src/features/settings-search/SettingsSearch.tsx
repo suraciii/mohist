@@ -20,9 +20,8 @@
  *   never matches a timeout field whose current value happens to be 30.
  *
  * - **D4 — Enter navigates and focuses via rAF element-poll.** After the
- *   dialog closes, the Settings tab route changes. Radix Tabs unmounts the
- *   inactive `TabsContent`, so the target focusable element mounts
- *   asynchronously after the route change. We poll
+ *   dialog closes, the route-based Settings section changes, so the target
+ *   focusable element may mount asynchronously after navigation. We poll
  *   `document.getElementById(focusTargetId)` on each `requestAnimationFrame`
  *   up to ~500ms, then call `.focus()` + `scrollIntoView`. If the poll
  *   times out the navigation still happens, but we surface a warning instead
@@ -38,7 +37,11 @@ import {
   CommandItem,
   CommandList,
 } from '@/shared/ui/components/command'
-import { useProjectPath } from '../../entities/project'
+import {
+  useSettingsSectionPath,
+  type SettingsSectionKey,
+} from '@/pages/settings/lib'
+import { isProjectSection } from '@/pages/settings/lib/sections'
 import { registerShortcutHandler } from './keyboard-shortcuts'
 import { settingsSearchRegistry } from './registry'
 import type { SettingsSearchEntry, SettingsTab } from './types'
@@ -55,9 +58,8 @@ const SECTION_LABEL: Record<SettingsTab, string> = {
 
 /**
  * FOCUS_POLL_TIMEOUT_MS bounds the rAF element-poll that follows an Enter
- * activation. Radix Tabs unmounts inactive content, so the target focusable
- * element mounts asynchronously after the route change; ~500ms is plenty in
- * practice but acts as a hard ceiling.
+ * activation. Settings section content can mount after the route change; ~500ms
+ * is plenty in practice but acts as a hard ceiling.
  */
 const FOCUS_POLL_TIMEOUT_MS = 500
 
@@ -110,7 +112,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 function SettingsSearch() {
   const [open, setOpen] = useState(false)
   const navigate = useNavigate()
-  const toProjectPath = useProjectPath()
+  const sectionPath = useSettingsSectionPath()
   const titleId = useId()
 
   const openDialog = useCallback(() => setOpen(true), [])
@@ -165,13 +167,17 @@ function SettingsSearch() {
 
   const handleSelect = useCallback(
     (entry: SettingsSearchEntry) => {
+      const targetPath = sectionPath(entry.tab as SettingsSectionKey)
+      if (!targetPath) {
+        return
+      }
       focusTargetAfterNavigation.current = entry.focusTargetId
       setOpen(false)
-      navigate(toProjectPath(`/settings/${entry.tab}`))
-      // Poll for the focus target after Radix Tabs mounts the new TabsContent.
+      navigate(targetPath)
+      // Poll for the focus target after the target settings route renders.
       focusTargetElement(entry.focusTargetId, entry.revealEvent)
     },
-    [navigate, toProjectPath],
+    [navigate, sectionPath],
   )
 
   return (
@@ -195,23 +201,29 @@ function SettingsSearch() {
         <CommandEmpty data-testid="settings-search-empty">{NO_MATCHES_COPY}</CommandEmpty>
         {grouped.map((group) => (
           <CommandGroup key={group.tab} heading={group.label} data-testid={`settings-search-group-${group.tab}`}>
-            {group.entries.map((entry) => (
-              <CommandItem
-                key={entry.focusTargetId}
-                value={buildHaystack(entry)}
-                onSelect={() => handleSelect(entry)}
-                data-testid={`settings-search-result-${entry.focusTargetId}`}
-                className="min-h-[44px] py-2"
-              >
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
-                  <span className="text-sm font-medium text-foreground">{entry.label}</span>
-                  <span className="text-xs text-foreground/70">{entry.description}</span>
-                </span>
-                <span className="ml-2 text-xs text-foreground/70 shrink-0">
-                  {SECTION_LABEL[entry.tab]}
-                </span>
-              </CommandItem>
-            ))}
+            {group.entries.map((entry) => {
+              const disabled =
+                isProjectSection(entry.tab as SettingsSectionKey) &&
+                sectionPath(entry.tab as SettingsSectionKey) === null
+              return (
+                <CommandItem
+                  key={entry.focusTargetId}
+                  value={buildHaystack(entry)}
+                  disabled={disabled}
+                  onSelect={() => handleSelect(entry)}
+                  data-testid={`settings-search-result-${entry.focusTargetId}`}
+                  className="min-h-[44px] py-2"
+                >
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+                    <span className="text-sm font-medium text-foreground">{entry.label}</span>
+                    <span className="text-xs text-foreground/70">{entry.description}</span>
+                  </span>
+                  <span className="ml-2 text-xs text-foreground/70 shrink-0">
+                    {SECTION_LABEL[entry.tab]}
+                  </span>
+                </CommandItem>
+              )
+            })}
           </CommandGroup>
         ))}
       </CommandList>

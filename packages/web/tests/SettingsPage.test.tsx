@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { baseRender, screen, fireEvent, waitFor } from './test-utils'
+import { baseRender, screen, fireEvent, waitFor, TEST_PROJECT } from './test-utils'
 import { SettingsPage } from '../src/pages/settings/ui/SettingsPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import React from 'react'
 
 function createSystemInfo(overrides: Partial<any> = {}) {
@@ -72,10 +73,12 @@ function renderWithQueryClient(
   return baseRender(
     <MemoryRouter initialEntries={initialEntries}>
       <QueryClientProvider client={queryClient}>
-        <Routes>
-          <Route path="/settings/:section" element={ui} />
-          <Route path="/settings" element={ui} />
-        </Routes>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <Routes>
+            <Route path="/settings/:section" element={ui} />
+            <Route path="/settings" element={ui} />
+          </Routes>
+        </ProjectProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   )
@@ -174,10 +177,10 @@ describe('SettingsPage', () => {
     it('should render Coder Agent tab by default', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      expect(screen.getByRole('tab', { name: 'Coder Agent' })).toBeInTheDocument()
-      expect(screen.getByRole('tab', { name: 'Runtime' })).toBeInTheDocument()
-      expect(screen.getByRole('tab', { name: 'System' })).toBeInTheDocument()
-      expect(screen.getAllByRole('heading', { name: 'External Coder Agent' })[0]).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Coder Agent' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Runtime' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'System' })).toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { name: 'Coder Agent' })[0]).toBeInTheDocument()
     })
 
     it('should display opencode model count via the lightweight hint', () => {
@@ -239,37 +242,37 @@ describe('SettingsPage', () => {
   })
 
   describe('Tab switching', () => {
-    it('should switch to Runtime tab when clicked', () => {
-      renderWithQueryClient(<SettingsPage />)
+    it('should switch to Runtime section when the Runtime sub-nav link is clicked', () => {
+      renderWithQueryClient(<SettingsPage />, ['/settings/ai'])
 
-      fireEvent.click(screen.getByRole('tab', { name: 'Runtime' }))
+      fireEvent.click(screen.getByRole('link', { name: 'Runtime' }))
 
-      expect(screen.getAllByRole('heading', { name: 'Coder Agent Runtime' })[0]).toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { name: 'Runtime' })[0]).toBeInTheDocument()
     })
 
-    it('should switch back to Coder Agent tab when clicked', () => {
-      renderWithQueryClient(<SettingsPage />)
+    it('should switch back to Coder Agent section when its sub-nav link is clicked', () => {
+      renderWithQueryClient(<SettingsPage />, ['/settings/ai'])
 
-      fireEvent.click(screen.getByRole('tab', { name: 'Runtime' }))
-      expect(screen.getAllByRole('heading', { name: 'Coder Agent Runtime' })[0]).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('link', { name: 'Runtime' }))
+      expect(screen.getAllByRole('heading', { name: 'Runtime' })[0]).toBeInTheDocument()
 
-      fireEvent.click(screen.getByRole('tab', { name: 'Coder Agent' }))
-      expect(screen.getAllByRole('heading', { name: 'External Coder Agent' })[0]).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('link', { name: 'Coder Agent' }))
+      expect(screen.getAllByRole('heading', { name: 'Coder Agent' })[0]).toBeInTheDocument()
     })
 
-    it('should highlight active tab', () => {
-      renderWithQueryClient(<SettingsPage />)
+    it('should mark the active sub-nav item with aria-current="page"', () => {
+      renderWithQueryClient(<SettingsPage />, ['/settings/ai'])
 
-      const aiTab = screen.getByRole('tab', { name: 'Coder Agent' })
-      const agentTab = screen.getByRole('tab', { name: 'Runtime' })
+      const aiLink = screen.getByRole('link', { name: 'Coder Agent' })
+      const agentLink = screen.getByRole('link', { name: 'Runtime' })
 
-      expect(aiTab).toHaveAttribute('aria-selected', 'true')
-      expect(agentTab).toHaveAttribute('aria-selected', 'false')
+      expect(aiLink).toHaveAttribute('aria-current', 'page')
+      expect(agentLink).not.toHaveAttribute('aria-current')
 
-      fireEvent.click(agentTab)
+      fireEvent.click(agentLink)
 
-      expect(agentTab).toHaveAttribute('aria-selected', 'true')
-      expect(aiTab).toHaveAttribute('aria-selected', 'false')
+      expect(agentLink).toHaveAttribute('aria-current', 'page')
+      expect(aiLink).not.toHaveAttribute('aria-current')
     })
   })
 

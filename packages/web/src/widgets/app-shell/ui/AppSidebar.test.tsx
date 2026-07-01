@@ -3,7 +3,7 @@ import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { SidebarProvider } from '@/shared/ui/components/sidebar'
 import { AppSidebar } from './AppSidebar'
@@ -39,11 +39,17 @@ function renderSidebar(initialRoute: string, initialProjectId: string | null = T
         <MemoryRouter initialEntries={[initialRoute]}>
           <SidebarProvider>
             <AppSidebar onCreateIssue={vi.fn()} />
+            <LocationSpy />
           </SidebarProvider>
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
   )
+}
+
+function LocationSpy() {
+  const location = useLocation()
+  return <div data-testid="location-spy" data-pathname={location.pathname} />
 }
 
 function getNavTestIdsInOrder(): string[] {
@@ -144,6 +150,45 @@ describe('AppSidebar primary navigation', () => {
     expect(screen.getByTestId('nav-dashboard')).toHaveAttribute('data-active', 'true')
   })
 
+  it('highlights the Settings entry on the application-scoped /settings/ai route', () => {
+    renderSidebar('/settings/ai')
+
+    expect(screen.getByTestId('nav-settings')).toHaveAttribute('data-active', 'true')
+  })
+
+  it('highlights the Settings entry on the legacy project-scoped /:projectName/settings/:section route', () => {
+    renderSidebar('/demo/settings/repositories')
+
+    expect(screen.getByTestId('nav-settings')).toHaveAttribute('data-active', 'true')
+  })
+
+  it('navigates to /settings/ai (no project prefix) when Settings is clicked with a selected project', () => {
+    renderSidebar('/demo')
+
+    fireEvent.click(screen.getByTestId('nav-settings'))
+
+    expect(screen.getByTestId('location-spy')).toHaveAttribute('data-pathname', '/settings/ai')
+    expect(screen.getByTestId('nav-settings')).toHaveAttribute('data-active', 'true')
+  })
+
+  it('navigates to /settings/ai when Settings is clicked with no project selected', () => {
+    renderSidebar('/demo', null)
+
+    fireEvent.click(screen.getByTestId('nav-settings'))
+
+    expect(screen.getByTestId('location-spy')).toHaveAttribute('data-pathname', '/settings/ai')
+    expect(screen.getByTestId('nav-settings')).toHaveAttribute('data-active', 'true')
+  })
+
+  it('navigates Logs through the selected project route', () => {
+    renderSidebar('/demo')
+
+    fireEvent.click(screen.getByTestId('nav-logs'))
+
+    expect(screen.getByTestId('location-spy')).toHaveAttribute('data-pathname', '/demo/logs')
+    expect(screen.getByTestId('nav-logs')).toHaveAttribute('data-active', 'true')
+  })
+
   it('renders Archived after Logs and Settings (Archived renders last)', () => {
     renderSidebar('/demo')
 
@@ -165,11 +210,11 @@ describe('AppSidebar primary navigation', () => {
     expect(labels).toContain('Issues')
   })
 
-  it('hides Settings while keeping Logs visible when no project is selected', () => {
+  it('keeps Settings visible when no project is selected (global config is reachable)', () => {
     renderSidebar('/demo', null)
 
     expect(screen.getByTestId('nav-logs')).toBeInTheDocument()
-    expect(screen.queryByTestId('nav-settings')).not.toBeInTheDocument()
+    expect(screen.getByTestId('nav-settings')).toBeInTheDocument()
   })
 
   it('shows Settings when a project is selected', () => {

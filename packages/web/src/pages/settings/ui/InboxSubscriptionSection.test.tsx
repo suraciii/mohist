@@ -188,7 +188,7 @@ describe('InboxSubscriptionSection', () => {
 
     renderSection()
 
-    expect(screen.getByText('Inbox recording')).toBeInTheDocument()
+    expect(screen.getByText('Inbox')).toBeInTheDocument()
     expect(screen.getByText('Workflow updates')).toBeInTheDocument()
     expect(screen.getByText('Choose which workflow updates create future inbox items.')).toBeInTheDocument()
   })

@@ -7,6 +7,7 @@ import { CardSection } from '@/shared/ui/components/card-section'
 import { Input } from '@/shared/ui/components/input'
 import { Tooltip } from '@/shared/ui/components/tooltip'
 import type { SettingsSearchEntry } from '@/features/settings-search'
+import { getSectionMeta } from '../lib/sections'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
@@ -230,6 +231,7 @@ export function AgentSettingsSection() {
   const { data: runtimeConfig, isLoading, error, refetch } = useAgentRuntime()
   const { data: config } = useConfig()
   const setAgentRuntime = useSetAgentRuntime()
+  const { label: sectionLabel, description: sectionDescription } = getSectionMeta('agent')
 
   const [localValues, setLocalValues] = useState<FormValues>(() => configToForm(DEFAULTS))
   const [savedValues, setSavedValues] = useState<FormValues>(() => configToForm(DEFAULTS))
@@ -375,8 +377,8 @@ export function AgentSettingsSection() {
     return (
       <SectionState
         variant="loading"
-        title="Coder Agent Runtime"
-        description="Configure how Mohist schedules external coder agent sessions."
+        title={sectionLabel}
+        description={sectionDescription}
         skeletonRows={6}
       />
     )
@@ -386,8 +388,8 @@ export function AgentSettingsSection() {
     return (
       <SectionState
         variant="error"
-        title="Coder Agent Runtime"
-        description="Configure how Mohist schedules external coder agent sessions."
+        title={sectionLabel}
+        description={sectionDescription}
         message={`Failed to load settings: ${error.message}`}
         onRetry={() => refetch()}
       />
@@ -396,8 +398,8 @@ export function AgentSettingsSection() {
 
   return (
     <SettingsSection
-      title="Coder Agent Runtime"
-      description="Configure how Mohist schedules external coder agent sessions."
+      title={sectionLabel}
+      description={sectionDescription}
     >
       <div className="space-y-4">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Timeouts</h3>

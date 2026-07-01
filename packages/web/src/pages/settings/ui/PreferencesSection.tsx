@@ -19,6 +19,7 @@ import { THEME_OPTIONS, type ThemeOption } from '@/shared/lib/theme/theme'
 import { useTheme } from '@/app/providers/ThemeProvider'
 import type { SettingsSearchEntry } from '@/features/settings-search'
 import { SHORTCUTS } from '@/features/settings-search/keyboard-shortcuts'
+import { getSectionMeta } from '../lib/sections'
 import { SettingsSection } from './SettingsSection'
 
 /**
@@ -155,12 +156,10 @@ function KeyboardShortcutReference() {
 
 export function PreferencesSection() {
   const { theme } = useTheme()
+  const { label: sectionLabel, description: sectionDescription } = getSectionMeta('preferences')
 
   return (
-    <SettingsSection
-      title="Preferences"
-      description="Real user preferences and read-only reference information. System facts live on the System tab."
-    >
+    <SettingsSection title={sectionLabel} description={sectionDescription}>
       <CardSection
         title="Theme"
         titleAs="h3"
