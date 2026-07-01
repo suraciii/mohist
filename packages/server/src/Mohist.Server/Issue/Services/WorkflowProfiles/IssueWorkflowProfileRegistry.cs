@@ -17,7 +17,7 @@ public class IssueWorkflowProfileRegistry : IScopedService
     {
         var defaults = new MohistLocalIssueWorkflowProfile(promptLoader, dbFactory);
         var githubPr = new MohistGithubPrIssueWorkflowProfile(promptLoader, dbFactory);
-        _profiles = new Dictionary<string, IIssueWorkflowProfile>(StringComparer.OrdinalIgnoreCase)
+        _profiles = new Dictionary<string, IIssueWorkflowProfile>(IssueWorkflowProfiles.IdComparer)
         {
             [defaults.Id] = defaults,
             [githubPr.Id] = githubPr,
@@ -46,6 +46,12 @@ public class IssueWorkflowProfileRegistry : IScopedService
     public WorkflowProfileInfo Default => ToInfo(Get(IssueWorkflowProfiles.LocalId));
 
     public bool Exists(string? id) => !string.IsNullOrWhiteSpace(id) && _profiles.ContainsKey(id);
+
+    public string? CanonicalId(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        return _profiles.TryGetValue(id, out var profile) ? profile.Id : null;
+    }
 
     public bool Matches(string profileId, string? context) =>
         SuitableForMatcher.Matches(Get(profileId).SuitableFor, context);

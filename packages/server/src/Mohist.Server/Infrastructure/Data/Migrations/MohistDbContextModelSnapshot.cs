@@ -1007,6 +1007,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
 
+                    b.Property<string>("DisabledWorkflowProfileIds")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("[]");
+
                     b.Property<string>("Prompts")
                         .IsRequired()
                         .ValueGeneratedOnAdd()

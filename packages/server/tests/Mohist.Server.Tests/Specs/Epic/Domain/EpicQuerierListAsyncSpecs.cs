@@ -306,7 +306,7 @@ public class EpicQuerierListAsyncSpecs
             .Options;
         var factory = new TestDbContextFactory(options);
         using (var db = factory.CreateDbContext())
-            db.Database.Migrate();
+            GrainTestConfig.MigrateWithSchemaFix(db);
         return new TestDatabase(connection, factory);
     }
 
@@ -320,7 +320,7 @@ public class EpicQuerierListAsyncSpecs
             .UseSqlite(connection)
             .Options;
         using (var db = new MohistDbContext(migrateOptions))
-            db.Database.Migrate();
+            GrainTestConfig.MigrateWithSchemaFix(db);
 
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
@@ -431,7 +431,7 @@ public class EpicQuerierListAsyncSpecs
     private sealed class ThrowingIssueQuerier : IssueQuerier
     {
         public ThrowingIssueQuerier()
-            : base(null!, null!, null!, null!, null!, null!)
+            : base(null!, null!, null!, null!, null!, null!, null!)
         {
         }
 

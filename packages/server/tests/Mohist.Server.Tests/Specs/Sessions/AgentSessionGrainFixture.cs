@@ -43,7 +43,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         _keeper.Open();
 
         using (var db = GrainTestConfig.CreateDbContext(ConnectionString))
-            db.Database.Migrate();
+            GrainTestConfig.MigrateWithSchemaFix(db);
 
         var builder = new InProcessTestClusterBuilder();
         builder.ConfigureSilo((_, siloBuilder) =>

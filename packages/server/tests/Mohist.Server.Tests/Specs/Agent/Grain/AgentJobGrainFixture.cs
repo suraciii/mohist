@@ -33,7 +33,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
         _keeper.Open();
 
         using (var db = GrainTestConfig.CreateDbContext(connectionString))
-            db.Database.Migrate();
+            GrainTestConfig.MigrateWithSchemaFix(db);
 
         var builder = new InProcessTestClusterBuilder();
         builder.Options.InitialSilosCount = 1;

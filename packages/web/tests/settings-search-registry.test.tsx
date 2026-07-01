@@ -125,8 +125,11 @@ vi.mock('../src/entities/settings', async (importOriginal) => {
     useSystemUpdate: () => ({ mutateAsync: vi.fn(), isPending: false }),
     useSystemUpdateStatus: () => ({ data: null, refetch: vi.fn() }),
     useWorkflowProfiles: () => ({ data: [], isLoading: false, isError: false }),
+    useAllWorkflowProfiles: () => ({ data: [], isLoading: false, isError: false }),
     useWorkflowProfile: () => ({ data: null, isLoading: false, isError: false }),
     useProjectDefaultWorkflowProfile: () => aiSettingsClient.useProjectDefaultWorkflowProfile(),
+    useDisableWorkflowProfile: () => ({ mutate: vi.fn() }),
+    useEnableWorkflowProfile: () => ({ mutate: vi.fn() }),
   }
 })
 
@@ -178,7 +181,7 @@ function arrangeAiLoaded() {
   aiSettingsClient.useStageModels.mockReturnValue({ data: { stageModels: null } })
   aiSettingsClient.useSetStageModels.mockReturnValue({ mutate: vi.fn() })
   aiSettingsClient.useProjectDefaultWorkflowProfile.mockReturnValue({
-    data: { projectId: 'proj-1', defaultTemplateId: null },
+    data: { projectId: 'proj-1', defaultTemplateId: null, disabledWorkflowProfileIds: [] },
     isLoading: false,
     isError: false,
   })
@@ -239,10 +242,8 @@ afterEach(() => {
 describe('settingsSearchRegistry', () => {
   it('aggregates every configurable field across the 7 existing tabs', () => {
     const tabs = new Set(settingsSearchRegistry.map((entry) => entry.tab))
-    // All 7 tabs are accounted for. Workflows contributes no entries because
-    // it has no configurable fields, but the registry still recognises the tab.
     expect(tabs).toEqual(
-      new Set(['ai', 'agent', 'preferences', 'repositories', 'templates', 'system']),
+      new Set(['ai', 'agent', 'preferences', 'repositories', 'templates', 'system', 'workflows']),
     )
   })
 
@@ -294,9 +295,32 @@ describe('settingsSearchRegistry', () => {
     ])
   })
 
-  it('exposes an empty workflows list because workflows has no configurable fields', () => {
+  it('includes workflow-related entries for Settings Search discoverability', () => {
     const workflowEntries = settingsSearchRegistry.filter((entry) => entry.tab === 'workflows')
-    expect(workflowEntries).toEqual([])
+    expect(workflowEntries.length).toBeGreaterThan(0)
+    for (const entry of workflowEntries) {
+      expect(entry.label).toBeTruthy()
+      expect(entry.description).toBeTruthy()
+      expect(entry.focusTargetId).toBeTruthy()
+    }
+  })
+
+  it('includes a Workflow Profiles entry that navigates to the section', () => {
+    const profileEntry = settingsSearchRegistry.find(
+      (e) => e.focusTargetId === 'workflow-profiles-section',
+    )
+    expect(profileEntry).toBeDefined()
+    expect(profileEntry!.tab).toBe('workflows')
+    expect(profileEntry!.label).toBe('Workflow Profiles')
+  })
+
+  it('includes a Project Default Workflow entry', () => {
+    const defaultEntry = settingsSearchRegistry.find(
+      (e) => e.focusTargetId === 'project-default-workflow',
+    )
+    expect(defaultEntry).toBeDefined()
+    expect(defaultEntry!.tab).toBe('workflows')
+    expect(defaultEntry!.label).toBe('Project Default Workflow')
   })
 
   it('includes the Preferences theme descriptor', () => {

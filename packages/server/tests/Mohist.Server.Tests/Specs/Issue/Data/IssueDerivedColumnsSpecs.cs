@@ -22,7 +22,7 @@ public class IssueDerivedColumnsSpecs
             .Options;
 
         await using var db = new MohistDbContext(options);
-        db.Database.Migrate();
+        GrainTestConfig.MigrateWithSchemaFix(db);
 
         var issue = new IssueRow
         {
@@ -56,7 +56,7 @@ public class IssueDerivedColumnsSpecs
             .Options;
 
         await using var db = new MohistDbContext(options);
-        db.Database.Migrate();
+        GrainTestConfig.MigrateWithSchemaFix(db);
 
         var legacyIssue = new IssueRow
         {

@@ -125,6 +125,31 @@ describe('CreateIssueDialog', () => {
 
     queryClient.clear()
   })
+
+  it('does not serialize inherited default workflow as an explicit create selection', async () => {
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({
+      effectiveTemplateId: 'mohist/github-pr',
+      source: 'system',
+      configuredTemplateId: 'mohist/local',
+    })
+    mocks.useWorkflowProfiles.mockReturnValue({
+      data: [{ id: 'mohist/github-pr', displayName: 'GitHub PR', description: '', isDefault: false }],
+    })
+    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Disabled default fallback' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
+      workflowProfileId: 'mohist/local',
+    }))
+    expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
+      workflowProfileId: 'mohist/github-pr',
+    }))
+  })
 })
 
 describe('CreateIssueDialog toast feedback', () => {
@@ -548,7 +573,7 @@ describe('CreateIssueDialog workflow profile default', () => {
     })
   }
 
-  it('sends the project-configured default workflow profile when no explicit workflow is chosen', async () => {
+  it('shows the project-configured default workflow profile but does not send it as an explicit selection', async () => {
     setupProfiles()
     mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
     mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({
@@ -566,7 +591,7 @@ describe('CreateIssueDialog workflow profile default', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
     await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
       workflowProfileId: 'mohist/github-pr',
     }))
   })
@@ -583,5 +608,48 @@ describe('CreateIssueDialog workflow profile default', () => {
 
     const select = await screen.findByLabelText('Workflow') as HTMLSelectElement
     expect(select.value).toBe('mohist/local')
+  })
+
+  it('does not prefill or submit a frontmatter recommendation that is not enabled', async () => {
+    mocks.useWorkflowProfiles.mockReturnValue({
+      data: [{ id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false }],
+    })
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({
+      effectiveTemplateId: 'mohist/github-pr',
+      source: 'system',
+      configuredTemplateId: null,
+    })
+    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Stale recommendation' } })
+    fireEvent.change(screen.getByPlaceholderText('Optional description'), {
+      target: {
+        value: [
+          '---',
+          'recommended_workflow: mohist/local',
+          '---',
+          '',
+          'Body',
+        ].join('\n'),
+      },
+    })
+
+    expect(await screen.findByTestId('recommended-workflow')).toHaveTextContent('mohist/local')
+    expect(screen.getByTestId('workflow-recommendation-unavailable')).toHaveTextContent('not enabled')
+    const select = screen.getByLabelText('Workflow') as HTMLSelectElement
+    expect(select.value).toBe('mohist/github-pr')
+    expect([...select.options].map((option) => option.value)).toEqual(['mohist/github-pr'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
+      workflowProfileId: 'mohist/local',
+    }))
+    expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
+      workflowProfileId: 'mohist/github-pr',
+    }))
   })
 })

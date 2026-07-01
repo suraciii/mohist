@@ -206,8 +206,11 @@ export function setStageModel(projectId: string | null | undefined, stage: strin
     }))
 }
 
-export function getWorkflowProfiles() {
-  return request<Array<{ id: string; name: string; description: string; isDefault: boolean }>>('/workflow-templates/system')
+export function getWorkflowProfiles(projectId?: string | null) {
+  const path = projectId
+    ? `/workflow-templates/system?project=${encodeURIComponent(projectId)}`
+    : '/workflow-templates/system'
+  return request<Array<{ id: string; name: string; description: string; isDefault: boolean }>>(path)
     .then((templates) => templates.map((template) => ({
       id: template.id,
       displayName: template.name,
@@ -223,14 +226,16 @@ export function getWorkflowProfile(id: string) {
 export interface ProjectDefaultWorkflowProfile {
   projectId: string
   defaultTemplateId: string | null
+  disabledWorkflowProfileIds: string[]
 }
 
 export function getProjectDefaultWorkflowProfile(projectId?: string | null) {
-  return request<{ projectId: string; defaultTemplateId: string | null; variables?: unknown }>(
+  return request<{ projectId: string; defaultTemplateId: string | null; variables?: unknown; disabledWorkflowProfileIds?: string[] }>(
     projectApiPath(projectId, '/workflow-profile'),
   ).then((response) => ({
     projectId: response.projectId,
     defaultTemplateId: response.defaultTemplateId ?? null,
+    disabledWorkflowProfileIds: response.disabledWorkflowProfileIds ?? [],
   }))
 }
 
@@ -251,6 +256,20 @@ export function clearProjectDefaultWorkflowProfile(projectId: string | null | un
       method: 'DELETE',
     },
   )
+}
+
+export function disableWorkflowProfile(projectId: string | null | undefined, profileId: string) {
+  return request<void>(projectApiPath(projectId, '/workflow-profile/disable'), {
+    method: 'POST',
+    body: JSON.stringify({ profileId }),
+  })
+}
+
+export function enableWorkflowProfile(projectId: string | null | undefined, profileId: string) {
+  return request<void>(projectApiPath(projectId, '/workflow-profile/enable'), {
+    method: 'POST',
+    body: JSON.stringify({ profileId }),
+  })
 }
 
 export function getSystemInfo() {

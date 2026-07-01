@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Tests.Support;
@@ -579,6 +582,375 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("custom", profileData.GetProperty("templateSource").GetString());
     }
 
+    // ===================== Enable/disable workflow profiles =====================
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithDisabledWorkflowProfile_ReturnsBadRequest()
+    {
+        var project = await CreateProjectAsync("wfp-create-disabled");
+
+        // Disable mohist/github-pr
+        await _client.PostOkAsync(
+            $"/api/projects/{project.Id}/workflow-profile/disable",
+            new { profileId = "mohist/github-pr" });
+
+        // Create issue with disabled profile should fail
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Disabled profile", projectId = project.Id, workflowProfileId = "mohist/github-pr" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("unknown_workflow_profile", body.GetProperty("code").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithDisabledWorkflowProfileInDifferentCase_ReturnsBadRequest()
+    {
+        var project = await CreateProjectAsync("wfp-create-disabled-case");
+
+        await _client.PostOkAsync(
+            $"/api/projects/{project.Id}/workflow-profile/disable",
+            new { profileId = "mohist/github-pr" });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Disabled profile case", projectId = project.Id, workflowProfileId = "MOHIST/GITHUB-PR" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("unknown_workflow_profile", body.GetProperty("code").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task PatchIssue_WithDisabledWorkflowProfile_ReturnsBadRequestAndLeavesSelectionUnchanged()
+    {
+        var project = await CreateProjectAsync("wfp-patch-disabled");
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Patch disabled", projectId = project.Id, workflowProfileId = "mohist/local" });
+
+        await _client.PostOkAsync(
+            $"/api/projects/{project.Id}/workflow-profile/disable",
+            new { profileId = "mohist/github-pr" });
+
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}",
+            new { workflowProfileId = "mohist/github-pr" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("unknown_workflow_profile", body.GetProperty("code").GetString());
+
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+        Assert.Equal("mohist/local", detail.WorkflowProfileId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task PatchIssue_WithDisabledWorkflowProfileInDifferentCase_ReturnsBadRequestAndLeavesSelectionUnchanged()
+    {
+        var project = await CreateProjectAsync("wfp-patch-disabled-case");
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Patch disabled case", projectId = project.Id, workflowProfileId = "mohist/local" });
+
+        await _client.PostOkAsync(
+            $"/api/projects/{project.Id}/workflow-profile/disable",
+            new { profileId = "mohist/github-pr" });
+
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}",
+            new { workflowProfileId = "MOHIST/GITHUB-PR" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("unknown_workflow_profile", body.GetProperty("code").GetString());
+
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+        Assert.Equal("mohist/local", detail.WorkflowProfileId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WhenNoProfileEnabled_ReturnsBadRequest()
+    {
+        var project = await CreateProjectAsync("wfp-no-enabled");
+
+        // Directly set all profiles disabled via raw SQL
+        // (the service layer enforces the last-enabled invariant, so we
+        // bypass it to test the issue-creation pre-flight check).
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<Mohist.Server.Infrastructure.Data.Db.MohistDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var existing = await db.ProjectWorkflowProfiles.FirstOrDefaultAsync(x => x.ProjectId == project.Id);
+            if (existing is null)
+            {
+                db.ProjectWorkflowProfiles.Add(new Mohist.Server.Infrastructure.Data.Workflow.ProjectWorkflowProfile
+                {
+                    ProjectId = project.Id,
+                    Variables = "{}",
+                    DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"],
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                });
+            }
+            else
+            {
+                existing.DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"];
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+            await db.SaveChangesAsync();
+        }
+
+        // Create issue without explicit profile should fail
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "No enabled", projectId = project.Id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("no_enabled_workflow_profile", body.GetProperty("code").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithExplicitProfile_WhenNoProfileEnabled_ReturnsNoEnabledWorkflowProfile()
+    {
+        var project = await CreateProjectAsync("wfp-no-enabled-explicit");
+
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var existing = await db.ProjectWorkflowProfiles.FirstOrDefaultAsync(x => x.ProjectId == project.Id);
+            if (existing is null)
+            {
+                db.ProjectWorkflowProfiles.Add(new Mohist.Server.Infrastructure.Data.Workflow.ProjectWorkflowProfile
+                {
+                    ProjectId = project.Id,
+                    Variables = "{}",
+                    DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"],
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                });
+            }
+            else
+            {
+                existing.DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"];
+                existing.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+            await db.SaveChangesAsync();
+        }
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "No enabled explicit", projectId = project.Id, workflowProfileId = "mohist/local" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("no_enabled_workflow_profile", body.GetProperty("code").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task ExistingIssue_WhenAllProfilesDisabled_ReadSurfacesReportUnresolvedAndStartFails()
+    {
+        var project = await CreateProjectAsync("wfp-existing-all-disabled");
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Existing all disabled", projectId = project.Id, isDraft = false });
+
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<Mohist.Server.Infrastructure.Data.Db.MohistDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var row = await db.ProjectWorkflowProfiles.FirstOrDefaultAsync(x => x.ProjectId == project.Id);
+            if (row is null)
+            {
+                db.ProjectWorkflowProfiles.Add(new Mohist.Server.Infrastructure.Data.Workflow.ProjectWorkflowProfile
+                {
+                    ProjectId = project.Id,
+                    Variables = "{}",
+                    DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"],
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                });
+            }
+            else
+            {
+                row.DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"];
+                row.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+            await db.SaveChangesAsync();
+        }
+
+        var detailResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}");
+        Assert.Equal(HttpStatusCode.OK, detailResponse.StatusCode);
+        var detailData = (await detailResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal(JsonValueKind.Null, detailData.GetProperty("workflowProfileId").ValueKind);
+
+        var listed = await _client.GetAsync($"/api/projects/{project.Id}/issues?all=true");
+        Assert.Equal(HttpStatusCode.OK, listed.StatusCode);
+        var listItem = (await listed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").EnumerateArray().Single();
+        Assert.Equal(JsonValueKind.Null, listItem.GetProperty("workflowProfileId").ValueKind);
+
+        var profileResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
+        Assert.Equal(HttpStatusCode.OK, profileResponse.StatusCode);
+        var profileData = (await profileResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal(JsonValueKind.Null, profileData.GetProperty("profileId").ValueKind);
+
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            grain.StartWorkAsync(new WorkflowProjectContext(
+                project.Id, "wfp-existing-all-disabled", RepositoryBaseBranch: "main")));
+        Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DisableLastEnabledProfile_ReturnsBadRequest()
+    {
+        var project = await CreateProjectAsync("wfp-last-enabled");
+
+        // Disable one profile first
+        await _client.PostOkAsync(
+            $"/api/projects/{project.Id}/workflow-profile/disable",
+            new { profileId = "mohist/local" });
+
+        // Disabling the last one should fail
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/workflow-profile/disable",
+            new { profileId = "mohist/github-pr" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("last_enabled_workflow_profile", body.GetProperty("code").GetString());
+
+        // Verify the blacklist is unchanged (only mohist/local is disabled)
+        var profiles = await _client.GetDataAsync<SystemTemplateInfoDto[]>(
+            $"/api/workflow-templates/system?project={project.Id}");
+        Assert.Contains(profiles, p => p.Id == "mohist/github-pr");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DisableUnknownWorkflowProfile_ReturnsBadRequestAndLeavesBlacklistUnchanged()
+    {
+        var project = await CreateProjectAsync("wfp-disable-unknown");
+
+        await _client.PostOkAsync(
+            $"/api/projects/{project.Id}/workflow-profile/disable",
+            new { profileId = "mohist/local" });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/workflow-profile/disable",
+            new { profileId = "does/not/exist" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("unknown_workflow_profile", body.GetProperty("code").GetString());
+
+        var profiles = await _client.GetDataAsync<SystemTemplateInfoDto[]>(
+            $"/api/workflow-templates/system?project={project.Id}");
+        var onlyEnabled = Assert.Single(profiles);
+        Assert.Equal("mohist/github-pr", onlyEnabled.Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DiscoveryReflectsDisabledProfile()
+    {
+        var project = await CreateProjectAsync("wfp-discovery");
+
+        // Both profiles visible initially
+        var all = await _client.GetDataAsync<SystemTemplateInfoDto[]>(
+            $"/api/workflow-templates/system?project={project.Id}");
+        Assert.Equal(2, all.Length);
+
+        // Disable mohist/local
+        await _client.PostOkAsync(
+            $"/api/projects/{project.Id}/workflow-profile/disable",
+            new { profileId = "mohist/local" });
+
+        // Only mohist/github-pr should remain
+        var filtered = await _client.GetDataAsync<SystemTemplateInfoDto[]>(
+            $"/api/workflow-templates/system?project={project.Id}");
+        var filteredId = Assert.Single(filtered);
+        Assert.Equal("mohist/github-pr", filteredId.Id);
+
+        // Re-enable it
+        await _client.PostOkAsync(
+            $"/api/projects/{project.Id}/workflow-profile/enable",
+            new { profileId = "mohist/local" });
+
+        var restored = await _client.GetDataAsync<SystemTemplateInfoDto[]>(
+            $"/api/workflow-templates/system?project={project.Id}");
+        Assert.Equal(2, restored.Length);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DiscoveryWithoutProject_ReturnsFullCatalog()
+    {
+        var full = await _client.GetDataAsync<SystemTemplateInfoDto[]>(
+            "/api/workflow-templates/system");
+
+        Assert.Equal(2, full.Length);
+        Assert.Contains(full, t => t.Id == "mohist/local");
+        Assert.Contains(full, t => t.Id == "mohist/github-pr");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task WorkflowProfilesDiscovery_WithProject_FiltersDisabled()
+    {
+        var project = await CreateProjectAsync("wfp-profiles-discovery");
+
+        await _client.PostOkAsync(
+            $"/api/projects/{project.Id}/workflow-profile/disable",
+            new { profileId = "mohist/github-pr" });
+
+        var profiles = await _client.GetDataAsync<WorkflowProfileDescriptionDto[]>(
+            $"/api/workflow-profiles?project={project.Id}");
+
+        var profileIds = profiles.Select(p => p.Id).ToList();
+        Assert.Contains("mohist/local", profileIds);
+        Assert.DoesNotContain("mohist/github-pr", profileIds);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task Discovery_WithMixedCaseDisabledProfile_FiltersDisabled()
+    {
+        var project = await CreateProjectAsync("wfp-discovery-case");
+
+        await _client.PostOkAsync(
+            $"/api/projects/{project.Id}/workflow-profile/disable",
+            new { profileId = "MOHIST/GITHUB-PR" });
+
+        var profiles = await _client.GetDataAsync<WorkflowProfileDescriptionDto[]>(
+            $"/api/workflow-profiles?project={project.Id}");
+
+        var profileIds = profiles.Select(p => p.Id).ToList();
+        Assert.Contains("mohist/local", profileIds);
+        Assert.DoesNotContain("mohist/github-pr", profileIds);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync(string prefix)
     {
         var project = await _client.PostDataAsync<ProjectDto>(
@@ -597,5 +969,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
     }
 
     private sealed record ProjectDto(string Id);
-    private sealed record IssueDto(int Number, string Id, string WorkflowProfileId);
+    private sealed record IssueDto(int Number, string Id, string? WorkflowProfileId);
+    private sealed record SystemTemplateInfoDto(string Id, string Name, string Description, bool IsDefault);
+    private sealed record WorkflowProfileDescriptionDto(string Id, string DisplayName, string Description, IReadOnlyList<string> SuitableFor);
 }

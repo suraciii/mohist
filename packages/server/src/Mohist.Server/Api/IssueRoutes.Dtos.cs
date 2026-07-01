@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
@@ -203,7 +204,7 @@ public sealed record IssueWorkflowProfileResponse(
     bool HasCustomTemplate,
     string? Yaml,
     string? WorkflowRunId,
-    string ProfileId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ProfileId,
     string UpdateMode,
     VariableBundle Variables,
     string UpdatedAt,

@@ -4,4 +4,5 @@ public static class IssueWorkflowProfiles
 {
     public const string LocalId = "mohist/local";
     public const string GithubPrId = "mohist/github-pr";
+    public static readonly StringComparer IdComparer = StringComparer.OrdinalIgnoreCase;
 }

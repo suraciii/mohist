@@ -33,8 +33,11 @@ const useSystemInfoMock = vi.fn()
 const useSystemUpdateMock = vi.fn()
 const useSystemUpdateStatusMock = vi.fn()
 const useWorkflowProfilesMock = vi.fn()
+const useAllWorkflowProfilesMock = vi.fn()
 const useWorkflowProfileMock = vi.fn()
 const useProjectDefaultWorkflowProfileMock = vi.fn()
+const useDisableWorkflowProfileMock = vi.fn()
+const useEnableWorkflowProfileMock = vi.fn()
 const useProjectTemplatesMock = vi.fn()
 const useSystemTemplatesMock = vi.fn()
 const useDeleteProjectTemplateOverrideMock = vi.fn()
@@ -72,8 +75,11 @@ vi.mock('../src/entities/settings', async (importOriginal) => {
     useSystemUpdate: () => useSystemUpdateMock(),
     useSystemUpdateStatus: () => useSystemUpdateStatusMock(),
     useWorkflowProfiles: () => useWorkflowProfilesMock(),
+    useAllWorkflowProfiles: () => useAllWorkflowProfilesMock(),
     useWorkflowProfile: (profileId: string) => useWorkflowProfileMock(profileId),
     useProjectDefaultWorkflowProfile: () => useProjectDefaultWorkflowProfileMock(),
+    useDisableWorkflowProfile: () => useDisableWorkflowProfileMock(),
+    useEnableWorkflowProfile: () => useEnableWorkflowProfileMock(),
   }
 })
 
@@ -168,12 +174,22 @@ function arrangeLoadedMocks() {
     isLoading: false,
     isError: false,
   })
-  useWorkflowProfileMock.mockReturnValue({ data: null, isLoading: false, isError: false })
-  useProjectDefaultWorkflowProfileMock.mockReturnValue({
-    data: { projectId: 'proj-selected', defaultTemplateId: null },
+  useAllWorkflowProfilesMock.mockReturnValue({
+    data: [
+      { id: 'mohist/local', displayName: 'Default', description: 'Standard staged workflow.', isDefault: true },
+      { id: 'mohist/quick-fix', displayName: 'Quick Fix', description: 'Short repair workflow.', isDefault: false },
+    ],
     isLoading: false,
     isError: false,
   })
+  useWorkflowProfileMock.mockReturnValue({ data: null, isLoading: false, isError: false })
+  useProjectDefaultWorkflowProfileMock.mockReturnValue({
+    data: { projectId: 'proj-selected', defaultTemplateId: null, disabledWorkflowProfileIds: [] },
+    isLoading: false,
+    isError: false,
+  })
+  useDisableWorkflowProfileMock.mockReturnValue({ mutate: vi.fn() })
+  useEnableWorkflowProfileMock.mockReturnValue({ mutate: vi.fn() })
   useProjectTemplatesMock.mockReturnValue({
     data: [
       { key: 'build-plan', displayName: 'Build Plan', description: 'Plan the implementation.', tags: ['plan'], stage: 'plan', body: 'Plan body', source: 'system' },

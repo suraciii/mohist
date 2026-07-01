@@ -42,7 +42,8 @@ public static partial class IssueRoutes
             IssueQuerier issuesQuery,
             IssueRepositoryResolver repositoryResolver,
             IssueWorkflowProfileRegistry profileRegistry,
-            IssueWorkflowProfileManager issueProfileManager) =>
+            IssueWorkflowProfileManager issueProfileManager,
+            ProjectWorkflowProfileManager projectProfileManager) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title))
                 return ApiResults.BadRequest("title is required");
@@ -55,7 +56,20 @@ public static partial class IssueRoutes
             if (TryValidateModelMetadata(req, out var modelError) is false)
                 return ApiResults.BadRequest(modelError!, "invalid_model_metadata");
 
-            if (!string.IsNullOrWhiteSpace(req.WorkflowProfileId) && !profileRegistry.Exists(req.WorkflowProfileId))
+            var requestedWorkflowProfileId = profileRegistry.CanonicalId(req.WorkflowProfileId);
+            if (!string.IsNullOrWhiteSpace(req.WorkflowProfileId) && requestedWorkflowProfileId is null)
+                return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
+
+            var disabledIds = await projectProfileManager.GetDisabledWorkflowProfileIdsAsync(project.Id);
+            var allSystemIds = profileRegistry.List().Select(p => p.Id).ToHashSet(IssueWorkflowProfiles.IdComparer);
+            var enabledCount = allSystemIds.Count(id => !disabledIds.Contains(id));
+            if (enabledCount == 0)
+                return ApiResults.BadRequest(
+                    "Cannot create issue: no workflow profile is enabled for this project. " +
+                    "Enable a workflow profile first before creating issues.",
+                    "no_enabled_workflow_profile");
+
+            if (requestedWorkflowProfileId is not null && disabledIds.Contains(requestedWorkflowProfileId))
                 return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
 
             var resolution = repositoryResolver.Resolve(project, req.RepositoryName);
@@ -80,7 +94,7 @@ public static partial class IssueRoutes
                     req.Risk,
                     req.IsDraft ?? true,
                     req.AttachmentIds,
-                    req.WorkflowProfileId);
+                    requestedWorkflowProfileId);
             }
             catch (AttachmentLimitException ex)
             {
@@ -121,6 +135,7 @@ public static partial class IssueRoutes
             IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery,
             IssueWorkflowProfileRegistry profileRegistry,
+            ProjectWorkflowProfileManager projectProfileManager,
             IssueWorkflowProfileManager issueProfileManager) =>
         {
             var project = GetRequiredProject(ctx);
@@ -138,11 +153,18 @@ public static partial class IssueRoutes
             // Workflow profile id: any present non-null value must refer to a
             // known registered profile. Null means "clear to inherit default"
             // and is part of the established three-state semantics.
+            var workflowProfileIdForUpdate = req.WorkflowProfileId;
             if (req.Contains(nameof(UpdateIssueRequest.WorkflowProfileId))
-                && !string.IsNullOrWhiteSpace(req.WorkflowProfileId)
-                && !profileRegistry.Exists(req.WorkflowProfileId))
+                && !string.IsNullOrWhiteSpace(req.WorkflowProfileId))
             {
-                return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
+                var requestedWorkflowProfileId = profileRegistry.CanonicalId(req.WorkflowProfileId);
+                if (requestedWorkflowProfileId is null
+                    || (await projectProfileManager.GetDisabledWorkflowProfileIdsAsync(project.Id)).Contains(requestedWorkflowProfileId))
+                {
+                    return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
+                }
+
+                workflowProfileIdForUpdate = requestedWorkflowProfileId;
             }
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
@@ -157,7 +179,7 @@ public static partial class IssueRoutes
                     IsDraft: req.IsDraft,
                     AttachmentIds: req.AttachmentIds,
                     PresentFields: req.Fields,
-                    WorkflowProfileId: req.WorkflowProfileId));
+                    WorkflowProfileId: workflowProfileIdForUpdate));
             }
             catch (IssueDomain.WorkflowProfileLockedException ex)
             {

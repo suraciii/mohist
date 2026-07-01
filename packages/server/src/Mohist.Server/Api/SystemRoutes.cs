@@ -1,4 +1,5 @@
 using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Project.Services;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Services;
@@ -12,11 +13,48 @@ public static class SystemRoutes
         app.MapGet("/api/system/info", async (SystemInfoService systemInfo, CancellationToken ct) =>
             ApiResults.Ok(await systemInfo.GetSystemInfoAsync()));
 
-        app.MapGet("/api/workflow-templates/system", async (ProjectWorkflowProfileManager profileManager) =>
-            ApiResults.Ok(await profileManager.ListSystemTemplatesAsync()));
+        app.MapGet("/api/workflow-templates/system", async (
+            ProjectWorkflowProfileManager profileManager,
+            ProjectRefResolver projectRefResolver,
+            string? project) =>
+        {
+            var templates = await profileManager.ListSystemTemplatesAsync();
 
-        app.MapGet("/api/workflow-profiles", (IssueWorkflowProfileRegistry registry) =>
-            ApiResults.Ok(registry.ListDescribed()));
+            if (!string.IsNullOrWhiteSpace(project))
+            {
+                var projectInfo = await projectRefResolver.ResolveAsync(project);
+                if (projectInfo is null)
+                    return ApiResults.NotFound($"Project '{project}' not found");
+
+                var disabledIds = await profileManager.GetDisabledWorkflowProfileIdsAsync(projectInfo.Id);
+                if (disabledIds.Count > 0)
+                    templates = templates.Where(t => !disabledIds.Contains(t.Id)).ToList();
+            }
+
+            return ApiResults.Ok(templates);
+        });
+
+        app.MapGet("/api/workflow-profiles", async (
+            IssueWorkflowProfileRegistry registry,
+            ProjectRefResolver projectRefResolver,
+            ProjectWorkflowProfileManager profileManager,
+            string? project) =>
+        {
+            var profiles = registry.ListDescribed();
+
+            if (!string.IsNullOrWhiteSpace(project))
+            {
+                var projectInfo = await projectRefResolver.ResolveAsync(project);
+                if (projectInfo is null)
+                    return ApiResults.NotFound($"Project '{project}' not found");
+
+                var disabledIds = await profileManager.GetDisabledWorkflowProfileIdsAsync(projectInfo.Id);
+                if (disabledIds.Count > 0)
+                    profiles = profiles.Where(p => !disabledIds.Contains(p.Id)).ToList();
+            }
+
+            return ApiResults.Ok(profiles);
+        });
 
         app.MapGet("/api/workflow-templates/system/{*id}", (string id) =>
         {

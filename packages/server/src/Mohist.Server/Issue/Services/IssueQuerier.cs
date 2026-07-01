@@ -39,6 +39,7 @@ public class IssueQuerier : IScopedService
     private readonly IssueRepositoryResolver _resolver;
     private readonly ConfigService _configService;
     private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
+    private readonly ProjectWorkflowProfileManager _projectProfileManager;
 
     public IssueQuerier(
         IDbContextFactory<MohistDbContext> dbFactory,
@@ -46,7 +47,8 @@ public class IssueQuerier : IScopedService
         ProjectQuerier projects,
         IssueRepositoryResolver resolver,
         ConfigService configService,
-        EffectiveWorkflowProfileResolver effectiveProfileResolver)
+        EffectiveWorkflowProfileResolver effectiveProfileResolver,
+        ProjectWorkflowProfileManager projectProfileManager)
     {
         _dbFactory = dbFactory;
         _profiles = profiles;
@@ -54,6 +56,7 @@ public class IssueQuerier : IScopedService
         _resolver = resolver;
         _configService = configService;
         _effectiveProfileResolver = effectiveProfileResolver;
+        _projectProfileManager = projectProfileManager;
     }
 
     public async Task<IssueReadModel?> GetAsync(string projectId, int number, ProjectInfo? project = null)
@@ -71,7 +74,8 @@ public class IssueQuerier : IScopedService
         var issue = await LoadIssueAsync(db, projectId, number);
         if (issue is null) return null;
         var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
-        return ToInfo(issue, project, projectDefaultTemplateId);
+        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
+        return ToInfo(issue, project, projectDefaultTemplateId, disabledIds);
     }
 
     public async Task<Domain.Issue?> GetDomainAsync(string projectId, int number)
@@ -111,8 +115,9 @@ public class IssueQuerier : IScopedService
             .Where(row => row.ProjectId == projectId)
             .ToListAsync();
         var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
+        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
         var list = IssueRowMapper.ByNumber(rows, projectId)
-            .Select(issue => ToReadModel(ToInfo(issue, project, projectDefaultTemplateId)))
+            .Select(issue => ToReadModel(ToInfo(issue, project, projectDefaultTemplateId, disabledIds)))
             .OrderBy(i => i.Number)
             .ToList();
 
@@ -157,8 +162,9 @@ public class IssueQuerier : IScopedService
             .Where(row => row.ProjectId == projectId)
             .ToListAsync();
         var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
+        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
         var list = IssueRowMapper.ByNumber(rows, projectId)
-            .Select(issue => ToReadModel(ToInfo(issue, project: null, projectDefaultTemplateId)))
+            .Select(issue => ToReadModel(ToInfo(issue, project: null, projectDefaultTemplateId, disabledIds)))
             .ToList();
         ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
         ApplyFeedbackProjections(list, await LoadFeedbackAsync(db, list));
@@ -416,8 +422,9 @@ public class IssueQuerier : IScopedService
             .ToListAsync();
 
         var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
+        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
         var issues = IssueRowMapper.ByNumber(rows, projectId)
-            .Select(issue => ToReadModel(ToInfo(issue, project: null, projectDefaultTemplateId)))
+            .Select(issue => ToReadModel(ToInfo(issue, project: null, projectDefaultTemplateId, disabledIds)))
             .ToList();
 
         // Resolve lifecycle workflow runs and ship time per Done issue from durable events.
@@ -766,8 +773,9 @@ public class IssueQuerier : IScopedService
             .ToListAsync();
 
         var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
+        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
         var issues = IssueRowMapper.ByNumber(rows, projectId)
-            .Select(issue => ToReadModel(ToInfo(issue, project: null, projectDefaultTemplateId)))
+            .Select(issue => ToReadModel(ToInfo(issue, project: null, projectDefaultTemplateId, disabledIds)))
             .ToList();
 
         var workflows = await LoadWorkflowStatesAsync(db, issues);
@@ -853,10 +861,46 @@ public class IssueQuerier : IScopedService
     private async Task<IssueReadModel> ToReadModelAsync(MohistDbContext db, Domain.Issue issue, ProjectInfo? project = null)
     {
         var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, issue.ProjectId);
-        var model = ToReadModel(ToInfo(issue, project, projectDefaultTemplateId));
+        var model = ToReadModel(await ToInfoAsync(issue, project, projectDefaultTemplateId));
         ApplyWorkflowProjections([model], await LoadWorkflowStatesAsync(db, [model]));
         ApplyFeedbackProjections([model], await LoadFeedbackAsync(db, [model]));
         return model;
+    }
+
+    public async Task<IssueInfo> ToInfoAsync(Domain.Issue issue, ProjectInfo? project, string? projectDefaultTemplateId)
+    {
+        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(issue.ProjectId);
+        var resolved = _effectiveProfileResolver.Resolve(issue.WorkflowProfileId, projectDefaultTemplateId, disabledIds);
+        var resolution = _resolver.Resolve(project, issue.RepositoryRef);
+        return new()
+        {
+            Id = issue.Id,
+            Number = issue.Number,
+            Title = issue.Title,
+            Body = issue.Body,
+            Status = MohistDefaultWorkflowProjection.IssueStatusName(issue.Status),
+            Health = MohistDefaultWorkflowProjection.Health(issue.Status),
+            ProjectId = issue.ProjectId,
+            ProjectName = project?.Name,
+            Labels = new Dictionary<string, string>(issue.Labels, StringComparer.Ordinal),
+            Priority = issue.Priority,
+            Risk = issue.Risk,
+            Model = null,
+            ModelVariant = null,
+            AgentConfig = null,
+            StageModels = null,
+            StageModelVariants = null,
+            StageVariables = null,
+            CreatedAt = issue.CreatedAt.ToString("o"),
+            UpdatedAt = issue.UpdatedAt.ToString("o"),
+            ArchivedAt = issue.ArchivedAt?.ToString("o"),
+            WorkflowRunId = issue.WorkflowRunId,
+            WorkflowProfileId = resolved,
+            PrerequisiteNumbers = issue.PrerequisiteNumbers,
+            IsDraft = issue.IsDraft,
+            Repository = resolution.Repository,
+            RepositoryProblem = resolution.Problem,
+        };
     }
 
     public static IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project = null)
@@ -905,7 +949,10 @@ public class IssueQuerier : IScopedService
     /// that has access to the scoped <see cref="IssueQuerier"/> so the
     /// profile id agrees across every read surface.
     /// </summary>
-    public IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project, string? projectDefaultTemplateId)
+    public IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project, string? projectDefaultTemplateId) =>
+        ToInfo(issue, project, projectDefaultTemplateId, null);
+
+    public IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project, string? projectDefaultTemplateId, IReadOnlySet<string>? disabledIds)
     {
         var resolution = _resolver.Resolve(project, issue.RepositoryRef);
         return new()
@@ -932,7 +979,7 @@ public class IssueQuerier : IScopedService
             ArchivedAt = issue.ArchivedAt?.ToString("o"),
             CompletedAt = issue.CompletedAt?.ToString("o"),
             WorkflowRunId = issue.WorkflowRunId,
-            WorkflowProfileId = _effectiveProfileResolver.Resolve(issue.WorkflowProfileId, projectDefaultTemplateId),
+            WorkflowProfileId = _effectiveProfileResolver.Resolve(issue.WorkflowProfileId, projectDefaultTemplateId, disabledIds),
             PrerequisiteNumbers = issue.PrerequisiteNumbers,
             IsDraft = issue.IsDraft,
             Repository = resolution.Repository,
@@ -1043,6 +1090,8 @@ public class IssueQuerier : IScopedService
         foreach (var issue in issues)
         {
             if (issue.WorkflowRunId is null || !workflows.TryGetValue(issue.WorkflowRunId, out var status)) continue;
+
+            if (string.IsNullOrWhiteSpace(issue.WorkflowProfileId)) continue;
 
             var projection = _profiles.Get(issue.WorkflowProfileId).ProjectWorkflowState(issue, status);
 
