@@ -83,7 +83,6 @@ function renderWithQueryClient(
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.useFakeTimers()
   ;(useOpencodeRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
     data: { mode: 'local-opencode', command: 'opencode', model: null, note: 'external coder agent' },
     isLoading: false,
@@ -167,6 +166,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.unstubAllGlobals()
 })
 
 describe('SettingsPage', () => {
@@ -418,7 +418,7 @@ describe('SettingsPage', () => {
     })
 
     it('recovers persisted reconnect state after reload and polls health', async () => {
-      vi.useRealTimers()
+      vi.useFakeTimers()
       const refetchInfo = vi.fn().mockResolvedValue(undefined)
       const refetchUpdateStatus = vi.fn().mockResolvedValue(undefined)
       const fetchMock = vi.fn().mockResolvedValue({ ok: true })
@@ -441,13 +441,14 @@ describe('SettingsPage', () => {
 
       expect(screen.getAllByText(/Waiting for reconnect/i).length).toBeGreaterThan(0)
       expect(screen.queryByRole('button', { name: /Update & Restart/i })).not.toBeInTheDocument()
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/health'), { timeout: 4000 })
-      await waitFor(() => expect(refetchInfo).toHaveBeenCalled(), { timeout: 4000 })
-      await waitFor(() => expect(refetchUpdateStatus).toHaveBeenCalled(), { timeout: 4000 })
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(fetchMock).toHaveBeenCalledWith('/api/health')
+      expect(refetchInfo).toHaveBeenCalled()
+      expect(refetchUpdateStatus).toHaveBeenCalled()
     })
 
     it('starts update, shows reconnect progress, polls health, and refetches runtime info', async () => {
-      vi.useRealTimers()
+      vi.useFakeTimers()
       const waitingJob = createUpdateJob()
       let updateStarted = false
       const mutateAsync = vi.fn().mockImplementation(async () => {
@@ -484,13 +485,14 @@ describe('SettingsPage', () => {
 
       fireEvent.click(screen.getAllByRole('button', { name: /Update & Restart/i })[0])
 
-      await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
-      await waitFor(() => expect(trackingEnabled).toBe(true))
-      await waitFor(() => expect(screen.getAllByText(/Waiting for reconnect/i).length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(trackingEnabled).toBe(true))
+      await vi.waitFor(() => expect(screen.getAllByText(/Waiting for reconnect/i).length).toBeGreaterThan(0))
 
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/health'), { timeout: 4000 })
-      await waitFor(() => expect(refetchInfo).toHaveBeenCalled(), { timeout: 4000 })
-      await waitFor(() => expect(refetchUpdateStatus).toHaveBeenCalled(), { timeout: 4000 })
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(fetchMock).toHaveBeenCalledWith('/api/health')
+      expect(refetchInfo).toHaveBeenCalled()
+      expect(refetchUpdateStatus).toHaveBeenCalled()
     })
 
     it('renders dirty-source warning and disables update action', () => {
@@ -829,7 +831,6 @@ describe('SettingsPage', () => {
     })
 
     it('persists a new log level through the config API and shows the saved value', async () => {
-      vi.useRealTimers()
       const mutateAsync = vi.fn().mockResolvedValue({ level: 'ERROR' })
       ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
         data: createSystemInfo(),
@@ -865,7 +866,6 @@ describe('SettingsPage', () => {
     })
 
     it('surfaces a failed log-level save as a visible error and reverts the displayed value', async () => {
-      vi.useRealTimers()
       const mutateAsync = vi.fn().mockRejectedValue(new Error('logLevel must be one of DEBUG, INFO, WARN, ERROR'))
       ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
         data: createSystemInfo(),

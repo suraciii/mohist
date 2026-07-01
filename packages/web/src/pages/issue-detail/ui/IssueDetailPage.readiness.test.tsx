@@ -38,6 +38,21 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     useWorkflowYaml: (...args: unknown[]) => mockUseWorkflowYaml(...args),
     startIssue: (...args: unknown[]) => mockStartIssue(...args),
     updateIssue: (...args: unknown[]) => mockUpdateIssue(...args),
+    getIssueWorkflowVariables: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
+    patchIssueWorkflowDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
+    patchIssueWorkflowStageDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
+  }
+})
+
+vi.mock('../../../entities/settings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/settings')>()
+  return {
+    ...actual,
+    useWorkflowProfiles: () => ({ data: [] }),
+    useAvailableModelIds: () => ({ data: [] }),
+    useOpencodeModel: () => ({ data: null }),
+    useModelVariants: () => ({ data: [] }),
+    useEffectiveDefaultWorkflowProfile: () => ({ data: null }),
   }
 })
 

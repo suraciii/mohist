@@ -87,11 +87,17 @@ vi.mock('../src/entities/settings', async (importOriginal) => {
   return {
     ...actual,
     useWorkflowProfiles: () => ({ data: mocks.workflowProfilesList }),
+    useAvailableModelIds: () => ({ data: [] }),
+    useOpencodeModel: () => ({ data: null }),
+    useModelVariants: () => ({ data: [] }),
   }
 })
 
 vi.mock('../src/entities/issue/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/entities/issue/api/client')>()),
+  getIssueWorkflowVariables: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
+  patchIssueWorkflowDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
+  patchIssueWorkflowStageDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
   startIssue: vi.fn(() => Promise.resolve()),
   closeIssue: vi.fn(() => Promise.resolve()),
   forceStopIssue: vi.fn(() => Promise.resolve()),
