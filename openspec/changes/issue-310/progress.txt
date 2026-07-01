@@ -1,0 +1,26 @@
+# Issue 310 — progress notes
+
+## T-001 — extract presentational foundation
+
+Moved 9 inline pieces out of `IssueDetailPage.tsx` (1375 → 1196 lines, −179).
+
+New files:
+- `pages/issue-detail/model/format.ts` (51 lines) — `formatRelativeTime`, `formatStageName`, `stageToIssueStatus`, `WORKFLOW_STAGE_LABELS`, `attachmentFromMetadata`.
+- `pages/issue-detail/ui/pills.tsx` (89 lines) — `PriorityChip`, `WorkflowStagePill`, `HealthPill`, `DraftPill`, `ArchivedPill`.
+- `pages/issue-detail/ui/WorkflowYamlDialog.tsx` (58 lines).
+
+Page now imports the moved pieces; no JSX body or behavior change.
+
+### Codebase patterns confirmed for later tasks
+
+- `model/` exports pure helpers + hooks (precedent: `epic-detail/model/advancement.ts`).
+- `ui/` holds the page + co-located presentational modules + (later) `sections/` and `cards/` subfolders; sibling component tests stay in `ui/` next to the page.
+- The page is the sole owner of structural wrappers (the grid, the `space-y-8`/`space-y-6` columns, every `*-frame` div carrying `mb-8`, structural `data-testid`s). Children render inner content only — D2 rule that keeps the density test green.
+- Two consumers of `attachmentFromMetadata` build the URL locally and pass `(id, attachments, url)` — the page still owns `resolveIssueAttachment` closure (per D6).
+- Web test command: `npm run test:run -w packages/web -- src/pages/issue-detail` filters by workspace-relative path; full suite is `npm run test:run -w packages/web`.
+
+### Verification
+
+- `rg 'data-testid' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx` count: 40 (was 46 — the 6 moved testids `priority-chip`, `workflow-stage-pill`, `health-pill`, `draft-pill`, `archived-pill`, `active-run-yaml-trigger` travel with the JSX into the new modules; page-wide union of data-testids unchanged).
+- `npm run typecheck -w packages/web`: green.
+- `npm run test:run -w packages/web`: 3578 passed / 1 skipped across 233 files; issue-detail 4 suites / 67 tests green.

@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeftIcon, BotIcon, PencilIcon } from 'lucide-react'
-import { IssueStatus, IssueHealth, WorkflowStage, type AttachmentInfo, type RecoveryProjection } from '../../../entities/issue'
+import { IssueStatus, IssueHealth, type RecoveryProjection } from '../../../entities/issue'
 import { addComment, addPrerequisite, closeIssue, commentAttachmentContentPath, deleteComment, extractAttachmentIds, forceStopIssue, issueAttachmentContentPath, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue, updateIssue } from '../../../entities/issue'
-import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline, useWorkflowYaml } from '../../../entities/issue'
+import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
@@ -13,196 +13,17 @@ import { IssueModelSelector } from '../../../features/select-issue-model'
 import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
 import { ActivityDialog } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
-import { statusLabel } from '../../../entities/issue/lib/status-badge'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 import { AttachmentComposer, MarkdownReader } from '@/shared/ui'
-import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
-import { getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
-import { getStageColors } from '../../../widgets/kanban-board/model/stage-colors'
+import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { CardSection } from '@/shared/ui/components/card-section'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-
-function PriorityChip({ priority }: { priority: string | null | undefined }) {
-  if (!priority) return null
-  const style = getPriorityStyle(priority)
-  return (
-    <span
-      data-testid="priority-chip"
-      className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
-      style={{ backgroundColor: style.bg, color: style.text }}
-    >
-      {formatPriority(priority)}
-    </span>
-  )
-}
-
-const WORKFLOW_STAGE_LABELS: Record<WorkflowStage, string> = {
-  [WorkflowStage.Plan]: 'Plan',
-  [WorkflowStage.Build]: 'Build',
-  [WorkflowStage.Check]: 'Check',
-  [WorkflowStage.Integrate]: 'Integrate',
-  [WorkflowStage.Done]: 'Done',
-}
-
-function stageToIssueStatus(stage: WorkflowStage | undefined): IssueStatus {
-  if (!stage) return IssueStatus.Backlog
-  if (stage === WorkflowStage.Done) return IssueStatus.Done
-  return IssueStatus.InProgress
-}
-
-function WorkflowStagePill({ stage }: { stage: WorkflowStage | undefined }) {
-  if (!stage) return null
-  const colors = getStageColors(stageToIssueStatus(stage))
-  return (
-    <span
-      data-testid="workflow-stage-pill"
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-      style={{ backgroundColor: `${colors.accent}1a`, color: colors.accent }}
-    >
-      <span
-        className="inline-block h-1.5 w-1.5 rounded-full"
-        style={{ backgroundColor: colors.accent }}
-      />
-      {WORKFLOW_STAGE_LABELS[stage]}
-    </span>
-  )
-}
-
-function HealthPill({ health }: { health: IssueHealth }) {
-  const colorMap: Record<IssueHealth, { dot: string; bg: string; text: string }> = {
-    [IssueHealth.Active]: { dot: '#22c55e', bg: '#dcfce7', text: '#15803d' },
-    [IssueHealth.Paused]: { dot: '#eab308', bg: '#fef9c3', text: '#a16207' },
-    [IssueHealth.Blocked]: { dot: '#ef4444', bg: '#fee2e2', text: '#b91c1c' },
-    [IssueHealth.Interrupted]: { dot: '#f97316', bg: '#ffedd5', text: '#c2410c' },
-    [IssueHealth.Cancelled]: { dot: '#9ca3af', bg: '#f3f4f6', text: '#6b7280' },
-    [IssueHealth.Done]: { dot: '#22c55e', bg: '#dcfce7', text: '#15803d' },
-  }
-  const c = colorMap[health] ?? colorMap[IssueHealth.Active]
-  return (
-    <span
-      data-testid="health-pill"
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-      style={{ backgroundColor: c.bg, color: c.text }}
-    >
-      <span
-        className="inline-block h-1.5 w-1.5 rounded-full"
-        style={{ backgroundColor: c.dot }}
-      />
-      {statusLabel(health)}
-    </span>
-  )
-}
-
-function DraftPill() {
-  return (
-    <span
-      data-testid="draft-pill"
-      className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-semibold"
-      title="This issue is still a draft and cannot be started yet"
-    >
-      <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
-      Draft
-    </span>
-  )
-}
-
-function ArchivedPill({ archivedAt }: { archivedAt: string | null | undefined }) {
-  return (
-    <span
-      data-testid="archived-pill"
-      data-archived-at={archivedAt ?? ''}
-      className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[10px] font-semibold"
-      title="Archived — preserved execution history is still readable below"
-    >
-      <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500" />
-      Archived
-    </span>
-  )
-}
-
-function formatRelativeTime(iso: string): string {
-  const diff = Math.max(0, Date.now() - new Date(iso).getTime())
-  const seconds = Math.floor(diff / 1000)
-  if (seconds < 5) return 'just now'
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  return `${hours}h ago`
-}
-
-function formatStageName(stage: string | null | undefined): string {
-  if (!stage) return '-'
-  return stage
-    .split(/[_-]/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
-}
-
-function attachmentFromMetadata(id: string, attachments: AttachmentInfo[] | undefined, url: string): MarkdownAttachment | null {
-  const attachment = attachments?.find((item) => item.id === id)
-  if (!attachment) return null
-  return {
-    url,
-    contentType: attachment.contentType || 'application/octet-stream',
-    fileName: attachment.fileName,
-    size: attachment.size,
-  }
-}
-
-function WorkflowYamlDialog({ workflowRunId, isArchived }: { workflowRunId: string; isArchived: boolean }) {
-  const [open, setOpen] = useState(false)
-  const { data, isLoading } = useWorkflowYaml(workflowRunId, open)
-  const heading = isArchived ? 'Workflow run YAML' : 'Active run YAML'
-  const description = isArchived
-    ? 'Rendered runtime output of the preserved workflow run. The workflow is no longer active; this is the historical record.'
-    : 'Rendered runtime output of the active workflow run, not the issue\u0027s workflow profile configuration.'
-
-  return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        data-testid="active-run-yaml-trigger"
-        data-yaml-mode={isArchived ? 'archived' : 'active'}
-        className="w-full text-left rounded-lg border border-gray-200 bg-white p-3 hover:bg-gray-50 transition-colors"
-      >
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600">{heading}</span>
-          <span className="text-xs text-blue-600">View</span>
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-      </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-4xl max-h-[80vh] overflow-hidden flex flex-col p-0">
-          <DialogHeader>
-            <DialogTitle>{heading}</DialogTitle>
-            <p className="text-xs text-muted-foreground pt-1">{description}</p>
-          </DialogHeader>
-          <div className="flex-1 overflow-auto px-4 pb-4">
-            {isLoading ? (
-              <div className="space-y-2">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />
-                ))}
-              </div>
-            ) : data?.yaml ? (
-              <pre className="text-xs font-mono leading-relaxed text-gray-800 whitespace-pre-wrap break-all bg-gray-50 rounded-md p-4 border">
-                {data.yaml}
-              </pre>
-            ) : (
-              <p className="text-sm text-gray-400">No workflow YAML available.</p>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  )
-}
+import { attachmentFromMetadata, formatRelativeTime, formatStageName } from '../model/format'
+import { ArchivedPill, DraftPill, HealthPill, PriorityChip, WorkflowStagePill } from './pills'
+import { WorkflowYamlDialog } from './WorkflowYamlDialog'
 
 export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
