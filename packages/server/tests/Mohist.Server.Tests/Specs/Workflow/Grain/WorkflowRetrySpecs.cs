@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using System.Text.Json;
@@ -122,6 +123,72 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var (checks, r3) = await PollWorkAnyAsync();
         Assert.StartsWith("checks-", checks.WorkId);
         await ReportChecksPassAsync(r3, checks, "check-1");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task TaskFails_UserRetriesWorkflow_RetriedTaskKeepsRecovery()
+    {
+        var recovery = new RecoveryDefinition(
+            2,
+            [
+                new RecoveryHandlerDefinition(
+                    "errorCode=base-moved",
+                    [
+                        new TaskDefinition(
+                            "recover:rebase",
+                            "Rebase after base moved",
+                            "spec/task")
+                    ],
+                    RetrySelf: true)
+            ]);
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks:
+            [
+                new TaskDefinition(
+                    "merge-pr",
+                    "Merge PR",
+                    "spec/task",
+                    Recovery: recovery)
+            ],
+            checks: []));
+
+        var (firstAttempt, r1) = await PollWorkAnyAsync();
+        Assert.StartsWith("merge-pr.1", firstAttempt.WorkId);
+        Assert.NotNull(firstAttempt.Recovery);
+        await ReportAsync(r1, firstAttempt.WorkId, "failed", "transient gh EOF");
+
+        await workflow.RetryAsync();
+
+        var (retriedAttempt, r2) = await PollWorkAnyAsync();
+        Assert.StartsWith("merge-pr.2", retriedAttempt.WorkId);
+        Assert.Equal(r1, r2);
+        Assert.NotNull(retriedAttempt.Recovery);
+        using (var recoveryJson = JsonDocument.Parse(retriedAttempt.Recovery!))
+        {
+            Assert.Equal("errorCode=base-moved",
+                recoveryJson.RootElement
+                    .GetProperty("handlers")[0]
+                    .GetProperty("when")
+                    .GetString());
+        }
+
+        await ReportAsync(r2, retriedAttempt.WorkId, new WorkResult(
+            "completed",
+            "Merge PR failed (errorCode=base-moved); recovery scheduled",
+            Output: """{"errorCode":"base-moved"}""",
+            AddTasks:
+            [
+                new RuntimeTaskInput(
+                    "recover:rebase",
+                    "Rebase after base moved",
+                    "spec/task")
+            ]));
+
+        var (recoveryTask, r3) = await PollWorkAnyAsync();
+        Assert.StartsWith("recover:rebase.1", recoveryTask.WorkId);
+        Assert.Equal(r2, r3);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
