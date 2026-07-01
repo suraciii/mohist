@@ -8,7 +8,6 @@ import { ensureDir, runCommand } from "../system/process.js"
 import { runnerVariables, WorkspaceManager } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import { acpAgentAction } from "../actions/acp-agent.js"
-import { git as defaultGit } from "../actions/git.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
 import {
@@ -25,30 +24,25 @@ import {
   resolveMaxCleanupAttempts,
   type WorktreeSnapshot,
 } from "./worktree-cleanup.js"
+import {
+  attachBranchStabilityEvidence,
+  checkBranchStability,
+  expectedWorkspaceBranch,
+  type BranchStabilityEvidence,
+} from "./branch-stability.js"
+import { git } from "./git-probe.js"
 
 const DEFAULT_STALE_INDEX_LOCK_MS = 60_000
 
 export type CleanupAgentAction = (context: ActionContext) => Promise<ActionResult>
 
-type GitRunner = (workDir: string, args: string[], signal: AbortSignal) => Promise<{
-  success: boolean
-  stdout: string
-  stderr: string
-  exitCode: number
-  combinedOutput: string
-}>
 type LockHolderProbe = (workDir: string, lockPath: string, signal: AbortSignal) => Promise<{ held: boolean; detail?: string }>
 
 let cleanupAgentAction: CleanupAgentAction = acpAgentAction
-let git: GitRunner = defaultGit
 let lockHolderProbe: LockHolderProbe = defaultLockHolderProbe
 
 export function setCleanupAgentActionForTest(handler: CleanupAgentAction | null) {
   cleanupAgentAction = handler ?? acpAgentAction
-}
-
-export function setExecutorGitRunnerForTest(runner: GitRunner | null) {
-  git = runner ?? defaultGit
 }
 
 export function setExecutorLockHolderProbeForTest(probe: LockHolderProbe | null) {
@@ -61,23 +55,6 @@ export interface DirtyWorktreeEvidence {
   unstaged: string[]
   untracked: string[]
   cleanupAttempts: number
-}
-
-export interface BranchStabilityEvidence {
-  kind: "branch-stability"
-  boundary: "start" | "end"
-  expectedBranch: string
-  observedBranch: string
-  observedRef?: string | null
-}
-
-export interface BranchInvariantViolationEvidence {
-  kind: "branch-invariant-violation"
-  boundary: "start" | "end"
-  expectedBranch: string
-  observedBranch: string
-  observedRef?: string | null
-  detail?: string
 }
 
 export class WorkExecutor {
@@ -131,7 +108,7 @@ export class WorkExecutor {
       const workspaceRoot = this.workspaceRoot(variables)
       const workDir = await this.resolveWorkDir(renderedWith, workspaceRoot)
       const expectedBranch = expectedWorkspaceBranch(variables)
-      const startCheck = await this.checkBranchStability(work, workDir, expectedBranch, "start", signal)
+      const startCheck = await checkBranchStability(work, workDir, expectedBranch, "start", signal)
       if (startCheck.kind === "violation") {
         return startCheck.result
       }
@@ -142,7 +119,7 @@ export class WorkExecutor {
       if (normalized.status !== "completed") {
         return attachBranchStabilityEvidence(normalized, startCheck.evidence)
       }
-      const endCheck = await this.checkBranchStability(work, workDir, expectedBranch, "end", signal)
+      const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal)
       if (endCheck.kind === "violation") {
         return endCheck.result
       }
@@ -161,103 +138,6 @@ export class WorkExecutor {
       }
       return failure(work, errorMessage(error))
     }
-  }
-
-  /**
-   * Task boundary invariant: the workflow workspace must remain on
-   * `workspace.branch` for the entire lifetime of a task. The start
-   * check runs before the action is invoked; the end check runs after
-   * a successful action but before `enforceCleanWorktree` so a
-   * wrong-branch state is reported as a branch-invariant violation
-   * (runner/action bug) rather than as a generic dirty-worktree
-   * failure. The two checks are intentionally not exhaustive: the
-   * action itself may temporarily move refs, and that is the
-   * integration's contract; we only assert the boundary.
-   */
-  private async checkBranchStability(
-    work: RenderedWorkItem,
-    workDir: string,
-    expectedBranch: string | null,
-    boundary: "start" | "end",
-    signal: AbortSignal,
-  ): Promise<
-    | { kind: "ok"; evidence: BranchStabilityEvidence }
-    | { kind: "violation"; result: WorkItemResult }
-  > {
-    const observed = await readCurrentBranch(workDir, signal)
-    if (expectedBranch === null) {
-      const evidence: BranchStabilityEvidence = {
-        kind: "branch-stability",
-        boundary,
-        expectedBranch: "",
-        observedBranch: observed.branch ?? "",
-        observedRef: observed.ref,
-      }
-      return { kind: "ok", evidence }
-    }
-    // A non-git worktree has no branch context to check, matching
-    // the clean-worktree probe's "treat as satisfied" semantics for
-    // plain tmpdirs and test fixtures. The evidence records the
-    // empty observed branch so downstream consumers can tell the
-    // boundary was trivially satisfied. A detached HEAD at a real
-    // git worktree, by contrast, IS a violation: the run branch is
-    // always a real branch ref, so a detached HEAD must not be
-    // silently tolerated.
-    if (observed.nonGit) {
-      const evidence: BranchStabilityEvidence = {
-        kind: "branch-stability",
-        boundary,
-        expectedBranch,
-        observedBranch: "",
-        observedRef: null,
-      }
-      return { kind: "ok", evidence }
-    }
-    const evidence: BranchStabilityEvidence = {
-      kind: "branch-stability",
-      boundary,
-      expectedBranch,
-      observedBranch: observed.branch ?? "",
-      observedRef: observed.ref,
-    }
-    if (observed.error) {
-      return {
-        kind: "violation",
-        result: branchInvariantViolationFailure(work, {
-          kind: "branch-invariant-violation",
-          boundary,
-          expectedBranch,
-          observedBranch: observed.branch ?? "",
-          observedRef: observed.ref,
-          detail: `git rev-parse --abbrev-ref HEAD probe failed: ${observed.error}`,
-        }),
-      }
-    }
-    if (observed.detached) {
-      return {
-        kind: "violation",
-        result: branchInvariantViolationFailure(work, {
-          kind: "branch-invariant-violation",
-          boundary,
-          expectedBranch,
-          observedBranch: "",
-          observedRef: observed.ref,
-        }),
-      }
-    }
-    if (observed.branch !== expectedBranch) {
-      return {
-        kind: "violation",
-        result: branchInvariantViolationFailure(work, {
-          kind: "branch-invariant-violation",
-          boundary,
-          expectedBranch,
-          observedBranch: observed.branch ?? "",
-          observedRef: observed.ref,
-        }),
-      }
-    }
-    return { kind: "ok", evidence }
   }
 
   /**
@@ -904,90 +784,6 @@ function errorMessage(error: unknown): string {
 
 function isNotFoundError(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "ENOENT")
-}
-
-function expectedWorkspaceBranch(variables: JsonObject): string | null {
-  const workspace = variables["workspace"]
-  if (!workspace || typeof workspace !== "object" || Array.isArray(workspace)) return null
-  const branch = (workspace as JsonObject)["branch"]
-  return typeof branch === "string" && branch.length > 0 ? branch : null
-}
-
-interface CurrentBranchResult {
-  branch: string | null
-  ref: string | null
-  detached: boolean
-  nonGit: boolean
-  error: string | null
-}
-
-async function readCurrentBranch(workDir: string, signal: AbortSignal): Promise<CurrentBranchResult> {
-  const probe = await git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal)
-  if (!probe.success) {
-    const stderr = (probe.stderr ?? "").toLowerCase()
-    // A plain (non-git) worktree is the same edge case as the clean
-    // worktree probe: there is no branch context, so the branch check
-    // is satisfied trivially rather than reported as a failure.
-    if (stderr.includes("not a git repository")) {
-      return { branch: null, ref: null, detached: false, nonGit: true, error: null }
-    }
-    return { branch: null, ref: null, detached: false, nonGit: false, error: probe.combinedOutput || `exit ${probe.exitCode}` }
-  }
-  const branch = probe.stdout.trim()
-  // `git rev-parse --abbrev-ref HEAD` returns "HEAD" for a detached
-  // HEAD. The run branch is always a real branch ref, so a detached
-  // HEAD is itself a boundary violation; surface it as a null branch
-  // (the caller compares to the expected branch and reports the
-  // violation) but record the ref for evidence.
-  if (branch === "HEAD") {
-    const refProbe = await git(workDir, ["rev-parse", "HEAD"], signal)
-    return { branch: null, ref: refProbe.success ? refProbe.stdout.trim() : null, detached: true, nonGit: false, error: null }
-  }
-  return { branch, ref: branch, detached: false, nonGit: false, error: null }
-}
-
-function branchInvariantViolationFailure(
-  work: RenderedWorkItem,
-  evidence: BranchInvariantViolationEvidence,
-): WorkItemResult {
-  const label = work.title?.trim() || work.uses || work.workId
-  const observed = evidence.observedBranch || `(detached at ${evidence.observedRef ?? "unknown"})`
-  const detail = evidence.detail ? `; ${evidence.detail}` : ""
-  const message = `branch-invariant violation at ${evidence.boundary} boundary for ${label}: ` +
-    `expected branch '${evidence.expectedBranch}', observed '${observed}'${detail}`.slice(0, 4000)
-  return {
-    status: "failed",
-    message,
-    output: JSON.stringify(evidence),
-  }
-}
-
-function attachBranchStabilityEvidence(
-  result: WorkItemResult,
-  evidence: BranchStabilityEvidence | BranchStabilityEvidence[],
-): WorkItemResult {
-  const stack = Array.isArray(evidence) ? evidence : [evidence]
-  if (stack.length === 0) return result
-  const existingOutput = result.output ? safeParseJson(result.output) : null
-  const evidenceList = Array.isArray((existingOutput ?? {})["branchStability"])
-    ? ((existingOutput as JsonObject)["branchStability"] as JsonValue[])
-    : []
-  const merged: JsonObject = {
-    ...(existingOutput ?? {}),
-    branchStability: [...evidenceList, ...stack.map(branchStabilityToJson)],
-  }
-  return { ...result, output: JSON.stringify(merged) }
-}
-
-function branchStabilityToJson(evidence: BranchStabilityEvidence): JsonObject {
-  const value: JsonObject = {
-    kind: evidence.kind,
-    boundary: evidence.boundary,
-    expectedBranch: evidence.expectedBranch,
-    observedBranch: evidence.observedBranch,
-  }
-  if (evidence.observedRef !== undefined) value["observedRef"] = evidence.observedRef
-  return value
 }
 
 // ---------------------------------------------------------------------------

@@ -7,9 +7,9 @@ import { promisify } from "node:util"
 import {
   WorkExecutor,
   setCleanupAgentActionForTest,
-  setExecutorGitRunnerForTest,
   setExecutorLockHolderProbeForTest,
 } from "../src/runtime/executor.js"
+import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { ActionRegistry } from "../src/actions/registry.js"
 import type { ActionContext, ActionResult, WorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
