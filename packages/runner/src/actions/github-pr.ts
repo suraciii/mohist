@@ -1,7 +1,7 @@
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
-import { runCommand } from "../system/process.js"
+import { runCommand, type CommandResult } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
 import { isIssueFieldSource, resolveIssueFields, type IssueFields } from "./issue-fields.js"
 
@@ -47,6 +47,26 @@ export function setGitHubPrChecksTimingForTest(timing: { pollIntervalMs?: number
   if (timing.pollIntervalMs !== undefined) prChecksPollIntervalMs = timing.pollIntervalMs
   if (timing.noChecksGraceMs !== undefined) prChecksNoChecksGraceMs = timing.noChecksGraceMs
   if (timing.unavailableRetryLimit !== undefined) prChecksUnavailableRetryLimit = Math.max(0, Math.floor(timing.unavailableRetryLimit))
+}
+
+// Bounded in-action retry for transient network failures on read-only gh calls
+// (gh pr view / gh pr list). Network jitter to api.github.com (e.g. "unexpected
+// EOF", connection reset) is common through a flaky proxy path and should not
+// surface as an action failure. Writes (gh pr create/merge/...) are intentionally
+// NOT retried here: they are not all idempotent.
+const GH_TRANSIENT_RETRY_LIMIT_DEFAULT = 3
+const GH_TRANSIENT_RETRY_BACKOFF_MS_DEFAULT = 2_000
+let ghTransientRetryLimit = GH_TRANSIENT_RETRY_LIMIT_DEFAULT
+let ghTransientRetryBackoffMs = GH_TRANSIENT_RETRY_BACKOFF_MS_DEFAULT
+
+export function setGitHubPrTransientRetryForTest(opts: { limit?: number; backoffMs?: number } | null) {
+  if (opts === null) {
+    ghTransientRetryLimit = GH_TRANSIENT_RETRY_LIMIT_DEFAULT
+    ghTransientRetryBackoffMs = GH_TRANSIENT_RETRY_BACKOFF_MS_DEFAULT
+    return
+  }
+  if (opts.limit !== undefined) ghTransientRetryLimit = Math.max(0, Math.floor(opts.limit))
+  if (opts.backoffMs !== undefined) ghTransientRetryBackoffMs = Math.max(0, Math.floor(opts.backoffMs))
 }
 
 export type GitHubPrErrorCode =
@@ -603,9 +623,16 @@ export async function waitChecksAndMergePr(
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string) => void,
 ): Promise<WaitChecksAndMergeOk | WaitChecksAndMergeFailure> {
-  const viewResult = await gh("gh", ["pr", "view", String(prNumber), "--json", "state,mergeCommit,url,number,mergeStateStatus"], workDir, signal)
+  const viewResult = await runGhReadWithRetry(
+    gh,
+    ["pr", "view", String(prNumber), "--json", "state,mergeCommit,url,number,mergeStateStatus"],
+    workDir,
+    signal,
+    record,
+    "gh-pr-view",
+    `pr view ${prNumber} --json state,mergeCommit,url,number,mergeStateStatus`,
+  )
   const viewOutput = combinedGhOutput(viewResult)
-  record("gh-pr-view", `pr view ${prNumber} --json state,mergeCommit,url,number,mergeStateStatus`, viewResult.exitCode, viewOutput)
   if (viewResult.exitCode !== 0) {
     return {
       kind: "failure",
@@ -690,9 +717,16 @@ export async function waitChecksAndMergePr(
         output: "cancelled before merge status settled",
       }
     }
-    const mergeStatusResult = await gh("gh", ["pr", "view", String(prNumber), "--json", "mergeStateStatus"], workDir, signal)
+    const mergeStatusResult = await runGhReadWithRetry(
+      gh,
+      ["pr", "view", String(prNumber), "--json", "mergeStateStatus"],
+      workDir,
+      signal,
+      record,
+      "gh-pr-merge-ready",
+      `pr view ${prNumber} --json mergeStateStatus`,
+    )
     const mergeStatusOutput = combinedGhOutput(mergeStatusResult)
-    record("gh-pr-merge-ready", `pr view ${prNumber} --json mergeStateStatus`, mergeStatusResult.exitCode, mergeStatusOutput)
     if (mergeStatusResult.exitCode !== 0) {
       return {
         kind: "failure",
@@ -747,9 +781,16 @@ export async function waitChecksAndMergePr(
     }
   }
 
-  const recheck = await gh("gh", ["pr", "view", String(prNumber), "--json", "state,mergeCommit,url"], workDir, signal)
+  const recheck = await runGhReadWithRetry(
+    gh,
+    ["pr", "view", String(prNumber), "--json", "state,mergeCommit,url"],
+    workDir,
+    signal,
+    record,
+    "gh-pr-view-confirm",
+    `pr view ${prNumber} --json state,mergeCommit,url`,
+  )
   const recheckOutput = combinedGhOutput(recheck)
-  record("gh-pr-view-confirm", `pr view ${prNumber} --json state,mergeCommit,url`, recheck.exitCode, recheckOutput)
   if (recheck.exitCode !== 0) {
     return {
       kind: "failure",
@@ -833,14 +874,16 @@ async function waitForPrChecks(
         output: "cancelled before next poll",
       }
     }
-    const checksResult = await gh(
-      "gh",
+    const checksResult = await runGhReadWithRetry(
+      gh,
       ["pr", "view", String(prNumber), "--json", "statusCheckRollup"],
       workDir,
       signal,
+      record,
+      "gh-pr-checks",
+      `pr view ${prNumber} --json statusCheckRollup`,
     )
     const checksOutput = combinedGhOutput(checksResult)
-    record("gh-pr-checks", `pr view ${prNumber} --json statusCheckRollup`, checksResult.exitCode, checksOutput)
     let unavailable: { message: string; output: string } | null = null
     if (checksResult.exitCode !== 0) {
       unavailable = { message: checksOutput, output: checksOutput }
@@ -921,6 +964,42 @@ function delayWithSignal(ms: number, signal: AbortSignal): Promise<void> {
     }
     signal.addEventListener("abort", onAbort, { once: true })
   })
+}
+
+// Runs a read-only gh command, retrying transient network failures (network
+// jitter, rate limits, 5xx) up to ghTransientRetryLimit times with backoff.
+// Only reads are safe to retry; writes must bypass this. Each retried attempt
+// is recorded with a "(transient retry N/M)" marker; the final outcome is
+// recorded under the canonical command so existing step assertions hold.
+async function runGhReadWithRetry(
+  gh: GhRunner,
+  args: string[],
+  workDir: string,
+  signal: AbortSignal,
+  record: (name: string, command: string, exitCode: number, output: string) => void,
+  recordName: string,
+  recordCommand: string,
+): Promise<CommandResult> {
+  let attempt = 0
+  for (;;) {
+    const result = await gh("gh", args, workDir, signal)
+    const transient = result.exitCode !== 0
+      && attempt < ghTransientRetryLimit
+      && looksLikeRetrySafe(`${result.stdout}\n${result.stderr}`)
+    if (!transient) {
+      record(recordName, recordCommand, result.exitCode, combinedGhOutput(result))
+      return result
+    }
+    attempt++
+    record(recordName, `${recordCommand} (transient retry ${attempt}/${ghTransientRetryLimit})`, result.exitCode, combinedGhOutput(result))
+    try {
+      await delayWithSignal(ghTransientRetryBackoffMs, signal)
+    } catch (error) {
+      record(recordName, recordCommand, result.exitCode, `aborted during retry backoff: ${errorMessage(error)}`)
+      return result
+    }
+    if (signal.aborted) return result
+  }
 }
 
 export interface PrCheckEntry {
@@ -1183,6 +1262,20 @@ export function looksLikeRetrySafe(text: string): boolean {
   if (lower.includes("could not resolve host") || lower.includes("network") || lower.includes("timeout") || lower.includes("timed out")) return true
   if (lower.includes("connection reset") || lower.includes("temporarily unavailable") || lower.includes("try again")) return true
   if (lower.includes("502") || lower.includes("503") || lower.includes("504")) return true
+  // Go net/http transport errors emitted by gh (e.g. when the TLS stream to
+  // api.github.com is cut mid-response through an unstable proxy path).
+  if (
+    lower.includes("unexpected eof") ||
+    lower.includes("connection refused") ||
+    lower.includes("broken pipe") ||
+    lower.includes("dial tcp") ||
+    lower.includes("no such host") ||
+    lower.includes("tls handshake") ||
+    lower.includes("context deadline exceeded") ||
+    lower.includes("i/o timeout")
+  ) {
+    return true
+  }
   return false
 }
 
