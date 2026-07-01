@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-export type LegendShape = 'bar' | 'line' | 'dot'
+export type LegendShape = 'bar' | 'line' | 'dashedLine' | 'dot'
 
 export interface LegendEntry {
   label: string
@@ -38,6 +38,23 @@ function LegendSwatch({ shape, className }: { shape: LegendShape; className: str
             <circle cx="5" cy="4" r="2" fill="none" className={className} />
             <circle cx="11" cy="7" r="2" fill="none" className={className} />
             <circle cx="15" cy="2" r="2" fill="none" className={className} />
+          </svg>
+        </span>
+      )
+    }
+    case 'dashedLine': {
+      return (
+        <span className="inline-block w-4 h-3 mr-1.5 align-middle" aria-hidden="true">
+          <svg width="16" height="12" viewBox="0 0 16 12">
+            <polyline
+              points="0,10 5,4 11,7 15,2"
+              fill="none"
+              strokeWidth={2}
+              strokeDasharray="2 2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={className}
+            />
           </svg>
         </span>
       )

@@ -19,6 +19,7 @@ public static partial class IssueRoutes
         projectIssues.MapIssueMetrics();
         projectIssues.MapIssueApprovalMetrics();
         projectIssues.MapIssueQualityMetrics();
+        projectIssues.MapIssueDeliveryTimeMetrics();
 
         return app;
     }

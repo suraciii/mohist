@@ -27,6 +27,10 @@ vi.mock('./ThroughputChart', () => ({
   ThroughputChart: () => <div data-testid="throughput-chart-mock" />,
 }))
 
+vi.mock('./CycleTimeChart', () => ({
+  CycleTimeChart: () => <div data-testid="cycle-time-chart-mock" />,
+}))
+
 vi.mock('./CostTrendChart', () => ({
   CostTrendChart: () => <div data-testid="cost-trend-chart-mock" />,
 }))
@@ -55,6 +59,16 @@ describe('ProductivityZone', () => {
     const throughput = screen.getByTestId('throughput-chart-mock')
     expect(zone).toContainElement(throughput)
     expect(completion.compareDocumentPosition(throughput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('mounts the cycle-time chart after the throughput chart', () => {
+    render(<ProductivityZone />)
+
+    const zone = screen.getByTestId('productivity-zone')
+    const throughput = screen.getByTestId('throughput-chart-mock')
+    const cycle = screen.getByTestId('cycle-time-chart-mock')
+    expect(zone).toContainElement(cycle)
+    expect(throughput.compareDocumentPosition(cycle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('mounts the cost trend chart after investment panel', () => {

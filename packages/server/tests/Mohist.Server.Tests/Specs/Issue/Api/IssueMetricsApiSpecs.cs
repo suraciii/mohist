@@ -348,6 +348,154 @@ public class IssueMetricsApiSpecs
         Assert.Null(payload.Window30d.FirstTimeRightRate);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_DeliveredIssueWithWorkStart_ReturnsLeadAndCycle()
+    {
+        var project = await CreateProjectAsync($"delivery-time-present-{Guid.NewGuid():N}");
+        var createdAt = new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc);
+        var workStartedAt = new DateTimeOffset(2026, 6, 3, 10, 0, 0, TimeSpan.Zero);
+        var completedAt = new DateTime(2026, 6, 5, 14, 0, 0, DateTimeKind.Utc);
+        var issueId = $"issue_dt_present_{Guid.NewGuid():N}";
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            issueId,
+            createdAt,
+            completedAt,
+            [workStartedAt]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        var point = Assert.Single(payload.Points);
+        Assert.Equal(1, point.IssueNumber);
+        Assert.Equal(
+            new DateTimeOffset(completedAt, TimeSpan.Zero).ToString("o"),
+            point.CompletedAt);
+        Assert.Equal(4.25, point.LeadDays, precision: 5);
+        Assert.NotNull(point.CycleDays);
+        Assert.Equal(2.1667, point.CycleDays!.Value, precision: 3);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_NoDeliveredIssues_ReturnsEmptyPoints()
+    {
+        var project = await CreateProjectAsync($"delivery-time-empty-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        Assert.Empty(payload.Points);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_DeliveredIssueWithoutWorkStart_ReportsNullCycle()
+    {
+        var project = await CreateProjectAsync($"delivery-time-noStart-{Guid.NewGuid():N}");
+        var createdAt = new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc);
+        var completedAt = new DateTime(2026, 6, 4, 14, 0, 0, DateTimeKind.Utc);
+        var issueId = $"issue_dt_nostart_{Guid.NewGuid():N}";
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            issueId,
+            createdAt,
+            completedAt,
+            Array.Empty<DateTimeOffset>());
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        var point = Assert.Single(payload.Points);
+        // `null` cycle time is the "undefined" marker — not a fabricated zero.
+        Assert.Null(point.CycleDays);
+        // Lead time is always defined.
+        Assert.Equal(3.25, point.LeadDays, precision: 5);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_GenuineZeroDurationCycle_ReportsZeroAndIsDistinctFromEmpty()
+    {
+        var project = await CreateProjectAsync($"delivery-time-zero-{Guid.NewGuid():N}");
+        var zeroMoment = new DateTime(2026, 6, 5, 14, 0, 0, DateTimeKind.Utc);
+        var createdAt = new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc);
+        var issueId = $"issue_dt_zero_{Guid.NewGuid():N}";
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            issueId,
+            createdAt,
+            zeroMoment,
+            [new DateTimeOffset(zeroMoment, TimeSpan.Zero)]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        var point = Assert.Single(payload.Points);
+        // Genuine zero, not the empty-array null marker.
+        Assert.NotNull(point.CycleDays);
+        Assert.Equal(0.0, point.CycleDays!.Value, precision: 5);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_UsesInjectedRouteClockForTrailingWindow()
+    {
+        var project = await CreateProjectAsync($"delivery-time-clock-{Guid.NewGuid():N}");
+        var insideIssueId = $"issue_dt_clock_inside_{Guid.NewGuid():N}";
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            insideIssueId,
+            new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 6, 5, 14, 0, 0, DateTimeKind.Utc),
+            [new DateTimeOffset(2026, 6, 3, 10, 0, 0, TimeSpan.Zero)]);
+        var outsideIssueId = $"issue_dt_clock_outside_{Guid.NewGuid():N}";
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 2,
+            outsideIssueId,
+            new DateTime(2026, 4, 20, 8, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 5, 1, 14, 0, 0, DateTimeKind.Utc),
+            [new DateTimeOffset(2026, 4, 21, 10, 0, 0, TimeSpan.Zero)]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        var point = Assert.Single(payload.Points);
+        Assert.Equal(1, point.IssueNumber);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_UnknownProject_ReturnsNotFound()
+    {
+        using var response = await _client.GetAsync(
+            $"/api/projects/proj-dt-unknown-{Guid.NewGuid():N}/issues/metrics/delivery-time");
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync(string name)
     {
         using var response = await _client.PostAsJsonAsync(
@@ -694,6 +842,60 @@ public class IssueMetricsApiSpecs
             workflowRunId, json);
     }
 
+    private async Task SeedDeliveredIssueWithCyclesAsync(
+        string projectId,
+        int number,
+        string issueId,
+        DateTime createdAt,
+        DateTime completedAt,
+        IReadOnlyList<DateTimeOffset> workStartTimes)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var issue = new DomainIssue
+        {
+            Id = issueId,
+            ProjectId = projectId,
+            Number = number,
+            Title = "Delivery time metric issue",
+            Status = IssueStatus.Done,
+            CreatedAt = createdAt,
+            UpdatedAt = completedAt,
+            CompletedAt = completedAt,
+        };
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
+        });
+        await db.SaveChangesAsync();
+
+        var source = IssueQuerier.IssueSourcePrefix + issueId;
+        var dbMax = await db.IssueEvents
+            .AsNoTracking()
+            .Where(e => e.Source == source)
+            .Select(e => (long?)e.Id)
+            .MaxAsync();
+        var nextId = (dbMax ?? 0) + 1;
+        foreach (var start in workStartTimes)
+        {
+            db.IssueEvents.Add(new IssueEventRow
+            {
+                Id = nextId++,
+                Source = source,
+                EventId = Guid.NewGuid().ToString(),
+                Type = IssueQuerier.WorkStartedType,
+                Time = start,
+                SpecVersion = "1.0",
+                Subject = number.ToString(),
+                DataContentType = "application/json",
+                Data = JsonDocument.Parse("null").RootElement,
+                ExtensionsJson = "{}",
+            });
+        }
+        await db.SaveChangesAsync();
+    }
+
     private static async Task<T> ReadDataAsync<T>(HttpResponseMessage response)
     {
         var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<T>>(JsonOptions);
@@ -721,4 +923,7 @@ public class IssueMetricsApiSpecs
     private sealed record QualityMetricsWindowDto(string From, string To, int SampleCount, double? FirstTimeRightRate, StageReworkRateDto[] Stages);
     private sealed record StageReworkRateDto(string Stage, int EnteredCount, double? ReworkRate);
     private sealed record QualityMetricsResponse(QualityMetricsWindowDto Window7d, QualityMetricsWindowDto Window30d);
+
+    private sealed record DeliveryTimePointDto(int IssueNumber, string CompletedAt, double LeadDays, double? CycleDays);
+    private sealed record DeliveryTimeMetricsResponse(DeliveryTimePointDto[] Points);
 }

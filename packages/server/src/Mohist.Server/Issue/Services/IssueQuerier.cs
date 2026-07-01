@@ -22,7 +22,7 @@ namespace Mohist.Server.Issue.Services;
 
 public class IssueQuerier : IScopedService
 {
-    private const string WorkStartedType = "com.mohist.issue.work-started";
+    internal const string WorkStartedType = "com.mohist.issue.work-started";
     private static readonly string[] QualityStageOrder = ["plan", "build", "check", "integrate"];
     private static readonly string[] QualityWorkflowEventTypes =
     [
@@ -229,6 +229,35 @@ public class IssueQuerier : IScopedService
         double? AverageSeconds,
         double? MedianSeconds,
         double? MaxSeconds);
+
+    /// <summary>
+    /// One per-issue sample returned by <see cref="GetDeliveryTimesAsync"/>.
+    /// <see cref="IssueNumber"/> is the project's display number (so the
+    /// consuming chart can identify the point without resolving the stable
+    /// id); <see cref="CompletedAt"/> is the project's persisted completion
+    /// moment (latest terminal <c>done</c>) — not a post-completion
+    /// <c>updatedAt</c>; <see cref="LeadDays"/> is always defined
+    /// (creation → completion); <see cref="CycleDays"/> is the
+    /// first-work-start → final-completion duration when at least one
+    /// <c>IssueWorkStarted</c> event exists for the issue, or <c>null</c>
+    /// when the issue has no recorded work-start. <c>null</c> means
+    /// "undefined" (no recorded start) and is structurally distinguishable
+    /// from a genuine zero-duration cycle (<c>CycleDays == 0</c>).
+    /// </summary>
+    public sealed record DeliveryTimePoint(
+        int IssueNumber,
+        DateTimeOffset CompletedAt,
+        double LeadDays,
+        double? CycleDays);
+
+    /// <summary>
+    /// The result of <see cref="GetDeliveryTimesAsync"/>. <see cref="Points"/>
+    /// is empty (not an error, not a fabricated zero) when the trailing
+    /// window contains no delivered issues; an empty list length is the
+    /// empty signal the consuming chart relies on.
+    /// </summary>
+    public sealed record DeliveryTimeResult(
+        IReadOnlyList<DeliveryTimePoint> Points);
 
     // CloudEvents reverse-DNS bus types that mark a terminal transition.
     // <c>com.mohist.issue.work-completed</c> → <c>completed</c> (Done).
@@ -825,6 +854,135 @@ public class IssueQuerier : IScopedService
             AverageSeconds: average,
             MedianSeconds: median,
             MaxSeconds: max);
+    }
+
+    /// <summary>
+    /// Per-issue lead-time and cycle-time series for delivered issues in a
+    /// fixed trailing window. Only issues that have reached <c>done</c>
+    /// (<see cref="IssueStatus.Done"/>) with a non-null
+    /// <c>CompletedAt</c> contribute a sample; <c>cancelled</c>
+    /// (<see cref="IssueStatus.Cancelled"/>) issues are excluded. Window
+    /// membership is anchored on <c>Issue.CompletedAt</c>, which the
+    /// <c>issue-completion-timestamp</c> spec already defines as the
+    /// latest terminal <c>done</c> moment (reopen-and-re-complete
+    /// therefore re-anchors the point at the latest completion, and the
+    /// prior completion is not retained as a separate sample). The
+    /// window length is fixed at <c>30</c> days and is not
+    /// user-configurable (<c>now</c> is the only injected parameter,
+    /// satisfying the no-wall-clock rule).
+    /// <para>
+    /// Lead time = <c>CompletedAt − CreatedAt</c>; <c>CreatedAt</c> is
+    /// the aggregate's <c>init</c>-only/immutable field, so it cannot
+    /// drift across retries. Cycle time = <c>CompletedAt − earliest
+    /// IssueWorkStarted</c> per issue — a scan over durable
+    /// <c>IssueEvents</c> rows (same idiom as <see cref="GetQualityAsync"/>,
+    /// but <c>Min</c> instead of "latest"), preserving the earliest
+    /// work-start across retries. When an issue has no recorded
+    /// <c>IssueWorkStarted</c>, <c>CycleDays</c> is <c>null</c>
+    /// (undefined), distinguishable from a genuine
+    /// <c>CycleDays == 0</c> zero-duration cycle. The returned series
+    /// is at per-issue granularity (no pre-aggregation) and is ordered by
+    /// <c>CompletedAt</c> ascending so the consuming chart can plot
+    /// against the completion-date axis directly.
+    /// </para>
+    /// </summary>
+    public async Task<DeliveryTimeResult> GetDeliveryTimesAsync(
+        string projectId,
+        DateTimeOffset now)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        // Fixed 30-day trailing window keyed on the completion moment.
+        // `now` is the injected anchor; never read the wall clock here.
+        var windowFrom = now.AddDays(-30);
+        var windowTo = now;
+
+        // Resolve the project's issue set. We use `db.Issues` directly
+        // (not the projected read model) so the local-filters below see
+        // the raw `Status`/`CreatedAt`/`CompletedAt` fields without
+        // enrichment overhead — the metrics surface never renders
+        // an issue row, only a duration tuple.
+        var issueRows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId)
+            .ToListAsync();
+
+        if (issueRows.Count == 0)
+        {
+            return new DeliveryTimeResult(Array.Empty<DeliveryTimePoint>());
+        }
+
+        var issuesById = IssueRowMapper.ById(issueRows, projectId)
+            .ToDictionary(i => i.Id, StringComparer.Ordinal);
+
+        var projectIssueIds = issuesById.Keys.ToList();
+        var projectSources = projectIssueIds
+            .Select(id => IssueSourcePrefix + id)
+            .ToList();
+
+        // Scan durable `IssueEvents` for the project's work-started
+        // events. EF Core SQLite cannot translate `DateTimeOffset`
+        // comparisons against the TEXT `Time` column, so we pull the
+        // candidate rows first and filter in memory — the same idiom
+        // `GetQualityAsync` already uses. Candidate set is bounded
+        // by the project's issue count; at v1 volumes this is small.
+        var earliestWorkStartedByIssue = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        if (projectSources.Count > 0)
+        {
+            var sourceSet = new HashSet<string>(projectSources, StringComparer.Ordinal);
+            var candidates = await db.IssueEvents.AsNoTracking()
+                .Select(e => new { e.Source, e.Type, e.Time })
+                .ToListAsync();
+
+            foreach (var e in candidates)
+            {
+                if (e.Type != WorkStartedType) continue;
+                if (!sourceSet.Contains(e.Source)) continue;
+
+                var issueId = e.Source[IssueSourcePrefix.Length..];
+                if (!earliestWorkStartedByIssue.TryGetValue(issueId, out var existing) || e.Time < existing)
+                {
+                    earliestWorkStartedByIssue[issueId] = e.Time;
+                }
+            }
+        }
+
+        var points = new List<DeliveryTimePoint>(issuesById.Count);
+        foreach (var issue in issuesById.Values)
+        {
+            // Only delivered issues participate. Cancelled issues carry
+            // no lead/cycle contribution per the spec; still-in-flight
+            // issues (Backlog/InProgress) lack `CompletedAt` and are
+            // skipped here.
+            if (issue.Status != IssueStatus.Done) continue;
+            if (issue.CompletedAt is null) continue;
+
+            var completedAtDt = DateTime.SpecifyKind(issue.CompletedAt.Value, DateTimeKind.Utc);
+            if (completedAtDt < windowFrom.UtcDateTime || completedAtDt > windowTo.UtcDateTime) continue;
+
+            var createdAtUtc = DateTime.SpecifyKind(issue.CreatedAt, DateTimeKind.Utc);
+            var leadSpan = completedAtDt - createdAtUtc;
+            var leadDays = leadSpan.TotalDays;
+
+            double? cycleDays = null;
+            if (earliestWorkStartedByIssue.TryGetValue(issue.Id, out var firstStart))
+            {
+                var cycleSpan = completedAtDt - firstStart.UtcDateTime;
+                cycleDays = cycleSpan.TotalDays;
+            }
+
+            points.Add(new DeliveryTimePoint(
+                IssueNumber: issue.Number,
+                CompletedAt: new DateTimeOffset(completedAtDt, TimeSpan.Zero),
+                LeadDays: leadDays,
+                CycleDays: cycleDays));
+        }
+
+        // Order by completion time ascending so the consuming chart can
+        // plot the series directly along the x-axis (left → older,
+        // right → newer).
+        points.Sort(static (a, b) => a.CompletedAt.CompareTo(b.CompletedAt));
+
+        return new DeliveryTimeResult(points);
     }
 
     /// <summary>

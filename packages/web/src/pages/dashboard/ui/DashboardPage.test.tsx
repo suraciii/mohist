@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   completionThroughput: { bucket: 'day', window: { from: '2026-06-01T00:00:00', to: '2026-06-07T23:59:59' }, buckets: [] } as { bucket: string; window: { from: string; to: string }; buckets: { boundary: string; completed: number; failed: number }[] },
   approvalWait: undefined as { window: { from: string; to: string }; sampleCount: number; averageSeconds: number | null; medianSeconds: number | null; maxSeconds: number | null } | undefined,
   qualityMetrics: undefined as any,
+  deliveryTime: undefined as { points: { issueNumber: number; completedAt: string; leadDays: number; cycleDays: number | null }[] } | undefined,
 }))
 
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -92,6 +93,10 @@ vi.mock('../../../entities/issue/api/quality-metrics', () => ({
   useQualityMetrics: () => ({ data: mocks.qualityMetrics }),
 }))
 
+vi.mock('../../../entities/issue/api/delivery-time', () => ({
+  useDeliveryTime: () => ({ data: mocks.deliveryTime, isLoading: false, isError: false }),
+}))
+
 import { DashboardPage } from './DashboardPage'
 
 function renderPage() {
@@ -118,6 +123,7 @@ describe('DashboardPage', () => {
     mocks.completionTrend = undefined
     mocks.approvalWait = undefined
     mocks.qualityMetrics = undefined
+    mocks.deliveryTime = undefined
   })
 
   afterEach(() => {
