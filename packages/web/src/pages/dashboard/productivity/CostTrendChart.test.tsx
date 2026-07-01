@@ -222,6 +222,26 @@ describe('CostTrendChart', () => {
     expect(markers).toHaveLength(7)
   })
 
+  it('renders without crashing when costPerShip is omitted (server WhenWritingNull wire format)', () => {
+    // The server serializes null costPerShip with JsonIgnoreCondition.WhenWritingNull,
+    // so the key is absent on the wire and parses as `undefined` (not `null`).
+    const omittedPoints = buildUsageData().cumulativeCostPerShip!.map((p) => {
+      const { costPerShip: _omit, ...rest } = p
+      return rest
+    }) as AgentUsageTimeseriesDto['cumulativeCostPerShip']
+
+    mockUseAgentUsage.mockReturnValue({
+      data: buildUsageData({ cumulativeCostPerShip: omittedPoints }),
+      isLoading: false,
+      isError: false,
+    })
+
+    render(<CostTrendChart />)
+
+    expect(screen.getByTestId('bar-series')).toBeInTheDocument()
+    expect(screen.queryByTestId('line-series')).not.toBeInTheDocument()
+  })
+
   it('bars-only when cumulativeCostPerShip is absent', () => {
     const data = buildUsageData({ cumulativeCostPerShip: null })
 
