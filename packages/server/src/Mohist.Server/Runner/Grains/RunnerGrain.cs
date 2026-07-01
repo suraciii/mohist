@@ -24,6 +24,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private RunnerInfo? _info;
     private string? _pendingBuildGitHash;
     private readonly IPersistentState<RunnerWorksState> _worksState;
+    private readonly SemaphoreSlim _worksStateWriteGate = new(1, 1);
     private DateTime _lastHeartbeat;
     private IDisposable? _heartbeatTimer;
 
@@ -862,7 +863,15 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private async Task PersistAsync()
     {
-        await _worksState.WriteStateAsync();
+        await _worksStateWriteGate.WaitAsync();
+        try
+        {
+            await _worksState.WriteStateAsync();
+        }
+        finally
+        {
+            _worksStateWriteGate.Release();
+        }
     }
 
     private bool HasOutstandingWork()
