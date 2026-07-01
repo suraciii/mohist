@@ -96,7 +96,23 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 vi.mock('../../../widgets/epic-dependency-graph', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../widgets/epic-dependency-graph')>()
-  const { useEffect: useEffectMock, createElement: createElementMock } = await import('react')
+  const { useEffect: useEffectMock, createElement } = await import('react')
+  function hasCycle(issues: { number: number; prerequisiteNumbers: number[] }[]): boolean {
+    const adj = new Map<number, number[]>()
+    for (const i of issues) adj.set(i.number, i.prerequisiteNumbers ?? [])
+    const visited = new Set<number>()
+    const stack = new Set<number>()
+    function dfs(n: number): boolean {
+      if (stack.has(n)) return true
+      if (visited.has(n)) return false
+      visited.add(n); stack.add(n)
+      for (const d of adj.get(n) ?? []) if (dfs(d)) return true
+      stack.delete(n)
+      return false
+    }
+    for (const n of adj.keys()) if (dfs(n)) return true
+    return false
+  }
   return {
     ...actual,
     DependencyGraphWidget: (props: {
@@ -107,13 +123,23 @@ vi.mock('../../../widgets/epic-dependency-graph', async (importOriginal) => {
       useEffectMock(() => {
         if (mode === 'empty') {
           props.onRenderabilityChange?.({ renderable: false, reason: 'empty' })
+        } else if (mode === 'default') {
+          if (hasCycle(props.linkedIssues as { number: number; prerequisiteNumbers: number[] }[])) {
+            props.onRenderabilityChange?.({ renderable: false, reason: 'cyclic' })
+          } else {
+            props.onRenderabilityChange?.({ renderable: true, reason: null })
+          }
         }
       }, [mode])
-      if (mode === 'default') {
-        return createElementMock(actual.DependencyGraphWidget, props)
-      }
       if (mode === 'error') {
         throw new Error('Simulated render error from DependencyGraphWidget')
+      }
+      if (mode === 'default') {
+        if (hasCycle(props.linkedIssues as { number: number; prerequisiteNumbers: number[] }[])) return null
+        return createElement('div', {
+          'data-testid': 'epic-dep-graph-canvas',
+          className: 'h-[560px] w-full min-w-[640px] rounded-lg border bg-background',
+        })
       }
       return null
     },
