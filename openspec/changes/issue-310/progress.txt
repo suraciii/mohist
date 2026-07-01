@@ -24,3 +24,33 @@ Page now imports the moved pieces; no JSX body or behavior change.
 - `rg 'data-testid' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx` count: 40 (was 46 — the 6 moved testids `priority-chip`, `workflow-stage-pill`, `health-pill`, `draft-pill`, `archived-pill`, `active-run-yaml-trigger` travel with the JSX into the new modules; page-wide union of data-testids unchanged).
 - `npm run typecheck -w packages/web`: green.
 - `npm run test:run -w packages/web`: 3578 passed / 1 skipped across 233 files; issue-detail 4 suites / 67 tests green.
+
+## T-002 — merge duplicated click-outside effects into useConfirmOutsideClick hook
+
+Both inline `useEffect` blocks at the original L222-235 (force-stop) and L319-332 (stop) shared the same 5 s auto-dismiss + `mousedown` listener shape. Lifted into `model/useConfirmOutsideClick.ts` returning a `RefObject<HTMLDivElement>`; page now calls the hook twice and the local refs move with the wiring. Note: I will move the refs to the future `IssueActionsCard.tsx` in T-004 — for now they live in the page as the only consumer of the confirm flag in this iteration.
+
+New files:
+- `pages/issue-detail/model/useConfirmOutsideClick.ts` (35 lines) — `{ confirming, setConfirming, timeoutMs? }` → `RefObject<HTMLDivElement>`, default 5000ms.
+- `pages/issue-detail/model/useConfirmOutsideClick.test.ts` (162 lines) — 8 specs: ref shape, no-op when `confirming=false`, outside `mousedown` dismisses, inside click stays, exact 5000ms auto-dismiss via `vi.advanceTimersByTime`, custom `timeoutMs`, timer reset on `true→false→true`, listener removal when `confirming` flips back to `false`.
+
+Page changes:
+- `IssueDetailPage.tsx`: dropped both inline `useEffect` blocks and two `useRef` declarations; imports and uses the hook for `forceStopPanelRef` (L39-42) and `stopPanelRef` (L119-122). No JSX / data-testid change.
+
+### Codebase patterns confirmed for later tasks
+
+- React 19 + `useRef<T>(null)` types as `RefObject<T | null>`. To match a `RefObject<T>` signature verbatim, `useRef<T | null>(null)` and `return ref as React.RefObject<T>` works (strict-mode safe; the runtime value really is `T | null` but the consumer never reads it before the panel renders).
+- tsconfig enables `noUnusedLocals`. A "shared" `let` binding that one render path writes to and test code reads in `act()` needs a local `const` copy inside the helper (TS will not narrow `let`s across functions).
+- The hook is purely behavioral (no JSX, no testid), so its move does not touch the density test's structural query — confirmed by rerunning the full issue-detail suite (5 files / 75 tests green).
+
+### Gotchas
+
+- Vitest's `// @vitest-environment jsdom` is needed because the hook attaches a real DOM listener.
+- `vi.spyOn(document, 'addEventListener'|'removeEventListener')` survives the hook's effect cleanup without interfering with the fake timer, so the listener-removal test stays deterministic (no wall clock).
+
+### Verification
+
+- `rg 'useEffect\(|addEventListener.*mousedown|panelRef|clickOutside' packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx`: 0 matches.
+- `npm run typecheck -w packages/web`: green.
+- Hook unit suite: 8/8 pass in 30 ms (well under the 50 ms unit budget per design/testing.md).
+- issue-detail suites: 5 files / 75 tests green (the existing 67 + 8 new).
+- `npm run test:run -w packages/web`: 3586 passed / 1 skipped across 234 files.

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeftIcon, BotIcon, PencilIcon } from 'lucide-react'
@@ -22,6 +22,7 @@ import { CardSection } from '@/shared/ui/components/card-section'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { attachmentFromMetadata, formatRelativeTime, formatStageName } from '../model/format'
+import { useConfirmOutsideClick } from '../model/useConfirmOutsideClick'
 import { ArchivedPill, DraftPill, HealthPill, PriorityChip, WorkflowStagePill } from './pills'
 import { WorkflowYamlDialog } from './WorkflowYamlDialog'
 
@@ -35,25 +36,13 @@ export function IssueDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
-  const forceStopPanelRef = useRef<HTMLDivElement>(null)
+  const forceStopPanelRef = useConfirmOutsideClick({
+    confirming: forceStopConfirming,
+    setConfirming: setForceStopConfirming,
+  })
 
   const [prereqInput, setPrereqInput] = useState('')
   const [prereqError, setPrereqError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!forceStopConfirming) return
-    const timer = setTimeout(() => setForceStopConfirming(false), 5000)
-    const handleClickOutside = (e: MouseEvent) => {
-      if (forceStopPanelRef.current && !forceStopPanelRef.current.contains(e.target as Node)) {
-        setForceStopConfirming(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => {
-      clearTimeout(timer)
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [forceStopConfirming])
 
   const { data: issue, isLoading, isError } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
@@ -127,7 +116,10 @@ export function IssueDetailPage() {
   })
 
   const [stopConfirming, setStopConfirming] = useState(false)
-  const stopPanelRef = useRef<HTMLDivElement>(null)
+  const stopPanelRef = useConfirmOutsideClick({
+    confirming: stopConfirming,
+    setConfirming: setStopConfirming,
+  })
   const stopMutation = useMutation({
     mutationFn: () => stopIssue(issueNumber, projectId),
     onSuccess: () => {
@@ -136,21 +128,6 @@ export function IssueDetailPage() {
       setStopConfirming(false)
     },
   })
-
-  useEffect(() => {
-    if (!stopConfirming) return
-    const timer = setTimeout(() => setStopConfirming(false), 5000)
-    const handler = (e: MouseEvent) => {
-      if (stopPanelRef.current && !stopPanelRef.current.contains(e.target as Node)) {
-        setStopConfirming(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => {
-      clearTimeout(timer)
-      document.removeEventListener('mousedown', handler)
-    }
-  }, [stopConfirming])
 
   const canStopWorkflow = !!issue?.workflowRunId
     && issue.health !== IssueHealth.Done
