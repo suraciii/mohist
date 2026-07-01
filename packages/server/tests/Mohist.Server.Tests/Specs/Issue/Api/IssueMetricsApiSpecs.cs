@@ -356,9 +356,11 @@ public class IssueMetricsApiSpecs
     public async Task DeliveryTimeMetrics_DeliveredIssueWithWorkStart_ReturnsLeadAndCycle()
     {
         var project = await CreateProjectAsync($"delivery-time-present-{Guid.NewGuid():N}");
-        var createdAt = new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc);
-        var workStartedAt = new DateTimeOffset(2026, 6, 3, 10, 0, 0, TimeSpan.Zero);
-        var completedAt = new DateTime(2026, 6, 5, 14, 0, 0, DateTimeKind.Utc);
+        var completedAt = DeliveryTimeCompletedAt();
+        var createdAt = completedAt.AddDays(-4).AddHours(-6);
+        var workStartedAt = new DateTimeOffset(completedAt, TimeSpan.Zero)
+            .AddDays(-2)
+            .AddHours(-4);
         var issueId = $"issue_dt_present_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
@@ -404,8 +406,8 @@ public class IssueMetricsApiSpecs
     public async Task DeliveryTimeMetrics_DeliveredIssueWithoutWorkStart_ReportsNullCycle()
     {
         var project = await CreateProjectAsync($"delivery-time-noStart-{Guid.NewGuid():N}");
-        var createdAt = new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc);
-        var completedAt = new DateTime(2026, 6, 4, 14, 0, 0, DateTimeKind.Utc);
+        var completedAt = DeliveryTimeCompletedAt();
+        var createdAt = completedAt.AddDays(-3).AddHours(-6);
         var issueId = $"issue_dt_nostart_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
@@ -433,8 +435,8 @@ public class IssueMetricsApiSpecs
     public async Task DeliveryTimeMetrics_GenuineZeroDurationCycle_ReportsZeroAndIsDistinctFromEmpty()
     {
         var project = await CreateProjectAsync($"delivery-time-zero-{Guid.NewGuid():N}");
-        var zeroMoment = new DateTime(2026, 6, 5, 14, 0, 0, DateTimeKind.Utc);
-        var createdAt = new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc);
+        var zeroMoment = DeliveryTimeCompletedAt();
+        var createdAt = zeroMoment.AddDays(-4).AddHours(-6);
         var issueId = $"issue_dt_zero_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
@@ -461,22 +463,24 @@ public class IssueMetricsApiSpecs
     public async Task DeliveryTimeMetrics_UsesInjectedRouteClockForTrailingWindow()
     {
         var project = await CreateProjectAsync($"delivery-time-clock-{Guid.NewGuid():N}");
+        var insideCompletedAt = DeliveryTimeCompletedAt();
+        var outsideCompletedAt = _fixture.TimeProvider.GetUtcNow().UtcDateTime.AddDays(-31);
         var insideIssueId = $"issue_dt_clock_inside_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 1,
             insideIssueId,
-            new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc),
-            new DateTime(2026, 6, 5, 14, 0, 0, DateTimeKind.Utc),
-            [new DateTimeOffset(2026, 6, 3, 10, 0, 0, TimeSpan.Zero)]);
+            insideCompletedAt.AddDays(-4).AddHours(-6),
+            insideCompletedAt,
+            [new DateTimeOffset(insideCompletedAt, TimeSpan.Zero).AddDays(-2).AddHours(-4)]);
         var outsideIssueId = $"issue_dt_clock_outside_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 2,
             outsideIssueId,
-            new DateTime(2026, 4, 20, 8, 0, 0, DateTimeKind.Utc),
-            new DateTime(2026, 5, 1, 14, 0, 0, DateTimeKind.Utc),
-            [new DateTimeOffset(2026, 4, 21, 10, 0, 0, TimeSpan.Zero)]);
+            outsideCompletedAt.AddDays(-11).AddHours(-6),
+            outsideCompletedAt,
+            [new DateTimeOffset(outsideCompletedAt, TimeSpan.Zero).AddDays(-10).AddHours(-4)]);
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/delivery-time");
@@ -670,6 +674,9 @@ public class IssueMetricsApiSpecs
 
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
+
+    private DateTime DeliveryTimeCompletedAt() =>
+        _fixture.TimeProvider.GetUtcNow().UtcDateTime.AddDays(-14);
 
     private async Task<ProjectDto> CreateProjectAsync(string name)
     {
