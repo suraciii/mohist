@@ -118,3 +118,108 @@ Acceptance criterion crosscheck:
    and the rest of the authoritative-source suite still pass (34/34).
 8. `npm test` passes (3 pre-existing date-boundary failures unrelated to
    this change).
+
+## T-002 Specific Findings
+
+### `/agent/activity` route rewiring
+
+`Api/AgentRoutes.cs` `GET /agent/activity` now:
+- Drops the local `ListAvailableRunnersAsync` lookup that produced the
+  `runnerIds` list (it only existed to feed the `+1` heuristic and is no
+  longer called by any route — left in place as dead code because T-001
+  kept it and removing it is out of scope for T-002).
+- Injects `RunnerStatusService` and calls `GetCapacityAsync(project.Id)`
+  once; passes the resulting `RunnerCapacityView` into the querier as
+  `capacity:`. `AgentSessionQuerier.GetActivityAsync` accepts
+  `RunnerCapacityView? capacity` (nullable so the querier stays usable
+  in unit tests without the runner service).
+- Still calls `BuildWaitingCardsAsync` and threads the result through
+  `waiting:` so the waiting count is preserved.
+
+### `AgentSessionQuerier.GetActivityAsync` signature change
+
+- Dropped `IReadOnlyList<string>? runnerIds` (it fed only `runnerIds.Count
+  + 1`).
+- Added `RunnerCapacityView? capacity` (defaults to `0/0` when null so
+  tests that do not exercise the unified source still get a sane
+  `ActivitySlotUsageDto`).
+- The querier is **session-pure**: it does no capacity math of its own.
+  `summary.Slots` is now `new ActivitySlotUsageDto(capacity?.UsedSlots
+  ?? 0, capacity?.TotalSlots ?? 0)`.
+- `summary.Active` continues to reflect the visible active session card
+  count — it is still the visibility signal, just no longer the capacity
+  source.
+- `RunnerStatusService` is NOT injected into the querier (D4).
+
+### Existing test updates
+
+- No existing `AgentSessionSpecs` test pinned `summary.slots` to active
+  session card count or `runnerCount+1`. The only existing assertions on
+  `summary` were `Assert.Equal(0, activity.Summary.Active)` (skipped
+  `RunnerReport_WhenAgentWorkFailsBeforeTelemetry_ClosesCreatedSession`)
+  and `Assert.Equal(1, activity.Summary.Failed)` — neither depends on
+  the slot derivation, so neither needed rewording.
+- The wire shape `{ active, max }` of `ActivitySlotUsageDto` is preserved;
+  only the value derivation changes (proposal D3).
+
+### New divergence spec
+
+`AgentSessionSpecs.AgentActivity_WhenRunnerActiveWorksExceedVisibleSessions_SlotsReflectRunner`
+mirrors the T-001 divergence spec for `/agent/status`:
+- Drains `IRunnerRegistryGrain.ListRunnerIdsAsync()` so the assertion
+  reflects only this test's runner.
+- Registers a runner with `slots = 4`.
+- Starts two workflow runs, assigns both to the runner, polls twice so
+  the runner carries two distinct workflow owners in `ActiveWorks`.
+- Calls `/agent/activity` and asserts:
+  - `summary.slots.active == 2` (runner active-works count, NOT the
+    zero visible AgentSession count).
+  - `summary.slots.max == 4` (persisted runner slots).
+  - `summary.active == 0` (visible AgentSession count, intentionally
+    divergent from capacity to prove the two surfaces are independent).
+- Uses `SeedActivityDivergenceTemplateAsync` to seed both
+  `ProjectWorkflowTemplates` and `ProjectWorkflowProfiles` rows for
+  the synthetic workflow project id (same pattern as T-001's
+  `SeedRuntimeDivergenceTemplateAsync`).
+
+## T-002 Verification
+
+- `dotnet build` (server + tests, TreatWarningsAsErrors): clean (0
+  warnings, 0 errors).
+- Targeted `dotnet test` filter covering `AgentSessionSpecs`,
+  `AgentSessionActivityVisibilitySpecs`, `RunnerStatusProjectionSpecs`,
+  `RuntimeEntrySpecs`, `ApiContractSpecs`: 101/101 pass, 2 skipped
+  (pre-existing skips).
+- The new divergence spec `AgentActivity_WhenRunnerActiveWorksExceed
+  VisibleSessions_SlotsReflectRunner` passes (asserts
+  `summary.slots.active == 2`, `summary.slots.max == 4`,
+  `summary.active == 0`).
+- Full server test run (`npm test`): 3288 pass, 13 skipped, 3 fail.
+  The 3 failures (`AgentCostRollupApiSpecs.GetCost_TodayBucket*
+  × 2`, `AgentUsageTimeseriesApiSpecs.GetUsage_RangeToBoundaryIsExclusive`)
+  are the same pre-existing date-boundary failures already documented
+  in the T-001 verification section. They use `DateTime.UtcNow.Date`
+  rather than `_fixture.TimeProvider.GetUtcNow().Date` so they break
+  whenever the test runs at the day boundary. Not caused by this
+  change.
+
+Acceptance criterion crosscheck:
+1. `/agent/activity.summary.slots.active/max` are sourced from
+   `RunnerStatusService.GetCapacityAsync` — done; identical
+   underlying source to `/runners[].capacity` (both walk
+   `GetOnlineRunnersAsync`).
+2. `AgentSessionQuerier.GetActivityAsync` no longer accepts
+   `runnerIds` and no longer computes `ActivitySlotUsageDto` from
+   `cards.Count(active)` or `runnerCount+1` — done.
+3. `AgentSessionQuerier` remains session-pure (`RunnerStatusService`
+   not injected) — done; `RunnerStatusView`/`RunnerCapacityView` are
+   the only runner-service DTO the querier references, and only as a
+   method parameter.
+4. No existing `AgentSessionSpecs` assertions tying `summary.slots`
+   to active-session-card count or `runnerCount+1` remain (there
+   were none in the file before this change).
+5. Divergence assertion added
+   (`AgentActivity_WhenRunnerActiveWorksExceedVisibleSessions
+   _SlotsReflectRunner`).
+6. `npm test` (server) passes (3 pre-existing date-boundary failures
+   unrelated to this change).

@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain.Run;
@@ -688,7 +689,7 @@ public class AgentSessionQuerier : IScopedService
             : null;
     }
 
-    public async Task<ActivityDto> GetActivityAsync(string projectId, int? limit = null, IReadOnlyList<ActivityWaitingCardDto>? waiting = null, IReadOnlyList<string>? runnerIds = null, CancellationToken ct = default)
+    public async Task<ActivityDto> GetActivityAsync(string projectId, int? limit = null, IReadOnlyList<ActivityWaitingCardDto>? waiting = null, RunnerCapacityView? capacity = null, CancellationToken ct = default)
     {
         var take = Math.Clamp(limit ?? 50, 1, 200);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -710,12 +711,13 @@ public class AgentSessionQuerier : IScopedService
             .ToList();
 
         waiting ??= [];
+        var slots = new ActivitySlotUsageDto(capacity?.UsedSlots ?? 0, capacity?.TotalSlots ?? 0);
         var summary = new ActivitySummaryDto(
             cards.Count(c => c.Status == "active"),
             waiting.Count,
             0,
             0,
-            new ActivitySlotUsageDto(cards.Count(c => c.Status == "active"), (runnerIds?.Count ?? 0) + 1));
+            slots);
 
         return new ActivityDto(summary, cards, waiting.ToList());
     }
