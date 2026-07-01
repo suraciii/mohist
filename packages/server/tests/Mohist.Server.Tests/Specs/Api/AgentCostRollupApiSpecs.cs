@@ -25,6 +25,8 @@ public class AgentCostRollupApiSpecs
         _client = fixture.Client;
     }
 
+    private DateTime Today => _fixture.TimeProvider.GetUtcNow().UtcDateTime.Date;
+
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
@@ -47,11 +49,11 @@ public class AgentCostRollupApiSpecs
     public async Task GetCost_TotalCostSumsAcrossAllSessionsWithUsage()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(8),
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(8),
             costAmount: 0.02, costCurrency: "USD");
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-5).AddHours(8),
+        await InsertSessionAsync(project.Id, Today.AddDays(-5).AddHours(8),
             costAmount: 0.05, costCurrency: "USD");
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-9).AddHours(8),
+        await InsertSessionAsync(project.Id, Today.AddDays(-9).AddHours(8),
             costAmount: 0.10, costCurrency: "USD");
 
         var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
@@ -68,10 +70,10 @@ public class AgentCostRollupApiSpecs
     public async Task GetCost_SessionsWithoutUsageAreSkipped()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-1).AddHours(8),
+        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(8),
             costAmount: 0.05, costCurrency: "USD");
-        await InsertSessionWithoutUsageAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(8));
-        await InsertSessionWithoutUsageAsync(project.Id, DateTime.UtcNow.Date.AddDays(-3).AddHours(8));
+        await InsertSessionWithoutUsageAsync(project.Id, Today.AddDays(-2).AddHours(8));
+        await InsertSessionWithoutUsageAsync(project.Id, Today.AddDays(-3).AddHours(8));
 
         var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
             $"/api/projects/{project.Id}/agent/cost");
@@ -86,9 +88,9 @@ public class AgentCostRollupApiSpecs
     public async Task GetCost_TodayCostBucketExcludesPriorDays()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddHours(10),
+        await InsertSessionAsync(project.Id, Today.AddHours(10),
             costAmount: 0.04, costCurrency: "USD");
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(10),
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(10),
             costAmount: 0.10, costCurrency: "USD");
 
         var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
@@ -106,7 +108,7 @@ public class AgentCostRollupApiSpecs
     public async Task GetCost_TodayBucketBoundaryMatchesTimeseriesCurrentDay()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddHours(1),
+        await InsertSessionAsync(project.Id, Today.AddHours(1),
             costAmount: 0.03, costCurrency: "USD");
 
         var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
@@ -146,7 +148,7 @@ public class AgentCostRollupApiSpecs
     public async Task GetCost_CostPerShipEqualsTotalCostOverDoneIssues()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-1).AddHours(8),
+        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(8),
             costAmount: 1.50, costCurrency: "USD");
         for (var i = 0; i < 6; i++)
             await InsertIssueWithStatusAsync(project.Id, i + 1, $"d{i + 1}", IssueStatus.Done);
@@ -167,7 +169,7 @@ public class AgentCostRollupApiSpecs
     public async Task GetCost_FreeShippingIsRealZeroNotEmpty()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-1).AddHours(8),
+        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(8),
             costAmount: 0.0, costCurrency: "USD");
         for (var i = 0; i < 5; i++)
             await InsertIssueWithStatusAsync(project.Id, i + 1, $"d{i + 1}", IssueStatus.Done);
@@ -189,7 +191,7 @@ public class AgentCostRollupApiSpecs
     public async Task GetCost_ZeroShippedIssuesYieldsUndefinedCostPerShip()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-1).AddHours(8),
+        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(8),
             costAmount: 1.20, costCurrency: "USD");
 
         var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
@@ -207,7 +209,7 @@ public class AgentCostRollupApiSpecs
     public async Task GetCost_ProjectWithoutUsageReturnsEmptySpendNotZero()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionWithoutUsageAsync(project.Id, DateTime.UtcNow.Date.AddDays(-1).AddHours(8));
+        await InsertSessionWithoutUsageAsync(project.Id, Today.AddDays(-1).AddHours(8));
 
         var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
             $"/api/projects/{project.Id}/agent/cost");
@@ -226,7 +228,7 @@ public class AgentCostRollupApiSpecs
     public async Task GetCost_EmptinessIsEvaluatedIndependentlyPerMetric()
     {
         var project = await CreateProjectAsync();
-        var twoDaysAgo = DateTime.UtcNow.Date.AddDays(-2).AddHours(8);
+        var twoDaysAgo = Today.AddDays(-2).AddHours(8);
         await InsertSessionAsync(project.Id, twoDaysAgo, costAmount: 0.50, costCurrency: "USD");
 
         var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
@@ -256,7 +258,7 @@ public class AgentCostRollupApiSpecs
     public async Task GetCost_UsageTimeseriesEndpointRemainsAvailableAndUnchanged()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(8),
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(8),
             costAmount: 0.02, costCurrency: "USD");
 
         var usageResponse = await _client.GetDataAsync<UsageTimeseriesResponseDto>(

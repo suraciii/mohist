@@ -24,13 +24,15 @@ public class AgentUsageTimeseriesApiSpecs
         _client = fixture.Client;
     }
 
+    private DateTime Today => _fixture.TimeProvider.GetUtcNow().UtcDateTime.Date;
+
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GetUsage_ReturnsSevenDailyBucketsWithCorrectStructure()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(10),
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(10),
             inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
 
         var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
@@ -49,7 +51,7 @@ public class AgentUsageTimeseriesApiSpecs
     public async Task GetUsage_BucketTotalsSumAdditiveFields()
     {
         var project = await CreateProjectAsync();
-        var bucketDay = DateTime.UtcNow.Date.AddDays(-1);
+        var bucketDay = Today.AddDays(-1);
         await InsertSessionAsync(project.Id, bucketDay.AddHours(8),
             inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
         await InsertSessionAsync(project.Id, bucketDay.AddHours(12),
@@ -71,7 +73,7 @@ public class AgentUsageTimeseriesApiSpecs
     public async Task GetUsage_CompletedSessionsAreIncluded()
     {
         var project = await CreateProjectAsync();
-        var bucketDay = DateTime.UtcNow.Date.AddDays(-3);
+        var bucketDay = Today.AddDays(-3);
         await InsertSessionAsync(project.Id, bucketDay.AddHours(10),
             inputTokens: 500, outputTokens: 200, totalTokens: 700, costAmount: 0.10, costCurrency: "USD",
             agentSessionId: "some-runtime-id");
@@ -91,14 +93,14 @@ public class AgentUsageTimeseriesApiSpecs
     public async Task GetUsage_EmptyBucketHasZeroTotals()
     {
         var project = await CreateProjectAsync();
-        var dayWithSession = DateTime.UtcNow.Date.AddDays(-1);
+        var dayWithSession = Today.AddDays(-1);
         await InsertSessionAsync(project.Id, dayWithSession.AddHours(10),
             inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
 
         var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
             $"/api/projects/{project.Id}/agent/usage");
 
-        var dayWithoutSession = DateTime.UtcNow.Date.AddDays(-5);
+        var dayWithoutSession = Today.AddDays(-5);
         var emptyBucket = response.Buckets.Single(b => b.BucketStart.Date == dayWithoutSession.Date);
         Assert.Equal(0, emptyBucket.InputTokens);
         Assert.Equal(0, emptyBucket.OutputTokens);
@@ -112,12 +114,12 @@ public class AgentUsageTimeseriesApiSpecs
     public async Task GetUsage_SessionWithoutUsageIsSkipped()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionWithoutUsageAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(10));
+        await InsertSessionWithoutUsageAsync(project.Id, Today.AddDays(-2).AddHours(10));
 
         var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
             $"/api/projects/{project.Id}/agent/usage");
 
-        var bucket = response.Buckets.Single(b => b.BucketStart.Date == DateTime.UtcNow.Date.AddDays(-2));
+        var bucket = response.Buckets.Single(b => b.BucketStart.Date == Today.AddDays(-2));
         Assert.Equal(0, bucket.InputTokens);
         Assert.Equal(0, bucket.OutputTokens);
         Assert.Equal(0, bucket.TotalTokens);
@@ -130,7 +132,7 @@ public class AgentUsageTimeseriesApiSpecs
     public async Task GetUsage_CostCurrencyIsEchoed()
     {
         var project = await CreateProjectAsync();
-        var bucketDay = DateTime.UtcNow.Date.AddDays(-1);
+        var bucketDay = Today.AddDays(-1);
         await InsertSessionAsync(project.Id, bucketDay.AddHours(10),
             inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "EUR");
 
@@ -156,7 +158,7 @@ public class AgentUsageTimeseriesApiSpecs
     public async Task GetUsage_SessionsOutsideRangeAreNotIncluded()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-10),
+        await InsertSessionAsync(project.Id, Today.AddDays(-10),
             inputTokens: 999, outputTokens: 999, totalTokens: 1998, costAmount: 9.99, costCurrency: "USD");
 
         var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
@@ -172,7 +174,7 @@ public class AgentUsageTimeseriesApiSpecs
     public async Task GetUsage_RangeToBoundaryIsExclusive()
     {
         var project = await CreateProjectAsync();
-        var rangeTo = DateTime.UtcNow.Date.AddDays(1);
+        var rangeTo = Today.AddDays(1);
         await InsertSessionAsync(project.Id, rangeTo,
             inputTokens: 999, outputTokens: 999, totalTokens: 1998, costAmount: 9.99, costCurrency: "USD");
 
@@ -190,7 +192,7 @@ public class AgentUsageTimeseriesApiSpecs
     public async Task GetUsage_CumulativeSeriesHasSameLengthAsBuckets()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(10),
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(10),
             inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
 
         var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
@@ -303,7 +305,7 @@ public class AgentUsageTimeseriesApiSpecs
     public async Task GetUsage_CumulativeCostPerShipIsNullWhenNoShipped()
     {
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(10),
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(10),
             inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
 
         var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
@@ -327,12 +329,12 @@ public class AgentUsageTimeseriesApiSpecs
         var project = await CreateProjectAsync();
 
         // Session with zero cost but non-null usage
-        await InsertSessionAsync(project.Id, DateTime.UtcNow.Date.AddDays(-2).AddHours(10),
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(10),
             inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 0, costCurrency: "USD");
 
         // A shipped issue
         await InsertDoneIssueAsync(project.Id, 1, "Done issue",
-            DateTime.UtcNow.Date.AddDays(-1).AddHours(12));
+            Today.AddDays(-1).AddHours(12));
 
         var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
             $"/api/projects/{project.Id}/agent/usage");

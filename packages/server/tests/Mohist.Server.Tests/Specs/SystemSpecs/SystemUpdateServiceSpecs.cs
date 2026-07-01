@@ -43,6 +43,7 @@ public class SystemUpdateServiceSpecs
 
         var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
         await commands.WaitForCountAsync(2);
+        await store.WaitForStatusAsync("waiting-for-reconnect");
 
         Assert.True(result.Started);
         Assert.Collection(commands.Requests,
@@ -333,7 +334,7 @@ public class SystemUpdateServiceSpecs
 
         var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
         await commands.WaitForCountAsync(2);
-        await WaitUntilAsync(async () => (await store.GetLatestAsync())?.Status == "waiting-for-reconnect");
+        await store.WaitForStatusAsync("waiting-for-reconnect");
 
         Assert.True(result.Started);
         Assert.False(await store.TryAcquireLockAsync("job-2"));
@@ -910,7 +911,7 @@ public class SystemUpdateServiceSpecs
 
         var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
         await commands.WaitForCountAsync(2);
-        await WaitUntilAsync(async () => (await store.GetLatestAsync())?.Status == "recovered");
+        await store.WaitForStatusAsync("recovered");
 
         var latest = await store.GetLatestAsync();
         Assert.True(result.Started);
@@ -953,7 +954,7 @@ public class SystemUpdateServiceSpecs
 
         var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
         await commands.WaitForCountAsync(2);
-        await WaitUntilAsync(async () => (await store.GetLatestAsync())?.Status == "failed");
+        await store.WaitForStatusAsync("failed");
 
         var latest = await store.GetLatestAsync();
         Assert.True(result.Started);
@@ -992,7 +993,7 @@ public class SystemUpdateServiceSpecs
 
         var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
         await commands.WaitForCountAsync(3);
-        await WaitUntilAsync(async () => (await store.GetLatestAsync())?.Status == "recovered");
+        await store.WaitForStatusAsync("recovered");
 
         var latest = await store.GetLatestAsync();
         Assert.True(result.Started);
