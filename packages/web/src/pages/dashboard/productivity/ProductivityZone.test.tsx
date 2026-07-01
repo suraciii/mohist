@@ -31,6 +31,10 @@ vi.mock('./CycleTimeChart', () => ({
   CycleTimeChart: () => <div data-testid="cycle-time-chart-mock" />,
 }))
 
+vi.mock('./StageDurationChart', () => ({
+  StageDurationChart: () => <div data-testid="stage-duration-chart-mock" />,
+}))
+
 vi.mock('./CostTrendChart', () => ({
   CostTrendChart: () => <div data-testid="cost-trend-chart-mock" />,
 }))
@@ -76,5 +80,15 @@ describe('ProductivityZone', () => {
 
     const zone = screen.getByTestId('productivity-zone')
     expect(zone).toContainElement(screen.getByTestId('cost-trend-chart-mock'))
+  })
+
+  it('mounts the stage-duration chart after the cycle-time chart', () => {
+    render(<ProductivityZone />)
+
+    const zone = screen.getByTestId('productivity-zone')
+    const cycle = screen.getByTestId('cycle-time-chart-mock')
+    const stage = screen.getByTestId('stage-duration-chart-mock')
+    expect(zone).toContainElement(stage)
+    expect(cycle.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })

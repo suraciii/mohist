@@ -32,6 +32,15 @@ public class IssueQuerier : IScopedService
         EventCatalog.ReverseDns.CheckPending,
         EventCatalog.ReverseDns.RepairScheduled,
     ];
+    // Stage-duration event loader selects BOTH `StageStarted` and
+    // `StageCompleted` over the per-run `WorkflowRunEvents` source. The
+    // existing `QualityWorkflowEventTypes` set omits `StageCompleted`,
+    // so the loaders cannot be shared.
+    private static readonly string[] StageDurationEventTypes =
+    [
+        EventCatalog.ReverseDns.StageStarted,
+        EventCatalog.ReverseDns.StageCompleted,
+    ];
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueWorkflowProfileRegistry _profiles;
@@ -258,6 +267,62 @@ public class IssueQuerier : IScopedService
     /// </summary>
     public sealed record DeliveryTimeResult(
         IReadOnlyList<DeliveryTimePoint> Points);
+
+    /// <summary>
+    /// The trailing window returned by <see cref="GetStageDurationsAsync"/>.
+    /// Fixed 30 days, anchored on the issue's persisted completion moment,
+    /// shared with the delivery-time surface so the two charts see the
+    /// same delivered-issue population.
+    /// </summary>
+    public sealed record StageDurationWindow(DateTimeOffset From, DateTimeOffset To);
+
+    /// <summary>
+    /// Per-stage aggregate returned by <see cref="GetStageDurationsAsync"/>.
+    /// <see cref="AverageSeconds"/> / <see cref="MedianSeconds"/> are
+    /// <c>null</c> when no delivered issue in the window contributes a
+    /// defined sample for the stage (the stage is absent from the result
+    /// in that case, but the nullable shape lets the route distinguish
+    /// "absent" from "fabricated zero"). <see cref="SampleCount"/>
+    /// distinguishes a true zero-sample window from a stage with a genuine
+    /// zero-duration sample (one or more issues whose latest attempt
+    /// completed at the same moment as it started).
+    /// </summary>
+    public sealed record StageDurationStageAggregate(
+        string Stage,
+        int SampleCount,
+        double? AverageSeconds,
+        double? MedianSeconds);
+
+    /// <summary>
+    /// The wait breakout returned alongside the flow-efficiency ratio.
+    /// <see cref="AverageApprovalGateWaitSeconds"/> is the mean of the
+    /// per-issue approval-gate wait (sum of respondedAt − requestedAt over
+    /// completed approvals), averaged over the same delivered issues that
+    /// contribute to the ratio. <see cref="AverageInactiveGapSeconds"/>
+    /// is the mean of <c>cycle − Σ(stage durations)</c> over the same
+    /// population. Both fields are <c>null</c> when the window contains
+    /// no delivered issues with a defined, strictly positive cycle.
+    /// Issues with zero wait or zero gap contribute zero to the averages
+    /// rather than being excluded.
+    /// </summary>
+    public sealed record StageDurationWaitBreakout(
+        double? AverageApprovalGateWaitSeconds,
+        double? AverageInactiveGapSeconds);
+
+    /// <summary>
+    /// The result of <see cref="GetStageDurationsAsync"/>. The stages are
+    /// returned in workflow stage order (the configured profile's
+    /// definition). Stages reached by no delivered issue in the window
+    /// are absent — a fabricated zero would mislead the consuming chart.
+    /// <see cref="FlowEfficiencyRatio"/> is the population-weighted
+    /// Σ activeWork ÷ Σ cycleTime over issues with a defined, strictly
+    /// positive cycle (issues with undefined or zero cycle are excluded).
+    /// </summary>
+    public sealed record StageDurationResult(
+        StageDurationWindow Window,
+        IReadOnlyList<StageDurationStageAggregate> Stages,
+        double? FlowEfficiencyRatio,
+        StageDurationWaitBreakout WaitBreakout);
 
     // CloudEvents reverse-DNS bus types that mark a terminal transition.
     // <c>com.mohist.issue.work-completed</c> → <c>completed</c> (Done).
@@ -986,6 +1051,494 @@ public class IssueQuerier : IScopedService
     }
 
     /// <summary>
+    /// Per-stage duration distribution, flow-efficiency ratio, and wait
+    /// breakout for delivered issues in the fixed 30-day trailing window
+    /// anchored on completion time (shared with <see cref="GetDeliveryTimesAsync"/>).
+    /// Derived purely from already-persisted workflow-run events
+    /// (<c>StageStarted</c> / <c>StageCompleted</c>) and lifecycle events
+    /// (<c>IssueWorkStarted</c> / <c>IssueWorkCompleted</c>) — no new
+    /// collection, no schema change.
+    /// <para>
+    /// Aggregation is in-memory (EF Core SQLite cannot translate
+    /// <c>DateTimeOffset</c> against the TEXT <c>Time</c> column). For
+    /// each delivered issue in the window the surface:
+    /// <list type="number">
+    /// <item><description>computes the issue's cycle from the earliest
+    /// <c>IssueWorkStarted</c> to the persisted <c>CompletedAt</c>;</description></item>
+    /// <item><description>collects <c>StageStarted</c> /
+    /// <c>StageCompleted</c> events across all the issue's workflow
+    /// runs (loaded via the same run-discovery pattern as
+    /// <see cref="GetQualityAsync"/>) and pairs the latest
+    /// <c>StageStarted</c> with the first following <c>StageCompleted</c>
+    /// per stage id (invalidated earlier attempts are not averaged or
+    /// summed);</description></item>
+    /// <item><description>decomposes the cycle into active-work,
+    /// approval-gate wait, and inactive-gap using the same approval-wait
+    /// definition as <see cref="GetApprovalWaitAsync"/>; pending
+    /// approvals contribute nothing;</description></item>
+    /// <item><description>aggregates per-stage average / median over
+    /// defined samples and computes the population-weighted flow-efficiency
+    /// ratio over issues with a defined, strictly positive cycle.</description></item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// The empty result (no delivered issues in the window) is a
+    /// <see cref="StageDurationResult"/> with an empty
+    /// <see cref="StageDurationResult.Stages"/>, a <c>null</c>
+    /// <see cref="StageDurationResult.FlowEfficiencyRatio"/>, and a
+    /// <see cref="StageDurationResult.WaitBreakout"/> carrying two
+    /// <c>null</c> averages — distinguishable on the wire from any
+    /// genuine zero via the nullable shape and zero sample counts.
+    /// </para>
+    /// </summary>
+    public async Task<StageDurationResult> GetStageDurationsAsync(
+        string projectId,
+        DateTimeOffset now)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        // Fixed 30-day trailing window keyed on the completion moment.
+        // Anchored on `Issue.CompletedAt`, mirroring delivery-time.
+        var windowFrom = now.AddDays(-30);
+        var windowTo = now;
+
+        // Resolve the project's issue set.
+        var issueRows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId)
+            .ToListAsync();
+
+        if (issueRows.Count == 0)
+        {
+            return BuildEmptyStageDurationResult(windowFrom, windowTo);
+        }
+
+        // Resolve the project's issue set as `IssueReadModel` so we can
+        // feed `LoadWorkflowStatesAsync` (which expects the read-model
+        // shape) for the approval-wait projection.
+        var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
+        var disabledIds = await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId);
+        var issueReadModels = IssueRowMapper.ByNumber(issueRows, projectId)
+            .Select(issue => ToReadModel(ToInfo(issue, project: null, projectDefaultTemplateId, disabledIds)))
+            .ToList();
+
+        var issuesById = issueReadModels.ToDictionary(i => i.Id, StringComparer.Ordinal);
+
+        var projectIssueIds = issuesById.Keys.ToList();
+        var projectSources = projectIssueIds
+            .Select(id => IssueSourcePrefix + id)
+            .ToList();
+
+        // Resolve the workflow stage order from the project's effective
+        // workflow profile so reached stages are reported in the right
+        // order and any stage that exists in the profile but was not
+        // reached by a delivered issue stays absent (rather than
+        // appearing as a fabricated zero).
+        var stageOrder = await ResolveProjectStageOrderAsync(db, projectId);
+
+        // Scan durable `IssueEvents` for the project's work-started
+        // events (to anchor cycle time) and to discover every workflow
+        // run id that executed the issue (including runs from prior
+        // reruns / rerun-from-stage — the same cross-run discovery
+        // pattern as `GetQualityAsync`).
+        var earliestWorkStartedByIssue = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        var runIdsByIssue = issuesById.Keys.ToDictionary(
+            id => id,
+            _ => new List<string>(),
+            StringComparer.Ordinal);
+
+        if (projectSources.Count > 0)
+        {
+            var sourceSet = new HashSet<string>(projectSources, StringComparer.Ordinal);
+            var candidates = await db.IssueEvents.AsNoTracking()
+                .Select(e => new { e.Source, e.Type, e.Time, e.Data })
+                .ToListAsync();
+
+            foreach (var e in candidates)
+            {
+                if (!sourceSet.Contains(e.Source)) continue;
+                var issueId = e.Source[IssueSourcePrefix.Length..];
+
+                if (e.Type == WorkStartedType)
+                {
+                    if (earliestWorkStartedByIssue.TryGetValue(issueId, out var existing))
+                    {
+                        if (e.Time < existing) earliestWorkStartedByIssue[issueId] = e.Time;
+                    }
+                    else
+                    {
+                        earliestWorkStartedByIssue[issueId] = e.Time;
+                    }
+
+                    var wrId = ReadWorkflowRunId(e.Data);
+                    if (!string.IsNullOrWhiteSpace(wrId) && runIdsByIssue.TryGetValue(issueId, out var ids))
+                        ids.Add(wrId);
+                }
+                else if (e.Type == WorkCompletedType)
+                {
+                    var wrId = ReadWorkflowRunId(e.Data);
+                    if (!string.IsNullOrWhiteSpace(wrId) && runIdsByIssue.TryGetValue(issueId, out var ids))
+                        ids.Add(wrId);
+                }
+            }
+        }
+
+        // Union each issue's current WorkflowRunId with the historical
+        // ids found in events, so a stage whose events live only on the
+        // current run (and never produced a fresh WorkStarted) is still
+        // discoverable.
+        foreach (var issue in issuesById.Values)
+        {
+            if (!string.IsNullOrWhiteSpace(issue.WorkflowRunId) && runIdsByIssue.TryGetValue(issue.Id, out var ids))
+                ids.Add(issue.WorkflowRunId);
+        }
+
+        var allRunIds = runIdsByIssue.Values
+            .SelectMany(ids => ids)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        // Load workflow-run state for approval projection semantics across
+        // the same issue run set used for stage-duration discovery.
+        var workflows = await LoadWorkflowStatesAsync(db, allRunIds);
+
+        // Load StageStarted / StageCompleted events selecting `Time` (the
+        // existing `LoadWorkflowRunEventFactsAsync` projection drops
+        // `Time`; this loader selects `Source/Id/Type/Time/Data` over
+        // BOTH event types so the latest-attempt pairing can use the
+        // durable CloudEvent timestamps).
+        var stageEventsByRun = await LoadWorkflowRunStageEventsAsync(db, allRunIds);
+
+        // Per-issue computation: stage durations, cycle components.
+        var perIssue = new List<PerIssueCycleBreakdown>();
+        var samplesByStage = new Dictionary<string, List<double>>(StringComparer.Ordinal);
+
+        foreach (var issue in issuesById.Values)
+        {
+            if (!string.Equals(issue.Status, "done", StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.IsNullOrWhiteSpace(issue.CompletedAt)) continue;
+            if (!DateTime.TryParse(
+                issue.CompletedAt,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out var completedAtRaw))
+                continue;
+
+            var completedAtDt = DateTime.SpecifyKind(completedAtRaw, DateTimeKind.Utc);
+            if (completedAtDt < windowFrom.UtcDateTime || completedAtDt > windowTo.UtcDateTime) continue;
+
+            if (!runIdsByIssue.TryGetValue(issue.Id, out var issueRunIds)) continue;
+
+            // Pair each reached stage with its latest attempt duration.
+            // Stages with no following completion contribute no sample.
+            var stageDurations = ComputeLatestAttemptStageDurations(issueRunIds, stageEventsByRun);
+
+            // Cycle = CompletedAt - earliest IssueWorkStarted.
+            double? cycleSeconds = null;
+            if (earliestWorkStartedByIssue.TryGetValue(issue.Id, out var firstStart))
+            {
+                var span = completedAtDt - firstStart.UtcDateTime;
+                cycleSeconds = span.TotalSeconds;
+            }
+
+            var approvalGateWaitSeconds = SumApprovalGateWaitSeconds(issueRunIds, workflows);
+
+            var sumStageSeconds = stageDurations.Values.Sum();
+
+            perIssue.Add(new PerIssueCycleBreakdown(
+                StageDurations: stageDurations,
+                CycleSeconds: cycleSeconds,
+                ApprovalGateWaitSeconds: approvalGateWaitSeconds,
+                SumStageSeconds: sumStageSeconds));
+
+            // Accumulate per-stage defined samples. Undefined stages
+            // (started-without-completion) are simply absent from
+            // `stageDurations` and therefore excluded from the averages.
+            foreach (var (stage, duration) in stageDurations)
+            {
+                if (!samplesByStage.TryGetValue(stage, out var list))
+                {
+                    list = new List<double>();
+                    samplesByStage[stage] = list;
+                }
+                list.Add(duration);
+            }
+        }
+
+        if (perIssue.Count == 0)
+        {
+            return BuildEmptyStageDurationResult(windowFrom, windowTo);
+        }
+
+        // Build per-stage aggregates in workflow stage order. Stages
+        // present in the profile but never reached by any delivered
+        // issue are omitted entirely.
+        var observedStages = new HashSet<string>(samplesByStage.Keys, StringComparer.Ordinal);
+        var orderedStages = stageOrder
+            .Concat(observedStages.Where(s => !stageOrder.Contains(s, StringComparer.Ordinal))
+                .OrderBy(s => s, StringComparer.Ordinal))
+            .ToList();
+
+        var stageAggregates = orderedStages
+            .Where(samplesByStage.ContainsKey)
+            .Select(stage =>
+            {
+                var samples = samplesByStage[stage];
+                samples.Sort();
+                var average = samples.Average();
+                var median = ComputeMedian(samples);
+                return new StageDurationStageAggregate(
+                    Stage: stage,
+                    SampleCount: samples.Count,
+                    AverageSeconds: average,
+                    MedianSeconds: median);
+            })
+            .ToList();
+
+        // Flow efficiency ratio: population-weighted Σ activeWork ÷
+        // Σ cycleTime over issues with a defined, strictly positive
+        // cycle. Issues with undefined (no WorkStarted) or zero cycle
+        // contribute nothing to numerator or denominator.
+        // `activeWork = Σ(stage durations) − approvalGateWait`. The
+        // formula is taken verbatim per spec D6 so the three components
+        // sum to cycle by construction.
+        double sumActiveWork = 0;
+        double sumCycle = 0;
+        double sumApprovalWait = 0;
+        double sumInactiveGap = 0;
+        int waitPopulation = 0;
+        foreach (var entry in perIssue)
+        {
+            if (entry.CycleSeconds is not double cycleValue || cycleValue <= 0)
+                continue;
+
+            var activeWork = entry.SumStageSeconds - entry.ApprovalGateWaitSeconds;
+            var inactiveGap = cycleValue - entry.SumStageSeconds;
+            // Event histories with approval wait outside stage spans or stage
+            // spans outside the cycle cannot produce the public non-negative
+            // decomposition, so they stay out of ratio/wait aggregates.
+            if (activeWork < 0 || inactiveGap < 0)
+                continue;
+
+            sumActiveWork += activeWork;
+            sumCycle += cycleValue;
+            sumApprovalWait += entry.ApprovalGateWaitSeconds;
+            sumInactiveGap += inactiveGap;
+            waitPopulation += 1;
+        }
+
+        double? ratio = sumCycle > 0 ? sumActiveWork / sumCycle : null;
+        StageDurationWaitBreakout? waitBreakout = waitPopulation > 0
+            ? new StageDurationWaitBreakout(
+                AverageApprovalGateWaitSeconds: sumApprovalWait / waitPopulation,
+                AverageInactiveGapSeconds: sumInactiveGap / waitPopulation)
+            : new StageDurationWaitBreakout(null, null);
+
+        return new StageDurationResult(
+            new StageDurationWindow(windowFrom, windowTo),
+            stageAggregates,
+            ratio,
+            waitBreakout);
+    }
+
+    private static StageDurationResult BuildEmptyStageDurationResult(DateTimeOffset from, DateTimeOffset to) =>
+        new(
+            new StageDurationWindow(from, to),
+            Array.Empty<StageDurationStageAggregate>(),
+            null,
+            new StageDurationWaitBreakout(null, null));
+
+    private static double ComputeMedian(List<double> sortedSamples)
+    {
+        // Reuse the exact odd/even formula from `GetApprovalWaitAsync`
+        // so the two surfaces agree.
+        var count = sortedSamples.Count;
+        return count % 2 == 1
+            ? sortedSamples[count / 2]
+            : (sortedSamples[count / 2 - 1] + sortedSamples[count / 2]) / 2.0;
+    }
+
+    private static double SumApprovalGateWaitSeconds(
+        IReadOnlyList<string> issueRunIds,
+        IReadOnlyDictionary<string, WorkflowStatusView> workflows)
+    {
+        double totalSeconds = 0;
+        foreach (var runId in issueRunIds.Distinct(StringComparer.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(runId)) continue;
+            if (!workflows.TryGetValue(runId, out var workflow)) continue;
+
+            foreach (var approval in MohistDefaultWorkflowProjection.StageApprovals(workflow))
+            {
+                if (!approval.RespondedAt.HasValue) continue;
+                if (!string.Equals(approval.Status, "approved", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(approval.Status, "rejected", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var wait = (approval.RespondedAt.Value - approval.RequestedAt).TotalSeconds;
+                if (wait > 0) totalSeconds += wait;
+            }
+        }
+
+        return totalSeconds;
+    }
+
+    private async Task<IReadOnlyList<string>> ResolveProjectStageOrderAsync(MohistDbContext db, string projectId)
+    {
+        var profileId = _effectiveProfileResolver.Resolve(
+            issueSelection: null,
+            projectDefaultId: await LoadProjectDefaultTemplateAsync(db, projectId),
+            disabledIds: await _projectProfileManager.GetDisabledWorkflowProfileIdsAsync(projectId));
+        if (profileId is null) return new List<string>();
+        var profile = _profiles.Get(profileId);
+        return profile.Definition.Stages?
+            .Select(s => s.Stage)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList()
+            ?? new List<string>();
+    }
+
+    /// <summary>
+    /// For one issue, gather every <c>StageStarted</c> /
+    /// <c>StageCompleted</c> event across its run sources, order the
+    /// combined event stream by <c>(Time, Id)</c>, then for each stage
+    /// id take the LAST <c>StageStarted</c> event and pair it with the
+    /// FIRST <c>StageCompleted</c> event that follows it. Earlier
+    /// attempts (invalidated by a subsequent <c>StageStarted</c> for
+    /// the same stage) are not averaged in.
+    /// <para>
+    /// A stage whose latest <c>StageStarted</c> has no following
+    /// <c>StageCompleted</c> is simply absent from the returned
+    /// dictionary — its undefined duration does not contribute to any
+    /// aggregate.
+    /// </para>
+    /// </summary>
+    private static IReadOnlyDictionary<string, double> ComputeLatestAttemptStageDurations(
+        IReadOnlyList<string> issueRunIds,
+        IReadOnlyDictionary<string, List<WorkflowRunStageEvent>> stageEventsByRun)
+    {
+        // Stream every stage event for this issue's runs, ordered by
+        // `(Time, Id)` so the durable append-only sequence is canonical.
+        var events = new List<WorkflowRunStageEvent>();
+        foreach (var runId in issueRunIds)
+        {
+            if (string.IsNullOrWhiteSpace(runId)) continue;
+            if (!stageEventsByRun.TryGetValue(runId, out var list)) continue;
+            events.AddRange(list);
+        }
+
+        if (events.Count == 0) return new Dictionary<string, double>(StringComparer.Ordinal);
+
+        // Sort by `(Time, Id)` so the durable append-only sequence is
+        // the canonical ordering (matches `GetApprovalWaitAsync`'s
+        // expectation that older events sort before newer ones).
+        events.Sort(static (a, b) =>
+        {
+            var byTime = a.Time.CompareTo(b.Time);
+            return byTime != 0 ? byTime : a.Id.CompareTo(b.Id);
+        });
+
+        // For each stage id, track the latest StageStarted event position
+        // we've seen (supersedes any prior StageStarted for the same
+        // stage, satisfying invalidate-on-restart). Pairing is a separate
+        // pass so duplicate completions after the matching completion do
+        // not stretch the latest attempt.
+        var latestStartedIndexByStage = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        for (var i = 0; i < events.Count; i++)
+        {
+            var evt = events[i];
+            if (string.IsNullOrWhiteSpace(evt.Stage)) continue;
+            if (string.Equals(evt.Type, EventCatalog.ReverseDns.StageStarted, StringComparison.Ordinal))
+            {
+                latestStartedIndexByStage[evt.Stage] = i;
+            }
+        }
+
+        // For each stage id, the latest attempt is the latest StageStarted,
+        // paired with the first StageCompleted that follows it in ordered
+        // event sequence. Later duplicate/recovery completions are ignored.
+        var durations = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var (stage, startedIndex) in latestStartedIndexByStage)
+        {
+            var startedAt = events[startedIndex].Time;
+            for (var i = startedIndex + 1; i < events.Count; i++)
+            {
+                var evt = events[i];
+                if (!string.Equals(evt.Stage, stage, StringComparison.Ordinal)) continue;
+                if (!string.Equals(evt.Type, EventCatalog.ReverseDns.StageCompleted, StringComparison.Ordinal)) continue;
+
+                var durationSeconds = (evt.Time - startedAt).TotalSeconds;
+                if (durationSeconds >= 0)
+                    durations[stage] = durationSeconds;
+                break;
+            }
+        }
+
+        return durations;
+    }
+
+    private async Task<Dictionary<string, List<WorkflowRunStageEvent>>> LoadWorkflowRunStageEventsAsync(
+        MohistDbContext db,
+        IEnumerable<string> workflowRunIds)
+    {
+        var runIds = workflowRunIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (runIds.Length == 0)
+            return new Dictionary<string, List<WorkflowRunStageEvent>>(StringComparer.Ordinal);
+
+        var sourcesByRunId = runIds.ToDictionary(
+            id => WorkflowRunEventPersistence.WorkflowRunSource(id),
+            id => id,
+            StringComparer.Ordinal);
+        var sources = sourcesByRunId.Keys.ToArray();
+
+        // Select Source/Id/Type/Time/Data over BOTH StageStarted and
+        // StageCompleted (the existing
+        // `LoadWorkflowRunEventFactsAsync` filters by
+        // `QualityWorkflowEventTypes`, which omits `StageCompleted`).
+        var rows = await db.WorkflowRunEvents
+            .AsNoTracking()
+            .Where(row => sources.Contains(row.Source)
+                && StageDurationEventTypes.Contains(row.Type))
+            .Select(row => new { row.Source, row.Id, row.Type, row.Time, row.Data })
+            .ToListAsync();
+
+        var grouped = new Dictionary<string, List<WorkflowRunStageEvent>>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            if (!sourcesByRunId.TryGetValue(row.Source, out var runId)) continue;
+            var stage = ReadWorkflowEventStage(row.Data);
+            var evt = new WorkflowRunStageEvent(
+                runId, row.Id, row.Type, row.Time, stage);
+            if (!grouped.TryGetValue(runId, out var list))
+            {
+                list = new List<WorkflowRunStageEvent>();
+                grouped[runId] = list;
+            }
+            list.Add(evt);
+        }
+
+        return grouped;
+    }
+
+    private sealed record WorkflowRunStageEvent(
+        string RunId,
+        long Id,
+        string Type,
+        DateTimeOffset Time,
+        string? Stage);
+
+    private sealed record PerIssueCycleBreakdown(
+        IReadOnlyDictionary<string, double> StageDurations,
+        double? CycleSeconds,
+        double ApprovalGateWaitSeconds,
+        double SumStageSeconds);
+
+    /// <summary>
     /// Helpers for the completion aggregation. Internal so the unit tests
     /// can pin ISO-week boundary computation without instantiating the
     /// service.
@@ -1190,13 +1743,23 @@ public class IssueQuerier : IScopedService
         var workflowRunIds = issues
             .Select(i => i.WorkflowRunId)
             .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        if (workflowRunIds.Length == 0) return [];
+        return await LoadWorkflowStatesAsync(db, workflowRunIds);
+    }
+
+    private async Task<Dictionary<string, WorkflowStatusView>> LoadWorkflowStatesAsync(MohistDbContext db, IReadOnlyCollection<string> workflowRunIds)
+    {
+        var runIds = workflowRunIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (runIds.Length == 0) return [];
 
         var runRows = await db.WorkflowRuns
             .AsNoTracking()
-            .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
+            .Where(row => runIds.Contains(row.WorkflowRunId))
             .ToListAsync();
 
         var workflows = new Dictionary<string, WorkflowStatusView>(StringComparer.Ordinal);

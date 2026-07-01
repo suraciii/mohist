@@ -4,8 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Tests.Support;
@@ -496,6 +498,179 @@ public class IssueMetricsApiSpecs
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StageDurationMetrics_DeliveredIssueWithStageEvents_ReturnsStagesRatioAndWait()
+    {
+        var project = await CreateProjectAsync($"stage-duration-present-{Guid.NewGuid():N}");
+        var now = new DateTimeOffset(2030, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        _fixture.TimeProvider.SetUtcNow(now);
+        var shipTime = now.AddDays(-2);
+        var issueId = $"issue_sd_present_{Guid.NewGuid():N}";
+        var workflowRunId = $"wr_sd_present_{Guid.NewGuid():N}";
+        var createdAt = shipTime.AddHours(-10).UtcDateTime;
+        var completedAt = shipTime.UtcDateTime;
+
+        await SeedDeliveredIssueWithStageRunAsync(
+            project.Id,
+            number: 1,
+            issueId,
+            workflowRunId,
+            createdAt,
+            completedAt,
+            shipTime,
+            [
+                ("plan", shipTime.AddHours(-10), shipTime.AddHours(-7)),
+                ("build", shipTime.AddHours(-7), shipTime.AddHours(-3)),
+            ],
+            approvalWait: TimeSpan.FromHours(1));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/stage-duration");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<StageDurationMetricsResponse>(response);
+        Assert.Equal(2, payload.Stages.Length);
+
+        var planStage = Assert.Single(payload.Stages, s => s.Stage == "plan");
+        Assert.Equal(1, planStage.SampleCount);
+        Assert.NotNull(planStage.AverageSeconds);
+        Assert.Equal(3 * 3600, planStage.AverageSeconds!.Value, precision: 3);
+        Assert.NotNull(planStage.MedianSeconds);
+        Assert.Equal(3 * 3600, planStage.MedianSeconds!.Value, precision: 3);
+
+        var buildStage = Assert.Single(payload.Stages, s => s.Stage == "build");
+        Assert.Equal(1, buildStage.SampleCount);
+        Assert.NotNull(buildStage.AverageSeconds);
+        Assert.Equal(4 * 3600, buildStage.AverageSeconds!.Value, precision: 3);
+
+        // Σ stages = 7h, approval wait = 1h → activeWork = 6h.
+        // Cycle = 10h. Ratio = 0.6.
+        Assert.NotNull(payload.FlowEfficiencyRatio);
+        Assert.Equal(0.6, payload.FlowEfficiencyRatio!.Value, precision: 3);
+
+        Assert.NotNull(payload.WaitBreakout);
+        Assert.NotNull(payload.WaitBreakout!.AverageApprovalGateWaitSeconds);
+        Assert.Equal(3600, payload.WaitBreakout!.AverageApprovalGateWaitSeconds!.Value, precision: 3);
+        // inactiveGap = cycle(10) - stages(7) = 3h.
+        Assert.NotNull(payload.WaitBreakout.AverageInactiveGapSeconds);
+        Assert.Equal(3 * 3600, payload.WaitBreakout.AverageInactiveGapSeconds!.Value, precision: 3);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StageDurationMetrics_RunOnlyInLifecyclePayload_DiscoversStageEvents()
+    {
+        var project = await CreateProjectAsync($"stage-duration-event-run-{Guid.NewGuid():N}");
+        var now = new DateTimeOffset(2030, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        _fixture.TimeProvider.SetUtcNow(now);
+        var shipTime = now.AddDays(-2);
+        var issueId = $"issue_sd_event_run_{Guid.NewGuid():N}";
+        var workflowRunId = $"wr_sd_event_run_{Guid.NewGuid():N}";
+        var staleRunId = $"wr_sd_event_run_stale_{Guid.NewGuid():N}";
+
+        await SeedDeliveredIssueWithStageRunAsync(
+            project.Id,
+            number: 1,
+            issueId,
+            workflowRunId,
+            shipTime.AddHours(-6).UtcDateTime,
+            shipTime.UtcDateTime,
+            shipTime,
+            [("plan", shipTime.AddHours(-4), shipTime.AddHours(-1))],
+            approvalWait: TimeSpan.Zero,
+            issueWorkflowRunId: staleRunId);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/stage-duration");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<StageDurationMetricsResponse>(response);
+        var planStage = Assert.Single(payload.Stages, s => s.Stage == "plan");
+        Assert.Equal(1, planStage.SampleCount);
+        Assert.Equal(3 * 3600, planStage.AverageSeconds!.Value, precision: 3);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StageDurationMetrics_NoDeliveredIssuesInWindow_ReturnsEmptyResult()
+    {
+        var project = await CreateProjectAsync($"stage-duration-empty-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/stage-duration");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<StageDurationMetricsResponse>(response);
+        Assert.Empty(payload.Stages);
+        Assert.Null(payload.FlowEfficiencyRatio);
+        Assert.NotNull(payload.WaitBreakout);
+        Assert.Null(payload.WaitBreakout!.AverageApprovalGateWaitSeconds);
+        Assert.Null(payload.WaitBreakout.AverageInactiveGapSeconds);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StageDurationMetrics_UsesInjectedRouteClockForTrailingWindow()
+    {
+        // The route uses the injected `TimeProvider`, never the wall
+        // clock. Advance the fixture's clock so we can place completed
+        // issues on the boundary of the trailing window.
+        var project = await CreateProjectAsync($"stage-duration-clock-{Guid.NewGuid():N}");
+        var now = new DateTimeOffset(2030, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        _fixture.TimeProvider.SetUtcNow(now);
+
+        var insideIssueId = $"issue_sd_clock_inside_{Guid.NewGuid():N}";
+        var insideRunId = $"wr_sd_clock_inside_{Guid.NewGuid():N}";
+        await SeedDeliveredIssueWithStageRunAsync(
+            project.Id,
+            number: 1,
+            insideIssueId,
+            insideRunId,
+            now.AddDays(-3).UtcDateTime,
+            now.AddDays(-1).UtcDateTime,
+            now.AddDays(-1),
+            [("plan", now.AddDays(-1).AddHours(-2), now.AddDays(-1))],
+            approvalWait: TimeSpan.Zero);
+
+        var outsideIssueId = $"issue_sd_clock_outside_{Guid.NewGuid():N}";
+        var outsideRunId = $"wr_sd_clock_outside_{Guid.NewGuid():N}";
+        await SeedDeliveredIssueWithStageRunAsync(
+            project.Id,
+            number: 2,
+            outsideIssueId,
+            outsideRunId,
+            now.AddDays(-100).UtcDateTime,
+            now.AddDays(-60).UtcDateTime,
+            now.AddDays(-60),
+            [("plan", now.AddDays(-60).AddHours(-2), now.AddDays(-60))],
+            approvalWait: TimeSpan.Zero);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/stage-duration");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<StageDurationMetricsResponse>(response);
+        var planStage = Assert.Single(payload.Stages, s => s.Stage == "plan");
+        // Only the in-window issue contributes.
+        Assert.Equal(1, planStage.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StageDurationMetrics_UnknownProject_ReturnsNotFound()
+    {
+        using var response = await _client.GetAsync(
+            $"/api/projects/proj-sd-unknown-{Guid.NewGuid():N}/issues/metrics/stage-duration");
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync(string name)
     {
         using var response = await _client.PostAsJsonAsync(
@@ -896,6 +1071,152 @@ public class IssueMetricsApiSpecs
         await db.SaveChangesAsync();
     }
 
+    private async Task SeedDeliveredIssueWithStageRunAsync(
+        string projectId,
+        int number,
+        string issueId,
+        string workflowRunId,
+        DateTime createdAt,
+        DateTime completedAt,
+        DateTimeOffset shipTime,
+        (string Stage, DateTimeOffset StartedAt, DateTimeOffset CompletedAt)[] stageSpans,
+        TimeSpan approvalWait,
+        string? issueWorkflowRunId = null)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var issue = new DomainIssue
+        {
+            Id = issueId,
+            ProjectId = projectId,
+            Number = number,
+            Title = "Stage duration metric issue",
+            Status = IssueStatus.Done,
+            CreatedAt = createdAt,
+            UpdatedAt = completedAt,
+            CompletedAt = completedAt,
+            WorkflowRunId = issueWorkflowRunId ?? workflowRunId,
+        };
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
+        });
+        await db.SaveChangesAsync();
+
+        // IssueWorkStarted event anchoring the cycle time. The earliest
+        // stage's StageStarted timestamp is the natural candidate.
+        var firstStageStart = stageSpans[0].StartedAt;
+        var source = IssueQuerier.IssueSourcePrefix + issueId;
+        var dbMax = await db.IssueEvents.AsNoTracking()
+            .Where(e => e.Source == source)
+            .Select(e => (long?)e.Id)
+            .MaxAsync();
+        var nextId = (dbMax ?? 0) + 1;
+        db.IssueEvents.Add(new IssueEventRow
+        {
+            Id = nextId++,
+            Source = source,
+            EventId = Guid.NewGuid().ToString(),
+            Type = IssueQuerier.WorkStartedType,
+            Time = firstStageStart,
+            SpecVersion = "1.0",
+            Subject = number.ToString(),
+            DataContentType = "application/json",
+            Data = IssueEventSerializer.ToData(new IssueWorkStarted(workflowRunId)),
+            ExtensionsJson = "{}",
+        });
+        db.IssueEvents.Add(new IssueEventRow
+        {
+            Id = nextId++,
+            Source = source,
+            EventId = Guid.NewGuid().ToString(),
+            Type = IssueQuerier.WorkCompletedType,
+            Time = shipTime,
+            SpecVersion = "1.0",
+            Subject = number.ToString(),
+            DataContentType = "application/json",
+            Data = IssueEventSerializer.ToData(new IssueWorkCompleted(workflowRunId)),
+            ExtensionsJson = "{}",
+        });
+        await db.SaveChangesAsync();
+
+        // Build a workflow run with one approval gate on the first
+        // stage. The approval's requestedAt sits inside the first
+        // stage's window; respondedAt = requestedAt + approvalWait.
+        var firstStage = stageSpans[0];
+        var approvalRequestedAt = firstStage.StartedAt;
+        var approvalRespondedAt = approvalRequestedAt + approvalWait;
+        var stageObjects = stageSpans.Select((s, idx) => (object)new
+        {
+            Id = s.Stage,
+            Attempt = 1,
+            RequiresApproval = idx == 0,
+            Status = "Completed",
+            Tasks = new[]
+            {
+                new { Id = $"{s.Stage}-task", DefinitionId = $"{s.Stage}-task", Attempt = 1, Title = $"{s.Stage} task", Status = "Completed", Uses = "mohist/acp-agent" },
+            },
+            Checks = idx == 0
+                ? new[] { new { Name = $"{s.Stage}-ok", Title = $"{s.Stage} ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" } }
+                : new object[0],
+            ApprovalStatus = idx == 0
+                ? new
+                {
+                    Result = "approved",
+                    RequestedAt = approvalRequestedAt.ToString("O"),
+                    RespondedAt = approvalRespondedAt.ToString("O"),
+                }
+                : null,
+        }).ToArray();
+
+        var runState = new
+        {
+            Id = workflowRunId,
+            Metadata = new { CreatedAt = createdAt.AddMinutes(-5), Name = "test" },
+            Status = "Completed",
+            CurrentStageId = stageSpans[^1].Stage,
+            Stages = stageObjects,
+        };
+        var json = JsonSerializer.Serialize(runState, JSON.Options);
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
+            workflowRunId, json);
+
+        // Per-run stage events (StageStarted / StageCompleted).
+        var seq = 1L;
+        foreach (var s in stageSpans)
+        {
+            db.WorkflowRunEvents.Add(new WorkflowRunEventRow
+            {
+                Id = seq++,
+                Source = WorkflowRunEventPersistence.WorkflowRunSource(workflowRunId),
+                EventId = Guid.NewGuid().ToString(),
+                Type = EventCatalog.ReverseDns.StageStarted,
+                Time = s.StartedAt,
+                SpecVersion = "1.0",
+                Subject = null,
+                DataContentType = "application/json",
+                Data = JsonSerializer.SerializeToElement(new { stage = s.Stage }, JSON.Options),
+                ExtensionsJson = "{}",
+            });
+            db.WorkflowRunEvents.Add(new WorkflowRunEventRow
+            {
+                Id = seq++,
+                Source = WorkflowRunEventPersistence.WorkflowRunSource(workflowRunId),
+                EventId = Guid.NewGuid().ToString(),
+                Type = EventCatalog.ReverseDns.StageCompleted,
+                Time = s.CompletedAt,
+                SpecVersion = "1.0",
+                Subject = null,
+                DataContentType = "application/json",
+                Data = JsonSerializer.SerializeToElement(new { stage = s.Stage }, JSON.Options),
+                ExtensionsJson = "{}",
+            });
+        }
+        await db.SaveChangesAsync();
+    }
+
     private static async Task<T> ReadDataAsync<T>(HttpResponseMessage response)
     {
         var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<T>>(JsonOptions);
@@ -926,4 +1247,13 @@ public class IssueMetricsApiSpecs
 
     private sealed record DeliveryTimePointDto(int IssueNumber, string CompletedAt, double LeadDays, double? CycleDays);
     private sealed record DeliveryTimeMetricsResponse(DeliveryTimePointDto[] Points);
+
+    private sealed record StageDurationStageDto(string Stage, int SampleCount, double? AverageSeconds, double? MedianSeconds);
+    private sealed record StageDurationWaitBreakoutDto(double? AverageApprovalGateWaitSeconds, double? AverageInactiveGapSeconds);
+    private sealed record StageDurationMetricsResponse(
+        StageDurationMetricsWindowDto Window,
+        StageDurationStageDto[] Stages,
+        double? FlowEfficiencyRatio,
+        StageDurationWaitBreakoutDto? WaitBreakout);
+    private sealed record StageDurationMetricsWindowDto(string From, string To);
 }

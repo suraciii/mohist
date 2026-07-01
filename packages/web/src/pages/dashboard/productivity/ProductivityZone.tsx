@@ -5,6 +5,7 @@ import { EpicProgressList } from './EpicProgressList'
 import { InvestmentPanel } from './InvestmentPanel'
 import { QualityPanel } from './QualityPanel'
 import { SnapshotRow } from './SnapshotRow'
+import { StageDurationChart } from './StageDurationChart'
 import { ThroughputChart } from './ThroughputChart'
 
 export function ProductivityZone() {
@@ -19,6 +20,7 @@ export function ProductivityZone() {
       <CompletionTrend />
       <ThroughputChart />
       <CycleTimeChart />
+      <StageDurationChart />
       <QualityPanel />
       <InvestmentPanel />
       <CostTrendChart />

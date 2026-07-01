@@ -8,6 +8,8 @@ export { approvalWaitQueryKey, fetchApprovalWait, invalidateApprovalWait, useApp
 export type { ApprovalWaitMetricsResponse, ApprovalWaitMetricsWindow } from './api/approval-wait'
 export { deliveryTimeQueryKey, fetchDeliveryTime, useDeliveryTime } from './api/delivery-time'
 export type { DeliveryTimeMetricsResponse, DeliveryTimePointDto } from './api/delivery-time'
+export { fetchStageDuration, stageDurationQueryKey, useStageDuration } from './api/stage-duration'
+export type { StageDurationMetricsResponse, StageDurationMetricsWindow, StageDurationStageDto, StageDurationWaitBreakoutDto } from './api/stage-duration'
 export { statusBadge, statusLabel } from './lib/status-badge'
 export { deriveCompletionSnapshot, useCompletionSnapshot } from './lib/completion-snapshot'
 export type { CompletionSnapshot } from './lib/completion-snapshot'

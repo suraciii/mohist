@@ -313,3 +313,51 @@ public sealed record DeliveryTimePointDto(
 /// </summary>
 public sealed record DeliveryTimeMetricsResponse(
     DeliveryTimePointDto[] Points);
+
+/// <summary>
+/// Response shape for the stage-duration metrics endpoint. The stages are
+/// returned in workflow stage order. Stages reached by no delivered issue
+/// in the window are absent (a fabricated zero would mislead the consuming
+/// chart). <see cref="FlowEfficiencyRatio"/> is <c>null</c> for the empty
+/// result so it is distinguishable from a genuine zero-or-one ratio.
+/// <see cref="WaitBreakout"/> averages are <c>null</c> for the empty
+/// result, distinguishable from a genuine zero-wait issue.
+/// </summary>
+public sealed record StageDurationMetricsResponse(
+    StageDurationMetricsWindowDto Window,
+    StageDurationStageDto[] Stages,
+    double? FlowEfficiencyRatio,
+    StageDurationWaitBreakoutDto? WaitBreakout);
+
+public sealed record StageDurationMetricsWindowDto(
+    string From,
+    string To);
+
+/// <summary>
+/// One per-stage aggregate in the stage-duration response.
+/// <see cref="AverageSeconds"/> and <see cref="MedianSeconds"/> are the
+/// arithmetic mean and median of the latest-attempt durations across the
+/// windowed delivered issues. <see cref="SampleCount"/> is the number of
+/// issues contributing a defined sample (started-and-completed latest
+/// attempt) for the stage — distinguishes a true zero-sample window from
+/// a stage with a genuine zero-duration sample.
+/// </summary>
+public sealed record StageDurationStageDto(
+    string Stage,
+    int SampleCount,
+    double? AverageSeconds,
+    double? MedianSeconds);
+
+/// <summary>
+/// The wait-breakout averages alongside the flow-efficiency ratio.
+/// <see cref="AverageApprovalGateWaitSeconds"/> is the mean of the
+/// per-issue approval-gate wait over the issues contributing to the
+/// ratio. <see cref="AverageInactiveGapSeconds"/> is the mean of
+/// <c>cycle − Σ(stage durations)</c> over the same population. Both
+/// fields are <c>null</c> when no delivered issue in the window has a
+/// defined cycle time; zero-wait issues contribute zero rather than
+/// exclusion.
+/// </summary>
+public sealed record StageDurationWaitBreakoutDto(
+    double? AverageApprovalGateWaitSeconds,
+    double? AverageInactiveGapSeconds);
