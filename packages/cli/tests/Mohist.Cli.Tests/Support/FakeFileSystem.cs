@@ -54,10 +54,39 @@ public sealed class FakeFileSystem : IFileSystem
     {
         var sourceKey = Normalize(source);
         var destKey = Normalize(destination);
+
         if (_files.TryGetValue(sourceKey, out var content))
         {
             _files.Remove(sourceKey);
             _files[destKey] = content;
+            return;
+        }
+
+        if (_directories.Contains(sourceKey))
+        {
+            var sourcePrefix = sourceKey.EndsWith(Path.DirectorySeparatorChar)
+                ? sourceKey
+                : sourceKey + Path.DirectorySeparatorChar;
+            var destFilePrefix = destKey.EndsWith(Path.DirectorySeparatorChar)
+                ? destKey
+                : destKey + Path.DirectorySeparatorChar;
+
+            foreach (var file in _files.Keys.Where(k => k.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase)).ToArray())
+            {
+                var suffix = file.Substring(sourcePrefix.Length);
+                _files[destFilePrefix + suffix] = _files[file];
+                _files.Remove(file);
+            }
+
+            foreach (var dir in _directories.Where(d => d.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase)).ToArray())
+            {
+                var suffix = dir.Substring(sourcePrefix.Length);
+                _directories.Add(destFilePrefix + suffix);
+                _directories.Remove(dir);
+            }
+
+            _directories.Add(destKey);
+            _directories.Remove(sourceKey);
         }
     }
 
