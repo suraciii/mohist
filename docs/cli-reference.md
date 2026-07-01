@@ -13,7 +13,7 @@ mo info                # CLI 本地环境与安装来源概览
 mo use <project>       # 切换 active project
 ```
 
-所有命令都接受 `--project <name>` 和 `--project-id <id>` 在不切换 active project 的情况下指定目标 project。
+项目作用域命令通常接受 `--project <name>` 和 `--project-id <id>`，可在不切换 active project 的情况下指定目标 project；不依赖 project 的全局命令（如 `mo workflow list`、`mo info`）以各自 `--help` 为准。
 
 ## 输出格式
 
@@ -101,6 +101,7 @@ mo issue close <number>
 mo issue reopen <number>
 mo issue retry <number>
 mo issue rerun <number>
+mo issue rerun-from-stage <number> --stage <stage>
 mo issue force-stop <number>
 mo issue resume <number>
 mo issue stop <number>
@@ -264,7 +265,7 @@ mo workflow list                 # 列出 workflow profile（别名 ls）
 ## OTel 管理
 
 ```bash
-mo otel query [<sql>]            # 直接查询 otel.db（无需 server）
+mo otel query <sql>              # 直接查询 otel.db（无需 server）
 mo otel status                   # OTel collector 状态与数据库统计（需 server）
 ```
 

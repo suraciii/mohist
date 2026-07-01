@@ -13,6 +13,7 @@ public class CliReferenceDocsSpecs
         Assert.Contains("mo issue prereq add <number> <prereq-number>", doc);
         Assert.Contains("mo issue prereq remove <number> <prereq-number>", doc);
         Assert.Contains("mo issue reject <number> --message <message>", doc);
+        Assert.Contains("mo issue rerun-from-stage <number> --stage <stage>", doc);
 
         Assert.DoesNotContain("mo issue comment <number> <body>", doc);
         Assert.DoesNotContain("prerequisite-add", doc);
@@ -29,6 +30,7 @@ public class CliReferenceDocsSpecs
         Assert.Contains("mo issue prereq add <number> <prereq-number>", doc);
         Assert.Contains("mo issue prereq remove <number> <prereq-number>", doc);
         Assert.Contains("mo issue reject <number> --message <message>", doc);
+        Assert.Contains("mo issue rerun-from-stage <number> --stage <stage>", doc);
 
         Assert.DoesNotContain("prerequisite-add", doc);
         Assert.DoesNotContain("prerequisite-remove", doc);
@@ -43,7 +45,9 @@ public class CliReferenceDocsSpecs
         Assert.Contains("`list`、`show` 和 session 子命令支持 `-o table|json`", doc);
         Assert.Contains("`list` 支持 `-o table|json`；所有子命令支持 `--project`/`--project-id`", doc);
         Assert.Contains("顶层 `mo workflow` 不接受 `--project`/`--project-id`", doc);
+        Assert.Contains("项目作用域命令通常接受 `--project <name>` 和 `--project-id <id>`", doc);
 
+        Assert.DoesNotContain("所有命令都接受 `--project <name>` 和 `--project-id <id>`", doc);
         Assert.DoesNotContain("所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo agent", doc);
         Assert.DoesNotContain("所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo label", doc);
         Assert.DoesNotContain("所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo workflow", doc);
@@ -87,7 +91,8 @@ public class CliReferenceDocsSpecs
             "mo skills sync",
             "mo agent session launch",
             "mo label remove <key>",
-            "mo otel status"
+            "mo otel status",
+            "mo otel query <sql>"
         ];
 
         foreach (var command in criticalSubcommands)
