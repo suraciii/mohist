@@ -1,0 +1,8 @@
+progress for issue-304
+
+## Codebase Patterns
+
+- T-001 (display-vs-functional-entry convention): conventions.md style is rule+example over prose; uses ## top-level sections, tables, and code-fence callouts. Prior sections already use this pattern; new section follows it. Only conventions.md is touched; architecture.md is explicitly out of scope per design.md Decision 4.
+- design.md Decision 4 specifies the exact three-tier wording; T-001 implementation just transcribes that into conventions.md as a standing reference (not epic-specific commentary).
+- Acceptance check uses `grep -i 'web.*only|display' design/conventions.md` — pre-existing matches exist for unrelated "display number / display key" prose; the new tier-1 row and section heading satisfy the grep criterion.
+- The "tier 2 but not tier 3" justification for keeping operations in the dispatcher (Decision 1) is recorded inline so future readers see both rules together.
