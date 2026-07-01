@@ -135,14 +135,14 @@ Plan / Check 完成后，issue 进入 `awaiting approval`。这时 AI 不工作�
 
 ```bash
 mo issue approve 42     # 通过，进下一阶段
-mo issue reject 42      # 打回，AI 重做当前阶段
+mo issue reject 42 --message "Missing error handling in proposal"  # 打回，AI 重做当前阶段
 ```
 
-**Reject 时的反馈**：reject 命令当前不带理由（roadmap）。如果你想让 AI 知道为什么 reject，先 add comment 再 reject：
+**Reject 时的反馈**：`reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
 
 ```bash
 mo issue comment add 42 --body "Reject because: missing error handling in proposal"
-mo issue reject 42
+mo issue reject 42 -m "See comment: missing error handling"
 ```
 
 ## Comment（评论）
@@ -171,14 +171,14 @@ mo issue prereq remove 11 10 # 移除依赖
 
 Web UI 上 issue 详情页有 "Add Prerequisite" 区。
 
-## 暂停与停止
+## 中断、停止与关闭
 
 ```bash
-# 软暂停（stop）—— workflow 状态保留，可以 resume
-mo issue stop 42
-
-# 强制停止（force-stop）—— 终止运行中的 agent session
+# 可恢复中断（force-stop）—— 终止运行中的 agent session，后续用 resume 接着跑
 mo issue force-stop 42
+
+# 永久停止（stop）—— terminal，不能 resume
+mo issue stop 42
 
 # 完全关闭（close）—— issue 进入终态
 mo issue close 42
@@ -189,8 +189,8 @@ mo issue reopen 42
 
 | 操作 | 适用场景 | 后果 |
 |---|---|---|
-| `stop` | 暂时不想让它跑 | 状态保留，可 resume |
-| `force-stop` | agent 卡死、stop 不响应 | 强杀 agent，状态可能 interrupted |
+| `force-stop` | 暂时中断、agent 卡住、想保留恢复入口 | 终止运行中的 agent，issue 进入可 `resume` 的 interrupted 路径 |
+| `stop` | 确定不再继续这次 workflow | 永久停止 workflow run，terminal，不能 resume |
 | `close` | 这个 issue 不做了 | 进入 closed 终态，可 reopen |
 | `reopen` | 误关了，或想再做 | 回到 backlog |
 
@@ -239,7 +239,7 @@ mo issue show <number>
 mo issue update <number> [options]
 mo issue start <number>
 mo issue approve <number>
-mo issue reject <number>
+mo issue reject <number> --message <message>
 mo issue close <number>
 mo issue reopen <number>
 mo issue retry <number>

@@ -9,6 +9,7 @@ mo --version
 mo --help
 mo status              # 当前 project 状态、agent 状态、runner 状态
 mo logs                # 最近日志
+mo info                # CLI 本地环境与安装来源概览
 mo use <project>       # 切换 active project
 ```
 
@@ -95,7 +96,7 @@ mo issue show <number>
 mo issue update <number> [options]
 mo issue start <number>
 mo issue approve <number>
-mo issue reject <number>
+mo issue reject <number> --message <message>
 mo issue close <number>
 mo issue reopen <number>
 mo issue retry <number>
@@ -285,11 +286,14 @@ mo otel query "SELECT name, COUNT(*) FROM spans GROUP BY name ORDER BY 2 DESC LI
 ## 只读诊断
 
 ```bash
+mo info                    # CLI 本地环境与安装来源概览
+mo info --verbose          # 追加 skills、git remote、opencode、env、OS、capacity、disk 等诊断
+mo info --json             # 机器可读 JSON
 mo system info               # 服务端系统诊断（identity/source/install/update/services/paths）
 mo opencode models           # 当前 project 可用 coder 模型 ID，每行一个
 ```
 
-以上命令支持 `-o table|json`。
+`mo info` 是 CLI 本地诊断；`mo system info` 是服务端系统诊断。`mo system info` 和 `mo opencode models` 支持 `-o table|json`。
 
 ## Repository 管理
 
@@ -318,7 +322,11 @@ mo config list
 mo skills list               # 列出可分发 skill
 mo skills install            # 安装/更新 skill 到外部 agent
 mo skills get <name>         # 获取 skill 的完整内容
+mo skills path <name>        # 输出内置 skill 的打包路径
+mo skills sync               # 将工作树 skill-data 同步到托管缓存
 ```
+
+`sync` 用于本仓库开发：编辑 `packages/cli/Mohist.Cli/skill-data/` 后运行它，让托管缓存与工作树一致，随后 `mo skills get <name>` 会反映本地改动。
 
 详见 [Skill 机制](skills.md)。
 

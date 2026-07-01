@@ -62,14 +62,12 @@ it as prerequisites so the epic can advance one issue at a time without false
 starts:
 
 ```bash
-# CLI does not yet have a prerequisite command — use the API:
-curl -X POST http://localhost:3456/api/projects/<project>/issues/<B>/prerequisites \
-  -H "Content-Type: application/json" \
-  -d '{"prerequisiteNumber": <A-number>}'
+mo issue prereq add <B-number> <A-number>
+mo issue prereq remove <B-number> <A-number>
 ```
 
 A starts first; B becomes start-blocked ("waiting for #A") until A is delivered,
-then B is free to start. Prefer fewer prerequisites — only real data/scaffold/invariant dependencies.
+then B is free to start. Prefer fewer prerequisites — only real data/scaffold/invariant dependencies. Use the API only as a fallback when the CLI is unavailable.
 
 ### Lifecycle: prefer autopilot (start / pause / resume)
 
