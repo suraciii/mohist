@@ -4,7 +4,7 @@ The web `IssueDetailPage` is a god-component (scc Complexity 211 / 1375 lines) h
 
 ## What Changes
 
-- Promote the 9 inline presentational sub-components (`PriorityChip`, `WorkflowStagePill`, `HealthPill`, `DraftPill`, `ArchivedPill`, `WorkflowYamlDialog`, and the header/label helpers) into their own files under `packages/web/src/pages/issue-detail/`.
+- Promote the 9 inline presentational sub-components (`PriorityChip`, `WorkflowStagePill`, `HealthPill`, `DraftPill`, `ArchivedPill`, `WorkflowYamlDialog`, and the header/label helpers) into their own modules under `packages/web/src/pages/issue-detail/` (`WorkflowYamlDialog` gets its own file; the five <30-line pills are consolidated into one cohesive `ui/pills.tsx` module rather than one file per chip — see design D1).
 - Split the main column into `IssueDescriptionSection`, `IssueDiffFilesSection`, `IssueCommitsSection`, and `IssueCommentsSection`; split the right rail into `IssueDetailsCard`, `IssueDriftCard`, `IssueConfigurationCard`, `IssueActionsCard`, `IssuePrerequisitesCard`, and `IssueReadinessCard`.
 - Merge the two duplicated click-outside + 5s auto-dismiss effects into a single reusable `useConfirmOutsideClick()` hook; migrate `forceStopPanelRef` / `stopPanelRef` alongside the Actions card so the shared refs stay co-located with their consumers.
 - Extract the 13 mutations into a `useIssueDetailMutations()` hook (or co-locate them with their owning sub-component), so the page body converges to orchestration only.
