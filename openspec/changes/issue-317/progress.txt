@@ -401,3 +401,89 @@ Each task appends its findings; the next task reads the section it cares about.
   (matches T-001/T-002/T-003/T-004/T-005 baseline).
 - Spec gate: full CLI test project — 559 passed, 0 failed
   (matches T-005 baseline, no regression in neighboring clusters).
+
+## Carve notes for T-007 (Prereq + Comment + Template)
+
+### Three small clusters grouped because each is too trivial for a separate task
+
+- Per the design (`D1` cluster-ownership, plus the task's grouping note),
+  the three remaining small clusters were carved together because each is
+  only 60–100 lines — splitting into 3 tasks would have been over-splitting
+  for verbatim moves that follow the same shape.
+- All three sat as one contiguous block between `ResolveProjectId` (line 72)
+  and `IssueTemplatesPath` (line 304) in the post-T-006 core file. The seam
+  anchor at the boundary `ResolveProjectId` → `BuildPrereq` and at
+  `BuildTemplateGet` → `IssueTemplatesPath` was a clean two-edit find/
+  replace with no shared-helper bookkeeping (the only D1-physical-vs-call-
+  graph wrinkle, `ExtractLatestId` already shipped in T-006, does not
+  recur here — all three clusters sit exactly where their call-graph owner
+  physically sits).
+
+### `IssueTemplatesPath` placement moved into the core helpers region
+
+- After T-006, `IssueTemplatesPath` was sitting at the **bottom** of the
+  core file (lines 304–310) — only because that was where it physically
+  landed in the pre-refactor monolithic file. Per the cli-module-structure
+  spec it is a required core shared helper alongside `NumberArg`,
+  `ProjectIssuesPath`, `IsOptionProvided`, `ValidateOutput`,
+  `ResolveProjectId`. The carve moved it up to sit alongside the other
+  five helpers (now at line 81 of the 87-line core), so the core partial
+  reads as: `Build()` → 6 shared helpers → close. This is the
+  "core partial only Build + helpers" scenario from the spec.
+- Only the Template cluster uses `IssueTemplatesPath` today (the only
+  call sites are `BuildTemplateList` and `BuildTemplateGet`), but keeping
+  it in the core enforces the spec invariant and prevents the next
+  cluster-on-the-edge from accidentally re-introducing the physical-order
+  discrepancy. `BuildTemplateList` and `BuildTemplateGet` reach it via
+  partial-class `private` access — same rule as the other helpers.
+
+### Prereq / Comment / Template partial `using` blocks are minimal
+
+- All three need only `using System.CommandLine;` — no `System.Net.Http`
+  (no `HttpRequestException` catches), no `System.Text.Json.Nodes` (no
+  `JsonNode?` shapes), no `System.CommandLine.Parsing` (no direct
+  `ParseResult` / `Option` signatures beyond their `Command` constructor
+  paths).
+- `MohistCliCommands.ProjectRefOption` / `OutputOption` / `Escape` /
+  `NoActiveProjectMessage`, `BodyInputResolver`, `MohistCliApi` all live
+  in the same namespace (`Mohist.Cli`) so no extra imports are needed.
+  Same minimal-import rule that applied to Crud (T-002), Lifecycle
+  (T-003), Session (T-004), Workflow (T-005), Feedback (T-006) holds for
+  Prereq/Comment/Template as well.
+
+### Cross-cluster shared helper access is unchanged
+
+- All three clusters call `ResolveProjectId`, `ValidateOutput`,
+  `NumberArg`, `ProjectIssuesPath` (Template also calls `IssueTemplatesPath`),
+  exactly the same as the pre-T-007 in-file calls. The carve moves the
+  methods, not the call sites of those helpers. Verbatim move confirmed
+  by the 40-test filtered spec run below.
+
+### Core partial final state (T-007 close)
+
+- Core contains only `Build()` (public entry) + 6 private static helpers:
+  `NumberArg`, `ProjectIssuesPath`, `IsOptionProvided`, `ValidateOutput`,
+  `ResolveProjectId`, `IssueTemplatesPath`. No concrete subcommand build
+  methods. Spec scenario "核心 partial 只保留 Build 与共享 helper" satisfied.
+- Three `Subcommands.Add(...)` calls inside `Build()` (lines 38-40)
+  reference `BuildPrereq`/`BuildComment`/`BuildTemplate` — those are
+  forwarded to the partials; no method definitions remain in the core.
+
+## File metrics after T-007
+
+- `MohistCliCommands.Issue.cs` shrank from 311 → 87 lines (Δ −224L).
+- `MohistCliCommands.Issue.Prereq.cs` is 96L gross (matches ~100L target).
+- `MohistCliCommands.Issue.Comment.cs` is 60L gross (matches ~60L target).
+- `MohistCliCommands.Issue.Template.cs` is 82L gross (close to ~90L target).
+- Spec gate: `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj`
+  → 0 Warning(s), 0 Error(s).
+- Spec gate: `dotnet test packages/cli/tests/Mohist.Cli.Tests/...
+  --filter 'FullyQualifiedName~CliIssuePrereqSpecs|
+  FullyQualifiedName~CliIssueCommentAndFeedbackSpecs|
+  FullyQualifiedName~CliIssueTemplateCommandSpecs'`
+  → 40 passed, 0 failed (prereq add/remove, comment add, template list/get
+  bit-for-bit green).
+- Spec gate: full CLI issue suite — 231 passed, 0 failed (matches
+  T-001/T-002/T-003/T-004/T-005/T-006 baseline).
+- Spec gate: full CLI test project — 559 passed, 0 failed (matches
+  T-006 baseline, no regression in neighboring clusters).
