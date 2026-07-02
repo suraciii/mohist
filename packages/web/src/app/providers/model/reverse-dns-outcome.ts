@@ -1,5 +1,4 @@
 import type { RebaseConflictState } from '../../../entities/issue/model/drift'
-import type { RebaseEvent } from '../../../entities/issue/model/rebase-events'
 import { REVERSE_DNS_EVENT_TYPES } from '../../../shared/lib/canonical-event-types'
 import { readIssueNumber } from './timeline-live-event'
 
@@ -127,10 +126,4 @@ export function decideReverseDnsOutcome(
   return { handled: false }
 }
 
-/**
- * Type-narrowing helper for callers that need to branch on the rebase event
- * shape returned by the decider. Pairs with the decider's narrow type.
- */
-export function asRebaseDispatchEvent(event: ReverseDnsRebaseEvent): RebaseEvent {
-  return event
-}
+
