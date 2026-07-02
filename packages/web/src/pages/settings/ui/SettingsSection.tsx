@@ -13,8 +13,8 @@ export function SettingsSection({
 }: SettingsSectionProps) {
   return (
     <section>
-      <h2 className="text-sm font-medium text-foreground">{title}</h2>
-      {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+      <h2 className="text-sm font-medium text-foreground text-balance">{title}</h2>
+      {description && <p className="mt-1 text-sm text-muted-foreground text-pretty">{description}</p>}
       <div className="mt-4 space-y-4">{children}</div>
     </section>
   )

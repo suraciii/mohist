@@ -103,6 +103,14 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
     }
   }, [open])
 
+  useEffect(() => {
+    function reveal() {
+      setOpen(true)
+    }
+    window.addEventListener('mohist:sidebar:open-project-switcher', reveal)
+    return () => window.removeEventListener('mohist:sidebar:open-project-switcher', reveal)
+  }, [])
+
   function handleSelect(project: Project) {
     setProjectId(project.id)
     setOpen(false)

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { baseRender, fireEvent, render, screen, waitFor } from './test-utils'
+import { baseRender, fireEvent, render, screen, waitFor, within } from './test-utils'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import type { AgentRuntimeConfig, GeneralConfig } from '../src/entities/settings'
@@ -284,7 +284,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     expect(screen.queryByText(/Settings saved successfully/i)).not.toBeInTheDocument()
   })
 
-  it('surfaces a save failure by leaving the form in a not-saved state with no inline error banner', async () => {
+  it('surfaces a save failure inline as a role=alert + aria-live=polite error card (T-003)', async () => {
     vi.useRealTimers()
     const updateAgentRuntime = vi.fn().mockRejectedValue(
       new Error('agentTimeout must be a number'),
@@ -304,7 +304,12 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled(),
     )
-    expect(screen.queryByText(/agentTimeout must be a number/i)).not.toBeInTheDocument()
+
+    const errorBanner = await screen.findByTestId('agent-runtime-save-error')
+    expect(errorBanner).toHaveAttribute('role', 'alert')
+    expect(errorBanner).toHaveAttribute('aria-live', 'polite')
+    expect(errorBanner).toHaveTextContent(/agentTimeout must be a number/i)
+    expect(errorBanner.className).toContain('text-red-700')
     expect(screen.queryByText(/Settings saved successfully/i)).not.toBeInTheDocument()
   })
 
@@ -380,6 +385,65 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     expect(callArg.maxGracePeriods).toBeUndefined()
     expect(callArg.pollInterval).toBe(5000)
   })
+
+  it('opens the shared AlertDialog on Reset and does not call updateAgentRuntime before confirm (T-001)', async () => {
+    vi.useRealTimers()
+    const updateAgentRuntime = vi.fn().mockImplementation(async (payload) => ({
+      ...DEFAULT_RUNTIME,
+      ...payload,
+    }))
+    runtimeClient.updateAgentRuntime.mockImplementation(updateAgentRuntime)
+
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to Defaults' }))
+
+    const dialog = await screen.findByTestId('agent-reset-alert')
+    expect(dialog).toBeInTheDocument()
+    expect(dialog).toHaveAttribute('data-tone', 'destructive')
+
+    expect(updateAgentRuntime).not.toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByTestId('agent-reset-alert-cancel'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-reset-alert')).not.toBeInTheDocument()
+    })
+    expect(updateAgentRuntime).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to Defaults' }))
+    const dialog2 = await screen.findByTestId('agent-reset-alert')
+    fireEvent.click(within(dialog2).getByTestId('agent-reset-alert-confirm'))
+
+    await waitFor(() => expect(updateAgentRuntime).toHaveBeenCalledTimes(1))
+  })
+
+  it('does not render the hand-written fixed-inset-0 confirm overlay markup (T-001)', async () => {
+    vi.useRealTimers()
+    runtimeClient.updateAgentRuntime.mockImplementation(async (payload) => ({
+      ...DEFAULT_RUNTIME,
+      ...payload,
+    }))
+
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to Defaults' }))
+
+    await screen.findByTestId('agent-reset-alert')
+
+    const handWrittenOverlay = document.querySelector(
+      '.fixed.inset-0.flex.items-center.justify-center.bg-black\\/50',
+    )
+    expect(handWrittenOverlay).toBeNull()
+  })
 })
 
 describe('AgentSettingsSection mutation feedback (T-003)', () => {
@@ -434,7 +498,7 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
     expect(screen.queryByText(/Save failed/)).not.toBeInTheDocument()
   })
 
-  it('renders field-level validation errors inline and does not toast them', async () => {
+  it('renders field-level validation errors inline and does not toast them (T-003 a11y wiring)', async () => {
     await renderLoaded()
 
     const timeoutInput = getNumberInputByLabel('Session Timeout')
@@ -442,13 +506,18 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
 
     const validationError = screen.getByText('Must be at least 1 minute')
     expect(validationError).toBeInTheDocument()
-    expect(validationError.className).toContain('text-red-600')
+    expect(validationError.className).toContain('text-red-700')
+    expect(validationError).toHaveAttribute('role', 'alert')
+
+    expect(timeoutInput).toHaveAttribute('aria-invalid', 'true')
+    expect(timeoutInput.getAttribute('aria-describedby')).toBe(validationError.id)
+    expect(validationError.id).toMatch(/-error$/)
 
     expect(toast.success).not.toHaveBeenCalled()
     expect(toast.error).not.toHaveBeenCalled()
   })
 
-  it('surfaces reset failure through the hook toast (no setSaveError path)', async () => {
+  it('surfaces reset failure through the hook toast AND inline saveError card (T-003)', async () => {
     runtimeClient.updateAgentRuntime.mockImplementation(async () => {
       throw new Error('Reset boom')
     })
@@ -465,6 +534,43 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
       expect(toast.error).toHaveBeenCalledWith('Reset boom')
     })
 
-    expect(screen.queryByText(/Reset failed/)).not.toBeInTheDocument()
+    const errorBanner = await screen.findByTestId('agent-runtime-save-error')
+    expect(errorBanner).toHaveAttribute('role', 'alert')
+    expect(errorBanner).toHaveAttribute('aria-live', 'polite')
+    expect(errorBanner).toHaveTextContent(/Reset boom/i)
+  })
+
+  it('does not add a sonner toast call from handleSave / confirmReset beyond what useSetAgentRuntime already does (T-003)', async () => {
+    const callsBefore = toast.error.mock.calls.length
+    const callsBeforeSuccess = toast.success.mock.calls.length
+
+    runtimeClient.updateAgentRuntime.mockImplementation(async () => {
+      throw new Error('Inline only')
+    })
+
+    await renderLoaded()
+
+    const timeoutInput = getNumberInputByLabel('Session Timeout')
+    fireEvent.change(timeoutInput, { target: { value: '25' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    await screen.findByTestId('agent-runtime-save-error')
+
+    const callsAfterSave = toast.error.mock.calls.length - callsBefore
+    expect(callsAfterSave).toBe(1)
+
+    const callsBeforeReset = toast.error.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: /Reset to Defaults/ }))
+    await screen.findByText('Reset Coder Agent Settings')
+    fireEvent.click(screen.getByRole('button', { name: /^Reset$/ }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-runtime-save-error')).toHaveTextContent(/Inline only/i)
+    })
+
+    const callsAfterReset = toast.error.mock.calls.length - callsBeforeReset
+    expect(callsAfterReset).toBe(1)
+
+    expect(toast.success.mock.calls.length - callsBeforeSuccess).toBe(0)
   })
 })

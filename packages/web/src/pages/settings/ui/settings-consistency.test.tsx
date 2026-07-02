@@ -122,3 +122,93 @@ describe('settings section heading is sourced from sections SOT (T-005)', () => 
     })
   }
 })
+
+describe('settings typography baseline (T-008)', () => {
+  const settingsSourceFiles = collectSourceFiles(settingsDir)
+  const settingsSectionPath = settingsSourceFiles.find((file) => file.endsWith('/pages/settings/ui/SettingsSection.tsx'))
+
+  it('SettingsSection is the single source of truth for the page-level heading and description', () => {
+    expect(settingsSectionPath, 'expected SettingsSection.tsx to exist').toBeTruthy()
+
+    const source = readFileSync(settingsSectionPath!, 'utf8')
+    expect(source).toMatch(/<h2[^>]*className="[^"]*\btext-balance\b/)
+    expect(source).toMatch(/<p[^>]*className="[^"]*\btext-pretty\b/)
+  })
+
+  it('per-section files do not duplicate text-balance / text-pretty on their own headings or descriptions', () => {
+    const pageSectionFiles = settingsSourceFiles.filter((file) =>
+      /(?:AgentSettingsSection|AiSettingsSection|InboxSubscriptionSection|LabelCatalogSection|PreferencesSection|RepositoriesSection|SystemSettingsSection|TemplatesSection|WorkflowProfilesSection)\.tsx$/.test(file),
+    )
+
+    const offenders = pageSectionFiles.flatMap((file) => {
+      const source = readFileSync(file, 'utf8')
+      const matches: string[] = []
+      if (/\btext-balance\b/.test(source)) matches.push(`${file}: text-balance`)
+      if (/\btext-pretty\b/.test(source)) matches.push(`${file}: text-pretty`)
+      return matches
+    })
+
+    expect(offenders).toEqual([])
+  })
+
+  it('System InfoRow values apply tabular-nums on the mono-spaced value span', () => {
+    const source = readFileSync(
+      settingsSourceFiles.find((file) => file.endsWith('/pages/settings/ui/SystemSettingsSection.tsx'))!,
+      'utf8',
+    )
+
+    expect(source).toMatch(/font-mono[^"]*tabular-nums|tabular-nums[^"]*font-mono/)
+  })
+
+  it('Agent numeric inputs, unit spans, and mono data rows apply tabular-nums', () => {
+    const source = readFileSync(
+      settingsSourceFiles.find((file) => file.endsWith('/pages/settings/ui/AgentSettingsSection.tsx'))!,
+      'utf8',
+    )
+
+    const inputMatch = source.match(/<Input\b[\s\S]*?className="w-24[^"]*"/)
+    expect(inputMatch, 'expected Agent numeric Input with w-24 class').toBeTruthy()
+    expect(inputMatch![0]).toMatch(/\btabular-nums\b/)
+
+    const unitMatch = source.match(/<span[^>]*>{unit}<\/span>/)
+    expect(unitMatch, 'expected Agent unit span rendering {unit}').toBeTruthy()
+    expect(unitMatch![0]).toMatch(/\btabular-nums\b/)
+
+    const timeoutDiagramMatch = source.match(/<pre\b[\s\S]*?>\{lines\.join\('\\n'\)\}<\/pre>/)
+    expect(timeoutDiagramMatch, 'expected Agent timeout diagram mono row').toBeTruthy()
+    expect(timeoutDiagramMatch![0]).toMatch(/\btabular-nums\b/)
+  })
+
+  it('page title does not carry tabular-nums (numeric columns / mono rows only)', () => {
+    expect(settingsSectionPath).toBeTruthy()
+    const source = readFileSync(settingsSectionPath!, 'utf8')
+    const titleMatch = source.match(/<h2[^>]*className="([^"]+)"/)
+    expect(titleMatch, 'expected SettingsSection heading element').toBeTruthy()
+    expect(titleMatch![1]).not.toMatch(/\btabular-nums\b/)
+  })
+
+  it('typography pass introduces no animation or gradient effects on touched lines', () => {
+    // The T-008 contract: text-balance / text-pretty / tabular-nums only. Pre-existing
+    // motion (Loader2Icon.animate-spin, SectionState skeleton.animate-pulse) predates
+    // this pass and is not in scope. We assert the lines T-008 touches don't also add
+    // motion/gradient tokens.
+    const forbiddenNewTokens = /\b(?:animate-(?!none\b)|motion-safe:|motion-reduce:|bg-gradient-\w+|gradient-to-\w+)\b/
+    const allowedTypographyTokens = /\b(?:text-balance|text-pretty|tabular-nums)\b/
+
+    const typographyPassFiles = [
+      settingsSectionPath!,
+      settingsSourceFiles.find((file) => file.endsWith('/pages/settings/ui/SystemSettingsSection.tsx'))!,
+      settingsSourceFiles.find((file) => file.endsWith('/pages/settings/ui/AgentSettingsSection.tsx'))!,
+    ]
+
+    const offenders = typographyPassFiles.flatMap((file) => {
+      const lines = readFileSync(file, 'utf8').split('\n')
+      return lines
+        .filter((line) => allowedTypographyTokens.test(line))
+        .filter((line) => forbiddenNewTokens.test(line))
+        .map((line) => `${file}: ${line.trim()}`)
+    })
+
+    expect(offenders).toEqual([])
+  })
+})

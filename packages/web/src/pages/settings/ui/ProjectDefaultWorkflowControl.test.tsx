@@ -146,12 +146,12 @@ function renderWithoutProject() {
 }
 
 describe('ProjectDefaultWorkflowControl', () => {
-  it('renders a no-project-selected hint when there is no active project', () => {
+  it('renders a no-project CTA when the WorkflowProfilesSection is mounted without a project (T-006)', () => {
     renderWithoutProject()
 
-    expect(screen.getByTestId('project-default-workflow-no-project')).toHaveTextContent(
-      'No project selected',
-    )
+    expect(screen.getByTestId('no-project-select-button')).toBeInTheDocument()
+    expect(screen.getByTestId('no-project-create-button')).toBeInTheDocument()
+    expect(screen.queryByTestId('project-default-workflow-no-project')).not.toBeInTheDocument()
   })
 
   it('displays the current project default read back from the workflow-profile endpoint', async () => {

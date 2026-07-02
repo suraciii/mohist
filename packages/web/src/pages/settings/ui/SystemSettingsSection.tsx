@@ -42,7 +42,7 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
   return (
     <div className="flex items-center justify-between py-2 border-b last:border-b-0 gap-3">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-xs text-foreground font-mono text-right">{children}</span>
+      <span className="text-xs text-foreground font-mono text-right tabular-nums">{children}</span>
     </div>
   )
 }
@@ -260,7 +260,12 @@ export function SystemSettingsSection() {
 
         <div className="mt-3 space-y-1">
           <span className="block text-xs font-medium text-muted-foreground">Log Path</span>
-          <p className="text-xs text-muted-foreground font-mono">~/.mohist/logs/</p>
+          <p
+            data-testid="system-log-path"
+            className="text-xs text-foreground font-mono tabular-nums"
+          >
+            {systemInfo?.paths.logs ?? '—'}
+          </p>
         </div>
       </CardSection>
 
@@ -336,7 +341,10 @@ export function SystemSettingsSection() {
               )}
 
               {systemInfo.source.dirty && (
-                <p className="mt-2 rounded-md bg-amber-100 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                <p
+                  data-testid="system-update-dirty-source-warning"
+                  className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+                >
                   Local source has uncommitted changes. Update is disabled until the tree is clean.
                 </p>
               )}
@@ -422,15 +430,15 @@ export function SystemSettingsSection() {
             <InfoRow label="Config">{systemInfo.paths.config ?? '—'}</InfoRow>
             <InfoRow label="Opencode">{systemInfo.paths.opencode ?? '—'}</InfoRow>
             <InfoRow label="Logs">{systemInfo.paths.logs ?? '—'}</InfoRow>
+            <p
+              data-testid="system-edit-config-note"
+              className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+            >
+              Modify server-side config by editing config.jsonc and restarting the server.
+            </p>
           </CardSection>
         </>
       )}
-
-      <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
-        <p className="text-xs text-amber-700">
-          Modify server-side config by editing config.jsonc and restarting the server.
-        </p>
-      </div>
     </SettingsSection>
   )
 }

@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { cn } from '@/shared/lib/utils'
+import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import {
   SETTINGS_SECTIONS,
   type SettingsSectionKey,
 } from '../lib/sections'
 import { useSettingsSectionPath } from '../lib/useSettingsSectionPath'
 import { useRovingTabindex } from '../lib/useRovingTabindex'
+import { useSettingsDirty } from '../lib/SettingsDirtyContext'
 
 const SUBLINK_BASE =
   'flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1'
@@ -31,9 +33,10 @@ interface GroupNavProps {
   group: GroupData
   activeSection: SettingsSectionKey
   roving: ReturnType<typeof useRovingTabindex>
+  onItemClick: (item: SubNavItem) => (event: MouseEvent<HTMLAnchorElement>) => void
 }
 
-function GroupNav({ group, activeSection, roving }: GroupNavProps) {
+function GroupNav({ group, activeSection, roving, onItemClick }: GroupNavProps) {
   return (
     <ul aria-label={group.heading} className="flex flex-col gap-0.5">
       {group.items.map((item) => {
@@ -45,9 +48,7 @@ function GroupNav({ group, activeSection, roving }: GroupNavProps) {
               ref={roving.getItemRef(item.index)}
               tabIndex={roving.getItemTabIndex(item.index)}
               onKeyDown={roving.onKeyDown}
-              onClick={(event) => {
-                if (isDisabled) event.preventDefault()
-              }}
+              onClick={onItemClick(item)}
               data-testid={`settings-subnav-${item.key}`}
               data-testid-scope={group.scope}
               aria-disabled={isDisabled ? 'true' : undefined}
@@ -69,6 +70,9 @@ function GroupNav({ group, activeSection, roving }: GroupNavProps) {
 
 export function SettingsSubNav({ activeSection }: SettingsSubNavProps) {
   const sectionPath = useSettingsSectionPath()
+  const navigate = useNavigate()
+  const { dirty } = useSettingsDirty()
+  const [pendingTarget, setPendingTarget] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [isOverflowing, setIsOverflowing] = useState(false)
   const [showBottomFade, setShowBottomFade] = useState(false)
@@ -115,6 +119,29 @@ export function SettingsSubNav({ activeSection }: SettingsSubNavProps) {
       setRovingIndex(Math.max(0, flatItems.length - 1))
     }
   }, [flatItems.length, rovingIndex])
+
+  const handleItemClick = useCallback(
+    (item: SubNavItem) => (event: MouseEvent<HTMLAnchorElement>) => {
+      if (item.to === null) {
+        event.preventDefault()
+        return
+      }
+      if (!dirty || item.key === activeSection) return
+      event.preventDefault()
+      setPendingTarget(item.to)
+    },
+    [activeSection, dirty],
+  )
+
+  const handleDialogOpenChange = useCallback((next: boolean) => {
+    if (!next) setPendingTarget(null)
+  }, [])
+
+  const handleConfirmDiscard = useCallback(() => {
+    const target = pendingTarget
+    setPendingTarget(null)
+    if (target) navigate(target)
+  }, [pendingTarget, navigate])
 
   useEffect(() => {
     const node = containerRef.current
@@ -179,6 +206,7 @@ export function SettingsSubNav({ activeSection }: SettingsSubNavProps) {
               group={group}
               activeSection={activeSection}
               roving={roving}
+              onItemClick={handleItemClick}
             />
           </div>
         ))}
@@ -199,6 +227,17 @@ export function SettingsSubNav({ activeSection }: SettingsSubNavProps) {
           data-visible={showBottomFade ? 'true' : 'false'}
         />
       )}
+      <AlertDialog
+        open={pendingTarget !== null}
+        onOpenChange={handleDialogOpenChange}
+        title="Discard unsaved changes?"
+        description="You have unsaved changes on this tab. Switching tabs will discard them."
+        confirmLabel="Discard"
+        cancelLabel="Stay"
+        tone="destructive"
+        onConfirm={handleConfirmDiscard}
+        data-testid="settings-dirty-discard-alert"
+      />
     </div>
   )
 }

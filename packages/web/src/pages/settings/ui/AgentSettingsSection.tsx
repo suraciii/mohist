@@ -2,14 +2,21 @@ import { useState, useEffect, useMemo } from 'react'
 import { useAgentRuntime, useConfig, useSetAgentRuntime } from '../../../entities/settings'
 import type { AgentRuntimeConfig, GeneralConfig } from '../../../entities/settings'
 import { agentRuntimeToConfigKey } from '../../../entities/settings/api/client'
+import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
+import { FieldError, useFieldErrorId } from '@/shared/ui/components/field-error'
 import { Input } from '@/shared/ui/components/input'
 import { Tooltip } from '@/shared/ui/components/tooltip'
 import type { SettingsSearchEntry } from '@/features/settings-search'
 import { getSectionMeta } from '../lib/sections'
+import { useSettingsDirty } from '../lib/SettingsDirtyContext'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
+
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : 'Request failed.'
+}
 
 const DEFAULTS: AgentRuntimeConfig = {
   timeout: 600000,
@@ -174,7 +181,7 @@ function TimeoutDiagram({ session, stage, task }: { session: number; stage: numb
 
   return (
     <CardSection>
-      <pre className="text-xs text-muted-foreground font-mono leading-5 whitespace-pre">{lines.join('\n')}</pre>
+      <pre className="text-xs text-muted-foreground font-mono leading-5 whitespace-pre tabular-nums">{lines.join('\n')}</pre>
     </CardSection>
   )
 }
@@ -200,6 +207,8 @@ function InputField({
   disabledReason?: string
   onChange: (v: number) => void
 }) {
+  const errorId = useFieldErrorId(`${id}-error`)
+  const hasError = !disabled && !!error
   return (
     <div className="space-y-1">
       <label htmlFor={id} className="block text-xs font-medium text-muted-foreground">
@@ -215,14 +224,16 @@ function InputField({
             const v = parseInt(e.target.value, 10)
             onChange(isNaN(v) ? 0 : v)
           }}
-          className="w-24"
+          className="w-24 tabular-nums"
+          aria-invalid={hasError || undefined}
+          aria-describedby={hasError ? errorId : undefined}
         />
-        <span className="text-sm text-muted-foreground">{unit}</span>
+        <span className="text-sm text-muted-foreground tabular-nums">{unit}</span>
       </div>
       {disabled && disabledReason && (
         <p className="text-xs text-muted-foreground">{disabledReason}</p>
       )}
-      {!disabled && error && <p className="text-xs text-red-600">{error}</p>}
+      {hasError && <FieldError id={errorId}>{error}</FieldError>}
     </div>
   )
 }
@@ -231,6 +242,7 @@ export function AgentSettingsSection() {
   const { data: runtimeConfig, isLoading, error, refetch } = useAgentRuntime()
   const { data: config } = useConfig()
   const setAgentRuntime = useSetAgentRuntime()
+  const { setDirty: setSettingsDirty } = useSettingsDirty()
   const { label: sectionLabel, description: sectionDescription } = getSectionMeta('agent')
 
   const [localValues, setLocalValues] = useState<FormValues>(() => configToForm(DEFAULTS))
@@ -266,6 +278,13 @@ export function AgentSettingsSection() {
       (k) => !unsupportedFields.has(k) && localValues[k] !== savedValues[k],
     )
   }, [localValues, savedValues, unsupportedFields])
+
+  useEffect(() => {
+    setSettingsDirty(dirty)
+    return () => {
+      setSettingsDirty(false)
+    }
+  }, [dirty, setSettingsDirty])
 
   const hasValidationErrors = Object.keys(validationErrors).length > 0
 
@@ -319,7 +338,8 @@ export function AgentSettingsSection() {
 
       const result = await setAgentRuntime.mutateAsync(changed)
       setSavedValues(configToForm(result))
-    } catch {
+    } catch (err) {
+      setSaveError(message(err))
     } finally {
       setSaving(false)
     }
@@ -367,7 +387,8 @@ export function AgentSettingsSection() {
       setLocalValues(form)
       setSavedValues(form)
       setValidationErrors({})
-    } catch {
+    } catch (err) {
+      setSaveError(message(err))
     } finally {
       setSaving(false)
     }
@@ -454,34 +475,31 @@ export function AgentSettingsSection() {
       </div>
 
       {saveError && (
-        <p className="text-xs text-red-600">{saveError}</p>
-      )}
-
-      {showResetConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-background rounded-lg shadow-xl p-6 w-full max-w-sm mx-4">
-            <h3 className="text-lg font-medium text-foreground mb-2">Reset Coder Agent Settings</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Reset all agent runtime settings to their default values?
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => setShowResetConfirm(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={confirmReset}
-                disabled={saving}
-                className="bg-red-600 hover:bg-red-700 text-white"
-              >
-                {saving ? 'Resetting...' : 'Reset'}
-              </Button>
-            </div>
-          </div>
+        <div
+          role="alert"
+          aria-live="polite"
+          data-testid="agent-runtime-save-error"
+          className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+        >
+          {saveError}
         </div>
       )}
+
+      <AlertDialog
+        open={showResetConfirm}
+        onOpenChange={(open) => {
+          if (saving) return
+          setShowResetConfirm(open)
+        }}
+        title="Reset Coder Agent Settings"
+        description="Reset all agent runtime settings to their default values?"
+        confirmLabel={saving ? 'Resetting...' : 'Reset'}
+        cancelLabel="Cancel"
+        tone="destructive"
+        loading={saving}
+        onConfirm={confirmReset}
+        data-testid="agent-reset-alert"
+      />
     </SettingsSection>
   )
 }

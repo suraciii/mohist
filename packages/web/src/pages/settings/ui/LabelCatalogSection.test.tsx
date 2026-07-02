@@ -349,7 +349,7 @@ describe('LabelCatalogSection', () => {
     expect(payload.patch).toEqual({ description: 'Classifies the subsystem', supportedValues: [] })
   })
 
-  it('deletes an entry via DELETE when the delete button is clicked', () => {
+  it('deletes an entry via DELETE only after the shared AlertDialog is confirmed (T-002)', () => {
     useLabelCatalogMock.mockReturnValue({
       data: [moduleDef],
       isLoading: false,
@@ -361,11 +361,54 @@ describe('LabelCatalogSection', () => {
 
     fireEvent.click(screen.getByTestId('label-catalog-delete-button-module'))
 
+    const dialog = screen.getByTestId('label-catalog-delete-alert')
+    expect(dialog).toBeInTheDocument()
+    expect(dialog).toHaveAttribute('data-tone', 'destructive')
+
+    expect(removeMutateMock).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTestId('label-catalog-delete-alert-confirm'))
+
     expect(removeMutateMock).toHaveBeenCalledTimes(1)
-    const [key, opts] = removeMutateMock.mock.calls[0]
-    expect(key).toBe('module')
-    expect(typeof opts.onSettled).toBe('function')
-    expect(typeof opts.onError).toBe('function')
+    expect(removeMutateMock.mock.calls[0][0]).toBe('module')
+  })
+
+  it('does not invoke the delete mutation when the AlertDialog is cancelled (T-002)', () => {
+    useLabelCatalogMock.mockReturnValue({
+      data: [moduleDef],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+
+    renderSection()
+
+    fireEvent.click(screen.getByTestId('label-catalog-delete-button-module'))
+
+    const dialog = screen.getByTestId('label-catalog-delete-alert')
+    expect(dialog).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('label-catalog-delete-alert-cancel'))
+
+    expect(removeMutateMock).not.toHaveBeenCalled()
+  })
+
+  it('renders a single shared AlertDialog instance for the whole section, not per row (T-002)', () => {
+    useLabelCatalogMock.mockReturnValue({
+      data: [moduleDef, refactorDef],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+
+    renderSection()
+
+    fireEvent.click(screen.getByTestId('label-catalog-delete-button-module'))
+    const dialog = screen.getByTestId('label-catalog-delete-alert')
+    expect(dialog).toBeInTheDocument()
+
+    const allDialogs = document.querySelectorAll('[data-testid="label-catalog-delete-alert"]')
+    expect(allDialogs).toHaveLength(1)
   })
 
   it('surfaces server errors from create mutation as an in-page alert', async () => {
@@ -426,5 +469,215 @@ describe('LabelCatalogSection', () => {
     renderSection()
 
     expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it('wires aria-invalid + aria-describedby only on the invalid add-form field (T-003)', () => {
+    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
+
+    renderSection()
+
+    const keyInput = screen.getByTestId('label-catalog-add-key')
+    const descriptionInput = screen.getByTestId('label-catalog-add-description')
+    const valuesInput = screen.getByTestId('label-catalog-add-values')
+
+    expect(keyInput).not.toHaveAttribute('aria-invalid')
+    expect(keyInput).not.toHaveAttribute('aria-describedby')
+
+    fireEvent.change(keyInput, { target: { value: 'Module' } })
+    fireEvent.change(descriptionInput, { target: { value: 'desc' } })
+    fireEvent.click(screen.getByTestId('label-catalog-add-submit'))
+
+    const errorEl = screen.getByTestId('label-catalog-add-error')
+    expect(errorEl).toHaveAttribute('role', 'alert')
+    expect(errorEl.className).toContain('text-red-700')
+
+    expect(keyInput).toHaveAttribute('aria-invalid', 'true')
+    expect(keyInput.getAttribute('aria-describedby')).toBe('label-catalog-add-error')
+    expect(descriptionInput).not.toHaveAttribute('aria-invalid')
+    expect(descriptionInput).not.toHaveAttribute('aria-describedby')
+    expect(valuesInput).not.toHaveAttribute('aria-invalid')
+    expect(valuesInput).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('wires aria-invalid + aria-describedby only on the invalid edit-form field (T-003)', () => {
+    useLabelCatalogMock.mockReturnValue({
+      data: [moduleDef],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+
+    renderSection()
+
+    fireEvent.click(screen.getByTestId('label-catalog-edit-button-module'))
+    fireEvent.change(screen.getByTestId('label-catalog-edit-description-module'), {
+      target: { value: '   ' },
+    })
+    fireEvent.click(screen.getByTestId('label-catalog-edit-save-module'))
+
+    const errorEl = screen.getByTestId('label-catalog-edit-error-module')
+    expect(errorEl).toHaveAttribute('role', 'alert')
+    expect(errorEl.className).toContain('text-red-700')
+
+    const descriptionInput = screen.getByTestId('label-catalog-edit-description-module')
+    const valuesInput = screen.getByTestId('label-catalog-edit-values-module')
+
+    expect(descriptionInput).toHaveAttribute('aria-invalid', 'true')
+    expect(descriptionInput.getAttribute('aria-describedby')).toBe('label-catalog-edit-error-module')
+    expect(valuesInput).not.toHaveAttribute('aria-invalid')
+    expect(valuesInput).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('shows edit server errors as form-level alerts without marking every edit field invalid (T-003)', async () => {
+    useLabelCatalogMock.mockReturnValue({
+      data: [moduleDef],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    updateMutateMock.mockImplementation((_payload: unknown, opts: { onError?: (err: Error) => void }) => {
+      opts.onError?.(new Error("Key 'module' not found in the project catalog."))
+    })
+
+    renderSection()
+
+    fireEvent.click(screen.getByTestId('label-catalog-edit-button-module'))
+    fireEvent.click(screen.getByTestId('label-catalog-edit-save-module'))
+
+    const errorEl = await screen.findByTestId('label-catalog-edit-error-module')
+    expect(errorEl).toHaveTextContent(/not found/i)
+
+    const descriptionInput = screen.getByTestId('label-catalog-edit-description-module')
+    const valuesInput = screen.getByTestId('label-catalog-edit-values-module')
+
+    expect(descriptionInput).not.toHaveAttribute('aria-invalid')
+    expect(descriptionInput).not.toHaveAttribute('aria-describedby')
+    expect(valuesInput).not.toHaveAttribute('aria-invalid')
+    expect(valuesInput).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('renders an inline New definition CTA when the catalog is empty (T-006)', () => {
+    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
+
+    renderSection()
+
+    const newButton = screen.getByTestId('label-catalog-empty-new-button')
+    expect(newButton).toBeInTheDocument()
+    expect(newButton).toHaveTextContent(/New definition/)
+  })
+
+  describe('Search input (T-007)', () => {
+    it('renders a search input with an accessible label when a project is selected', () => {
+      useLabelCatalogMock.mockReturnValue({
+        data: [moduleDef, refactorDef],
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+
+      renderSection()
+
+      const search = screen.getByTestId('label-catalog-search')
+      expect(search).toBeInTheDocument()
+      expect(search.tagName).toBe('INPUT')
+      expect(search.getAttribute('aria-label')).toMatch(/search/i)
+      expect(search.getAttribute('placeholder')).not.toBeNull()
+    })
+
+    it('filters the displayed list by key when a matching query is entered', () => {
+      useLabelCatalogMock.mockReturnValue({
+        data: [moduleDef, refactorDef],
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+
+      renderSection()
+
+      fireEvent.change(screen.getByTestId('label-catalog-search'), {
+        target: { value: 'module' },
+      })
+
+      expect(screen.getByTestId('label-catalog-row-module')).toBeInTheDocument()
+      expect(screen.queryByTestId('label-catalog-row-refactor')).not.toBeInTheDocument()
+    })
+
+    it('filters the displayed list by description when a matching query is entered', () => {
+      useLabelCatalogMock.mockReturnValue({
+        data: [moduleDef, refactorDef],
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+
+      renderSection()
+
+      fireEvent.change(screen.getByTestId('label-catalog-search'), {
+        target: { value: 'subsystem' },
+      })
+
+      expect(screen.getByTestId('label-catalog-row-module')).toBeInTheDocument()
+      expect(screen.queryByTestId('label-catalog-row-refactor')).not.toBeInTheDocument()
+    })
+
+    it('filters the displayed list by a supported value when a matching query is entered', () => {
+      useLabelCatalogMock.mockReturnValue({
+        data: [moduleDef, refactorDef],
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+
+      renderSection()
+
+      fireEvent.change(screen.getByTestId('label-catalog-search'), {
+        target: { value: 'auth' },
+      })
+
+      expect(screen.getByTestId('label-catalog-row-module')).toBeInTheDocument()
+      expect(screen.queryByTestId('label-catalog-row-refactor')).not.toBeInTheDocument()
+    })
+
+    it('restores the full list when the search query is cleared', () => {
+      useLabelCatalogMock.mockReturnValue({
+        data: [moduleDef, refactorDef],
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+
+      renderSection()
+
+      fireEvent.change(screen.getByTestId('label-catalog-search'), {
+        target: { value: 'module' },
+      })
+      expect(screen.queryByTestId('label-catalog-row-refactor')).not.toBeInTheDocument()
+
+      fireEvent.change(screen.getByTestId('label-catalog-search'), {
+        target: { value: '' },
+      })
+      expect(screen.getByTestId('label-catalog-row-module')).toBeInTheDocument()
+      expect(screen.getByTestId('label-catalog-row-refactor')).toBeInTheDocument()
+    })
+
+    it('shows a "no matches" message without the inline New definition CTA when the search filter is the only reason the list is empty', () => {
+      useLabelCatalogMock.mockReturnValue({
+        data: [moduleDef, refactorDef],
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+
+      renderSection()
+
+      fireEvent.change(screen.getByTestId('label-catalog-search'), {
+        target: { value: 'no-such-key' },
+      })
+
+      expect(screen.queryByTestId('label-catalog-row-module')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('label-catalog-row-refactor')).not.toBeInTheDocument()
+      expect(screen.getAllByText(/No label definitions match the current search/i).length).toBeGreaterThan(0)
+      expect(screen.queryByTestId('label-catalog-empty-new-button')).not.toBeInTheDocument()
+    })
   })
 })

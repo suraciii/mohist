@@ -248,7 +248,9 @@ describe('App routing split for settings scopes', () => {
 
     expect(window.location.pathname).toBe('/settings/repositories')
     expect(queryByTestId('repositories-section')).not.toBeInTheDocument()
-    expect(queryByText('No project selected')).toBeInTheDocument()
+    expect(queryByText('No project selected')).not.toBeInTheDocument()
+    expect(queryByTestId('no-project-select-button')).toBeInTheDocument()
+    expect(queryByTestId('no-project-create-button')).toBeInTheDocument()
   })
 
   it('redirects /settings/<project-section> to the selected project scope once a project is available', async () => {

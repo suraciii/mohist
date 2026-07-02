@@ -1,0 +1,251 @@
+// @vitest-environment jsdom
+import { describe, it, expect, vi } from 'vitest'
+import { useState } from 'react'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+
+import { AlertDialog } from '../../../src/shared/ui/components/alert-dialog'
+
+interface HarnessProps {
+  initialOpen?: boolean
+  onConfirm?: () => void
+  loading?: boolean
+  tone?: 'destructive' | 'default'
+}
+
+function Harness({
+  initialOpen = false,
+  onConfirm = vi.fn(),
+  loading = false,
+  tone = 'destructive',
+}: HarnessProps) {
+  const [open, setOpen] = useState(initialOpen)
+  const handleConfirm = () => {
+    onConfirm()
+    setOpen(false)
+  }
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} data-testid="open">
+        Open
+      </button>
+      <button type="button" data-testid="outside">
+        Outside
+      </button>
+      <AlertDialog
+        open={open}
+        onOpenChange={setOpen}
+        title="Delete this item?"
+        description="This action cannot be undone."
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={handleConfirm}
+        loading={loading}
+        tone={tone}
+        data-testid="alert-dialog"
+      />
+    </>
+  )
+}
+
+function withinDialog(dialog: HTMLElement) {
+  const byTestId = (testId: string): HTMLElement => {
+    const el = dialog.querySelector<HTMLElement>(`[data-testid="${testId}"]`)
+    if (!el) throw new Error(`No element with data-testid "${testId}" inside dialog`)
+    return el
+  }
+  return {
+    getByTestId: byTestId,
+    queryByTestId: (testId: string) =>
+      dialog.querySelector<HTMLElement>(`[data-testid="${testId}"]`),
+  }
+}
+
+describe('shared/ui AlertDialog', () => {
+  it('moves keyboard focus into the dialog when it opens', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    const trigger = screen.getByTestId('open')
+    await user.click(trigger)
+
+    const dialog = await screen.findByTestId('alert-dialog')
+
+    await waitFor(() => {
+      const active = document.activeElement as HTMLElement | null
+      expect(active).not.toBeNull()
+      const insideDialog = active ? dialog.contains(active) : false
+      if (!insideDialog) {
+        throw new Error(`focus is not inside dialog yet (active=${active?.tagName})`)
+      }
+    })
+  })
+
+  it('keeps keyboard focus within the dialog by trapping it via the base-ui focus guards', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.click(screen.getByTestId('open'))
+
+    const dialog = await screen.findByTestId('alert-dialog')
+
+    const guards = document.querySelectorAll('[data-base-ui-focus-guard]')
+    expect(guards.length).toBeGreaterThan(0)
+
+    const confirm = withinDialog(dialog).getByTestId('alert-dialog-confirm')
+    confirm.focus()
+    expect(document.activeElement).toBe(confirm)
+
+    const lastGuard = guards[guards.length - 1] as HTMLElement
+    lastGuard.focus()
+
+    await waitFor(() => {
+      const active = document.activeElement as HTMLElement | null
+      expect(active).not.toBeNull()
+      expect(dialog.contains(active)).toBe(true)
+    })
+  })
+
+  it('returns keyboard focus to the invoking element when the dialog closes', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    const trigger = screen.getByTestId('open')
+    await user.click(trigger)
+
+    const dialog = await screen.findByTestId('alert-dialog')
+    const cancel = withinDialog(dialog).getByTestId('alert-dialog-cancel')
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+    cancel.focus()
+    expect(document.activeElement).toBe(cancel)
+
+    await user.click(cancel)
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('alert-dialog')).not.toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(document.activeElement).toBe(trigger)
+    })
+  })
+
+  it('returns keyboard focus to the invoking element after confirm', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    const trigger = screen.getByTestId('open')
+    await user.click(trigger)
+
+    const dialog = await screen.findByTestId('alert-dialog')
+    const confirm = withinDialog(dialog).getByTestId('alert-dialog-confirm')
+    confirm.focus()
+    expect(document.activeElement).toBe(confirm)
+
+    await user.click(confirm)
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('alert-dialog')).not.toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(document.activeElement).toBe(trigger)
+    })
+  })
+
+  it('returns keyboard focus to the invoking element after Escape', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    const trigger = screen.getByTestId('open')
+    await user.click(trigger)
+
+    const dialog = await screen.findByTestId('alert-dialog')
+    const cancel = withinDialog(dialog).getByTestId('alert-dialog-cancel')
+    cancel.focus()
+    expect(document.activeElement).toBe(cancel)
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('alert-dialog')).not.toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(document.activeElement).toBe(trigger)
+    })
+  })
+
+  it('dismisses on Escape without invoking onConfirm (acts as cancellation)', async () => {
+    const user = userEvent.setup()
+    const onConfirm = vi.fn()
+    render(<Harness onConfirm={onConfirm} />)
+
+    await user.click(screen.getByTestId('open'))
+    await screen.findByTestId('alert-dialog')
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('alert-dialog')).not.toBeInTheDocument()
+    })
+
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
+  it('invokes onConfirm only when the explicit confirm button is clicked', async () => {
+    const user = userEvent.setup()
+    const onConfirm = vi.fn()
+    render(<Harness onConfirm={onConfirm} />)
+
+    await user.click(screen.getByTestId('open'))
+
+    const dialog = await screen.findByTestId('alert-dialog')
+
+    await user.click(withinDialog(dialog).getByTestId('alert-dialog-cancel'))
+    expect(onConfirm).not.toHaveBeenCalled()
+
+    await user.click(screen.getByTestId('open'))
+    await user.click(withinDialog(screen.getByTestId('alert-dialog')).getByTestId('alert-dialog-confirm'))
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders a destructive-tone confirm button and removes the close X by default', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.click(screen.getByTestId('open'))
+    const dialog = await screen.findByTestId('alert-dialog')
+
+    expect(dialog).toHaveAttribute('data-tone', 'destructive')
+
+    const confirm = withinDialog(dialog).getByTestId('alert-dialog-confirm')
+    expect(confirm.className).toContain('bg-red-600')
+
+    expect(dialog.querySelector('button[aria-label="Close"]')).toBeNull()
+  })
+
+  it('falls back to a non-destructive confirm tone when tone is "default"', async () => {
+    const user = userEvent.setup()
+    render(<Harness tone="default" />)
+    await user.click(screen.getByTestId('open'))
+    const dialog = await screen.findByTestId('alert-dialog')
+
+    expect(dialog).toHaveAttribute('data-tone', 'default')
+    const confirm = withinDialog(dialog).getByTestId('alert-dialog-confirm')
+    expect(confirm.className).not.toContain('bg-red-600')
+  })
+
+  it('does not close while loading and reflects the loading state on both buttons', async () => {
+    const onConfirm = vi.fn()
+    render(<Harness onConfirm={onConfirm} loading />)
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('open'))
+    const dialog = await screen.findByTestId('alert-dialog')
+
+    const cancel = withinDialog(dialog).getByTestId('alert-dialog-cancel') as HTMLButtonElement
+    const confirm = withinDialog(dialog).getByTestId('alert-dialog-confirm') as HTMLButtonElement
+    expect(cancel.disabled).toBe(true)
+    expect(confirm.disabled).toBe(true)
+    expect(confirm.textContent).toContain('Working')
+
+    await user.click(cancel)
+    expect(onConfirm).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('alert-dialog')).toBeInTheDocument()
+  })
+})

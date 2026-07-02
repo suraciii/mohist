@@ -9,7 +9,17 @@ import type { Project } from '../../src/entities/project'
 import { ProjectProvider } from '../../src/entities/project'
 import { SettingsPage } from '../../src/pages/settings/ui/SettingsPage'
 
-const settingsTabs = ['ai', 'agent', 'repositories', 'workflows', 'templates', 'system', 'preferences'] as const
+const settingsTabs = [
+  'ai',
+  'agent',
+  'repositories',
+  'workflows',
+  'templates',
+  'label-catalog',
+  'inbox',
+  'system',
+  'preferences',
+] as const
 const focusableSelector = [
   'a[href]',
   'button',
@@ -19,49 +29,11 @@ const focusableSelector = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
-vi.mock('../../src/entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/entities/project')>()
-  return {
-    ...actual,
-    useRepositories: () => ({ data: projects[0].repositories, isLoading: false }),
-    useAddRepository: () => ({ mutate: vi.fn(), isPending: false }),
-    useRemoveRepository: () => ({ mutate: vi.fn(), isPending: false }),
-    useSetDefaultRepository: () => ({ mutate: vi.fn(), isPending: false }),
-  }
-})
-
-vi.mock('../../src/entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/entities/settings')>()
-  return {
-    ...actual,
-    useOpencodeRuntime: () => ({ data: { mode: 'local', command: 'opencode', model: null, note: '' }, isLoading: false, error: null }),
-    useAvailableModelIds: () => ({ data: ['openai/gpt-4.1', 'anthropic/claude-sonnet-4'], isLoading: false, error: null }),
-    useOpencodeModel: () => ({ data: { model: null }, isLoading: false, error: null }),
-    useUpdateOpencodeModel: () => ({ mutate: vi.fn(), isPending: false }),
-    useStageModels: () => ({ data: { stageModels: null }, isLoading: false, error: null }),
-    useSetStageModels: () => ({ mutate: vi.fn(), isPending: false }),
-    useAgentRuntime: () => ({ data: agentRuntime, isLoading: false, error: null }),
-    useUpdateAgentRuntime: () => ({ mutate: vi.fn(), isPending: false }),
-    useLogLevel: () => ({ data: { level: 'INFO' }, isLoading: false, error: null }),
-    useSetLogLevel: () => ({ mutate: vi.fn(), isPending: false }),
-    useWorkflowProfiles: () => ({ data: workflowProfiles, isLoading: false, error: null }),
-    useWorkflowProfile: () => ({ data: workflowProfileDetail, isLoading: false, error: null }),
-    useSystemInfo: () => ({ data: systemInfo, isLoading: false, error: null }),
-    useSystemUpdateStatus: () => ({ data: { hasJob: false, job: null }, isLoading: false, error: null }),
-    useStartSystemUpdate: () => ({ mutate: vi.fn(), isPending: false }),
-    useRuntimeConsistency: () => ({ data: runtimeConsistency, isLoading: false, error: null }),
-  }
-})
-
-vi.mock('../../src/entities/template', () => ({
-  useProjectTemplates: () => ({ data: templates, isLoading: false, error: null }),
-  useSystemTemplates: () => ({ data: templates, isLoading: false, error: null }),
-  useProjectTemplateOverride: () => ({ data: null, isLoading: false, error: null }),
-  useUpsertProjectTemplateOverride: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeleteProjectTemplateOverride: () => ({ mutate: vi.fn(), isPending: false }),
-  usePreviewProjectTemplate: () => ({ mutate: vi.fn(), isPending: false }),
-}))
-
+// Data fixtures are declared first so the mock factories below can capture
+// stable references. Each query hook MUST return the same object identity on
+// every render; returning fresh object literals makes any component that lists
+// the hook result in a useEffect dependency array (e.g. AiSettingsSection's
+// useStageModels effect) re-run forever -> infinite render loop -> OOM.
 const projects: Project[] = [
   {
     id: 'proj-a11y',
@@ -80,6 +52,16 @@ const agentRuntime = {
   taskTimeout: 900000,
   stageTimeout: 1800000,
   maxConcurrent: 2,
+  maxGracePeriods: 1,
+  pollInterval: 5000,
+}
+
+const config = {
+  logLevel: 'INFO',
+  agentTimeout: 600,
+  taskTimeout: 900,
+  stageTimeout: 1800,
+  maxConcurrentAgents: 2,
   maxGracePeriods: 1,
   pollInterval: 5000,
 }
@@ -123,6 +105,92 @@ const templates = [
     source: 'system',
   },
 ]
+
+const inboxSubscription = {
+  workflow_failed: true,
+  approval_requested: true,
+  issue_started: true,
+  issue_completed: true,
+}
+
+// Stable query-result wrappers (identity is preserved across renders).
+const projectQueries = {
+  list: { data: projects, isLoading: false, error: null },
+  repos: { data: projects[0].repositories, isLoading: false },
+}
+const settingsQueries = {
+  opencodeRuntime: { data: { mode: 'local', command: 'opencode', model: null, note: '' }, isLoading: false, error: null },
+  availableModelIds: { data: { models: ['openai/gpt-4.1', 'anthropic/claude-sonnet-4'], modelVariants: {} }, isLoading: false, error: null },
+  opencodeModel: { data: { model: null, variant: null }, isLoading: false, error: null },
+  stageModels: { data: { stageModels: null, stageModelVariants: null }, isLoading: false, error: null },
+  agentRuntime: { data: agentRuntime, isLoading: false, error: null, refetch: vi.fn() },
+  config: { data: config, isLoading: false, error: null },
+  logLevel: { data: { level: 'INFO' }, isLoading: false, isError: false, error: null },
+  allWorkflowProfiles: { data: workflowProfiles, isLoading: false, isError: false, error: null },
+  workflowProfile: { data: workflowProfileDetail, isLoading: false, isError: false, error: null },
+  projectDefaultWorkflowProfile: { data: { defaultTemplateId: 'mohist/local' }, isLoading: false, isError: false, error: null },
+  systemInfo: { data: systemInfo, isLoading: false, isError: false, error: null, refetch: vi.fn() },
+  systemUpdateStatus: { data: { hasJob: false, job: null }, isLoading: false, error: null, refetch: vi.fn() },
+  runtimeConsistency: { data: runtimeConsistency, isLoading: false, error: null },
+}
+const mutation = { mutate: vi.fn(), mutateAsync: vi.fn().mockResolvedValue(agentRuntime), isPending: false }
+
+vi.mock('../../src/entities/project/api/queries', () => ({
+  useProjects: () => projectQueries.list,
+  useCreateProject: () => mutation,
+  useDeleteProject: () => mutation,
+  useRepositories: () => projectQueries.repos,
+  useAddRepository: () => mutation,
+  useRemoveRepository: () => mutation,
+  useSetDefaultRepository: () => mutation,
+}))
+
+vi.mock('../../src/entities/settings/api/queries', () => ({
+  useOpencodeRuntime: () => settingsQueries.opencodeRuntime,
+  useAvailableModelIds: () => settingsQueries.availableModelIds,
+  useOpencodeModel: () => settingsQueries.opencodeModel,
+  useUpdateOpencodeModel: () => mutation,
+  useStageModels: () => settingsQueries.stageModels,
+  useSetStageModels: () => mutation,
+  useAgentRuntime: () => settingsQueries.agentRuntime,
+  useConfig: () => settingsQueries.config,
+  useSetAgentRuntime: () => mutation,
+  useLogLevel: () => settingsQueries.logLevel,
+  useSetLogLevel: () => mutation,
+  useAllWorkflowProfiles: () => settingsQueries.allWorkflowProfiles,
+  useWorkflowProfiles: () => settingsQueries.allWorkflowProfiles,
+  useWorkflowProfile: () => settingsQueries.workflowProfile,
+  useProjectDefaultWorkflowProfile: () => settingsQueries.projectDefaultWorkflowProfile,
+  useSetProjectDefaultWorkflowProfile: () => mutation,
+  useClearProjectDefaultWorkflowProfile: () => mutation,
+  useDisableWorkflowProfile: () => mutation,
+  useEnableWorkflowProfile: () => mutation,
+  useSystemInfo: () => settingsQueries.systemInfo,
+  useSystemUpdate: () => mutation,
+  useSystemUpdateStatus: () => settingsQueries.systemUpdateStatus,
+  useRuntimeConsistency: () => settingsQueries.runtimeConsistency,
+}))
+
+vi.mock('../../src/entities/template', () => ({
+  useProjectTemplates: () => ({ data: templates, isLoading: false, error: null }),
+  useSystemTemplates: () => ({ data: templates, isLoading: false, error: null }),
+  useProjectTemplateOverride: () => ({ data: null, isLoading: false, error: null }),
+  useUpsertProjectTemplateOverride: () => mutation,
+  useDeleteProjectTemplateOverride: () => mutation,
+  usePreviewProjectTemplate: () => mutation,
+}))
+
+vi.mock('../../src/entities/label-catalog/api/queries', () => ({
+  useLabelCatalog: () => ({ data: [], isLoading: false, isError: false, error: null, refetch: vi.fn() }),
+  useCreateLabelDefinition: () => mutation,
+  useUpdateLabelDefinition: () => mutation,
+  useDeleteLabelDefinition: () => mutation,
+}))
+
+vi.mock('../../src/entities/inbox/api/queries', () => ({
+  useInboxSubscription: () => ({ data: inboxSubscription, isLoading: false }),
+  useUpdateInboxSubscription: () => mutation,
+}))
 
 function renderSettingsTab(tab: typeof settingsTabs[number]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })

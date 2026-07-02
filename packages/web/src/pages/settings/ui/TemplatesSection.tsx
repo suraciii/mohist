@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { InfoIcon, PlusIcon, SearchIcon } from 'lucide-react'
+import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Input } from '@/shared/ui/components/input'
@@ -12,6 +13,7 @@ import {
 import type { ProjectTemplate, SystemTemplate } from '../../../entities/template'
 import type { SettingsSearchEntry } from '@/features/settings-search'
 import { getSectionMeta } from '../lib/sections'
+import { NoProjectCard } from './NoProjectCard'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 import { TemplateEditor, type TemplateEditorTarget, type EditorMode } from './TemplateEditor'
@@ -111,18 +113,20 @@ function matchesSearch(
   return false
 }
 
+export type TemplateDestructiveKind = 'reset' | 'delete'
+
 function TemplateRow({
   template,
   systemByKey,
   onOpenEditor,
-  onReset,
-  isResetPending,
+  onRequestDestructive,
+  isDestructivePending,
 }: {
   template: ProjectTemplate
   systemByKey: Map<string, SystemTemplate>
   onOpenEditor: (target: TemplateEditorTarget) => void
-  onReset: (key: string) => void
-  isResetPending: boolean
+  onRequestDestructive: (key: string, kind: TemplateDestructiveKind) => void
+  isDestructivePending: boolean
 }) {
   const isSystem = template.source === 'system'
   const isProject = !isSystem
@@ -207,8 +211,8 @@ function TemplateRow({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onReset(template.key)}
-              disabled={isResetPending}
+              onClick={() => onRequestDestructive(template.key, 'reset')}
+              disabled={isDestructivePending}
               className={templateActionClassName}
               data-testid={`template-reset-${template.key}`}
             >
@@ -219,8 +223,8 @@ function TemplateRow({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onReset(template.key)}
-              disabled={isResetPending}
+              onClick={() => onRequestDestructive(template.key, 'delete')}
+              disabled={isDestructivePending}
               data-testid={`template-delete-${template.key}`}
               className={`${templateActionClassName} text-red-700 hover:text-red-800 hover:bg-red-50`}
             >
@@ -242,6 +246,10 @@ export function TemplatesSection() {
   const [search, setSearch] = useState('')
   const [editorTarget, setEditorTarget] = useState<TemplateEditorTarget | null>(null)
   const [newDialogOpen, setNewDialogOpen] = useState(false)
+  const [pendingDestructive, setPendingDestructive] = useState<{
+    key: string
+    kind: TemplateDestructiveKind
+  } | null>(null)
   const { label: sectionLabel, description: sectionDescription } = getSectionMeta('templates')
 
   const systemByKey = useMemo(() => {
@@ -255,15 +263,33 @@ export function TemplatesSection() {
     return templates.filter((t) => matchesSearch(t, search))
   }, [templates, search])
 
-  if (!currentProject) {
-    return (
-      <div
-        data-testid="templates-no-project"
-        className="rounded-md border border-dashed bg-muted/30 p-6 text-center text-sm text-muted-foreground"
-      >
-        No project selected
-      </div>
+  function requestDestructive(key: string, kind: TemplateDestructiveKind) {
+    setPendingDestructive({ key, kind })
+  }
+
+  function cancelDestructive() {
+    if (deleteOverride.isPending) return
+    setPendingDestructive(null)
+  }
+
+  function confirmDestructive() {
+    if (!pendingDestructive) return
+    const target = pendingDestructive
+    deleteOverride.mutate(
+      { key: target.key },
+      {
+        onSuccess: () => {
+          setPendingDestructive(null)
+        },
+        onError: () => {
+          setPendingDestructive(null)
+        },
+      },
     )
+  }
+
+  if (!currentProject) {
+    return <NoProjectCard title={sectionLabel} />
   }
 
   return (
@@ -291,6 +317,7 @@ export function TemplatesSection() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by key, name, tag, or description"
+          aria-label="Search templates"
           data-testid="template-search"
           className="min-h-11 pl-7 text-sm"
         />
@@ -314,6 +341,18 @@ export function TemplatesSection() {
               ? 'No templates match the current search.'
               : 'No templates available for this project.'
           }
+          action={
+            templates && templates.length === 0 ? (
+              <Button
+                size="sm"
+                onClick={() => setNewDialogOpen(true)}
+                data-testid="templates-empty-new-button"
+              >
+                <PlusIcon />
+                New Template
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
         <div className="space-y-2">
@@ -323,8 +362,8 @@ export function TemplatesSection() {
               template={t}
               systemByKey={systemByKey}
               onOpenEditor={setEditorTarget}
-              onReset={(key) => deleteOverride.mutate({ key })}
-              isResetPending={deleteOverride.isPending}
+              onRequestDestructive={requestDestructive}
+              isDestructivePending={deleteOverride.isPending}
             />
           ))}
         </div>
@@ -343,6 +382,37 @@ export function TemplatesSection() {
         open={newDialogOpen}
         projectId={projectId!}
         onClose={() => setNewDialogOpen(false)}
+      />
+
+      <AlertDialog
+        open={pendingDestructive !== null}
+        onOpenChange={(open) => {
+          if (!open) cancelDestructive()
+        }}
+        title={
+          pendingDestructive?.kind === 'delete'
+            ? 'Delete this template?'
+            : 'Reset this template override?'
+        }
+        description={
+          pendingDestructive
+            ? pendingDestructive.kind === 'delete'
+              ? `The template '${pendingDestructive.key}' will be permanently removed. This action cannot be undone.`
+              : `The project override for '${pendingDestructive.key}' will be removed and the system template will be used.`
+            : undefined
+        }
+        confirmLabel={
+          deleteOverride.isPending
+            ? 'Working...'
+            : pendingDestructive?.kind === 'delete'
+              ? 'Delete'
+              : 'Reset'
+        }
+        cancelLabel="Cancel"
+        tone="destructive"
+        loading={deleteOverride.isPending}
+        onConfirm={confirmDestructive}
+        data-testid="template-destructive-alert"
       />
     </SettingsSection>
   )

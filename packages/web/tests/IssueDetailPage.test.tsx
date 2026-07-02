@@ -644,6 +644,52 @@ describe('IssueDetailPage Markdown rendering', () => {
       })
     })
 
+    it('opens an AlertDialog instead of window.confirm when clicking Delete and only deletes on confirm', async () => {
+      const issueApi = await import('../src/entities/issue/api/client')
+      mocks.issue = makeIssue({
+        body: 'Issue body',
+        comments: [
+          {
+            id: 'comment-1',
+            issueId: 'issue-1',
+            body: 'Existing comment',
+            createdAt: '2024-01-01T11:00:00.000Z',
+          },
+        ],
+      })
+      renderWithQueryClient(<IssueDetailPage />)
+
+      const deleteBtn = await screen.findByTestId('comment-delete-button')
+
+      const windowConfirmSpy = vi.spyOn(window, 'confirm')
+
+      fireEvent.click(deleteBtn)
+
+      expect(windowConfirmSpy).not.toHaveBeenCalled()
+      expect(issueApi.deleteComment).not.toHaveBeenCalled()
+
+      const dialog = await screen.findByTestId('comment-delete-alert')
+      expect(dialog).toBeInTheDocument()
+
+      fireEvent.click(within(dialog).getByTestId('comment-delete-alert-cancel'))
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('comment-delete-alert')).not.toBeInTheDocument()
+      })
+      expect(issueApi.deleteComment).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByTestId('comment-delete-button'))
+      const confirmDialog = await screen.findByTestId('comment-delete-alert')
+      fireEvent.click(within(confirmDialog).getByTestId('comment-delete-alert-confirm'))
+
+      await waitFor(() => {
+        expect(issueApi.deleteComment).toHaveBeenCalledTimes(1)
+      })
+      expect(windowConfirmSpy).not.toHaveBeenCalled()
+
+      windowConfirmSpy.mockRestore()
+    })
+
     it('shows empty comments message when no comments exist', async () => {
       mocks.issue = makeIssue({
         body: 'Issue body',

@@ -3,7 +3,7 @@ import { InboxIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 
 interface SectionStateProps {
-  variant: 'loading' | 'error' | 'empty'
+  variant: 'loading' | 'error' | 'empty' | 'no-project'
   /** Title shown above the state. */
   title?: string
   /** Short description shown in the header; loading and empty use it for context. */
@@ -16,8 +16,12 @@ interface SectionStateProps {
   onRetry?: () => void
   /** Custom icon (empty only). */
   icon?: ReactNode
-  /** Optional override for empty-state body. */
+  /** Optional inline next-step action (empty + no-project only). */
+  action?: ReactNode
+  /** Optional override for empty/no-project body. */
   children?: ReactNode
+  /** Optional test id forwarded to the outer container (useful for the no-project CTA). */
+  'data-testid'?: string
 }
 
 export function SectionState({
@@ -28,7 +32,9 @@ export function SectionState({
   message,
   onRetry,
   icon,
+  action,
   children,
+  'data-testid': testId,
 }: SectionStateProps) {
   if (variant === 'loading') {
     return (
@@ -84,9 +90,15 @@ export function SectionState({
     )
   }
 
-  // empty
+  // empty / no-project share the dashed-box layout; no-project just defaults a friendlier copy
+  const isNoProject = variant === 'no-project'
+  const defaultDescription = isNoProject
+    ? 'Pick a project from the sidebar, or create a new one to get started.'
+    : 'Nothing here yet.'
+  const showAction = action != null || children != null
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid={testId} data-variant={variant}>
       {title && (
         <div>
           <h3 className="text-sm font-medium text-foreground">{title}</h3>
@@ -99,8 +111,13 @@ export function SectionState({
         <div className="mx-auto mb-2 inline-flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground/70">
           {icon ?? <InboxIcon className="size-4" />}
         </div>
-        <p className="text-sm text-muted-foreground">{description ?? 'Nothing here yet.'}</p>
-        {children}
+        <p className="text-sm text-muted-foreground">{description ?? defaultDescription}</p>
+        {showAction && (
+          <div className="mt-4 flex flex-col items-center justify-center gap-2 sm:flex-row">
+            {action}
+            {children}
+          </div>
+        )}
       </div>
     </div>
   )

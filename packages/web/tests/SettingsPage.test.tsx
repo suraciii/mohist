@@ -84,6 +84,25 @@ function renderWithQueryClient(
   )
 }
 
+function renderWithoutProject(
+  ui: React.ReactElement,
+  initialEntries: string[] = ['/settings/repositories'],
+) {
+  const queryClient = createMockQueryClient()
+  return baseRender(
+    <MemoryRouter initialEntries={initialEntries}>
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId={null} initialProjects={[]}>
+          <Routes>
+            <Route path="/settings/:section" element={ui} />
+            <Route path="/settings" element={ui} />
+          </Routes>
+        </ProjectProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  )
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   ;(useOpencodeRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -273,6 +292,19 @@ describe('SettingsPage', () => {
 
       expect(agentLink).toHaveAttribute('aria-current', 'page')
       expect(aiLink).not.toHaveAttribute('aria-current')
+    })
+
+    it('does not prompt when a dirty Runtime form re-clicks the active tab', () => {
+      renderWithQueryClient(<SettingsPage />, ['/settings/agent'])
+
+      const timeoutInput = screen.getByLabelText('Session Timeout')
+      fireEvent.change(timeoutInput, { target: { value: '31' } })
+
+      fireEvent.click(screen.getByRole('link', { name: 'Runtime' }))
+
+      expect(screen.queryByTestId('settings-dirty-discard-alert')).not.toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { name: 'Runtime' })[0]).toBeInTheDocument()
+      expect(timeoutInput).toHaveValue(31)
     })
   })
 
@@ -903,6 +935,61 @@ describe('SettingsPage', () => {
       await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith('WARN'))
       await waitFor(() => expect(screen.getByText(/logLevel must be one of/i)).toBeInTheDocument())
       await waitFor(() => expect(trigger).toHaveTextContent('INFO'))
+    })
+  })
+
+  describe('No-project empty state (T-006)', () => {
+    it('renders the no-project CTA in the Repositories section when no project is selected', () => {
+      renderWithoutProject(<SettingsPage />, ['/settings/repositories'])
+
+      expect(screen.getByTestId('no-project-select-button')).toBeInTheDocument()
+      expect(screen.getByTestId('no-project-create-button')).toBeInTheDocument()
+      expect(screen.queryByText('No project selected')).not.toBeInTheDocument()
+    })
+
+    it('renders the no-project CTA in the Label catalog section when no project is selected', () => {
+      renderWithoutProject(<SettingsPage />, ['/settings/label-catalog'])
+
+      expect(screen.getByTestId('no-project-select-button')).toBeInTheDocument()
+      expect(screen.getByTestId('no-project-create-button')).toBeInTheDocument()
+      expect(screen.queryByText('No project selected')).not.toBeInTheDocument()
+    })
+
+    it('renders the no-project CTA in the Templates section when no project is selected', () => {
+      renderWithoutProject(<SettingsPage />, ['/settings/templates'])
+
+      expect(screen.getByTestId('no-project-select-button')).toBeInTheDocument()
+      expect(screen.getByTestId('no-project-create-button')).toBeInTheDocument()
+      expect(screen.queryByText('No project selected')).not.toBeInTheDocument()
+    })
+
+    it('renders the no-project CTA in the Workflows section when no project is selected', () => {
+      renderWithoutProject(<SettingsPage />, ['/settings/workflows'])
+
+      expect(screen.getByTestId('no-project-select-button')).toBeInTheDocument()
+      expect(screen.getByTestId('no-project-create-button')).toBeInTheDocument()
+    })
+
+    it('Select project CTA dispatches the sidebar reveal event', () => {
+      const listener = vi.fn()
+      window.addEventListener('mohist:sidebar:open-project-switcher', listener)
+      try {
+        renderWithoutProject(<SettingsPage />, ['/settings/repositories'])
+
+        fireEvent.click(screen.getByTestId('no-project-select-button'))
+
+        expect(listener).toHaveBeenCalledTimes(1)
+      } finally {
+        window.removeEventListener('mohist:sidebar:open-project-switcher', listener)
+      }
+    })
+
+    it('Create Project CTA opens the inline CreateProjectDialog', () => {
+      renderWithoutProject(<SettingsPage />, ['/settings/repositories'])
+
+      fireEvent.click(screen.getByTestId('no-project-create-button'))
+
+      expect(screen.getByTestId('create-project-dialog')).toBeInTheDocument()
     })
   })
 })
