@@ -144,6 +144,9 @@ describe('SessionTimeline', () => {
     for (const label of ['Plan', 'Build', 'Check', 'Integrate']) {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
+    for (const stage of ['plan', 'build', 'check', 'integrate']) {
+      expect(screen.getByTestId(`workflow-status-stage-${stage}`)).toHaveAttribute('data-state', 'completed')
+    }
     expect(screen.queryByText(/^Done$/)).not.toBeInTheDocument()
   })
 
