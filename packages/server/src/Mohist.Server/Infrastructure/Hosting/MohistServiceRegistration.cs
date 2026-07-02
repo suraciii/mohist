@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Events.Hosting;
 using Mohist.Server.Events.Hub;
@@ -57,20 +56,7 @@ public static class MohistServiceRegistration
         services.AddMohistOpenTelemetry(configuration);
 
         services.AddDbContextFactory<MohistDbContext>(options =>
-        {
-            options.UseSqlite(connectionString);
-            // Issue-318 T-002 + T-004: the DbContext model declares the
-            // WorkflowRuns STORED status computed column and the
-            // IX_WorkflowRuns_Status index. T-004
-            // (20260702060000_WorkflowRunStatus) materializes them on
-            // disk at deploy time. With the migration in place the model
-            // matches the snapshot and the warning is never generated,
-            // so the Ignore here is a no-op for production. Tests that
-            // pre-create the schema without going through Migrate() keep
-            // the suppression as a defensive measure.
-            options.ConfigureWarnings(w => w.Ignore(
-                RelationalEventId.PendingModelChangesWarning));
-        });
+            options.UseSqlite(connectionString));
 
         services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>, IssueStore>();
         services.AddScoped<IStateStore<Mohist.Server.Agent.Domain.Agent>, AgentStore>();

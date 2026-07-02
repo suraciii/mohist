@@ -1182,4 +1182,27 @@ describe('IssueDetailPage workflow run status pill (issue-318 T-005)', () => {
     const pill = screen.getByTestId('workflow-run-status-running')
     expect(pill.dataset.status).toBe('running')
   })
+
+  it('does not render a workflow run status pill for backlog issues without a timeline', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('issue-detail-header')).toBeInTheDocument())
+    expect(screen.queryByTestId('workflow-run-status-unknown')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-run-status-pending')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-run-status-ready')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-run-status-running')).not.toBeInTheDocument()
+  })
 })

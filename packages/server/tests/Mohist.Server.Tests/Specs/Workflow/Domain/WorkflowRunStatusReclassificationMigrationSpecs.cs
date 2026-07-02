@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -12,6 +13,7 @@ namespace Mohist.Server.Tests.Specs.Workflow.Domain;
 public class WorkflowRunStatusReclassificationMigrationSpecs
 {
     private const string MigrationId = "20260702060000_WorkflowRunStatus";
+    private const string PreviousMigrationId = "20260629120000_BackfillIssueCompletedAt";
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
@@ -22,7 +24,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         string rowId;
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await MigrateToPreviousAsync(setup);
             rowId = "wf_legacy_pending";
             await SeedWorkflowRunAsync(setup, rowId, BuildState(
                 status: "Pending",
@@ -30,11 +32,11 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
                 stagesInFlight: false));
         }
 
-        await RunMigrationUpAsync(database);
+        await MigrateToWorkflowRunStatusAsync(database);
 
         await using var verify = database.CreateDbContext();
-        var state = await ReadStateAsync(verify, rowId);
-        Assert.Contains("\"status\":\"created\"", state);
+        Assert.Equal("created", await ReadStateStatusAsync(verify, rowId));
+        Assert.Equal("created", await ReadStatusColumnAsync(verify, rowId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -46,7 +48,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         string rowId;
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await MigrateToPreviousAsync(setup);
             rowId = "wf_legacy_running_unassigned";
             // Old "Running" with no assignment and no in-flight work —
             // covers the backstop case where a runner pool entry never
@@ -58,11 +60,11 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
                 stagesInFlight: false));
         }
 
-        await RunMigrationUpAsync(database);
+        await MigrateToWorkflowRunStatusAsync(database);
 
         await using var verify = database.CreateDbContext();
-        var state = await ReadStateAsync(verify, rowId);
-        Assert.Contains("\"status\":\"pending\"", state);
+        Assert.Equal("pending", await ReadStateStatusAsync(verify, rowId));
+        Assert.Equal("pending", await ReadStatusColumnAsync(verify, rowId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -74,7 +76,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         string rowId;
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await MigrateToPreviousAsync(setup);
             rowId = "wf_legacy_running_inflight_task";
             await SeedWorkflowRunAsync(setup, rowId, BuildState(
                 status: "Running",
@@ -84,11 +86,11 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
                 inFlightChecksWorkId: false));
         }
 
-        await RunMigrationUpAsync(database);
+        await MigrateToWorkflowRunStatusAsync(database);
 
         await using var verify = database.CreateDbContext();
-        var state = await ReadStateAsync(verify, rowId);
-        Assert.Contains("\"status\":\"running\"", state);
+        Assert.Equal("running", await ReadStateStatusAsync(verify, rowId));
+        Assert.Equal("running", await ReadStatusColumnAsync(verify, rowId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -100,7 +102,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         string rowId;
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await MigrateToPreviousAsync(setup);
             rowId = "wf_legacy_running_inflight_checks";
             await SeedWorkflowRunAsync(setup, rowId, BuildState(
                 status: "Running",
@@ -110,11 +112,11 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
                 inFlightChecksWorkId: true));
         }
 
-        await RunMigrationUpAsync(database);
+        await MigrateToWorkflowRunStatusAsync(database);
 
         await using var verify = database.CreateDbContext();
-        var state = await ReadStateAsync(verify, rowId);
-        Assert.Contains("\"status\":\"running\"", state);
+        Assert.Equal("running", await ReadStateStatusAsync(verify, rowId));
+        Assert.Equal("running", await ReadStatusColumnAsync(verify, rowId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -126,7 +128,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         string rowId;
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await MigrateToPreviousAsync(setup);
             rowId = "wf_legacy_running_assigned_idle";
             await SeedWorkflowRunAsync(setup, rowId, BuildState(
                 status: "Running",
@@ -134,11 +136,11 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
                 stagesInFlight: false));
         }
 
-        await RunMigrationUpAsync(database);
+        await MigrateToWorkflowRunStatusAsync(database);
 
         await using var verify = database.CreateDbContext();
-        var state = await ReadStateAsync(verify, rowId);
-        Assert.Contains("\"status\":\"ready\"", state);
+        Assert.Equal("ready", await ReadStateStatusAsync(verify, rowId));
+        Assert.Equal("ready", await ReadStatusColumnAsync(verify, rowId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -150,7 +152,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         var seeded = new Dictionary<string, string>(StringComparer.Ordinal);
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await MigrateToPreviousAsync(setup);
             // The four non-running terminal / blocking values the spec
             // pins as untouched: completed, failed, stopped, paused,
             // awaitingApproval. These were already semantically correct
@@ -179,7 +181,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
             }
         }
 
-        await RunMigrationUpAsync(database);
+        await MigrateToWorkflowRunStatusAsync(database);
 
         await using var verify = database.CreateDbContext();
         foreach (var (id, originalStatus) in seeded)
@@ -189,8 +191,8 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
             // unchanged" contract — the column mirrors the
             // pre-migration value (lowercased) because the
             // reclassification UPDATEs do not match these statuses.
-            var columnValue = await ReadStatusColumnAsync(verify, id);
-            Assert.Equal(CamelCaseStatus(originalStatus).ToLowerInvariant(), columnValue);
+            Assert.Equal(originalStatus, await ReadStateStatusAsync(verify, id));
+            Assert.Equal(CamelCaseStatus(originalStatus).ToLowerInvariant(), await ReadStatusColumnAsync(verify, id));
         }
     }
 
@@ -208,21 +210,21 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         var rowId = "wf_idempotent_round_trip";
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await MigrateToPreviousAsync(setup);
             await SeedWorkflowRunAsync(setup, rowId, BuildState(
                 status: "Running",
                 assignmentRunnerId: "runner_x",
                 stagesInFlight: false));
         }
 
-        await RunMigrationUpAsync(database);
+        await MigrateToWorkflowRunStatusAsync(database);
         string firstState;
         await using (var firstRead = database.CreateDbContext())
         {
             firstState = await ReadStateAsync(firstRead, rowId);
         }
 
-        await RunMigrationUpAsync(database);
+        await MigrateToWorkflowRunStatusAsync(database);
 
         await using var secondRead = database.CreateDbContext();
         var secondState = await ReadStateAsync(secondRead, rowId);
@@ -250,7 +252,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         var inFlightRow = "wf_e2e_inflight";
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.MigrateAsync();
+            await MigrateToPreviousAsync(setup);
             await SeedWorkflowRunAsync(setup, assignedRow, BuildState(
                 status: "Running",
                 assignmentRunnerId: "runner_e2e",
@@ -267,12 +269,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
                 inFlightChecksWorkId: false));
         }
 
-        // The migration runs as part of MigrateAsync above (the
-        // schema step is folded into the migration history). The
-        // RunMigrationUpAsync helper only emits the data
-        // reclassification; call it explicitly here so the test
-        // mirrors the production two-step order.
-        await RunMigrationUpAsync(database);
+        await MigrateToWorkflowRunStatusAsync(database);
 
         await using (var verifyType = database.CreateDbContext())
         {
@@ -287,6 +284,9 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         }
 
         await using var verify = database.CreateDbContext();
+        Assert.Equal("ready", await ReadStateStatusAsync(verify, assignedRow));
+        Assert.Equal("pending", await ReadStateStatusAsync(verify, unassignedRow));
+        Assert.Equal("running", await ReadStateStatusAsync(verify, inFlightRow));
         Assert.Equal("ready", await ReadStatusColumnAsync(verify, assignedRow));
         Assert.Equal("pending", await ReadStatusColumnAsync(verify, unassignedRow));
         Assert.Equal("running", await ReadStatusColumnAsync(verify, inFlightRow));
@@ -369,71 +369,13 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
             _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown terminal/blocking status")
         };
 
-    private static async Task RunMigrationUpAsync(TestDatabase database)
+    private static Task MigrateToPreviousAsync(MohistDbContext ctx) =>
+        ctx.GetService<IMigrator>().MigrateAsync(PreviousMigrationId);
+
+    private static async Task MigrateToWorkflowRunStatusAsync(TestDatabase database)
     {
-        // Mirror the production migration's Up SQL exactly so the
-        // assertions pin the actual deployed code path. The full
-        // Migration.Up() is split into the schema step (add column +
-        // alter column + index) — already exercised by
-        // EnsureCreatedAsync -> MigrateAsync above — and the data
-        // reclassification step run here.
-        var sql = """
-            -- 1) Old "pending" → "created".
-            UPDATE "WorkflowRuns"
-            SET "State" = json_set("State", '$.status', 'created')
-            WHERE LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))) = 'pending';
-
-            -- 2) Old "running" with no assignment → "pending".
-            UPDATE "WorkflowRuns"
-            SET "State" = json_set("State", '$.status', 'pending')
-            WHERE LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))) = 'running'
-              AND json_extract("State", '$.assignment.runnerId') IS NULL
-              AND json_extract("State", '$.claim.runnerId') IS NULL;
-
-            -- 3) Old "running" with assignment + in-flight → "running".
-            UPDATE "WorkflowRuns"
-            SET "State" = json_set("State", '$.status', 'running')
-            WHERE LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))) = 'running'
-              AND (
-                  json_extract("State", '$.assignment.runnerId') IS NOT NULL
-                  OR json_extract("State", '$.claim.runnerId') IS NOT NULL
-              )
-              AND (
-                  EXISTS (
-                      SELECT 1
-                      FROM json_each(json_extract("State", '$.stages')) AS stage
-                      WHERE json_extract(stage.value, '$.checksWorkId') IS NOT NULL
-                  )
-                  OR EXISTS (
-                      SELECT 1
-                      FROM json_each(json_extract("State", '$.stages')) AS stage,
-                           json_each(json_extract(stage.value, '$.tasks')) AS task
-                      WHERE LOWER(COALESCE(json_extract(task.value, '$.status'), json_extract(task.value, '$.Status'))) = 'running'
-                  )
-              );
-
-            -- 4) Old "running" with assignment + no in-flight → "ready".
-            UPDATE "WorkflowRuns"
-            SET "State" = json_set("State", '$.status', 'ready')
-            WHERE LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))) = 'running'
-              AND (
-                  json_extract("State", '$.assignment.runnerId') IS NOT NULL
-                  OR json_extract("State", '$.claim.runnerId') IS NOT NULL
-              )
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM json_each(json_extract("State", '$.stages')) AS stage
-                  WHERE json_extract(stage.value, '$.checksWorkId') IS NOT NULL
-              )
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM json_each(json_extract("State", '$.stages')) AS stage,
-                       json_each(json_extract(stage.value, '$.tasks')) AS task
-                  WHERE LOWER(COALESCE(json_extract(task.value, '$.status'), json_extract(task.value, '$.Status'))) = 'running'
-              );
-            """;
         await using var ctx = database.CreateDbContext();
-        await ctx.Database.ExecuteSqlRawAsync(sql);
+        await ctx.GetService<IMigrator>().MigrateAsync(MigrationId);
     }
 
     private static async Task SeedWorkflowRunAsync(
@@ -479,6 +421,17 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         return (result as string) ?? string.Empty;
     }
 
+    private static async Task<string?> ReadStateStatusAsync(MohistDbContext ctx, string workflowRunId)
+    {
+        var state = await ReadStateAsync(ctx, workflowRunId);
+        using var document = JsonDocument.Parse(state);
+        if (document.RootElement.TryGetProperty("status", out var status))
+            return status.GetString();
+        if (document.RootElement.TryGetProperty("Status", out var pascalStatus))
+            return pascalStatus.GetString();
+        return null;
+    }
+
     private static async Task<string?> ReadStatusColumnAsync(MohistDbContext ctx, string workflowRunId)
     {
         var connection = ctx.Database.GetDbConnection();
@@ -492,28 +445,6 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         command.Parameters.Add(param);
         var result = await command.ExecuteScalarAsync();
         return result as string;
-    }
-
-    private static async Task<string?> ScalarStringAsync(MohistDbContext ctx, string sql)
-    {
-        var connection = ctx.Database.GetDbConnection();
-        if (connection.State != System.Data.ConnectionState.Open)
-            connection.Open();
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        var result = await command.ExecuteScalarAsync();
-        return result as string;
-    }
-
-    private static async Task<int> ScalarIntAsync(MohistDbContext ctx, string sql)
-    {
-        var connection = ctx.Database.GetDbConnection();
-        if (connection.State != System.Data.ConnectionState.Open)
-            connection.Open();
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        var result = await command.ExecuteScalarAsync();
-        return Convert.ToInt32(result);
     }
 
     private static TestDatabase CreateDatabase()

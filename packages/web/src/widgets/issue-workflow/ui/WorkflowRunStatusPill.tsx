@@ -123,6 +123,8 @@ function isKnownRunStatus(value: string): value is WorkflowRunStatus {
 }
 
 export function WorkflowRunStatusPill({ status, className }: WorkflowRunStatusPillProps) {
+  if (!status) return null
+
   const presentation = status && isKnownRunStatus(status)
     ? PRESENTATION_BY_STATUS[status]
     : UNKNOWN_PRESENTATION

@@ -154,19 +154,15 @@ describe('WorkflowRunStatusPill', () => {
     expect(pill).toHaveTextContent(/unknown/i)
   })
 
-  it('falls back to an unknown presentation for a null status', () => {
-    renderPill(null)
+  it('renders nothing for a null status', () => {
+    const { container } = renderPill(null)
 
-    const pill = screen.getByTestId('workflow-run-status-unknown')
-    expect(pill).toBeInTheDocument()
-    expect(pill.dataset.status).toBe('unknown')
+    expect(container).toBeEmptyDOMElement()
   })
 
-  it('falls back to an unknown presentation for an undefined status', () => {
-    renderPill(undefined)
+  it('renders nothing for an undefined status', () => {
+    const { container } = renderPill(undefined)
 
-    const pill = screen.getByTestId('workflow-run-status-unknown')
-    expect(pill).toBeInTheDocument()
-    expect(pill.dataset.status).toBe('unknown')
+    expect(container).toBeEmptyDOMElement()
   })
 })
