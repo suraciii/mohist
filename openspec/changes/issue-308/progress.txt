@@ -50,3 +50,45 @@ The three target specs:
 - **T-004 (merge pipeline)**: `waitChecksAndMergePr`, `waitForPrChecks`, `mergeStateStatusFailure`, `runGhReadWithRetry`, `delayWithSignal`, `WaitChecksAndMergeOk`/`Failure` types, plus `PrChecksWaitResult` (internal) all stay in `github-pr.ts`. Move to `github-pr-merge.ts` along with the two timing/retry setters and their internal `let` knobs (`prChecksPollIntervalMs`, `prChecksNoChecksGraceMs`, `prChecksUnavailableRetryLimit`, `ghTransientRetryLimit`, `ghTransientRetryBackoffMs`).
 - **T-005 (issue-fields + orchestrators split)**: `resolveCreatePrText`, `resolveMergeSubject`, `validateIssueFieldSource`, `loadIssueFields`, `resolveIssueFieldValue`, `requiredIssueFields` move to `github-pr-issue-fields.ts`. The orchestrator functions + their git-ref probes (`openOrReusePr`/`resolveCurrentBranch`/`resolveBaseSha`/`BaseShaOk`/`BaseShaFailure`) go to `create-github-pr.ts`. Output adapters fold into their orchestrators byte-identical.
 - **Test files untouched**: confirm `git diff packages/runner/tests/` is empty after this task; it is.
+
+## T-002 — Extract gh failure-text classifier module + add direct unit tests for the matcher matrix
+
+**Done.** Pure leaf module `github-pr-classify.ts` created (75 lines), `github-pr.ts` re-exports the 7 classifier symbols, new `tests/github-pr-classify.spec.ts` covers every phrase in every matcher plus `classifyGhFailure` precedence + empty/blank fallback. All 793 tests green (38 new + 755 unchanged). Monolith went from 1171 → 1114 lines. Zero existing spec file touched.
+
+### Files created
+- `packages/runner/src/actions/github-pr-classify.ts` — leaf (depends only on `github-pr-types.ts` for `GitHubPrErrorCode`). Exports `classifyGhFailure`, `classifyPushFailure`, `looksLikeBaseMoved`, `looksLikeProtectionConflict`, `looksLikePrStateConflict`, `looksLikeAuthFailure`, `looksLikeRetrySafe`. Body is byte-identical to the previous `github-pr.ts` definitions (same `toLowerCase()` idiom, same phrase lists).
+- `packages/runner/tests/github-pr-classify.spec.ts` — 38 pure-function tests: for each matcher, enumerate every phrase (lowercase + mixed-case to confirm `toLowerCase()`), plus a control set of negative phrases (unrelated error text) and an empty-input check. `classifyGhFailure` gets single-bucket classification tests, full 5-way precedence sweep (table-driven), and pairwise precedence (auth-beats-protection-beats-base-moved-beats-pr-state-beats-retry-safe). `classifyPushFailure` gets delegation + base-moved-via-git-push-output test.
+
+### File modified
+- `packages/runner/src/actions/github-pr.ts` — added value-side imports for the 7 classifier symbols + a re-export block mirroring the parse/checks pattern from T-001; removed the relocated definitions. 93-line diff (18 insertions, 75 deletions). 1171 → 1114 lines.
+
+### Key gotchas
+- **Barrel re-export pattern (T-001 precedent, continued)**: import the symbols as values (they are used internally by `classifyGhFailure`, `runGhReadWithRetry`, etc.), and add a value `export {}` block. No `type` qualifier needed because all 7 symbols are functions, not interfaces.
+- **`classifyGhFailure` precedence table-driven test**: instead of writing 5 long "winning phrase + losing phrase" pairs by hand, a single loop iterates over the 5 buckets and uses a tiny IIFE per case to return the right phrase + the right "loser text containing every lower-priority bucket" — this proves that priority *suppresses* the lower-bucket matches in the same text, not just that the bucket *appears* in isolation.
+- **Empty / whitespace-only fallback**: the original `classifyGhFailure` does `if (!text.trim()) return "retry-safe"` *before* any matcher. Verified via dedicated test that whitespace-only stdout, whitespace-only stderr, and whitespace in both still classify as `retry-safe`. This guards against regressions where someone might move the empty-text check below the matcher loop and accidentally let a pure-whitespace `lower.includes("502")` (false-positive) slip through.
+- **Test style for pure leaves**: no `afterEach` runner reset needed (no mutable singleton involved); only direct function calls. Mirrors the small-spec style already used by `issue-fields.spec.ts` etc.
+- **Why no `import type` for `GitHubPrErrorCode`**: the test asserts classifier return values are typed as `GitHubPrErrorCode` via `expect(...).toBe<GitHubPrErrorCode>("retry-safe")` — this is a generic type argument at the assertion call site, so `GitHubPrErrorCode` must be a value-position type at the import (which it is: `import type` works fine here, and I used it).
+
+### Acceptance criteria status
+- [x] `github-pr-classify.ts` exists; exports the 7 symbols verbatim (same `toLowerCase()`, same phrase lists, same body).
+- [x] `tests/github-pr-classify.spec.ts` directly asserts every documented phrase for all five `looksLike*` matchers (11 + 8 + 6 + 8 + 20 = 53 phrase assertions across the suite, plus mixed-case and negative controls).
+- [x] `classifyGhFailure` precedence pinned: 5-way table-driven sweep + 4 pairwise precedence tests + empty/blank-text → `retry-safe` fallback test.
+- [x] `github-pr.ts` re-exports all 7 classifier symbols via a value `export {}` block; barrel transparency preserved (registry.ts + 3 specs + internal callers all compile unchanged).
+- [x] `npm run typecheck -w packages/runner` exits 0.
+- [x] `npm test -w packages/runner` green: 57 files / 793 tests pass — 38 new + 755 existing (the three action specs at 9/8/21 unchanged).
+
+### Verification commands run
+```
+npm run typecheck -w packages/runner   # exits 0
+npm run build -w packages/runner       # succeeds (postbuild writes build-info.json)
+npm test -w packages/runner            # 57 files, 793 tests pass (38 new in github-pr-classify.spec.ts)
+npm test -w packages/runner -- create-github-pr merge-github-pr mark-github-pr-ready
+                                       # 3 files, 38 tests pass (unchanged from T-001)
+git diff packages/runner/tests/        # only the new spec; no existing spec edited
+```
+
+### Notes for downstream tasks
+- **T-003 (runtime)**: still applies — `git`/`gh` runners + `setGitHubPr*ForTest` setters live in `github-pr.ts:53-62` and the `let` knobs (`prChecksPollIntervalMs` etc.) at lines ~80–105.
+- **T-004 (merge pipeline)**: `waitChecksAndMergePr`, `waitForPrChecks`, `mergeStateStatusFailure`, `runGhReadWithRetry`, `delayWithSignal`, `WaitChecksAndMergeOk`/`Failure` types, `PrChecksWaitResult` (internal) all still in `github-pr.ts`. Move to `github-pr-merge.ts` along with the timing/retry setters and internal `let` knobs.
+- **T-005 (issue-fields + orchestrators split)**: still applies verbatim.
+- **Test files untouched** (re-verified after T-002): only `tests/github-pr-classify.spec.ts` is new; `create-github-pr.spec.ts` / `merge-github-pr.spec.ts` / `mark-github-pr-ready.spec.ts` / every other existing spec is untouched (still 9 / 8 / 21 cases respectively).
