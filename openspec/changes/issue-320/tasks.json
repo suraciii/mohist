@@ -69,7 +69,7 @@
     {
       "id": "T-004",
       "title": "移除 Productivity zone 的 SnapshotRow",
-      "spec": "specs/dashboard-attention/spec.md",
+      "spec": "",
       "description": "从 ProductivityZone.tsx 移除 SnapshotRow import 与 <SnapshotRow /> 挂载，并删除 SnapshotRow.tsx 与 SnapshotRow.test.tsx 文件。不要删除 useCompletionSnapshot（entities/issue 公共导出，有独立测试与未来复用价值）。同步从 ProductivityZone.test.tsx 移除 vi.mock('./SnapshotRow') 块。",
       "acceptanceCriteria": [
         "Productivity zone 不再渲染 testid='productivity-snapshot-row' 及其子元素",
