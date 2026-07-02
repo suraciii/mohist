@@ -4,6 +4,48 @@ import { stringAt } from "../core/json-path.js"
 import { runCommand, type CommandResult } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
 import { isIssueFieldSource, resolveIssueFields, type IssueFields } from "./issue-fields.js"
+import {
+  classifyPrChecks,
+  parsePrStatusCheckRollupResult,
+} from "./github-pr-checks.js"
+import {
+  combinedGhOutput,
+  errorMessage,
+  extractPrNumberFromUrl,
+  parsePrList,
+  parsePrListWithDraft,
+  parsePrView,
+  parsePrViewWithDraft,
+} from "./github-pr-parse.js"
+import type {
+  CreateGitHubPrOutput,
+  GitHubPrErrorCode,
+  GitHubPrStep,
+  MarkGitHubPrReadyOutput,
+  MergeGitHubPrOutput,
+} from "./github-pr-types.js"
+
+export {
+  classifyPrChecks,
+  parsePrStatusCheckRollup,
+  type PrCheckEntry,
+} from "./github-pr-checks.js"
+export {
+  combinedGhOutput,
+  errorMessage,
+  extractPrNumberFromUrl,
+  parsePrList,
+  parsePrListWithDraft,
+  parsePrView,
+  parsePrViewWithDraft,
+} from "./github-pr-parse.js"
+export type {
+  CreateGitHubPrOutput,
+  GitHubPrErrorCode,
+  GitHubPrStep,
+  MarkGitHubPrReadyOutput,
+  MergeGitHubPrOutput,
+} from "./github-pr-types.js"
 
 type GitRunner = typeof defaultGit
 type GhRunner = typeof runCommand
@@ -67,67 +109,6 @@ export function setGitHubPrTransientRetryForTest(opts: { limit?: number; backoff
   }
   if (opts.limit !== undefined) ghTransientRetryLimit = Math.max(0, Math.floor(opts.limit))
   if (opts.backoffMs !== undefined) ghTransientRetryBackoffMs = Math.max(0, Math.floor(opts.backoffMs))
-}
-
-export type GitHubPrErrorCode =
-  | "base-moved"
-  | "retry-safe"
-  | "config-error"
-  | "protection-conflict"
-  | "pr-state-conflict"
-  | "pr-checks-unavailable"
-  | "pr-checks-failed"
-
-export interface GitHubPrStep {
-  name: string
-  command: string
-  exitCode: number
-  output: string
-}
-
-export interface CreateGitHubPrOutput {
-  kind: "create-github-pr"
-  status: "completed" | "failed"
-  source: string
-  targetBranch: string
-  branch: string | null
-  prNumber: number | null
-  prUrl: string | null
-  operation: "created" | "updated" | "reused" | null
-  baseSha: string | null
-  pushed: boolean
-  draft: boolean
-  errorCode: GitHubPrErrorCode | null
-  message: string | null
-  output: string
-  steps: GitHubPrStep[]
-}
-
-export interface MergeGitHubPrOutput {
-  kind: "merge-github-pr"
-  status: "completed" | "failed"
-  prNumber: number | null
-  prUrl: string | null
-  mergeCommitSha: string | null
-  method: "squash"
-  errorCode: GitHubPrErrorCode | null
-  message: string | null
-  output: string
-  steps: GitHubPrStep[]
-}
-
-export interface MarkGitHubPrReadyOutput {
-  kind: "mark-github-pr-ready"
-  status: "completed" | "failed"
-  prNumber: number | null
-  prUrl: string | null
-  state: "READY" | "DRAFT" | null
-  previousState: "READY" | "DRAFT" | null
-  transitioned: boolean
-  errorCode: GitHubPrErrorCode | null
-  message: string | null
-  output: string
-  steps: GitHubPrStep[]
 }
 
 export async function createGitHubPrAction(context: ActionContext): Promise<ActionResult> {
@@ -1002,97 +983,6 @@ async function runGhReadWithRetry(
   }
 }
 
-export interface PrCheckEntry {
-  name: string
-  bucket: string
-  state: string
-}
-
-type PrStatusCheckRollupParseResult =
-  | { kind: "ok"; checks: PrCheckEntry[] }
-  | { kind: "invalid"; message: string }
-
-export function parsePrStatusCheckRollup(stdout: string): PrCheckEntry[] {
-  const parsed = parsePrStatusCheckRollupResult(stdout)
-  return parsed.kind === "ok" ? parsed.checks : []
-}
-
-function parsePrStatusCheckRollupResult(stdout: string): PrStatusCheckRollupParseResult {
-  const trimmed = stdout.trim()
-  if (!trimmed) return { kind: "invalid", message: "gh pr view statusCheckRollup returned empty output" }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(trimmed)
-  } catch {
-    return { kind: "invalid", message: "gh pr view statusCheckRollup returned unparseable JSON" }
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { kind: "invalid", message: "gh pr view statusCheckRollup returned unexpected JSON" }
-  }
-  const rollup = (parsed as Record<string, unknown>)["statusCheckRollup"]
-  if (!Array.isArray(rollup)) {
-    return { kind: "invalid", message: "gh pr view statusCheckRollup did not include a statusCheckRollup array" }
-  }
-  const out: PrCheckEntry[] = []
-  for (const item of rollup) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) continue
-    const obj = item as Record<string, unknown>
-    const name = typeof obj["name"] === "string"
-      ? (obj["name"] as string)
-      : typeof obj["context"] === "string"
-        ? (obj["context"] as string)
-        : ""
-    const status = typeof obj["status"] === "string" ? (obj["status"] as string) : ""
-    const rawState = typeof obj["state"] === "string" ? (obj["state"] as string) : ""
-    const conclusion = typeof obj["conclusion"] === "string" ? (obj["conclusion"] as string) : ""
-    const state = conclusion || rawState || status
-    const bucket = classifyRollupBucket(status || rawState, conclusion)
-    out.push({ name, bucket, state })
-  }
-  return { kind: "ok", checks: out }
-}
-
-function classifyRollupBucket(status: string, conclusion: string): string {
-  const normalizedStatus = status.toUpperCase()
-  const normalizedConclusion = conclusion.toUpperCase()
-  if (normalizedConclusion === "SUCCESS") return "pass"
-  if (normalizedConclusion === "SKIPPED" || normalizedConclusion === "NEUTRAL") return "skip"
-  if (normalizedConclusion === "FAILURE" || normalizedConclusion === "ERROR" || normalizedConclusion === "CANCELLED" || normalizedConclusion === "ACTION_REQUIRED") return "fail"
-  if (normalizedStatus === "SUCCESS") return "pass"
-  if (normalizedStatus === "SKIPPED" || normalizedStatus === "NEUTRAL") return "skip"
-  if (normalizedStatus === "FAILURE" || normalizedStatus === "ERROR" || normalizedStatus === "CANCELLED" || normalizedStatus === "ACTION_REQUIRED") return "fail"
-  return "pending"
-}
-
-type PrChecksClassification =
-  | { kind: "pending" }
-  | { kind: "passed" }
-  | { kind: "failed"; message: string }
-
-export function classifyPrChecks(entries: PrCheckEntry[]): PrChecksClassification {
-  if (entries.length === 0) return { kind: "passed" }
-  const failed: string[] = []
-  for (const entry of entries) {
-    const bucket = (entry.bucket ?? "").toLowerCase()
-    if (bucket === "pending" || bucket === "") {
-      return { kind: "pending" }
-    }
-    if (bucket === "fail") {
-      failed.push(formatFailedCheck(entry))
-    }
-  }
-  if (failed.length > 0) {
-    return { kind: "failed", message: failed.join("; ") }
-  }
-  return { kind: "passed" }
-}
-
-function formatFailedCheck(entry: PrCheckEntry): string {
-  const label = entry.name || "unknown check"
-  const bucket = entry.bucket || "FAIL"
-  const state = entry.state && entry.state !== bucket ? ` (state=${entry.state})` : ""
-  return `${label} [bucket=${bucket}]${state}`
-}
 
 export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal): Promise<{ ok: true; output: string } | { ok: false; exitCode: number; output: string; message: string }> {
   const version = await gh("gh", ["--version"], workDir, signal)
@@ -1279,101 +1169,3 @@ export function looksLikeRetrySafe(text: string): boolean {
   return false
 }
 
-export function parsePrList(stdout: string): { number: number; url: string }[] {
-  const trimmed = stdout.trim()
-  if (!trimmed) return []
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(trimmed)
-  } catch {
-    return []
-  }
-  if (!Array.isArray(parsed)) return []
-  const out: { number: number; url: string }[] = []
-  for (const item of parsed) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) continue
-    const number = (item as Record<string, unknown>)["number"]
-    const url = (item as Record<string, unknown>)["url"]
-    if (typeof number === "number" && typeof url === "string") {
-      out.push({ number, url })
-    }
-  }
-  return out
-}
-
-export function parsePrListWithDraft(stdout: string): { number: number; url: string; isDraft: boolean }[] {
-  const trimmed = stdout.trim()
-  if (!trimmed) return []
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(trimmed)
-  } catch {
-    return []
-  }
-  if (!Array.isArray(parsed)) return []
-  const out: { number: number; url: string; isDraft: boolean }[] = []
-  for (const item of parsed) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) continue
-    const obj = item as Record<string, unknown>
-    const number = obj["number"]
-    const url = obj["url"]
-    const draft = obj["isDraft"]
-    if (typeof number === "number" && typeof url === "string") {
-      out.push({ number, url, isDraft: draft === true })
-    }
-  }
-  return out
-}
-
-interface PrViewState {
-  state?: string
-  url?: string
-  mergeCommit?: { oid?: string } | null
-  isDraft?: boolean
-  mergeStateStatus?: string
-}
-
-export function parsePrView(stdout: string): PrViewState | null {
-  return parsePrViewInternal(stdout, false)
-}
-
-export function parsePrViewWithDraft(stdout: string): PrViewState | null {
-  return parsePrViewInternal(stdout, true)
-}
-
-function parsePrViewInternal(stdout: string, includeDraft: boolean): PrViewState | null {
-  const trimmed = stdout.trim()
-  if (!trimmed) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(trimmed)
-  } catch {
-    return null
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
-  const obj = parsed as Record<string, unknown>
-  const state = typeof obj["state"] === "string" ? (obj["state"] as string) : undefined
-  const url = typeof obj["url"] === "string" ? (obj["url"] as string) : undefined
-  const rawMergeCommit = obj["mergeCommit"]
-  const mergeCommit = rawMergeCommit && typeof rawMergeCommit === "object" && !Array.isArray(rawMergeCommit)
-    ? { oid: typeof (rawMergeCommit as Record<string, unknown>)["oid"] === "string" ? ((rawMergeCommit as Record<string, unknown>)["oid"] as string) : undefined }
-    : null
-  const result: PrViewState = { state, url, mergeCommit, mergeStateStatus: typeof obj["mergeStateStatus"] === "string" ? (obj["mergeStateStatus"] as string) : undefined }
-  if (includeDraft) result.isDraft = obj["isDraft"] === true
-  return result
-}
-
-export function extractPrNumberFromUrl(url: string): number | null {
-  const match = url.match(/\/pull\/(\d+)/)
-  if (!match || !match[1]) return null
-  const n = Number(match[1])
-  return Number.isFinite(n) ? n : null
-}
-
-export function combinedGhOutput(result: { stdout: string; stderr: string }): string {
-  return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n")
-}
-
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}

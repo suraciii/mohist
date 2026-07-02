@@ -1,0 +1,52 @@
+# Issue #308 progress
+
+## Codebase Patterns
+
+- **Module split strategy**: 11 focused modules + a barrel (`github-pr.ts`) per design D1. Strict DAG, leaves first.
+- **Barrel transparency (D3)**: `registry.ts` and the three specs (`create-`, `merge-`, `mark-` github-pr specs) import the public surface from `./github-pr.js`. Internal-helpers compile unchanged when the barrel re-exports the relocated symbols; no spec import-line edit needed.
+- **Runner singletons**: still live as top-of-file mutable `let` in `github-pr.ts` (`git`/`gh`). Move to `github-pr-runtime.ts` in T-003.
+- **Test injection setters**: `setGitHubPrGitRunnerForTest`/`setGitHubPrGhRunnerForTest` (in github-pr.ts today, runtime in T-003). `setGitHubPrChecksTimingForTest`/`setGitHubPrTransientRetryForTest` (in github-pr.ts today, merge in T-004).
+- **ESM + NodeNext + `.js` extensions**: every internal `import` path uses `.js` (e.g. `./github-pr-parse.js`). `import type` for type-only imports.
+
+## T-001 — Extract pure leaf modules (types, parse, checks) and start the barrel
+
+**Done.** Three pure leaves created, `github-pr.ts` re-exports them, all 755 tests pass including the three action specs unchanged. No spec file import line changed; `registry.ts` import line unchanged.
+
+### Files created
+- `packages/runner/src/actions/github-pr-types.ts` — `GitHubPrErrorCode`, `GitHubPrStep`, and the three `*Output` interfaces (byte-identical property order).
+- `packages/runner/src/actions/github-pr-parse.ts` — `parsePrList`/`WithDraft`, `parsePrView`/`WithDraft`/`Internal`, `extractPrNumberFromUrl`, `combinedGhOutput`, `errorMessage`.
+- `packages/runner/src/actions/github-pr-checks.ts` — `PrCheckEntry`, `parsePrStatusCheckRollup` and its result parser (both exported; the latter was internal in the monolith), `classifyRollupBucket`, `classifyPrChecks`, `formatFailedCheck`.
+
+### File modified
+- `packages/runner/src/actions/github-pr.ts` — added imports + re-exports at the top; removed the relocated definitions. Org moved from 1379 → 1171 lines.
+
+### Key gotchas
+- **`parsePrStatusCheckRollupResult`** was originally file-private. The leaf's `parsePrStatusCheckRollup` (the public API) calls it. We renamed the leaf's private `function` to `export function` (still module-internal in spirit, but reachable from `github-pr.ts`) so `waitForPrChecks`'s internal call site `parsePrStatusCheckRollupResult(checksResult.stdout)` could keep compiling unchanged while satisfying the design's "(±result)" notation. `github-pr.ts` does NOT re-export it, so the public action surface is unaffected.
+- **`parsePrList` etc.**: leaf exports them verbatim — no behavioral change. `extractPrNumberFromUrl` and `PrViewState` move with them.
+- **TypeScript type-only re-export**: `export type { ... }` is required for `interface`/`type` re-export under `isolatedModules` semantics; value re-export uses `export { ... }`. Mixing the two keeps each symbol in the correct export kind.
+- **`import { type PrCheckEntry }` inside `export {...}` block** — TypeScript syntax for re-exporting a type alongside values in a single `export {}` block.
+
+### Acceptance criteria status
+- [x] The three new leaves exist under `packages/runner/src/actions/` and contain the relocated symbols verbatim.
+- [x] The three `*Output` interfaces retain their exact declaration-order properties.
+- [x] `github-pr.ts` re-exports the relocated symbols so the four callers (registry.ts + 3 specs) compile with NO import-line edit.
+- [x] `npm run typecheck -w packages/runner` exits 0.
+- [x] `npm test -w packages/runner` is green; the three action specs pass unchanged.
+
+### Verification commands run
+```
+npm run typecheck -w packages/runner   # exits 0
+npm run build -w packages/runner       # succeeds (postbuild writes build-info.json)
+npm test -w packages/runner            # 56 files, 755 tests pass
+```
+The three target specs:
+- `create-github-pr.spec.ts` — 8 tests pass
+- `merge-github-pr.spec.ts` — 21 tests pass
+- `mark-github-pr-ready.spec.ts` — 9 tests pass
+
+### Notes for downstream tasks
+- **T-002 (classifier matrix)**: `classifyGhFailure` + `classifyPushFailure` + the five `looksLike*` matchers all remain in `github-pr.ts` at lines ~1097–~1170. Move verbatim to `github-pr-classify.ts` (a leaf — depends only on `github-pr-types.ts` for `GitHubPrErrorCode`). The leaf should re-export `classifyGhFailure` etc. AND `github-pr.ts` should re-export them so all callers (internal + tests) compile unchanged.
+- **T-003 (runtime)**: `git`/`gh` runners stay in `github-pr.ts` for now; relocate to `github-pr-runtime.ts`. Export `getGitHubPrGit()` / `getGitHubPrGh()` getters (NOT exported `let` bindings — set-then-get must stay live). Helpers keep runner **parameter** signatures; only orchestrators call the getter once.
+- **T-004 (merge pipeline)**: `waitChecksAndMergePr`, `waitForPrChecks`, `mergeStateStatusFailure`, `runGhReadWithRetry`, `delayWithSignal`, `WaitChecksAndMergeOk`/`Failure` types, plus `PrChecksWaitResult` (internal) all stay in `github-pr.ts`. Move to `github-pr-merge.ts` along with the two timing/retry setters and their internal `let` knobs (`prChecksPollIntervalMs`, `prChecksNoChecksGraceMs`, `prChecksUnavailableRetryLimit`, `ghTransientRetryLimit`, `ghTransientRetryBackoffMs`).
+- **T-005 (issue-fields + orchestrators split)**: `resolveCreatePrText`, `resolveMergeSubject`, `validateIssueFieldSource`, `loadIssueFields`, `resolveIssueFieldValue`, `requiredIssueFields` move to `github-pr-issue-fields.ts`. The orchestrator functions + their git-ref probes (`openOrReusePr`/`resolveCurrentBranch`/`resolveBaseSha`/`BaseShaOk`/`BaseShaFailure`) go to `create-github-pr.ts`. Output adapters fold into their orchestrators byte-identical.
+- **Test files untouched**: confirm `git diff packages/runner/tests/` is empty after this task; it is.
