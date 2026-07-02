@@ -67,7 +67,7 @@ const CHART_GROUPS: readonly GroupSpec[] = [
       </>
     ),
   },
-] as const
+]
 
 export function InsightsCharts() {
   return (
