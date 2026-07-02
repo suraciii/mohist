@@ -140,7 +140,7 @@ Agent cost windowed (`GetCostWindowedAsync`) simply substitutes its 30-day liter
 **Deploy order:** server first, then web. The server change is strictly additive (new optional `range` param + `int? windowDays`; omit ⇒ today), so it can ship and be validated against the unchanged web/Dashboard before the selector appears.
 
 1. **Server — shared type (D1):** add `MetricsRange` parse/validate helper + the day-count map.
-2. **Server — queriers:** add `int? windowDays` to the seven methods (completion, delivery-time, stage-duration, quality, cumulative-flow, approval-wait, cost-windowed, usage) substituting each fixed literal; default each to today's value on null.
+2. **Server — queriers:** add `int? windowDays` to the eight methods (completion, delivery-time, stage-duration, quality, cumulative-flow, approval-wait, cost-windowed, usage) substituting each fixed literal; default each to today's value on null.
 3. **Server — routes:** bind `string? range` on the eight endpoints, validate presets ⇒ 400 on unknown, pass `windowDays` through. Supersede the CFD D6 doc-comments.
 4. **Server — validate:** `npm test` (server) green, including updated CFD/quality/usage specs and new range scenarios (D7).
 5. **Web — hooks:** add optional `range?: InsightsRange` to the eight hooks (URL + queryKey); leave `useApprovalWait`/`useEpics` unchanged.
