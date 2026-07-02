@@ -1,3 +1,5 @@
+## ADDED Requirements
+
 ### Requirement: System workflow profile description is sourced solely from the workflow YAML
 
 Every system workflow profile's user-facing description SHALL be sourced solely from the workflow YAML `description` field via the profile's parsed `WorkflowDefinition`. No system workflow profile SHALL expose a description read from a compiled-in C# string constant. Both built-in profiles (`mohist/local`, `mohist/github-pr`) SHALL resolve their `Description` from their respective `WorkflowDefinition.Description` (`MohistWorkflow.Definition` and `MohistWorkflow.GithubPrWorkflowDefinition`), exactly as `mohist/local` already does. The `MohistGithubPrIssueWorkflowProfile.GithubPrDescription` constant and every reference to it SHALL be removed.
