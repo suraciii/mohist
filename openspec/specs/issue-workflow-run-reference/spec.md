@@ -66,19 +66,19 @@ Internal domain fields, exceptions, logs, and judgments SHALL refer to the issue
 - **THEN** the decision SHALL combine the issue's status and the workflow run's state
 - **AND** SHALL NOT be expressed as `workflowRunId != null`
 
-### Requirement: Background reconciliation skips non-in-progress issues
+### Requirement: Workflow status read path is a pure query
 
-The background workflow reconciliation sweep SHALL only consider issues whose status is `InProgress` as candidates for stuck-run recovery. Archived issues (which are `Done`) and other non-`InProgress` issues SHALL NOT be pulled as reconciliation candidates, even when they carry a preserved `workflowRunId`. The candidate query SHALL exclude archived/done issues rather than relying on a null `workflowRunId` to filter them out.
+`IssueGrain.GetWorkflowStatusAsync` SHALL be a pure query: it SHALL return the bound workflow run's projected status/state without mutating the issue's own status and without producing any write side-effect. The read path SHALL NOT perform lazy terminal-state reconciliation (e.g. `ReconcileWithWorkflowTerminalStateAsync`) or otherwise advance an issue toward `Done`. Issue terminal-state transitions SHALL be driven solely by command/event paths (see `issue-workflow-completion`), never by the read path, preserving command/query separation.
 
-#### Scenario: Archived issue is not swept as a stuck run
+#### Scenario: Read path reports a completed run without transitioning the issue
 
-- **WHEN** the background reconciliation sweep runs
-- **AND** an archived `Done` issue has a preserved `workflowRunId`
-- **THEN** the sweep SHALL NOT select that issue as a reconciliation candidate
-- **AND** SHALL NOT trigger workflow status recovery for it
+- **WHEN** `GetWorkflowStatusAsync` is called for an `InProgress` issue whose bound workflow run has reached `Completed`
+- **THEN** it SHALL return the workflow run's completed status
+- **AND** SHALL NOT transition the issue to `Done`
+- **AND** SHALL NOT invoke any reconciliation write
 
-#### Scenario: In-progress issue with reference is still swept
+#### Scenario: Read path never mutates issue state
 
-- **WHEN** the background reconciliation sweep runs
-- **AND** an `InProgress` issue has a non-null `workflowRunId`
-- **THEN** the sweep SHALL select that issue for status reconciliation
+- **WHEN** `GetWorkflowStatusAsync` is called any number of times for an issue
+- **THEN** no call SHALL mutate the issue's status or any persisted issue field
+- **AND** no call SHALL perform terminal-state reconciliation as a side-effect of the read
