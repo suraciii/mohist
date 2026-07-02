@@ -1,0 +1,28 @@
+{
+  "project": "mohist-local",
+  "description": "Unify the mohist/github-pr workflow description source to its workflow YAML, removing the parallel C# constant so both built-in profiles resolve the user-facing description from the parsed WorkflowDefinition.Description as the single source of truth.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Resolve github-pr description from YAML and retire the compiled constant across profile, manager, and specs",
+      "spec": "specs/workflow-profile-description/spec.md#both-built-in-workflow-profiles-resolve-their-description-from-the-workflow-yaml-as-the-single-source-of-truth",
+      "description": "Delete the `public const string GithubPrDescription` from `MohistGithubPrIssueWorkflowProfile` and add a private static `ResolveDescription()` helper that mirrors `MohistLocalIssueWorkflowProfile.ResolveDescription()` — reading `MohistWorkflow.GithubPrWorkflowDefinition.Description` with the same \"No description provided\" empty fallback — then flip the `Description` override to call it. Rewrite the github-pr branch of `ProjectWorkflowProfileManager.BuildSystemTemplates()` to read `GithubPrWorkflowDefinition.Description` (with the same empty fallback) instead of the deleted constant, dropping the `.TrimEnd()` so the branch is byte-for-byte identical in shape to the local branch. In `MohistPrIssueWorkflowProfileSpecs.cs`, remove the `_AsConstant` case (its symbol is gone), keep the existing substring assertions (`gh`, `gh auth login`, `GitHub PR`) that still pass against the YAML, and add source-equality assertions that `profile.Description` and the github-pr `SystemTemplateInfo.Description` both equal `MohistWorkflow.GithubPrWorkflowDefinition.Description`. These edits must land together because deleting the const breaks compilation at both call sites until both are updated.",
+      "acceptanceCriteria": [
+        "Repo-wide grep for `GithubPrDescription` returns zero hits (the const and every reference to it are gone).",
+        "`MohistGithubPrIssueWorkflowProfile.Description` returns `MohistWorkflow.GithubPrWorkflowDefinition.Description` with a \"No description provided\" empty fallback, structurally mirroring `MohistLocalIssueWorkflowProfile.ResolveDescription()` (same helper name, same shape, same fallback string).",
+        "`ProjectWorkflowProfileManager.BuildSystemTemplates()` reads `GithubPrWorkflowDefinition.Description` for the github-pr branch with the same empty fallback and no `.TrimEnd()`, so the local and github-pr branches assemble the description identically.",
+        "The `_AsConstant` spec case is removed; the existing `gh` / `gh auth login` / `GitHub PR` substring assertions on `profile.Description` and `SystemTemplateInfo.Description` remain green against the YAML source.",
+        "New source-equality assertions verify `profile.Description` and the github-pr `SystemTemplateInfo.Description` both equal `MohistWorkflow.GithubPrWorkflowDefinition.Description`.",
+        "`dotnet build Mohist.sln` succeeds (`TreatWarningsAsErrors` acts as the lint gate, catching any dangling reference).",
+        "`npm test` (C# suite, including `MohistPrIssueWorkflowProfileSpecs` and `ProjectWorkflowProfileManager` specs) passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/MohistGithubPrIssueWorkflowProfile.cs`, `packages/server/src/Mohist.Server/Workflow/Services/ProjectWorkflowProfileManager.cs`, and `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs`; green `dotnet build Mohist.sln` + C# spec run.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D1/D2/D3 mandates these land in one commit — the const is referenced from both the profile and BuildSystemTemplates, so deleting it without updating both is a compile break. Non-goals: do not change `WorkflowYamlSerializer` parsing logic; do not reposition the YAML description wording (tracked separately)."
+    }
+  ]
+}
