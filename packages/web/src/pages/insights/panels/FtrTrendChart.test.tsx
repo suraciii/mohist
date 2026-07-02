@@ -497,4 +497,37 @@ describe('FtrTrendChart', () => {
     expect(screen.getByText('Jun 1')).toBeInTheDocument()
     expect(screen.getByText('Jun 7')).toBeInTheDocument()
   })
+
+  // --- Window annotation ---
+
+  it('renders a window badge derived from trend.from/trend.to when trend is present', () => {
+    useQualityMetricsMock.mockReturnValue({
+      data: buildTrendData(),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderChart()
+
+    const badge = screen.getByTestId('ftr-trend-chart-window')
+    expect(badge).toBeInTheDocument()
+    expect(badge.textContent).toContain('Jun 1')
+    expect(badge.textContent).toContain('Jun 30')
+  })
+
+  it('hides the window badge in the empty state when trend is missing', () => {
+    useQualityMetricsMock.mockReturnValue({
+      data: {
+        window7d: makeWindow(10, 0.7),
+        window30d: makeWindow(20, 0.65),
+      },
+      isLoading: false,
+      isError: false,
+    })
+
+    renderChart()
+
+    expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
+    expect(screen.queryByTestId('ftr-trend-chart-window')).not.toBeInTheDocument()
+  })
 })

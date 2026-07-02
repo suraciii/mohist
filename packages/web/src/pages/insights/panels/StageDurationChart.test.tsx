@@ -458,4 +458,34 @@ describe('StageDurationChart', () => {
 
     expect(screen.getByText('Stage Duration')).toBeInTheDocument()
   })
+
+  // --- Window annotation ---
+
+  it('renders a window badge derived from the endpoint window when stages are populated', () => {
+    mockMatchMedia(false)
+    mockUseStageDuration.mockReturnValue({
+      data: buildData({
+        window: { from: '2026-06-01T00:00:00+00:00', to: '2026-07-01T00:00:00+00:00' },
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    render(<StageDurationChart />)
+
+    const badge = screen.getByTestId('stage-duration-chart-window')
+    expect(badge).toBeInTheDocument()
+    expect(badge.textContent).toContain('Jun 1')
+    expect(badge.textContent).toContain('Jul 1')
+  })
+
+  it('hides the window badge in the empty state', () => {
+    mockMatchMedia(false)
+    mockUseStageDuration.mockReturnValue({ data: undefined, isLoading: false, isError: false })
+
+    render(<StageDurationChart />)
+
+    expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
+    expect(screen.queryByTestId('stage-duration-chart-window')).not.toBeInTheDocument()
+  })
 })

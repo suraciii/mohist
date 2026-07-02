@@ -100,7 +100,15 @@ export function CycleTimeChart() {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Cycle Time
         </h3>
-        <LensToggle value={lens} onChange={setLens} />
+        <div className="flex items-center gap-2">
+          <span
+            data-testid="cycle-time-chart-window"
+            className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs tabular-nums text-muted-foreground"
+          >
+            30d
+          </span>
+          <LensToggle value={lens} onChange={setLens} />
+        </div>
       </div>
       <ChartContainer
         status={status}

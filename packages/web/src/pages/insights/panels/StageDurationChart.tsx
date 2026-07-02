@@ -61,6 +61,17 @@ function formatStageDuration(seconds: number): string {
   return `${Math.round(seconds)}s`
 }
 
+function formatStageWindowDayLabel(iso: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
+  if (!match) return iso
+  const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function formatStageWindow(data: StageDurationMetricsResponse): string {
+  return `${formatStageWindowDayLabel(data.window.from)} – ${formatStageWindowDayLabel(data.window.to)}`
+}
+
 function valueFor(stage: StageDurationStageDto, lens: DurationLens): number | null {
   return lens === 'median' ? stage.medianSeconds : stage.averageSeconds
 }
@@ -96,7 +107,17 @@ export function StageDurationChart() {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Stage Duration
         </h3>
-        <LensToggle value={lens} onChange={setLens} />
+        <div className="flex items-center gap-2">
+          {hasPlottableStages(data) && (
+            <span
+              data-testid="stage-duration-chart-window"
+              className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs tabular-nums text-muted-foreground"
+            >
+              {formatStageWindow(data)}
+            </span>
+          )}
+          <LensToggle value={lens} onChange={setLens} />
+        </div>
       </div>
       <ChartContainer
         status={status}
