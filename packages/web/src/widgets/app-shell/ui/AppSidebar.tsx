@@ -15,6 +15,7 @@ import {
   PowerOffIcon,
   InboxIcon,
   BotIcon,
+  SparklesIcon,
 } from 'lucide-react'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
@@ -56,6 +57,7 @@ interface NavItem {
 
 const primaryNav: readonly NavItem[] = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, to: '/', scope: 'project' },
+  { key: 'insights', label: 'Insights', icon: SparklesIcon, to: '/insights', scope: 'project' },
   { key: 'issues', label: 'Issues', icon: ListTodoIcon, to: '/issues', scope: 'project' },
   { key: 'agents', label: 'Agents', icon: BotIcon, to: '/agents', scope: 'project' },
   { key: 'inbox', label: 'Inbox', icon: InboxIcon, to: '/inbox', scope: 'project' },

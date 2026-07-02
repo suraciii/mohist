@@ -33,6 +33,8 @@ export interface QualityTrendDto {
 export interface QualityMetricsResponse {
   window7d: QualityMetricsWindowDto
   window30d: QualityMetricsWindowDto
+  previousFirstTimeRightRate?: number | null
+  previousSampleCount?: number
   trend?: QualityTrendDto
 }
 

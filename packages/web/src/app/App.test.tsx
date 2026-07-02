@@ -28,6 +28,14 @@ const logsMocks = vi.hoisted(() => ({
   useLogs: vi.fn(),
 }))
 
+const metricsMocks = vi.hoisted(() => ({
+  useCompletionThroughput: vi.fn(),
+  useDeliveryTime: vi.fn(),
+  useQualityMetrics: vi.fn(),
+  useCostRollup: vi.fn(),
+  useStageDuration: vi.fn(),
+}))
+
 const TEST_PROJECT = {
   id: 'test-project',
   name: 'demo',
@@ -51,6 +59,7 @@ vi.mock('../entities/agent', async (importOriginal) => {
     useAgentStatus: () => ({
       data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } },
     }),
+    useCostRollup: metricsMocks.useCostRollup,
   }
 })
 
@@ -80,6 +89,17 @@ vi.mock('../entities/inbox', async (importOriginal) => {
 vi.mock('../pages/logs/model/useLogs', () => ({
   useLogs: logsMocks.useLogs,
 }))
+
+vi.mock('../entities/issue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../entities/issue')>()
+  return {
+    ...actual,
+    useCompletionThroughput: metricsMocks.useCompletionThroughput,
+    useDeliveryTime: metricsMocks.useDeliveryTime,
+    useQualityMetrics: metricsMocks.useQualityMetrics,
+    useStageDuration: metricsMocks.useStageDuration,
+  }
+})
 
 function renderApp() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -118,6 +138,11 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
       truncated: false,
       file: null,
     })
+    metricsMocks.useCompletionThroughput.mockReturnValue({ data: undefined, isLoading: false })
+    metricsMocks.useDeliveryTime.mockReturnValue({ data: undefined, isLoading: false })
+    metricsMocks.useQualityMetrics.mockReturnValue({ data: undefined, isLoading: false })
+    metricsMocks.useCostRollup.mockReturnValue({ data: undefined, isLoading: false })
+    metricsMocks.useStageDuration.mockReturnValue({ data: undefined, isLoading: false })
   })
 
   afterEach(() => {
@@ -155,6 +180,18 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
     expect(getByTestId('inbox-title')).toHaveTextContent('Inbox')
     expect(inboxMocks.useInbox).toHaveBeenCalled()
   })
+
+  it('routes /:projectName/insights to the Insights page and keeps the Dashboard unreachable on the same URL', () => {
+    window.history.replaceState({}, '', '/demo/insights')
+
+    const { getByTestId, queryByTestId } = renderApp()
+
+    expect(getByTestId('insights-title')).toHaveTextContent('Insights')
+    expect(getByTestId('signal-summary')).toBeInTheDocument()
+    expect(getByTestId('insights-chart-placeholder')).toBeInTheDocument()
+    // Dashboard content must not appear on the insights route.
+    expect(queryByTestId('dashboard-page')).toBeNull()
+  })
 })
 
 describe('App routing split for settings scopes', () => {
@@ -178,6 +215,11 @@ describe('App routing split for settings scopes', () => {
       truncated: false,
       file: null,
     })
+    metricsMocks.useCompletionThroughput.mockReturnValue({ data: undefined, isLoading: false })
+    metricsMocks.useDeliveryTime.mockReturnValue({ data: undefined, isLoading: false })
+    metricsMocks.useQualityMetrics.mockReturnValue({ data: undefined, isLoading: false })
+    metricsMocks.useCostRollup.mockReturnValue({ data: undefined, isLoading: false })
+    metricsMocks.useStageDuration.mockReturnValue({ data: undefined, isLoading: false })
   })
 
   afterEach(() => {
