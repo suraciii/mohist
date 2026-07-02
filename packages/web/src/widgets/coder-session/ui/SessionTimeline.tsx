@@ -145,12 +145,13 @@ const WORKFLOW_STAGES = [
   { key: 'build', label: 'Build' },
   { key: 'check', label: 'Check' },
   { key: 'integrate', label: 'Integrate' },
-  { key: 'done', label: 'Done' },
 ]
 
 export function WorkflowStatusTimeline({ currentStage }: { currentStage: string }) {
-  const stageOrder = ['backlog', 'plan', 'build', 'check', 'integrate', 'done']
-  const currentIndex = stageOrder.indexOf(currentStage)
+  const stageOrder = ['backlog', 'plan', 'build', 'check', 'integrate']
+  const currentIndex = currentStage === 'done'
+    ? stageOrder.length
+    : stageOrder.indexOf(currentStage)
 
   return (
     <div className="flex items-center gap-1 mb-4">
@@ -158,9 +159,15 @@ export function WorkflowStatusTimeline({ currentStage }: { currentStage: string 
         const stageIdx = stageOrder.indexOf(stage.key)
         const isCompleted = currentIndex > stageIdx
         const isCurrent = currentIndex === stageIdx
+        const stageState = isCompleted ? 'completed' : isCurrent ? 'current' : 'pending'
 
         return (
-          <div key={stage.key} className="flex items-center gap-1">
+          <div
+            key={stage.key}
+            className="flex items-center gap-1"
+            data-testid={`workflow-status-stage-${stage.key}`}
+            data-state={stageState}
+          >
             {i > 0 && (
               <div className={`h-0.5 w-4 ${isCompleted || isCurrent ? 'bg-blue-500' : 'bg-gray-200'}`} />
             )}

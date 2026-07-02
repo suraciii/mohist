@@ -259,7 +259,7 @@ describe('WorkflowView', () => {
     expect(stageBar).toHaveClass('overflow-x-auto', 'flex-nowrap')
     expect(screen.queryByTestId('workflow-stage-bar')).not.toBeInTheDocument()
 
-    for (const label of ['Plan', 'Build', 'Check', 'Integrate', 'Done']) {
+    for (const label of ['Plan', 'Build', 'Check', 'Integrate']) {
       const stageButton = screen.getByRole('button', { name: new RegExp(label, 'i') })
       expect(stageButton).toBeInTheDocument()
       expect(stageButton).toHaveClass('min-w-32', 'shrink-0')
@@ -268,6 +268,8 @@ describe('WorkflowView', () => {
       expect(labelNode).toHaveClass('whitespace-nowrap')
       expect(labelNode).not.toHaveClass('truncate')
     }
+
+    expect(screen.queryByRole('button', { name: /^done$/i })).not.toBeInTheDocument()
   })
 
   it('does not request workflow timeline for backlog issues', () => {

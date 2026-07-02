@@ -71,7 +71,6 @@ public static class MohistServiceRegistration
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddSingleton<IUserNotificationDispatcher, UserNotificationDispatcher>();
         services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
-        services.AddHostedService<IssueWorkflowReconciliationService>();
         services.AddHostedService<AttachmentCleanupService>();
         services.AddHostedService<EpicReconciliationService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());

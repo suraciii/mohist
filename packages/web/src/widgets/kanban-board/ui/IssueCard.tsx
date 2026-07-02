@@ -21,12 +21,11 @@ interface Props {
 
 type StatusIndicator = 'blocked' | 'cancelled' | 'approval' | 'running' | 'waiting' | 'drift' | null
 
-const WORKFLOW_STAGE_LABELS: Record<WorkflowStage, string> = {
+const WORKFLOW_STAGE_LABELS: Partial<Record<WorkflowStage, string>> = {
   [WorkflowStage.Plan]: 'Plan',
   [WorkflowStage.Build]: 'Build',
   [WorkflowStage.Check]: 'Check',
   [WorkflowStage.Integrate]: 'Integrate',
-  [WorkflowStage.Done]: 'Done',
 }
 
 const SYSTEM_DEFAULT_WORKFLOW_PROFILE_ID = 'mohist/local'
@@ -132,8 +131,8 @@ function StatusPill({ indicator }: { indicator: StatusIndicator }) {
 }
 
 function WorkflowStagePill({ issue }: { issue: Issue }) {
-  const stage = issue.status === IssueStatus.Done ? WorkflowStage.Done : issue.workflowStage
-  if (!stage) return null
+  const stage = issue.workflowStage
+  if (!stage || !WORKFLOW_STAGE_LABELS[stage]) return null
 
   const colors = getStageColors(
     issue.status === IssueStatus.Done

@@ -839,7 +839,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       expect(summary).toBeNull()
     })
 
-    it('does not render an integrating badge on completed issue cards', () => {
+    it('renders the real workflow stage on completed issue cards', () => {
       const doneIntegratedIssue = makeIssue({
         number: 43,
         title: 'Completed integrated issue',
@@ -859,7 +859,9 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
       expect(screen.getAllByText('Completed integrated issue').length).toBeGreaterThan(0)
       expect(screen.queryByTestId('integration-badge')).not.toBeInTheDocument()
-      expect(screen.getAllByTestId('workflow-stage-badge').map((el) => el.textContent)).toContain('Done')
+      const stageBadges = screen.getAllByTestId('workflow-stage-badge').map((el) => el.textContent)
+      expect(stageBadges).toContain('Integrate')
+      expect(stageBadges).not.toContain('Done')
       expect(screen.queryByText(/Integrating/i)).not.toBeInTheDocument()
     })
 

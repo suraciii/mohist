@@ -19,7 +19,7 @@ export function PriorityChip({ priority }: { priority: string | null | undefined
 }
 
 export function WorkflowStagePill({ stage }: { stage: WorkflowStage | undefined }) {
-  if (!stage) return null
+  if (!stage || !WORKFLOW_STAGE_LABELS[stage]) return null
   const colors = getStageColors(stageToIssueStatus(stage))
   return (
     <span

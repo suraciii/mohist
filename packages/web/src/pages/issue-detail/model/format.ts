@@ -1,17 +1,15 @@
 import { IssueStatus, WorkflowStage, type AttachmentInfo } from '../../../entities/issue'
 import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
 
-export const WORKFLOW_STAGE_LABELS: Record<WorkflowStage, string> = {
+export const WORKFLOW_STAGE_LABELS: Partial<Record<WorkflowStage, string>> = {
   [WorkflowStage.Plan]: 'Plan',
   [WorkflowStage.Build]: 'Build',
   [WorkflowStage.Check]: 'Check',
   [WorkflowStage.Integrate]: 'Integrate',
-  [WorkflowStage.Done]: 'Done',
 }
 
 export function stageToIssueStatus(stage: WorkflowStage | undefined): IssueStatus {
   if (!stage) return IssueStatus.Backlog
-  if (stage === WorkflowStage.Done) return IssueStatus.Done
   return IssueStatus.InProgress
 }
 
