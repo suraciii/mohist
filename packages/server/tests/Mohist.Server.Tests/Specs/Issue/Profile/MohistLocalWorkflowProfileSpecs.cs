@@ -1122,7 +1122,8 @@ public class MohistLocalWorkflowProfileSpecs
     {
         var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
 
-        Assert.Equal(MohistWorkflow.Definition.Description, profile.Description);
+        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), profile.Description);
+        Assert.Equal(MohistWorkflow.Definition.Description!.TrimEnd(), profile.Description);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -1166,7 +1167,7 @@ public class MohistLocalWorkflowProfileSpecs
 
         var defaultEntry = Assert.Single(list, info => info.Id == "mohist/local");
         Assert.True(defaultEntry.IsDefault);
-        Assert.Equal(MohistWorkflow.Definition.Description, defaultEntry.Description);
+        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), defaultEntry.Description);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -1180,7 +1181,7 @@ public class MohistLocalWorkflowProfileSpecs
 
         var defaultTemplate = Assert.Single(templates, t => t.Id == "mohist/local");
         Assert.True(defaultTemplate.IsDefault);
-        Assert.Equal(MohistWorkflow.Definition.Description, defaultTemplate.Description);
+        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), defaultTemplate.Description);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

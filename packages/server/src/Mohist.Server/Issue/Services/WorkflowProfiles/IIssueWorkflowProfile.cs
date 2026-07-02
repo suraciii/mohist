@@ -10,7 +10,6 @@ public interface IIssueWorkflowProfile
     string DisplayName { get; }
     string Description { get; }
     bool IsDefault { get; }
-    IReadOnlyList<string> SuitableFor { get; }
     WorkflowDefinition Definition { get; }
     MohistDefaultWorkflowState ProjectWorkflowState(Domain.Issue issue, WorkflowStatusView? workflow);
     MohistDefaultWorkflowState ProjectWorkflowState(IssueReadModel issue, WorkflowStatusView? workflow);

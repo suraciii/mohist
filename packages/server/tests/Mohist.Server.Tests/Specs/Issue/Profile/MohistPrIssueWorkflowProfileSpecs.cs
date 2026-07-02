@@ -32,7 +32,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("Mohist GitHub PR", profile.DisplayName);
         Assert.False(profile.IsDefault);
         Assert.False(string.IsNullOrWhiteSpace(profile.Description));
-        Assert.NotEmpty(profile.SuitableFor);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -50,21 +49,12 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void MohistGithubPrIssueWorkflowProfile_SuitableForSignalsGeneralPurpose()
+    public void MohistGithubPrIssueWorkflowProfile_DescriptionReadsFromGithubPrYaml()
     {
         var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
 
-        Assert.Contains(profile.SuitableFor, s => s.Contains("general-purpose", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
-    public void MohistGithubPrIssueWorkflowProfile_DescriptionSurfacesGhCliPrerequisite_AsConstant()
-    {
-        Assert.Contains("gh", MohistGithubPrIssueWorkflowProfile.GithubPrDescription, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("gh auth login", MohistGithubPrIssueWorkflowProfile.GithubPrDescription, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("GitHub PR", MohistGithubPrIssueWorkflowProfile.GithubPrDescription, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.GithubPrWorkflowDefinition), profile.Description);
+        Assert.EndsWith("`gh` CLI on the runner host and `gh auth login` against the target repository.", profile.Description);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -160,7 +150,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void Registry_ListDescribed_IncludesSuitableForForBothBuiltIns()
+    public void Registry_ListDescribed_ExposesDescriptionForBothBuiltIns()
     {
         var registry = BuildRegistry();
 
@@ -170,8 +160,10 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var defaultEntry = Assert.Single(described, d => d.Id == "mohist/local");
         var prEntry = Assert.Single(described, d => d.Id == "mohist/github-pr");
 
-        Assert.NotEmpty(defaultEntry.SuitableFor);
-        Assert.NotEmpty(prEntry.SuitableFor);
+        Assert.False(string.IsNullOrWhiteSpace(defaultEntry.Description));
+        Assert.False(string.IsNullOrWhiteSpace(prEntry.Description));
+        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), defaultEntry.Description);
+        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.GithubPrWorkflowDefinition), prEntry.Description);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -685,6 +677,28 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("gh auth login", prTemplate.Description, StringComparison.OrdinalIgnoreCase);
 
         Assert.DoesNotContain(templates, t => t.Id == "mohist/pr");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task BothCatalogPaths_AgreeWithProfileInstanceForBothBuiltIns()
+    {
+        var registry = BuildRegistry();
+        var manager = new ProjectWorkflowProfileManager(new FakeDbContextFactory(), new FakePromptLoader(), new PromptTemplateEngine());
+
+        var templates = await manager.ListSystemTemplatesAsync();
+        var described = registry.ListDescribed();
+
+        foreach (var profileId in new[] { IssueWorkflowProfiles.LocalId, IssueWorkflowProfiles.GithubPrId })
+        {
+            var profile = registry.Get(profileId);
+            var template = Assert.Single(templates, t => t.Id == profileId);
+            var describedEntry = Assert.Single(described, d => d.Id == profileId);
+
+            Assert.Equal(profile.Description, template.Description);
+            Assert.Equal(profile.Description, describedEntry.Description);
+        }
     }
 
     // ===================== Helpers =====================

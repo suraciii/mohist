@@ -448,7 +448,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
 
         Assert.True(defaultTemplate.GetProperty("isDefault").GetBoolean());
         var description = defaultTemplate.GetProperty("description").GetString();
-        Assert.Equal(MohistWorkflow.Definition.Description, description);
+        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), description);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -464,7 +464,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
 
         Assert.True(data.GetProperty("isDefault").GetBoolean());
         Assert.Equal("Mohist Local", data.GetProperty("displayName").GetString());
-        Assert.Equal(MohistWorkflow.Definition.Description, data.GetProperty("description").GetString());
+        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), data.GetProperty("description").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
