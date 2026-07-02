@@ -87,16 +87,31 @@ export function formatPriority(priority: string): string {
   return priority.toUpperCase()
 }
 
+const PRIORITY_STRIP_COLORS: Record<string, string> = {
+  p0: '#dc2626',
+  p1: '#ea580c',
+  p2: '#ca8a04',
+  p3: '#16a34a',
+  p4: '#6b7280',
+}
+
+const PRIORITY_STRIP_FALLBACK = '#6b7280'
+
+export function getPriorityStripColor(priority: string | null | undefined): string {
+  if (!priority) return PRIORITY_STRIP_FALLBACK
+  return PRIORITY_STRIP_COLORS[priority] ?? PRIORITY_STRIP_FALLBACK
+}
+
 const PRIORITY_COLORS: Record<string, { bg: string; text: string }> = {
-  p0: { bg: '#fee2e2', text: '#dc2626' },
-  p1: { bg: '#fee2e2', text: '#dc2626' },
-  p2: { bg: '#fef9c3', text: '#ca8a04' },
-  p3: { bg: '#dcfce7', text: '#16a34a' },
-  p4: { bg: '#f3f4f6', text: '#6b7280' },
+  p0: { bg: '#fee2e2', text: '#7f1d1d' },
+  p1: { bg: '#ffedd5', text: '#7c2d12' },
+  p2: { bg: '#fef9c3', text: '#713f12' },
+  p3: { bg: '#dcfce7', text: '#14532d' },
+  p4: { bg: '#f3f4f6', text: '#1f2937' },
 }
 
 export function getPriorityStyle(priority: string): { bg: string; text: string } {
-  return PRIORITY_COLORS[priority] ?? { bg: '#fef9c3', text: '#ca8a04' }
+  return PRIORITY_COLORS[priority] ?? { bg: '#fef9c3', text: '#713f12' }
 }
 
 const RISK_COLORS: Record<string, { bg: string; text: string }> = {
