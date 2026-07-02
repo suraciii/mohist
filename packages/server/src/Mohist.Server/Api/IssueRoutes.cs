@@ -21,6 +21,7 @@ public static partial class IssueRoutes
         projectIssues.MapIssueQualityMetrics();
         projectIssues.MapIssueDeliveryTimeMetrics();
         projectIssues.MapIssueStageDurationMetrics();
+        projectIssues.MapIssueCumulativeFlow();
 
         return app;
     }

@@ -386,3 +386,36 @@ public sealed record StageDurationStageDto(
 public sealed record StageDurationWaitBreakoutDto(
     double? AverageApprovalGateWaitSeconds,
     double? AverageInactiveGapSeconds);
+
+/// <summary>
+/// Response shape for the cumulative-flow metrics endpoint. The endpoint
+/// returns the ordered list of daily stage-population snapshots that
+/// fall within the fixed trailing 90-day window pinned by the server.
+/// <see cref="Snapshots"/> is dense over the window only insofar as
+/// snapshots have landed: empty (not fabricated) when no daily snapshot
+/// has been written for the project yet. <see cref="RangeFrom"/> and
+/// <see cref="RangeTo"/> are the inclusive UTC calendar-day bounds
+/// (<c>"yyyy-MM-dd"</c>) the window covers.
+/// </summary>
+public sealed record CumulativeFlowResponse(
+    CumulativeFlowDayDto[] Snapshots,
+    string RangeFrom,
+    string RangeTo);
+
+/// <summary>
+/// One per-day snapshot in the cumulative-flow series. <see cref="Day"/>
+/// is the UTC calendar day (<c>"yyyy-MM-dd"</c>) the snapshot covers;
+/// the six <see cref="int"/> counts are the number of issues attributed
+/// to that stage as of that day, derived by the daily stage-population
+/// snapshot job (see <c>StagePopulationSnapshotService</c>). The widget
+/// reads no event stream — these counts are the persisted cache the
+/// CFD renders.
+/// </summary>
+public sealed record CumulativeFlowDayDto(
+    string Day,
+    int Backlog,
+    int Plan,
+    int Build,
+    int Check,
+    int Integrate,
+    int Done);

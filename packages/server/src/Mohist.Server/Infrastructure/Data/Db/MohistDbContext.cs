@@ -16,6 +16,7 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Data.Label;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Inbox;
+using Mohist.Server.Infrastructure.Data.StagePopulation;
 using Mohist.Server.Inbox;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Workflow.Services.Sessions;
@@ -66,6 +67,7 @@ public class MohistDbContext : DbContext
     public DbSet<RunnerWorkRow> RunnerWorks { get; set; } = null!;
     public DbSet<InboxItemRow> InboxItems { get; set; } = null!;
     public DbSet<InboxSubscriptionRow> InboxSubscriptions { get; set; } = null!;
+    public DbSet<StagePopulationSnapshotRow> StagePopulationSnapshots { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -627,6 +629,20 @@ public class MohistDbContext : DbContext
                 .WithOne()
                 .HasForeignKey<InboxSubscriptionRow>(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<StagePopulationSnapshotRow>(entity =>
+        {
+            entity.ToTable("StagePopulationSnapshots");
+            entity.HasKey(e => new { e.ProjectId, e.Day });
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Day).HasMaxLength(10).IsRequired();
+            // Idempotency: one row per (project, day). The daily job
+            // upserts the six counts in place on retry; the unique
+            // index makes the conflict the dedup signal.
+            entity.HasIndex(e => new { e.ProjectId, e.Day })
+                .IsUnique()
+                .HasDatabaseName("UQ_StagePopulationSnapshots_ProjectId_Day");
         });
     }
 
