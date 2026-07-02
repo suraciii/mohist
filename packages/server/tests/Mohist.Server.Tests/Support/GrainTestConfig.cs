@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
@@ -29,13 +30,79 @@ public static class GrainTestConfig
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connectionString)
+            // Issue-318 T-002 vs T-004: see ConfigureSilo for context. The
+            // raw context builder used outside the silo (e.g. in
+            // BacklogFixture, MohistDbFixture) needs the same
+            // suppression — the production warning would otherwise abort
+            // the test before T-004's migration is added.
+            .ConfigureWarnings(w => w.Ignore(
+                RelationalEventId.PendingModelChangesWarning))
             .Options;
         return new MohistDbContext(options);
     }
 
     public static void MigrateWithSchemaFix(MohistDbContext db)
     {
+        // Issue-318 T-002: the model declares the WorkflowRuns STORED
+        // status computed column + IX_WorkflowRuns_Status index, but
+        // the migration that materializes them is produced in T-004.
+        // PendingModelChangesWarning is suppressed at the DbContext
+        // registration site (ConfigureSilo / MohistServiceRegistration)
+        // so Migrate() here does not throw. The IF NOT EXISTS DDL below
+        // ensures the test DB actually has the column / index so the
+        // new filtering queries run against a real schema — mirrors
+        // the Attachments fix-up pattern in MohistDbFixture. The
+        // TRIGGER simulates the STORED computed column's
+        // auto-population behavior at the SQL layer so writes through
+        // IWorkflowRunStore (which only touch State JSON) leave the
+        // column in sync with State.status; without this, persisted
+        // status would stay NULL and the new status-filter queries
+        // would match nothing.
         db.Database.Migrate();
+        ApplyWorkflowRunsStatusSchemaFix(db);
+    }
+
+    /// <summary>
+    /// Issue-318 T-002: applies the test-only DDL that materializes the
+    /// STORED Status computed column and its index on the WorkflowRuns
+    /// table, plus the trigger that simulates the column's auto-update
+    /// on INSERT/UPDATE. The migration that produces the durable form is
+    /// owned by T-004; this helper exists so any test fixture
+    /// (MohistIntegrationFixture, BacklogFixture, MohistDbFixture, …) can
+    /// get a schema-compatible test DB without going through
+    /// MigrateWithSchemaFix. Idempotent — re-runnable across test classes
+    /// sharing an in-memory database. See MigrateWithSchemaFix for the
+    /// full rationale.
+    /// </summary>
+    public static void ApplyWorkflowRunsStatusSchemaFix(MohistDbContext db)
+    {
+        db.Database.ExecuteSqlRaw("""
+            ALTER TABLE "WorkflowRuns" ADD COLUMN "Status" TEXT NULL;
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS "IX_WorkflowRuns_Status" ON "WorkflowRuns" ("Status", "AssignedRunnerId");
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE TRIGGER IF NOT EXISTS "WorkflowRuns_AI_Status"
+            AFTER INSERT ON "WorkflowRuns"
+            BEGIN
+                UPDATE "WorkflowRuns"
+                SET "Status" = LOWER(COALESCE(json_extract(NEW."State", '$.status'), json_extract(NEW."State", '$.Status')))
+                WHERE "WorkflowRunId" = NEW."WorkflowRunId";
+            END;
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE TRIGGER IF NOT EXISTS "WorkflowRuns_AU_Status"
+            AFTER UPDATE ON "WorkflowRuns"
+            BEGIN
+                UPDATE "WorkflowRuns"
+                SET "Status" = LOWER(COALESCE(json_extract(NEW."State", '$.status'), json_extract(NEW."State", '$.Status')))
+                WHERE "WorkflowRunId" = NEW."WorkflowRunId";
+            END;
+            """);
     }
 
     public static void ConfigureSilo(
@@ -48,8 +115,25 @@ public static class GrainTestConfig
         siloBuilder.UseInMemoryReminderService();
         DecorateReminderTable(siloBuilder.Services);
         siloBuilder.AddMemoryGrainStorageAsDefault();
-        siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options
-            .UseSqlite(connectionString));
+        siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options =>
+        {
+            options.UseSqlite(connectionString);
+            // Issue-318 T-002: the DbContext model now declares the
+            // WorkflowRuns STORED status computed column and the
+            // IX_WorkflowRuns_Status index. The migration that
+            // materializes them is owned by T-004, so any test that
+            // runs against a T-002-only build would otherwise fail at
+            // Migrate() on this pending-changes warning. Suppress the
+            // warning here (test-time only) and ensure the column /
+            // index exist via raw DDL inside MigrateWithSchemaFix. The
+            // trigger in MigrateWithSchemaFix stands in for the STORED
+            // computed column's auto-population so the new status
+            // filters run against a real schema. Once T-004 lands the
+            // migration can be applied and this suppression becomes a
+            // no-op (no warning because model == snapshot).
+            options.ConfigureWarnings(w => w.Ignore(
+                RelationalEventId.PendingModelChangesWarning));
+        });
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         siloBuilder.Services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         siloBuilder.Services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();

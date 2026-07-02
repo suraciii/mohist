@@ -31,6 +31,15 @@ public sealed class WorkflowRunQuerier
         return JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateAssignmentJson(row.State));
     }
 
+    /// <summary>
+    /// Issue-318 D4: returns workflow runs that are bound to
+    /// <paramref name="runnerId"/> and sit in <c>Ready</c> (assigned,
+    /// dispatchable work, no in-flight work). Filters at the database
+    /// layer on the STORED <c>Status</c> computed column plus
+    /// <c>AssignedRunnerId</c>; never deserializes the <c>State</c> JSON
+    /// of non-matching rows. The <c>Ready</c> filter already excludes
+    /// in-flight work, so every row returned is directly pickup-able.
+    /// </summary>
     public async Task<IReadOnlyList<string>> FindAssignedToAsync(string runnerId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(runnerId))
@@ -39,53 +48,71 @@ public sealed class WorkflowRunQuerier
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.WorkflowRuns
             .AsNoTracking()
-            .Where(row => row.AssignedRunnerId == runnerId)
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Ready) && row.AssignedRunnerId == runnerId)
             .OrderBy(row => row.WorkflowRunId)
             .Select(row => row.WorkflowRunId)
             .ToListAsync(ct);
     }
 
+    /// <summary>
+    /// Issue-318 D4: returns workflow runs that are unassigned and waiting
+    /// for *any* runner to claim (<c>Pending</c>). Filters at the database
+    /// layer on the STORED <c>Status</c> computed column; never
+    /// deserializes the <c>State</c> JSON of non-matching rows. The
+    /// unassigned (<c>AssignedRunnerId IS NULL</c>) is implied by the
+    /// <c>Pending</c> status under the new state machine (D1) and is
+    /// asserted redundantly here as defensive belt-and-suspenders against
+    /// any orphan row that survives the migration without an assignment.
+    /// </summary>
     public async Task<IReadOnlyList<string>> FindAssignableAsync(string? projectId = null, int limit = 20, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
         var query = db.WorkflowRuns
             .AsNoTracking()
-            .Where(row => row.AssignedRunnerId == null);
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Pending) && row.AssignedRunnerId == null);
 
         if (!string.IsNullOrWhiteSpace(projectId))
             query = query.Where(row => row.MetadataProjectId == projectId);
 
-        var assignable = new List<string>(Math.Max(1, limit));
-        var pageSize = Math.Max(20, limit * 4);
-        var offset = 0;
-        while (assignable.Count < limit)
-        {
-            var rows = await query
-                .OrderBy(row => row.CreatedAt)
-                .ThenBy(row => row.WorkflowRunId)
-                .Skip(offset)
-                .Take(pageSize)
-                .ToListAsync(ct);
-            if (rows.Count == 0)
-                break;
-
-            foreach (var row in rows)
-            {
-                var run = JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateAssignmentJson(row.State));
-                if (run is null) continue;
-                if (run.Status.IsTerminal()) continue;
-                if (run.Status != WorkflowRunStatus.Pending) continue;
-                if (run.Assignment is not null) continue;
-                if (!run.HasDispatchableWork()) continue;
-
-                assignable.Add(row.WorkflowRunId);
-                if (assignable.Count >= limit)
-                    break;
-            }
-
-            offset += rows.Count;
-        }
-
-        return assignable;
+        return await query
+            .OrderBy(row => row.CreatedAt)
+            .ThenBy(row => row.WorkflowRunId)
+            .Take(limit)
+            .Select(row => row.WorkflowRunId)
+            .ToListAsync(ct);
     }
+
+    /// <summary>
+    /// Issue-318 D4: counts workflow runs that are currently in flight
+    /// (<c>Running</c>) and bound to <paramref name="runnerId"/>. Used by
+    /// the runner grain's dispatch-capacity gate so the per-runner slot
+    /// budget accounts for work already picked up. Filters at the database
+    /// layer on the STORED <c>Status</c> computed column plus
+    /// <c>AssignedRunnerId</c>; never deserializes <c>State</c>. Replaces
+    /// the previous <c>FindAssignedToAsync</c> +
+    /// <c>GetCurrentWorkIdAsync</c> fan-out, which under the new state
+    /// machine would have collapsed to zero (Ready excludes in-flight
+    /// work).
+    /// </summary>
+    public async Task<int> CountRunningAssignedToAsync(string runnerId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(runnerId))
+            return 0;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.WorkflowRuns
+            .AsNoTracking()
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Running) && row.AssignedRunnerId == runnerId)
+            .Select(row => row.WorkflowRunId)
+            .CountAsync(ct);
+    }
+
+    // The STORED Status computed column is the lowercase JSON enum
+    // value (D3). This helper is the single point that knows the
+    // SQLite column == lowercase canonical form contract; every
+    // status-filtering query funnels through it so a future rename
+    // changes one site, not three (or all the read sites).
+    private static string StatusString(WorkflowRunStatus status) =>
+        status.ToString().ToLowerInvariant();
 }

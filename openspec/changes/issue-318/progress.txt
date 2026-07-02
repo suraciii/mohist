@@ -134,3 +134,83 @@ AwaitingApproval`) is the rejection set, and line 277 (the explicit
 is the right shape — `Created` rejects because there's no work yet,
 `Paused` and `AwaitingApproval` reject because the runner must
 resume the run rather than claim it fresh.
+
+## T-002 status
+
+### Work was already merged into T-001 commit
+
+The T-002 feature slice (D3 computed column, D4 query rewrites, poll-loop
+simplification, the `CountRunningAssignedToAsync` count query) was already
+implemented as part of the T-001 commit (`ed6bc4ec`) because T-001's audit
+table required the domain to land on the new statuses, which in turn
+required the persistence/querier to actually filter on those statuses —
+otherwise the domain transitions would be inconsistent with what the
+scheduler surfaces. The relevant diffs are:
+
+- `MohistDbContext.cs` — STORED `Status` computed column +
+  `IX_WorkflowRuns_Status` index (D3).
+- `WorkflowRunRow.cs` — `Status` projected scalar.
+- `WorkflowRunQuerier.cs` — `FindAssignedToAsync` = `status == Ready && runner`,
+  `FindAssignableAsync` = `status == Pending && unassigned` (in-memory
+  deserialize-and-`NextWork()` loop deleted), plus the new
+  `CountRunningAssignedToAsync` count query (D4).
+- `RunnerGrain.cs` — `ActiveWorkflowCountAsync` now uses
+  `CountRunningAssignedToAsync`; `PollAssignedOrAssignableWorkflowAsync`
+  no longer calls `GetCurrentWorkIdAsync` (D4 / D7).
+- `GrainTestConfig.cs`, `InboxProjectionTestSupport.cs`,
+  `MohistIntegrationFixture.cs`, `MohistServiceRegistration.cs` — the
+  test-only DDL that materializes the STORED column / index / trigger in
+  test databases (T-004's migration will own the durable form) and the
+  `PendingModelChangesWarning` suppression needed while T-002 ships
+  ahead of T-004.
+
+### Spec files added under T-002
+
+- `packages/server/tests/.../Specs/Workflow/Querier/WorkflowRunQuerierSchedulingSpecs.cs`
+  — 9 facts covering DB-layer filtering on `Pending` / `Ready && runner`,
+  no-deserialize of non-matching `State` rows, the `CountRunningAssignedToAsync`
+  count, and the schema (`Status` column + `IX_WorkflowRuns_Status`).
+- `packages/server/tests/.../Specs/Runner/Grain/RunnerPollSchedulingSpecs.cs`
+  — 5 facts covering direct `PollWorkAsync` pickup of `Ready` rows,
+  `ActiveWorkflowCountAsync` slot-budget behavior, the count query, and
+  structural checks that the poll loop and the count gate no longer
+  call `GetCurrentWorkIdAsync`.
+
+### Test fixes applied in T-002
+
+The two structural specs in `RunnerPollSchedulingSpecs.cs` were written
+against the new T-001 code but the file-paths / comment-stripping
+ergonomics needed tightening:
+
+- `GetProjectRoot()` was climbing 4 directories up from
+  `bin/<config>/<tfm>/` and landing on `packages/server/tests/`
+  instead of `packages/server/`. The source-composition produced
+  `packages/server/tests/src/...` (missing) — the structural tests
+  threw `DirectoryNotFoundException`. Fixed to climb 5 directories.
+- `ExtractMethodBody` used a hard-coded 2-space marker; the actual
+  source uses 4-space indentation. Replaced with a token search that
+  accepts any leading whitespace.
+- The `GetCurrentWorkIdAsync` `DoesNotContain` assertion was
+  false-positive tripping on the documentation comment inside the
+  method body that explicitly mentions the dropped symbol. Added a
+  small `StripCSharpComments` helper (line + block comments + string
+  literals blanked out) so the structural check only sees the
+  executable body.
+
+### Pre-existing parallel-run flakes
+
+The full integration suite (parallel by collection) has 147
+pre-existing failures in master (`git stash` verified) that are
+unrelated to issue-318: 4 `DeliveryTimeMetrics_*` flakes noted in
+T-001's progress plus ~143 inbox/epic/database-init specs that share
+SQLite fixtures and break under parallel load. Focused
+`Specs.Workflow` (541/541) and `Specs.Runner` (218/218) suites are
+clean.
+
+### Net effect of T-002
+
+The T-002 commit lands with no domain change and no behavioral
+regression. The 2 previously-failing structural tests in
+`RunnerPollSchedulingSpecs` go green (file-path / indentation /
+comment-stripping fixes). All 9 querier specs and all 5
+poll-scheduling specs pass.

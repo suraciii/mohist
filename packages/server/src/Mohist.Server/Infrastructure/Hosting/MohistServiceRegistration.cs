@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Events.Hosting;
 using Mohist.Server.Events.Hub;
@@ -56,7 +57,22 @@ public static class MohistServiceRegistration
         services.AddMohistOpenTelemetry(configuration);
 
         services.AddDbContextFactory<MohistDbContext>(options =>
-            options.UseSqlite(connectionString));
+        {
+            options.UseSqlite(connectionString);
+            // Issue-318 T-002 vs T-004: the DbContext model declares the
+            // WorkflowRuns STORED status computed column and the
+            // IX_WorkflowRuns_Status index. The migration that materializes
+            // them is produced by T-004. During the window between the
+            // model change (T-002) and the migration (T-004) EF will
+            // raise RelationalEventId.PendingModelChangesWarning at
+            // DbContext startup (Program.cs calls db.Database.Migrate()),
+            // which Promote to an exception aborting the host. Suppress
+            // the warning here so the in-progress model can run; once
+            // T-004 lands and ApplyMigrations the model == snapshot and
+            // the warning is never generated, making this Ignore a no-op.
+            options.ConfigureWarnings(w => w.Ignore(
+                RelationalEventId.PendingModelChangesWarning));
+        });
 
         services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>, IssueStore>();
         services.AddScoped<IStateStore<Mohist.Server.Agent.Domain.Agent>, AgentStore>();
