@@ -40,8 +40,6 @@ style: ["极简，只给目标态。"]
   resources:
     - project-integration
   tasks:
-    - id: integrate:spec-sync
-      uses: mohist/acp-agent
     - id: integrate:archive-change
       uses: mohist/archive-change
     - id: integrate:rebase

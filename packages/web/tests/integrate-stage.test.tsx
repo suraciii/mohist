@@ -68,13 +68,6 @@ describe('Integrate stage rendering', () => {
 describe('CheckReadinessOutput types', () => {
   it('should have required integration readiness fields', () => {
     const readinessOutput = {
-      specImpact: {
-        capabilities: ['test-capability'],
-        targetFiles: ['openspec/specs/test-capability/spec.md'],
-        counts: { added: 1, modified: 0, removed: 0, renamed: 0 },
-        conflicts: [],
-        valid: true,
-      },
       mergeReadiness: {
         targetBranch: 'main',
         canFastForward: true,
@@ -88,10 +81,8 @@ describe('CheckReadinessOutput types', () => {
       },
     }
 
-    expect(readinessOutput.specImpact).toBeDefined()
     expect(readinessOutput.mergeReadiness).toBeDefined()
     expect(readinessOutput.healthGatePolicy).toBeDefined()
-    expect(readinessOutput.specImpact.capabilities).toContain('test-capability')
     expect(readinessOutput.mergeReadiness.targetBranch).toBe('main')
     expect(readinessOutput.healthGatePolicy.command).toBe('npm test')
   })
@@ -115,12 +106,12 @@ describe('Integration event types', () => {
         issueId: 'issue-1',
         projectId: 'project-1',
         issueNumber: 1,
-        step: 'integrate:spec-sync',
+        step: 'integrate:archive-change',
         status: 'completed',
-        summary: 'specs synced successfully',
+        summary: 'change archived successfully',
       },
     }
-    expect(event.integration_step_updated.step).toBe('integrate:spec-sync')
+    expect(event.integration_step_updated.step).toBe('integrate:archive-change')
     expect(event.integration_step_updated.status).toBe('completed')
   })
 
@@ -146,36 +137,34 @@ describe('Integration event types', () => {
         projectId: 'project-1',
         issueNumber: 1,
         steps: [
-          { step: 'integrate:spec-sync', status: 'completed' },
           { step: 'integrate:archive-change', status: 'completed' },
           { step: 'integrate:merge', status: 'completed' },
           { step: 'final-health', status: 'completed' },
         ],
       },
     }
-    expect(event.integration_completed.steps).toHaveLength(4)
-    expect(event.integration_completed.steps[0].step).toBe('integrate:spec-sync')
+    expect(event.integration_completed.steps).toHaveLength(3)
+    expect(event.integration_completed.steps[0].step).toBe('integrate:archive-change')
   })
 })
 
 describe('IntegrationStepResult type', () => {
   it('should have correct shape for integration step results', () => {
     const stepResult = {
-      step: 'integrate:spec-sync',
+      step: 'integrate:archive-change',
       status: 'completed' as const,
       output: {
-        capabilities: ['cap1'],
-        counts: { added: 2, modified: 1, removed: 0, renamed: 0 },
-        targetFiles: ['file1.md'],
-        conflicts: [],
-        valid: true,
+        kind: 'archive-change',
+        source: 'openspec/changes/issue-1',
+        destination: 'openspec/changes/archive/2026-05-09-issue-1',
+        changed: true,
       },
       startedAt: '2026-05-09T10:00:00Z',
       completedAt: '2026-05-09T10:00:05Z',
       duration: 5000,
     }
 
-    expect(stepResult.step).toBe('integrate:spec-sync')
+    expect(stepResult.step).toBe('integrate:archive-change')
     expect(stepResult.status).toBe('completed')
     expect(stepResult.duration).toBe(5000)
   })

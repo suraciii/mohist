@@ -129,7 +129,7 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("sequential", definition.Stages[3].LockBehavior);
         Assert.Equal(["project-integration"], definition.Stages[3].Resources);
         var integrateIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "workspace-prepare", "integrate:spec-sync", "integrate:archive-change", "integrate:rebase", "integrate:push" }, integrateIds);
+        Assert.Equal(new[] { "workspace-prepare", "integrate:archive-change", "integrate:rebase", "integrate:push" }, integrateIds);
         Assert.DoesNotContain("integrate:merge", integrateIds);
         Assert.Equal("mohist/rebase", rebase.Uses);
         var rebaseWithJson = JsonSerializer.Serialize(rebase.With);
@@ -143,7 +143,7 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("workspace.branch", pushWithJson);
         Assert.Contains("repository.baseBranch", pushWithJson);
         var integrateTaskIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(["workspace-prepare", "integrate:spec-sync", "integrate:archive-change", "integrate:rebase", "integrate:push"], integrateTaskIds);
+        Assert.Equal(["workspace-prepare", "integrate:archive-change", "integrate:rebase", "integrate:push"], integrateTaskIds);
         foreach (var task in definition.Stages[3].Tasks)
         {
             Assert.NotEqual("mohist/merge", task.Uses);

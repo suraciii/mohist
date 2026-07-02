@@ -63,7 +63,7 @@ workflow runtime variables；check stage 在 `ai-review` 通过后用
 `mohist/push`（`forceWithLease: true`）把最新 commit 推到 PR head，
 再用 `mohist/mark-github-pr-ready` 把 PR 标记为 ready，最后用只读的
 `mohist/github-pr-status` check 确认 PR 状态并等待人工批准；integrate
-stage 依次执行 `spec-sync` → `archive-change` → `push` → `merge-pr`，
+stage 依次执行 `archive-change` → `push` → `merge-pr`，
 用 `mohist/github-pr-status` 的 `expect: merged` check 验证 PR 已合入。
 
 ```yaml
@@ -129,10 +129,9 @@ stage 依次执行 `spec-sync` → `archive-change` → `push` → `merge-pr`，
   checks:
     - name: github-pr-status   # mohist/github-pr-status (read-only)
 
-- stage: integrate
-  tasks:
-    - id: spec-sync
-    - id: archive-change
+  - stage: integrate
+    tasks:
+      - id: archive-change
     - id: push
     - id: merge-pr            # mohist/merge-github-pr
       with:

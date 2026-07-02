@@ -358,19 +358,15 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void GithubPrWorkflowDefinition_IntegrateStage_DeliversViaSpecSyncArchivePushMergePr()
+    public void GithubPrWorkflowDefinition_IntegrateStage_DeliversViaArchivePushMergePr()
     {
         var integrate = MohistWorkflow.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "integrate");
 
         var orderedIds = integrate.Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "workspace-prepare", "spec-sync", "archive-change", "push", "merge-pr" }, orderedIds);
+        Assert.Equal(new[] { "workspace-prepare", "archive-change", "push", "merge-pr" }, orderedIds);
 
         Assert.Equal("sequential", integrate.LockBehavior);
         Assert.Contains("project-integration", integrate.Resources!);
-
-        var specSync = integrate.Tasks.Single(t => t.Id == "spec-sync");
-        Assert.Equal("mohist/acp-agent", specSync.Uses);
-        Assert.Equal("${{ prompts.spec-sync }}", ReadStringWith(specSync, "prompt"));
 
         var archiveChange = integrate.Tasks.Single(t => t.Id == "archive-change");
         Assert.Equal("mohist/archive-change", archiveChange.Uses);
@@ -603,7 +599,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.DoesNotContain("merge-ready", checkChecks);
 
         var integrateIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "workspace-prepare", "spec-sync", "archive-change", "push", "merge-pr" }, integrateIds);
+        Assert.Equal(new[] { "workspace-prepare", "archive-change", "push", "merge-pr" }, integrateIds);
         Assert.Contains("mohist/merge-github-pr", definition.Stages[3].Tasks.Select(t => t.Uses).ToArray());
 
         var integrateChecks = JsonSerializer.Serialize(definition.Stages[3].Checks);

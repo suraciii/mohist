@@ -103,9 +103,6 @@ public class TaskRequiredFilesSpecs
     {
         var classification = TaskRunExtensions.DeriveClassification("core/script", null);
         Assert.Equal(TaskClassification.Orchestration, classification);
-
-        classification = TaskRunExtensions.DeriveClassification("mohist/openspec-sync", null);
-        Assert.Equal(TaskClassification.Orchestration, classification);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

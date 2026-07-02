@@ -7,7 +7,6 @@ import { isObject, objectInput, stringInput } from "../core/json.js"
 import { resolveActionPath } from "./expectations.js"
 import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
 
-const SPEC_SYNC_COMMIT_MESSAGE = "Sync OpenSpec specs from change delta"
 const ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX = "Archive OpenSpec change"
 const OPENSPEC_ARCHIVE_NAME_VAR_KEY = "openspecArchiveName"
 const ARCHIVE_DESTINATION_VAR_KEY = "_actions.archiveChange.destination"
@@ -144,96 +143,6 @@ export async function openspecArtifactsAction(context: ActionContext): Promise<A
     status: "failure",
     message: `OpenSpec artifacts missing under ${changeDir}: ${missing.join(", ")}`,
     output,
-  }
-}
-
-export async function openspecSyncAction(context: ActionContext): Promise<ActionResult> {
-  const changeDir = resolveChangeDir(context)
-  if (!changeDir) return { status: "failure", message: "OpenSpec sync requires 'changeDir'" }
-  const specsDir = join(changeDir, "specs")
-  if (!exists(specsDir)) return { status: "success", message: "No specs directory to sync; skipping" }
-
-  const destination = join(context.workDir, "specs")
-  await copyDirectory(specsDir, destination)
-
-  const addResult = await openSpecGitRunner(context.workDir, ["add", "specs/"], context.signal)
-  if (!addResult.success) {
-    return {
-      status: "failure",
-      message: `git add specs/ failed: ${addResult.combinedOutput || addResult.stderr || `exit ${addResult.exitCode}`}`,
-      output: JSON.stringify({
-        kind: "openspec-sync",
-        source: specsDir,
-        destination,
-        stage: "add",
-        addOutput: addResult.combinedOutput,
-      }),
-    }
-  }
-
-  const diffResult = await openSpecGitRunner(context.workDir, ["diff", "--cached", "--name-only", "--", "specs/"], context.signal)
-  if (!diffResult.success) {
-    return {
-      status: "failure",
-      message: `git diff --cached -- specs/ failed: ${diffResult.combinedOutput || diffResult.stderr || `exit ${diffResult.exitCode}`}`,
-      output: JSON.stringify({
-        kind: "openspec-sync",
-        source: specsDir,
-        destination,
-        stage: "diff",
-        diffOutput: diffResult.combinedOutput,
-      }),
-    }
-  }
-
-  const changedFiles = [...new Set(diffResult.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))]
-  if (changedFiles.length === 0) {
-    return {
-      status: "success",
-      message: "OpenSpec specs already up to date; no changes to commit",
-      output: JSON.stringify({
-        kind: "openspec-sync",
-        source: specsDir,
-        destination,
-        changed: false,
-        noChange: true,
-      }),
-    }
-  }
-
-  const commitResult = await openSpecGitRunner(context.workDir, ["commit", "-m", SPEC_SYNC_COMMIT_MESSAGE, "--", "specs/"], context.signal)
-  if (!commitResult.success) {
-    return {
-      status: "failure",
-      message: `git commit specs/ failed: ${commitResult.combinedOutput || commitResult.stderr || `exit ${commitResult.exitCode}`}`,
-      output: JSON.stringify({
-        kind: "openspec-sync",
-        source: specsDir,
-        destination,
-        stage: "commit",
-        commitOutput: commitResult.combinedOutput,
-        changedFiles,
-      }),
-    }
-  }
-
-  const headResult = await openSpecGitRunner(context.workDir, ["rev-parse", "HEAD"], context.signal)
-  const commitSha = headResult.success ? headResult.stdout.trim() : null
-
-  return {
-    status: "success",
-    message: "OpenSpec specs synced and committed",
-    output: JSON.stringify({
-      kind: "openspec-sync",
-      source: specsDir,
-      destination,
-      changed: true,
-      noChange: false,
-      commitMessage: SPEC_SYNC_COMMIT_MESSAGE,
-      commitSha,
-      commitOutput: commitResult.combinedOutput,
-      changedFiles,
-    }),
   }
 }
 

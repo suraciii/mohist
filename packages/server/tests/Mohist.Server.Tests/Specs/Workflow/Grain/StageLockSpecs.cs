@@ -64,7 +64,7 @@ public class StageLockSpecs : WorkflowGrainSpecs
 
         Assert.NotNull(firstIntegrate);
         Assert.Equal("integrate", firstIntegrate.Stage);
-        Assert.StartsWith("integrate:spec-sync.", firstIntegrate.WorkId);
+        Assert.StartsWith("integrate:archive-change.", firstIntegrate.WorkId);
 
         var lockGrain = Grains.GetGrain<IWorkflowStageLockGrain>(
             WorkflowStageLockKeys.ForProjectResource(projectId, resource));
@@ -95,7 +95,7 @@ public class StageLockSpecs : WorkflowGrainSpecs
         Assert.NotNull(secondIntegrate);
         Assert.Equal(secondWorkflowId, secondIntegrate.WorkflowRunId);
         Assert.Equal("integrate", secondIntegrate.Stage);
-        Assert.StartsWith("integrate:spec-sync.", secondIntegrate.WorkId);
+        Assert.StartsWith("integrate:archive-change.", secondIntegrate.WorkId);
 
         await ReportAsync(secondRunnerId, secondIntegrate.WorkflowRunId, secondIntegrate.WorkId, new WorkResult("completed"));
         var secondMerge = await secondRunner.PollAsync();
@@ -279,7 +279,7 @@ public class StageLockSpecs : WorkflowGrainSpecs
                 []),
             new StageDefinition("integrate",
                 [
-                    new("integrate:spec-sync", "Sync specs", "spec/task"),
+                    new("integrate:archive-change", "Archive change", "spec/task"),
                     new("integrate:merge", "Merge branch", "spec/task")
                 ],
                 [],
