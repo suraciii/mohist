@@ -363,10 +363,14 @@ public sealed record DeliveryTimePointDto(
 /// returns one entry per delivered issue in the fixed 30-day trailing
 /// window anchored on completion time. <see cref="Points"/> is empty
 /// (not an error, not a fabricated zero) when no delivered issues fall
-/// in the window.
+/// in the window. <see cref="PreviousCycleDays"/> is strictly additive:
+/// the existing <see cref="Points"/> series and the existing fixed
+/// trailing window are preserved unchanged; only the previous-window
+/// average is added.
 /// </summary>
 public sealed record DeliveryTimeMetricsResponse(
-    DeliveryTimePointDto[] Points);
+    DeliveryTimePointDto[] Points,
+    double? PreviousCycleDays);
 
 /// <summary>
 /// Response shape for the stage-duration metrics endpoint. The stages are

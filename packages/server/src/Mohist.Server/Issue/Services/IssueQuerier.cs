@@ -320,9 +320,19 @@ public class IssueQuerier : IScopedService
     /// is empty (not an error, not a fabricated zero) when the trailing
     /// window contains no delivered issues; an empty list length is the
     /// empty signal the consuming chart relies on.
+    /// <see cref="PreviousAverageCycleDays"/> is strictly additive: it is the
+    /// average cycle time over the immediately-preceding window of the same
+    /// length as the current 30-day trailing window
+    /// (<c>[now − 2W, now − W]</c>), computed with the identical
+    /// earliest-work-start-to-final-completion definition and
+    /// completion-time windowing. <c>null</c> is the defined empty result
+    /// when the previous window has no delivered issues, structurally
+    /// distinguishable from a genuine zero-duration average; it is
+    /// evaluated independently of <see cref="Points"/>.
     /// </summary>
     public sealed record DeliveryTimeResult(
-        IReadOnlyList<DeliveryTimePoint> Points);
+        IReadOnlyList<DeliveryTimePoint> Points,
+        double? PreviousAverageCycleDays);
 
     /// <summary>
     /// The trailing window returned by <see cref="GetStageDurationsAsync"/>.
@@ -1161,6 +1171,21 @@ public class IssueQuerier : IScopedService
     /// <c>CompletedAt</c> ascending so the consuming chart can plot
     /// against the completion-date axis directly.
     /// </para>
+    /// <para>
+    /// In addition to the per-issue series, the result includes a
+    /// <see cref="DeliveryTimeResult.PreviousAverageCycleDays"/> over the
+    /// immediately-preceding window of the same length
+    /// (<c>[now − 2W, now − W]</c>), computed with the identical
+    /// cycle-time definition and completion-time windowing as the current
+    /// window. The previous-window average is the arithmetic mean of
+    /// <c>CycleDays</c> over delivered issues that fall in the previous
+    /// window and have a defined cycle (issues whose cycle is undefined
+    /// <c>null</c> do not contribute). When the previous window contains
+    /// no such issues, the average is the defined empty result
+    /// (<c>null</c>), structurally distinguishable from a genuine
+    /// zero-duration average and evaluated independently of the current
+    /// window.
+    /// </para>
     /// </summary>
     public async Task<DeliveryTimeResult> GetDeliveryTimesAsync(
         string projectId,
@@ -1173,6 +1198,13 @@ public class IssueQuerier : IScopedService
         var windowFrom = now.AddDays(-30);
         var windowTo = now;
 
+        // Previous window: same length, immediately preceding the current
+        // window. The two windows are evaluated independently; this gives
+        // the consumer the cycle-time baseline it needs to derive a trend
+        // in a single read.
+        var previousWindowFrom = now.AddDays(-60);
+        var previousWindowTo = windowFrom;
+
         // Resolve the project's issue set. We use `db.Issues` directly
         // (not the projected read model) so the local-filters below see
         // the raw `Status`/`CreatedAt`/`CompletedAt` fields without
@@ -1184,7 +1216,9 @@ public class IssueQuerier : IScopedService
 
         if (issueRows.Count == 0)
         {
-            return new DeliveryTimeResult(Array.Empty<DeliveryTimePoint>());
+            return new DeliveryTimeResult(
+                Array.Empty<DeliveryTimePoint>(),
+                PreviousAverageCycleDays: null);
         }
 
         var issuesById = IssueRowMapper.ById(issueRows, projectId)
@@ -1223,6 +1257,13 @@ public class IssueQuerier : IScopedService
         }
 
         var points = new List<DeliveryTimePoint>(issuesById.Count);
+        // Previous-window cycle accumulator. Only `defined`-cycle issues
+        // contribute; the count is tracked separately so the empty
+        // (zero-sample) and a genuine zero-duration mean are
+        // distinguishable.
+        double previousCycleSum = 0;
+        int previousCycleCount = 0;
+
         foreach (var issue in issuesById.Values)
         {
             // Only delivered issues participate. Cancelled issues carry
@@ -1233,11 +1274,6 @@ public class IssueQuerier : IScopedService
             if (issue.CompletedAt is null) continue;
 
             var completedAtDt = DateTime.SpecifyKind(issue.CompletedAt.Value, DateTimeKind.Utc);
-            if (completedAtDt < windowFrom.UtcDateTime || completedAtDt > windowTo.UtcDateTime) continue;
-
-            var createdAtUtc = DateTime.SpecifyKind(issue.CreatedAt, DateTimeKind.Utc);
-            var leadSpan = completedAtDt - createdAtUtc;
-            var leadDays = leadSpan.TotalDays;
 
             double? cycleDays = null;
             if (earliestWorkStartedByIssue.TryGetValue(issue.Id, out var firstStart))
@@ -1246,11 +1282,25 @@ public class IssueQuerier : IScopedService
                 cycleDays = cycleSpan.TotalDays;
             }
 
-            points.Add(new DeliveryTimePoint(
-                IssueNumber: issue.Number,
-                CompletedAt: new DateTimeOffset(completedAtDt, TimeSpan.Zero),
-                LeadDays: leadDays,
-                CycleDays: cycleDays));
+            if (completedAtDt >= windowFrom.UtcDateTime && completedAtDt <= windowTo.UtcDateTime)
+            {
+                var createdAtUtc = DateTime.SpecifyKind(issue.CreatedAt, DateTimeKind.Utc);
+                var leadSpan = completedAtDt - createdAtUtc;
+                var leadDays = leadSpan.TotalDays;
+
+                points.Add(new DeliveryTimePoint(
+                    IssueNumber: issue.Number,
+                    CompletedAt: new DateTimeOffset(completedAtDt, TimeSpan.Zero),
+                    LeadDays: leadDays,
+                    CycleDays: cycleDays));
+            }
+            else if (cycleDays.HasValue
+                && completedAtDt >= previousWindowFrom.UtcDateTime
+                && completedAtDt < previousWindowTo.UtcDateTime)
+            {
+                previousCycleSum += cycleDays.Value;
+                previousCycleCount++;
+            }
         }
 
         // Order by completion time ascending so the consuming chart can
@@ -1258,7 +1308,16 @@ public class IssueQuerier : IScopedService
         // right → newer).
         points.Sort(static (a, b) => a.CompletedAt.CompareTo(b.CompletedAt));
 
-        return new DeliveryTimeResult(points);
+        // Empty previous window is `null`, distinguishable from a
+        // genuine zero-duration average (which would require
+        // `previousCycleCount > 0`).
+        double? previousAverageCycleDays = previousCycleCount == 0
+            ? null
+            : previousCycleSum / previousCycleCount;
+
+        return new DeliveryTimeResult(
+            Points: points,
+            PreviousAverageCycleDays: previousAverageCycleDays);
     }
 
     /// <summary>

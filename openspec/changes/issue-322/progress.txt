@@ -20,9 +20,39 @@
 - `IssueMetricsApiSpecs` has a local `CompletionMetricsResponse` record that mirrors the API shape. Both must include `CurrentTotal` and `PreviousTotal` (or JSON deserialization fails on the new fields), otherwise the existing day/week tests break on shape mismatch. The change to that local record is also part of T-001.
 - For the day test `CompletionMetrics_DayBucket_GenuineZeroCompletionPreviousWindowIsDistinctFromEmpty`, with fixture time `2026-06-30`, the previous window is `[2026-05-02, 2026-06-01)`. Two cancellation events at `2026-05-10` and `2026-05-25` both fall inside that range — used to assert `SampleCount=2, Completed=0, Failed=2`.
 
+## Codebase Patterns
+
+- `IssueRoutes.Metrics.cs` is the only metrics route reading `DateTimeOffset.UtcNow` directly; every other route (`IssueRoutes.DeliveryTimeMetrics.cs`, `IssueRoutes.QualityMetrics.cs`) resolves `TimeProvider` from DI. Switching completion to the same DI shape is the D4 opportunistic consistency fix; nothing else in the API surface needs this change.
+- `MohistIntegrationFixture.TimeProvider` is a `FakeTimeProvider` pinned at `2026-06-30 00:00 UTC`. So API-level completion tests must seed events inside `[2026-06-01, 2026-07-01)` for the current day-window and `[2026-05-02, 2026-06-01)` for the previous day-window. For the week bucket, current ISO week starts `2026-06-29` and previous 12-week window is `[2026-01-19, 2026-04-13)`.
+- The querier-side tests use an explicit `DateTimeOffset now` parameter, so they can independently verify adjacency by shifting `now` and re-running — preferred over fixture-clock reliance.
+- `IssueQuerier.GetCompletionBucketsAsync` already pre-filtered events by source + terminal type and collapsed to the latest terminal event per issue before bucketing. The previous-window totals reuse that same `latestTerminalByIssue` materialized list and just split it across the two adjacent windows — no extra DB round-trip.
+- The completion surface uses two distinct empty-result idioms today: dense zero buckets per the spec, and (new) a `SampleCount` discriminator on the totals DTO. The DTO additive guarantee means existing consumers that read `Buckets`/`Window` see no change; the new `CurrentTotal`/`PreviousTotal` are net-new fields.
+- The delivery-time surface (T-002) reuses the `Now`-injection DI shape that `IssueRoutes.DeliveryTimeMetrics.cs` already had wired up (no clock fix needed; the route already called `timeProvider.GetUtcNow()` and the querier accepted a `DateTimeOffset now`). The previous-window addition is purely a second-window accumulator alongside the existing single-pass issue loop; no second DB scan introduced.
+
+## Decisions
+
+- T-001 deliberately keeps `windowFrom`/`windowTo` semantically identical to today's; the previous window is `[today - 2W, today - W]` derived from the same `today`/`currentWeek` already computed for the current window. This means existing assertions like `payload.Buckets[0].Boundary == windowFrom as yyyy-MM-dd` still hold byte-for-byte.
+- For day granularity, `previousFrom = today.AddDays(-59)` and `previousTo = windowFrom`. For week granularity, `previousFrom = currentWeek.AddDays(-7*12)` (start of week 24 weeks back) and `previousTo = windowFrom`.
+- The totals object is its own `CompletionTotal` / `CompletionMetricsTotalsDto` rather than reusing the bucket shape — it has no `Boundary` and intentionally exposes `SampleCount` so the zero-sample vs genuine-zero discrimination is on the wire. This matches D2 in design.md (the surface's own idiom).
+- The handler-level TimeProvider swap was inlined into the existing endpoint rather than split into a separate refactor task, per task notes: it is required for deterministic testing of the new previous-window branch.
+- T-002 follows D2 by mirroring the existing nullable `CycleDays` idiom: the previous-window average is `double?` (`null` ⟹ no delivered issues in the previous window). The empty result is structurally distinguishable from a genuine zero-duration average (a genuine zero yields `0.0` with at least one contributing sample).
+- T-002 keeps the per-issue `Points` series strictly scoped to the current window. Previous-window delivered issues contribute only to the previous-window mean accumulator — they do NOT appear in `Points`. This preserves the existing per-issue series shape byte-for-byte and the contract that `Points` covers only the current window.
+- For T-002 the previous-window average uses the same earliest-work-start-to-final-completion ("surviving retries") definition and the same `CompletedAt`-anchored windowing the current window uses; only the window bounds shift. No new schema, no new persisted field.
+- Boundaries are asymmetric on purpose: the current window is `[windowFrom, windowTo]` (`<=` inclusive on both ends, matching today's contract) and the previous window is `[previousWindowFrom, previousWindowTo)` (`<` on the upper end so the boundary belongs to the current window). Adjacent but non-overlapping.
+
+## Gotchas
+
+- The `latestTerminalByIssue` list intentionally stays a single GroupBy of all terminal events; do not also call the bucketing logic twice (once per window) — that would re-introduce the closed-then-reopened stale-count risk if the implementation is split incorrectly. The single-pass loop with two window checks (current, then previous) is correct.
+- The `IndexByBoundary` dictionary is keyed on `DateOnly`, which for the week bucket is the Monday of the ISO week. Don't change that keying or the bucketing will silently misalign on week boundaries.
+- `IssueMetricsApiSpecs` has a local `CompletionMetricsResponse` record that mirrors the API shape. Both must include `CurrentTotal` and `PreviousTotal` (or JSON deserialization fails on the new fields), otherwise the existing day/week tests break on shape mismatch. The change to that local record is also part of T-001.
+- For the day test `CompletionMetrics_DayBucket_GenuineZeroCompletionPreviousWindowIsDistinctFromEmpty`, with fixture time `2026-06-30`, the previous window is `[2026-05-02, 2026-06-01)`. Two cancellation events at `2026-05-10` and `2026-05-25` both fall inside that range — used to assert `SampleCount=2, Completed=0, Failed=2`.
+- `IssueMetricsApiSpecs` also has a local `DeliveryTimeMetricsResponse` record mirroring the API shape (T-002). It must include the new `PreviousCycleDays` field, or the existing delivery-time tests start failing on shape mismatch after the API response gains the new field.
+- T-002 implementation single-pass: each issue falls into AT MOST one of the current window (added to `Points`) or the previous window (added to the accumulator). The two branches are mutually exclusive by the boundary semantics, so no double-counting. Issues with `CycleDays == null` (no recorded work-start) are excluded from the previous-window accumulator entirely — they do not drag the mean down or fabricate a partial sample.
+- The previous window is intentionally excluded from `Points` even for the API spec test that seeds issues in BOTH windows: `Points` keeps the existing "current window only" contract; the previous window surfaces only via `previousCycleDays`. The first iteration of the test expected `Assert.Equal(2, payload.Points.Length)` which was wrong — corrected to `Assert.Single(payload.Points)` after confirming with a probe.
+
 ## Verification
 
 - `dotnet build Mohist.sln -p:SkipWebBuild=true` succeeds with 0 warnings (TreatWarningsAsErrors=true via `Directory.Build.props`).
-- `dotnet test Mohist.sln -p:SkipWebBuild=true --filter "FullyQualifiedName~IssueMetricsApiSpecs|FullyQualifiedName~IssueQuerierSpecs"` → 131/131 pass (new tests included).
-- Full server test run: 3536 pass, 13 skipped (pre-existing), 0 failed.
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --filter "FullyQualifiedName~IssueMetricsApiSpecs|FullyQualifiedName~IssueQuerierSpecs"` → 142/142 pass (new tests included). Up from 131 in T-001 to 142 after T-002 (4 new API specs + 7 new querier specs).
+- Full server test run: 3547 pass, 13 skipped (pre-existing), 0 failed. Up from 3536 in T-001 to 3547 after T-002.
 - Web/runner untouched by this task; no need to re-run their tests.

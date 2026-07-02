@@ -749,6 +749,164 @@ public class IssueMetricsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task DeliveryTimeMetrics_BothWindowsReturned_DeltaDerivableAcrossAdjacent30DayWindows()
+    {
+        // Fixture `now` is 2026-06-30 UTC: current window [2026-05-31, 2026-06-30],
+        // previous window [2026-05-01, 2026-05-31). Seed one delivered issue
+        // (with work-start) inside each window with different cycle durations
+        // and verify both averages are present in the response so a consumer
+        // can derive the delta.
+        var project = await CreateProjectAsync($"delivery-time-both-{Guid.NewGuid():N}");
+
+        var currentCompletedAt = new DateTimeOffset(2026, 6, 14, 14, 0, 0, TimeSpan.Zero);
+        var currentWorkStart = currentCompletedAt.AddDays(-2).AddHours(-4);
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            $"issue_dt_both_current_{Guid.NewGuid():N}",
+            currentCompletedAt.UtcDateTime.AddDays(-4).AddHours(-6),
+            currentCompletedAt.UtcDateTime,
+            [currentWorkStart]);
+
+        var previousCompletedAt = new DateTimeOffset(2026, 5, 20, 14, 0, 0, TimeSpan.Zero);
+        var previousWorkStart = previousCompletedAt.AddDays(-6);
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 2,
+            $"issue_dt_both_previous_{Guid.NewGuid():N}",
+            previousCompletedAt.UtcDateTime.AddDays(-10),
+            previousCompletedAt.UtcDateTime,
+            [previousWorkStart]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        // Only the current-window issue contributes a `Point`; the
+        // previous-window issue contributes only to the average.
+        var point = Assert.Single(payload.Points);
+        Assert.NotNull(payload.PreviousCycleDays);
+        // Previous window's only delivered cycle was 6 days exactly,
+        // since work-start is the moment − 6 days before completion.
+        Assert.Equal(6.0, payload.PreviousCycleDays!.Value, precision: 5);
+        Assert.NotNull(point.CycleDays);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_PreviousWindowEmpty_ReportsNullIndependentOfCurrentWindow()
+    {
+        // Only seed a current-window issue; the previous window is empty.
+        // `previousCycleDays` must remain the defined `null` (empty), not a
+        // fabricated zero, regardless of the current-window activity.
+        var project = await CreateProjectAsync($"delivery-time-prev-empty-{Guid.NewGuid():N}");
+        var completedAt = DeliveryTimeCompletedAt();
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            $"issue_dt_prev_empty_{Guid.NewGuid():N}",
+            completedAt.AddDays(-4).AddHours(-6),
+            completedAt,
+            [new DateTimeOffset(completedAt, TimeSpan.Zero).AddDays(-2).AddHours(-4)]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        var point = Assert.Single(payload.Points);
+        Assert.NotNull(point.CycleDays);
+        // Independent evaluation — current window has its cycle, previous window is empty.
+        Assert.Null(payload.PreviousCycleDays);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_CurrentWindowEmpty_PreviousWindowAverageStillReturned()
+    {
+        // Reverse asymmetry from the test above: current window has no
+        // delivered issues, but the previous window does. The previous
+        // average must still be returned and `Points` empty (preserved
+        // empty-result semantics).
+        var project = await CreateProjectAsync($"delivery-time-curr-empty-{Guid.NewGuid():N}");
+        var insideCurrentCompletedAt = DeliveryTimeCompletedAt();
+        var outsideCompletedAt = _fixture.TimeProvider.GetUtcNow().AddDays(-45);
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            $"issue_dt_curr_empty_outside_{Guid.NewGuid():N}",
+            outsideCompletedAt.UtcDateTime.AddDays(-10),
+            outsideCompletedAt.UtcDateTime,
+            [outsideCompletedAt.AddDays(-3)]);
+
+        // Sanity: the seeded issue is outside the current window and
+        // inside the previous [now − 60d, now − 30d) window (45d ago is
+        // within [30, 60) days before fixture-now).
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        Assert.Empty(payload.Points);
+        Assert.NotNull(payload.PreviousCycleDays);
+        Assert.Equal(3.0, payload.PreviousCycleDays!.Value, precision: 5);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_AdditivePreservation_PointsAndTrailingWindowUnchanged()
+    {
+        // The previous-window addition must be strictly additive: the
+        // Points series shape, ordering, and field semantics are preserved
+        // byte-for-byte for an existing consumer that does not read
+        // `previousCycleDays`.
+        var project = await CreateProjectAsync($"delivery-time-additive-{Guid.NewGuid():N}");
+        var firstCompletedAt = DeliveryTimeCompletedAt();
+        var firstWorkStart = new DateTimeOffset(firstCompletedAt, TimeSpan.Zero)
+            .AddDays(-1)
+            .AddHours(-12);
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            $"issue_dt_add_first_{Guid.NewGuid():N}",
+            firstCompletedAt.AddDays(-2).AddHours(-6),
+            firstCompletedAt,
+            [firstWorkStart]);
+
+        var secondCompletedAt = firstCompletedAt.AddHours(48);
+        var secondWorkStart = new DateTimeOffset(secondCompletedAt, TimeSpan.Zero)
+            .AddDays(-3);
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 2,
+            $"issue_dt_add_second_{Guid.NewGuid():N}",
+            secondCompletedAt.AddDays(-5),
+            secondCompletedAt,
+            [secondWorkStart]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        Assert.Equal(2, payload.Points.Length);
+        // Ordered ascending by CompletedAt (existing requirement).
+        Assert.True(payload.Points[0].CompletedAt.CompareTo(payload.Points[1].CompletedAt) <= 0);
+        // Each point preserves LeadDays / CycleDays / IssueNumber / CompletedAt.
+        foreach (var p in payload.Points)
+        {
+            Assert.NotEqual(0, p.LeadDays);
+            Assert.NotNull(p.CycleDays);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task StageDurationMetrics_DeliveredIssueWithStageEvents_ReturnsStagesRatioAndWait()
     {
         var project = await CreateProjectAsync($"stage-duration-present-{Guid.NewGuid():N}");
@@ -1683,7 +1841,7 @@ public class IssueMetricsApiSpecs
     private sealed record QualityMetricsResponse(QualityMetricsWindowDto Window7d, QualityMetricsWindowDto Window30d, QualityTrendDto Trend);
 
     private sealed record DeliveryTimePointDto(int IssueNumber, string CompletedAt, double LeadDays, double? CycleDays);
-    private sealed record DeliveryTimeMetricsResponse(DeliveryTimePointDto[] Points);
+    private sealed record DeliveryTimeMetricsResponse(DeliveryTimePointDto[] Points, double? PreviousCycleDays);
 
     private sealed record StageDurationStageDto(string Stage, int SampleCount, double? AverageSeconds, double? MedianSeconds);
     private sealed record StageDurationWaitBreakoutDto(double? AverageApprovalGateWaitSeconds, double? AverageInactiveGapSeconds);
