@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -10,9 +11,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(MohistDbContext))]
-    partial class MohistDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260702060000_WorkflowRunStatus")]
+    partial class WorkflowRunStatus
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -345,32 +348,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         });
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", b =>
-                {
-                    b.Property<string>("ProjectId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("ApprovalRequestedEnabled")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<bool>("IssueCompletedEnabled")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<bool>("IssueStartedEnabled")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("WorkflowFailedEnabled")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("ProjectId");
-
-                    b.ToTable("InboxSubscriptions", (string)null);
-                });
-
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.AttachmentRow", b =>
                 {
                     b.Property<string>("Id")
@@ -589,6 +566,36 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("ProjectIssueTemplates", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", b =>
+                {
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("ApprovalRequestedEnabled")
+                        .IsRequired()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IssueCompletedEnabled")
+                        .IsRequired()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IssueStartedEnabled")
+                        .IsRequired()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("WorkflowFailedEnabled")
+                        .IsRequired()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ProjectId");
+
+                    b.ToTable("InboxSubscriptions", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Label.LabelDefinitionRow", b =>
                 {
                     b.Property<string>("Id")
@@ -679,6 +686,15 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_Runners_Slots_Positive", "\"Slots\" > 0");
                         });
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", b =>
+                {
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Project.ProjectRow", null)
+                        .WithOne()
+                        .HasForeignKey("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", "ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.RunnerWorkRow", b =>
@@ -946,43 +962,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("AgentSessionTranscriptTurns", (string)null);
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.StagePopulation.StagePopulationSnapshotRow", b =>
-                {
-                    b.Property<string>("ProjectId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Day")
-                        .HasMaxLength(10)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Backlog")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Build")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Check")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Done")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Integrate")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("Plan")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("ProjectId", "Day");
-
-                    b.HasIndex("ProjectId", "Day")
-                        .IsUnique()
-                        .HasDatabaseName("UQ_StagePopulationSnapshots_ProjectId_Day");
-
-                    b.ToTable("StagePopulationSnapshots", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.IssueWorkflowProfile", b =>
@@ -1361,15 +1340,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasKey("WorkflowRunId");
 
                     b.ToTable("WorkflowVariables");
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", b =>
-                {
-                    b.HasOne("Mohist.Server.Infrastructure.Data.Project.ProjectRow", null)
-                        .WithOne()
-                        .HasForeignKey("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", "ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

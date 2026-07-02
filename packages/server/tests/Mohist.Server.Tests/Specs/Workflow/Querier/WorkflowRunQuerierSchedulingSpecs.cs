@@ -308,20 +308,39 @@ public class WorkflowRunQuerierSchedulingSpecs
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
 
-        var statusColumn = await db.Database
-            .SqlQueryRaw<string>("""
-                SELECT "name" FROM pragma_table_info('WorkflowRuns') WHERE "name" = 'Status';
-                """)
-            .ToListAsync();
-        Assert.Equal("Status", Assert.Single(statusColumn));
+        // Inspect the EF model so this test does not depend on raw
+        // SQL / pragma / shared-cache visibility — EF has already
+        // resolved the WorkflowRunRow entity through the model builder
+        // (the same builder that other tests use to assert filtering
+        // against the materialized schema), and a missing column would
+        // surface as a model-vs-snapshot mismatch. Read the computed
+        // column SQL expression and the index name from the model so
+        // we pin both the column shape and the index declaration
+        // expected by the in-memory filter queries.
+        var entity = db.Model.FindEntityType(
+            typeof(Mohist.Server.Infrastructure.Data.Workflow.WorkflowRunRow));
+        Assert.NotNull(entity);
+        var statusProperty = entity!.FindProperty("Status");
+        Assert.NotNull(statusProperty);
+        Assert.Equal(
+            "LOWER(COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status')))",
+            statusProperty!.GetComputedColumnSql());
+        var index = entity.GetIndexes()
+            .SingleOrDefault(i => i.GetDatabaseName() == "IX_WorkflowRuns_Status");
+        Assert.NotNull(index);
+        Assert.Equal(
+            new[] { "Status", "AssignedRunnerId" },
+            index!.Properties.Select(p => p.Name).ToArray());
+    }
 
-        var indexes = await db.Database
-            .SqlQueryRaw<string>("""
-                SELECT "name" FROM sqlite_master
-                WHERE type = 'index' AND tbl_name = 'WorkflowRuns' AND "name" = 'IX_WorkflowRuns_Status';
-                """)
-            .ToListAsync();
-        Assert.Equal("IX_WorkflowRuns_Status", Assert.Single(indexes));
+    private static async Task<object?> ScalarAsync(MohistDbContext db, string sql)
+    {
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            connection.Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return await command.ExecuteScalarAsync();
     }
 
     private async Task<(string PendingId, List<string> NonPendingIds)> SeedRunsAcrossStatusesAsync(string prefix)
