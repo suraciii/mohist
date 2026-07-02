@@ -1,0 +1,41 @@
+## Codebase Patterns
+
+### LiveTaskProvider test harness
+- `packages/web/src/app/providers/LiveTaskProvider.test.ts` has a `vi.hoisted` `mocks` block that mocks `useEventsConnection`, `useAgentStatus`, and `sonner.toast.{info,error,success}`.
+- The `mountWith(queryClient)` helper renders `LiveTaskProvider` under `QueryClientProvider` + `ProjectProvider` and pulls back the captured `handleEvent` callback from `mocks.useEventsConnection.mock.calls[0][1]`.
+- Calling `handleEvent(eventName, data)` from the test drives the in-file `handleEvent` switch exactly as `useEventsConnection` would on the SignalR bus.
+- `beforeEach` calls `vi.clearAllMocks()` so every test gets a fresh spy baseline.
+
+### Re-observing `LiveTaskContext` state in tests
+- `useLiveTask` (from `entities/issue/model/live-task`) reads the context that `LiveTaskProvider` populates.
+- To capture `rebaseConflict` (and the rest of the state) from a test, mount a tiny child consumer under `LiveTaskProvider` that writes the state object to a mutable ref on every render. Read the ref's latest value after `act()` to assert on the post-event state.
+- Pattern used in new D2 tests:
+  ```ts
+  const stateProbe = { current: null as { rebaseConflict: unknown } | null }
+  function StateProbe() { stateProbe.current = useLiveTask(); return null }
+  // pass `stateProbe` into `mountWith` and let it render <StateProbe/> as the child
+  ```
+
+### Seeding the issue cache for `findIssueNumber`
+- `findIssueNumber` reads `queryClient.getQueriesData<Issue[]>({ queryKey: ['issues'] })` and matches on `Issue.id` to return the issue's `.number`.
+- Tests can seed via `queryClient.setQueryData(['issues'], [makeIssue(id, number)])` before driving `handleEvent`.
+- A minimal `Issue` for seeding requires the required scalar fields (`id`, `number`, `title`, `status`, `health`, `projectId`, `labels`, `createdAt`, `updatedAt`, `isDraft`, `canStart`, `blocker`); use `IssueStatus.Backlog` / `IssueHealth.Active` for status/health since these are string-valued enums.
+
+### `dispatchRebaseEvent` / `onRebaseEvent` in tests
+- `onRebaseEvent(handler)` (from `entities/issue/model/rebase-events`) is the public subscribe entry — it returns an unsubscribe function.
+- Tests can subscribe, push events into a captured array, and assert on the captured sequence; remember to call the off function at end-of-test.
+
+## Task T-001 outcomes
+
+- Added 10 new characterization tests in `LiveTaskProvider.test.ts` covering the currently-untested branches of:
+  - `handleReverseDnsIntegrationOutcome` — rebase-completed (clears conflict via state probe, dispatches `rebase_completed`, invalidates `['issues']`), merge-success (toast.success, invalidates `['issues']`), rebase-conflict (WorkflowRunFailed + StageFailed arms — sets state via probe, dispatches `rebase_conflict`, toast.error, invalidates `['issues']`), merge-failure (toast.error, invalidates `['issues']`, no rebase dispatch), no-match fallthrough (returns false — no rebase dispatch, no toast, default switch-arm invalidations fire).
+  - `notifyRunLifecycleToast` — pause arm (toast.info `'Issue #N needs approval'`), error arm (toast.error `'Issue #N encountered an error'`), suppression when the event's issue is currently viewed, suppression when `findIssueNumber` returns null.
+- All 33 tests in `LiveTaskProvider.test.ts` green; full web suite (240 files / 3727 tests) green; `npm run typecheck -w packages/web` clean.
+- NO production code change — tests pin the CURRENT in-file implementation per design D2.
+
+## Gotchas for downstream tasks
+
+- The `IssueWorkCompleted + non-rebase non-merge` fallthrough test must use `IssueWorkCompleted` (not `WorkflowRunFailed`) as the carrier event because the workflow-run switch arm also fires `notifyRunLifecycleToast` for paused/failed events, which would taint the "no toast was fired by the outcome handler" assertion. `IssueWorkCompleted` has no toast side-effects outside the outcome handler itself.
+- When the seeding step (`WorkflowRunFailed + rebase_conflict`) is needed to populate `rebaseConflict` before a `rebase_completed` clearing test, the seeding step also fires `toast.error('Rebase conflict on Issue #N')`. The test resets `mocks.toastInfo/Error/Success` via `mockClear()` between seed and the assertion step to keep the assertion focused on the post-seed handler's behavior.
+- The check `expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 'detail', issueId] })` only fires in the issue-arm when the outcome handler returns false; the rebase-completed arm returns true and breaks out of the issue-arm without firing the detail invalidation. Pin this.
+- The rebase-failed toast outcome (`'Rebase conflict on Issue #21'` etc.) is `toast.error`; the merge-failed outcome (`'Merge failed for Issue #21'`) is also `toast.error` but with different copy. Both must be tested separately to keep the strings distinct.
