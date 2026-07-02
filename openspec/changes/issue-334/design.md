@@ -58,9 +58,9 @@ return [new WorkflowRunStopped()];
 Decision: extract the cleanup into a small idempotent domain method (e.g. `bool ReconcileStoppedApprovalGate()`, sibling to `ReconcileReadyStatusWithInFlightWork` in `Shared.cs`) that returns whether it changed state, then:
 
 1. Call it from `Stop()` (D1) before the `Stopped` transition.
-2. Call it from `OnActivateAsync` over rehydrated state; when it returns true, save the run back (mirroring the existing reconcile write-back at `WorkflowGrain.cs:70-73`).
+2. Call it from `OnActivateAsync` over rehydrated state, but **only when `run.Status == Stopped`** (so a live run genuinely awaiting approval is never disturbed); when it returns true, save the run back (mirroring the existing reconcile write-back at `WorkflowGrain.cs:70-73`).
 
-The method's guard: `run.Status == Stopped && current.IsAwaitingApproval` → clear gate, return true. This makes the fix self-healing for already-poisoned records the next time their grain activates, without a data migration.
+The method's guard is the residual-gate condition `current.IsAwaitingApproval` → clear `ApprovalStatus`, set `StageRunStatus = Running`, return true. Guarding on `IsAwaitingApproval` (rather than `run.Status == Stopped`) is what lets the same method serve both call sites: inside `Stop()` the run is not yet `Stopped`, so a `Stopped`-only guard would make the cleanup a no-op and leave the gate dangling on every fresh stop (breaking the stop-clears-gate requirement). The `Stopped` scoping for the self-heal path lives at the `OnActivateAsync` caller instead. The method is idempotent — once the gate is cleared, `IsAwaitingApproval` is false, so subsequent activations are no-ops (no write amplification). This makes the fix self-healing for already-poisoned records the next time their grain activates, without a data migration.
 
 - *Alternative — relax the `Stop()` guard to allow idempotent re-stop over `Stopped`+dirty:* rejected. Widens a terminal run's mutation surface, re-runs `ClearExecutableStateAsync`, and re-emits `WorkflowRunStopped` for an already-terminal run — large blast radius for a low-risk bug.
 - *Alternative — one-off State scrub migration:* rejected. Spec explicitly wants self-healing without a migration; a reconcile-on-activate covers #331 and any future poison uniformly.

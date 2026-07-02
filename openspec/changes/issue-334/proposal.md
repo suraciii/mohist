@@ -5,7 +5,7 @@
 ## What Changes
 
 - `WorkflowRun.Stop()` 在终止时清除当前 stage 的残留审批门禁：若当前 stage `IsAwaitingApproval`，置 `ApprovalStatus = null` 并把 `StageRunStatus` 从 `AwaitingApproval` 翻回。镜像 `AddRuntimeTasks`（`WorkflowRun.Work.cs:95-96`）已有的「审批失效」清理模式——stop 是更强的失效语境。
-- 清理基于**运行时状态**判定（而非仅附加在新事件上），因此像 #331 这样已持久化成脏数据的 run，下次其 grain 执行 stop 时也会被修正。
+- 清理基于**运行时状态**判定（而非仅附加在新事件上）。由于 `Stop()` 对已处于终态（`Stopped`）的 run 会直接抛异常（无法再次 stop），已持久化成脏数据的 run（如 #331）改在 grain 重新激活时自愈——`OnActivateAsync` 调用幂等的 `ReconcileStoppedApprovalGate()` 清除残留门禁并写回 State。
 - **不**发新事件：stop 是终止，不是审批决策，清理的是残留门禁状态而非「驳回」，不产出 `StageApprovalResolved` 之类。
 - **不**改投影层 / 前端 / inbox / `ClearExecutableStateAsync`：它们消费的是 domain 暴露的状态，domain 修正后矛盾自然消失。
 
@@ -23,7 +23,8 @@
 
 ## Impact
 
-- **Server / Domain**（`packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.Lifecycle.cs`）：`Stop()` 扩展，对当前 stage 做审批门禁清理。
+- **Server / Domain**（`packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.Lifecycle.cs` + `Shared.cs`）：`Stop()` 扩展，对当前 stage 做审批门禁清理；清理逻辑抽取为 `Shared.cs` 中新的幂等方法 `ReconcileStoppedApprovalGate()`。
+- **Server / Grain**（`packages/server/src/Mohist.Server/Workflow/Grains/WorkflowGrain.cs`）：`OnActivateAsync` 在 `run.Status == Stopped` 时调用该 reconcile 并写回，自愈已持久化的脏 run（如 #331）。
 - **测试**：扩展 domain stop spec（如 `WorkflowRunStatusTransitionSpecs.cs` 中的 `Stop_LandsOnStopped`），新增「awaiting-approval 中途被 stop 后 `ApprovalStatus` 为 null、`StageRunStatus` 不再是 `AwaitingApproval`」的断言。
 - **下游消费方无需改码**：`WorkflowStatusMapper`、`IssueQuerier` 的 approval 派生、`MohistDefaultWorkflowProjection.StageApprovals`、Web 看板均读取清洗后的 domain 状态，自洽。
 - 无持久化迁移；无 API / 数据契约变更；blast radius 限于 domain 方法与其 spec。

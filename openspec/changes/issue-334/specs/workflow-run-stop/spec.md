@@ -16,14 +16,15 @@ A stopped workflow run MUST NOT carry a residual awaiting-approval gate on its c
 
 ### Requirement: Cleanup is evaluated against runtime state to correct persisted dirty data
 
-The approval-gate cleanup in `Stop()` SHALL be driven by the current stage's runtime state (`IsAwaitingApproval`), not by the arrival of a fresh event. Consequently a run that was persisted with stale awaiting-approval state — such as a run stopped under the pre-fix code that left `ApprovalStatus` dangling — SHALL be corrected the next time its grain executes `Stop()` over that state. This makes the fix self-healing for already-poisoned records without requiring a data migration.
+The approval-gate cleanup SHALL be driven by the current stage's runtime state (`IsAwaitingApproval`), not by the arrival of a fresh event. Because `Stop()` rejects an already-terminal run (it throws when `Status` is `Stopped`), a run persisted with stale awaiting-approval state — such as a run stopped under the pre-fix code that left `ApprovalStatus` dangling — SHALL be corrected the next time its workflow grain reactivates: the rehydration reconcile in `OnActivateAsync` clears the residual gate and writes the cleaned state back to the run store. This makes the fix self-healing for already-poisoned records without requiring a data migration.
 
-#### Scenario: Persisted dirty run is corrected on next stop
+#### Scenario: Persisted dirty run is corrected on next grain reactivation
 
 - **WHEN** a run was persisted in a state where `Status` is `Stopped` but the current stage still carries a non-null, unresolved `ApprovalStatus`
-- **AND** the run's grain later executes `Stop()` over that persisted state
+- **AND** the run's workflow grain later reactivates (`OnActivateAsync`) over that persisted state
 - **THEN** the current stage's `ApprovalStatus` SHALL be set to null
 - **AND** the current stage's `StageRunStatus` SHALL NOT be `AwaitingApproval`
+- **AND** the cleaned state SHALL be written back to the run store
 
 ### Requirement: Stop emits no approval-decision events
 
