@@ -229,11 +229,40 @@ public sealed record CompletionMetricsBucketDto(
 /// is one of <c>day</c> / <c>week</c>; <c>Window</c> is the trailing
 /// time range the series covers. <c>Buckets</c> is dense: every
 /// bucket in the window is present, even when its counts are zero.
+/// <c>CurrentTotal</c> and <c>PreviousTotal</c> are strictly additive:
+/// the pre-existing <c>Buckets</c> / <c>Window</c> series and the
+/// fixed day/week granularity are unchanged. The two totals are
+/// computed from the same latest-terminal-event classification the
+/// per-bucket series uses, over the current window
+/// <c>[now − W, now]</c> and the immediately-preceding window of the
+/// same length <c>[now − 2W, now − W]</c>. <see cref="CompletionMetricsTotalsDto.SampleCount"/>
+/// is the terminal-issue count in the window — it lets the caller
+/// distinguish a zero-sample (empty) window (<c>SampleCount == 0</c>,
+/// no terminal issues fell in the window) from a genuine
+/// zero-completion window (<c>SampleCount > 0</c>, every terminal
+/// issue cancelled and none completed).
 /// </summary>
 public sealed record CompletionMetricsResponse(
     string Bucket,
     CompletionMetricsWindowDto Window,
-    CompletionMetricsBucketDto[] Buckets);
+    CompletionMetricsBucketDto[] Buckets,
+    CompletionMetricsTotalsDto CurrentTotal,
+    CompletionMetricsTotalsDto PreviousTotal);
+
+/// <summary>
+/// Window-scoped completion totals. <see cref="Completed"/> and
+/// <see cref="Failed"/> aggregate the latest-terminal-event
+/// classification across every issue whose terminal event falls in
+/// the window. <see cref="SampleCount"/> is the number of terminal
+/// issues contributing to the totals in the window — it is the
+/// discriminator that distinguishes the empty (zero-sample) result
+/// (<c>SampleCount == 0</c>) from a genuine zero-completion window
+/// (<c>SampleCount > 0</c>, <c>Completed == 0</c>).
+/// </summary>
+public sealed record CompletionMetricsTotalsDto(
+    int Completed,
+    int Failed,
+    int SampleCount);
 
 public sealed record CompletionMetricsWindowDto(
     string From,
@@ -261,10 +290,25 @@ public sealed record ApprovalWaitMetricsWindowDto(
 /// windows are returned together so callers can compare recent and
 /// longer-term quality in one read. <see cref="Trend"/> is a strictly
 /// additive pre-sized per-day series across the trailing 30-day window.
+/// <para>
+/// <see cref="PreviousFirstTimeRightRate"/> and <see cref="PreviousSampleCount"/>
+/// are strictly additive: they carry the first-time-right rate over the
+/// immediately-preceding 30-day window (the window of the same length
+/// as the current 30-day window, immediately preceding it), using the
+/// identical ship-time windowing and FTR classification. <see cref="PreviousSampleCount"/>
+/// is the empty discriminator — when it is <c>0</c>, the previous window
+/// is empty (no shipped issues fell in it) and
+/// <see cref="PreviousFirstTimeRightRate"/> is <c>null</c>, structurally
+/// distinguishable from a genuine <c>0</c> or <c>1</c> rate. The two
+/// windows are evaluated independently: the current window can be non-empty
+/// while the previous window is empty and vice-versa.
+/// </para>
 /// </summary>
 public sealed record QualityMetricsResponse(
     QualityMetricsWindowDto Window7d,
     QualityMetricsWindowDto Window30d,
+    double? PreviousFirstTimeRightRate,
+    int PreviousSampleCount,
     QualityTrendDto Trend);
 
 /// <summary>
@@ -334,10 +378,14 @@ public sealed record DeliveryTimePointDto(
 /// returns one entry per delivered issue in the fixed 30-day trailing
 /// window anchored on completion time. <see cref="Points"/> is empty
 /// (not an error, not a fabricated zero) when no delivered issues fall
-/// in the window.
+/// in the window. <see cref="PreviousCycleDays"/> is strictly additive:
+/// the existing <see cref="Points"/> series and the existing fixed
+/// trailing window are preserved unchanged; only the previous-window
+/// average is added.
 /// </summary>
 public sealed record DeliveryTimeMetricsResponse(
-    DeliveryTimePointDto[] Points);
+    DeliveryTimePointDto[] Points,
+    double? PreviousCycleDays);
 
 /// <summary>
 /// Response shape for the stage-duration metrics endpoint. The stages are

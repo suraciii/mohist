@@ -90,6 +90,24 @@ describe('AppSidebar primary navigation', () => {
     expect(issuesIndex).toBeGreaterThan(dashboardIndex)
   })
 
+  it('exposes an Insights entry that navigates to /insights via useProjectPath', () => {
+    renderSidebar('/demo')
+
+    const insights = screen.getByTestId('nav-insights')
+    expect(insights).toBeInTheDocument()
+    expect(within(insights).getByText('Insights')).toBeInTheDocument()
+
+    fireEvent.click(insights)
+
+    expect(screen.getByTestId('location-spy')).toHaveAttribute('data-pathname', '/demo/insights')
+  })
+
+  it('highlights the Insights entry on /:projectName/insights', () => {
+    renderSidebar('/demo/insights')
+
+    expect(screen.getByTestId('nav-insights')).toHaveAttribute('data-active', 'true')
+  })
+
   it('does not contain Board or Home primary nav entries', () => {
     renderSidebar('/demo')
 
@@ -100,12 +118,13 @@ describe('AppSidebar primary navigation', () => {
     expect(screen.queryByText('Home')).not.toBeInTheDocument()
   })
 
-  it('preserves the canonical navigation order: Dashboard, Issues, Inbox, Activity, Runners, Epics, Logs, Settings, Archived', () => {
+  it('preserves the canonical navigation order: Dashboard, Insights, Issues, Inbox, Activity, Runners, Epics, Logs, Settings, Archived', () => {
     renderSidebar('/demo')
 
     const order = getNavTestIdsInOrder()
     expect(order).toEqual([
       'nav-dashboard',
+      'nav-insights',
       'nav-issues',
       'nav-agents',
       'nav-inbox',

@@ -50,12 +50,15 @@ public static class AgentRoutes
             var projectIssues = await issues.ListAsync(project.Id, project, all: true);
             var doneIssuesCount = projectIssues.Count(i => i.Status == "done");
             var costPerShip = BuildCostPerShip(cost.TotalCost, doneIssuesCount);
+            var windowed = await sessions.GetCostWindowedAsync(project.Id, ct);
 
             return ApiResults.Ok(new AgentCostRollupDto(
                 cost.TotalCost,
                 cost.TodayCost,
                 doneIssuesCount,
-                costPerShip));
+                costPerShip,
+                windowed.CurrentWindow,
+                windowed.PreviousWindow));
         });
 
         return app;

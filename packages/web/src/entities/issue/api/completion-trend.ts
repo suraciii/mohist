@@ -8,10 +8,18 @@ export interface CompletionBucketPoint {
   failed: number
 }
 
+export interface CompletionTotalDto {
+  completed: number
+  failed: number
+  sampleCount: number
+}
+
 export interface CompletionTrendResponse {
   bucket: string
   window: { from: string; to: string }
   buckets: CompletionBucketPoint[]
+  currentTotal?: CompletionTotalDto
+  previousTotal?: CompletionTotalDto
 }
 
 type CompletionBucket = 'day' | 'week'

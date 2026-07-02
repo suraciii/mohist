@@ -1024,6 +1024,251 @@ public class IssueQuerierSpecs
         Assert.Equal("2026-06-15", result.Buckets[^1].Boundary);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_PreviousWindowIsImmediatelyPrecedingAndSameLength()
+    {
+        // Spec: previous window is [now - 2W, now - W] where W is the
+        // current 30-day window. For day granularity this is exactly
+        // 30 trailing UTC days immediately before the current window.
+        // Verify by re-running with `now` shifted 30 days earlier: the
+        // shifted run's current window must equal what the previous
+        // window would cover.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-prev-day-{Guid.NewGuid():N}", Name = "Prev Day Project" };
+        SeedIssue(db, project, "issue_prev_day_1");
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        var currentFrom = result.WindowFrom;
+        var currentTo = result.WindowTo;
+        // Current window length must be exactly 30 days inclusive of today.
+        Assert.Equal(TimeSpan.FromDays(30), currentTo - currentFrom);
+
+        // The shifted run's current window matches the previous window
+        // that would cover the original run's preceding period.
+        var shiftedNow = now - TimeSpan.FromDays(30);
+        var shiftedResult = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, shiftedNow);
+        Assert.Equal(shiftedResult.WindowFrom, currentFrom - TimeSpan.FromDays(30));
+        Assert.Equal(shiftedResult.WindowTo, currentFrom);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_WeekBucketing_PreviousWindowIsImmediatelyPrecedingAndSameLength()
+    {
+        // Spec: previous window is [now - 2W, now - W] where W is the
+        // current 12-week window. For week granularity this is exactly
+        // 12 ISO weeks immediately before the current window.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-prev-week-{Guid.NewGuid():N}", Name = "Prev Week Project" };
+        SeedIssue(db, project, "issue_prev_week_1");
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Week, now);
+
+        var currentFrom = result.WindowFrom;
+        var currentTo = result.WindowTo;
+        Assert.Equal(TimeSpan.FromDays(7 * 12), currentTo - currentFrom);
+
+        var shiftedNow = now - TimeSpan.FromDays(7 * 12);
+        var shiftedResult = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Week, shiftedNow);
+        Assert.Equal(shiftedResult.WindowFrom, currentFrom - TimeSpan.FromDays(7 * 12));
+        Assert.Equal(shiftedResult.WindowTo, currentFrom);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_BothWindowTotalsAggregateLatestTerminalByEventTime()
+    {
+        // Two completed events in the current window and one failed
+        // event in the previous window. Both totals must reflect the
+        // events' terminal types and aggregate the same way the
+        // per-bucket series does (latest-terminal-event classification).
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-both-day-{Guid.NewGuid():N}", Name = "Both Day Project" };
+        var i1 = SeedIssue(db, project, "issue_both_day_1");
+        var i2 = SeedIssue(db, project, "issue_both_day_2");
+        var i3 = SeedIssue(db, project, "issue_both_day_3");
+        await db.SaveChangesAsync();
+
+        // Current window events (within trailing 30d ending 2026-06-20).
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i2.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero));
+        // Previous window event — with now=2026-06-19, the previous
+        // day-window is [2026-04-21, 2026-05-21).
+        SeedEvent(db, i3.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        Assert.Equal(2, result.CurrentTotal.Completed);
+        Assert.Equal(0, result.CurrentTotal.Failed);
+        Assert.Equal(2, result.CurrentTotal.SampleCount);
+
+        Assert.Equal(0, result.PreviousTotal.Completed);
+        Assert.Equal(1, result.PreviousTotal.Failed);
+        Assert.Equal(1, result.PreviousTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_LatestTerminalEventDedupedAcrossWindows()
+    {
+        // An issue closed in the previous window and reopened +
+        // re-completed in the current window. The latest terminal
+        // event lives in the current window; the earlier terminal
+        // (closed in previous window) must be invalidated by the
+        // latest-terminal classification — counted once in the
+        // current window only, never in the previous.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-cross-{Guid.NewGuid():N}", Name = "Cross Window Project" };
+        var i1 = SeedIssue(db, project, "issue_cross_1");
+        await db.SaveChangesAsync();
+
+        // Earlier terminal event in the previous window [2026-04-21, 2026-05-21).
+        SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero));
+        // Reopen (non-terminal) sits between the two terminals.
+        SeedEvent(db, i1.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 12, 10, 0, 0, TimeSpan.Zero));
+        // Latest terminal event (the only one counted) lives in the current window.
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 10, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        // Current window holds the latest terminal (completed).
+        Assert.Equal(1, result.CurrentTotal.Completed);
+        Assert.Equal(0, result.CurrentTotal.Failed);
+        Assert.Equal(1, result.CurrentTotal.SampleCount);
+        // Previous window is empty: the earlier terminal event was
+        // invalidated by the subsequent latest-terminal classification,
+        // not retained as a separate count.
+        Assert.Equal(0, result.PreviousTotal.Completed);
+        Assert.Equal(0, result.PreviousTotal.Failed);
+        Assert.Equal(0, result.PreviousTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_NoTerminalIssuesInPrevious_YieldsEmptyResult()
+    {
+        // A window with no terminal issues must report SampleCount 0
+        // (the empty/zero-sample result), not a fabricated zero with
+        // a non-zero sample count.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-empty-prev-{Guid.NewGuid():N}", Name = "Empty Prev Project" };
+        var i1 = SeedIssue(db, project, "issue_empty_prev_1");
+        await db.SaveChangesAsync();
+
+        // One current-window completion only; previous window has no events.
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        Assert.Equal(1, result.CurrentTotal.Completed);
+        Assert.Equal(1, result.CurrentTotal.SampleCount);
+        // Previous window: no terminal issues at all → SampleCount 0.
+        Assert.Equal(0, result.PreviousTotal.Completed);
+        Assert.Equal(0, result.PreviousTotal.Failed);
+        Assert.Equal(0, result.PreviousTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_GenuineZeroCompletionPreviousWindow_IsDistinguishableFromEmpty()
+    {
+        // A window where every terminal issue cancelled and none
+        // completed is a GENUINE zero: SampleCount > 0, Completed == 0.
+        // This must be distinguishable from the empty (zero-sample)
+        // result, which reports SampleCount == 0.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-zero-prev-{Guid.NewGuid():N}", Name = "Genuine Zero Prev Project" };
+        var i1 = SeedIssue(db, project, "issue_zero_prev_1");
+        var i2 = SeedIssue(db, project, "issue_zero_prev_2");
+        await db.SaveChangesAsync();
+
+        // now = 2026-06-19; previous day-window = [2026-04-21, 2026-05-21).
+        // Place two failed (cancelled) events inside that range.
+        SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 5, 9, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i2.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 11, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        // Genuine zero completion with non-zero sample count.
+        Assert.Equal(0, result.PreviousTotal.Completed);
+        Assert.Equal(2, result.PreviousTotal.Failed);
+        Assert.Equal(2, result.PreviousTotal.SampleCount);
+        // Current window is empty: SampleCount 0.
+        Assert.Equal(0, result.CurrentTotal.SampleCount);
+        // The discriminator is SampleCount, not Completed.
+        Assert.NotEqual(result.PreviousTotal.SampleCount, result.CurrentTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_WindowAdvancesWithCurrentTime()
+    {
+        // Advancing `now` shifts the previous window so that issues
+        // that age out of the previous window drop out of both the
+        // per-bucket series AND the totals.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-advance-{Guid.NewGuid():N}", Name = "Advance Project" };
+        var i1 = SeedIssue(db, project, "issue_advance_1");
+        await db.SaveChangesAsync();
+
+        // Event lands in the previous window for `now=2026-06-19`:
+        // previous day-window = [2026-04-21, 2026-05-21).
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var earlierNow = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var earlierResult = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, earlierNow);
+        Assert.Equal(1, earlierResult.PreviousTotal.Completed);
+        Assert.Equal(1, earlierResult.PreviousTotal.SampleCount);
+
+        // Now advance `now` by 60 days. The previous window slides to
+        // [2026-08-18 - 59d, 2026-08-18 - 29d) = [2026-06-20, 2026-07-20).
+        // The 2026-05-10 event is now in neither window.
+        var laterNow = new DateTimeOffset(2026, 8, 18, 12, 0, 0, TimeSpan.Zero);
+        var laterResult = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, laterNow);
+        Assert.Equal(0, laterResult.PreviousTotal.Completed);
+        Assert.Equal(0, laterResult.PreviousTotal.SampleCount);
+        // …and it falls out of the current window too.
+        Assert.Equal(0, laterResult.CurrentTotal.Completed);
+        Assert.Equal(0, laterResult.CurrentTotal.SampleCount);
+    }
+
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
@@ -2064,6 +2309,309 @@ public class IssueQuerierSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task GetQualityAsync_PreviousWindowAdjacencyAndLength_AreImmediatePreceding30Days()
+    {
+        // The previous window is `[now − 60d, now − 30d)` — same 30-day
+        // length as the current window, immediately preceding it. Seed
+        // one shipped FTR issue in the current window and one shipped
+        // non-FTR issue in the previous window. With
+        // `now = 2026-06-19 12:00 UTC`:
+        //   current   window = [2026-05-20 12:00, 2026-06-19 12:00]
+        //   previous  window = [2026-04-20 12:00, 2026-05-20 12:00)
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-quality-prev-adj-{Guid.NewGuid():N}", Name = "Quality Prev Adjacency" };
+
+        var previousShipTime = new DateTime(2026, 5, 10, 14, 0, 0, DateTimeKind.Utc);
+        var previousIssue = SeedIssue(db, project, "issue_quality_prev_adj_prev", workflowRunId: "wr_quality_prev_adj_prev", status: IssueStatus.Done);
+        SeedEvent(db, previousIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(previousShipTime, TimeSpan.Zero), "wr_quality_prev_adj_prev");
+        await SeedWorkflowRunAsync(db, "wr_quality_prev_adj_prev", QualityRunState("wr_quality_prev_adj_prev", [
+            ("plan", [("plan-repair", "Plan repair", 1)]),
+        ]));
+
+        var currentShipTime = new DateTime(2026, 6, 5, 14, 0, 0, DateTimeKind.Utc);
+        var currentIssue = SeedIssue(db, project, "issue_quality_prev_adj_curr", workflowRunId: "wr_quality_prev_adj_curr", status: IssueStatus.Done);
+        SeedEvent(db, currentIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(currentShipTime, TimeSpan.Zero), "wr_quality_prev_adj_curr");
+        await SeedWorkflowRunAsync(db, "wr_quality_prev_adj_curr", QualityRunState("wr_quality_prev_adj_curr", [
+            ("plan", [("plan-ok", "Plan ok", 0)]),
+            ("build", [("build-ok", "Build ok", 0)]),
+        ]));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetQualityAsync(project.Id, now);
+
+        // Current 30d window: 1 sample, FTR = 1.0.
+        Assert.Equal(1, result.Window30d.SampleCount);
+        Assert.Equal(1.0, result.Window30d.FirstTimeRightRate);
+        // Previous 30d window: 1 sample, FTR = 0.0 (the repair).
+        Assert.Equal(1, result.PreviousWindow.SampleCount);
+        Assert.Equal(0.0, result.PreviousWindow.FirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetQualityAsync_PreviousWindowEmpty_ReturnsNullIndependentOfCurrent()
+    {
+        // Only seed a shipped issue in the current window. The previous
+        // window must evaluate to the empty result (sampleCount 0,
+        // null rate) regardless of how full the current window is.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-quality-prev-empty-{Guid.NewGuid():N}", Name = "Quality Prev Empty" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+
+        var issue = SeedIssue(db, project, "issue_quality_prev_empty_only", workflowRunId: "wr_quality_prev_empty_only", status: IssueStatus.Done);
+        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_prev_empty_only");
+        await SeedWorkflowRunAsync(db, "wr_quality_prev_empty_only", QualityRunState("wr_quality_prev_empty_only", [
+            ("plan", [("plan-ok", "Plan ok", 0)]),
+            ("build", [("build-ok", "Build ok", 0)]),
+        ]));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result = await service.GetQualityAsync(project.Id, now);
+
+        // Current window is populated.
+        Assert.Equal(1, result.Window30d.SampleCount);
+        Assert.Equal(1.0, result.Window30d.FirstTimeRightRate);
+        // Previous window is empty.
+        Assert.Equal(0, result.PreviousWindow.SampleCount);
+        Assert.Null(result.PreviousWindow.FirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetQualityAsync_CurrentWindowEmpty_PreviousWindowRateComputedIndependently()
+    {
+        // Reverse asymmetry: no current-window shipped issues, but
+        // the previous window has one shipped non-FTR issue. The
+        // current window reports the empty result (SampleCount 0)
+        // and the previous window reports the genuine 0.0 rate.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-quality-curr-empty-prev-{Guid.NewGuid():N}", Name = "Quality Curr Empty Prev" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+
+        var previousShipTime = new DateTime(2026, 5, 10, 14, 0, 0, DateTimeKind.Utc);
+        var issue = SeedIssue(db, project, "issue_quality_curr_empty_prev", workflowRunId: "wr_quality_curr_empty_prev", status: IssueStatus.Done);
+        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(previousShipTime, TimeSpan.Zero), "wr_quality_curr_empty_prev");
+        await SeedWorkflowRunAsync(db, "wr_quality_curr_empty_prev", QualityRunState("wr_quality_curr_empty_prev", [
+            ("plan", [("plan-repair", "Plan repair", 1)]),
+        ]));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result = await service.GetQualityAsync(project.Id, now);
+
+        // Current window is empty.
+        Assert.Equal(0, result.Window30d.SampleCount);
+        Assert.Null(result.Window30d.FirstTimeRightRate);
+        // Previous window is computed independently — 1 sample, FTR 0.0.
+        Assert.Equal(1, result.PreviousWindow.SampleCount);
+        Assert.Equal(0.0, result.PreviousWindow.FirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetQualityAsync_IdenticalFtrClassificationAcrossBothWindows()
+    {
+        // The previous window uses the IDENTICAL FTR classification as
+        // the current window: a shipped issue is FTR iff no check
+        // across its whole lifecycle triggered a repair. Seed two
+        // previous-window issues — one with a durable RepairScheduled
+        // event (FTR = false), one with a check run twice (also
+        // FTR = false because the second run signals rework) — and
+        // assert the rate matches the lifecycle-derived classification.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-quality-prev-ftr-identical-{Guid.NewGuid():N}", Name = "Quality Prev FTR Identical" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+
+        // (a) Previous-window issue with a RepairScheduled event → FTR = false.
+        var repairShipTime = new DateTime(2026, 5, 5, 14, 0, 0, DateTimeKind.Utc);
+        var repairIssue = SeedIssue(db, project, "issue_quality_prev_ftr_repair", workflowRunId: "wr_quality_prev_ftr_repair", status: IssueStatus.Done);
+        SeedEvent(db, repairIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(repairShipTime, TimeSpan.Zero), "wr_quality_prev_ftr_repair");
+        await SeedWorkflowRunAsync(db, "wr_quality_prev_ftr_repair", QualityRunState("wr_quality_prev_ftr_repair", [
+            ("plan", [("plan-ok", "Plan ok", 0)]),
+            ("check", [("review", "Review", 0)]),
+        ]));
+        SeedWorkflowRunEvent(db, "wr_quality_prev_ftr_repair", 1, EventCatalog.ReverseDns.StageStarted, new DateTimeOffset(2026, 5, 4, 9, 0, 0, TimeSpan.Zero), new { stage = "plan" });
+        SeedWorkflowRunEvent(db, "wr_quality_prev_ftr_repair", 2, EventCatalog.ReverseDns.CheckPassed, new DateTimeOffset(2026, 5, 4, 10, 0, 0, TimeSpan.Zero), new { stage = "plan", checkName = "plan-ok", message = "ok" });
+        SeedWorkflowRunEvent(db, "wr_quality_prev_ftr_repair", 3, EventCatalog.ReverseDns.StageStarted, new DateTimeOffset(2026, 5, 4, 11, 0, 0, TimeSpan.Zero), new { stage = "check" });
+        SeedWorkflowRunEvent(db, "wr_quality_prev_ftr_repair", 4, EventCatalog.ReverseDns.RepairScheduled, new DateTimeOffset(2026, 5, 4, 12, 0, 0, TimeSpan.Zero), new { stage = "check", checkName = "review", taskIds = new[] { "repair-1" } });
+        SeedWorkflowRunEvent(db, "wr_quality_prev_ftr_repair", 5, EventCatalog.ReverseDns.CheckPassed, new DateTimeOffset(2026, 5, 5, 14, 0, 0, TimeSpan.Zero), new { stage = "check", checkName = "review", message = "ok" });
+
+        // (b) Previous-window issue with no repair → FTR = true.
+        var cleanShipTime = new DateTime(2026, 5, 12, 14, 0, 0, DateTimeKind.Utc);
+        var cleanIssue = SeedIssue(db, project, "issue_quality_prev_ftr_clean", workflowRunId: "wr_quality_prev_ftr_clean", status: IssueStatus.Done);
+        SeedEvent(db, cleanIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(cleanShipTime, TimeSpan.Zero), "wr_quality_prev_ftr_clean");
+        await SeedWorkflowRunAsync(db, "wr_quality_prev_ftr_clean", QualityRunState("wr_quality_prev_ftr_clean", [
+            ("plan", [("plan-ok", "Plan ok", 0)]),
+            ("build", [("build-ok", "Build ok", 0)]),
+        ]));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result = await service.GetQualityAsync(project.Id, now);
+
+        // 2 previous-window issues: 1 FTR, 1 not → rate 0.5.
+        // Mirrors the current window's FTR classification.
+        Assert.Equal(2, result.PreviousWindow.SampleCount);
+        Assert.NotNull(result.PreviousWindow.FirstTimeRightRate);
+        Assert.Equal(0.5, result.PreviousWindow.FirstTimeRightRate!.Value, precision: 5);
+        // Both issues shipped before 30d ago so the current window
+        // is empty (preserved empty-result semantics).
+        Assert.Equal(0, result.Window30d.SampleCount);
+        Assert.Null(result.Window30d.FirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetQualityAsync_AdjacencyShiftsWithNow_DrivenByExplicitDateTimeOffset()
+    {
+        // The querier-level adjacency check: shifting `now` by exactly
+        // 30 days must move the previous-window boundary by the same
+        // amount and shift which issue falls inside each window. This
+        // proves the previous window is `now`-anchored, not fixture-
+        // clock-anchored.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-quality-prev-shift-{Guid.NewGuid():N}", Name = "Quality Prev Shift" };
+
+        // Issue that ships near a window boundary for now = D. The
+        // issue is FTR (no repair); its ship moment is the only thing
+        // that determines which window hosts it.
+        var anchor = new DateTime(2026, 6, 10, 14, 0, 0, DateTimeKind.Utc);
+        var issue = SeedIssue(db, project, "issue_quality_prev_shift_anchor", workflowRunId: "wr_quality_prev_shift_anchor", status: IssueStatus.Done);
+        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(anchor, TimeSpan.Zero), "wr_quality_prev_shift_anchor");
+        await SeedWorkflowRunAsync(db, "wr_quality_prev_shift_anchor", QualityRunState("wr_quality_prev_shift_anchor", [
+            ("plan", [("plan-ok", "Plan ok", 0)]),
+            ("build", [("build-ok", "Build ok", 0)]),
+        ]));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        // Window D: now=2026-06-30 → anchor (6/10) is inside current
+        // window [5/31, 6/30], previous window is empty.
+        var nowEarlier = new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
+        var earlier = await service.GetQualityAsync(project.Id, nowEarlier);
+        Assert.Equal(1, earlier.Window30d.SampleCount);
+        Assert.Equal(1.0, earlier.Window30d.FirstTimeRightRate);
+        Assert.Equal(0, earlier.PreviousWindow.SampleCount);
+        Assert.Null(earlier.PreviousWindow.FirstTimeRightRate);
+
+        // Window D+30d: now=2026-07-30 → current window is empty
+        // (anchor 6/10 is outside [7/1, 7/30]); the SAME issue is now
+        // inside the new previous window [6/1, 7/1).
+        var nowLater = new DateTimeOffset(2026, 7, 30, 0, 0, 0, TimeSpan.Zero);
+        var later = await service.GetQualityAsync(project.Id, nowLater);
+        Assert.Equal(0, later.Window30d.SampleCount);
+        Assert.Null(later.Window30d.FirstTimeRightRate);
+        Assert.Equal(1, later.PreviousWindow.SampleCount);
+        Assert.Equal(1.0, later.PreviousWindow.FirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetQualityAsync_PreviousWindowAvgAcrossMultipleContributingIssues_IsArithmeticMean()
+    {
+        // Seed three previous-window shipped issues with different
+        // FTR outcomes (2 FTR, 1 not) and assert the previous-window
+        // rate is the arithmetic mean of the per-issue FTR flag.
+        // Mirrors the current-window contract.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-quality-prev-mean-{Guid.NewGuid():N}", Name = "Quality Prev Mean" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+
+        // (a) FTR — no repair.
+        var ftr1 = SeedIssue(db, project, "issue_quality_prev_mean_ftr1", workflowRunId: "wr_quality_prev_mean_ftr1", status: IssueStatus.Done);
+        SeedEvent(db, ftr1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 5, 1, 14, 0, 0, TimeSpan.Zero), "wr_quality_prev_mean_ftr1");
+        await SeedWorkflowRunAsync(db, "wr_quality_prev_mean_ftr1", QualityRunState("wr_quality_prev_mean_ftr1", [
+            ("plan", [("plan-ok", "Plan ok", 0)]),
+        ]));
+
+        // (b) FTR — no repair.
+        var ftr2 = SeedIssue(db, project, "issue_quality_prev_mean_ftr2", workflowRunId: "wr_quality_prev_mean_ftr2", status: IssueStatus.Done);
+        SeedEvent(db, ftr2.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 5, 5, 14, 0, 0, TimeSpan.Zero), "wr_quality_prev_mean_ftr2");
+        await SeedWorkflowRunAsync(db, "wr_quality_prev_mean_ftr2", QualityRunState("wr_quality_prev_mean_ftr2", [
+            ("plan", [("plan-ok", "Plan ok", 0)]),
+        ]));
+
+        // (c) Not FTR — one check had a repair.
+        var repaired = SeedIssue(db, project, "issue_quality_prev_mean_repaired", workflowRunId: "wr_quality_prev_mean_repaired", status: IssueStatus.Done);
+        SeedEvent(db, repaired.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 5, 10, 14, 0, 0, TimeSpan.Zero), "wr_quality_prev_mean_repaired");
+        await SeedWorkflowRunAsync(db, "wr_quality_prev_mean_repaired", QualityRunState("wr_quality_prev_mean_repaired", [
+            ("plan", [("plan-ok", "Plan ok", 0)]),
+            ("build", [("build-repair", "Build repair", 1)]),
+        ]));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result = await service.GetQualityAsync(project.Id, now);
+
+        // 3 previous-window issues: 2 FTR, 1 not → rate 2/3.
+        Assert.Equal(3, result.PreviousWindow.SampleCount);
+        Assert.Equal(2.0 / 3.0, result.PreviousWindow.FirstTimeRightRate!.Value, precision: 5);
+        // Current window is empty.
+        Assert.Equal(0, result.Window30d.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetQualityAsync_PreviousWindowAdditive_ExistingWindowsAndTrendUnchanged()
+    {
+        // The previous-window addition must be strictly additive: the
+        // existing window7d, window30d, per-stage rework, and trend
+        // series are preserved byte-for-byte for a consumer that does
+        // not read the previous-window fields.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-quality-prev-additive-{Guid.NewGuid():N}", Name = "Quality Prev Additive" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+
+        var issue = SeedIssue(db, project, "issue_quality_prev_additive", workflowRunId: "wr_quality_prev_additive", status: IssueStatus.Done);
+        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_prev_additive");
+        await SeedWorkflowRunAsync(db, "wr_quality_prev_additive", QualityRunState("wr_quality_prev_additive", [
+            ("plan", [("plan-ok", "Plan ok", 0)]),
+            ("build", [("build-repair", "Build repair", 1)]),
+        ]));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result = await service.GetQualityAsync(project.Id, now);
+
+        // Existing 7d window preserved.
+        Assert.Equal(1, result.Window7d.SampleCount);
+        Assert.Equal(0.0, result.Window7d.FirstTimeRightRate);
+        Assert.Contains(result.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(result.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        // Existing 30d window preserved.
+        Assert.Equal(1, result.Window30d.SampleCount);
+        Assert.Equal(0.0, result.Window30d.FirstTimeRightRate);
+        Assert.Contains(result.Window30d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(result.Window30d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        // Existing trend preserved (30 dense per-day buckets).
+        Assert.Equal(30, result.Trend.Points.Count);
+        // New previous-window field: empty (no previous-window
+        // issues seeded). The previous-window addition does not touch
+        // any existing field.
+        Assert.Equal(0, result.PreviousWindow.SampleCount);
+        Assert.Null(result.PreviousWindow.FirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task ListAsync_ForDoneIssue_IncludesCompletedAt()
     {
         using var scope = _fixture.Services.CreateScope();
@@ -2512,6 +3060,265 @@ public class IssueQuerierSpecs
         Assert.True(result.Points[0].CompletedAt < result.Points[1].CompletedAt);
         Assert.Equal(early.Number, result.Points[0].IssueNumber);
         Assert.Equal(late.Number, result.Points[1].IssueNumber);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetDeliveryTimesAsync_PreviousWindowAdjacencyAndLength_AreImmediatePreceding30Days()
+    {
+        // The previous window is `[now − 60d, now − 30d)` — same 30-day
+        // length as the current window, immediately preceding it. Seed
+        // one delivered issue with work-start inside the previous
+        // window (cycle 4d) and one inside the current window (cycle
+        // 5d). With `now = 2026-06-19 12:00 UTC`:
+        //   current   window = [2026-05-20 12:00, 2026-06-19 12:00]
+        //   previous  window = [2026-04-20 12:00, 2026-05-20 12:00)
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-dt-prev-adj-{Guid.NewGuid():N}", Name = "DT Prev Adjacency" };
+
+        var previousCompletedAt = new DateTime(2026, 5, 10, 14, 0, 0, DateTimeKind.Utc);
+        var previousWorkStart = new DateTimeOffset(previousCompletedAt, TimeSpan.Zero).AddDays(-4);
+        var prev = SeedDeliveredIssue(
+            db, project, "issue_dt_prev_adj_prev",
+            createdAt: new DateTime(2026, 4, 25, 8, 0, 0, DateTimeKind.Utc),
+            completedAt: previousCompletedAt);
+        SeedEvent(db, prev.Id, IssueQuerier.WorkStartedType, previousWorkStart);
+
+        var currentCompletedAt = new DateTime(2026, 6, 5, 14, 0, 0, DateTimeKind.Utc);
+        var currentWorkStart = new DateTimeOffset(currentCompletedAt, TimeSpan.Zero).AddDays(-5);
+        var curr = SeedDeliveredIssue(
+            db, project, "issue_dt_prev_adj_curr",
+            createdAt: new DateTime(2026, 5, 28, 8, 0, 0, DateTimeKind.Utc),
+            completedAt: currentCompletedAt);
+        SeedEvent(db, curr.Id, IssueQuerier.WorkStartedType, currentWorkStart);
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetDeliveryTimesAsync(project.Id, now);
+
+        // Only the current-window issue contributes a `Point`; the
+        // previous-window issue contributes only to the average. This
+        // matches the surface contract: `Points` is the per-issue
+        // delivery-time series anchored on the current window, and the
+        // previous-window data returns as a scalar average alongside.
+        var point = Assert.Single(result.Points);
+        Assert.NotNull(point.CycleDays);
+        Assert.NotNull(result.PreviousAverageCycleDays);
+        Assert.Equal(4.0, result.PreviousAverageCycleDays!.Value, precision: 5);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetDeliveryTimesAsync_PreviousWindowEmpty_ReturnsNullIndependentOfCurrent()
+    {
+        // Only seed a delivered issue inside the current window. The
+        // previous window must evaluate to `null` (the defined empty
+        // result) regardless of how full the current window is.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-dt-prev-empty-{Guid.NewGuid():N}", Name = "DT Prev Empty" };
+        var completedAt = new DateTime(2026, 6, 5, 14, 0, 0, DateTimeKind.Utc);
+        var issue = SeedDeliveredIssue(
+            db, project, "issue_dt_prev_empty_only",
+            createdAt: new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc),
+            completedAt: completedAt);
+        SeedEvent(db, issue.Id, IssueQuerier.WorkStartedType,
+            new DateTimeOffset(completedAt, TimeSpan.Zero).AddDays(-3));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetDeliveryTimesAsync(project.Id, now);
+
+        var point = Assert.Single(result.Points);
+        Assert.NotNull(point.CycleDays);
+        Assert.Null(result.PreviousAverageCycleDays);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetDeliveryTimesAsync_CurrentWindowEmpty_PreviousWindowAverageComputedIndependently()
+    {
+        // Current window empty, previous window has one issue.
+        // `Points` remains empty (preserved empty-result semantics) but
+        // the previous-window average is reported.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-dt-curr-empty-{Guid.NewGuid():N}", Name = "DT Curr Empty" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var previousCompletedAt = new DateTime(2026, 5, 10, 14, 0, 0, DateTimeKind.Utc);
+        var issue = SeedDeliveredIssue(
+            db, project, "issue_dt_curr_empty_prev",
+            createdAt: new DateTime(2026, 4, 25, 8, 0, 0, DateTimeKind.Utc),
+            completedAt: previousCompletedAt);
+        SeedEvent(db, issue.Id, IssueQuerier.WorkStartedType,
+            new DateTimeOffset(previousCompletedAt, TimeSpan.Zero).AddDays(-2));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result = await service.GetDeliveryTimesAsync(project.Id, now);
+
+        Assert.Empty(result.Points);
+        Assert.NotNull(result.PreviousAverageCycleDays);
+        Assert.Equal(2.0, result.PreviousAverageCycleDays!.Value, precision: 5);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetDeliveryTimesAsync_PreviousWindowIssueWithoutWorkStart_ExcludedFromAverage()
+    {
+        // An issue in the previous window with no recorded work-start
+        // has `CycleDays == null` (undefined) and must NOT contribute
+        // to the previous-window average. With no contributing sample,
+        // the previous-window average falls back to `null`.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-dt-prev-nostart-{Guid.NewGuid():N}", Name = "DT Prev NoStart" };
+        var completedAt = new DateTime(2026, 5, 10, 14, 0, 0, DateTimeKind.Utc);
+        SeedDeliveredIssue(
+            db, project, "issue_dt_prev_no_start",
+            createdAt: new DateTime(2026, 4, 25, 8, 0, 0, DateTimeKind.Utc),
+            completedAt: completedAt);
+        // No WorkStarted event for this issue.
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetDeliveryTimesAsync(project.Id, now);
+
+        Assert.Null(result.PreviousAverageCycleDays);
+        Assert.Empty(result.Points);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetDeliveryTimesAsync_IdenticalCycleDefinitionAcrossBothWindows()
+    {
+        // The previous window must use the same earliest-work-start
+        // ("surviving retries") definition as the current window. Seed
+        // two work-start events for the previous-window issue (a retry)
+        // and assert the previous-window average anchors on the
+        // EARLIEST start, mirroring the current-window contract.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-dt-prev-retry-{Guid.NewGuid():N}", Name = "DT Prev Retry" };
+        var completedAt = new DateTime(2026, 5, 10, 14, 0, 0, DateTimeKind.Utc);
+        var firstStart = new DateTimeOffset(2026, 5, 1, 9, 0, 0, TimeSpan.Zero);
+        var retryStart = new DateTimeOffset(2026, 5, 5, 11, 0, 0, TimeSpan.Zero);
+        var issue = SeedDeliveredIssue(
+            db, project, "issue_dt_prev_retry",
+            createdAt: new DateTime(2026, 4, 25, 8, 0, 0, DateTimeKind.Utc),
+            completedAt: completedAt);
+        SeedEvent(db, issue.Id, IssueQuerier.WorkStartedType, firstStart);
+        SeedEvent(db, issue.Id, IssueQuerier.WorkStartedType, retryStart);
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetDeliveryTimesAsync(project.Id, now);
+
+        Assert.NotNull(result.PreviousAverageCycleDays);
+        // Anchored on the EARLIEST start (5/1 09:00), not the retry
+        // (5/5 11:00). (5/10 14:00) − (5/1 09:00) = 9.208... days.
+        Assert.Equal(9.2083, result.PreviousAverageCycleDays!.Value, precision: 3);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetDeliveryTimesAsync_PreviousWindowAvgAcrossMultipleContributingIssues_IsArithmeticMean()
+    {
+        // Seed three previous-window issues with cycles 2d, 4d, 6d
+        // (each via a work-start exactly N days before completion). The
+        // arithmetic mean is 4.0d. This pins the mean operation and
+        // proves we accumulate over multiple contributing samples.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-dt-prev-mean-{Guid.NewGuid():N}", Name = "DT Prev Mean" };
+
+        var i1 = SeedDeliveredIssue(
+            db, project, "issue_dt_prev_mean_1",
+            createdAt: new DateTime(2026, 4, 28, 8, 0, 0, DateTimeKind.Utc),
+            completedAt: new DateTime(2026, 5, 1, 14, 0, 0, DateTimeKind.Utc));
+        SeedEvent(db, i1.Id, IssueQuerier.WorkStartedType,
+            new DateTimeOffset(2026, 4, 29, 14, 0, 0, TimeSpan.Zero));
+
+        var i2 = SeedDeliveredIssue(
+            db, project, "issue_dt_prev_mean_2",
+            createdAt: new DateTime(2026, 4, 30, 8, 0, 0, DateTimeKind.Utc),
+            completedAt: new DateTime(2026, 5, 5, 14, 0, 0, DateTimeKind.Utc));
+        SeedEvent(db, i2.Id, IssueQuerier.WorkStartedType,
+            new DateTimeOffset(2026, 5, 1, 14, 0, 0, TimeSpan.Zero));
+
+        var i3 = SeedDeliveredIssue(
+            db, project, "issue_dt_prev_mean_3",
+            createdAt: new DateTime(2026, 5, 2, 8, 0, 0, DateTimeKind.Utc),
+            completedAt: new DateTime(2026, 5, 10, 14, 0, 0, DateTimeKind.Utc));
+        SeedEvent(db, i3.Id, IssueQuerier.WorkStartedType,
+            new DateTimeOffset(2026, 5, 4, 14, 0, 0, TimeSpan.Zero));
+
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetDeliveryTimesAsync(project.Id, now);
+
+        Assert.NotNull(result.PreviousAverageCycleDays);
+        // (2 + 4 + 6) / 3 = 4.0
+        Assert.Equal(4.0, result.PreviousAverageCycleDays!.Value, precision: 5);
+        // Current window is empty for this seeding.
+        Assert.Empty(result.Points);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetDeliveryTimesAsync_AdjacencyShiftsWithNow_DrivenByExplicitDateTimeOffset()
+    {
+        // The querier-level adjacency check: shifting `now` by exactly
+        // 30 days must move the previous-window boundary by the same
+        // amount and shift which issue falls inside each window. This
+        // proves the previous window is `now`-anchored, not fixture-
+        // clock-anchored.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-dt-prev-shift-{Guid.NewGuid():N}", Name = "DT Prev Shift" };
+
+        // Issue that completes near a window boundary for now = D.
+        // The issue's work-start is irrelevant to the adjacency claim —
+        // only the completion moment determines which window hosts it.
+        var anchor = new DateTime(2026, 6, 10, 14, 0, 0, DateTimeKind.Utc);
+        SeedDeliveredIssue(
+            db, project, "issue_dt_prev_shift_anchor",
+            createdAt: new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc),
+            completedAt: anchor);
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        // Window D: now=2026-06-30 → anchor (6/10) is inside current
+        // window [5/31, 6/30).
+        var nowEarlier = new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
+        var earlier = await service.GetDeliveryTimesAsync(project.Id, nowEarlier);
+        Assert.Single(earlier.Points);
+        Assert.Null(earlier.PreviousAverageCycleDays);
+
+        // Window D+30d: now=2026-07-30 → current window [7/1, 7/30)
+        // no longer contains the anchor; the SAME issue is now in the
+        // new previous window [6/1, 7/1).
+        var nowLater = new DateTimeOffset(2026, 7, 30, 0, 0, 0, TimeSpan.Zero);
+        var later = await service.GetDeliveryTimesAsync(project.Id, nowLater);
+        Assert.Empty(later.Points);
+        // The cycle is undefined (no work-start), so the previous
+        // average is the defined empty `null`, not a fabricated zero.
+        Assert.Null(later.PreviousAverageCycleDays);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

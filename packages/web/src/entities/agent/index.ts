@@ -10,7 +10,7 @@ export {
   useAgentSessions,
 } from './api/queries'
 export { costRollupQueryKey, fetchCostRollup, useCostRollup } from './api/cost-rollup'
-export type { AgentCostMetricDto, AgentCostRollupDto } from './api/cost-rollup'
+export type { AgentCostMetricDto, AgentCostRollupDto, AgentCostWindowedFigureDto } from './api/cost-rollup'
 export { agentUsageQueryKey, fetchAgentUsage, useAgentUsage } from './api/agent-usage'
 export type {
   AgentUsageTimeseriesDto,
