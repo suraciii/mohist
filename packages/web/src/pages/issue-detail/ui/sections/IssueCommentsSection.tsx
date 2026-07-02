@@ -1,0 +1,116 @@
+import { Button } from '@/shared/ui/components/button'
+import { AttachmentComposer, MarkdownReader } from '@/shared/ui'
+import { commentAttachmentContentPath, type Comment } from '../../../../entities/issue'
+import { formatTime } from '../../../../shared/lib/format-time'
+import { attachmentFromMetadata } from '../../model/format'
+import type { IssueDetailMutations } from '../../model/useIssueDetailMutations'
+
+export interface IssueCommentsSectionProps {
+  comments: Comment[]
+  issueNumber: number
+  issueProjectId: string
+  commentText: string
+  setCommentText: (value: string) => void
+  deletingCommentId: string | null
+  setDeletingCommentId: (value: string | null) => void
+  deleteCommentError: string | null
+  setDeleteCommentError: (value: string | null) => void
+  mutations: Pick<IssueDetailMutations, 'addCommentMutation' | 'deleteCommentMutation'>
+}
+
+export function IssueCommentsSection({
+  comments,
+  issueNumber,
+  issueProjectId,
+  commentText,
+  setCommentText,
+  deletingCommentId,
+  setDeletingCommentId,
+  deleteCommentError,
+  setDeleteCommentError,
+  mutations,
+}: IssueCommentsSectionProps) {
+  const { addCommentMutation, deleteCommentMutation } = mutations
+
+  return (
+    <div className="rounded-lg bg-white p-4" data-testid="comments-section">
+      <h2 className="text-sm font-semibold text-gray-700 mb-3">
+        Comments ({comments.length})
+      </h2>
+      {comments.length === 0 ? (
+        <p className="text-sm text-gray-400">No comments yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {comments.map((comment) => (
+            <div
+              key={comment.id}
+              className="border-b border-gray-100 pb-3 last:border-0 last:pb-0"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1">
+                  <div className="text-xs text-gray-400 mb-1">
+                    {formatTime(comment.createdAt)}
+                  </div>
+                  <MarkdownReader
+                    content={comment.body}
+                    baseHeadingLevel={3}
+                    resolveAttachment={(id) => attachmentFromMetadata(
+                      id,
+                      comment.attachments,
+                      `/api${commentAttachmentContentPath(issueNumber, comment.id, id, issueProjectId)}`,
+                    )}
+                  />
+                </div>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => {
+                    setDeleteCommentError(null)
+                    if (window.confirm('Delete this comment?')) {
+                      setDeletingCommentId(comment.id)
+                      deleteCommentMutation.mutate(comment.id)
+                    }
+                  }}
+                  disabled={deletingCommentId === comment.id}
+                  className="text-muted-foreground hover:text-red-500"
+                  title="Delete comment"
+                >
+                  {deletingCommentId === comment.id ? 'Deleting...' : 'Delete'}
+                </Button>
+              </div>
+              {deleteCommentError && deletingCommentId === null && (
+                <div className="mt-1 text-xs text-red-500">{deleteCommentError}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-4 pt-3 border-t border-gray-100">
+        <AttachmentComposer
+          projectId={issueProjectId}
+          value={commentText}
+          onChange={setCommentText}
+          placeholder="Add a comment..."
+          rows={2}
+          className="resize-none"
+        />
+        <div className="flex items-center justify-between mt-2">
+          {addCommentMutation.error && (
+            <span className="text-xs text-red-500">
+              {addCommentMutation.error.message}
+            </span>
+          )}
+          <div className="ml-auto">
+            <Button
+              onClick={() => addCommentMutation.mutate(commentText)}
+              disabled={!commentText.trim() || addCommentMutation.isPending}
+            >
+              {addCommentMutation.isPending ? 'Sending...' : 'Comment'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -557,24 +557,25 @@ public class IssueMetricsApiSpecs
     public async Task DeliveryTimeMetrics_UsesInjectedRouteClockForTrailingWindow()
     {
         var project = await CreateProjectAsync($"delivery-time-clock-{Guid.NewGuid():N}");
-        var insideCompletedAt = DeliveryTimeCompletedAt();
-        var outsideCompletedAt = _fixture.TimeProvider.GetUtcNow().UtcDateTime.AddDays(-31);
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var insideCompletedAt = new DateTimeOffset(DeliveryTimeCompletedAt(), TimeSpan.Zero);
+        var outsideCompletedAt = now.AddDays(-40);
         var insideIssueId = $"issue_dt_clock_inside_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 1,
             insideIssueId,
-            insideCompletedAt.AddDays(-4).AddHours(-6),
-            insideCompletedAt,
-            [new DateTimeOffset(insideCompletedAt, TimeSpan.Zero).AddDays(-2).AddHours(-4)]);
+            insideCompletedAt.UtcDateTime.AddDays(-4).AddHours(-6),
+            insideCompletedAt.UtcDateTime,
+            [insideCompletedAt.AddDays(-2).AddHours(-4)]);
         var outsideIssueId = $"issue_dt_clock_outside_{Guid.NewGuid():N}";
         await SeedDeliveredIssueWithCyclesAsync(
             project.Id,
             number: 2,
             outsideIssueId,
-            outsideCompletedAt.AddDays(-11).AddHours(-6),
-            outsideCompletedAt,
-            [new DateTimeOffset(outsideCompletedAt, TimeSpan.Zero).AddDays(-10).AddHours(-4)]);
+            outsideCompletedAt.UtcDateTime.AddDays(-10),
+            outsideCompletedAt.UtcDateTime,
+            [outsideCompletedAt.AddDays(-9)]);
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/delivery-time");
