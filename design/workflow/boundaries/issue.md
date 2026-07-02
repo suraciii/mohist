@@ -29,7 +29,7 @@
 
 `Workflow/Services/ProjectWorkflowProfileManager.cs` 引 `Issue.Services.WorkflowProfiles`，**只为拿 `MohistWorkflow.Definition`**。把默认定义挪到应用配置层，这条反向引用即消失 → 双向变单向 `Issue→Workflow` ✓。
 
-（另外两个 Manager——`WorkflowProfileManager`、`IssueWorkflowProfileManager`——不引用 Issue 类型，不造成领域污染。）
+（另外两个 Manager 的现状：`IssueWorkflowProfileManager` 不引用 Issue 类型，干净。`WorkflowProfileManager` 引用了 `IssueStore.Deserialize`（`Infrastructure.Data.Issue`）和 `IssueWorkflowProfile` 行类型（`Issue.Services.WorkflowProfiles`）——但读的是 issue 级 workflow profile 配置（profile id、template、variables），这按上文归属判定本就归 Issue，属配置层可接受越界，不触碰 WorkflowRun 决策，不造成领域污染。）
 
 ## 现状偏差（迁移项）
 
@@ -41,4 +41,4 @@
 
 ## 范围外
 
-`Workflow/Services/Sessions/AgentSessionQuerier.cs` → `Issue.Services` 的依赖是 **Session/Agent 上下文**的问题（session 查询要 issue 上下文），不在本边界，待分析 Agent/Session 时处理。
+`Workflow/Services/Sessions/AgentSessionQuerier.cs` → `Issue.Services` 的依赖是 **Session 上下文**的问题（session 查询要 issue 上下文做富化），不在本边界。Session 现为独立子域（见 [`domain-analysis.md`](../../domain-analysis.md) Session 小节），其读侧应从 `Workflow/Services/Sessions/` 迁回 `Sessions/`，见该偏差项。

@@ -20,7 +20,8 @@
 | **Workflow**（核心，最受尊重） | stage / task / check / workflow run / profile / decision / gate / **artifact**（产出归此） |
 | **Issue** | issue / epic / status / prerequisite / priority / risk / draft / done |
 | **Project Space** | project / repository / isolation / variable / default branch / **prompt（project-scoped 资源，issue 为子 scope）** |
-| **Agent** | agent / coder / job / session（痕迹）—— 叶子 |
+| **Agent** | agent / coder / job —— 叶子（执行者 facet） |
+| **Session** | agent session / transcript / context / usage / runtime events / lineage —— 横向叶子（执行痕迹，被多上下文消费） |
 | **Runner** | resource / heartbeat / lease / registration（纯 server 端） |
 | **Skill·Explore** | 需求探索 → 产出 issue（价值链入口） |
 | Generic | label / user / system info（不承载业务规则） |
@@ -40,13 +41,15 @@
 | 3 | Project Space | Workflow | Published Language | 项目变量 | Workflow 只用不透明 projectId，不模型依赖 |
 | 4 | Project Space | Issue | Shared Kernel | ProjectId（共享身份）、仓库引用 | Issue 住在 project 里 |
 | 5 | Issue | Skill·Explore | OHS + PL（issue 创建） | issue 体/模板 | Skill 遵奉创建契约产出 issue；**价值链上游、模型下游** |
-| 6 | Agent | runner 进程 | Conformist | agent 定义 | runner 遵奉定义调 coder；**session 记录回流** Agent |
+| 6 | Agent | runner 进程 | Conformist | agent 定义 | runner 遵奉定义调 coder |
 | 7 | Runner | runner 进程 | Published Language | 心跳/租约 | Runner 拥有资源模型 |
 | 8 | Server | Web | OHS + PL（HTTP API） | API DTO | Web 遵奉 |
 | 9 | Server | CLI | OHS + PL（HTTP API） | API DTO | CLI 遵奉 |
 | 10 | Generic | Issue 等 | Shared Kernel / PL | 标签、用户身份 | 通用，不承载业务规则 |
+| 11 | Session | Issue / Workflow / Api | OHS + PL（session 读模型） | session DTO（coder-sessions、health、activity、列表） | Session 是横向可观测域；消费者只读遵奉，Session 拥有模型 |
+| 12 | Runner / Agent → Session | Session | Published Language | runtime events append（runner）、session 关闭事件（Agent job 失败善后） | 向 Session 写执行痕迹；Session 不反向依赖写者 |
 
-补充：Web 同时**只读消费** Workflow 的 artifact 与 Agent 的 session（各自 OHS 暴露，Web 遵奉），是 #8 的细化，非新上下文。
+补充：Web 同时**只读消费** Workflow 的 artifact 与 Session 的读模型（各自 OHS 暴露，Web 遵奉），是 #8 的细化，非新上下文。
 
 **Prompts 属于 Project Space 上下文**（project-scoped，唯一可配置层；内置 .prompt 只是 loader fallback；详见 [`prompt-management.md`](prompt-management.md)）。两点架构约束：
 - **Workflow 只用 key 引用 prompt**（`WorkflowDefinition` 里的字符串），不依赖 prompt 解析——零耦合。
@@ -74,9 +77,16 @@
   │                     └──────────────┘       │                     ││
   │   (#10 SK/PL)                              │                     ││
   │   ┌──────────┐   ┌──────────┐              │                     ││
-  │   │ Generic  │   │  Agent   │◄──(#6 defs)──┘ (leaf)              ││
-  │   │Label/User│   │(defs+会话)│  session 回流▲                     ││
-  │   └──────────┘   └──────────┘              │                     ││
+  │   │ Generic  │   │  Agent   │◄──(#6 defs)──┘ (leaf, 执行者)        ││
+  │   │Label/User│   │ (defs)   │              │                     ││
+  │   └──────────┘   └────┬─────┘              │                     ││
+  │                       │                    │                     ││
+  │   ┌───────────────────┴────────────────────┘                     ││
+  │   │  #11/#12  横向：Issue/Workflow/Api 读消费，Runner/Agent 写      ││
+  │   ▼                                                               ││
+  │ ┌──────────────┐                                                   ││
+  │ │   Session    │ (横向叶子, 执行痕迹: transcript/context/usage)     ││
+  │ └──────────────┘                                                   ││
    └─────────────────────────────┬──────────────┼─────────────────────┘
      (#8/#9 OHS+PL HTTP API)    │              │
             ┌───────────────────┴───┐    ┌─────▼──────────────┐
@@ -90,8 +100,9 @@
 
 ## 不变量（硬约束）
 
-- **Workflow 不依赖任何业务上下文**（不依赖 Issue / Agent / Runner / Project Space 的模型）。它只接收抽象输入、产出裁定——这是它能被信任地自治运行的前提。
+- **Workflow 不依赖任何业务上下文**（不依赖 Issue / Agent / Session / Runner / Project Space 的模型）。它只接收抽象输入、产出裁定——这是它能被信任地自治运行的前提。
 - **Issue → Workflow**：单向。Issue 消费引擎、选 profile、引用 artifact。Workflow 不知"issue"。
+- **Session 是横向叶子**：被 Agent（善后写入）、Runner（runtime events append）、Issue/Workflow/Api（只读消费）多向使用，但 Session 自身不反向依赖任何业务上下文。Session 的模型（transcript/context/usage/lineage）独立演化。
 - **runner 进程是基础设施**，不是上下文；它遵奉 Workflow 的执行契约、依赖 Agent 定义、向 Runner 注册心跳。
 - **ProjectId 是共享身份**（人人引用），但不构成 Workflow 的模型依赖。
 - **Artifact 属 Workflow**，非独立上下文。
@@ -106,5 +117,6 @@
 本文是目标态。当前代码与目标的偏差，逐步收敛：
 
 - **默认 `WorkflowDefinition` 内容错位**：`MohistWorkflow` + `mohist-local.workflow.yaml` 是应用级配置，却躺在 `Issue/Services/WorkflowProfiles/`——应挪到应用配置层。（注：workflow profile 配置本身 = template 选择 + variables，是 Issue/Project 自己的配置，留原处是对的；详见 [`workflow/boundaries/issue.md`](workflow/boundaries/issue.md)。）
-- **模块目录与上下文归属**未对齐：`Epic/`→Issue、`Sessions/`→Agent。物理是否合并视成本，归属以本文为准。
+- **模块目录与上下文归属**未对齐：`Epic/`→Issue、`Sessions/`→Session（独立上下文，本文已修正，原误归 Agent）。`Sessions/` 与 `Agent/` 是两个独立子域的两个目录，无需合并。
 - **Workflow↔Issue 目标为单向依赖**（Issue→Workflow）；目前 `ProjectWorkflowProfileManager` 因拿 `MohistWorkflow.Definition` 而反向引用 Issue，搬走默认定义即消除。
+- **Session 读侧寄生 Workflow 目录**：Session 的读侧（`AgentSessionQuerier`、对外 DTO、metadata 键名常量、transcript 投影）当前寄生在 `Workflow/Services/Sessions/`，导致 `Sessions/Services/AgentSessionQuery.cs` 反向 `using Workflow.Services.Sessions` 取常量——横向叶子域反向依赖 Workflow，违反不变量。应将 `Workflow/Services/Sessions/` 全部迁回 `Sessions/`。
