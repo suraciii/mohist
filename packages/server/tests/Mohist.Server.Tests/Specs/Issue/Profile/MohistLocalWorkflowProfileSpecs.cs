@@ -1054,7 +1054,7 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("plan (proposal, specs, design, tasks, self-review)", description!);
         Assert.Contains("build", description);
         Assert.Contains("check (AI review, merge readiness)", description);
-        Assert.Contains("integrate (spec sync, archive, merge, push)", description);
+        Assert.Contains("integrate (archive, merge, push)", description);
         Assert.DoesNotContain("use quick-fix", description);
         Assert.DoesNotContain("use experiment", description);
     }

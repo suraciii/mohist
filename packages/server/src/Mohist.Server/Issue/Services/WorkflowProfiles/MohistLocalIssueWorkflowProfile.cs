@@ -19,10 +19,8 @@ public class MohistLocalIssueWorkflowProfile : MohistIssueWorkflowProfileBase
     public override string Description => ResolveDescription();
     public override bool IsDefault => true;
     public override IReadOnlyList<string> SuitableFor { get; } = [
-        "feature development involving UI or backend changes",
-        "bug fixes requiring a full plan-build-check-integrate lifecycle",
-        "OpenSpec-driven workflows with structured change artifacts",
-        "issues needing approval gates between stages"
+        "default general-purpose workflow",
+        "changes that warrant a full plan-build-check-integrate lifecycle"
     ];
 
     private static string ResolveDescription()
