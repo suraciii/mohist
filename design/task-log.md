@@ -213,7 +213,7 @@ GET /api/workflow-runs/{runId}/work/{workId}/task-log?cursor=&limit=
 | 概念 | 回答的问题 | 归属 | TaskLog 关系 |
 |------|-----------|------|-------------|
 | TaskLog（新） | task 执行**过程**发生什么 | Runner 子域 | — |
-| AgentSession transcript | agent **对话**了什么 | Agent 子域 | 互补：agent task = transcript + log |
+| AgentSession transcript | agent **对话**了什么 | Session 子域 | 互补：agent task = transcript + log |
 | Artifact | task **产出**什么文件 | 审查证据 | 同级证据 |
 | task output JSON | task 的**结构化结果** | Workflow 裁定输入 | 互补：log 给过程，output 给结论 |
 | `~/.mohist/logs` | **server daemon** 自身日志 | 基础设施 | 无关 |
