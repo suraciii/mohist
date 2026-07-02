@@ -18,7 +18,7 @@ internal static class WorkflowCommands
         cmd.Aliases.Add("ls");
         var describedOpt = new Option<bool>("--described")
         {
-            Description = "Show profile descriptions with suitable_for context"
+            Description = "Show profile descriptions"
         };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();

@@ -27,7 +27,7 @@ public class WorkflowCliSpecs
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
-            { "success": true, "data": [ { "id": "mohist/local", "displayName": "Mohist Local", "description": "Plan, build, check, and integrate an issue using OpenSpec artifacts.", "suitableFor": ["feature development", "bug fixes"] } ] }
+            { "success": true, "data": [ { "id": "mohist/local", "displayName": "Mohist Local", "description": "Plan, build, check, and integrate an issue using OpenSpec artifacts." } ] }
             """);
 
         var output = new StringWriter();
@@ -54,7 +54,7 @@ public class WorkflowCliSpecs
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
-            { "success": true, "data": [ { "id": "mohist/local", "displayName": "Mohist Local", "description": "Plan, build, check, and integrate an issue using OpenSpec artifacts.", "suitableFor": ["feature development", "bug fixes"] } ] }
+            { "success": true, "data": [ { "id": "mohist/local", "displayName": "Mohist Local", "description": "Plan, build, check, and integrate an issue using OpenSpec artifacts." } ] }
             """);
 
         var output = new StringWriter();
@@ -73,18 +73,18 @@ public class WorkflowCliSpecs
         Assert.Contains("mohist/local", stdout);
         Assert.Contains("Mohist Local", stdout);
         Assert.Contains("OpenSpec", stdout);
-        Assert.Contains("feature development", stdout);
-        Assert.Contains("bug fixes", stdout);
+        Assert.DoesNotContain("Suitable for", stdout);
+        Assert.DoesNotContain("not specified", stdout, StringComparison.OrdinalIgnoreCase);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task WorkflowList_Described_EmptySuitableFor_ShowsNotSpecified()
+    public async Task WorkflowList_Described_DescriptionIsShownAndNoSuitableForLineIsEmitted()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
-            { "success": true, "data": [ { "id": "mohist/local", "displayName": "Mohist Local", "description": "A workflow.", "suitableFor": [] } ] }
+            { "success": true, "data": [ { "id": "mohist/local", "displayName": "Mohist Local", "description": "A workflow." } ] }
             """);
 
         var output = new StringWriter();
@@ -100,7 +100,9 @@ public class WorkflowCliSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("not specified", stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("A workflow.", stdout);
+        Assert.DoesNotContain("Suitable for", stdout);
+        Assert.DoesNotContain("not specified", stdout, StringComparison.OrdinalIgnoreCase);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

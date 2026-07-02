@@ -28,3 +28,29 @@ T-001 (2026-07-02): Server: unify description source via shared resolver and rem
 - `WorkflowProfileDescription` exposes only Id/DisplayName/Description; `IssueWorkflowProfileRegistry` exposes no `Matches`; `SuitableForMatcher.cs` deleted: grep + file absence confirm.
 - Repo-wide `SuitableFor` grep under packages/server returns only the unrelated `IssueTemplate` model + test method names describing absence: grep confirms.
 - Server specs pass: `dotnet test Mohist.sln -p:SkipWebBuild=true` → 3573 passed, 13 pre-existing skipped, 0 failed.
+
+T-002 (2026-07-02): CLI: drop suitableFor from `mo workflow list --described` rendering and option help.
+
+## Codebase Patterns
+
+- The CLI render method kept its name and signature — `RenderWorkflowProfilesDescribed(JsonNode? data)` — but the body shrank to id/displayName/description plus the blank separator. Decision: do not introduce a new render path; collapse in place, since the only consumer (`PrintWorkflowProfilesDescribedAsync`) calls exactly this method.
+- The `--described` option help text shortened from "Show profile descriptions with suitable_for context" to "Show profile descriptions" — minimal wording, no skill-specific framing, no mention of the removed field.
+- The CLI specs that mock the `/api/workflow-profiles` response inline with `suitableFor` arrays exist in two projects: `packages/cli/tests/Mohist.Cli.Tests/CliWorkflowListSpecs.cs` (pure CLI) and `packages/server/tests/Mohist.Server.Tests/Specs/Api/WorkflowCliSpecs.cs` (server-side CLI integration). Both must drop `suitableFor` from their mock fixtures; both are scoped by the task to follow T-002's removal.
+- The negative assertions in CliWorkflowListSpecs use `Assert.DoesNotContain("Suitable for", stdout)` and `Assert.DoesNotContain("(not specified)", stdout)`. This is the spec scenario "described CLI output shows only the description" gate, kept tight to the exact wording the old renderer used.
+- The help-text scenario in the spec is asserted via the `--help` output: invoke `["workflow", "list", "--help"]`, then `Assert.Contains("--described", stdout)` and `Assert.DoesNotContain("suitable_for", stdout)`. This is the most direct way to assert the help text scenario from `opencode/changes/issue-333/specs/workflow-profile-description/spec.md` (it is the System.CommandLine output, not internal state).
+
+## Gotchas
+
+- The server-side CLI specs (in `packages/server/tests/Mohist.Server.Tests/Specs/Api/WorkflowCliSpecs.cs`) exercise the same `MohistCliApi` assembly and asserted the old `Suitable for:` / `not specified` output. They must be updated in the same task — they broke the moment the CLI render code lost the `suitableFor` parse, because the `WorkflowList_Described_FormatsHumanReadableOutput` test asserted the tag strings appear, and `WorkflowList_Described_EmptySuitableFor_ShowsNotSpecified` asserted the placeholder. Both now assert the description-only shape.
+- The first full solution test run after the CLI change reported 1 transient failure on a re-run; the second run was green. This is the same family of intermittent host-boot flakiness that T-001 attributed to the 13 pre-existing `Skip` tests. Documenting the run-to-run variance; the canonical state is "0 failed".
+- After T-002, `grep -rn "suitableFor\|Suitable for" packages/cli/Mohist.Cli/` returns only the `mohist-create-issue/SKILL.md` reference, which is T-003 (skill-data) territory. The CLI source tree and the CLI test tree are clean.
+- The `skill-data/mohist-create-issue/SKILL.md` line that still says "Suitable for: feature, bugfix, refactor, default" is a hand-written example in the skill's tagged-output example, not actual CLI output. It will be rewritten in T-003; leaving it untouched here is correct (out of T-002 scope).
+
+## Acceptance Criteria Coverage
+
+- `dotnet build Mohist.sln` succeeds with `TreatWarningsAsErrors`: passes (0 warnings, 0 errors).
+- `mo workflow list --described` output contains id/displayName/description, no `Suitable for:` line, no `(not specified)` placeholder: covered by `WorkflowListDescribed_RendersIdDisplayNameAndDescriptionWithoutSuitableForLine` in `CliWorkflowListSpecs.cs` (new), and reinforced by `WorkflowList_Described_FormatsHumanReadableOutput` + `WorkflowList_Described_DescriptionIsShownAndNoSuitableForLineIsEmitted` in `WorkflowCliSpecs.cs` (server-side CLI test, updated).
+- `--described` option help text contains no `suitable_for`: covered by `WorkflowList_HelpMentionsDescribedOptionAndOmitsSuitableForWording` in `CliWorkflowListSpecs.cs` (new), which asserts both `--described` is listed and `suitable_for` is absent from the rendered help.
+- CLI specs pass: `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj` → 561 passed, 0 failed.
+- `RenderWorkflowProfilesDescribed` no longer references a `suitableFor` JSON field: `grep -n "suitableFor" packages/cli/Mohist.Cli/MohistCliApi.cs` returns nothing.
+- Server-side CLI specs (in `Mohist.Server.Tests`) pass alongside: `dotnet test Mohist.sln -p:SkipWebBuild=true` → 3573 passed, 13 pre-existing skipped, 0 failed (canonical re-run).
