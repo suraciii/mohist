@@ -108,13 +108,13 @@ public static partial class IssueRoutes
         return JsonSerializer.SerializeToElement(with, JSON.Options);
     }
 
-    internal static RecoveryDefinition BuildRebaseRecovery(string baseBranch)
+    internal static RecoveryDefinition BuildRebaseRecovery()
     {
         var with = new Dictionary<string, JsonElement?>
         {
             ["session"] = JsonSerializer.SerializeToElement("check"),
-            ["prompt"] = JsonSerializer.SerializeToElement($"Resolve git rebase conflicts against {baseBranch}. Resolve conflicts, stage resolved files, and continue the rebase until it completes."),
-            ["agent"] = JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["type"] = "opencode" }),
+            ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.resolve-rebase-conflicts }}"),
+            ["agent"] = JsonSerializer.SerializeToElement("${{ vars.agent }}"),
         };
         return new RecoveryDefinition(
             Budget: 2,

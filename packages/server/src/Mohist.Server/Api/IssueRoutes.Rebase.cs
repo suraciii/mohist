@@ -44,7 +44,7 @@ public static partial class IssueRoutes
                 "mohist/rebase",
                 BuildRebaseTaskWith(baseBranch, issue.Repository!),
                 InvalidateChecks: true,
-                Recovery: BuildRebaseRecovery(baseBranch));
+                Recovery: BuildRebaseRecovery());
 
             var added = await workflow.AddTaskAsync(task);
             return ApiResults.Ok(new
