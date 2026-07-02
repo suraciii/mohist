@@ -103,3 +103,53 @@ Each task appends its findings; the next task reads the section it cares about.
   this task is required to land first because partial visibility / shared
   helper accessibility only works after `static partial class` + `ValidateOutput`
   + `ResolveProjectId` exist.
+
+## Carve notes for T-002 (and later)
+
+### CRUD cluster top/bottom is non-contiguous
+
+- The CRUD cluster spans **three non-adjacent** regions in the core file:
+  1. `BuildList` + `BuildCreate` + `ApplyFrontmatter` (top, before the
+     shared helpers);
+  2. `BuildShow` + `BuildUpdate` + `LoadCurrentLabelsAsync` +
+     `ParseLabelsFromIssue` (middle, sandwiching the shared helpers);
+  3. `PrintCreateGuidance` (bottom, after `BuildStop`).
+- The middle two regions sit **between** the three shared helpers
+  (`IsOptionProvided`, `ValidateOutput`, `ResolveProjectId`) and the
+  Lifecycle cluster, so a verbatim move cannot be one contiguous drop.
+- Lesson for later carve steps that also intermix with shared helpers:
+  do separate edits for each region, leaving the shared helpers exactly
+  where they are. `Edit` (find/replace) on the whole CRUD dump at once
+  is impractical for these clusters — split into top-group /
+  middle-group / bottom-group edits.
+
+### `PrintCreateGuidance` placement
+
+- Lives in `Issue.Crud.cs` (not `Issue.Lifecycle.cs` where it physically
+  sits in the core file at line 713-747). It is called **only** from
+  `BuildCreate` (line 255) and is a post-create user guidance routine
+  specific to the create result payload — design D1 cluster-ownership
+  rule wins over physical locality.
+
+### Partial file using-directives
+
+- Each partial needs its own `using` block. The `using System.CommandLine.Parsing;`
+  import required by `IsOptionProvided` (signature `ParseResult`, `Option`)
+  stays only in the core partial because `IsOptionProvided` is the only
+  cluster-crossing signature using `ParseResult` / `Option` outside their
+  `Command` constructor paths. CRUD partial only needs `System.CommandLine`,
+  `System.Net.Http` (for `HttpRequestException` in `LoadCurrentLabelsAsync`),
+  and `System.Text.Json.Nodes` (for `JsonNode?` in `PrintCreateGuidance` /
+  `ParseLabelsFromIssue`).
+
+## File metrics after T-002
+
+- `MohistCliCommands.Issue.cs` shrank from 2137 → 1618 lines (Δ −519L).
+  The 527-line `MohistCliCommands.Issue.Crud.cs` partial offsets by 527
+  gross, 519 net (after shared helper region is counted once across
+  both files: helpers stay in core; CRUD body moves verbatim with minor
+  `using` import trim).
+- Spec gate: `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj`
+  → 0 Warning(s), 0 Error(s).
+- Spec gate: full CLI test project — 559 passed, 0 failed (matches
+  T-001 close). CRUD-filter subset — 50 passed, 0 failed.
