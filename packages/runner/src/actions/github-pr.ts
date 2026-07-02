@@ -26,6 +26,13 @@ import {
   parsePrView,
   parsePrViewWithDraft,
 } from "./github-pr-parse.js"
+import {
+  getGitHubPrGh,
+  getGitHubPrGit,
+  runGhPrecheck,
+  setGitHubPrGhRunnerForTest,
+  setGitHubPrGitRunnerForTest,
+} from "./github-pr-runtime.js"
 import type {
   CreateGitHubPrOutput,
   GitHubPrErrorCode,
@@ -57,6 +64,10 @@ export {
   parsePrView,
   parsePrViewWithDraft,
 } from "./github-pr-parse.js"
+export {
+  setGitHubPrGhRunnerForTest,
+  setGitHubPrGitRunnerForTest,
+} from "./github-pr-runtime.js"
 export type {
   CreateGitHubPrOutput,
   GitHubPrErrorCode,
@@ -67,17 +78,6 @@ export type {
 
 type GitRunner = typeof defaultGit
 type GhRunner = typeof runCommand
-
-let git: GitRunner = defaultGit
-let gh: GhRunner = runCommand
-
-export function setGitHubPrGitRunnerForTest(runner: GitRunner | null) {
-  git = runner ?? defaultGit
-}
-
-export function setGitHubPrGhRunnerForTest(runner: GhRunner | null) {
-  gh = runner ?? runCommand
-}
 
 const PR_CHECKS_POLL_INTERVAL_MS_DEFAULT = 15_000
 // How long to keep polling after GitHub reports no checks before concluding
@@ -135,6 +135,9 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
   const remote = stringInput(context.with, "remote") ?? "origin"
   const draft = context.with?.["draft"] !== false
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
+
+  const gh = getGitHubPrGh()
+  const git = getGitHubPrGit()
 
   const steps: GitHubPrStep[] = []
   const record = createRecorder(steps)
@@ -233,6 +236,8 @@ export async function mergeGitHubPrAction(context: ActionContext): Promise<Actio
   const method = stringInput(context.with, "method") ?? "squash"
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
 
+  const gh = getGitHubPrGh()
+
   const steps: GitHubPrStep[] = []
   const record = createRecorder(steps)
 
@@ -268,7 +273,7 @@ export async function mergeGitHubPrAction(context: ActionContext): Promise<Actio
     return fail("config-error", subject.message, { output: subject.message })
   }
 
-  const resolvedPr = await resolvePrNumberForMerge(context, workDir, context.signal, record)
+  const resolvedPr = await resolvePrNumberForMerge(gh, context, workDir, context.signal, record)
   if (resolvedPr.kind === "failure") {
     return fail(resolvedPr.errorCode, resolvedPr.message, { output: resolvedPr.output })
   }
@@ -315,6 +320,7 @@ export async function markGitHubPrReadyAction(context: ActionContext): Promise<A
   }
 
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
+  const gh = getGitHubPrGh()
   const steps: GitHubPrStep[] = []
   const record = createRecorder(steps)
 
@@ -553,6 +559,7 @@ async function openOrReusePr(
 }
 
 async function resolvePrNumberForMerge(
+  gh: GhRunner,
   context: ActionContext,
   workDir: string,
   signal: AbortSignal,
@@ -1001,32 +1008,6 @@ async function runGhReadWithRetry(
   }
 }
 
-
-export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal): Promise<{ ok: true; output: string } | { ok: false; exitCode: number; output: string; message: string }> {
-  const version = await gh("gh", ["--version"], workDir, signal)
-  if (version.exitCode !== 0) {
-    const output = combinedGhOutput(version)
-    return {
-      ok: false,
-      exitCode: version.exitCode,
-      output,
-      message: "gh CLI is not installed or not on PATH. Install GitHub CLI and run `gh auth login` on the runner host before re-running this issue.",
-    }
-  }
-
-  const auth = await gh("gh", ["auth", "status"], workDir, signal)
-  const authOutput = combinedGhOutput(auth)
-  if (auth.exitCode !== 0) {
-    return {
-      ok: false,
-      exitCode: auth.exitCode,
-      output: authOutput,
-      message: "gh CLI is installed but `gh auth status` did not return a logged-in account. Run `gh auth login` on the runner host before re-running this issue.",
-    }
-  }
-
-  return { ok: true, output: `${version.stdout.trim()}\n${authOutput}` }
-}
 
 export async function resolveCurrentBranch(git: GitRunner, workDir: string, signal: AbortSignal): Promise<{ success: true; name: string } | { success: false; exitCode: number; combinedOutput: string }> {
   const result = await git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal)

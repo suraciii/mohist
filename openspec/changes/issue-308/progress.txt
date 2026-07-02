@@ -92,3 +92,47 @@ git diff packages/runner/tests/        # only the new spec; no existing spec edi
 - **T-004 (merge pipeline)**: `waitChecksAndMergePr`, `waitForPrChecks`, `mergeStateStatusFailure`, `runGhReadWithRetry`, `delayWithSignal`, `WaitChecksAndMergeOk`/`Failure` types, `PrChecksWaitResult` (internal) all still in `github-pr.ts`. Move to `github-pr-merge.ts` along with the timing/retry setters and internal `let` knobs.
 - **T-005 (issue-fields + orchestrators split)**: still applies verbatim.
 - **Test files untouched** (re-verified after T-002): only `tests/github-pr-classify.spec.ts` is new; `create-github-pr.spec.ts` / `merge-github-pr.spec.ts` / `mark-github-pr-ready.spec.ts` / every other existing spec is untouched (still 9 / 8 / 21 cases respectively).
+
+## T-003 — Extract shared runner runtime module (git/gh singletons + setters + runGhPrecheck)
+
+**Done.** New `github-pr-runtime.ts` (56 lines) is the single source of truth for the mutable `git`/`gh` runners, exposing `getGitHubPrGit()` / `getGitHubPrGh()` getters plus the two `setGitHubPr*ForTest` setters. `runGhPrecheck` relocated to the runtime module (consumes `combinedGhOutput` from `github-pr-parse.ts` — only dep). `github-pr.ts` re-exports the two setters via the barrel. New `tests/github-pr-runtime.spec.ts` (12 tests) pins the live-getter invariant, the single-setter-shared-across-paths contract, and `runGhPrecheck` behavior. Monolith: 1114 → 1095 lines. All 805 tests pass (12 new + 793 unchanged); the three action specs (8/21/9) pass unchanged.
+
+### Files created
+- `packages/runner/src/actions/github-pr-runtime.ts` — top-of-file `let git` / `let gh` (NOT exported) + `getGitHubPrGit()` / `getGitHubPrGh()` getters (read live on every call) + `setGitHubPrGitRunnerForTest` / `setGitHubPrGhRunnerForTest` setters (reset to `defaultGit` / `runCommand` on `null`) + `runGhPrecheck` (body byte-identical to the previous `github-pr.ts` definition) + `GhPrecheckOk` / `GhPrecheckFailure` / `GhPrecheckResult` types. Exports `GitRunner` / `GhRunner` type aliases for downstream modules. No deps beyond `runCommand` / `defaultGit` and `combinedGhOutput` from `github-pr-parse.ts`.
+- `packages/runner/tests/github-pr-runtime.spec.ts` — 12 pure tests: getter default + post-set value; setter resets to default on `null`; singleton identity (one setter call → one runner, observed by all subsequent getters); `runGhPrecheck` ok / version-fail / auth-fail branches; `runGhPrecheck` threads the *parameter* runner (not module-scope) — directly pins design D2's "helpers keep runner param signatures, orchestrators call the getter once" contract; barrel re-export of the two setters from `github-pr.js`.
+
+### File modified
+- `packages/runner/src/actions/github-pr.ts` — top-of-file now imports `getGitHubPrGh` / `getGitHubPrGit` / `runGhPrecheck` / `setGitHubPrGhRunnerForTest` / `setGitHubPrGitRunnerForTest` from `./github-pr-runtime.js` and re-exports the two setters. Removed the local `let git` / `let gh` plus the two setter definitions. Removed the old `runGhPrecheck` body. The three orchestrators (`createGitHubPrAction` / `mergeGitHubPrAction` / `markGitHubPrReadyAction`) now call the getter **once** at the top of the function and thread the captured `gh` / `git` into helpers. The one helper that previously read `gh` from module scope (`resolvePrNumberForMerge`) now takes `gh` as a parameter — its sole caller in `mergeGitHubPrAction` was updated to pass the captured runner. `type GitRunner` / `type GhRunner` aliases stay in `github-pr.ts` (cheap, helper-param types); they shadow the runtime's re-exported aliases by name, no behavioral effect. Monolith: 1114 → 1095 lines (19 lines moved out).
+
+### Key gotchas
+- **Getter vs exported-`let` (D2)**: design explicitly mandates getters, not exported mutable `let`. If we exported `let` and a helper captured the binding at module-load, `setGitHubPrGhRunnerForTest(null)` would never propagate to that helper. The getter is read live on every call, matching the previous behavior where helpers read the live `let` at call time. Pinned by the new `one setGitHubPrGhRunnerForTest call ... singleton identity` test.
+- **Single setter, many readers**: previously `git`/`gh` were closure-captured at module load by every helper in the monolith. After the split, those helpers don't see the module-scope binding at all — they take the runner as a parameter. The orchestrator captures the getter's return value *once* per action call and passes it through. This is what "helpers keep runner param signatures, only orchestrators call the getter" means in practice.
+- **`resolvePrNumberForMerge` signature change**: it was the *only* helper that read `gh` directly from module scope (line 578 of the pre-T-003 file). To keep the singleton-ownership clean — only orchestrators read module state — I added a `gh: GhRunner` first param. The sole caller (`mergeGitHubPrAction`) was updated to pass the captured `gh`. No test changed.
+- **Type-alias shadowing is fine**: the runtime module exports `GitRunner` / `GhRunner` for T-004 / T-005 to import. `github-pr.ts` keeps its own `type GitRunner = typeof defaultGit` / `type GhRunner = typeof runCommand` aliases for its helper-param types. They are structurally identical (both `typeof` the same underlying values), so callers see the same shape. No re-export needed.
+- **`runGhPrecheck` accepts `gh` as a param** — design's placement decision (this module is the "git/gh execution context"). A dedicated `github-pr-gh.ts` was an acceptable variant per design Open Questions; we follow the runtime placement (simpler DAG, fewer files).
+- **Barrel re-export pattern (T-001/T-002 precedent, continued)**: `github-pr.ts` adds a value `export {}` block for `setGitHubPrGhRunnerForTest` / `setGitHubPrGitRunnerForTest`. The *getters* and `runGhPrecheck` are NOT re-exported — they are internal to the runtime module and the orchestrators (consistent with `combinedGhOutput` etc. being internal to the orchestrator helpers in T-001). The new `barrel re-export from github-pr.js` test pins that only the two setters leak out.
+- **`CommandResult` import**: runtime's `runGhPrecheck` only needs `typeof runCommand` for the `GhRunner` type alias — it does not import `CommandResult` (the orchestrator's `runGhReadWithRetry` still needs it and will move with T-004). Kept the type alias local to runtime for the same reason.
+
+### Acceptance criteria status
+- [x] `github-pr-runtime.ts` is the single source of truth; `getGitHubPrGit()` / `getGitHubPrGh()` always return the live value set by the setters (12 new tests + afterEach pattern from the three existing specs).
+- [x] `setGitHubPrGitRunnerForTest` and `setGitHubPrGhRunnerForTest` keep their exact names and signatures and remain importable from `./github-pr.js` (barrel re-export). Three existing specs compile + run unchanged.
+- [x] One `setGitHubPrGhRunnerForTest` call sets the single gh runner read by all paths (create/merge/mark) — no per-module duplicate setters (singleton-identity test pins it).
+- [x] `runGhPrecheck` lives in `github-pr-runtime.ts` and behaves identically (ok / version-fail / auth-fail tests + threads-the-param test).
+- [x] `npm run typecheck -w packages/runner` exits 0.
+- [x] `npm test -w packages/runner` is green: 58 files / 805 tests pass — 12 new in `github-pr-runtime.spec.ts` + 793 unchanged; the three action specs at 8/21/9 pass unchanged.
+
+### Verification commands run
+```
+npm run typecheck -w packages/runner          # exits 0
+npm run build -w packages/runner              # succeeds (postbuild writes build-info.json)
+npm test -w packages/runner                   # 58 files, 805 tests pass
+npm test -w packages/runner -- create-github-pr merge-github-pr mark-github-pr-ready github-pr-runtime
+                                               # 4 files, 50 tests pass
+git diff packages/runner/tests/create-github-pr.spec.ts packages/runner/tests/merge-github-pr.spec.ts packages/runner/tests/mark-github-pr-ready.spec.ts
+                                               # empty — zero spec import-line churn
+```
+
+### Notes for downstream tasks
+- **T-004 (merge pipeline)**: `waitChecksAndMergePr`, `waitForPrChecks`, `mergeStateStatusFailure`, `runGhReadWithRetry`, `delayWithSignal`, `WaitChecksAndMergeOk`/`Failure` types, `PrChecksWaitResult` (internal) all still in `github-pr.ts` lines ~610–990. Move to `github-pr-merge.ts` along with the timing/retry setters and internal `let` knobs. The new module should import `getGitHubPrGh` from `github-pr-runtime.js` — its orchestrator helper (`waitChecksAndMergePr` — the merge path's orchestrator) calls the getter once and threads the runner into `waitForPrChecks` / `runGhReadWithRetry` / `delayWithSignal`. Same pattern as the three current action orchestrators.
+- **T-005 (issue-fields + orchestrators split)**: still applies verbatim. When `create-github-pr.ts` is created, it will import `getGitHubPrGit` / `getGitHubPrGh` / `runGhPrecheck` from `github-pr-runtime.js`. The git-ref probes (`resolveCurrentBranch` / `resolveBaseSha` / `BaseShaOk` / `BaseShaFailure`) move with the create orchestrator — only it touches git. `openOrReusePr` moves with create (only caller). The output adapter `buildCreateGitHubPrOutput` moves verbatim into `create-github-pr.ts`. `mergeGitHubPrAction` and `markGitHubPrReadyAction` similarly.
+- **Spec files untouched** (re-verified after T-003): only `tests/github-pr-runtime.spec.ts` is new; the three action specs (8/21/9) and every other existing spec are untouched.
