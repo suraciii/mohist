@@ -1,0 +1,129 @@
+import type { RebaseConflictState } from '../../../entities/issue/model/drift'
+import { REVERSE_DNS_EVENT_TYPES } from '../../../shared/lib/canonical-event-types'
+import { readIssueNumber } from './timeline-live-event'
+
+/**
+ * Invalidation key the caller will hand to `queryClient.invalidateQueries`.
+ * Decoupled from TanStack types so this module stays a pure function of
+ * `(eventName, parsed)` with no runtime dependency on `@tanstack/react-query`.
+ *
+ * Shape: tuple of string segments (e.g. `['issues']`, `['issues', 'detail', id]`).
+ */
+export type ReverseDnsInvalidationKey = readonly string[]
+
+export type ReverseDnsToastTone = 'success' | 'error'
+
+export interface ReverseDnsToast {
+  tone: ReverseDnsToastTone
+  message: string
+}
+
+/**
+ * Subset of `RebaseEvent` the decider produces. Kept narrow (only the two
+ * types the outcome handler can dispatch) — the caller branches on
+ * `rebaseEvent.type` to forward.
+ */
+export type ReverseDnsRebaseEvent =
+  | { type: 'rebase_completed'; issueNumber: number; rebased: boolean }
+  | { type: 'rebase_conflict'; issueNumber: number; conflicts: string[]; status?: string; error?: string }
+
+/**
+ * Declarative outcome of routing a reverse-DNS integration event.
+ *
+ * - `handled: false` — the event is not a reverse-DNS integration outcome
+ *   (no rebase dispatch, no toast, no state change). The caller falls
+ *   through to its switch-arm default invalidations.
+ * - `handled: true` — the decider matched one of the four outcome arms;
+ *   the caller applies exactly the sinks returned.
+ *
+ * The four sinks are mutually independent — none awaits another, and none
+ * reads a value produced by another in the same call — so the caller
+ * applies them in one canonical order (invalidate -> setRebaseConflict
+ * [null clears] -> dispatchRebaseEvent -> toast). The legacy per-arm order
+ * was not uniform across arms (rebase arms invalidated last; merge arms
+ * invalidated first) and is not reproduced per-arm.
+ */
+export type ReverseDnsOutcome =
+  | { handled: false }
+  | {
+    handled: true
+    invalidations: ReverseDnsInvalidationKey[]
+    rebaseConflict?: RebaseConflictState | null
+    rebaseEvent?: ReverseDnsRebaseEvent
+    toast?: ReverseDnsToast
+  }
+
+export function readOutcome(parsed: Record<string, unknown>): string | null {
+  const outcome = parsed.outcome ?? parsed.result ?? parsed.kind ?? parsed.operation ?? parsed.reason
+  return typeof outcome === 'string' ? outcome : null
+}
+
+export function isRebasePayload(parsed: Record<string, unknown>): boolean {
+  const outcome = readOutcome(parsed)
+  return outcome?.includes('rebase') === true || 'rebased' in parsed || 'conflicts' in parsed
+}
+
+export function isMergePayload(parsed: Record<string, unknown>): boolean {
+  const outcome = readOutcome(parsed)
+  return outcome?.includes('merge') === true
+}
+
+/**
+ * Pure decider: given a reverse-DNS event and its parsed envelope body,
+ * returns the declarative outcome. Does not import `@tanstack/react-query`,
+ * `sonner`, or React — see LiveTaskProvider.tsx for the effect-application
+ * loop that consumes the result.
+ */
+export function decideReverseDnsOutcome(
+  eventName: string,
+  parsed: Record<string, unknown>,
+): ReverseDnsOutcome {
+  const issueNumber = readIssueNumber(parsed)
+  if (issueNumber === null) return { handled: false }
+
+  if (eventName === REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted) {
+    if (isRebasePayload(parsed)) {
+      const rebased = typeof parsed.rebased === 'boolean' ? parsed.rebased : true
+      return {
+        handled: true,
+        invalidations: [['issues']],
+        rebaseConflict: null,
+        rebaseEvent: { type: 'rebase_completed', issueNumber, rebased },
+      }
+    }
+    if (isMergePayload(parsed)) {
+      return {
+        handled: true,
+        invalidations: [['issues']],
+        toast: { tone: 'success', message: `Issue #${issueNumber} merged successfully` },
+      }
+    }
+  }
+
+  const isFailureEvent = eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed
+    || eventName === REVERSE_DNS_EVENT_TYPES.StageFailed
+  if (!isFailureEvent) return { handled: false }
+
+  if (isRebasePayload(parsed)) {
+    const conflicts = Array.isArray(parsed.conflicts) ? parsed.conflicts.filter((x): x is string => typeof x === 'string') : []
+    const error = typeof parsed.error === 'string' ? parsed.error : undefined
+    const state: RebaseConflictState = { issueNumber, conflicts, status: 'failed', error }
+    return {
+      handled: true,
+      invalidations: [['issues']],
+      rebaseConflict: state,
+      rebaseEvent: { type: 'rebase_conflict', issueNumber, conflicts, status: 'failed', error },
+      toast: { tone: 'error', message: `Rebase conflict on Issue #${issueNumber}` },
+    }
+  }
+  if (isMergePayload(parsed)) {
+    return {
+      handled: true,
+      invalidations: [['issues']],
+      toast: { tone: 'error', message: `Merge failed for Issue #${issueNumber}` },
+    }
+  }
+  return { handled: false }
+}
+
+
