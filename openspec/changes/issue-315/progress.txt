@@ -39,3 +39,19 @@
 - When the seeding step (`WorkflowRunFailed + rebase_conflict`) is needed to populate `rebaseConflict` before a `rebase_completed` clearing test, the seeding step also fires `toast.error('Rebase conflict on Issue #N')`. The test resets `mocks.toastInfo/Error/Success` via `mockClear()` between seed and the assertion step to keep the assertion focused on the post-seed handler's behavior.
 - The check `expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 'detail', issueId] })` only fires in the issue-arm when the outcome handler returns false; the rebase-completed arm returns true and breaks out of the issue-arm without firing the detail invalidation. Pin this.
 - The rebase-failed toast outcome (`'Rebase conflict on Issue #21'` etc.) is `toast.error`; the merge-failed outcome (`'Merge failed for Issue #21'`) is also `toast.error` but with different copy. Both must be tested separately to keep the strings distinct.
+
+## Task T-002 outcomes
+
+- Pure envelope/normalization helpers extracted to `packages/web/src/app/providers/model/event-envelope.ts` (178 lines, no React/TanStack/sonner imports — only `entities/agent` for `AGENT_DETAIL_EVENTS` / `AgentDetailEventMap` types):
+  - `unwrapEnvelope`, `readEnvelopeField`, `asRecord`, `normalizeToolState`, `normalizeTranscriptDetail`, `unwrapTranscriptEnvelope`, `routeTranscriptEventName`, `isAgentDetailEvent`.
+- Pure timeline helpers extracted to `packages/web/src/app/providers/model/timeline-live-event.ts` (37 lines):
+  - `readIssueNumber`, `readTimelineEventId`, `readTimelineTime`, `buildTimelineLiveEvent`.
+- `LiveTaskProvider.tsx` slimmed 601 → 394 lines. Imports the helpers and re-exports the same `__testing__` key set; `LiveTaskProvider.test.ts` still imports `./LiveTaskProvider` byte-identical.
+- All 33 LiveTaskProvider tests green; full web suite (240 files / 3727 tests + 1 skipped) green; `npm run typecheck -w packages/web` clean.
+
+## Gotchas for downstream tasks
+
+- Module path from `app/providers/model/*.ts` to `entities/*` is `../../../entities/*` (three levels up to `src/`), NOT `../../entities/*` — the latter resolves to `app/entities/*` which does not exist. Easy off-by-one when extracting helpers out of `LiveTaskProvider.tsx` (which itself sits at `app/providers/` and uses `../../`).
+- `AgentDetailEventMap` (type-only) is still needed in `LiveTaskProvider.tsx` because the `dispatchAgentEvent` calls cast through `AgentDetailEventMap[typeof eventName]` / `AgentDetailEventMap[typeof routedName]`. `AGENT_DETAIL_EVENTS` is NOT needed there anymore — only in `event-envelope.ts` where `isAgentDetailEvent` lives.
+- `TimelineLiveEvent` type import is no longer needed in `LiveTaskProvider.tsx` — the function that uses it (`buildTimelineLiveEvent`) is fully encapsulated in `timeline-live-event.ts`.
+- `readIssueNumber` is consumed by `handleReverseDnsIntegrationOutcome` (still in `LiveTaskProvider.tsx`) — `readIssueNumber` must be exported and imported back so the body keeps working unchanged. T-003 will move the consumer to `reverse-dns-outcome.ts` and the import will move with it.

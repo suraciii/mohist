@@ -2,10 +2,10 @@ import { useEffect, useRef, useCallback, useState, useContext } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { EventName, Issue, LiveTaskState, RebaseConflictState } from '../../entities/issue'
-import { dispatchAgentEvent, AGENT_DETAIL_EVENTS, useAgentStatus } from '../../entities/agent'
+import { dispatchAgentEvent, useAgentStatus } from '../../entities/agent'
 import type { AgentDetailEventMap } from '../../entities/agent'
 import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
-import { dispatchTimelineEvent, type TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
+import { dispatchTimelineEvent } from '../../entities/issue/model/timeline-events'
 import { invalidateApprovalWait } from '../../entities/issue'
 import { applyInboxHint, isHighAttentionKind, parseInboxItemPersistedHint, shouldSuppressInAppNotice } from '../../entities/inbox/model/inbox-effects'
 import { useProject } from '../../entities/project'
@@ -13,6 +13,13 @@ import { LiveTaskContext } from '../../entities/issue'
 import { useEventsConnection } from '../../shared/api/events-hub'
 import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
 import { RuntimeToastContext } from '../../shared/ui/toast'
+import {
+  isAgentDetailEvent,
+  routeTranscriptEventName,
+  unwrapEnvelope,
+  unwrapTranscriptEnvelope,
+} from './model/event-envelope'
+import { buildTimelineLiveEvent, readIssueNumber } from './model/timeline-live-event'
 
 /**
  * Compile-time guard: every name the switch can route (i.e. every key of
@@ -32,183 +39,6 @@ type _AssertEventNameSubscribed = [Exclude<EventName, (typeof EVENT_TYPES)[numbe
   : false
 const _subscriptionCoversSwitch: _AssertEventNameSubscribed = true
 void _subscriptionCoversSwitch
-
-type AgentDetailEventName = keyof AgentDetailEventMap
-
-function isAgentDetailEvent(name: string): name is AgentDetailEventName {
-  return (AGENT_DETAIL_EVENTS as readonly string[]).includes(name)
-}
-
-function routeTranscriptEventName(name: string): string {
-  switch (name) {
-    case 'message.delta':
-      return 'coder_text_chunk'
-    case 'reasoning.delta':
-      return 'coder_thought_chunk'
-    case 'tool_call.started':
-    case 'tool_call.updated':
-    case 'tool_call.completed':
-      return 'coder_tool_call'
-    default:
-      return name
-  }
-}
-
-/**
- * Wire shape from the SignalR bus. The server now sends the full CloudEvents
- * 1.0.2 envelope; the Web reads {@link payload} for the original event body
- * and {@link extensions} for routing metadata (projectid, workflowrunid,
- * issueno). Falls back to the legacy raw-payload shape (where the event
- * body sits in a top-level `payload` field) for any unmigrated producers.
- *
- * Note on field casing: the server-side `CloudEventEnvelope` record uses
- * PascalCase property names (SpecVersion, DataContentType, ...) when
- * serialised by System.Text.Json, so the wire JSON has `specVersion`,
- * not the CloudEvents-spec lowercase `specversion`. The structural
- * check here matches what the server actually emits.
- */
-function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
-  if (!rawData || typeof rawData !== 'object') {
-    return {}
-  }
-  const candidate = rawData as Record<string, unknown>
-  // CloudEvents envelope marker: id + source + type + specVersion all
-  // present as strings. duck-typing on 'payload' alone would mis-parse
-  // any future event whose data payload happens to contain a nested
-  // 'payload' field.
-  if (
-    typeof candidate.specVersion === 'string'
-    && typeof candidate.id === 'string'
-    && typeof candidate.source === 'string'
-    && typeof candidate.type === 'string'
-  ) {
-    const payload = candidate.payload ?? candidate.data
-    if (payload && typeof payload === 'object') {
-      return payload as Record<string, unknown>
-    }
-    return {}
-  }
-  // Legacy raw-payload shape (unmigrated producers).
-  if (typeof candidate.type === 'string' && 'payload' in candidate) {
-    const payload = candidate.payload
-    if (payload && typeof payload === 'object') {
-      return payload as Record<string, unknown>
-    }
-    return {}
-  }
-  return candidate
-}
-
-function readEnvelopeField(candidate: Record<string, unknown>, camelCase: string, pascalCase: string): unknown {
-  return candidate[camelCase] ?? candidate[pascalCase]
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-function normalizeToolState(value: unknown, eventName: string): string | undefined {
-  if (typeof value === 'string' && value) {
-    switch (value) {
-      case 'completed':
-      case 'failed':
-      case 'timeout':
-      case 'cancelled':
-      case 'started':
-        return value
-      case 'running':
-      case 'in_progress':
-      case 'pending':
-        return 'started'
-      default:
-        return value
-    }
-  }
-  if (eventName === 'tool_call.completed') return 'completed'
-  if (eventName === 'tool_call.started') return 'started'
-  return undefined
-}
-
-function normalizeTranscriptDetail(
-  candidate: Record<string, unknown>,
-  eventName: string,
-  innerPayload?: Record<string, unknown>,
-): Record<string, unknown> {
-  const agentSessionId = readEnvelopeField(candidate, 'agentSessionId', 'AgentSessionId')
-  const sessionId = readEnvelopeField(candidate, 'sessionId', 'SessionId')
-  const workId = readEnvelopeField(candidate, 'workId', 'WorkId')
-  const normalized: Record<string, unknown> = {
-    ...candidate,
-    ...(innerPayload ?? {}),
-    type: eventName,
-  }
-  const toolCall = asRecord(normalized.toolCall)
-  if (toolCall) {
-    normalized.toolCallId ??= toolCall.toolCallId ?? toolCall.id
-    normalized.toolName ??= toolCall.toolName ?? toolCall.name
-    normalized.title ??= toolCall.title
-    normalized.rawInput ??= toolCall.input ?? toolCall.rawInput
-    normalized.rawOutput ??= toolCall.output ?? toolCall.rawOutput
-    normalized.rawOutputMetadata ??= toolCall.outputMetadata ?? toolCall.rawOutputMetadata
-    normalized.metadata ??= toolCall.metadata
-    normalized.details ??= toolCall.details
-    normalized.normalizedName ??= toolCall.normalizedName
-    normalized.displayTitle ??= toolCall.displayTitle
-    normalized.displaySubtitle ??= toolCall.displaySubtitle
-    normalized.category ??= toolCall.category
-  }
-  if (eventName.startsWith('tool_call.')) {
-    normalized.state = normalizeToolState(
-      normalized.state ?? normalized.status ?? toolCall?.state ?? toolCall?.status,
-      eventName,
-    )
-  }
-  if (innerPayload) {
-    normalized.payload = innerPayload
-  }
-  if (normalized.acpSessionId === undefined) {
-    normalized.acpSessionId = agentSessionId ?? sessionId
-  }
-  if (normalized.coderSessionId === undefined) {
-    normalized.coderSessionId = sessionId
-  }
-  if (normalized.executionId === undefined) {
-    normalized.executionId = workId
-  }
-  return normalized
-}
-
-function unwrapTranscriptEnvelope(rawData: unknown): { eventName: string; payload: unknown; detail: unknown } | null {
-  if (!rawData || typeof rawData !== 'object') {
-    return null
-  }
-  const candidate = rawData as Record<string, unknown>
-  const eventName = readEnvelopeField(candidate, 'type', 'Type')
-    ?? readEnvelopeField(candidate, 'eventType', 'EventType')
-    ?? readEnvelopeField(candidate, 'name', 'Name')
-  if (typeof eventName !== 'string') {
-    return null
-  }
-  const innerPayload = readEnvelopeField(candidate, 'payload', 'Payload') ?? readEnvelopeField(candidate, 'data', 'Data')
-  const hasRuntimeRowMetadata = readEnvelopeField(candidate, 'sessionId', 'SessionId') !== undefined
-    || readEnvelopeField(candidate, 'sequence', 'Sequence') !== undefined
-    || readEnvelopeField(candidate, 'createdAt', 'CreatedAt') !== undefined
-  if (hasRuntimeRowMetadata && innerPayload && typeof innerPayload === 'object') {
-    const payload = innerPayload as Record<string, unknown>
-    return {
-      eventName,
-      payload,
-      detail: normalizeTranscriptDetail(candidate, eventName, payload),
-    }
-  }
-  return {
-    eventName,
-    payload: candidate,
-    detail: normalizeTranscriptDetail(candidate, eventName),
-  }
-}
 
 export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName, buildTimelineLiveEvent, parseInboxItemPersistedHint, getCurrentIssueNumber }
 
@@ -297,43 +127,6 @@ function notifyApprovalRequestedToast(
   const issueNumber = evt.issueNumber ?? (evt.issueId ? findIssueNumber(queryClient, evt.issueId) : null)
   if (issueNumber === null || issueNumber === undefined || issueNumber === viewedIssue) return
   toast.info(`Issue #${issueNumber} needs approval`)
-}
-
-function readIssueNumber(parsed: Record<string, unknown>): number | null {
-  const issueNumber = parsed.issueNumber ?? parsed.issueNo ?? parsed.number
-  return typeof issueNumber === 'number' ? issueNumber : null
-}
-
-function readTimelineEventId(rawData: unknown): string | null {
-  if (!rawData || typeof rawData !== 'object') return null
-  const candidate = rawData as Record<string, unknown>
-  const id = candidate.id ?? candidate.eventId
-  return typeof id === 'string' && id ? id : null
-}
-
-function readTimelineTime(rawData: unknown, parsed: Record<string, unknown>): string | null {
-  if (rawData && typeof rawData === 'object') {
-    const candidate = rawData as Record<string, unknown>
-    const t = candidate.time ?? candidate.Time
-    if (typeof t === 'string' && t) return t
-  }
-  const fallback = parsed.time ?? parsed.createdAt ?? parsed.createdAtUtc ?? parsed.timestamp
-  return typeof fallback === 'string' && fallback ? fallback : null
-}
-
-function buildTimelineLiveEvent(
-  eventName: string,
-  rawData: unknown,
-  parsed: Record<string, unknown>,
-): TimelineLiveEvent {
-  return {
-    issueNumber: readIssueNumber(parsed),
-    issueId: typeof parsed.issueId === 'string' ? parsed.issueId : null,
-    type: eventName,
-    time: readTimelineTime(rawData, parsed),
-    eventId: readTimelineEventId(rawData),
-    payload: parsed,
-  }
 }
 
 function readOutcome(parsed: Record<string, unknown>): string | null {
