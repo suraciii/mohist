@@ -4,7 +4,6 @@ import { toast } from 'sonner'
 import { Button } from '@/shared/ui/components/button'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, type Issue } from '../../../entities/issue'
-import type { SortMode } from '../model/board-query'
 import { archiveAllCompleted } from '../../../entities/issue'
 import { IssueCard } from './IssueCard'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -18,8 +17,6 @@ interface Props {
   agentStatus: AgentStatus
   isDone?: boolean
   archivedCount?: number
-  sort?: SortMode
-  onSortChange?: (s: SortMode) => void
   headerToggle?: ReactNode
   footerToggle?: ReactNode
   bodyHidden?: boolean
@@ -32,8 +29,6 @@ export function StageColumn({
   agentStatus,
   isDone,
   archivedCount = 0,
-  sort,
-  onSortChange,
   headerToggle,
   footerToggle,
   bodyHidden = false,
@@ -72,12 +67,6 @@ export function StageColumn({
     },
   })
 
-  const sortOptions: { value: typeof sort; label: string }[] = [
-    { value: 'priority', label: 'Prio' },
-    { value: 'number', label: '#' },
-    { value: 'updated', label: 'Upd' },
-  ]
-
   return (
     <div
       data-testid={`stage-column-${status}`}
@@ -104,26 +93,6 @@ export function StageColumn({
         </span>
         {headerToggle}
       </div>
-
-      {onSortChange && sort && (
-        <div className="px-3 pt-1.5 pb-1 flex items-center gap-0.5">
-          {sortOptions.map((opt) => (
-            <Button
-              key={opt.value}
-              variant={sort === opt.value ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => onSortChange(opt.value!)}
-              className={`px-2 py-0.5 text-xs h-auto ${
-                sort === opt.value
-                  ? 'bg-blue-100 text-blue-700 font-medium hover:bg-blue-100'
-                  : 'text-muted-foreground/70 hover:text-foreground hover:bg-muted'
-              }`}
-            >
-              {opt.label}
-            </Button>
-          ))}
-        </div>
-      )}
 
       <div className="flex-1 space-y-2 overflow-y-auto p-2 min-h-[120px]">
         {bodyHidden ? (

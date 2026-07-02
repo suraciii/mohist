@@ -544,7 +544,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
   )
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3rem)]">
+    <div data-testid="kanban-board-root" className="flex flex-col min-w-0 h-[calc(100vh-3rem)]">
       <RunnerUnavailableBanner agentStatus={agentStatus} />
       <NeedsAttentionSummary items={attentionItems} />
       <FilterBar
@@ -623,7 +623,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
         </div>
       </div>
 
-      <div className="hidden md:flex flex-row gap-4 overflow-x-auto p-4 flex-1">
+      <div data-testid="kanban-board-row" className="hidden md:flex flex-row gap-4 overflow-x-auto p-4 flex-1 min-w-0">
         {displayedColumns.map((col) => {
           const isCancelled = col.key === IssueStatus.Cancelled
           const cancelledColumnHidden = isCancelled && !showCancelled && col.issues.length > 0
@@ -636,8 +636,6 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
               agentStatus={agentStatus}
               isDone={col.key === IssueStatus.Done}
               archivedCount={col.key === IssueStatus.Done ? archivedCount : undefined}
-              sort={localState.sort}
-              onSortChange={(s) => updateState({ ...localState, sort: s })}
               headerToggle={
                 isCancelled ? (
                   <Button

@@ -55,7 +55,7 @@ function AppContent() {
       <AppSidebar onCreateIssue={() => setCreateIssueOpen(true)} />
       <SidebarInset>
         <Header onCreateIssue={() => setCreateIssueOpen(true)} />
-        <div className="flex-1 min-h-0 flex flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
           <Routes>
             <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
             <Route path="/settings/:section" element={<ApplicationSettingsSection />} />
