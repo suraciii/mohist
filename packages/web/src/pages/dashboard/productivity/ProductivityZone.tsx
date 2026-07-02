@@ -1,5 +1,6 @@
 import { CompletionTrend } from './CompletionTrend'
 import { CostTrendChart } from './CostTrendChart'
+import { CumulativeFlowChart } from './CumulativeFlowChart'
 import { CycleTimeChart } from './CycleTimeChart'
 import { EpicProgressList } from './EpicProgressList'
 import { FtrTrendChart } from './FtrTrendChart'
@@ -22,6 +23,7 @@ export function ProductivityZone() {
       <ThroughputChart />
       <CycleTimeChart />
       <StageDurationChart />
+      <CumulativeFlowChart />
       <QualityPanel />
       <FtrTrendChart />
       <InvestmentPanel />

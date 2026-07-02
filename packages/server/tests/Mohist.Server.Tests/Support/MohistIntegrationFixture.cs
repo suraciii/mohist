@@ -182,6 +182,26 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             );
             """);
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS \"IX_LabelDefinitions_ProjectId_Key\" ON \"LabelDefinitions\" (\"ProjectId\", \"Key\");");
+
+        // StagePopulationSnapshots — the daily stage-population cache the
+        // cumulative-flow endpoint reads. The integration fixture creates
+        // tables via raw SQL (no migration runner), so the snapshot table
+        // is added here to mirror the production migration
+        // 20260702021109_AddStagePopulationSnapshotsTable.
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "StagePopulationSnapshots" (
+                "ProjectId" TEXT NOT NULL,
+                "Day" TEXT NOT NULL,
+                "Backlog" INTEGER NOT NULL,
+                "Plan" INTEGER NOT NULL,
+                "Build" INTEGER NOT NULL,
+                "Check" INTEGER NOT NULL,
+                "Integrate" INTEGER NOT NULL,
+                "Done" INTEGER NOT NULL,
+                CONSTRAINT "PK_StagePopulationSnapshots" PRIMARY KEY ("ProjectId", "Day")
+            );
+            """);
+        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS \"UQ_StagePopulationSnapshots_ProjectId_Day\" ON \"StagePopulationSnapshots\" (\"ProjectId\", \"Day\");");
     }
 
     private static string CreateWebRoot()

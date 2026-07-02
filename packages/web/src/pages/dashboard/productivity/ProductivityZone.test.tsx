@@ -39,6 +39,10 @@ vi.mock('./StageDurationChart', () => ({
   StageDurationChart: () => <div data-testid="stage-duration-chart-mock" />,
 }))
 
+vi.mock('./CumulativeFlowChart', () => ({
+  CumulativeFlowChart: () => <div data-testid="cumulative-flow-chart-mock" />,
+}))
+
 vi.mock('./CostTrendChart', () => ({
   CostTrendChart: () => <div data-testid="cost-trend-chart-mock" />,
 }))
@@ -94,6 +98,18 @@ describe('ProductivityZone', () => {
     const stage = screen.getByTestId('stage-duration-chart-mock')
     expect(zone).toContainElement(stage)
     expect(cycle.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('mounts the cumulative-flow chart after the stage-duration chart and before QualityPanel', () => {
+    render(<ProductivityZone />)
+
+    const zone = screen.getByTestId('productivity-zone')
+    const stage = screen.getByTestId('stage-duration-chart-mock')
+    const cumulative = screen.getByTestId('cumulative-flow-chart-mock')
+    const quality = screen.getByTestId('productivity-quality')
+    expect(zone).toContainElement(cumulative)
+    expect(stage.compareDocumentPosition(cumulative) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(cumulative.compareDocumentPosition(quality) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('mounts the FTR trend chart immediately after QualityPanel', () => {

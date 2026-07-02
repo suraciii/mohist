@@ -73,6 +73,11 @@ public static class MohistServiceRegistration
         services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
         services.AddHostedService<AttachmentCleanupService>();
         services.AddHostedService<EpicReconciliationService>();
+        services.AddOptions<StagePopulationSnapshotOptions>()
+            .Bind(configuration.GetSection(StagePopulationSnapshotOptions.SectionName))
+            .Validate(options => options.SnapshotPeriod > TimeSpan.Zero,
+                "Stage population snapshot period must be positive.");
+        services.AddHostedService<StagePopulationSnapshotService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();

@@ -10,6 +10,8 @@ export { deliveryTimeQueryKey, fetchDeliveryTime, useDeliveryTime } from './api/
 export type { DeliveryTimeMetricsResponse, DeliveryTimePointDto } from './api/delivery-time'
 export { fetchStageDuration, stageDurationQueryKey, useStageDuration } from './api/stage-duration'
 export type { StageDurationMetricsResponse, StageDurationMetricsWindow, StageDurationStageDto, StageDurationWaitBreakoutDto } from './api/stage-duration'
+export { cumulativeFlowQueryKey, fetchCumulativeFlow, useCumulativeFlow } from './api/cumulative-flow'
+export type { CumulativeFlowDayDto, CumulativeFlowResponse } from './api/cumulative-flow'
 export { statusBadge, statusLabel } from './lib/status-badge'
 export { deriveCompletionSnapshot, useCompletionSnapshot } from './lib/completion-snapshot'
 export type { CompletionSnapshot } from './lib/completion-snapshot'

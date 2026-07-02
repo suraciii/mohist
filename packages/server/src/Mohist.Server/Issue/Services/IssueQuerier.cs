@@ -1273,18 +1273,47 @@ public class IssueQuerier : IScopedService
             id => id,
             _ => new List<string>(),
             StringComparer.Ordinal);
+        // Per-issue lifecycle event stream needed for the shared
+        // attribution core (`IssueStageAttribution.Attribute`).
+        // Captures WorkStarted / WorkCompleted / Closed / Reopened so
+        // the stage-duration surface and the stage-population snapshot
+        // job produce the same "latest stage" verdict for the same
+        // issue.
+        var lifecycleEventsByIssue = new Dictionary<string, List<IssueStageAttribution.AttributionEvent>>(StringComparer.Ordinal);
 
         if (projectSources.Count > 0)
         {
             var sourceSet = new HashSet<string>(projectSources, StringComparer.Ordinal);
             var candidates = await db.IssueEvents.AsNoTracking()
-                .Select(e => new { e.Source, e.Type, e.Time, e.Data })
+                .Select(e => new { e.Source, e.Type, e.Time, e.Data, e.Id })
                 .ToListAsync();
 
             foreach (var e in candidates)
             {
                 if (!sourceSet.Contains(e.Source)) continue;
                 var issueId = e.Source[IssueSourcePrefix.Length..];
+
+                // Record every lifecycle event the shared attribution
+                // core consumes; the WorkStarted / WorkCompleted
+                // branches below also drive the existing per-issue
+                // run-id / earliest-start accumulators.
+                if (e.Type == WorkStartedType
+                    || e.Type == WorkCompletedType
+                    || e.Type == ClosedType
+                    || e.Type == "com.mohist.issue.reopened")
+                {
+                    if (!lifecycleEventsByIssue.TryGetValue(issueId, out var list))
+                    {
+                        list = new List<IssueStageAttribution.AttributionEvent>();
+                        lifecycleEventsByIssue[issueId] = list;
+                    }
+                    list.Add(new IssueStageAttribution.AttributionEvent(
+                        Type: e.Type,
+                        Time: e.Time,
+                        Id: e.Id,
+                        Stage: null,
+                        WorkflowRunId: ReadWorkflowRunId(e.Data)));
+                }
 
                 if (e.Type == WorkStartedType)
                 {
@@ -1356,9 +1385,22 @@ public class IssueQuerier : IScopedService
 
             if (!runIdsByIssue.TryGetValue(issue.Id, out var issueRunIds)) continue;
 
+            // Attribution core: the snapshot and the stage-duration
+            // surface share the same latest-run decision. When the
+            // attribution model can identify the active workflow run,
+            // durations are computed from that run only so historical
+            // invalidated runs cannot contribute samples.
+            var lifecycleForIssue = lifecycleEventsByIssue.TryGetValue(issue.Id, out var le)
+                ? le
+                : (IReadOnlyList<IssueStageAttribution.AttributionEvent>)Array.Empty<IssueStageAttribution.AttributionEvent>();
+            var attribution = ComputeIssueAttribution(lifecycleForIssue, issueRunIds, stageEventsByRun, stageOrder, dayEndUtc: now);
+            IReadOnlyList<string> durationRunIds = !string.IsNullOrWhiteSpace(attribution.WorkflowRunId)
+                ? new[] { attribution.WorkflowRunId }
+                : issueRunIds;
+
             // Pair each reached stage with its latest attempt duration.
             // Stages with no following completion contribute no sample.
-            var stageDurations = ComputeLatestAttemptStageDurations(issueRunIds, stageEventsByRun);
+            var stageDurations = ComputeLatestAttemptStageDurations(durationRunIds, stageEventsByRun);
 
             // Cycle = CompletedAt - earliest IssueWorkStarted.
             double? cycleSeconds = null;
@@ -1525,6 +1567,55 @@ public class IssueQuerier : IScopedService
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .ToList()
             ?? new List<string>();
+    }
+
+    /// <summary>
+    /// Shared attribution core. The stage-duration surface and the
+    /// stage-population snapshot job both call this helper so the two
+    /// surfaces are guaranteed to agree on an issue's latest stage
+    /// under the same <em>latest-attempt, latest-run-wins,
+    /// invalidate-on-restart</em> idiom. The per-stage duration
+    /// dictionary produced by <see cref="ComputeLatestAttemptStageDurations"/>
+    /// is a stage-duration-specific concern (it pairs the latest
+    /// <c>StageStarted</c> with the first following
+    /// <c>StageCompleted</c> per stage id); the attribution core here
+    /// produces the issue's single attributed stage for the day.
+    /// <para>
+    /// Lifecycle events come from the per-issue <c>IssueEvents</c> the
+    /// caller has already loaded (work-started / work-completed /
+    /// closed / reopened); stage events come from the per-run
+    /// <c>WorkflowRunEvents</c> the caller has already loaded. The
+    /// day bound is <paramref name="dayEndUtc"/>; events past the
+    /// bound are caller-filtered (SQLite cannot translate
+    /// <see cref="DateTimeOffset"/> against TEXT, so the bound is
+    /// applied in LINQ-to-objects after materialization).
+    /// </para>
+    /// </summary>
+    private static IssueStageAttribution.Attribution ComputeIssueAttribution(
+        IReadOnlyList<IssueStageAttribution.AttributionEvent> lifecycleEvents,
+        IReadOnlyList<string> issueRunIds,
+        IReadOnlyDictionary<string, List<WorkflowRunStageEvent>> stageEventsByRun,
+        IReadOnlyList<string> stageOrder,
+        DateTimeOffset dayEndUtc)
+    {
+        var events = new List<IssueStageAttribution.AttributionEvent>(lifecycleEvents.Count + 16);
+        events.AddRange(lifecycleEvents);
+        foreach (var runId in issueRunIds)
+        {
+            if (string.IsNullOrWhiteSpace(runId)) continue;
+            if (!stageEventsByRun.TryGetValue(runId, out var list)) continue;
+            foreach (var se in list)
+            {
+                events.Add(new IssueStageAttribution.AttributionEvent(
+                    Type: se.Type,
+                    Time: se.Time,
+                    Id: se.Id,
+                    Stage: se.Stage,
+                    WorkflowRunId: runId));
+            }
+        }
+
+        return IssueStageAttribution.Attribute(events, stageOrder, dayEndUtc);
     }
 
     /// <summary>

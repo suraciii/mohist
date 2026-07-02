@@ -10,6 +10,9 @@ export type { BarSeriesProps, BarDatum } from './BarSeries'
 export { LineSeries } from './LineSeries'
 export type { LineSeriesProps, LinePoint } from './LineSeries'
 
+export { AreaSeries } from './AreaSeries'
+export type { AreaSeriesProps, AreaPoint, AreaBand } from './AreaSeries'
+
 export { ChartAxes } from './ChartAxes'
 export type { ChartAxesProps, AxisTick, AxisSide } from './ChartAxes'
 
