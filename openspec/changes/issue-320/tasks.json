@@ -19,7 +19,7 @@
       "type": "WRITE",
       "output": "widgets/attention-hero/ui/AttentionHero.tsx 与 widgets/attention-hero/ui/AttentionHero.test.tsx 更新完成",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "删除仅限 AllClearState 内的占位 div，不动其他 import（设计 Decision 2 确认无 import 变为孤儿）。"
     },
     {
@@ -41,7 +41,7 @@
       "type": "WRITE",
       "output": "pages/dashboard/ui/DashboardPage.tsx 与 pages/dashboard/ui/DashboardPage.test.tsx 更新完成",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Ask Agent 按钮是该文件中 useNavigate/useProjectPath/toProjectPath/BotIcon 的唯一消费者（设计 Decision 2 已 grep 确认）。"
     },
     {
@@ -63,7 +63,7 @@
       "type": "WRITE",
       "output": "widgets/dashboard-pulse/ui/PulseZone.tsx 与 widgets/dashboard-pulse/ui/PulseZone.test.tsx 更新完成",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "statusCounts 在 useActivityCards 模型层保留——ActivityPage.tsx:39-42 仍消费它，仅删除 PulseZone 内的消费（设计 Decision 2）。"
     },
     {
