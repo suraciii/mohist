@@ -208,3 +208,66 @@ Each task appends its findings; the next task reads the section it cares about.
   members touch — shared helpers (`NumberArg`, `ProjectIssuesPath`,
   `ValidateOutput`, `ResolveProjectId`, `IsOptionProvided`,
   `IssueTemplatesPath`) stay in the core partial and are not re-imported.
+
+## Carve notes for T-004 (Session)
+
+### Session cluster is one contiguous region (like Lifecycle, unlike CRUD)
+
+- The Session cluster sat as a single contiguous block from line 83
+  (`BuildSessions`) to line 356 (`BuildSessionFollowup` close brace) in
+  the post-T-003 core file. The seam anchor at the boundary
+  `BuildSessionFollowup` → `BuildWorkflow` was a clean single `edit`
+  find/replace with no shared-helper bookkeeping (T-002's three-region
+  CRUD problem does not recur here). The session cluster does not
+  interleave with the shared helpers in any way — it sits entirely
+  between the helpers and the Workflow cluster.
+- 8 methods (lines 83-356, ~274 lines) dropped out via one `edit`. The
+  result: 281-line `MohistCliCommands.Issue.Session.cs` partial, 1076-line
+  core. Net Δ −275L.
+
+### `BuildSessionFollowup`'s cross-helper ordering is preserved verbatim
+
+- `BuildSessionFollowup` is the only Session method that calls
+  `ValidateOutput` BEFORE `ResolveProjectId` (the others call project-id
+  first, then output-mode). This ordering is intentional: it short-
+  circuits the `BodyInputResolver` / file I/O step on bad `--output`
+  values. The verbatim move preserves this byte-for-byte; do not
+  reorder during a future carve.
+
+### Session partial `using` block is minimal
+
+- Only `using System.CommandLine;` is needed — no `System.Net.Http`
+  (no `HttpRequestException` catches), no `System.Text.Json.Nodes`
+  (no `JsonNode?` shapes), no `System.CommandLine.Parsing` (no
+  `ParseResult` / `Option` signatures beyond their `Command`
+  constructor paths). `BodyInputResolver` lives in the same namespace
+  (`Mohist.Cli`) so no import is needed. The minimal-import rule
+  applied to Lifecycle (T-003) and Crud (T-002) holds for Session too.
+
+### `SessionNameArg` lives with its callers
+
+- `SessionNameArg` is called only from the four sub-subcommand builders
+  (`BuildSessionShow` / `BuildSessionTranscript` / `BuildSessionCompact` /
+  `BuildSessionReset` / `BuildSessionFollowup`), all of which now live
+  in the Session partial. `SessionNameArg` therefore moves with them
+  per D1 cluster-ownership rule — not to the core partial even though
+  it looks like a small shared helper, because nothing outside the
+  Session cluster ever calls it.
+
+## File metrics after T-004
+
+- `MohistCliCommands.Issue.cs` shrank from 1351 → 1076 lines
+  (Δ −275L). The 281-line `MohistCliCommands.Issue.Session.cs` partial
+  offsets by 281 gross, 275 net (no shared-helper region — Session
+  methods sit in one block, no scattered sub-region).
+- Spec gate: `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj`
+  → 0 Warning(s), 0 Error(s).
+- Spec gate: `dotnet test packages/cli/tests/Mohist.Cli.Tests/... --filter
+  'FullyQualifiedName~CliIssueSessionSpecs'` → 44 passed, 0 failed
+  (session list/show/transcript/compact/reset/followup output and
+  exit codes bit-for-bit green).
+- Spec gate: full CLI issue suite — 231 passed, 0 failed
+  (matches T-001/T-002/T-003 baseline).
+- Spec gate: full CLI test project — 559 passed, 0 failed
+  (matches T-001/T-002/T-003 baseline, no regression in
+  neighboring clusters).
