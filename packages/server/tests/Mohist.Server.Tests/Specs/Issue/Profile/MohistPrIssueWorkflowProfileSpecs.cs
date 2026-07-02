@@ -50,11 +50,11 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void MohistGithubPrIssueWorkflowProfile_SuitableForMentionsGhCliPrerequisite()
+    public void MohistGithubPrIssueWorkflowProfile_SuitableForSignalsGeneralPurpose()
     {
         var profile = new MohistGithubPrIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
 
-        Assert.Contains(profile.SuitableFor, s => s.Contains("gh", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(profile.SuitableFor, s => s.Contains("general-purpose", StringComparison.OrdinalIgnoreCase));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
