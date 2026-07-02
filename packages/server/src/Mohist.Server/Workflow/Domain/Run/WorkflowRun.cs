@@ -12,7 +12,13 @@ namespace Mohist.Server.Workflow.Domain.Run;
 /// <c>Paused</c>, <c>Stopped</c>, and <c>AwaitingApproval</c> only result
 /// from workflow-level commands, never from a task status transition.
 /// </summary>
-public enum WorkflowRunStatus { Pending, Running, AwaitingApproval, Paused, Stopped, Completed, Failed }
+public enum WorkflowRunStatus { Created, Pending, Ready, Running, AwaitingApproval, Paused, Stopped, Completed, Failed }
+
+public static class WorkflowRunStatusExtensions
+{
+    public static bool IsTerminal(this WorkflowRunStatus status) =>
+        status is WorkflowRunStatus.Stopped or WorkflowRunStatus.Completed or WorkflowRunStatus.Failed;
+}
 
 [GenerateSerializer]
 public sealed record WorkflowRunMetadata(

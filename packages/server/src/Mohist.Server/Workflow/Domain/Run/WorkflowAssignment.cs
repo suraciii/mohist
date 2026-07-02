@@ -25,7 +25,14 @@ public static partial class WorkflowRunExtensions
             if (run.Assignment is not null)
                 throw new InvalidOperationException($"Workflow is already assigned to {run.Assignment.RunnerId}");
 
+            if (run.Status != WorkflowRunStatus.Pending)
+                throw new InvalidOperationException($"Workflow is {run.Status}, assignment requires Pending");
+
+            if (!run.HasDispatchableWork())
+                throw new InvalidOperationException("Workflow has no dispatchable work");
+
             run.Assignment = new WorkflowAssignment(runnerId, now);
+            run.Status = WorkflowRunStatus.Ready;
         }
 
         public bool IsAssignedTo(string runnerId)

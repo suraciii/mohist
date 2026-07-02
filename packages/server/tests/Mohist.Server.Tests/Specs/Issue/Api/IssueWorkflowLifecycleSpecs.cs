@@ -182,7 +182,12 @@ public class IssueWorkflowLifecycleSpecs
 
         var run = await LoadWorkflowRunAsync(oldWrId);
         Assert.NotNull(run);
-        Assert.Equal(WorkflowRunStatus.Running, run!.Status);
+        // After Rerun, the stage is reset to running. With no assignment
+        // on the run (the prior StopAsync left it unassigned because
+        // no runner ever picked it up), the new state machine lands on
+        // Pending (started, has dispatchable work, waiting for any
+        // runner to claim it).
+        Assert.Equal(WorkflowRunStatus.Pending, run!.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

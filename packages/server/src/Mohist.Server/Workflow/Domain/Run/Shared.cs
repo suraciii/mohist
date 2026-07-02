@@ -30,3 +30,40 @@ public static class WorkflowRunBranch
         return string.IsNullOrEmpty(safe) ? "mohist/run" : $"mohist/run-{safe}";
     }
 }
+
+public static partial class WorkflowRunExtensions
+{
+    extension(WorkflowRun run)
+    {
+        public bool IsTerminal() => run.Status.IsTerminal();
+
+        public bool HasInFlightWork() => run.Stages.Any(stage =>
+            stage.Tasks.Any(t => t.Status == TaskRunStatus.Running)
+            || !string.IsNullOrWhiteSpace(stage.ChecksWorkId)
+            || stage.Checks.Any(c => c.Status == StageCheckStatus.Running));
+
+        public bool HasDispatchableWork()
+        {
+            if (run.CurrentStageId is null) return false;
+            var current = run.Stages.FirstOrDefault(s => string.Equals(s.Id, run.CurrentStageId, StringComparison.Ordinal));
+            if (current is null || !current.Initialized) return false;
+
+            return current.Tasks.Any(t => t.Status == TaskRunStatus.Pending)
+                || current.Checks.Any(c => c.Status == StageCheckStatus.Pending);
+        }
+
+        public bool ReconcileReadyStatusWithInFlightWork()
+        {
+            if (run.Status != WorkflowRunStatus.Ready || !run.HasInFlightWork()) return false;
+
+            run.Status = WorkflowRunStatus.Running;
+            return true;
+        }
+    }
+
+    private static WorkflowRunStatus WaitingForDispatchStatus(WorkflowRun run) =>
+        run.Assignment is null ? WorkflowRunStatus.Pending : WorkflowRunStatus.Ready;
+
+    private static WorkflowRunStatus ActiveOrWaitingForDispatchStatus(WorkflowRun run) =>
+        run.HasInFlightWork() ? WorkflowRunStatus.Running : WaitingForDispatchStatus(run);
+}

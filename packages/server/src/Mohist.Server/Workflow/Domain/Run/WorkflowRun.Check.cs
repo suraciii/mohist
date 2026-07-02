@@ -45,7 +45,7 @@ public static partial class WorkflowRunExtensions
             var current = run.CurrentStage();
             current.ScheduleCheckRepair(checkName, repairTasks, message, output);
             run.Failure = null;
-            run.Status = WorkflowRunStatus.Running;
+            run.Status = WaitingForDispatchStatus(run);
             var taskIds = current.Tasks
                 .TakeLast(repairTasks.Count)
                 .Select(t => t.Id)
@@ -105,7 +105,16 @@ public static partial class WorkflowRunExtensions
             check.FinishedAt = null;
             check.Message = result.Message;
             check.Output = result.Output;
-            return [new CheckPending(current.Id, check.Name, result.Message)];
+            var events = new List<WorkflowEvent>
+            {
+                new CheckPending(current.Id, check.Name, result.Message)
+            };
+            // Re-evaluate the run state: the check has been re-queued,
+            // so the run is no longer in-flight. With the runner still
+            // assigned, it lands on Ready so the next poll re-dispatches
+            // the check work.
+            events.AddRange(run.Advance());
+            return events;
         }
 
         public IReadOnlyList<TaskDefinition> BuildRepairTasks(

@@ -1,0 +1,136 @@
+## Codebase Patterns
+
+### Workflow status writes follow scattered-guard pattern (per D2)
+
+The WorkflowRun aggregate has no central `CanTransition(from, to)` matrix
+or private setter; instead each command handler carries its own
+ad-hoc guard. This is the deliberate, audit-table approach (D2 in
+design.md) — the new state machine just changed which targets the
+guards point to. A writer can therefore still mis-write `run.Status =`,
+and an audit-pass (grep `_run!.Status = WorkflowRunStatus.`) is part
+of the contract.
+
+### `WaitingForDispatchStatus(run)` and `ActiveOrWaitingForDispatchStatus(run)` helpers
+
+These are the two dispatch-status selectors added in T-001 and live in
+`Shared.cs` next to the other small aggregate helpers. They are the
+"Ready if assigned, Pending otherwise" (and "in-flight overrides
+that") helpers that the new scattered-guard pattern points to. New
+transition sites that need "fall back to a dispatch state after
+clearing failure / adding work / etc." should call one of these two
+helpers rather than hard-coding `Ready` or `Running`.
+
+### `ReconcileReadyStatusWithInFlightWork()` is the activation-time shim
+
+The grain calls this on every `OnActivateAsync` to catch the
+edge case where a `Ready` row was persisted with in-flight work
+(e.g. the historical migration missed a task or a
+sql-side repair left the row in `Ready` with a Running task).
+The shim is the runtime backstop for the imperfect migration in
+T-004; without it a Ready row that actually has in-flight work
+would be blocked by `PollWorkAsync`'s status guard.
+
+### `BuildPendingWork` guard is intentionally a T-005 concern
+
+`WorkflowStatusMapper.BuildPendingWork` still only returns work for
+`Status == Running`. The fix (also surface pending work for `Ready`
+and `Pending`) is part of T-005 (UI surface). T-001 does not touch
+it, so domain/grain tests that exercise the status mapper directly
+must not assert on `PendingWork` for non-`Running` rows.
+
+### Controllable workflow status check in `IssueGrain.CancelAsync`
+
+The "controllable workflow" status set used by
+`CancelAsync`'s cannot-close-while-running guard was extended to
+include `created` / `pending` / `ready` (the new non-terminal
+states from D1). The set is now {created, pending, ready, running,
+paused, awaiting-approval}. This was not in the original
+WorkflowRunStatus enumeration's spec but is a downstream consumer
+of the new vocabulary.
+
+### ResetCheck now calls Advance()
+
+`WorkflowRun.ResetCheck` (the "pending" check-result path) used to
+emit only `CheckPending`. Under the new state machine this left the
+run in `Running` with no in-flight work and no `ChecksWorkId` —
+`PollWorkAsync` would then refuse to redispatch. Adding the
+`run.Advance()` call re-evaluates the run state and lands the run on
+`Ready` (assigned, dispatchable work = the re-queued check), so
+the next poll picks the work up.
+
+## Decisions and gotchas
+
+### T-001 inherits partial state from a prior attempt
+
+The branch `mohist/run-wr_48e6ff1bf9a54ab99d7cac4fda095812` was
+already carrying ~9 of the ~19 write-site changes when I picked it up
+(enum order, IsTerminal extension, Shared.cs helpers, Start/Pause/
+Stop/Resume transitions, the Advance() default, Retry/Rerun paths).
+The remaining work was:
+  - the write sites in WorkflowRun.Task.cs / .Check.cs / .Failure.cs /
+    .Work.cs that needed `WaitingForDispatchStatus(run)` (not
+    `Running`),
+  - the AssignRunner → `Ready` write in WorkflowAssignment.cs,
+  - the `Status = WorkflowRunStatus.Running` write in
+    WorkflowGrain.MarkChecksRunning (was missing — checks would
+    dispatch but the run would not flip to `Running`),
+  - the PollWorkAsync guard admit `Ready`,
+  - the activation-time `ReconcileReadyStatusWithInFlightWork()` shim
+    and the grain's `IsTerminal()` delegation,
+  - the WorkflowRunQuerier in-memory Pending filter (will be replaced
+    by the STORED-column query in T-002, but the in-memory fallback
+    must still match the new vocabulary),
+  - the WorkflowRunStatusTransitionSpecs.cs test (15 facts covering
+    every transition point in the spec).
+
+The state of the partial fixes matched the design D2 audit table,
+so I did not have to re-litigate any transition.
+
+### Existing test vocabulary updates
+
+Splitting `Running` into `Ready` / `Pending` / `Running` invalidated
+~9 existing tests that asserted the old conflated `Running` state.
+The updates were:
+  - StatusSpecs: new `WorkflowStatusBeforeRunnerAssignmentIsPending`
+    + an inline comment on `WorkflowDoesNotStoreIssueOrWorkspaceContext`
+    explaining the pre-runner state is now `pending`.
+  - PausingWorkSpecs.StoppedWorkflow_HasTerminalStatus: the
+    pre-stop state is `Pending` (no runner ever claimed it).
+  - BacklogSpecs.NoRunner_WorkflowWaitsInBacklog: same.
+  - BoundarySpecs.CheckReportsPending_CheckRunsAgain: this is the
+    test that surfaced the ResetCheck-Advance() gap.
+  - DispatchAndLoadingSpecs.RuntimeTaskWithInvalidateChecks_ReopensStageChecks
+    + the two WorkflowRetrySpecs: status after a non-failure
+    command that resets dispatchable work lands on `Ready`, not
+    `Running`.
+  - WorkflowRetrySessionHealthGuardSpecs.TaskFails_SessionContextInWarnBand_RetrySucceedsAndStatusClears
+    same pattern.
+  - AgentJobOwnerKindSpecs: the runner-side `report.WorkflowStatus`
+    now reports `Ready` after task completion (check still pending).
+  - IssueFeedbackApiSpecs.CreateFeedback_AtAwaitingApprovalStage_ResumesStageAndPersistsFeedback:
+    the post-`RequestChanges` state is `Ready` (feedback task
+    queued, runner still assigned, no in-flight work yet).
+  - IssueWorkflowLifecycleSpecs.RerunAsync_WhenFailureReasonIsUnknownLegacyValue_RerunsExistingWorkflow:
+    the post-`RerunAsync` state is `Pending` (the prior
+    `StopAsync` left no assignment, so the new state machine lands
+    on Pending).
+
+### DeliveryTimeMetrics are pre-existing flaky tests
+
+Four `IssueMetricsApiSpecs.DeliveryTimeMetrics_*` tests fail in
+parallel runs of the full integration suite because of an apparent
+shared-state issue with the fake time provider. The same tests pass
+in isolation and the same failures reproduce on the master branch
+state (verified by stashing my changes and re-running). Not related
+to T-001; left as-is per "no unrelated fixes" policy.
+
+### `WorkflowGrain.AssignRunnerAsync` admit-set
+
+`AssignRunnerAsync` was already updated to admit `Pending` (was
+implicitly `Running` in the old machine). The check at line 269
+(`_run.Status.IsTerminal() || _run.Status is Created or Paused or
+AwaitingApproval`) is the rejection set, and line 277 (the explicit
+`Pending` + dispatchable-work check) is the success condition. This
+is the right shape — `Created` rejects because there's no work yet,
+`Paused` and `AwaitingApproval` reject because the runner must
+resume the run rather than claim it fresh.

@@ -73,9 +73,10 @@ public sealed class WorkflowRunQuerier
             {
                 var run = JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateAssignmentJson(row.State));
                 if (run is null) continue;
-                if (run.Status != WorkflowRunStatus.Running) continue;
+                if (run.Status.IsTerminal()) continue;
+                if (run.Status != WorkflowRunStatus.Pending) continue;
                 if (run.Assignment is not null) continue;
-                if (run.NextWork() is null) continue;
+                if (!run.HasDispatchableWork()) continue;
 
                 assignable.Add(row.WorkflowRunId);
                 if (assignable.Count >= limit)

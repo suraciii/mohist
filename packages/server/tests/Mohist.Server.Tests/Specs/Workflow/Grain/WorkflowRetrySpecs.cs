@@ -97,7 +97,10 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("running", status.Status);
+        // After retry the failure is cleared and the new task is
+        // dispatchable; the runner is still assigned so the run lands
+        // on Ready (no in-flight work yet).
+        Assert.Equal("ready", status.Status);
         Assert.Null(status.Failure);
         var buildStage = Assert.Single(status.Stages, s => s.Stage == "build");
         Assert.Null(buildStage.Failure);
@@ -281,18 +284,23 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r2, checks, "plan-ok");
 
         // The legacy reject path now routes through the feedback loop.
-        // The workflow is Running, not Failed, and the available actions
-        // list shows a request-changes action (instead of the prior
-        // retry/rerun failure-recovery actions).
+        // The workflow is dispatched with an apply-feedback task, not
+        // Failed, and the available actions list shows a request-changes
+        // action (instead of the prior retry/rerun failure-recovery
+        // actions).
 #pragma warning disable CS0618
         await workflow.RequestChangesAsync("needs rework");
 #pragma warning restore CS0618
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("running", status.Status);
+        // After RequestChanges, the legacy approval is replaced with a
+        // feedback task the runner can pick up. With the runner still
+        // assigned and dispatchable work queued, the run is Ready
+        // (not in-flight yet — the runner hasn't picked the new task).
+        Assert.Equal("ready", status.Status);
 
-        // The workflow is running with an apply-feedback task scheduled,
+        // The workflow is dispatched with an apply-feedback task scheduled,
         // so no recovery actions should be present.
         Assert.Empty(status.AvailableActions);
     }

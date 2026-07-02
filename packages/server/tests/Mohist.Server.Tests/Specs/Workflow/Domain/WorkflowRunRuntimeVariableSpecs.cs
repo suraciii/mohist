@@ -81,6 +81,7 @@ public class WorkflowRunRuntimeVariableSpecs
         var events = run.InitializeStage(
             [new("task-1", "Task 1", "spec/task")],
             [new("check-1", "Check 1", "spec/check")]);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         var events2 = run.StartTask("work-1", "runner-1");
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "task-1");
         task.Output = JsonSerializer.Deserialize<JsonElement>("{\"prNumber\":42}");

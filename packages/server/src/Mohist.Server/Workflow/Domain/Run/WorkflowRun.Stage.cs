@@ -37,7 +37,7 @@ public static partial class WorkflowRunExtensions
 
         private IReadOnlyList<WorkflowEvent> Advance()
         {
-            if (run.Status is WorkflowRunStatus.Pending or WorkflowRunStatus.Paused) return [];
+            if (run.Status == WorkflowRunStatus.Paused) return [];
             var events = new List<WorkflowEvent>();
 
             var current = run.CurrentStage();
@@ -68,7 +68,7 @@ public static partial class WorkflowRunExtensions
             {
                 StageRunStatus.Failed => WorkflowRunStatus.Failed,
                 StageRunStatus.AwaitingApproval => WorkflowRunStatus.AwaitingApproval,
-                _ => WorkflowRunStatus.Running
+                _ => WaitingForDispatchStatus(run)
             };
             return events;
         }
