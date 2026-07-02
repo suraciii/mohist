@@ -27,7 +27,7 @@ Every Issue-query edit today means opening one ~2400-line `IssueQuerier` and hun
   - `Issue/Services/IssueQuerier.cs` — loses the 5 metrics methods, their records/enum, private metrics helpers/types, and the metrics-only const/static-array fields; keeps read-model queries; gains the consolidated `ToInfo` mapping and shared load/event-scan helpers.
   - `Issue/Services/IssueMetricsQuerier.cs` (new) — receives the migrated metrics methods, types, and internal collaboration.
   - `Infrastructure/Data/Issue/IssueStore.cs` — remove `NormalizeLegacyLabels` and the `legacyLabelsDiscarded` deserialization overload.
-  - DI registration (`MigratedServicesRegistration`) — register `IssueMetricsQuerier` as scoped.
+  - DI registration — `IssueMetricsQuerier` implements `IScopedService` and is registered conventionally via the assembly scan (`AddMohistConventionalServices`), matching `IssueQuerier`'s lifetime; add one scoped theory row to `MigratedServicesRegistrationSpecs`.
   - `Api/IssueRoutes.*Metrics.cs` (5 partials) — repoint metrics result type references to the new service/namespace.
 - **Tests** (`packages/server/tests`):
   - `Specs/Issue/Querier/IssueQuerierSpecs.cs` (~3600 lines, mixed) — split the metrics specs out to a metrics-service spec file; read-model specs stay.
