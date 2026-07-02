@@ -6,6 +6,7 @@ import { dispatchAgentEvent, useAgentStatus } from '../../entities/agent'
 import type { AgentDetailEventMap } from '../../entities/agent'
 import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
 import { dispatchTimelineEvent } from '../../entities/issue/model/timeline-events'
+import { decideReverseDnsOutcome } from './model/reverse-dns-outcome'
 import { invalidateApprovalWait } from '../../entities/issue'
 import { applyInboxHint, isHighAttentionKind, parseInboxItemPersistedHint, shouldSuppressInAppNotice } from '../../entities/inbox/model/inbox-effects'
 import { useProject } from '../../entities/project'
@@ -19,7 +20,7 @@ import {
   unwrapEnvelope,
   unwrapTranscriptEnvelope,
 } from './model/event-envelope'
-import { buildTimelineLiveEvent, readIssueNumber } from './model/timeline-live-event'
+import { buildTimelineLiveEvent } from './model/timeline-live-event'
 
 /**
  * Compile-time guard: every name the switch can route (i.e. every key of
@@ -129,64 +130,43 @@ function notifyApprovalRequestedToast(
   toast.info(`Issue #${issueNumber} needs approval`)
 }
 
-function readOutcome(parsed: Record<string, unknown>): string | null {
-  const outcome = parsed.outcome ?? parsed.result ?? parsed.kind ?? parsed.operation ?? parsed.reason
-  return typeof outcome === 'string' ? outcome : null
-}
-
-function isRebasePayload(parsed: Record<string, unknown>): boolean {
-  const outcome = readOutcome(parsed)
-  return outcome?.includes('rebase') === true || 'rebased' in parsed || 'conflicts' in parsed
-}
-
-function isMergePayload(parsed: Record<string, unknown>): boolean {
-  const outcome = readOutcome(parsed)
-  return outcome?.includes('merge') === true
-}
-
-function handleReverseDnsIntegrationOutcome(
-  eventName: string,
-  parsed: Record<string, unknown>,
+/**
+ * Apply the declarative result of `decideReverseDnsOutcome` to its four
+ * real-world sinks. The four sinks are mutually independent (none awaits
+ * another, none reads another's result in-call), so a single canonical
+ * order preserves observable behavior across every arm — the legacy
+ * per-arm order was not uniform (rebase arms invalidated last, merge
+ * arms first) and is intentionally not reproduced per-arm.
+ *
+ * Canonical order:
+ *   1. invalidations   (`queryClient.invalidateQueries` for each key)
+ *   2. setRebaseConflict (null clears; undefined leaves the state unchanged)
+ *   3. dispatchRebaseEvent
+ *   4. toast
+ */
+function applyReverseDnsOutcome(
+  outcome: ReturnType<typeof decideReverseDnsOutcome>,
   queryClient: ReturnType<typeof useQueryClient>,
   setRebaseConflict: React.Dispatch<React.SetStateAction<RebaseConflictState | null>>,
 ): boolean {
-  const issueNumber = readIssueNumber(parsed)
-  if (issueNumber === null) return false
-
-  if (eventName === REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted) {
-    if (isRebasePayload(parsed)) {
-      const rebased = typeof parsed.rebased === 'boolean' ? parsed.rebased : true
-      setRebaseConflict(null)
-      dispatchRebaseEvent({ type: 'rebase_completed', issueNumber, rebased })
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      return true
+  if (!outcome.handled) return false
+  for (const queryKey of outcome.invalidations) {
+    queryClient.invalidateQueries({ queryKey: queryKey as unknown[] })
+  }
+  if (outcome.rebaseConflict !== undefined) {
+    setRebaseConflict(outcome.rebaseConflict)
+  }
+  if (outcome.rebaseEvent) {
+    dispatchRebaseEvent(outcome.rebaseEvent)
+  }
+  if (outcome.toast) {
+    if (outcome.toast.tone === 'success') {
+      toast.success(outcome.toast.message)
+    } else {
+      toast.error(outcome.toast.message)
     }
-    if (isMergePayload(parsed)) {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      toast.success(`Issue #${issueNumber} merged successfully`)
-      return true
-    }
   }
-
-  const isFailureEvent = eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed
-    || eventName === REVERSE_DNS_EVENT_TYPES.StageFailed
-  if (!isFailureEvent) return false
-
-  if (isRebasePayload(parsed)) {
-    const conflicts = Array.isArray(parsed.conflicts) ? parsed.conflicts.filter((x): x is string => typeof x === 'string') : []
-    const error = typeof parsed.error === 'string' ? parsed.error : undefined
-    setRebaseConflict({ issueNumber, conflicts, status: 'failed', error })
-    dispatchRebaseEvent({ type: 'rebase_conflict', issueNumber, conflicts, status: 'failed', error })
-    toast.error(`Rebase conflict on Issue #${issueNumber}`)
-    queryClient.invalidateQueries({ queryKey: ['issues'] })
-    return true
-  }
-  if (isMergePayload(parsed)) {
-    queryClient.invalidateQueries({ queryKey: ['issues'] })
-    toast.error(`Merge failed for Issue #${issueNumber}`)
-    return true
-  }
-  return false
+  return true
 }
 
 function useLiveEvents(projectId: string | null): LiveTaskState {
@@ -255,7 +235,7 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
           case REVERSE_DNS_EVENT_TYPES.StageStarted:
           case REVERSE_DNS_EVENT_TYPES.StageCompleted:
           case REVERSE_DNS_EVENT_TYPES.StageFailed: {
-            if (handleReverseDnsIntegrationOutcome(eventName, parsed, queryClient, setRebaseConflict)) {
+            if (applyReverseDnsOutcome(decideReverseDnsOutcome(eventName, parsed), queryClient, setRebaseConflict)) {
               break
             }
             queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -272,7 +252,7 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
           case REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged:
           case REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded:
           case REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved: {
-            if (handleReverseDnsIntegrationOutcome(eventName, parsed, queryClient, setRebaseConflict)) {
+            if (applyReverseDnsOutcome(decideReverseDnsOutcome(eventName, parsed), queryClient, setRebaseConflict)) {
               break
             }
             const { issueId } = parsed as { issueId: string; projectId: string }
@@ -293,7 +273,7 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
           case REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound:
           case REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded:
           case REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged: {
-            if (handleReverseDnsIntegrationOutcome(eventName, parsed, queryClient, setRebaseConflict)) {
+            if (applyReverseDnsOutcome(decideReverseDnsOutcome(eventName, parsed), queryClient, setRebaseConflict)) {
               break
             }
             queryClient.invalidateQueries({ queryKey: ['agent-status'] })
