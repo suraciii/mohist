@@ -9,6 +9,7 @@ export interface LineSeriesProps {
   points: (LinePoint | null)[]
   className?: string
   markerClassName?: string
+  strokeDasharray?: string
   animated?: boolean
 }
 
@@ -37,6 +38,7 @@ export function LineSeries({
   points,
   className = 'stroke-chart-5',
   markerClassName = 'fill-chart-5',
+  strokeDasharray,
   animated = true,
 }: LineSeriesProps) {
   const reduced = useReducedMotion()
@@ -61,6 +63,7 @@ export function LineSeries({
             d={pathD}
             className={`fill-none ${className}`}
             strokeWidth={2}
+            strokeDasharray={strokeDasharray}
             strokeLinejoin="round"
             strokeLinecap="round"
             style={motionStyle}

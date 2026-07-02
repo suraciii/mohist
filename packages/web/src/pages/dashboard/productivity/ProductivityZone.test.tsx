@@ -19,6 +19,10 @@ vi.mock('./QualityPanel', () => ({
   QualityPanel: () => <section data-testid="productivity-quality" />,
 }))
 
+vi.mock('./FtrTrendChart', () => ({
+  FtrTrendChart: () => <section data-testid="ftr-trend-chart-mock" />,
+}))
+
 vi.mock('./InvestmentPanel', () => ({
   InvestmentPanel: () => <section data-testid="investment-panel" />,
 }))
@@ -90,5 +94,16 @@ describe('ProductivityZone', () => {
     const stage = screen.getByTestId('stage-duration-chart-mock')
     expect(zone).toContainElement(stage)
     expect(cycle.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('mounts the FTR trend chart immediately after QualityPanel', () => {
+    render(<ProductivityZone />)
+
+    const zone = screen.getByTestId('productivity-zone')
+    const quality = screen.getByTestId('productivity-quality')
+    const ftr = screen.getByTestId('ftr-trend-chart-mock')
+    expect(zone).toContainElement(ftr)
+    expect(quality.compareDocumentPosition(ftr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(quality.nextElementSibling).toBe(ftr)
   })
 })

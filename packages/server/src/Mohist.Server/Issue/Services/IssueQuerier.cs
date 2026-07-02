@@ -481,11 +481,38 @@ public class IssueQuerier : IScopedService
     /// <summary>
     /// The result of <see cref="GetQualityAsync"/>. Both windows are
     /// returned together so callers can compare recent and longer-term
-    /// quality in a single read.
+    /// quality in a single read. <see cref="Trend"/> is a strictly
+    /// additive per-day series spanning the trailing 30-day window,
+    /// pre-sized so every day is emitted; rates are <c>null</c> for
+    /// empty buckets.
     /// </summary>
     public sealed record QualityMetricsResult(
         QualityMetricsWindow Window7d,
-        QualityMetricsWindow Window30d);
+        QualityMetricsWindow Window30d,
+        QualityTrend Trend);
+
+    /// <summary>
+    /// One pre-sized per-day bucket in the quality trend. <see cref="Boundary"/>
+    /// is the ISO calendar day (yyyy-MM-dd, UTC). <see cref="SampleCount"/>
+    /// distinguishes a true zero-sample bucket (null rates) from a bucket
+    /// whose computed rates happened to be 0 or 1.
+    /// </summary>
+    public sealed record QualityTrendPoint(
+        string Boundary,
+        int SampleCount,
+        double? FirstTimeRightRate,
+        double? ReworkRate);
+
+    /// <summary>
+    /// The pre-sized 30-day daily trend returned alongside the trailing
+    /// window scalars. <see cref="Points"/> has length 30, anchored on
+    /// <see cref="Window30dFrom"/> and ordered oldest-first.
+    /// </summary>
+    public sealed record QualityTrend(
+        string Bucket,
+        DateTimeOffset Window30dFrom,
+        DateTimeOffset Window30dTo,
+        IReadOnlyList<QualityTrendPoint> Points);
 
     /// <summary>
     /// Aggregates AI quality signals (first-time-right rate and per-stage
@@ -506,6 +533,20 @@ public class IssueQuerier : IScopedService
         var window7dTo = now;
         var window30dFrom = now.AddDays(-30);
         var window30dTo = now;
+
+        // Pre-sized 30 UTC calendar-day buckets inclusive of today. Every
+        // bucket is emitted so the consuming chart's x-axis never compresses.
+        var today = DateOnly.FromDateTime(now.UtcDateTime.Date);
+        var trendStart = today.AddDays(-29);
+        var trendBoundaries = Enumerable.Range(0, 30)
+            .Select(i => trendStart.AddDays(i))
+            .ToList();
+        var trendIndexByBoundary = trendBoundaries
+            .Select((b, i) => (Boundary: b, Index: i))
+            .ToDictionary(t => t.Boundary, t => t.Index);
+        var trendBuckets = new QualityTrendAccumulator[trendBoundaries.Count];
+        for (var i = 0; i < trendBuckets.Length; i++)
+            trendBuckets[i] = new QualityTrendAccumulator();
 
         // Load the project's issues and their workflow runs. We need the
         // raw WorkflowRun (not the projected view) because RepairCount is
@@ -612,12 +653,19 @@ public class IssueQuerier : IScopedService
                 Accumulate(window7d, isFirstTimeRight, stageRework);
 
             if (shipTime >= window30dFrom && shipTime <= window30dTo)
+            {
                 Accumulate(window30d, isFirstTimeRight, stageRework);
+
+                var shipDay = DateOnly.FromDateTime(shipTime.UtcDateTime.Date);
+                if (trendIndexByBoundary.TryGetValue(shipDay, out var trendIdx))
+                    Accumulate(trendBuckets[trendIdx], isFirstTimeRight, stageRework);
+            }
         }
 
         return new QualityMetricsResult(
             BuildWindow(window7dFrom, window7dTo, window7d),
-            BuildWindow(window30dFrom, window30dTo, window30d));
+            BuildWindow(window30dFrom, window30dTo, window30d),
+            BuildTrend(window30dFrom, window30dTo, trendBoundaries, trendBuckets));
     }
 
     private static (bool IsFirstTimeRight, IReadOnlyDictionary<string, bool> StageRework) ClassifyRuns(
@@ -739,6 +787,54 @@ public class IssueQuerier : IScopedService
             .ToList();
 
         return new QualityMetricsWindow(from, to, accumulator.SampleCount, firstTimeRightRate, stages);
+    }
+
+    private sealed class QualityTrendAccumulator
+    {
+        public int SampleCount { get; set; }
+        public int FirstTimeRightCount { get; set; }
+        public int ReworkedAtAnyStageCount { get; set; }
+    }
+
+    private static void Accumulate(
+        QualityTrendAccumulator accumulator,
+        bool isFirstTimeRight,
+        IReadOnlyDictionary<string, bool> stageRework)
+    {
+        accumulator.SampleCount++;
+        if (isFirstTimeRight) accumulator.FirstTimeRightCount++;
+        if (stageRework.Values.Any(v => v)) accumulator.ReworkedAtAnyStageCount++;
+    }
+
+    private QualityTrend BuildTrend(
+        DateTimeOffset window30dFrom,
+        DateTimeOffset window30dTo,
+        IReadOnlyList<DateOnly> boundaries,
+        IReadOnlyList<QualityTrendAccumulator> buckets)
+    {
+        var points = new QualityTrendPoint[boundaries.Count];
+        for (var i = 0; i < boundaries.Count; i++)
+        {
+            var bucket = buckets[i];
+            var sampleCount = bucket.SampleCount;
+            double? firstTimeRightRate = sampleCount == 0
+                ? null
+                : (double)bucket.FirstTimeRightCount / sampleCount;
+            double? reworkRate = sampleCount == 0
+                ? null
+                : (double)bucket.ReworkedAtAnyStageCount / sampleCount;
+            points[i] = new QualityTrendPoint(
+                Boundary: boundaries[i].ToString("yyyy-MM-dd"),
+                SampleCount: sampleCount,
+                FirstTimeRightRate: firstTimeRightRate,
+                ReworkRate: reworkRate);
+        }
+
+        return new QualityTrend(
+            Bucket: "day",
+            Window30dFrom: window30dFrom,
+            Window30dTo: window30dTo,
+            Points: points);
     }
 
     private async Task<Dictionary<string, WorkflowRun>> LoadWorkflowRunsAsync(

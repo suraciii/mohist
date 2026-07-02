@@ -3,7 +3,7 @@ export { addComment, addPrerequisite, approveIssue, rejectIssue, archiveAllCompl
 export { fetchCompletionTrend, useCompletionTrend, useCompletionThroughput } from './api/completion-trend'
 export type { CompletionBucketPoint, CompletionTrendResponse } from './api/completion-trend'
 export { fetchQualityMetrics, qualityMetricsQueryKey, useQualityMetrics } from './api/quality-metrics'
-export type { QualityMetricsResponse, QualityMetricsWindowDto, StageReworkRateDto } from './api/quality-metrics'
+export type { QualityMetricsResponse, QualityMetricsWindowDto, QualityTrendDto, QualityTrendPointDto, StageReworkRateDto } from './api/quality-metrics'
 export { approvalWaitQueryKey, fetchApprovalWait, invalidateApprovalWait, useApprovalWait } from './api/approval-wait'
 export type { ApprovalWaitMetricsResponse, ApprovalWaitMetricsWindow } from './api/approval-wait'
 export { deliveryTimeQueryKey, fetchDeliveryTime, useDeliveryTime } from './api/delivery-time'

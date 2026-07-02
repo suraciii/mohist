@@ -13,13 +13,14 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             IssueQuerier issuesQuery,
+            TimeProvider timeProvider,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
 
             var result = await issuesQuery.GetQualityAsync(
                 project.Id,
-                DateTimeOffset.UtcNow);
+                timeProvider.GetUtcNow());
 
             return ApiResults.Ok(BuildResponse(result));
         });
@@ -28,7 +29,8 @@ public static partial class IssueRoutes
     private static QualityMetricsResponse BuildResponse(IssueQuerier.QualityMetricsResult result) =>
         new(
             Window7d: BuildWindow(result.Window7d),
-            Window30d: BuildWindow(result.Window30d));
+            Window30d: BuildWindow(result.Window30d),
+            Trend: BuildTrend(result.Trend));
 
     private static QualityMetricsWindowDto BuildWindow(IssueQuerier.QualityMetricsWindow window) =>
         new(
@@ -38,5 +40,18 @@ public static partial class IssueRoutes
             FirstTimeRightRate: window.FirstTimeRightRate,
             Stages: window.Stages
                 .Select(s => new StageReworkRateDto(s.Stage, s.EnteredCount, s.ReworkRate))
+                .ToArray());
+
+    private static QualityTrendDto BuildTrend(IssueQuerier.QualityTrend trend) =>
+        new(
+            Bucket: trend.Bucket,
+            From: trend.Window30dFrom.ToString("o"),
+            To: trend.Window30dTo.ToString("o"),
+            Points: trend.Points
+                .Select(p => new QualityTrendPointDto(
+                    Boundary: p.Boundary,
+                    SampleCount: p.SampleCount,
+                    FirstTimeRightRate: p.FirstTimeRightRate,
+                    ReworkRate: p.ReworkRate))
                 .ToArray());
 }
