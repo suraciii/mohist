@@ -305,7 +305,7 @@ public class IssueLabelsSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public void Deserialize_LegacyArrayLabels_NormalizesToEmptyMap()
+    public void Deserialize_LegacyArrayLabels_NoLongerNormalized()
     {
         var legacyJson = """
         {
@@ -326,12 +326,7 @@ public class IssueLabelsSpecs
         }
         """;
 
-        var discarded = false;
-        var issue = IssueStore.Deserialize(legacyJson, out discarded);
-
-        Assert.True(discarded);
-        Assert.NotNull(issue);
-        Assert.Empty(issue!.Labels);
+        Assert.ThrowsAny<Exception>(() => IssueStore.Deserialize(legacyJson));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -358,10 +353,8 @@ public class IssueLabelsSpecs
         }
         """;
 
-        var discarded = true;
-        var issue = IssueStore.Deserialize(json, out discarded);
+        var issue = IssueStore.Deserialize(json);
 
-        Assert.False(discarded);
         Assert.NotNull(issue);
         Assert.Equal("frontend", issue!.Labels["stream"]);
         Assert.Equal("auth", issue.Labels["module"]);
