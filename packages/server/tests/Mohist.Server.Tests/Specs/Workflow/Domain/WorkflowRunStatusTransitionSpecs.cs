@@ -316,10 +316,10 @@ public class WorkflowRunStatusTransitionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void ReconcileStoppedApprovalGate_NoOpOnLiveAwaitingApprovalRun()
+    public void ReconcileStoppedApprovalGate_ClearsGateOnLiveAwaitingApprovalRun()
     {
         // The OnActivateAsync caller scopes invocation to Stopped runs, but
-        // the method itself must guard on the residual-gate predicate alone
+        // the method itself guards on the residual-gate predicate alone
         // (not the run status) so it can also serve the Stop() call site,
         // where the run is not yet Stopped. Verify the guard: on a live run
         // genuinely awaiting approval, calling the method clears the gate
