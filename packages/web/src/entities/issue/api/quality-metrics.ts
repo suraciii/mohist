@@ -16,9 +16,24 @@ export interface QualityMetricsWindowDto {
   stages: StageReworkRateDto[]
 }
 
+export interface QualityTrendPointDto {
+  boundary: string
+  sampleCount: number
+  firstTimeRightRate: number | null
+  reworkRate: number | null
+}
+
+export interface QualityTrendDto {
+  bucket: string
+  from: string
+  to: string
+  points: QualityTrendPointDto[]
+}
+
 export interface QualityMetricsResponse {
   window7d: QualityMetricsWindowDto
   window30d: QualityMetricsWindowDto
+  trend?: QualityTrendDto
 }
 
 export function fetchQualityMetrics(projectId: string) {

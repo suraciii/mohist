@@ -294,7 +294,8 @@ public class IssueMetricsApiSpecs
     public async Task QualityMetrics_ShippedIssuesWithRepairs_ReturnsBothWindowsWithRates()
     {
         var project = await CreateProjectAsync($"quality-present-{Guid.NewGuid():N}");
-        var requestedAt = DateTimeOffset.UtcNow.AddDays(-1);
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var requestedAt = now.AddDays(-1);
         var issueId = $"issue_quality_present_{Guid.NewGuid():N}";
         var workflowRunId = $"wr_quality_present_{Guid.NewGuid():N}";
 
@@ -348,6 +349,99 @@ public class IssueMetricsApiSpecs
         Assert.Contains(payload.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
         Assert.Equal(0, payload.Window30d.SampleCount);
         Assert.Null(payload.Window30d.FirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task QualityMetrics_ShippedIssuesWithRepairs_ReturnsTrendAlongsideWindows()
+    {
+        var project = await CreateProjectAsync($"quality-trend-present-{Guid.NewGuid():N}");
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var firstBoundary = DateOnly.FromDateTime(now.UtcDateTime.Date).AddDays(-29);
+        var shipTime = new DateTimeOffset(firstBoundary.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var issueId = $"issue_quality_trend_present_{Guid.NewGuid():N}";
+        var workflowRunId = $"wr_quality_trend_present_{Guid.NewGuid():N}";
+
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 1,
+            issueId,
+            workflowRunId,
+            shipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-repair", "Build repair", 1)]),
+            ]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        Assert.NotNull(payload.Window7d);
+        Assert.NotNull(payload.Window30d);
+        Assert.NotNull(payload.Trend);
+
+        Assert.Equal("day", payload.Trend.Bucket);
+        Assert.Equal(30, payload.Trend.Points.Length);
+        Assert.Equal(payload.Window30d.From, payload.Trend.From);
+        Assert.Equal(payload.Window30d.To, payload.Trend.To);
+
+        var shippedBoundary = shipTime.UtcDateTime.Date.ToString("yyyy-MM-dd");
+        var shippedPoint = Assert.Single(payload.Trend.Points, p => p.Boundary == shippedBoundary);
+        Assert.Equal(1, payload.Window30d.SampleCount);
+        Assert.Equal(1, shippedPoint.SampleCount);
+        Assert.Equal(0.0, shippedPoint.FirstTimeRightRate);
+        Assert.Equal(1.0, shippedPoint.ReworkRate);
+
+        // The route uses the injected `TimeProvider`; a sample in the first
+        // visible calendar bucket must be counted by both the scalar and trend.
+        Assert.Equal(shippedBoundary, payload.Trend.Points[0].Boundary);
+
+        var emptyPoint = payload.Trend.Points[1];
+        Assert.NotEqual(shippedBoundary, emptyPoint.Boundary);
+        Assert.Equal(0, emptyPoint.SampleCount);
+        Assert.Null(emptyPoint.FirstTimeRightRate);
+        Assert.Null(emptyPoint.ReworkRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task QualityMetrics_NoShippedIssues_ReturnsTwoHundredWithNullTrendRates()
+    {
+        var project = await CreateProjectAsync($"quality-trend-empty-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        Assert.NotNull(payload.Trend);
+        Assert.Equal("day", payload.Trend.Bucket);
+        Assert.Equal(30, payload.Trend.Points.Length);
+        Assert.All(payload.Trend.Points, p =>
+        {
+            Assert.Equal(0, p.SampleCount);
+            Assert.Null(p.FirstTimeRightRate);
+            Assert.Null(p.ReworkRate);
+        });
+        Assert.Equal(0, payload.Window7d.SampleCount);
+        Assert.Null(payload.Window7d.FirstTimeRightRate);
+        Assert.Equal(0, payload.Window30d.SampleCount);
+        Assert.Null(payload.Window30d.FirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task QualityMetrics_UnknownProject_ReturnsNotFound()
+    {
+        using var response = await _client.GetAsync(
+            $"/api/projects/proj-quality-unknown-{Guid.NewGuid():N}/issues/metrics/quality");
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -508,8 +602,7 @@ public class IssueMetricsApiSpecs
     public async Task StageDurationMetrics_DeliveredIssueWithStageEvents_ReturnsStagesRatioAndWait()
     {
         var project = await CreateProjectAsync($"stage-duration-present-{Guid.NewGuid():N}");
-        var now = new DateTimeOffset(2030, 6, 19, 12, 0, 0, TimeSpan.Zero);
-        _fixture.TimeProvider.SetUtcNow(now);
+        var now = _fixture.TimeProvider.GetUtcNow();
         var shipTime = now.AddDays(-2);
         var issueId = $"issue_sd_present_{Guid.NewGuid():N}";
         var workflowRunId = $"wr_sd_present_{Guid.NewGuid():N}";
@@ -568,8 +661,7 @@ public class IssueMetricsApiSpecs
     public async Task StageDurationMetrics_RunOnlyInLifecyclePayload_DiscoversStageEvents()
     {
         var project = await CreateProjectAsync($"stage-duration-event-run-{Guid.NewGuid():N}");
-        var now = new DateTimeOffset(2030, 6, 19, 12, 0, 0, TimeSpan.Zero);
-        _fixture.TimeProvider.SetUtcNow(now);
+        var now = _fixture.TimeProvider.GetUtcNow();
         var shipTime = now.AddDays(-2);
         var issueId = $"issue_sd_event_run_{Guid.NewGuid():N}";
         var workflowRunId = $"wr_sd_event_run_{Guid.NewGuid():N}";
@@ -622,11 +714,10 @@ public class IssueMetricsApiSpecs
     public async Task StageDurationMetrics_UsesInjectedRouteClockForTrailingWindow()
     {
         // The route uses the injected `TimeProvider`, never the wall
-        // clock. Advance the fixture's clock so we can place completed
-        // issues on the boundary of the trailing window.
+        // clock. Use the fixture's current fake clock so completed issues
+        // can be placed on the boundary of the trailing window.
         var project = await CreateProjectAsync($"stage-duration-clock-{Guid.NewGuid():N}");
-        var now = new DateTimeOffset(2030, 6, 19, 12, 0, 0, TimeSpan.Zero);
-        _fixture.TimeProvider.SetUtcNow(now);
+        var now = _fixture.TimeProvider.GetUtcNow();
 
         var insideIssueId = $"issue_sd_clock_inside_{Guid.NewGuid():N}";
         var insideRunId = $"wr_sd_clock_inside_{Guid.NewGuid():N}";
@@ -1250,7 +1341,9 @@ public class IssueMetricsApiSpecs
 
     private sealed record QualityMetricsWindowDto(string From, string To, int SampleCount, double? FirstTimeRightRate, StageReworkRateDto[] Stages);
     private sealed record StageReworkRateDto(string Stage, int EnteredCount, double? ReworkRate);
-    private sealed record QualityMetricsResponse(QualityMetricsWindowDto Window7d, QualityMetricsWindowDto Window30d);
+    private sealed record QualityTrendPointDto(string Boundary, int SampleCount, double? FirstTimeRightRate, double? ReworkRate);
+    private sealed record QualityTrendDto(string Bucket, string From, string To, QualityTrendPointDto[] Points);
+    private sealed record QualityMetricsResponse(QualityMetricsWindowDto Window7d, QualityMetricsWindowDto Window30d, QualityTrendDto Trend);
 
     private sealed record DeliveryTimePointDto(int IssueNumber, string CompletedAt, double LeadDays, double? CycleDays);
     private sealed record DeliveryTimeMetricsResponse(DeliveryTimePointDto[] Points);

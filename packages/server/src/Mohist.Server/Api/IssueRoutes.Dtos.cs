@@ -259,11 +259,36 @@ public sealed record ApprovalWaitMetricsWindowDto(
 /// <summary>
 /// Response shape for the AI quality metrics endpoint. Both trailing
 /// windows are returned together so callers can compare recent and
-/// longer-term quality in one read.
+/// longer-term quality in one read. <see cref="Trend"/> is a strictly
+/// additive pre-sized per-day series across the trailing 30-day window.
 /// </summary>
 public sealed record QualityMetricsResponse(
     QualityMetricsWindowDto Window7d,
-    QualityMetricsWindowDto Window30d);
+    QualityMetricsWindowDto Window30d,
+    QualityTrendDto Trend);
+
+/// <summary>
+/// Per-day quality trend over the trailing 30-day window. <see cref="Points"/>
+/// is dense — every day in the window is emitted, with null rates for
+/// buckets that contain no shipped issues.
+/// </summary>
+public sealed record QualityTrendDto(
+    string Bucket,
+    string From,
+    string To,
+    QualityTrendPointDto[] Points);
+
+/// <summary>
+/// One per-day bucket in the quality trend. <see cref="Boundary"/> is the
+/// ISO calendar day (yyyy-MM-dd, UTC). <see cref="SampleCount"/> is the
+/// number of shipped-in-bucket issues; a zero sample count yields null
+/// rates, distinguishable from a genuine zero-or-one rate.
+/// </summary>
+public sealed record QualityTrendPointDto(
+    string Boundary,
+    int SampleCount,
+    double? FirstTimeRightRate,
+    double? ReworkRate);
 
 /// <summary>
 /// One trailing window in the quality aggregation. <see cref="SampleCount"/>
