@@ -8,13 +8,11 @@ import { FactoryStatusHeadline } from '../../../widgets/factory-status'
 import { AttentionHero } from '../../../widgets/attention-hero'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { ProductivityZone } from '../productivity/ProductivityZone'
 import { DashboardZone } from './DashboardZone'
 import type { DashboardZoneId } from './DashboardZone'
 
 const DASHBOARD_ZONES: { id: DashboardZoneId; name: string }[] = [
   { id: 'pulse', name: 'Pulse' },
-  { id: 'productivity', name: 'Productivity' },
   { id: 'digest', name: 'Digest' },
 ]
 
@@ -74,21 +72,11 @@ export function DashboardPage() {
           data-testid="dashboard-zones"
           className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2"
         >
-          {DASHBOARD_ZONES.map((zone) =>
-            zone.id === 'digest' ? (
-              <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
-                <DashboardDigestWidget />
-              </DashboardZone>
-            ) : zone.id === 'pulse' ? (
-              <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
-                <PulseZone />
-              </DashboardZone>
-            ) : (
-              <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
-                <ProductivityZone />
-              </DashboardZone>
-            ),
-          )}
+          {DASHBOARD_ZONES.map((zone) => (
+            <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
+              {zone.id === 'digest' ? <DashboardDigestWidget /> : <PulseZone />}
+            </DashboardZone>
+          ))}
         </div>
       </div>
     </div>

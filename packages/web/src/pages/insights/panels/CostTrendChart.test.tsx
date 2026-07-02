@@ -467,4 +467,37 @@ describe('CostTrendChart', () => {
     expect(screen.getByText('Jun 22')).toBeInTheDocument()
     expect(screen.getByText('Jun 28')).toBeInTheDocument()
   })
+
+  // --- Window annotation ---
+
+  it('renders a window badge derived from rangeFrom/rangeTo when usage data is present', () => {
+    mockUseAgentUsage.mockReturnValue({
+      data: buildUsageData({
+        rangeFrom: '2026-06-22T00:00:00',
+        rangeTo: '2026-06-28T23:59:59',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    render(<CostTrendChart />)
+
+    const badge = screen.getByTestId('cost-trend-chart-window')
+    expect(badge).toBeInTheDocument()
+    expect(badge.textContent).toContain('Jun 22')
+    expect(badge.textContent).toContain('Jun 28')
+  })
+
+  it('hides the window badge in the empty state', () => {
+    mockUseAgentUsage.mockReturnValue({
+      data: buildUsageData({ buckets: [] }),
+      isLoading: false,
+      isError: false,
+    })
+
+    render(<CostTrendChart />)
+
+    expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
+    expect(screen.queryByTestId('cost-trend-chart-window')).not.toBeInTheDocument()
+  })
 })

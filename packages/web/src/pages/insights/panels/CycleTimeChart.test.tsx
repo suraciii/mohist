@@ -396,4 +396,25 @@ describe('CycleTimeChart', () => {
     expect(screen.getByTestId('scatter-series')).toBeInTheDocument()
     expect(screen.getByTestId('scatter-point-1').getAttribute('cx')).toBe(String(point1BeforeCx))
   })
+
+  // --- Window annotation ---
+
+  it('shows a 30d window badge in the header chrome', () => {
+    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+
+    render(<CycleTimeChart />)
+
+    const badge = screen.getByTestId('cycle-time-chart-window')
+    expect(badge).toBeInTheDocument()
+    expect(badge.textContent).toBe('30d')
+  })
+
+  it('keeps the window badge rendered when no delivered issues are present (empty state)', () => {
+    mockUseDeliveryTime.mockReturnValue({ data: buildEmpty(), isLoading: false, isError: false })
+
+    render(<CycleTimeChart />)
+
+    expect(screen.getByTestId('cycle-time-chart-window')).toBeInTheDocument()
+    expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
+  })
 })

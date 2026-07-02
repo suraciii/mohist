@@ -1,6 +1,5 @@
 export { InsightsPage } from './ui/InsightsPage'
 export { SignalSummary } from './ui/SignalSummary'
-export { ChartPlaceholder } from './ui/ChartPlaceholder'
 export {
   deriveSignalSummary,
   deriveThroughputVerdict,

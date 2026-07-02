@@ -7,7 +7,7 @@ import {
 import { useCostRollup } from '../../../entities/agent'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { SignalSummary } from './SignalSummary'
-import { ChartPlaceholder } from './ChartPlaceholder'
+import { InsightsCharts } from './InsightsCharts'
 
 export function InsightsPage() {
   useDocumentTitle('Insights — Mohist')
@@ -56,7 +56,7 @@ export function InsightsPage() {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Charts
           </h2>
-          <ChartPlaceholder />
+          <InsightsCharts />
         </section>
       </div>
     </div>

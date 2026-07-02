@@ -120,7 +120,7 @@ describe('DashboardPage', () => {
     cleanup()
   })
 
-  it('keeps slot identities stable when projects exist', () => {
+  it('keeps slot identities stable when projects exist and omits the productivity slot', () => {
     mocks.projects = [
       { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
     ]
@@ -129,13 +129,13 @@ describe('DashboardPage', () => {
 
     const attention = screen.getByTestId('dashboard-zone-attention')
     const pulse = screen.getByTestId('dashboard-zone-pulse')
-    const productivity = screen.getByTestId('dashboard-zone-productivity')
     const digest = screen.getByTestId('dashboard-zone-digest')
 
     expect(attention).toHaveAttribute('data-zone', 'attention')
     expect(pulse).toHaveAttribute('data-zone', 'pulse')
-    expect(productivity).toHaveAttribute('data-zone', 'productivity')
     expect(digest).toHaveAttribute('data-zone', 'digest')
+    expect(screen.queryByTestId('dashboard-zone-productivity')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-zone')).not.toBeInTheDocument()
   })
 
   it('mounts the dashboard-digest widget inside the digest zone slot', () => {
@@ -148,13 +148,12 @@ describe('DashboardPage', () => {
     const digestSlot = screen.getByTestId('dashboard-zone-digest')
     // The digest widget should be present inside the digest slot wrapper.
     expect(digestSlot.contains(screen.getByTestId('dashboard-digest-empty'))).toBe(true)
-    // Sanity: the widget is NOT mounted into the other three slots.
+    // Sanity: the widget is NOT mounted into the other slots.
     expect(container.querySelector('[data-testid="dashboard-zone-attention"] [data-testid="dashboard-digest-empty"]')).toBeNull()
     expect(container.querySelector('[data-testid="dashboard-zone-pulse"] [data-testid="dashboard-digest-empty"]')).toBeNull()
-    expect(container.querySelector('[data-testid="dashboard-zone-productivity"] [data-testid="dashboard-digest-empty"]')).toBeNull()
   })
 
-  it('mounts AttentionHero in the hero slot and zone content in every dashboard zone slot', () => {
+  it('mounts AttentionHero in the hero slot and zone content in every surviving dashboard zone slot', () => {
     mocks.projects = [
       { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
     ]
@@ -165,33 +164,24 @@ describe('DashboardPage', () => {
     expect(attentionSlots).toHaveLength(1)
     const attention = attentionSlots[0]
     const pulse = screen.getByTestId('dashboard-zone-pulse')
-    const productivity = screen.getByTestId('dashboard-zone-productivity')
     const digest = screen.getByTestId('dashboard-zone-digest')
 
     expect(attention.className).not.toMatch(/border-dashed/)
     expect(pulse.className).toMatch(/border-dashed/)
-    expect(productivity.className).toMatch(/border-dashed/)
 
     expect(attention.childElementCount).toBeGreaterThan(0)
     expect(pulse.childElementCount).toBeGreaterThan(0)
-    expect(productivity.childElementCount).toBeGreaterThan(0)
 
     expect(pulse.contains(screen.getByTestId('pulse-zone'))).toBe(true)
     expect(pulse.contains(screen.getByTestId('pulse-empty-state'))).toBe(true)
-    expect(productivity.contains(screen.getByTestId('productivity-zone'))).toBe(true)
-    expect(productivity.contains(screen.getByTestId('productivity-quality'))).toBe(true)
 
     expect(screen.getByTestId('dashboard-hero').contains(attention)).toBe(true)
     expect(screen.getByTestId('dashboard-zones').contains(attention)).toBe(false)
 
     expect(attention.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
     expect(pulse.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
-    expect(productivity.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
 
     expect(digest.querySelector('[data-testid="pulse-zone"], [data-testid="pulse-empty-state"]')).toBeNull()
-    expect(productivity.querySelector('[data-testid="pulse-zone"], [data-testid="pulse-empty-state"]')).toBeNull()
-    expect(digest.querySelector('[data-testid="productivity-zone"], [data-testid="productivity-quality"]')).toBeNull()
-    expect(pulse.querySelector('[data-testid="productivity-zone"], [data-testid="productivity-quality"]')).toBeNull()
     expect(container).toBeTruthy()
   })
 

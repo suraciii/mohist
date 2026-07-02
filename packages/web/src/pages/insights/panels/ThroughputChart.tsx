@@ -68,9 +68,17 @@ export function ThroughputChart() {
 
   return (
     <section data-testid="throughput-chart" aria-label="Throughput">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-        Throughput
-      </h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Throughput
+        </h3>
+        <span
+          data-testid="throughput-chart-window"
+          className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs tabular-nums text-muted-foreground"
+        >
+          30d
+        </span>
+      </div>
       <ChartContainer
         status={status}
         emptyAction={

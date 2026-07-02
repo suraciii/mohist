@@ -403,4 +403,16 @@ describe('ThroughputChart', () => {
     expect(dayLabels.length).toBeGreaterThan(0)
     expect(dayLabels.length).toBeLessThan(30)
   })
+
+  // --- Window annotation ---
+
+  it('shows a 30d window badge in the header chrome', () => {
+    mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
+
+    render(<ThroughputChart />)
+
+    const badge = screen.getByTestId('throughput-chart-window')
+    expect(badge).toBeInTheDocument()
+    expect(badge.textContent).toBe('30d')
+  })
 })

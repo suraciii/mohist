@@ -82,9 +82,19 @@ export function CostTrendChart() {
 
   return (
     <section data-testid="cost-trend-chart" aria-label="Cost Trend">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-        Cost Trend
-      </h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Cost Trend
+        </h3>
+        {hasUsageData(data) && (
+          <span
+            data-testid="cost-trend-chart-window"
+            className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs tabular-nums text-muted-foreground"
+          >
+            {formatLabel(data.rangeFrom)} – {formatLabel(data.rangeTo)}
+          </span>
+        )}
+      </div>
       <ChartContainer
         status={status}
         emptyAction={

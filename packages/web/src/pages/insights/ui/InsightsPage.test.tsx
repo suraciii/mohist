@@ -166,12 +166,18 @@ describe('InsightsPage structure', () => {
     expect(verdictCards.length).toBe(4)
   })
 
-  it('renders the chart-placeholder zone marked for M2', () => {
+  it('renders the four chart groups in the fixed dimension order', () => {
     renderPage()
 
-    const placeholder = screen.getByTestId('insights-chart-placeholder')
-    expect(placeholder).toBeInTheDocument()
-    expect(placeholder.textContent).toContain('图表将在后续迁移')
+    const groups = screen.getAllByTestId('insights-chart-group')
+    expect(groups).toHaveLength(4)
+    expect(groups.map((g) => g.getAttribute('data-dimension'))).toEqual([
+      'output',
+      'delivery',
+      'quality',
+      'investment',
+    ])
+    expect(screen.queryByTestId('insights-chart-placeholder')).not.toBeInTheDocument()
   })
 })
 
