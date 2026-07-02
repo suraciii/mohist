@@ -1,0 +1,31 @@
+# Issue #323 — Insights M2 chart migration — working memory
+
+## Codebase Patterns
+
+- **Dashboard grid layout** — `pages/dashboard/ui/DashboardPage.tsx` uses a 2-column responsive grid (`md:grid-cols-2`) that already renders two items cleanly. Going from 3 → 2 surviving zones does NOT cause layout regression.
+- **DashboardPage zone mounting** — iterates `DASHBOARD_ZONES` (array of `{id, name}`) and mounts each via `<DashboardZone>`. Wrapping the iterand in a single-expression ternary by `zone.id` (instead of a chained ternary chain) is the simpler, narrower shape after removing the productivity branch.
+- **DashboardPage empty-state path** — the `!projects || projects.length === 0` branch is the only place `dashboard-empty-state` renders; none of the chart mocks fire there, so tests in the empty-projects branch can keep asserting every zone is absent (including `dashboard-zone-productivity`) unchanged.
+- **Colocated tests** — every chart component has a `*.test.tsx` next to it (not in a separate `tests/` dir); relocating the component means moving its test file with it, single command (`git mv`).
+- **`../charts` import pattern preserved** — every `pages/dashboard/productivity/*.tsx` imports `'../charts'` (ChartContainer/ChartAxes/etc.) or specific primitives. Keeping `charts/` and `panels/` as siblings under `pages/insights/` (D1) preserves every import byte-for-byte.
+- **`<chart>-window` testid convention (from T-002 spec)** — D4 will add `data-testid="<chart>-window"` to six charts in T-002; the chart's existing data-testid was specifically generic (e.g. `productivity-quality` for `QualityPanel`, `throughput-chart` for `ThroughputChart`). The window badge naming must be `<chart-name>-window` to match `ThroughputChart → data-testid="throughput-chart-window"` etc. (T-002 not done yet; assert it does not collide with any existing testid via grep before adding the badge.)
+
+## Task T-001 specifics
+
+- The T-001 acceptance criteria were precise: it bundles D1 (relocate) with D5 (Dashboard narrowing) because ProductivityZone's deletion requires unmounting from DashboardPage. Doing them together avoids an intermediate broken state.
+- After relocation but before T-003, the relocated panels live under `pages/insights/panels/` but are not yet mounted anywhere — `InsightsPage` still renders the M1 `<ChartPlaceholder />`. This is the accepted intermediate state described in the task note.
+- All chart component data-testids keep their historical `productivity-*` prefix even though the components no longer live under `pages/dashboard/productivity/` (e.g. `productivity-quality`, `productivity-trend`, `productivity-epic-list`). Test files reference those ids. Renaming them is out of T-001 scope and belongs to a separate cleanup; the design.md decision D1 explicitly preserves the byte-for-byte import graph and implicit testid stability.
+- `ProductivityZone.test.tsx` was the only test that asserted the ProductivityZone component itself as a unit (with mocked child components). It was deleted along with `ProductivityZone.tsx`. Per-chart child ordering/positioning assertions that were in those tests are NOT preserved anywhere — T-003's `InsightsCharts.test.tsx` will cover the new group composition, not the legacy flat order.
+- `model/` subdirectory under `productivity/` moved as part of the productivity move (D1 keeps the `model/` sibling relationship). It contains `throughput.ts` + tests, `delivery-time.ts` + tests. The relocated panels all import via relative paths under the same parent, so nothing else needed to change.
+
+## Gotchas
+
+- **`DashboardZoneId` type narrowing** — removing `'productivity'` from the union in `DashboardZone.tsx` means `DASHBOARD_ZONES` array literal must also drop that id. TypeScript's exhaustiveness in the ternary was a non-issue because the new code uses a non-exhaustive ternary (`zone.id === 'digest' ? <digest> : <pulse>`), but if you ever tighten back, reintroduce exhaustive checks.
+- **`git mv` followed by `git rm`** — `git mv` stages the rename; `git rm` of those same paths then needs `-f` (force) because the index has staged entries. Workaround: `git rm -f <path>` after `git mv` works directly.
+- **No third `dashboard-digest-empty` slot check** — in the prior "zone content in every slot" test, the third negation (`productivity.querySelector('[data-testid="dashboard-digest-..."]')`) tested that the productivity slot does not contain digest content. After deletion the new test must verify the surviving zones (`pulse` not mounting digest; `digest` not mounting digest-empty/loading/content is wrong — digest IS the digest mount point). Lesson: be careful not to over-add "absence" assertions on the surviving zones that ARE supposed to mount the digest widget.
+- **`npm install` not pre-run** — this workspace ships `package-lock.json` but no `node_modules`; first run of any `npm run *` script triggers a `npm install` (took ~4s). Subsequent commands work normally.
+
+## Hand-off for T-002 / T-003
+
+- **T-002 (window badges)** — touches only six panel components; each badge goes in the existing header chrome next to the `<h3>`. Existing per-chart colocated tests get one new `expect(getByTestId('<chart>-window')).toBeInTheDocument()` per test that renders the populated state. Three charts (`CompletionTrend`, `QualityPanel`, `InvestmentPanel`) already show their window — no badge there.
+- **T-003 (groups + ChartPlaceholder removal)** — introduces `ChartGroup` and `InsightsCharts` in `pages/insights/ui/`. Replaces `<ChartPlaceholder />` in `InsightsPage.tsx`. Deletes `ChartPlaceholder.tsx` and its `index.ts` export. Adds `InsightsCharts.test.tsx`. Flips the placeholder assertion in `InsightsPage.test.tsx` to assert the four groups render. The Signal Summary tests remain unchanged.
+- The 10 colocated `*.test.tsx` files now live at `packages/web/src/pages/insights/panels/<Chart>.test.tsx`. They continue to mock `'../../../entities/...'` / `@/widgets/...` etc. with absolute/relative paths that don't reference the moved panel itself, so they should pass as-is. (Verified: 253 test files, 3961 tests passed after the move.)
