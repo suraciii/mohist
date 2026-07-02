@@ -126,6 +126,30 @@ describe('SessionTimeline', () => {
     expect(bar).toHaveAttribute('data-status', 'red')
   })
 
+  it('renders only real workflow stages in the status timeline', () => {
+    render(
+      <SessionTimeline
+        rounds={[makeRound()]}
+        isLoading={false}
+        isStreaming={false}
+        currentStage="done"
+        isLive={false}
+        taskProgress={new Map()}
+        loopProgress={null}
+        recoveryStatus={null}
+        planProgress={null}
+      />,
+    )
+
+    for (const label of ['Plan', 'Build', 'Check', 'Integrate']) {
+      expect(screen.getByText(label)).toBeInTheDocument()
+    }
+    for (const stage of ['plan', 'build', 'check', 'integrate']) {
+      expect(screen.getByTestId(`workflow-status-stage-${stage}`)).toHaveAttribute('data-state', 'completed')
+    }
+    expect(screen.queryByText(/^Done$/)).not.toBeInTheDocument()
+  })
+
   it('invokes onCompact when the user clicks the Compact action in the warning banner', () => {
     const onCompact = vi.fn()
     render(
