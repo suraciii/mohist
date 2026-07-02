@@ -5,22 +5,8 @@ import { CompactSessionCard } from './CompactSessionCard'
 
 const MAX_VISIBLE_CARDS = 4
 
-const PILL_STYLE: Record<string, string> = {
-  active: 'bg-blue-100 text-blue-700',
-  waiting: 'bg-amber-100 text-amber-700',
-  completed: 'bg-green-100 text-green-700',
-  failed: 'bg-red-100 text-red-700',
-}
-
-const PILL_LABEL: Record<string, string> = {
-  active: 'Active',
-  waiting: 'Waiting',
-  completed: 'Completed',
-  failed: 'Failed',
-}
-
 export function PulseZone() {
-  const { activeCards, statusCounts, slotUsage } = useActivityCards()
+  const { activeCards, slotUsage } = useActivityCards()
   const toProjectPath = useProjectPath()
   const visible = activeCards.slice(0, MAX_VISIBLE_CARDS)
   const overflow = activeCards.length - visible.length
@@ -37,22 +23,6 @@ export function PulseZone() {
         >
           {slotUsage.active}/{slotUsage.max} slots used
         </span>
-      </div>
-
-      <div
-        className="flex flex-wrap items-center gap-x-2 gap-y-1"
-        data-testid="pulse-status-pills"
-      >
-        {(['active', 'waiting', 'completed', 'failed'] as const).map((key) => (
-          <span
-            key={key}
-            data-testid={`pulse-pill-${key}`}
-            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${PILL_STYLE[key]}`}
-          >
-            <span>{PILL_LABEL[key]}:</span>
-            <span className="tabular-nums">{statusCounts[key]}</span>
-          </span>
-        ))}
       </div>
 
       {activeCards.length === 0 ? (
