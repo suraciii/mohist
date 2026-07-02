@@ -70,3 +70,25 @@
 ### Follow-ups
 - T-003 (Web Done stage removal) is independent and can proceed in parallel — no shared files with server.
 - The `GrainKeyForTest` testability seam is now established on IssueGrain. Future IssueGrain-level specs can follow the same construction pattern in `IssueWorkflowReadPathSpecs.CreateGrain`.
+
+## T-003 — Remove synthesized Done stage from Web stage-progression surfaces
+
+### Codebase Patterns
+- Web stage progression surfaces are hard-coded per component rather than shared: `WorkflowView.tsx` has `WORKFLOW_STAGES`, `SessionTimeline.tsx` has both `WORKFLOW_STAGES` and `stageOrder`, and card/detail pills each have their own `WORKFLOW_STAGE_LABELS` map.
+- Keep `WorkflowStage.Done` in `packages/web/src/entities/issue/model/issue.ts`; the change is only to stop rendering/deriving it as a stage list item, order entry, or displayed card/detail stage override.
+- For terminal issues whose stored `workflowStage` is still an unrendered terminal value, `WorkflowView` maps the detail panel back to `Integrate` when displaying preserved history. This keeps archived feedback visible without adding a Done tab/cell back to the stage bar.
+
+### Key files
+- `packages/web/src/widgets/issue-workflow/ui/WorkflowView.tsx` — `WORKFLOW_STAGES` now contains only plan/build/check/integrate; completed issues default to Integrate; no Done branch remains in `getStageStatus` or `getDefaultStage`.
+- `packages/web/src/widgets/coder-session/ui/SessionTimeline.tsx` — timeline stage list and order now contain only plan/build/check/integrate.
+- `packages/web/src/widgets/kanban-board/ui/IssueCard.tsx` — stage badge no longer overrides Done-status issues to `WorkflowStage.Done`; label map only covers real stages.
+- `packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx` — stage pill label map only covers real stages; no `stage === Done -> IssueStatus.Done` derivation.
+- Tests updated in `WorkflowView.test.tsx`, `SessionTimeline.test.tsx`, `kanban-board-query.test.tsx`, and `IssueDetailPage.archived.test.tsx`.
+
+### Verification
+- `npm run typecheck -w packages/web`: pass.
+- `npm run test:run -w packages/web`: 3543 passed, 1 skipped.
+- Targeted grep across the four requested component files returns no `WorkflowStage.Done`, `key: 'done'`, Done label-map, or Done stage-order/list matches.
+
+### Gotchas / Lessons
+- Existing archived Done issue fixtures can still carry `workflowStage: 'done'` and feedback records with `stage: 'done'`. Removing the Done tab initially hid preserved feedback because `WorkflowView` gated feedback rendering on `issue.workflowStage === selectedStage`; mapping terminal unrendered stages to Integrate for detail display fixes that without reintroducing a fifth stage cell.

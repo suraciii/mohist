@@ -30,7 +30,7 @@ function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   return 'UNKNOWN'
 }
 
-const WORKFLOW_STAGES = [WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check, WorkflowStage.Integrate, WorkflowStage.Done] as const
+const WORKFLOW_STAGES: readonly WorkflowStage[] = [WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check, WorkflowStage.Integrate]
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -116,8 +116,6 @@ function getStageStatus(
   }
 
   if (issue.workflowStage === stage && !stageState) return 'running'
-
-  if (issue.status === IssueStatus.Done && stage === WorkflowStage.Done) return 'completed'
 
   if (currentStageIdx < 0 || stageOrder > currentStageIdx) return 'pending'
 
@@ -1018,35 +1016,37 @@ function StepList({
     c.checkName === 'health' || (c.output && (c.output as Record<string, unknown>).kind === 'script')
   )
   const failedScriptHealthChecks = scriptHealthChecks.filter(c => c.status === 'failed' || c.status === 'error')
+  const displayedWorkflowStage = issue.status === IssueStatus.Done
+    && (!issue.workflowStage || !WORKFLOW_STAGES.includes(issue.workflowStage))
+    ? WorkflowStage.Integrate
+    : issue.workflowStage
 
   const isAwaitingApproval =
     failedScriptHealthChecks.length === 0 &&
     issue.approvalState?.status === 'awaiting' &&
-    issue.workflowStage === stage
+    displayedWorkflowStage === stage
 
   return (
     <div className="space-y-4">
-      {stage !== WorkflowStage.Done && (
-        <div>
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Tasks</h3>
-          <div className="space-y-1.5">
-            {taskResults.length > 0 ? (
-              taskResults.map((task) => (
-                <TaskItem
-                  key={task.taskId}
-                  task={task}
-                  issueNumber={issue.number}
-                  readOnly={readOnly}
-                />
-              ))
-            ) : (
-              <div className="text-sm text-gray-400 py-2">No tasks yet</div>
-            )}
-          </div>
+      <div>
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Tasks</h3>
+        <div className="space-y-1.5">
+          {taskResults.length > 0 ? (
+            taskResults.map((task) => (
+              <TaskItem
+                key={task.taskId}
+                task={task}
+                issueNumber={issue.number}
+                readOnly={readOnly}
+              />
+            ))
+          ) : (
+            <div className="text-sm text-gray-400 py-2">No tasks yet</div>
+          )}
         </div>
-      )}
+      </div>
 
-      {checkResults.length > 0 && stage !== WorkflowStage.Done && (
+      {checkResults.length > 0 && (
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Checks</h3>
           <div className="space-y-1.5">
@@ -1086,7 +1086,7 @@ function StepList({
 
       {/* Feedback history is rendered whenever the stage has feedback records — including
           during the running feedback-loop (apply-feedback task) when the approval card is hidden. */}
-      {issue.feedback && issue.feedback.length > 0 && issue.workflowStage === stage && (
+      {issue.feedback && issue.feedback.length > 0 && displayedWorkflowStage === stage && (
         <FeedbackHistory
           stage={stage}
           feedback={issue.feedback}
@@ -1415,7 +1415,7 @@ export function WorkflowView({ issue }: { issue: Issue }) {
 
   const getDefaultStage = useCallback((): WorkflowStage => {
     if (isBacklog) return WorkflowStage.Plan
-    if (isCompleted) return WorkflowStage.Done
+    if (isCompleted) return WorkflowStage.Integrate
     const currentIdx = issue.workflowStage ? WORKFLOW_STAGES.indexOf(issue.workflowStage) : -1
     if (currentIdx >= 0) return WORKFLOW_STAGES[currentIdx]
     return WorkflowStage.Plan

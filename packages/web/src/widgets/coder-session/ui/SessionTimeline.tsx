@@ -145,11 +145,10 @@ const WORKFLOW_STAGES = [
   { key: 'build', label: 'Build' },
   { key: 'check', label: 'Check' },
   { key: 'integrate', label: 'Integrate' },
-  { key: 'done', label: 'Done' },
 ]
 
 export function WorkflowStatusTimeline({ currentStage }: { currentStage: string }) {
-  const stageOrder = ['backlog', 'plan', 'build', 'check', 'integrate', 'done']
+  const stageOrder = ['backlog', 'plan', 'build', 'check', 'integrate']
   const currentIndex = stageOrder.indexOf(currentStage)
 
   return (

@@ -278,9 +278,10 @@ describe('IssueDetailPage archived Done issue — preserved history rendering', 
 
     const stageBar = await waitFor(() => screen.getByTestId('workflow-stage-bar'))
     expect(stageBar).toBeTruthy()
-    for (const stage of ['Plan', 'Build', 'Check', 'Integrate', 'Done']) {
+    for (const stage of ['Plan', 'Build', 'Check', 'Integrate']) {
       expect(within(stageBar).getByText(stage)).toBeTruthy()
     }
+    expect(within(stageBar).queryByText(/^Done$/)).not.toBeTruthy()
   })
 
   it('renders the same stage-bar layout for archived and non-archived Done issues', async () => {
@@ -292,7 +293,7 @@ describe('IssueDetailPage archived Done issue — preserved history rendering', 
 
     const { container: archivedContainer } = renderPage()
     const archivedBar = await waitFor(() => within(archivedContainer).getByTestId('workflow-stage-bar'))
-    const archivedStageLabels = within(archivedBar).getAllByText(/Plan|Build|Check|Integrate|Done/).map((n) => n.textContent)
+    const archivedStageLabels = within(archivedBar).getAllByText(/Plan|Build|Check|Integrate/).map((n) => n.textContent)
 
     cleanup()
     mockUseIssue.mockReturnValue({
@@ -304,9 +305,11 @@ describe('IssueDetailPage archived Done issue — preserved history rendering', 
 
     const { container: activeContainer } = renderPage()
     const activeBar = await waitFor(() => within(activeContainer).getByTestId('workflow-stage-bar'))
-    const activeStageLabels = within(activeBar).getAllByText(/Plan|Build|Check|Integrate|Done/).map((n) => n.textContent)
+    const activeStageLabels = within(activeBar).getAllByText(/Plan|Build|Check|Integrate/).map((n) => n.textContent)
 
     expect(archivedStageLabels).toEqual(activeStageLabels)
+    expect(within(archivedBar).queryByText(/^Done$/)).not.toBeTruthy()
+    expect(within(activeBar).queryByText(/^Done$/)).not.toBeTruthy()
   })
 
   it('renders the workflow-run YAML card labelled as preserved history for an archived issue', async () => {
