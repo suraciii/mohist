@@ -142,7 +142,7 @@ public class WorkflowProfileCatalogSpecs
         Assert.NotNull(info);
         Assert.Equal("Mohist Local", info!.Name);
         Assert.True(info.IsDefault);
-        Assert.Equal(MohistWorkflow.Definition.Description, info.Description);
+        Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), info.Description);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

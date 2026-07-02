@@ -971,5 +971,5 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
     private sealed record ProjectDto(string Id);
     private sealed record IssueDto(int Number, string Id, string? WorkflowProfileId);
     private sealed record SystemTemplateInfoDto(string Id, string Name, string Description, bool IsDefault);
-    private sealed record WorkflowProfileDescriptionDto(string Id, string DisplayName, string Description, IReadOnlyList<string> SuitableFor);
+    private sealed record WorkflowProfileDescriptionDto(string Id, string DisplayName, string Description);
 }
