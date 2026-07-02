@@ -40,10 +40,10 @@ issue #307 移除 issue 侧兜底扫描、改事件驱动流转后，这条「�
 | `WorkflowRun`（核心域） | run / stage / task / check 状态转移、`WorkflowRunCompleted`/`Failed`（→ CompleteIssue / AbortWork） | ✅ |
 | `Issue` | work-started / work-completed / closed 等 | ✅ |
 | `Runner` | `RunnerDisconnected` 等（→ Session 自决失败） | ✅（开放：见下） |
-| `Session` | 无（**痕迹 facet**，叶子域，领域不对其反应） | ❌ |
+| `Session` | 无（执行痕迹，横向叶子域，领域不对其反应） | ❌ |
 
 **非领域事件，不进 durable bus**，走各自通道：
-- **AgentSession 生命周期 + transcript**：Agent 子域的执行痕迹/遥测。`Session` 是「Agent 执行后留下的痕迹」，叶子，不反向依赖 Workflow。维持 best-effort 痕迹通道。
+- **AgentSession 生命周期 + transcript**：Session 子域（独立子域，见 [`domain-analysis.md`](domain-analysis.md)）的执行痕迹/遥测。`Session` 是横向叶子域——被多上下文消费、不反向依赖任何业务上下文。维持 best-effort 痕迹通道。
 - **UI 实时推送（`EventBridge`/SignalR）**：presentation，非 domain reaction。**摘出 durable bus**，走独立 best-effort 实时通道（UI 断线重连后自己对账）。理由见「stream 与 subscription」的 SLA 解耦。
 - **inbox hint**（`com.mohist.inbox.item-persisted`）：通知系统的投影信号，非领域事实。
 
