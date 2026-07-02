@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { Button } from '@/shared/ui/components/button'
 import { AttachmentComposer, MarkdownReader } from '@/shared/ui'
 import { commentAttachmentContentPath, type Comment } from '../../../../entities/issue'
@@ -31,6 +33,7 @@ export function IssueCommentsSection({
   mutations,
 }: IssueCommentsSectionProps) {
   const { addCommentMutation, deleteCommentMutation } = mutations
+  const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null)
 
   return (
     <div className="rounded-lg bg-white p-4" data-testid="comments-section">
@@ -66,20 +69,20 @@ export function IssueCommentsSection({
                   size="xs"
                   onClick={() => {
                     setDeleteCommentError(null)
-                    if (window.confirm('Delete this comment?')) {
-                      setDeletingCommentId(comment.id)
-                      deleteCommentMutation.mutate(comment.id)
-                    }
+                    setPendingDeleteCommentId(comment.id)
                   }}
                   disabled={deletingCommentId === comment.id}
                   className="text-muted-foreground hover:text-red-500"
                   title="Delete comment"
+                  data-testid="comment-delete-button"
                 >
                   {deletingCommentId === comment.id ? 'Deleting...' : 'Delete'}
                 </Button>
               </div>
-              {deleteCommentError && deletingCommentId === null && (
-                <div className="mt-1 text-xs text-red-500">{deleteCommentError}</div>
+              {deleteCommentError && deletingCommentId === null && pendingDeleteCommentId === null && (
+                <div className="mt-1 text-xs text-red-500" data-testid="comment-delete-error">
+                  {deleteCommentError}
+                </div>
               )}
             </div>
           ))}
@@ -111,6 +114,28 @@ export function IssueCommentsSection({
           </div>
         </div>
       </div>
+
+      <AlertDialog
+        open={pendingDeleteCommentId !== null}
+        onOpenChange={(open) => {
+          if (!open && deletingCommentId === null) {
+            setPendingDeleteCommentId(null)
+          }
+        }}
+        title="Delete this comment?"
+        description="This comment will be permanently removed. This action cannot be undone."
+        confirmLabel={deletingCommentId !== null ? 'Deleting...' : 'Delete'}
+        cancelLabel="Cancel"
+        tone="destructive"
+        loading={deletingCommentId !== null}
+        onConfirm={() => {
+          if (pendingDeleteCommentId !== null) {
+            setDeletingCommentId(pendingDeleteCommentId)
+            deleteCommentMutation.mutate(pendingDeleteCommentId)
+          }
+        }}
+        data-testid="comment-delete-alert"
+      />
     </div>
   )
 }

@@ -8,6 +8,7 @@ import { CardSection } from '../../../shared/ui/components/card-section'
 import { Switch } from '../../../shared/ui/components/switch'
 import type { SettingsSearchEntry } from '@/features/settings-search'
 import { getSectionMeta } from '../lib/sections'
+import { NoProjectCard } from './NoProjectCard'
 import { ProjectDefaultWorkflowControl } from './ProjectDefaultWorkflowControl'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
@@ -272,11 +273,7 @@ export function WorkflowProfilesSection() {
   }, [enableMutation, disableMutation])
 
   if (!currentProject) {
-    return (
-      <SettingsSection title={sectionLabel}>
-        <ProjectDefaultWorkflowControl />
-      </SettingsSection>
-    )
+    return <NoProjectCard title={sectionLabel} />
   }
 
   if (selectedId) {

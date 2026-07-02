@@ -7,6 +7,7 @@ import { RepositoriesSection } from '../src/pages/settings/ui/RepositoriesSectio
 
 const addRepositoryRequests: { method: string; url: string; body: unknown }[] = []
 const setDefaultRequests: { method: string; url: string; body: unknown }[] = []
+const removeRepositoryRequests: { method: string; url: string }[] = []
 
 let repositoriesResponse: Array<Record<string, unknown>> = [
   {
@@ -60,7 +61,8 @@ const handlers = [
     setDefaultRequests.push({ method: request.method, url: request.url, body })
     return HttpResponse.json({ success: true, data: { repositories: repositoriesResponse } })
   }),
-  http.delete('/api/projects/:projectId/repositories/:repoName', () => {
+  http.delete('/api/projects/:projectId/repositories/:repoName', ({ request }) => {
+    removeRepositoryRequests.push({ method: request.method, url: request.url })
     return HttpResponse.json({ success: true, data: { repositories: repositoriesResponse } })
   }),
 ]
@@ -78,6 +80,7 @@ afterAll(() => {
 beforeEach(() => {
   addRepositoryRequests.length = 0
   setDefaultRequests.length = 0
+  removeRepositoryRequests.length = 0
   repositoriesResponse = [
     {
       name: 'frontend',
@@ -231,5 +234,128 @@ describe('RepositoriesSection (git-url only)', () => {
 
     expect(screen.getByTestId('repository-set-default-backend')).toBeInTheDocument()
     expect(screen.getByTestId('repository-remove-backend')).toBeInTheDocument()
+  })
+
+  describe('Remove confirmation flow (T-002)', () => {
+    it('opens the shared AlertDialog when Remove is clicked and does not send DELETE before confirm', async () => {
+      render(<RepositoriesSection projectId="proj-1" />)
+
+      await screen.findByTestId('repository-backend')
+
+      fireEvent.click(screen.getByTestId('repository-remove-backend'))
+
+      const dialog = await screen.findByTestId('repository-remove-alert')
+      expect(dialog).toBeInTheDocument()
+      expect(dialog).toHaveAttribute('data-tone', 'destructive')
+
+      expect(removeRepositoryRequests).toHaveLength(0)
+
+      fireEvent.click(screen.getByTestId('repository-remove-alert-cancel'))
+
+      await waitFor(() =>
+        expect(screen.queryByTestId('repository-remove-alert')).not.toBeInTheDocument(),
+      )
+
+      expect(removeRepositoryRequests).toHaveLength(0)
+    })
+
+    it('does not invoke the remove mutation until the user confirms', async () => {
+      render(<RepositoriesSection projectId="proj-1" />)
+
+      await screen.findByTestId('repository-backend')
+
+      fireEvent.click(screen.getByTestId('repository-remove-backend'))
+
+      await screen.findByTestId('repository-remove-alert')
+      expect(removeRepositoryRequests).toHaveLength(0)
+
+      fireEvent.click(screen.getByTestId('repository-remove-alert-confirm'))
+
+      await waitFor(() => expect(removeRepositoryRequests).toHaveLength(1))
+      expect(removeRepositoryRequests[0].method).toBe('DELETE')
+      expect(removeRepositoryRequests[0].url).toContain('/api/projects/proj-1/repositories/backend')
+
+      await waitFor(() =>
+        expect(screen.queryByTestId('repository-remove-alert')).not.toBeInTheDocument(),
+      )
+    })
+
+    it('renders a single AlertDialog instance for the section, not per row (T-002)', async () => {
+      const initialRepos: Array<Record<string, unknown>> = [
+        {
+          name: 'a',
+          gitUrl: 'https://example.com/a.git',
+          baseBranch: 'main',
+          isDefault: false,
+        },
+        {
+          name: 'b',
+          gitUrl: 'https://example.com/b.git',
+          baseBranch: 'main',
+          isDefault: false,
+        },
+      ]
+      server.use(
+        http.get('/api/projects/:projectId/repositories', () =>
+          HttpResponse.json({ success: true, data: initialRepos }),
+        ),
+      )
+
+      render(<RepositoriesSection projectId="proj-1" />)
+
+      await screen.findByTestId('repository-a')
+      await screen.findByTestId('repository-b')
+
+      fireEvent.click(screen.getByTestId('repository-remove-a'))
+
+      const dialog = await screen.findByTestId('repository-remove-alert')
+      expect(dialog).toBeInTheDocument()
+
+      const allDialogs = document.querySelectorAll('[data-testid="repository-remove-alert"]')
+      expect(allDialogs).toHaveLength(1)
+
+      fireEvent.click(screen.getByTestId('repository-remove-alert-cancel'))
+      await waitFor(() =>
+        expect(screen.queryByTestId('repository-remove-alert')).not.toBeInTheDocument(),
+      )
+
+      fireEvent.click(screen.getByTestId('repository-remove-b'))
+      const dialog2 = await screen.findByTestId('repository-remove-alert')
+      expect(dialog2).toBeInTheDocument()
+    })
+
+    it('does not call DELETE on the initial trigger click across multiple rows', async () => {
+      const initialRepos: Array<Record<string, unknown>> = [
+        {
+          name: 'a',
+          gitUrl: 'https://example.com/a.git',
+          baseBranch: 'main',
+          isDefault: false,
+        },
+        {
+          name: 'b',
+          gitUrl: 'https://example.com/b.git',
+          baseBranch: 'main',
+          isDefault: false,
+        },
+      ]
+      server.use(
+        http.get('/api/projects/:projectId/repositories', () =>
+          HttpResponse.json({ success: true, data: initialRepos }),
+        ),
+      )
+
+      render(<RepositoriesSection projectId="proj-1" />)
+
+      await screen.findByTestId('repository-a')
+      await screen.findByTestId('repository-b')
+
+      fireEvent.click(screen.getByTestId('repository-remove-a'))
+      expect(removeRepositoryRequests).toHaveLength(0)
+      fireEvent.click(screen.getByTestId('repository-remove-b'))
+      expect(removeRepositoryRequests).toHaveLength(0)
+
+      expect(screen.getByTestId('repository-remove-alert')).toBeInTheDocument()
+    })
   })
 })

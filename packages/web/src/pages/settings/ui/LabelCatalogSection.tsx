@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { PencilIcon, PlusIcon, SearchIcon, Trash2Icon } from 'lucide-react'
 import {
   isValidLabelKey,
   useCreateLabelDefinition,
@@ -8,8 +8,10 @@ import {
   useUpdateLabelDefinition,
 } from '../../../entities/label-catalog'
 import type { LabelDefinition } from '../../../entities/label-catalog'
+import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
+import { FieldError, useFieldErrorId } from '@/shared/ui/components/field-error'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
 import { Textarea } from '@/shared/ui/components/textarea'
@@ -21,6 +23,13 @@ interface DraftState {
   key: string
   description: string
   supportedValuesRaw: string
+}
+
+type DraftErrorField = 'key' | 'description' | 'supportedValues' | 'form'
+
+interface DraftError {
+  field: DraftErrorField
+  message: string
 }
 
 const emptyDraft: DraftState = { key: '', description: '', supportedValuesRaw: '' }
@@ -56,21 +65,24 @@ function parseOptionalSupportedValues(raw: string): { values?: string[]; error?:
 function validateDraft(
   draft: DraftState,
   mode: 'add' | 'edit',
-): { values?: Omit<DraftState, 'supportedValuesRaw'> & { supportedValues?: string[] }; error?: string } {
+): { values?: Omit<DraftState, 'supportedValuesRaw'> & { supportedValues?: string[] }; error?: DraftError } {
   if (mode === 'add') {
-    if (!draft.key.trim()) return { error: 'Key is required.' }
+    if (!draft.key.trim()) return { error: { field: 'key', message: 'Key is required.' } }
     if (!isValidLabelKey(draft.key.trim())) {
       return {
-        error:
-          "Key must match '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$' (lowercase alphanumerics with optional interior dashes).",
+        error: {
+          field: 'key',
+          message:
+            "Key must match '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$' (lowercase alphanumerics with optional interior dashes).",
+        },
       }
     }
   }
   if (!draft.description.trim()) {
-    return { error: 'Description must be a non-empty, non-whitespace string.' }
+    return { error: { field: 'description', message: 'Description must be a non-empty, non-whitespace string.' } }
   }
   const parsed = parseOptionalSupportedValues(draft.supportedValuesRaw)
-  if (parsed.error) return { error: parsed.error }
+  if (parsed.error) return { error: { field: 'supportedValues', message: parsed.error } }
   return {
     values: {
       key: draft.key.trim(),
@@ -78,6 +90,15 @@ function validateDraft(
       supportedValues: parsed.values,
     },
   }
+}
+
+function matchesSearch(definition: LabelDefinition, query: string): boolean {
+  if (!query) return true
+  const q = query.toLowerCase()
+  if (definition.key.toLowerCase().includes(q)) return true
+  if (definition.description.toLowerCase().includes(q)) return true
+  if (definition.supportedValues?.some((v) => v.toLowerCase().includes(q))) return true
+  return false
 }
 
 function LabelDefinitionRow({
@@ -100,11 +121,16 @@ function LabelDefinitionRow({
   onSave: () => void
   draft: DraftState
   setDraft: (next: DraftState) => void
-  editError: string | null
+  editError: DraftError | null
   isSaving: boolean
   onDelete: () => void
   isDeleting: boolean
 }) {
+  const editErrorId = useFieldErrorId(`label-catalog-edit-error-${definition.key}`)
+  const editErrorMessage = editError?.message ?? null
+  const isDescriptionError = editError?.field === 'description'
+  const isValuesError = editError?.field === 'supportedValues'
+
   return (
     <CardSection
       data-testid={`label-catalog-row-${definition.key}`}
@@ -134,6 +160,8 @@ function LabelDefinitionRow({
               onChange={(e) => setDraft({ ...draft, description: e.target.value })}
               className="min-h-11 text-sm"
               data-testid={`label-catalog-edit-description-${definition.key}`}
+              aria-invalid={isDescriptionError ? true : undefined}
+              aria-describedby={isDescriptionError ? editErrorId : undefined}
             />
           </div>
           <div>
@@ -147,18 +175,20 @@ function LabelDefinitionRow({
               placeholder="One value per line, or comma-separated"
               className="min-h-16 text-sm font-mono"
               data-testid={`label-catalog-edit-values-${definition.key}`}
+              aria-invalid={isValuesError ? true : undefined}
+              aria-describedby={isValuesError ? editErrorId : undefined}
             />
             <p className="mt-1 text-[11px] text-muted-foreground">
               Leave empty to remove the value constraint.
             </p>
           </div>
-          {editError && (
-            <p
+          {editErrorMessage && (
+            <FieldError
+              id={editErrorId}
               data-testid={`label-catalog-edit-error-${definition.key}`}
-              className="text-xs text-red-700"
             >
-              {editError}
-            </p>
+              {editErrorMessage}
+            </FieldError>
           )}
           <div className="flex justify-end gap-2">
             <Button
@@ -253,15 +283,25 @@ export function LabelCatalogSection() {
   const { label: sectionLabel, description: sectionDescription } = getSectionMeta('label-catalog')
 
   const [addDraft, setAddDraft] = useState<DraftState>(emptyDraft)
-  const [addError, setAddError] = useState<string | null>(null)
+  const [addError, setAddError] = useState<DraftError | null>(null)
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<DraftState>(emptyDraft)
-  const [editError, setEditError] = useState<string | null>(null)
+  const [editError, setEditError] = useState<DraftError | null>(null)
   const [pageError, setPageError] = useState<string | null>(null)
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
   const keyInputRef = useRef<HTMLInputElement>(null)
+  const addErrorId = useFieldErrorId('label-catalog-add-error')
 
-  const sortedDefinitions = (definitions ?? []).slice().sort((a, b) => a.key.localeCompare(b.key))
+  const sortedDefinitions = useMemo(
+    () => (definitions ?? []).slice().sort((a, b) => a.key.localeCompare(b.key)),
+    [definitions],
+  )
+
+  const filteredDefinitions = useMemo(
+    () => sortedDefinitions.filter((definition) => matchesSearch(definition, search)),
+    [sortedDefinitions, search],
+  )
 
   function resetAddForm() {
     setAddDraft(emptyDraft)
@@ -272,7 +312,7 @@ export function LabelCatalogSection() {
     setPageError(null)
     const result = validateDraft(addDraft, 'add')
     if (result.error || !result.values) {
-      setAddError(result.error ?? 'Invalid input.')
+      setAddError(result.error ?? { field: 'form', message: 'Invalid input.' })
       return
     }
     setAddError(null)
@@ -310,7 +350,7 @@ export function LabelCatalogSection() {
     setEditError(null)
     const result = validateDraft(editDraft, 'edit')
     if (result.error || !result.values) {
-      setEditError(result.error ?? 'Invalid input.')
+      setEditError(result.error ?? { field: 'form', message: 'Invalid input.' })
       return
     }
     const patch: { description: string; supportedValues?: string[] } = {
@@ -322,7 +362,7 @@ export function LabelCatalogSection() {
     } else {
       const parsed = parseSupportedValues(rawValues)
       if (parsed.error || !parsed.values.length) {
-        setEditError(parsed.error ?? 'Provide at least one supported value.')
+        setEditError({ field: 'supportedValues', message: parsed.error ?? 'Provide at least one supported value.' })
         return
       }
       patch.supportedValues = parsed.values
@@ -334,22 +374,40 @@ export function LabelCatalogSection() {
           cancelEdit()
         },
         onError: (err: Error) => {
-          setEditError(err.message)
+          setEditError({ field: 'form', message: err.message })
         },
       },
     )
   }
 
-  function handleDelete(key: string) {
+  function requestDelete(key: string) {
     setPageError(null)
     setPendingDeleteKey(key)
+  }
+
+  function cancelDelete() {
+    if (remove.isPending) return
+    setPendingDeleteKey(null)
+  }
+
+  function confirmDelete() {
+    if (!pendingDeleteKey) return
+    const key = pendingDeleteKey
     remove.mutate(key, {
-      onSettled: () => setPendingDeleteKey(null),
+      onSuccess: () => {
+        setPendingDeleteKey(null)
+      },
       onError: (err: Error) => {
+        setPendingDeleteKey(null)
         setPageError(err.message)
       },
     })
   }
+
+  const addErrorMessage = addError?.message ?? null
+  const isAddKeyError = addError?.field === 'key'
+  const isAddDescriptionError = addError?.field === 'description'
+  const isAddValuesError = addError?.field === 'supportedValues'
 
   return (
     <SettingsSection
@@ -379,6 +437,19 @@ export function LabelCatalogSection() {
         </div>
       )}
 
+      <div className="relative">
+        <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          id="label-catalog-search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by key, description, or supported value"
+          aria-label="Search label definitions"
+          data-testid="label-catalog-search"
+          className="min-h-11 pl-7 text-sm"
+        />
+      </div>
+
       <CardSection title="Add definition" titleAs="h3" className="p-3" data-testid="label-catalog-add-form">
         <div className="space-y-2">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -392,6 +463,8 @@ export function LabelCatalogSection() {
                 placeholder="module"
                 className="min-h-11 text-sm font-mono"
                 data-testid="label-catalog-add-key"
+                aria-invalid={isAddKeyError ? true : undefined}
+                aria-describedby={isAddKeyError ? addErrorId : undefined}
               />
             </div>
             <div className="min-w-0">
@@ -403,6 +476,8 @@ export function LabelCatalogSection() {
                 placeholder="Classifies the subsystem"
                 className="min-h-11 text-sm"
                 data-testid="label-catalog-add-description"
+                aria-invalid={isAddDescriptionError ? true : undefined}
+                aria-describedby={isAddDescriptionError ? addErrorId : undefined}
               />
             </div>
           </div>
@@ -415,12 +490,14 @@ export function LabelCatalogSection() {
               placeholder="auth, ui, persistence"
               className="min-h-16 text-sm font-mono"
               data-testid="label-catalog-add-values"
+              aria-invalid={isAddValuesError ? true : undefined}
+              aria-describedby={isAddValuesError ? addErrorId : undefined}
             />
           </div>
-          {addError && (
-            <p data-testid="label-catalog-add-error" className="text-xs text-red-700">
-              {addError}
-            </p>
+          {addErrorMessage && (
+            <FieldError id={addErrorId} data-testid="label-catalog-add-error">
+              {addErrorMessage}
+            </FieldError>
           )}
           <Button
             onClick={handleAdd}
@@ -444,15 +521,31 @@ export function LabelCatalogSection() {
             message={error instanceof Error ? error.message : 'Failed to load catalog.'}
             onRetry={() => refetch()}
           />
-        ) : sortedDefinitions.length === 0 ? (
+        ) : filteredDefinitions.length === 0 ? (
           <SectionState
             variant="empty"
             title="Definitions"
-            description="No label definitions yet. Add one above to start curating your project's catalog."
+            description={
+              sortedDefinitions.length > 0
+                ? 'No label definitions match the current search.'
+                : 'No label definitions yet. Add one above to start curating your project\'s catalog.'
+            }
+            action={
+              sortedDefinitions.length === 0 ? (
+                <Button
+                  size="sm"
+                  onClick={() => keyInputRef.current?.focus()}
+                  data-testid="label-catalog-empty-new-button"
+                >
+                  <PlusIcon />
+                  New definition
+                </Button>
+              ) : undefined
+            }
           />
         ) : (
           <div className="space-y-2">
-            {sortedDefinitions.map((definition) => (
+            {filteredDefinitions.map((definition) => (
               <LabelDefinitionRow
                 key={definition.key}
                 definition={definition}
@@ -464,13 +557,32 @@ export function LabelCatalogSection() {
                 setDraft={setEditDraft}
                 editError={editingKey === definition.key ? editError : null}
                 isSaving={update.isPending && editingKey === definition.key}
-                onDelete={() => handleDelete(definition.key)}
-                isDeleting={pendingDeleteKey === definition.key && remove.isPending}
+                onDelete={() => requestDelete(definition.key)}
+                isDeleting={remove.isPending && pendingDeleteKey === definition.key}
               />
             ))}
           </div>
         )}
       </div>
+
+      <AlertDialog
+        open={pendingDeleteKey !== null}
+        onOpenChange={(open) => {
+          if (!open) cancelDelete()
+        }}
+        title="Delete this label definition?"
+        description={
+          pendingDeleteKey
+            ? `The definition '${pendingDeleteKey}' will be permanently removed. This action cannot be undone.`
+            : 'This label definition will be permanently removed.'
+        }
+        confirmLabel={remove.isPending ? 'Deleting...' : 'Delete'}
+        cancelLabel="Cancel"
+        tone="destructive"
+        loading={remove.isPending}
+        onConfirm={confirmDelete}
+        data-testid="label-catalog-delete-alert"
+      />
     </SettingsSection>
   )
 }

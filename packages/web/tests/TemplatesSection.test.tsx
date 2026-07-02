@@ -176,6 +176,13 @@ describe('TemplatesSection', () => {
   })
 
   describe('Search filtering', () => {
+    it('exposes an accessible label for the search input', async () => {
+      render(<TemplatesSection />)
+
+      const search = await screen.findByLabelText('Search templates')
+      expect(search).toBe(screen.getByTestId('template-search'))
+    })
+
     it('filters rows by key when search matches', async () => {
       render(<TemplatesSection />)
 
@@ -254,7 +261,7 @@ describe('TemplatesSection', () => {
   })
 
   describe('Reset action', () => {
-    it('sends DELETE to remove the override for an overridden row', async () => {
+    it('sends DELETE to remove the override only after the shared AlertDialog is confirmed (T-002)', async () => {
       let deletedKey: string | null = null
       server.use(
         http.delete(
@@ -277,7 +284,141 @@ describe('TemplatesSection', () => {
 
       fireEvent.click(screen.getByTestId('template-reset-proposal'))
 
+      const dialog = await screen.findByTestId('template-destructive-alert')
+      expect(dialog).toBeInTheDocument()
+      expect(dialog).toHaveAttribute('data-tone', 'destructive')
+
+      expect(deletedKey).toBeNull()
+
+      fireEvent.click(screen.getByTestId('template-destructive-alert-cancel'))
+
+      await waitFor(() =>
+        expect(screen.queryByTestId('template-destructive-alert')).not.toBeInTheDocument(),
+      )
+
+      expect(deletedKey).toBeNull()
+
+      fireEvent.click(screen.getByTestId('template-reset-proposal'))
+      await screen.findByTestId('template-destructive-alert')
+      fireEvent.click(screen.getByTestId('template-destructive-alert-confirm'))
+
       await waitFor(() => expect(deletedKey).toBe('proposal'))
+    })
+
+    it('does not invoke DELETE when the AlertDialog is cancelled (T-002)', async () => {
+      let deleteCalled = false
+      server.use(
+        http.delete(
+          `/api/projects/${PROJECT_ID}/templates/:key/override`,
+          () => {
+            deleteCalled = true
+            return HttpResponse.json({
+              success: true,
+              data: { message: 'deleted' },
+            })
+          },
+        ),
+      )
+
+      render(<TemplatesSection />)
+
+      await waitFor(() =>
+        expect(screen.getByTestId('template-row-proposal')).toBeInTheDocument(),
+      )
+
+      fireEvent.click(screen.getByTestId('template-reset-proposal'))
+      await screen.findByTestId('template-destructive-alert')
+      fireEvent.click(screen.getByTestId('template-destructive-alert-cancel'))
+
+      await waitFor(() =>
+        expect(screen.queryByTestId('template-destructive-alert')).not.toBeInTheDocument(),
+      )
+
+      expect(deleteCalled).toBe(false)
+    })
+
+    it('renders a single shared AlertDialog instance for the section, not per row (T-002)', async () => {
+      render(<TemplatesSection />)
+
+      await waitFor(() =>
+        expect(screen.getByTestId('template-row-proposal')).toBeInTheDocument(),
+      )
+      await waitFor(() =>
+        expect(screen.getByTestId('template-row-deploy-checklist')).toBeInTheDocument(),
+      )
+
+      fireEvent.click(screen.getByTestId('template-reset-proposal'))
+      const dialog = await screen.findByTestId('template-destructive-alert')
+      expect(dialog).toBeInTheDocument()
+
+      const allDialogs = document.querySelectorAll('[data-testid="template-destructive-alert"]')
+      expect(allDialogs).toHaveLength(1)
+    })
+  })
+
+  describe('Delete action (T-002)', () => {
+    it('sends DELETE for a project-unique template only after the AlertDialog is confirmed', async () => {
+      let deletedKey: string | null = null
+      server.use(
+        http.delete(
+          `/api/projects/${PROJECT_ID}/templates/:key/override`,
+          ({ params }) => {
+            deletedKey = String(params.key)
+            return HttpResponse.json({
+              success: true,
+              data: { message: `Override ${params.key} removed` },
+            })
+          },
+        ),
+      )
+
+      render(<TemplatesSection />)
+
+      await waitFor(() =>
+        expect(screen.getByTestId('template-row-deploy-checklist')).toBeInTheDocument(),
+      )
+
+      fireEvent.click(screen.getByTestId('template-delete-deploy-checklist'))
+
+      const dialog = await screen.findByTestId('template-destructive-alert')
+      expect(dialog).toBeInTheDocument()
+      expect(deletedKey).toBeNull()
+
+      fireEvent.click(screen.getByTestId('template-destructive-alert-confirm'))
+
+      await waitFor(() => expect(deletedKey).toBe('deploy-checklist'))
+    })
+
+    it('does not invoke DELETE when the AlertDialog is cancelled on a project-unique template', async () => {
+      let deleteCalled = false
+      server.use(
+        http.delete(
+          `/api/projects/${PROJECT_ID}/templates/:key/override`,
+          () => {
+            deleteCalled = true
+            return HttpResponse.json({
+              success: true,
+              data: { message: 'deleted' },
+            })
+          },
+        ),
+      )
+
+      render(<TemplatesSection />)
+
+      await waitFor(() =>
+        expect(screen.getByTestId('template-row-deploy-checklist')).toBeInTheDocument(),
+      )
+
+      fireEvent.click(screen.getByTestId('template-delete-deploy-checklist'))
+      await screen.findByTestId('template-destructive-alert')
+      fireEvent.click(screen.getByTestId('template-destructive-alert-cancel'))
+
+      await waitFor(() =>
+        expect(screen.queryByTestId('template-destructive-alert')).not.toBeInTheDocument(),
+      )
+
+      expect(deleteCalled).toBe(false)
     })
   })
 
@@ -380,6 +521,68 @@ describe('TemplatesSection', () => {
       await waitFor(() =>
         expect(screen.queryByTestId('new-template-dialog')).not.toBeInTheDocument(),
       )
+    })
+  })
+
+  describe('Empty list CTA (T-006)', () => {
+    it('renders an inline New Template action when there are no project templates', async () => {
+      server.use(
+        http.get(`/api/projects/${PROJECT_ID}/templates`, () =>
+          HttpResponse.json({ success: true, data: [] }),
+        ),
+      )
+
+      render(<TemplatesSection />)
+
+      await waitFor(() =>
+        expect(screen.getByTestId('templates-empty-new-button')).toBeInTheDocument(),
+      )
+
+      fireEvent.click(screen.getByTestId('templates-empty-new-button'))
+      const dialog = await screen.findByTestId('new-template-dialog')
+      expect(dialog).toBeInTheDocument()
+    })
+
+    it('does not render the inline New Template action when the search filter is the only reason the list is empty', async () => {
+      render(<TemplatesSection />)
+
+      await waitFor(() =>
+        expect(screen.getByTestId('template-row-proposal')).toBeInTheDocument(),
+      )
+
+      fireEvent.change(screen.getByTestId('template-search'), {
+        target: { value: 'no-such-template' },
+      })
+
+      await waitFor(() =>
+        expect(screen.queryByTestId('template-row-proposal')).not.toBeInTheDocument(),
+      )
+      expect(screen.queryByTestId('templates-empty-new-button')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('No-project state (T-006)', () => {
+    it('renders the no-project CTA (Select project + Create Project) when no project is selected', async () => {
+      const { baseRender: renderRaw } = await import('./test-utils')
+      const { ProjectProvider } = await import('../src/entities/project/model/ProjectContext')
+      const { MemoryRouter } = await import('react-router-dom')
+      const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query')
+
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+      renderRaw(
+        <MemoryRouter>
+          <QueryClientProvider client={queryClient}>
+            <ProjectProvider initialProjectId={null} initialProjects={[]}>
+              <TemplatesSection />
+            </ProjectProvider>
+          </QueryClientProvider>
+        </MemoryRouter>,
+      )
+
+      expect(screen.getByTestId('no-project-select-button')).toBeInTheDocument()
+      expect(screen.getByTestId('no-project-create-button')).toBeInTheDocument()
+      expect(screen.queryByText('No project selected')).not.toBeInTheDocument()
     })
   })
 })

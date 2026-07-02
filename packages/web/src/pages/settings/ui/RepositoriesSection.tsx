@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRepositories, useAddRepository, useRemoveRepository, useSetDefaultRepository } from '../../../entities/project'
+import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Input } from '@/shared/ui/components/input'
@@ -53,6 +54,7 @@ export function RepositoriesSection({ projectId }: Props) {
   const [newGitUrl, setNewGitUrl] = useState('')
   const [newBranch, setNewBranch] = useState('main')
   const [showForm, setShowForm] = useState(false)
+  const [pendingRemoveName, setPendingRemoveName] = useState<string | null>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const repositoryList = repositories ?? []
   const hasRepositories = repositoryList.length > 0
@@ -80,6 +82,31 @@ export function RepositoriesSection({ projectId }: Props) {
     setNewName('')
     setNewGitUrl('')
     setNewBranch('main')
+  }
+
+  function requestRemove(repoName: string) {
+    setPendingRemoveName(repoName)
+  }
+
+  function cancelRemove() {
+    if (removeRepo.isPending) return
+    setPendingRemoveName(null)
+  }
+
+  function confirmRemove() {
+    if (!pendingRemoveName) return
+    const repoName = pendingRemoveName
+    removeRepo.mutate(
+      { projectId, repoName },
+      {
+        onSuccess: () => {
+          setPendingRemoveName(null)
+        },
+        onError: () => {
+          setPendingRemoveName(null)
+        },
+      },
+    )
   }
 
   return (
@@ -158,7 +185,7 @@ export function RepositoriesSection({ projectId }: Props) {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => removeRepo.mutate({ projectId, repoName: repo.name })}
+                      onClick={() => requestRemove(repo.name)}
                       className="min-h-11 px-3 py-2 text-xs text-red-700 hover:text-red-800 hover:bg-red-50"
                       data-testid={`repository-remove-${repo.name}`}
                     >
@@ -227,6 +254,25 @@ export function RepositoriesSection({ projectId }: Props) {
           </CardSection>
         )}
       </div>
+
+      <AlertDialog
+        open={pendingRemoveName !== null}
+        onOpenChange={(open) => {
+          if (!open) cancelRemove()
+        }}
+        title="Remove this repository?"
+        description={
+          pendingRemoveName
+            ? `The repository '${pendingRemoveName}' will be removed from this project. This action cannot be undone.`
+            : 'This repository will be removed from this project.'
+        }
+        confirmLabel={removeRepo.isPending ? 'Removing...' : 'Remove'}
+        cancelLabel="Cancel"
+        tone="destructive"
+        loading={removeRepo.isPending}
+        onConfirm={confirmRemove}
+        data-testid="repository-remove-alert"
+      />
     </SettingsSection>
   )
 }

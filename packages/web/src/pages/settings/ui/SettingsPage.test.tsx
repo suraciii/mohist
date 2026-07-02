@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Project } from '../../../entities/project'
 import { ProjectProvider } from '../../../entities/project'
 import { SidebarProvider } from '@/shared/ui/components/sidebar'
+import type { AgentRuntimeConfig, GeneralConfig } from '../../../entities/settings'
 import { SettingsPage } from './SettingsPage'
 
 const useRepositoriesMock = vi.fn()
@@ -19,6 +20,22 @@ vi.mock('../../../entities/project', async (importOriginal) => {
     useAddRepository: () => ({ mutate: vi.fn(), isPending: false }),
     useRemoveRepository: () => ({ mutate: vi.fn(), isPending: false }),
     useSetDefaultRepository: () => ({ mutate: vi.fn(), isPending: false }),
+  }
+})
+
+const settingsClient = vi.hoisted(() => ({
+  getAgentRuntime: vi.fn(),
+  getConfig: vi.fn(),
+  updateAgentRuntime: vi.fn(),
+}))
+
+vi.mock('../../../entities/settings/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/settings/api/client')>()
+  return {
+    ...actual,
+    getAgentRuntime: settingsClient.getAgentRuntime,
+    getConfig: settingsClient.getConfig,
+    updateAgentRuntime: settingsClient.updateAgentRuntime,
   }
 })
 
@@ -420,5 +437,164 @@ describe('SettingsSubNav overflow affordance', () => {
         Object.defineProperty(HTMLElement.prototype, 'scrollHeight', originalScrollHeight)
       }
     }
+  })
+})
+
+const DEFAULT_RUNTIME: AgentRuntimeConfig = {
+  timeout: 1800000,
+  stageTimeout: 3600000,
+  taskTimeout: 600000,
+  maxConcurrent: 8,
+  maxGracePeriods: 2,
+  pollInterval: 30000,
+}
+
+const DEFAULT_CONFIG: GeneralConfig = {
+  agentTimeout: 600,
+  taskTimeout: 600,
+  stageTimeout: 3600,
+  maxConcurrentAgents: 3,
+  maxGracePeriods: 3,
+  pollInterval: 5000,
+  logLevel: 'INFO',
+}
+
+function getInputByLabel(label: string): HTMLInputElement {
+  const labelEl = screen.getByText(label).closest('label')
+  if (!labelEl) throw new Error(`No label for ${label}`)
+  const wrapper = labelEl.parentElement
+  if (!wrapper) throw new Error(`No wrapper for label ${label}`)
+  const input = wrapper.querySelector('input')
+  if (!input) throw new Error(`No input for label ${label}`)
+  return input as HTMLInputElement
+}
+
+describe('SettingsSubNav dirty-guard (T-004)', () => {
+  beforeEach(() => {
+    settingsClient.getAgentRuntime.mockResolvedValue(DEFAULT_RUNTIME)
+    settingsClient.getConfig.mockResolvedValue(DEFAULT_CONFIG)
+    settingsClient.updateAgentRuntime.mockResolvedValue(DEFAULT_RUNTIME)
+    useRepositoriesMock.mockReturnValue({ data: [], isLoading: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+    window.localStorage.clear()
+    vi.clearAllMocks()
+  })
+
+  it('proceeds with sub-nav navigation when the Agent form is clean (no prompt)', async () => {
+    renderSettings('/settings/agent')
+
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId('settings-subnav-preferences'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('preferences-theme-card')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('settings-subnav-preferences')).toHaveAttribute('aria-current', 'page')
+    expect(screen.queryByTestId('settings-dirty-discard-alert')).not.toBeInTheDocument()
+  })
+
+  it('opens the discard dialog when selecting another tab while the Agent form is dirty', async () => {
+    renderSettings('/settings/agent')
+
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
+
+    const sessionInput = getInputByLabel('Session Timeout')
+    fireEvent.change(sessionInput, { target: { value: '42' } })
+
+    fireEvent.click(screen.getByTestId('settings-subnav-preferences'))
+
+    const dialog = await screen.findByTestId('settings-dirty-discard-alert')
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getByText('Discard unsaved changes?')).toBeInTheDocument()
+    expect(within(dialog).getByText(/You have unsaved changes/i)).toBeInTheDocument()
+    expect(within(dialog).getByTestId('settings-dirty-discard-alert-confirm')).toBeInTheDocument()
+    expect(within(dialog).getByTestId('settings-dirty-discard-alert-cancel')).toBeInTheDocument()
+
+    expect(screen.getByTestId('settings-subnav-agent')).toHaveAttribute('aria-current', 'page')
+    expect(screen.queryByTestId('preferences-theme-card')).not.toBeInTheDocument()
+  })
+
+  it('keeps the dirty form intact when the discard dialog is cancelled', async () => {
+    renderSettings('/settings/agent')
+
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
+
+    const sessionInput = getInputByLabel('Session Timeout') as HTMLInputElement
+    fireEvent.change(sessionInput, { target: { value: '42' } })
+    expect(sessionInput.value).toBe('42')
+
+    fireEvent.click(screen.getByTestId('settings-subnav-preferences'))
+
+    const dialog = await screen.findByTestId('settings-dirty-discard-alert')
+    fireEvent.click(within(dialog).getByTestId('settings-dirty-discard-alert-cancel'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('settings-dirty-discard-alert')).not.toBeInTheDocument()
+    })
+
+    expect(screen.getByTestId('settings-subnav-agent')).toHaveAttribute('aria-current', 'page')
+    expect(screen.queryByTestId('preferences-theme-card')).not.toBeInTheDocument()
+
+    const sessionInputAfter = getInputByLabel('Session Timeout') as HTMLInputElement
+    expect(sessionInputAfter.value).toBe('42')
+  })
+
+  it('navigates to the requested tab after the dirty dialog is confirmed', async () => {
+    renderSettings('/settings/agent')
+
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
+
+    const sessionInput = getInputByLabel('Session Timeout')
+    fireEvent.change(sessionInput, { target: { value: '42' } })
+
+    fireEvent.click(screen.getByTestId('settings-subnav-preferences'))
+
+    const dialog = await screen.findByTestId('settings-dirty-discard-alert')
+    fireEvent.click(within(dialog).getByTestId('settings-dirty-discard-alert-confirm'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('preferences-theme-card')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('settings-subnav-preferences')).toHaveAttribute('aria-current', 'page')
+    expect(screen.queryByTestId('settings-dirty-discard-alert')).not.toBeInTheDocument()
+  })
+
+  it('clears dirty state after navigating away so the next tab switch is unguarded', async () => {
+    renderSettings('/settings/agent')
+
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
+
+    const sessionInput = getInputByLabel('Session Timeout')
+    fireEvent.change(sessionInput, { target: { value: '42' } })
+
+    fireEvent.click(screen.getByTestId('settings-subnav-preferences'))
+
+    const dialog = await screen.findByTestId('settings-dirty-discard-alert')
+    fireEvent.click(within(dialog).getByTestId('settings-dirty-discard-alert-confirm'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('preferences-theme-card')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId('settings-subnav-system'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-subnav-system')).toHaveAttribute('aria-current', 'page')
+    })
+    expect(screen.queryByTestId('settings-dirty-discard-alert')).not.toBeInTheDocument()
   })
 })

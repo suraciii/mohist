@@ -12,9 +12,12 @@ import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { useProject } from '../../../entities/project'
 import { SettingsSearch } from '@/features/settings-search'
 import {
+  getSectionMeta,
   isSettingsSectionKey,
   type SettingsSectionKey,
 } from '../lib/sections'
+import { SettingsDirtyProvider } from '../lib/SettingsDirtyContext'
+import { NoProjectCard } from './NoProjectCard'
 import { SettingsSubNav } from './SettingsSubNav'
 
 function SectionContent({ section }: { section: SettingsSectionKey }) {
@@ -29,13 +32,13 @@ function SectionContent({ section }: { section: SettingsSectionKey }) {
       return currentProject ? (
         <InboxSubscriptionSection />
       ) : (
-        <div className="text-sm text-muted-foreground">No project selected</div>
+        <NoProjectCard title={getSectionMeta(section).label} />
       )
     case 'repositories':
       return currentProject ? (
         <RepositoriesSection projectId={currentProject.id} />
       ) : (
-        <div className="text-sm text-muted-foreground">No project selected</div>
+        <NoProjectCard title={getSectionMeta(section).label} />
       )
     case 'workflows':
       return <WorkflowProfilesSection />
@@ -45,7 +48,7 @@ function SectionContent({ section }: { section: SettingsSectionKey }) {
       return currentProject ? (
         <LabelCatalogSection />
       ) : (
-        <div className="text-sm text-muted-foreground">No project selected</div>
+        <NoProjectCard title={getSectionMeta(section).label} />
       )
     case 'system':
       return <SystemSettingsSection />
@@ -64,17 +67,19 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto">
-      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">
-        <h1 className="sr-only">Settings</h1>
-        <div className="flex flex-col gap-6 md:flex-row">
-          <SettingsSubNav activeSection={section} />
-          <div className="flex-1 min-w-0" data-testid="settings-section">
-            <SectionContent section={section} />
+    <SettingsDirtyProvider>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">
+          <h1 className="sr-only">Settings</h1>
+          <div className="flex flex-col gap-6 md:flex-row">
+            <SettingsSubNav activeSection={section} />
+            <div className="flex-1 min-w-0" data-testid="settings-section">
+              <SectionContent section={section} />
+            </div>
           </div>
         </div>
+        <SettingsSearch />
       </div>
-      <SettingsSearch />
-    </div>
+    </SettingsDirtyProvider>
   )
 }
