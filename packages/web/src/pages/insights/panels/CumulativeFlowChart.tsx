@@ -162,9 +162,19 @@ export function CumulativeFlowChart() {
 
   return (
     <section data-testid="cumulative-flow-chart" aria-label="Cumulative Flow">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-        Cumulative Flow
-      </h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Cumulative Flow
+        </h3>
+        {hasSnapshotData(data) && (
+          <span
+            data-testid="cumulative-flow-chart-window"
+            className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs tabular-nums text-muted-foreground"
+          >
+            {formatDayLabel(data.rangeFrom)} – {formatDayLabel(data.rangeTo)}
+          </span>
+        )}
+      </div>
       <ChartContainer
         status={status}
         emptyAction={

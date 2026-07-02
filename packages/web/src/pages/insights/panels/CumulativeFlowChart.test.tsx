@@ -500,4 +500,39 @@ describe('CumulativeFlowChart', () => {
 
     expect(screen.getByText('Cumulative Flow')).toBeInTheDocument()
   })
+
+  // --- Window annotation ---
+
+  it('renders a window badge derived from the endpoint range when snapshots exist', () => {
+    mockMatchMedia(false)
+    mockUseCumulativeFlow.mockReturnValue({
+      data: buildPopulatedData({
+        rangeFrom: '2026-04-02',
+        rangeTo: '2026-06-30',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    render(<CumulativeFlowChart />)
+
+    const badge = screen.getByTestId('cumulative-flow-chart-window')
+    expect(badge).toBeInTheDocument()
+    expect(badge.textContent).toContain('Apr 2')
+    expect(badge.textContent).toContain('Jun 30')
+  })
+
+  it('hides the window badge in the empty state (no range to show)', () => {
+    mockMatchMedia(false)
+    mockUseCumulativeFlow.mockReturnValue({
+      data: buildEmptySeries(),
+      isLoading: false,
+      isError: false,
+    })
+
+    render(<CumulativeFlowChart />)
+
+    expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
+    expect(screen.queryByTestId('cumulative-flow-chart-window')).not.toBeInTheDocument()
+  })
 })

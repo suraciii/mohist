@@ -90,6 +90,14 @@ export function FtrTrendChart() {
           First-Time-Right Trend
         </h3>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {trend && bucketCount > 0 && (
+            <span
+              data-testid="ftr-trend-chart-window"
+              className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 tabular-nums"
+            >
+              {formatBoundaryLabel(trend.from)} – {formatBoundaryLabel(trend.to)}
+            </span>
+          )}
           <label
             className="flex items-center gap-1.5 cursor-pointer select-none tabular-nums"
             data-testid="ftr-trend-overlay-toggle"
