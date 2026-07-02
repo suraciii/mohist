@@ -593,7 +593,7 @@ describe('AttentionHero - all-clear state', () => {
     expect(screen.queryByText('Checking attention')).not.toBeInTheDocument()
   })
 
-  it('renders the all-clear state with All clear message and Productivity placeholder when no items and runner available', () => {
+  it('renders the all-clear state with All clear message and excludes the Productivity placeholder when no items and runner available', () => {
     mocks.issues = []
     mocks.agentStatus = makeAgentStatus({ runnerAvailable: true })
 
@@ -603,7 +603,7 @@ describe('AttentionHero - all-clear state', () => {
     const root = screen.getByTestId('dashboard-zone-attention')
     expect(root).toBeInTheDocument()
     expect(root).toHaveAttribute('data-zone', 'attention')
-    expect(screen.getByTestId('productivity-placeholder')).toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-placeholder')).not.toBeInTheDocument()
     expect(screen.queryByTestId('attention-item')).not.toBeInTheDocument()
     expect(screen.queryByTestId('runner-down-entry')).not.toBeInTheDocument()
   })
@@ -640,7 +640,7 @@ describe('AttentionHero - all-clear state', () => {
     renderHero()
 
     expect(screen.getByText('All clear')).toBeInTheDocument()
-    expect(screen.getByTestId('productivity-placeholder')).toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-placeholder')).not.toBeInTheDocument()
   })
 })
 

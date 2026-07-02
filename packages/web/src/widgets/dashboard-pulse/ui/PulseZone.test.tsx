@@ -99,7 +99,7 @@ describe('PulseZone', () => {
     expect(within(header).getByTestId('pulse-slots')).toHaveTextContent('0/8 slots used')
   })
 
-  it('renders the four status pills with counts sourced from the activity summary', () => {
+  it('does not render lifecycle status pills and keeps the slot-usage indicator', () => {
     mocks.activity = {
       summary: { active: 2, waiting: 1, completed: 4, failed: 1, slots: { active: 2, max: 8 } },
       sessions: [],
@@ -108,11 +108,12 @@ describe('PulseZone', () => {
 
     renderZone()
 
-    const pills = screen.getByTestId('pulse-status-pills')
-    expect(within(pills).getByTestId('pulse-pill-active')).toHaveTextContent('2')
-    expect(within(pills).getByTestId('pulse-pill-waiting')).toHaveTextContent('1')
-    expect(within(pills).getByTestId('pulse-pill-completed')).toHaveTextContent('4')
-    expect(within(pills).getByTestId('pulse-pill-failed')).toHaveTextContent('1')
+    expect(screen.queryByTestId('pulse-status-pills')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('pulse-pill-active')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('pulse-pill-waiting')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('pulse-pill-completed')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('pulse-pill-failed')).not.toBeInTheDocument()
+    expect(screen.getByTestId('pulse-slots')).toHaveTextContent('2/8 slots used')
   })
 
   it('still shows 0/max when the active session list is empty', () => {
