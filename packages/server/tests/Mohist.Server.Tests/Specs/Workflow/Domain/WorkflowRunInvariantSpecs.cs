@@ -8,7 +8,7 @@ namespace Mohist.Server.Tests.Specs.Workflow.Domain;
 
 public class WorkflowRunInvariantSpecs
 {
-    private static WorkflowRun BuildRun(bool requiresApproval = false)
+    private static WorkflowRun BuildRun(bool requiresApproval = false, bool assign = true)
     {
         var run = WorkflowRun.Create("wr_1", new WorkflowDefinition("spec/workflow", [
             new StageDefinition("build", [new("compile", "Compile", "spec/task")], [],
@@ -16,6 +16,8 @@ public class WorkflowRunInvariantSpecs
         ]));
         run.Start();
         run.InitializeStage([new("compile", "Compile", "spec/task")], []);
+        if (assign)
+            run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         return run;
     }
 
@@ -26,6 +28,7 @@ public class WorkflowRunInvariantSpecs
         ]));
         run.Start();
         run.InitializeStage([new("compile", "Compile", "spec/task"), new("test", "Test", "spec/task")], []);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         return run;
     }
 
@@ -34,7 +37,7 @@ public class WorkflowRunInvariantSpecs
     [Fact]
     public void SecondAssignmentRejectedWhenOneExists()
     {
-        var run = BuildRun();
+        var run = BuildRun(assign: false);
         run.AssignTo("runner-1", DateTimeOffset.UtcNow);
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -51,7 +54,7 @@ public class WorkflowRunInvariantSpecs
     [Fact]
     public void RunningTaskRunnerIdEqualsAssignmentRunnerId()
     {
-        var run = BuildRun();
+        var run = BuildRun(assign: false);
         run.AssignTo("runner-1", DateTimeOffset.UtcNow);
 
         run.StartTask("work-1", "runner-1");
@@ -65,11 +68,11 @@ public class WorkflowRunInvariantSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void RunningRunWithNoRunningTaskStaysRunning()
+    public void ReadyRunWithNoRunningTaskHasNoInFlightWork()
     {
         var run = BuildRun();
 
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.All(run.CurrentStage().Tasks, t => Assert.Equal(TaskRunStatus.Pending, t.Status));
         Assert.DoesNotContain(run.CurrentStage().Tasks, t => t.Status == TaskRunStatus.Running);
     }
@@ -80,7 +83,7 @@ public class WorkflowRunInvariantSpecs
     public void PausedOnlyResultsFromWorkflowLevelCommand()
     {
         var run = BuildRun();
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
         var events = run.Pause();
 
@@ -94,7 +97,7 @@ public class WorkflowRunInvariantSpecs
     public void StoppedOnlyResultsFromWorkflowLevelCommand()
     {
         var run = BuildRun();
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
         var events = run.Stop();
 
@@ -108,7 +111,7 @@ public class WorkflowRunInvariantSpecs
     public void AwaitingApprovalResultsFromWorkflowApprovalGate()
     {
         var run = BuildRun(requiresApproval: true);
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
         run.StartTask("work-1", "runner-1");
         var events = run.CompleteTask();
@@ -124,7 +127,7 @@ public class WorkflowRunInvariantSpecs
     public void TaskCompletionDoesNotDeriveWorkflowStatus()
     {
         var run = BuildMultiTaskRun();
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
         run.StartTask("work-1", "runner-1");
         run.CompleteTask();
@@ -163,14 +166,14 @@ public class WorkflowRunInvariantSpecs
     public void NonTerminalTaskTransitionDoesNotRecomputeWorkflowStatus()
     {
         var run = BuildMultiTaskRun();
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
         run.StartTask("work-1", "runner-1");
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
         Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks[0].Status);
 
         run.CompleteTask();
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.Equal(TaskRunStatus.Completed, run.CurrentStage().Tasks[0].Status);
     }
 }

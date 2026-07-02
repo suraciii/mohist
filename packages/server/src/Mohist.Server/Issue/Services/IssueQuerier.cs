@@ -1410,7 +1410,7 @@ public class IssueQuerier : IScopedService
                 cycleSeconds = span.TotalSeconds;
             }
 
-            var approvalGateWaitSeconds = SumApprovalGateWaitSeconds(issueRunIds, workflows);
+            var approvalGateWaitSeconds = SumApprovalGateWaitSeconds(durationRunIds, workflows);
 
             var sumStageSeconds = stageDurations.Values.Sum();
 

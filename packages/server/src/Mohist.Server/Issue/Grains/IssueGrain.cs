@@ -323,9 +323,13 @@ public class IssueGrain : Grain, IIssueGrain
         // the run is not stopped/terminal — a Done or archived issue that
         // preserved its reference is not a running workflow, and Close()
         // already rejects Done/archived itself.
+        // The new WorkflowRunStatus state machine splits the old single
+        // "running" into Created/Pending/Ready/Running; all four
+        // represent a non-terminal, controllable workflow that the user
+        // must explicitly stop before closing the issue.
         var wfStatus = await GetControllableWorkflowStatusAsync();
         if (wfStatus is { } running
-            && running is "running" or "paused" or "awaiting-approval")
+            && running is "created" or "pending" or "ready" or "running" or "paused" or "awaiting-approval")
         {
             throw new InvalidOperationException($"Cannot close issue while workflow is {running}. Stop the workflow first.");
         }

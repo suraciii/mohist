@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
@@ -38,7 +39,7 @@ public class WorkflowQuerier : IScopedService
             .FirstOrDefaultAsync();
         if (runJson is null) return null;
 
-        var run = JsonSerializer.Deserialize<WorkflowRun>(runJson, JSON.Options);
+        var run = DeserializeWorkflowRun(runJson);
         if (run is null) return null;
 
         var definition = (await _profileManager.LoadTemplateAsync(workflowRunId)).Structure;
@@ -104,7 +105,7 @@ public class WorkflowQuerier : IScopedService
             .FirstOrDefaultAsync();
         if (runJson is null) return null;
 
-        var run = JsonSerializer.Deserialize<WorkflowRun>(runJson, JSON.Options);
+        var run = DeserializeWorkflowRun(runJson);
         return run?.Workspace;
     }
 
@@ -134,7 +135,7 @@ public class WorkflowQuerier : IScopedService
             .FirstOrDefaultAsync();
 
         var run = runJson is not null
-            ? JsonSerializer.Deserialize<WorkflowRun>(runJson, JSON.Options)
+            ? DeserializeWorkflowRun(runJson)
             : null;
         return run?.HasIncompleteTaskWithUses(uses) ?? false;
     }
@@ -148,9 +149,12 @@ public class WorkflowQuerier : IScopedService
             .FirstOrDefaultAsync();
 
         var run = runJson is not null
-            ? JsonSerializer.Deserialize<WorkflowRun>(runJson, JSON.Options)
+            ? DeserializeWorkflowRun(runJson)
             : null;
         return run?.HasIncompleteTaskById(id) ?? false;
     }
+
+    private static WorkflowRun? DeserializeWorkflowRun(string json) =>
+        JsonSerializer.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateAssignmentJson(json), JSON.Options);
 
 }

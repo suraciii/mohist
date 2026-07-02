@@ -9,6 +9,10 @@ public static partial class WorkflowRunExtensions
     {
         public IReadOnlyList<WorkflowEvent> StartTask(string workId, string runnerId)
         {
+            if (run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
+                throw new InvalidOperationException($"WorkflowRun is {run.Status}, start task requires Ready or Running");
+            run.RequireAssignedTo(runnerId);
+
             var current = run.CurrentStage();
             var task = current.CurrentTask();
             if (task is null) return [];
@@ -17,6 +21,7 @@ public static partial class WorkflowRunExtensions
             task.StartedAt = DateTimeOffset.UtcNow;
             task.WorkId = workId;
             task.RunnerId = runnerId;
+            run.Status = WorkflowRunStatus.Running;
             return [new TaskStarted(current.Id, task.Id, runnerId)];
         }
 
@@ -89,7 +94,7 @@ public static partial class WorkflowRunExtensions
             current.Failure = null;
             current.Status = StageRunStatus.Running;
             run.Failure = null;
-            run.Status = WorkflowRunStatus.Running;
+            run.Status = WaitingForDispatchStatus(run);
 
             return [new TaskFailed(current.Id, task.Id, result.Reason)];
         }

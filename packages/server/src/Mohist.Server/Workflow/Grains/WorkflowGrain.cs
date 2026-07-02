@@ -67,6 +67,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         _run = await _runStore.LoadAsync(GrainKey);
+        if (_run is not null && _run.ReconcileReadyStatusWithInFlightWork())
+        {
+            await _runStore.SaveAsync(_run, ct);
+            _runDirty = false;
+        }
 
         _lastKnownRunnerId = _run?.Assignment?.RunnerId;
     }
@@ -126,7 +131,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
 
-        if (_run.Status is not (WorkflowRunStatus.Running or WorkflowRunStatus.Paused))
+        if (_run.Status is not (WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
 // Flip the run status to Stopped before clearing executable state so the
@@ -261,12 +266,16 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public async Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId)
     {
         if (_run is null) return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "missing");
-        if (_run.Status != WorkflowRunStatus.Running) return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
+        if (_run.Status.IsTerminal() || _run.Status is WorkflowRunStatus.Created or WorkflowRunStatus.Paused or WorkflowRunStatus.AwaitingApproval)
+            return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
         if (_run.Assignment is not null)
         {
             if (!string.Equals(_run.Assignment.RunnerId, runnerId, StringComparison.Ordinal))
                 return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, _run.Assignment.RunnerId, "already-assigned");
+            return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, runnerId);
         }
+        if (_run.Status != WorkflowRunStatus.Pending || !_run.HasDispatchableWork())
+            return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
         if (_run.Assignment is null)
         {
             _run.AssignTo(runnerId, DateTimeOffset.UtcNow);
@@ -279,7 +288,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     public async Task<WorkItem?> PollWorkAsync(string runnerId)
     {
-        if (_run is null || _run.Status != WorkflowRunStatus.Running)
+        if (_run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
             return null;
 
         if (!_run.IsAssignedTo(runnerId))
@@ -288,6 +297,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var active = TryBuildActiveWorkItem(runnerId);
         if (active is not null)
             return active;
+
+        if (_run.Status == WorkflowRunStatus.Running)
+            return null;
 
         var work = _run.NextWork();
         if (work is null)
@@ -404,6 +416,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 check.StartedAt = now;
             }
         }
+        _run!.Status = WorkflowRunStatus.Running;
         return checksWorkId;
     }
 
@@ -492,7 +505,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public Task<bool> IsStoppedOrTerminalAsync()
     {
         if (_run is null) return Task.FromResult(true);
-        return Task.FromResult(_run.Status is WorkflowRunStatus.Stopped or WorkflowRunStatus.Completed or WorkflowRunStatus.Failed);
+        return Task.FromResult(_run.IsTerminal());
     }
 
     public Task<string?> GetAssignedRunnerIdAsync()

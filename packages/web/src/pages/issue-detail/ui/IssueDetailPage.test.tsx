@@ -1081,3 +1081,128 @@ describe('IssueDetailPage Ask Agent entry (T-005)', () => {
     expect(callArg).toMatch(/\/agent-sessions\/new\?issue=14(&|$)/)
   })
 })
+
+describe('IssueDetailPage workflow run status pill (issue-318 T-005)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseIssueDiff.mockReturnValue({ data: undefined })
+    mockUseIssueCommits.mockReturnValue({ data: undefined })
+    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders the pending-runner pill when the workflow timeline status is pending', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'pending',
+        health: 'active',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+    mockUseWorkflowTimeline.mockReturnValue({
+      data: {
+        workflowRunId: 'wr-1',
+        status: 'pending',
+        currentStage: 'build',
+        pendingWork: null,
+        stages: [],
+        availableActions: [],
+      },
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('workflow-run-status-pending')).toBeTruthy())
+    const pill = screen.getByTestId('workflow-run-status-pending')
+    expect(pill.dataset.status).toBe('pending')
+  })
+
+  it('renders the ready-to-run pill when the workflow timeline status is ready', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'ready',
+        health: 'active',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+    mockUseWorkflowTimeline.mockReturnValue({
+      data: {
+        workflowRunId: 'wr-1',
+        status: 'ready',
+        currentStage: 'build',
+        pendingWork: { workId: 'build.1', workType: 'task', stage: 'build', title: 'Build', uses: null },
+        stages: [],
+        availableActions: [],
+      },
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('workflow-run-status-ready')).toBeTruthy())
+    const pill = screen.getByTestId('workflow-run-status-ready')
+    expect(pill.dataset.status).toBe('ready')
+  })
+
+  it('renders the running pill when the workflow timeline status is running', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+    mockUseWorkflowTimeline.mockReturnValue({
+      data: {
+        workflowRunId: 'wr-1',
+        status: 'running',
+        currentStage: 'build',
+        pendingWork: { workId: 'build.1', workType: 'task', stage: 'build', title: 'Build', uses: null },
+        stages: [],
+        availableActions: [],
+      },
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('workflow-run-status-running')).toBeTruthy())
+    const pill = screen.getByTestId('workflow-run-status-running')
+    expect(pill.dataset.status).toBe('running')
+  })
+
+  it('does not render a workflow run status pill for backlog issues without a timeline', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('issue-detail-header')).toBeInTheDocument())
+    expect(screen.queryByTestId('workflow-run-status-unknown')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-run-status-pending')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-run-status-ready')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-run-status-running')).not.toBeInTheDocument()
+  })
+})

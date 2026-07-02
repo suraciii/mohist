@@ -246,7 +246,9 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         var workflow = await CreateAndStartAsync(SingleStage());
 
         var status = await workflow.GetRunStatusAsync();
-        Assert.Equal("Running", status);
+        // After Start without a runner assignment, the workflow sits in
+        // Pending — the assignment pool will pick it up.
+        Assert.Equal("Pending", status);
 
         var runnerId = await RegisterRunnerAsync();
         _runnerId = runnerId;

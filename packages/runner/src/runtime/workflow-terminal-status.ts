@@ -2,7 +2,8 @@
 //
 // The server's authoritative WorkflowRunStatus enum lives at
 // `packages/server/.../Workflow/Domain/Run/WorkflowRun.cs`:
-//   Pending, Running, AwaitingApproval, Paused, Stopped, Completed, Failed
+//   Created, Pending, Ready, Running, AwaitingApproval, Paused,
+//   Stopped, Completed, Failed
 //
 // The runner is the consumer: it receives the canonical enum name as a
 // string (via SignalR push or convergence batch query) and decides what
@@ -14,9 +15,21 @@
 // the server reports but we don't recognize is conservatively treated as
 // non-terminal — better to leave a workspace `active` for a future
 // convergence tick than to mark it eligible by mistake.
+//
+// The union deliberately matches the new state-machine vocabulary
+// (D1/D7): `Created` is "built but not started", `Pending` is "started,
+// waiting for any runner to claim", `Ready` is "assigned, waiting for
+// the bound runner to pick up work". The cleanup-safety logic only
+// inspects `TERMINAL_WORKFLOW_STATUSES`; widening the union to all
+// non-terminal values (including the new `Created` and `Ready`) keeps
+// the type contract in sync with the server enum without any
+// behavioral change — anything not in the terminal set continues to
+// block automatic workspace removal by construction.
 
 export type WorkflowRunStatusName =
+  | "Created"
   | "Pending"
+  | "Ready"
   | "Running"
   | "AwaitingApproval"
   | "Paused"

@@ -511,7 +511,10 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await workflow.AddTaskAsync(new RuntimeTaskInput("rebase", "Rebase", "mohist/rebase", InvalidateChecks: true));
 
         var afterAdd = await GetQuerier().GetStatusAsync(_workflowId!);
-        Assert.Equal("running", afterAdd!.Status);
+        // The AwaitingApproval is cleared and the new rebase task is
+        // dispatchable. The runner is still assigned, so the run lands
+        // on Ready (no in-flight work yet).
+        Assert.Equal("ready", afterAdd!.Status);
         Assert.Equal("pending", afterAdd.Stages[0].Checks[0].Status);
 
         var (rebase, rebaseRunnerId) = await PollWorkAnyAsync();

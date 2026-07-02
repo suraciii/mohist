@@ -7,7 +7,7 @@ namespace Mohist.Server.Workflow.Services;
 
 public static class WorkflowStatusMapper
 {
-    private static string FrontendStatus(string raw) =>
+    public static string FrontendStatus(string raw) =>
         raw.Equals("AwaitingApproval", StringComparison.Ordinal)
             ? "awaiting-approval"
             : raw.ToLowerInvariant();
@@ -185,10 +185,10 @@ public static class WorkflowStatusMapper
         return actions;
     }
 
-    private static PendingWorkView? BuildPendingWork(WorkflowRun run)
+    public static PendingWorkView? BuildPendingWork(WorkflowRun run)
     {
         if (run.CurrentStageId is null) return null;
-        if (run.Status != WorkflowRunStatus.Running) return null;
+        if (run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running)) return null;
         var stage = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
         if (stage is null) return null;
 

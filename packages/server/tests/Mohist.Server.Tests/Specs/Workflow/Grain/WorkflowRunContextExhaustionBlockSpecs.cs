@@ -27,6 +27,7 @@ public class WorkflowRunContextExhaustionBlockSpecs
         var run = WorkflowRun.Create("wr-block-1", def);
         run.Start();
         run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         run.StartTask("work-1", "runner-1");
         run.FailTask(new TaskResult("failed", "compile error"));
         Assert.Equal(FailureReason.TaskFailed, run.Failure?.Reason);
@@ -60,6 +61,7 @@ public class WorkflowRunContextExhaustionBlockSpecs
         var run = WorkflowRun.Create("wr-block-2", def);
         run.Start();
         run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks);
+        run.AssignTo("runner-2", DateTimeOffset.UtcNow);
         run.StartTask("work-2", "runner-2");
         run.FailTask(new TaskResult("failed", "boom"));
 
@@ -83,6 +85,7 @@ public class WorkflowRunContextExhaustionBlockSpecs
         var run = WorkflowRun.Create("wr-block-3", def);
         run.Start();
         run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks);
+        run.AssignTo("runner-3", DateTimeOffset.UtcNow);
         run.StartTask("work-3", "runner-3");
         run.FailTask(new TaskResult("failed", "boom"));
         run.BlockStageWithContextExhaustion(taskId: "task-1.1", contextUsagePercent: 95d, sessionId: null);
@@ -115,6 +118,7 @@ public class WorkflowRunContextExhaustionBlockSpecs
         var run = WorkflowRun.Create("wr-block-4", BuildDefinition());
         run.Start();
         run.InitializeStage(BuildDefinition().Stages[0].Tasks, BuildDefinition().Stages[0].Checks);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         run.StartTask("work-1", "runner-1");
         run.FailTask(new TaskResult("failed", "compile error"));
         run.BlockStageWithContextExhaustion(taskId: "task-1.1", contextUsagePercent: 95d, sessionId: null);
@@ -129,7 +133,7 @@ public class WorkflowRunContextExhaustionBlockSpecs
         // workflow without throwing.
         var events = run.Retry();
         Assert.NotEmpty(events);
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -144,6 +148,7 @@ public class WorkflowRunContextExhaustionBlockSpecs
         var run = WorkflowRun.Create("wr-block-5", def);
         run.Start();
         run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks);
+        run.AssignTo("runner-5", DateTimeOffset.UtcNow);
         run.StartTask("work-5", "runner-5");
         run.FailTask(new TaskResult("failed", "compile error"));
         var original = run.Failure;

@@ -90,7 +90,10 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         var workflow = await StartWorkflowAsync(SingleStage());
 
         var statusBefore = await workflow.GetRunStatusAsync();
-        Assert.Equal("Running", statusBefore);
+        // After Start without a runner assignment, the workflow is in
+        // Pending (started, has dispatchable work, waiting for any
+        // runner to claim).
+        Assert.Equal("Pending", statusBefore);
 
         await workflow.StopAsync("user-stop");
 

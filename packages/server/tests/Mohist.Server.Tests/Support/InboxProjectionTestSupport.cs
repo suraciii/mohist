@@ -212,10 +212,19 @@ internal static class InboxProjectionTestSupport
         connection.Open();
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
+            // Issue-318 T-002 vs T-004: see GrainTestConfig.ConfigureSilo.
+            // The in-memory test DB here is created via raw DbContext, so
+            // it must also suppress the pending-changes warning or
+            // Migrate() throws before the schema fix-up below runs.
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning))
             .Options;
         var factory = new TestDbContextFactory(options);
         using (var db = factory.CreateDbContext())
+        {
             db.Database.Migrate();
+            GrainTestConfig.ApplyWorkflowRunsStatusSchemaFix(db);
+        }
         return new TestDatabase(connection, factory);
     }
 

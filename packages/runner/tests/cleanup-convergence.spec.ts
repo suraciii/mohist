@@ -147,6 +147,59 @@ describe("ConvergenceBackstop", () => {
     expect(registry.get("wr-1")?.phase).toBe("active")
   })
 
+  // T-003: cleanup-guard vocabulary widened to the new enum. The
+  // convergence backstop is the runner-side enforcement point for
+  // `runner-workspace-cleanup/spec.md#Non-eligible workspaces are never
+  // auto-cleaned`: each non-terminal status reported by the server must
+  // leave an active entry active and drop nothing from the registry.
+  // Per the D1 state-machine contract the runner must specifically
+  // tolerate the new `Created` (built not started) and `Ready`
+  // (assigned, waiting for pickup) values — a regression in either
+  // would mark the workspace eligible and trigger automatic removal on
+  // the next retention/budget tick.
+
+  it("RunOnce_OnCreatedStatus_LeavesEntryActive (D1 created — built not started)", async () => {
+    const registry = await makeRegistry()
+    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-created", workspacePath: join(root, "w1") })
+
+    const stub = new StubRunner([{ "wr-created": "Created" }])
+    const backstop = new ConvergenceBackstop(registry, stub)
+
+    const result = await backstop.runOnce(new AbortController().signal)
+
+    expect(result).toEqual({ queried: 1, transitioned: 0, dropped: 0 })
+    expect(registry.get("wr-created")?.phase).toBe("active")
+    expect(registry.get("wr-created")?.terminalAt).toBeNull()
+  })
+
+  it("RunOnce_OnPendingStatus_LeavesEntryActive (D1 pending — waiting for claim)", async () => {
+    const registry = await makeRegistry()
+    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-pending", workspacePath: join(root, "w1") })
+
+    const stub = new StubRunner([{ "wr-pending": "Pending" }])
+    const backstop = new ConvergenceBackstop(registry, stub)
+
+    const result = await backstop.runOnce(new AbortController().signal)
+
+    expect(result).toEqual({ queried: 1, transitioned: 0, dropped: 0 })
+    expect(registry.get("wr-pending")?.phase).toBe("active")
+    expect(registry.get("wr-pending")?.terminalAt).toBeNull()
+  })
+
+  it("RunOnce_OnReadyStatus_LeavesEntryActive (D1 ready — assigned, waiting for pickup)", async () => {
+    const registry = await makeRegistry()
+    await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-ready", workspacePath: join(root, "w1") })
+
+    const stub = new StubRunner([{ "wr-ready": "Ready" }])
+    const backstop = new ConvergenceBackstop(registry, stub)
+
+    const result = await backstop.runOnce(new AbortController().signal)
+
+    expect(result).toEqual({ queried: 1, transitioned: 0, dropped: 0 })
+    expect(registry.get("wr-ready")?.phase).toBe("active")
+    expect(registry.get("wr-ready")?.terminalAt).toBeNull()
+  })
+
   it("RunOnce_OnPausedStatus_LeavesEntryActive", async () => {
     const registry = await makeRegistry()
     await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })

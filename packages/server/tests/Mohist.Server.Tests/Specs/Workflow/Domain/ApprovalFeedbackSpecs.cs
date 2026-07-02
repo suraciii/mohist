@@ -32,6 +32,7 @@ public class ApprovalFeedbackSpecs
         run.InitializeStage(
             [new("draft", "Draft", "spec/task")],
             [new("plan-ok", "Plan OK", "spec/check")]);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         // The new task lifecycle (PR #140) requires a task to transition through
         // Pending → Running → Completed. Mirror that here before completing the
         // draft task so the stage reaches AwaitingApproval.
@@ -65,10 +66,10 @@ public class ApprovalFeedbackSpecs
         Assert.Null(feedback.ResolvedAt);
 
         Assert.Equal(StageRunStatus.Running, current.Status);
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.Null(current.ApprovalStatus);
         Assert.Null(current.Failure);
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -126,6 +127,7 @@ public class ApprovalFeedbackSpecs
         run.InitializeStage(
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")]);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         var current = run.CurrentStage();
         Assert.Equal(StageRunStatus.Running, current.Status);
 
@@ -274,6 +276,7 @@ public class ApprovalFeedbackSpecs
         run.InitializeStage(
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")]);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         run.StartTask("compile.1", "runner-1");
         run.FailTask(new TaskResult("failed", "boom"));
 
@@ -291,7 +294,7 @@ public class ApprovalFeedbackSpecs
         Assert.False(run.IsCurrentStageRetryableFailure());
 
         run.RequestChanges("revise");
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.False(run.IsCurrentStageRetryableFailure());
     }
 

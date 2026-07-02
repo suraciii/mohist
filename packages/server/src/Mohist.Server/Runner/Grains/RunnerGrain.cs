@@ -269,15 +269,13 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         if (persistedCount > 0)
             return persistedCount;
 
-        var dbCount = 0;
-        foreach (var workflowRunId in await _workflowRuns.FindAssignedToAsync(RunnerId))
-        {
-            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
-            var currentWorkId = await workflow.GetCurrentWorkIdAsync();
-            if (!string.IsNullOrWhiteSpace(currentWorkId))
-                dbCount++;
-        }
-        return dbCount;
+        // Issue-318 D4: under the new state machine the previous
+        // FindAssignedToAsync + GetCurrentWorkIdAsync fan-out collapsed to
+        // zero (Ready excludes in-flight work). The dispatch-capacity gate
+        // now reads status = Running AND AssignedRunnerId = <runner>
+        // directly via the STORED Status computed column (no grain
+        // round-trip, no State-deserialize).
+        return await _workflowRuns.CountRunningAssignedToAsync(RunnerId);
     }
 
     public async Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work)
@@ -683,13 +681,16 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         await RemoveStaleWorkflowWorksAsync();
 
+        // Issue-318 D4: FindAssignedToAsync now filters at the DB layer on
+        // status = Ready AND AssignedRunnerId = <runner>. Ready excludes
+        // in-flight work, so every surfaced row is directly pickup-able —
+        // the previous GetCurrentWorkIdAsync busy pre-check
+        // (~104 grain calls/s) is gone. PollWorkAsync itself still
+        // short-circuits null when the run's persisted state disagrees,
+        // so the dropped pre-check is safe.
         foreach (var workflowRunId in await _workflowRuns.FindAssignedToAsync(RunnerId))
         {
             var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
-            var currentWorkId = await workflow.GetCurrentWorkIdAsync();
-            if (!string.IsNullOrWhiteSpace(currentWorkId))
-                continue;
-
             var dispatch = await PollOneWorkflowAsync(workflow, workflowRunId);
             if (dispatch is not null)
                 return dispatch;

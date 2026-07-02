@@ -202,6 +202,15 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             );
             """);
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS \"UQ_StagePopulationSnapshots_ProjectId_Day\" ON \"StagePopulationSnapshots\" (\"ProjectId\", \"Day\");");
+
+        // Issue-318 T-002: Program.cs already calls db.Database.Migrate()
+        // during host startup, but the migration that materializes the
+        // WorkflowRuns STORED status computed column is produced in T-004.
+        // Apply the test-only schema fixup so the new status-filter
+        // queries (FindAssignableAsync / FindAssignedToAsync /
+        // CountRunningAssignedToAsync) have the column and index they
+        // expect. Idempotent — safe to call before/after Migrate().
+        GrainTestConfig.ApplyWorkflowRunsStatusSchemaFix(db);
     }
 
     private static string CreateWebRoot()

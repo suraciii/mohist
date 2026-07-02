@@ -121,10 +121,12 @@ public class WorkflowRetrySessionHealthGuardSpecs
 
             var status = await LoadStatusViewAsync(projectId, issueNumber);
             Assert.NotNull(status);
-            // The retry should have run. The run is back to running and
-            // there is no active failure (the warn band does not block
-            // retry, so the original task-failure is cleared).
-            Assert.Equal("running", status!.Status);
+            // The retry should have run. The run is back to a
+            // dispatchable state with no active failure (the warn band
+            // does not block retry, so the original task-failure is
+            // cleared). The runner is still assigned, so the run lands
+            // on Ready (no in-flight work yet).
+            Assert.Equal("ready", status!.Status);
             Assert.Null(status.Failure);
         }
         finally
