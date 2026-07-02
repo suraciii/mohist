@@ -229,11 +229,40 @@ public sealed record CompletionMetricsBucketDto(
 /// is one of <c>day</c> / <c>week</c>; <c>Window</c> is the trailing
 /// time range the series covers. <c>Buckets</c> is dense: every
 /// bucket in the window is present, even when its counts are zero.
+/// <c>CurrentTotal</c> and <c>PreviousTotal</c> are strictly additive:
+/// the pre-existing <c>Buckets</c> / <c>Window</c> series and the
+/// fixed day/week granularity are unchanged. The two totals are
+/// computed from the same latest-terminal-event classification the
+/// per-bucket series uses, over the current window
+/// <c>[now − W, now]</c> and the immediately-preceding window of the
+/// same length <c>[now − 2W, now − W]</c>. <see cref="CompletionMetricsTotalsDto.SampleCount"/>
+/// is the terminal-issue count in the window — it lets the caller
+/// distinguish a zero-sample (empty) window (<c>SampleCount == 0</c>,
+/// no terminal issues fell in the window) from a genuine
+/// zero-completion window (<c>SampleCount > 0</c>, every terminal
+/// issue cancelled and none completed).
 /// </summary>
 public sealed record CompletionMetricsResponse(
     string Bucket,
     CompletionMetricsWindowDto Window,
-    CompletionMetricsBucketDto[] Buckets);
+    CompletionMetricsBucketDto[] Buckets,
+    CompletionMetricsTotalsDto CurrentTotal,
+    CompletionMetricsTotalsDto PreviousTotal);
+
+/// <summary>
+/// Window-scoped completion totals. <see cref="Completed"/> and
+/// <see cref="Failed"/> aggregate the latest-terminal-event
+/// classification across every issue whose terminal event falls in
+/// the window. <see cref="SampleCount"/> is the number of terminal
+/// issues contributing to the totals in the window — it is the
+/// discriminator that distinguishes the empty (zero-sample) result
+/// (<c>SampleCount == 0</c>) from a genuine zero-completion window
+/// (<c>SampleCount > 0</c>, <c>Completed == 0</c>).
+/// </summary>
+public sealed record CompletionMetricsTotalsDto(
+    int Completed,
+    int Failed,
+    int SampleCount);
 
 public sealed record CompletionMetricsWindowDto(
     string From,

@@ -193,6 +193,154 @@ public class IssueMetricsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task CompletionMetrics_DayBucket_ReturnsBothWindowTotalsFromSeededEvents()
+    {
+        // The fixture's TimeProvider is fixed at 2026-06-30 00:00:00 UTC,
+        // so the current day-window is [2026-06-01, 2026-07-01) and the
+        // previous day-window is [2026-05-02, 2026-06-01). Seed events
+        // in each window and verify both totals.
+        var project = await CreateProjectAsync($"metrics-totals-{Guid.NewGuid():N}");
+        var currentIssue = await CreateIssueAsync(project.Id, "Current window issue");
+        var previousIssue = await CreateIssueAsync(project.Id, "Previous window issue");
+
+        await SeedEventAsync(currentIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(previousIssue.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.Zero));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+
+        Assert.NotNull(payload.CurrentTotal);
+        Assert.NotNull(payload.PreviousTotal);
+        Assert.Equal(1, payload.CurrentTotal.Completed);
+        Assert.Equal(0, payload.CurrentTotal.Failed);
+        Assert.Equal(1, payload.CurrentTotal.SampleCount);
+        Assert.Equal(0, payload.PreviousTotal.Completed);
+        Assert.Equal(1, payload.PreviousTotal.Failed);
+        Assert.Equal(1, payload.PreviousTotal.SampleCount);
+
+        // The existing per-bucket series and window are preserved
+        // unchanged alongside the new totals.
+        Assert.Equal("day", payload.Bucket);
+        Assert.Equal(30, payload.Buckets.Length);
+        Assert.NotNull(payload.Window);
+        Assert.Equal("2026-06-01", payload.Buckets[0].Boundary);
+        Assert.Equal("2026-06-30", payload.Buckets[^1].Boundary);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CompletionMetrics_DayBucket_EmptyPreviousWindowReportsZeroSampleCount()
+    {
+        // No terminal issues in the previous window → SampleCount 0
+        // (the empty / zero-sample result), distinguishable from a
+        // genuine zero-completion window.
+        var project = await CreateProjectAsync($"metrics-empty-prev-{Guid.NewGuid():N}");
+        var currentIssue = await CreateIssueAsync(project.Id, "Current only");
+        await SeedEventAsync(currentIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+
+        Assert.Equal(1, payload.CurrentTotal.SampleCount);
+        Assert.Equal(0, payload.PreviousTotal.Completed);
+        Assert.Equal(0, payload.PreviousTotal.Failed);
+        Assert.Equal(0, payload.PreviousTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CompletionMetrics_DayBucket_GenuineZeroCompletionPreviousWindowIsDistinctFromEmpty()
+    {
+        // Every terminal issue in the previous window cancelled —
+        // a GENUINE zero completion with non-zero SampleCount,
+        // distinguishable from the empty (zero-sample) result.
+        var project = await CreateProjectAsync($"metrics-zero-prev-{Guid.NewGuid():N}");
+        var p1 = await CreateIssueAsync(project.Id, "Cancelled prev 1");
+        var p2 = await CreateIssueAsync(project.Id, "Cancelled prev 2");
+        await SeedEventAsync(p1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(p2.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 25, 11, 0, 0, TimeSpan.Zero));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+
+        Assert.Equal(0, payload.PreviousTotal.Completed);
+        Assert.Equal(2, payload.PreviousTotal.Failed);
+        Assert.Equal(2, payload.PreviousTotal.SampleCount);
+        // Genuine zero has non-zero sample count; the empty result
+        // (SampleCount 0) must be distinguishable from it on the wire.
+        Assert.NotEqual(0, payload.PreviousTotal.SampleCount);
+        Assert.Equal(0, payload.CurrentTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CompletionMetrics_DayBucket_BothWindowTotalsAreAdditiveToExistingResponse()
+    {
+        // The new totals must not displace any existing field. Verify
+        // the existing per-bucket series, window, and bucket granularity
+        // remain intact when totals are populated.
+        var project = await CreateProjectAsync($"metrics-additive-{Guid.NewGuid():N}");
+        var issue = await CreateIssueAsync(project.Id, "Additive check");
+        await SeedEventAsync(issue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+
+        // Existing fields unchanged.
+        Assert.Equal("day", payload.Bucket);
+        Assert.Equal(30, payload.Buckets.Length);
+        Assert.Equal(payload.Buckets[0].Boundary, payload.Window.From[..10]);
+        Assert.Equal(payload.Buckets[^1].Boundary, DateOnly.Parse(payload.Window.To[..10]).AddDays(-1).ToString("yyyy-MM-dd"));
+        // Totals added on top.
+        Assert.NotNull(payload.CurrentTotal);
+        Assert.NotNull(payload.PreviousTotal);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CompletionMetrics_WeekBucket_ReturnsBothWindowTotalsFromSeededEvents()
+    {
+        // Fixture TimeProvider = 2026-06-30 (a Tuesday). The current
+        // ISO week starts on 2026-06-29 (Monday); the current
+        // 12-week window is [2026-04-13, 2026-07-06). The previous
+        // 12-week window is [2026-01-19, 2026-04-13).
+        var project = await CreateProjectAsync($"metrics-week-totals-{Guid.NewGuid():N}");
+        var currentIssue = await CreateIssueAsync(project.Id, "Current week issue");
+        var previousIssue = await CreateIssueAsync(project.Id, "Previous window issue");
+
+        // 2026-06-29 (Monday) → current week window.
+        await SeedEventAsync(currentIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 29, 10, 0, 0, TimeSpan.Zero));
+        // 2026-03-30 (Monday) → previous 12-week window.
+        await SeedEventAsync(previousIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 3, 30, 10, 0, 0, TimeSpan.Zero));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=week");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+
+        Assert.Equal("week", payload.Bucket);
+        Assert.Equal(12, payload.Buckets.Length);
+        Assert.Equal(1, payload.CurrentTotal.Completed);
+        Assert.Equal(1, payload.CurrentTotal.SampleCount);
+        Assert.Equal(1, payload.PreviousTotal.Completed);
+        Assert.Equal(1, payload.PreviousTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task ApprovalWaitMetrics_HasCompletedApprovals_ReturnsWindowSampleCountAndStats()
     {
         var project = await CreateProjectAsync($"approval-wait-present-{Guid.NewGuid():N}");
@@ -1512,7 +1660,13 @@ public class IssueMetricsApiSpecs
 
     private sealed record CompletionMetricsBucketDto(string Boundary, int Completed, int Failed);
     private sealed record CompletionMetricsWindowDto(string From, string To);
-    private sealed record CompletionMetricsResponse(string Bucket, CompletionMetricsWindowDto Window, CompletionMetricsBucketDto[] Buckets);
+    private sealed record CompletionMetricsTotalsDto(int Completed, int Failed, int SampleCount);
+    private sealed record CompletionMetricsResponse(
+        string Bucket,
+        CompletionMetricsWindowDto Window,
+        CompletionMetricsBucketDto[] Buckets,
+        CompletionMetricsTotalsDto CurrentTotal,
+        CompletionMetricsTotalsDto PreviousTotal);
 
     private sealed record ApprovalWaitMetricsWindowDto(string From, string To);
     private sealed record ApprovalWaitMetricsResponse(

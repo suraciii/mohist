@@ -247,12 +247,36 @@ public class IssueQuerier : IScopedService
     /// The result of <see cref="GetCompletionBucketsAsync"/>. <see cref="Buckets"/>
     /// is dense — every bucket in the fixed trailing window is present, even
     /// when its counts are zero, so callers can render a continuous chart.
+    /// <see cref="CurrentTotal"/> and <see cref="PreviousTotal"/> are strictly
+    /// additive: the existing per-bucket series, window bounds, and fixed
+    /// bucket granularity are preserved unchanged. Both totals aggregate the
+    /// latest-terminal-event classification (completed vs cancelled) over
+    /// the current window <c>[now − W, now]</c> and the immediately-preceding
+    /// window of the same length <c>[now − 2W, now − W]</c>.
     /// </summary>
     public sealed record CompletionBucketsResult(
         string Bucket,
         DateTimeOffset WindowFrom,
         DateTimeOffset WindowTo,
-        IReadOnlyList<CompletionBucketPoint> Buckets);
+        IReadOnlyList<CompletionBucketPoint> Buckets,
+        CompletionTotal CurrentTotal,
+        CompletionTotal PreviousTotal);
+
+    /// <summary>
+    /// Window-scoped completion totals. <see cref="Completed"/> and
+    /// <see cref="Failed"/> are aggregated from the latest-terminal-event
+    /// classification across every issue whose terminal event falls in
+    /// the window. <see cref="SampleCount"/> is the number of terminal
+    /// issues contributing — the discriminator that distinguishes the
+    /// empty (zero-sample) result (<c>SampleCount == 0</c>, no terminal
+    /// issues fell in the window) from a genuine zero-completion window
+    /// (<c>SampleCount > 0</c>, every terminal issue cancelled and none
+    /// completed).
+    /// </summary>
+    public sealed record CompletionTotal(
+        int Completed,
+        int Failed,
+        int SampleCount);
 
     /// <summary>
     /// The trailing window returned by <see cref="GetApprovalWaitAsync"/>.
@@ -373,6 +397,17 @@ public class IssueQuerier : IScopedService
     /// the window is emitted (zeros included). Issue counts are distinct
     /// per bucket — an issue with multiple terminal events of the same
     /// Type in the same bucket counts once.
+    /// <para>
+    /// In addition to the per-bucket series, the result includes a
+    /// <see cref="CompletionBucketsResult.CurrentTotal"/> over the current
+    /// window and a <see cref="CompletionBucketsResult.PreviousTotal"/> over
+    /// the immediately-preceding window of the same length
+    /// (<c>[now − 2W, now − W]</c>). Both totals use the same
+    /// latest-terminal-event classification as the per-bucket series. The
+    /// totals carry a <c>SampleCount</c> discriminator so a zero-sample
+    /// (empty) window is distinguishable from a genuine zero-completion
+    /// window.
+    /// </para>
     /// </summary>
     public async Task<CompletionBucketsResult> GetCompletionBucketsAsync(
         string projectId,
@@ -394,6 +429,8 @@ public class IssueQuerier : IScopedService
 
         DateTimeOffset windowFrom;
         DateTimeOffset windowTo;
+        DateTimeOffset previousFrom;
+        DateTimeOffset previousTo;
         IReadOnlyList<DateOnly> boundaries;
 
         if (bucket == CompletionBucket.Day)
@@ -402,6 +439,10 @@ public class IssueQuerier : IScopedService
             var today = DateOnly.FromDateTime(now.UtcDateTime.Date);
             windowFrom = new DateTimeOffset(today.AddDays(-29).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
             windowTo = new DateTimeOffset(today.AddDays(1).ToDateTime(new TimeOnly(0, 0)), TimeSpan.Zero);
+            // Previous window is the same length immediately preceding the
+            // current window: [today − 59d, today − 29d].
+            previousFrom = new DateTimeOffset(today.AddDays(-59).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            previousTo = windowFrom;
             boundaries = Enumerable.Range(0, 30)
                 .Select(i => today.AddDays(-29 + i))
                 .ToList();
@@ -413,6 +454,11 @@ public class IssueQuerier : IScopedService
             var firstWeek = currentWeek.AddDays(-7 * 11);
             windowFrom = new DateTimeOffset(firstWeek, TimeSpan.Zero);
             windowTo = new DateTimeOffset(currentWeek.AddDays(7), TimeSpan.Zero);
+            // Previous window: 12 trailing ISO weeks immediately preceding
+            // the current 12-week window, same length.
+            var previousFirstWeek = firstWeek.AddDays(-7 * 12);
+            previousFrom = new DateTimeOffset(previousFirstWeek, TimeSpan.Zero);
+            previousTo = windowFrom;
             boundaries = Enumerable.Range(0, 12)
                 .Select(i => DateOnly.FromDateTime(firstWeek.AddDays(7 * i)))
                 .ToList();
@@ -431,7 +477,9 @@ public class IssueQuerier : IScopedService
                 Bucket: bucket == CompletionBucket.Day ? "day" : "week",
                 WindowFrom: windowFrom,
                 WindowTo: windowTo,
-                Buckets: points);
+                Buckets: points,
+                CurrentTotal: new CompletionTotal(Completed: 0, Failed: 0, SampleCount: 0),
+                PreviousTotal: new CompletionTotal(Completed: 0, Failed: 0, SampleCount: 0));
         }
 
         // Pull terminal events for this project's issue sources, choose
@@ -449,7 +497,7 @@ public class IssueQuerier : IScopedService
             .ToListAsync();
         var sourceSet = new HashSet<string>(projectSources, StringComparer.Ordinal);
         var terminalTypes = new HashSet<string>(StringComparer.Ordinal) { WorkCompletedType, ClosedType };
-        var rows = candidates
+        var latestTerminalByIssue = candidates
             .Where(r => sourceSet.Contains(r.Source)
                 && terminalTypes.Contains(r.Type))
             .GroupBy(r => r.Source, StringComparer.Ordinal)
@@ -457,27 +505,60 @@ public class IssueQuerier : IScopedService
                 .OrderByDescending(r => r.Time)
                 .ThenByDescending(r => r.Id)
                 .First())
-            .Where(r => r.Time >= windowFrom && r.Time < windowTo)
             .ToList();
 
         var indexByBoundary = boundaries
             .Select((b, i) => (Boundary: b, Index: i))
             .ToDictionary(t => t.Boundary, t => t.Index);
 
-        foreach (var row in rows)
-        {
-            var boundary = bucket == CompletionBucket.Day
-                ? DateOnly.FromDateTime(row.Time.UtcDateTime.Date)
-                : DateOnly.FromDateTime(ISOWeekHelper.StartOfIsoWeek(row.Time.UtcDateTime));
-            if (!indexByBoundary.TryGetValue(boundary, out var idx)) continue;
+        var currentTotal = new CompletionTotal(Completed: 0, Failed: 0, SampleCount: 0);
+        var previousTotal = new CompletionTotal(Completed: 0, Failed: 0, SampleCount: 0);
 
-            if (row.Type == WorkCompletedType)
+        foreach (var row in latestTerminalByIssue)
+        {
+            // Bucket membership is anchored on terminal event time, using
+            // the same latest-terminal-event classification. An issue's
+            // latest terminal event may land in either window (current or
+            // previous); its contribution is counted exactly once, in the
+            // window that holds it.
+            if (row.Time >= windowFrom && row.Time < windowTo)
             {
-                points[idx] = points[idx] with { Completed = points[idx].Completed + 1 };
+                if (row.Type == WorkCompletedType)
+                {
+                    currentTotal = currentTotal with { Completed = currentTotal.Completed + 1 };
+                }
+                else
+                {
+                    currentTotal = currentTotal with { Failed = currentTotal.Failed + 1 };
+                }
+                currentTotal = currentTotal with { SampleCount = currentTotal.SampleCount + 1 };
+
+                var boundary = bucket == CompletionBucket.Day
+                    ? DateOnly.FromDateTime(row.Time.UtcDateTime.Date)
+                    : DateOnly.FromDateTime(ISOWeekHelper.StartOfIsoWeek(row.Time.UtcDateTime));
+                if (indexByBoundary.TryGetValue(boundary, out var idx))
+                {
+                    if (row.Type == WorkCompletedType)
+                    {
+                        points[idx] = points[idx] with { Completed = points[idx].Completed + 1 };
+                    }
+                    else
+                    {
+                        points[idx] = points[idx] with { Failed = points[idx].Failed + 1 };
+                    }
+                }
             }
-            else
+            else if (row.Time >= previousFrom && row.Time < previousTo)
             {
-                points[idx] = points[idx] with { Failed = points[idx].Failed + 1 };
+                if (row.Type == WorkCompletedType)
+                {
+                    previousTotal = previousTotal with { Completed = previousTotal.Completed + 1 };
+                }
+                else
+                {
+                    previousTotal = previousTotal with { Failed = previousTotal.Failed + 1 };
+                }
+                previousTotal = previousTotal with { SampleCount = previousTotal.SampleCount + 1 };
             }
         }
 
@@ -485,7 +566,9 @@ public class IssueQuerier : IScopedService
             Bucket: bucket == CompletionBucket.Day ? "day" : "week",
             WindowFrom: windowFrom,
             WindowTo: windowTo,
-            Buckets: points);
+            Buckets: points,
+            CurrentTotal: currentTotal,
+            PreviousTotal: previousTotal);
     }
 
     /// <summary>

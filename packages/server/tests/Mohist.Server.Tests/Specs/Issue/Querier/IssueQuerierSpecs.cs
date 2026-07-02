@@ -1024,6 +1024,251 @@ public class IssueQuerierSpecs
         Assert.Equal("2026-06-15", result.Buckets[^1].Boundary);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_PreviousWindowIsImmediatelyPrecedingAndSameLength()
+    {
+        // Spec: previous window is [now - 2W, now - W] where W is the
+        // current 30-day window. For day granularity this is exactly
+        // 30 trailing UTC days immediately before the current window.
+        // Verify by re-running with `now` shifted 30 days earlier: the
+        // shifted run's current window must equal what the previous
+        // window would cover.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-prev-day-{Guid.NewGuid():N}", Name = "Prev Day Project" };
+        SeedIssue(db, project, "issue_prev_day_1");
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        var currentFrom = result.WindowFrom;
+        var currentTo = result.WindowTo;
+        // Current window length must be exactly 30 days inclusive of today.
+        Assert.Equal(TimeSpan.FromDays(30), currentTo - currentFrom);
+
+        // The shifted run's current window matches the previous window
+        // that would cover the original run's preceding period.
+        var shiftedNow = now - TimeSpan.FromDays(30);
+        var shiftedResult = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, shiftedNow);
+        Assert.Equal(shiftedResult.WindowFrom, currentFrom - TimeSpan.FromDays(30));
+        Assert.Equal(shiftedResult.WindowTo, currentFrom);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_WeekBucketing_PreviousWindowIsImmediatelyPrecedingAndSameLength()
+    {
+        // Spec: previous window is [now - 2W, now - W] where W is the
+        // current 12-week window. For week granularity this is exactly
+        // 12 ISO weeks immediately before the current window.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-prev-week-{Guid.NewGuid():N}", Name = "Prev Week Project" };
+        SeedIssue(db, project, "issue_prev_week_1");
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Week, now);
+
+        var currentFrom = result.WindowFrom;
+        var currentTo = result.WindowTo;
+        Assert.Equal(TimeSpan.FromDays(7 * 12), currentTo - currentFrom);
+
+        var shiftedNow = now - TimeSpan.FromDays(7 * 12);
+        var shiftedResult = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Week, shiftedNow);
+        Assert.Equal(shiftedResult.WindowFrom, currentFrom - TimeSpan.FromDays(7 * 12));
+        Assert.Equal(shiftedResult.WindowTo, currentFrom);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_BothWindowTotalsAggregateLatestTerminalByEventTime()
+    {
+        // Two completed events in the current window and one failed
+        // event in the previous window. Both totals must reflect the
+        // events' terminal types and aggregate the same way the
+        // per-bucket series does (latest-terminal-event classification).
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-both-day-{Guid.NewGuid():N}", Name = "Both Day Project" };
+        var i1 = SeedIssue(db, project, "issue_both_day_1");
+        var i2 = SeedIssue(db, project, "issue_both_day_2");
+        var i3 = SeedIssue(db, project, "issue_both_day_3");
+        await db.SaveChangesAsync();
+
+        // Current window events (within trailing 30d ending 2026-06-20).
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i2.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero));
+        // Previous window event — with now=2026-06-19, the previous
+        // day-window is [2026-04-21, 2026-05-21).
+        SeedEvent(db, i3.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        Assert.Equal(2, result.CurrentTotal.Completed);
+        Assert.Equal(0, result.CurrentTotal.Failed);
+        Assert.Equal(2, result.CurrentTotal.SampleCount);
+
+        Assert.Equal(0, result.PreviousTotal.Completed);
+        Assert.Equal(1, result.PreviousTotal.Failed);
+        Assert.Equal(1, result.PreviousTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_LatestTerminalEventDedupedAcrossWindows()
+    {
+        // An issue closed in the previous window and reopened +
+        // re-completed in the current window. The latest terminal
+        // event lives in the current window; the earlier terminal
+        // (closed in previous window) must be invalidated by the
+        // latest-terminal classification — counted once in the
+        // current window only, never in the previous.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-cross-{Guid.NewGuid():N}", Name = "Cross Window Project" };
+        var i1 = SeedIssue(db, project, "issue_cross_1");
+        await db.SaveChangesAsync();
+
+        // Earlier terminal event in the previous window [2026-04-21, 2026-05-21).
+        SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero));
+        // Reopen (non-terminal) sits between the two terminals.
+        SeedEvent(db, i1.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 12, 10, 0, 0, TimeSpan.Zero));
+        // Latest terminal event (the only one counted) lives in the current window.
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 10, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        // Current window holds the latest terminal (completed).
+        Assert.Equal(1, result.CurrentTotal.Completed);
+        Assert.Equal(0, result.CurrentTotal.Failed);
+        Assert.Equal(1, result.CurrentTotal.SampleCount);
+        // Previous window is empty: the earlier terminal event was
+        // invalidated by the subsequent latest-terminal classification,
+        // not retained as a separate count.
+        Assert.Equal(0, result.PreviousTotal.Completed);
+        Assert.Equal(0, result.PreviousTotal.Failed);
+        Assert.Equal(0, result.PreviousTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_NoTerminalIssuesInPrevious_YieldsEmptyResult()
+    {
+        // A window with no terminal issues must report SampleCount 0
+        // (the empty/zero-sample result), not a fabricated zero with
+        // a non-zero sample count.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-empty-prev-{Guid.NewGuid():N}", Name = "Empty Prev Project" };
+        var i1 = SeedIssue(db, project, "issue_empty_prev_1");
+        await db.SaveChangesAsync();
+
+        // One current-window completion only; previous window has no events.
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        Assert.Equal(1, result.CurrentTotal.Completed);
+        Assert.Equal(1, result.CurrentTotal.SampleCount);
+        // Previous window: no terminal issues at all → SampleCount 0.
+        Assert.Equal(0, result.PreviousTotal.Completed);
+        Assert.Equal(0, result.PreviousTotal.Failed);
+        Assert.Equal(0, result.PreviousTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_GenuineZeroCompletionPreviousWindow_IsDistinguishableFromEmpty()
+    {
+        // A window where every terminal issue cancelled and none
+        // completed is a GENUINE zero: SampleCount > 0, Completed == 0.
+        // This must be distinguishable from the empty (zero-sample)
+        // result, which reports SampleCount == 0.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-zero-prev-{Guid.NewGuid():N}", Name = "Genuine Zero Prev Project" };
+        var i1 = SeedIssue(db, project, "issue_zero_prev_1");
+        var i2 = SeedIssue(db, project, "issue_zero_prev_2");
+        await db.SaveChangesAsync();
+
+        // now = 2026-06-19; previous day-window = [2026-04-21, 2026-05-21).
+        // Place two failed (cancelled) events inside that range.
+        SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 5, 9, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i2.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 11, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        // Genuine zero completion with non-zero sample count.
+        Assert.Equal(0, result.PreviousTotal.Completed);
+        Assert.Equal(2, result.PreviousTotal.Failed);
+        Assert.Equal(2, result.PreviousTotal.SampleCount);
+        // Current window is empty: SampleCount 0.
+        Assert.Equal(0, result.CurrentTotal.SampleCount);
+        // The discriminator is SampleCount, not Completed.
+        Assert.NotEqual(result.PreviousTotal.SampleCount, result.CurrentTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_WindowAdvancesWithCurrentTime()
+    {
+        // Advancing `now` shifts the previous window so that issues
+        // that age out of the previous window drop out of both the
+        // per-bucket series AND the totals.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-advance-{Guid.NewGuid():N}", Name = "Advance Project" };
+        var i1 = SeedIssue(db, project, "issue_advance_1");
+        await db.SaveChangesAsync();
+
+        // Event lands in the previous window for `now=2026-06-19`:
+        // previous day-window = [2026-04-21, 2026-05-21).
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var earlierNow = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var earlierResult = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, earlierNow);
+        Assert.Equal(1, earlierResult.PreviousTotal.Completed);
+        Assert.Equal(1, earlierResult.PreviousTotal.SampleCount);
+
+        // Now advance `now` by 60 days. The previous window slides to
+        // [2026-08-18 - 59d, 2026-08-18 - 29d) = [2026-06-20, 2026-07-20).
+        // The 2026-05-10 event is now in neither window.
+        var laterNow = new DateTimeOffset(2026, 8, 18, 12, 0, 0, TimeSpan.Zero);
+        var laterResult = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, laterNow);
+        Assert.Equal(0, laterResult.PreviousTotal.Completed);
+        Assert.Equal(0, laterResult.PreviousTotal.SampleCount);
+        // …and it falls out of the current window too.
+        Assert.Equal(0, laterResult.CurrentTotal.Completed);
+        Assert.Equal(0, laterResult.CurrentTotal.SampleCount);
+    }
+
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]

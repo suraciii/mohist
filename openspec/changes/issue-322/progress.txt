@@ -1,0 +1,28 @@
+## Codebase Patterns
+
+- `IssueRoutes.Metrics.cs` is the only metrics route reading `DateTimeOffset.UtcNow` directly; every other route (`IssueRoutes.DeliveryTimeMetrics.cs`, `IssueRoutes.QualityMetrics.cs`) resolves `TimeProvider` from DI. Switching completion to the same DI shape is the D4 opportunistic consistency fix; nothing else in the API surface needs this change.
+- `MohistIntegrationFixture.TimeProvider` is a `FakeTimeProvider` pinned at `2026-06-30 00:00 UTC`. So API-level completion tests must seed events inside `[2026-06-01, 2026-07-01)` for the current day-window and `[2026-05-02, 2026-06-01)` for the previous day-window. For the week bucket, current ISO week starts `2026-06-29` and previous 12-week window is `[2026-01-19, 2026-04-13)`.
+- The querier-side tests use an explicit `DateTimeOffset now` parameter, so they can independently verify adjacency by shifting `now` and re-running — preferred over fixture-clock reliance.
+- `IssueQuerier.GetCompletionBucketsAsync` already pre-filtered events by source + terminal type and collapsed to the latest terminal event per issue before bucketing. The previous-window totals reuse that same `latestTerminalByIssue` materialized list and just split it across the two adjacent windows — no extra DB round-trip.
+- The completion surface uses two distinct empty-result idioms today: dense zero buckets per the spec, and (new) a `SampleCount` discriminator on the totals DTO. The DTO additive guarantee means existing consumers that read `Buckets`/`Window` see no change; the new `CurrentTotal`/`PreviousTotal` are net-new fields.
+
+## Decisions
+
+- T-001 deliberately keeps `windowFrom`/`windowTo` semantically identical to today's; the previous window is `[today - 2W, today - W]` derived from the same `today`/`currentWeek` already computed for the current window. This means existing assertions like `payload.Buckets[0].Boundary == windowFrom as yyyy-MM-dd` still hold byte-for-byte.
+- For day granularity, `previousFrom = today.AddDays(-59)` and `previousTo = windowFrom`. For week granularity, `previousFrom = currentWeek.AddDays(-7*12)` (start of week 24 weeks back) and `previousTo = windowFrom`.
+- The totals object is its own `CompletionTotal` / `CompletionMetricsTotalsDto` rather than reusing the bucket shape — it has no `Boundary` and intentionally exposes `SampleCount` so the zero-sample vs genuine-zero discrimination is on the wire. This matches D2 in design.md (the surface's own idiom).
+- The handler-level TimeProvider swap was inlined into the existing endpoint rather than split into a separate refactor task, per task notes: it is required for deterministic testing of the new previous-window branch.
+
+## Gotchas
+
+- The `latestTerminalByIssue` list intentionally stays a single GroupBy of all terminal events; do not also call the bucketing logic twice (once per window) — that would re-introduce the closed-then-reopened stale-count risk if the implementation is split incorrectly. The single-pass loop with two window checks (current, then previous) is correct.
+- The `IndexByBoundary` dictionary is keyed on `DateOnly`, which for the week bucket is the Monday of the ISO week. Don't change that keying or the bucketing will silently misalign on week boundaries.
+- `IssueMetricsApiSpecs` has a local `CompletionMetricsResponse` record that mirrors the API shape. Both must include `CurrentTotal` and `PreviousTotal` (or JSON deserialization fails on the new fields), otherwise the existing day/week tests break on shape mismatch. The change to that local record is also part of T-001.
+- For the day test `CompletionMetrics_DayBucket_GenuineZeroCompletionPreviousWindowIsDistinctFromEmpty`, with fixture time `2026-06-30`, the previous window is `[2026-05-02, 2026-06-01)`. Two cancellation events at `2026-05-10` and `2026-05-25` both fall inside that range — used to assert `SampleCount=2, Completed=0, Failed=2`.
+
+## Verification
+
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` succeeds with 0 warnings (TreatWarningsAsErrors=true via `Directory.Build.props`).
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --filter "FullyQualifiedName~IssueMetricsApiSpecs|FullyQualifiedName~IssueQuerierSpecs"` → 131/131 pass (new tests included).
+- Full server test run: 3536 pass, 13 skipped (pre-existing), 0 failed.
+- Web/runner untouched by this task; no need to re-run their tests.
