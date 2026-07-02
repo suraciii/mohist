@@ -373,9 +373,25 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("json_extract(State, '$.metadata.createdAt')", stored: false);
             entity.Property(e => e.AssignedRunnerId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", stored: false);
+            // Issue-318 D3: STORED status computed column. Mirrors the
+            // COALESCE path-robustness pattern used by IssueRow.ProjectId /
+            // AgentRow.Status; LOWER normalizes the camelCase enum value
+            // (e.g. "ready", "pending") so the column is always lowercase
+            // regardless of any PascalCase historical state. The matching
+            // IX_WorkflowRuns_Status index is created in T-004 migration;
+            // T-002 declares the model-side projection only.
+            entity.Property(e => e.Status)
+                .HasComputedColumnSql("LOWER(COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status')))", stored: true);
             entity.HasIndex(e => e.MetadataProjectId);
             entity.HasIndex(e => e.AssignedRunnerId);
             entity.HasIndex(e => new { e.MetadataProjectId, e.AssignedRunnerId, e.CreatedAt });
+            // Issue-318 D3: covering index for the two scheduler queries
+            // (FindAssignableAsync -> status == pending, FindAssignedToAsync
+            // -> status == ready AND assigned == runner). The composite
+            // matches the runner-bound filter exactly; the standalone
+            // status index is implied by EF through the column projection.
+            entity.HasIndex(e => new { e.Status, e.AssignedRunnerId })
+                .HasDatabaseName("IX_WorkflowRuns_Status");
         });
 
         modelBuilder.Entity<WorkflowVariablesRow>(entity =>

@@ -16,6 +16,7 @@ public class RuntimeVariableMergeSpecs
         var events = run.InitializeStage(
             [new("proposal", "Proposal", "spec/propose")],
             [new("check-1", "Check 1", "spec/check")]);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         var events2 = run.StartTask("work-1", "runner-1");
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
         task.Status = TaskRunStatus.Completed;
@@ -42,6 +43,7 @@ public class RuntimeVariableMergeSpecs
         var events = run.InitializeStage(
             [new("proposal", "Proposal", "spec/propose"), new("review", "Review", "spec/review")],
             [new("check-1", "Check 1", "spec/check")]);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         var events2 = run.StartTask("work-1", "runner-1");
 
         var completed = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
@@ -68,6 +70,7 @@ public class RuntimeVariableMergeSpecs
         var events = run.InitializeStage(
             [new("proposal", "Proposal", "spec/propose")],
             [new("check-1", "Check 1", "spec/check")]);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         var events2 = run.StartTask("work-1", "runner-1");
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
         task.Status = TaskRunStatus.Completed;

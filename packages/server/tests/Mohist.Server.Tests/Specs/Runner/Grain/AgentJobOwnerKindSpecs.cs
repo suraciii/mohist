@@ -324,7 +324,10 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal("reported", report.Reason);
         Assert.Equal(WorkDispatchOwnerKinds.Workflow, report.OwnerKind);
         Assert.Equal(work.WorkflowRunId, report.OwnerId);
-        Assert.Equal("Running", report.WorkflowStatus);
+        // After task completion with a check still pending, the run
+        // returns to Ready (runner assigned, dispatchable work = the
+        // check). Ready is no longer conflated with Running.
+        Assert.Equal("Ready", report.WorkflowStatus);
 
         var orphanAgentJob = Grains.GetGrain<IAgentJobGrain>("workflow-report-orphan-agent-job");
         Assert.Equal(AgentJobStatus.Pending, await orphanAgentJob.GetStatusAsync());

@@ -2657,12 +2657,12 @@ public class IssueQuerierSpecs
         var result = await service.GetStageDurationsAsync(project.Id, new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero));
 
         Assert.NotNull(result.FlowEfficiencyRatio);
-        Assert.Equal(0.6, result.FlowEfficiencyRatio!.Value, precision: 3);
+        Assert.Equal(0.2, result.FlowEfficiencyRatio!.Value, precision: 3);
         Assert.NotNull(result.WaitBreakout);
         Assert.NotNull(result.WaitBreakout!.AverageApprovalGateWaitSeconds);
         Assert.Equal(3600, result.WaitBreakout.AverageApprovalGateWaitSeconds!.Value, precision: 3);
         Assert.NotNull(result.WaitBreakout.AverageInactiveGapSeconds);
-        Assert.Equal(3 * 3600, result.WaitBreakout.AverageInactiveGapSeconds!.Value, precision: 3);
+        Assert.Equal(7 * 3600, result.WaitBreakout.AverageInactiveGapSeconds!.Value, precision: 3);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

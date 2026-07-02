@@ -32,6 +32,8 @@ public class RerunFromStageSpecs
             var stage = run.Stages[i];
             var def = ThreeStageDefinition().Stages[i];
             run.InitializeStage(def.Tasks, def.Checks);
+            if (run.Assignment is null)
+                run.AssignTo("runner-1", DateTimeOffset.UtcNow);
             if (i == stageIdx)
                 break;
 
@@ -51,6 +53,7 @@ public class RerunFromStageSpecs
         run.InitializeStage(
             [new("draft", "Draft", "spec/task")],
             [new("plan-ok", "Plan OK", "spec/check")]);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         run.StartTask("draft.1", "runner-1");
         run.CompleteTask();
         run.PassCheck(new CheckResult("plan-ok", "pass"));
@@ -134,7 +137,7 @@ public class RerunFromStageSpecs
 
         Assert.Equal("build", run.CurrentStageId);
         Assert.Null(run.Failure);
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.Equal(2, events.Count);
         Assert.True(events[0] is WorkflowRunResumed,
             "First event should be WorkflowRunResumed");
@@ -206,7 +209,7 @@ public class RerunFromStageSpecs
         Assert.Equal("stage_not_reached", ex.Code);
         Assert.Equal("plan", run.CurrentStageId);
         Assert.Null(run.Failure);
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.Same(stagesAfterPlanRerun[0], run.Stages[0]);
         Assert.Same(stagesAfterPlanRerun[1], run.Stages[1]);
         Assert.Same(stagesAfterPlanRerun[2], run.Stages[2]);
@@ -282,7 +285,7 @@ public class RerunFromStageSpecs
         var newBuild = run.Stages.Single(s => s.Id == "build");
         Assert.Empty(newBuild.Checks);
         Assert.Null(run.Failure);
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -353,7 +356,7 @@ public class RerunFromStageSpecs
 
         Assert.Equal("build", run.CurrentStageId);
         Assert.Null(run.Failure);
-        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.Equal(2, events.Count);
     }
 

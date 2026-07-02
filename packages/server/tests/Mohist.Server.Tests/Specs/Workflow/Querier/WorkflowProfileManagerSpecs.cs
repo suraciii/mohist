@@ -1057,6 +1057,47 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task WorkflowQuerier_StatusRead_MigratesLegacyClaimAssignment()
+    {
+        var runId = "wr_legacy_claim_status_query";
+        await SeedAsync(
+            projectId: "proj-legacy-claim-status-query",
+            issueId: "issue_legacy_claim_status_query",
+            runId: runId,
+            issueTemplateJson: null,
+            issueWorkflowProfileId: "mohist/local");
+        await ReplaceRunStateJsonAsync(
+            runId,
+            """
+            {
+              "id": "wr_legacy_claim_status_query",
+              "metadata": {
+                "createdAt": "2026-06-15T10:00:00Z"
+              },
+              "status": "ready",
+              "claim": {
+                "runnerId": "runner-legacy-claim",
+                "claimedAt": "2026-06-15T10:01:00Z"
+              },
+              "currentStageId": "build",
+              "stages": []
+            }
+            """);
+        var querier = new WorkflowQuerier(
+            new TestDbContextFactory(_options),
+            _manager,
+            new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(_options)));
+
+        var status = await querier.GetStatusAsync(runId);
+
+        Assert.NotNull(status);
+        Assert.Equal("ready", status!.Status);
+        Assert.Equal("runner-legacy-claim", status.AssignedTo);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task LoadApprovalConfigAsync_ExistingRunIgnoresLaterDisabledProfiles()
     {
         var runId = "wr_existing_disabled_approval";
@@ -1352,6 +1393,14 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
                     ["issueId"] = issueId,
                 }));
         row.State = JSON.Serialize(run);
+        await db.SaveChangesAsync();
+    }
+
+    private async Task ReplaceRunStateJsonAsync(string runId, string stateJson)
+    {
+        await using var db = new MohistDbContext(_options);
+        var row = await db.WorkflowRuns.FirstAsync(x => x.WorkflowRunId == runId);
+        row.State = stateJson;
         await db.SaveChangesAsync();
     }
 

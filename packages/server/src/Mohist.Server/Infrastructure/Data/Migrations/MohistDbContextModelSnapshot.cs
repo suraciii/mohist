@@ -1314,6 +1314,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Status")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("LOWER(COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status')))", true);
+
                     b.HasKey("WorkflowRunId");
 
                     b.HasIndex("AssignedRunnerId");
@@ -1321,6 +1326,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("MetadataProjectId");
 
                     b.HasIndex("MetadataProjectId", "AssignedRunnerId", "CreatedAt");
+
+                    b.HasIndex("Status", "AssignedRunnerId")
+                        .HasDatabaseName("IX_WorkflowRuns_Status");
 
                     b.ToTable("WorkflowRuns");
                 });

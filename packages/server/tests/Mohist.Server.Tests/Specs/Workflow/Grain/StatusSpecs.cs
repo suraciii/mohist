@@ -39,6 +39,23 @@ public class StatusSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task WorkflowStatusBeforeRunnerAssignmentIsPending()
+    {
+        var workflow = await CreateWorkflowAsync();
+        await SeedWorkflowTemplateAsync(_workflowId!, SingleStage());
+        await workflow.StartAsync(TestInput());
+
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
+
+        Assert.NotNull(status);
+        // Started, has dispatchable work, no runner claimed it yet →
+        // Pending in the new state machine.
+        Assert.Equal("pending", status.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task WorkflowStatusShowsPendingWork()
     {
         var wf = await StartWorkflowAsync(SingleStage(
@@ -104,7 +121,11 @@ public class StatusSpecs : WorkflowGrainSpecs
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
 
         Assert.NotNull(status);
-        Assert.Equal("running", status.Status);
+        // No runner is registered at this point, so the workflow is in
+        // Pending (started, has dispatchable work, waiting for a runner
+        // to claim it). The new state machine disambiguates that from
+        // the assigned/Ready and in-flight/Running states.
+        Assert.Equal("pending", status.Status);
         Assert.DoesNotContain("Issue", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));
         Assert.DoesNotContain("Worktree", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));
         Assert.DoesNotContain("ChangeDir", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));

@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -246,6 +247,30 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
         Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
         Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task Activation_ReconcilesReadyRunWithInFlightWorkToRunning()
+    {
+        var workflowId = $"wf-ready-inflight-{Guid.NewGuid():N}";
+        _workflowId = workflowId;
+        var run = WorkflowRun.Create(workflowId, SingleStage(checks: []));
+        run.Start();
+        run.InitializeStage([new("task-1", "Task 1", "spec/task")], []);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
+        run.StartTask("work-1", "runner-1");
+        run.Status = WorkflowRunStatus.Ready;
+
+        var store = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<IWorkflowRunStore>();
+        await store.SaveAsync(run);
+
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
+        Assert.Equal(WorkflowRunStatus.Running, (await LoadRunAsync(workflowId)).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

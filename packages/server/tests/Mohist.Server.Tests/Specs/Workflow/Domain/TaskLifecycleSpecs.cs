@@ -16,6 +16,7 @@ public class TaskLifecycleSpecs
         ]));
         run.Start();
         run.InitializeStage([new("compile", "Compile", "spec/task")], [new("build-ok", "Build OK", "spec/check")]);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
         return run;
     }
 

@@ -661,7 +661,9 @@ describe('SettingsSearch scope-aware navigation', () => {
     const user = userEvent.setup()
     renderSettingsSearchWithProject('/settings/ai')
 
-    await user.keyboard('{Meta>}k{/Meta}')
+    act(() => {
+      getShortcutHandler('settings-search')?.()
+    })
     await waitFor(() => {
       expect(screen.getByTestId('settings-search-input')).toBeInTheDocument()
     })

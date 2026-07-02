@@ -1,7 +1,16 @@
-import type { WorkflowStage } from './issue'
 import type { WorkItemOrigin, StageApprovalState, WorkflowTaskCause, WorkflowFailureDetails } from './stage-state'
 
-export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled'
+export type WorkflowRunStatus =
+  | 'created'
+  | 'pending'
+  | 'ready'
+  | 'running'
+  | 'awaiting-approval'
+  | 'paused'
+  | 'stopped'
+  | 'completed'
+  | 'failed'
+
 export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
 export type WorkflowCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error'
 export type WorkflowStageRunStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped'
@@ -21,7 +30,7 @@ export interface WorkflowCheckFailurePolicy {
 }
 
 export interface WorkflowStageDefinition {
-  stage: WorkflowStage
+  stage: import('./issue').WorkflowStage
   checkFailurePolicies?: WorkflowCheckFailurePolicy[]
 }
 
@@ -35,7 +44,7 @@ export interface WorkflowDefinitionMetadata {
   name?: string
   source: WorkflowDefinitionSource
   capturedAt: string
-  stageOrder: WorkflowStage[]
+  stageOrder: import('./issue').WorkflowStage[]
   stageDefinitions?: WorkflowStageDefinition[]
 }
 
@@ -69,7 +78,7 @@ export interface WorkflowCheck {
 }
 
 export interface WorkflowStageRun {
-  stage: WorkflowStage
+  stage: import('./issue').WorkflowStage
   status: WorkflowStageRunStatus
   definition?: WorkflowStageDefinition | null
   tasks: WorkflowTask[]
@@ -86,13 +95,3 @@ export interface WorkflowStageRun {
   updatedAt?: string
 }
 
-export interface WorkflowRun {
-  id: string
-  issueId: string
-  issueNumber: number
-  status: WorkflowRunStatus
-  currentStage: WorkflowStage
-  workflowDefinition?: WorkflowDefinitionMetadata | null
-  stageRuns: WorkflowStageRun[]
-  failure?: WorkflowFailureDetails | null
-}
