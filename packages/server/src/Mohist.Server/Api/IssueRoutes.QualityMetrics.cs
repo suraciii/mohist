@@ -30,6 +30,8 @@ public static partial class IssueRoutes
         new(
             Window7d: BuildWindow(result.Window7d),
             Window30d: BuildWindow(result.Window30d),
+            PreviousFirstTimeRightRate: result.PreviousWindow.FirstTimeRightRate,
+            PreviousSampleCount: result.PreviousWindow.SampleCount,
             Trend: BuildTrend(result.Trend));
 
     private static QualityMetricsWindowDto BuildWindow(IssueQuerier.QualityMetricsWindow window) =>

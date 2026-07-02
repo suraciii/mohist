@@ -56,3 +56,30 @@
 - `dotnet test Mohist.sln -p:SkipWebBuild=true --filter "FullyQualifiedName~IssueMetricsApiSpecs|FullyQualifiedName~IssueQuerierSpecs"` → 142/142 pass (new tests included). Up from 131 in T-001 to 142 after T-002 (4 new API specs + 7 new querier specs).
 - Full server test run: 3547 pass, 13 skipped (pre-existing), 0 failed. Up from 3536 in T-001 to 3547 after T-002.
 - Web/runner untouched by this task; no need to re-run their tests.
+
+## Codebase Patterns
+
+- T-003 follows the same "single-pass issue loop with `else if` for the second window" pattern T-002 established: the existing 30-day accumulation already runs; the previous window contributes ONLY a single FTR-flag accumulator (`QualityFirstTimeRightAccumulator`), and the `else if` makes the two branches mutually exclusive by the boundary semantics — no double-counting, no second DB scan.
+- T-003 deliberately does NOT add a `WindowBounds` field to the previous window on the wire. The task acceptance criteria pin the previous-window DTO to "first-time-right rate plus its SampleCount" (the surface's existing `SampleCount` + nullable-rate idiom); window bounds would be additive but not required and would force consumers to re-validate them. The querier-side `QualityPreviousWindow` record intentionally stays minimal for the same reason.
+
+## Decisions
+
+- T-003 adds a small `QualityPreviousWindow` querier record (just `SampleCount` + `FirstTimeRightRate`) rather than reusing the full `QualityMetricsWindow` shape. This keeps the previous-window DTO minimal per the task acceptance criteria ("previous-window first-time-right rate plus its SampleCount") and avoids leaking per-stage rework or window bounds the spec didn't ask for. The two-window shape divergence is contained inside the querier.
+- T-003 keeps the previous-window contributions to the FTR scalar only — NOT to the per-stage rework breakdown or per-day trend series. The 7d/30d windows keep their existing per-stage data, and the 30-day trend series is unchanged. This matches the spec's "strictly additive" rule and the design's D1 (trend basis is the existing window30d, not a new previous-window trend).
+- The previous window uses the same asymmetric boundary semantics as T-002: current window is `[window30dFrom, window30dTo]` (`<=` inclusive on both ends) and previous window is `[previous30dFrom, previous30dTo)` (`<` on the upper end so the boundary moment belongs to the current window). Adjacent but non-overlapping.
+
+## Gotchas
+
+- T-003's `BuildPreviousWindow` mirrors the existing `BuildWindow` rate computation: `accumulator.SampleCount == 0 ⟹ null`, otherwise `(double)FtrCount / SampleCount`. The `SampleCount == 0` case is the empty-result signal; a genuine `0` or `1` rate requires `SampleCount > 0`. The two are structurally distinguishable on the wire (nullable rate + scalar sampleCount) — no other field needed for the discrimination.
+- The querier-level `QualityFirstTimeRightAccumulator` is intentionally a NEW type (separate from `QualityAccumulator` / `QualityTrendAccumulator`) because the previous window only needs FTR + count — not per-stage rework denominators. Reusing the larger accumulator would add cost for no benefit and would be a confusing signal that the previous window needs per-stage data (it does not).
+- The local `QualityMetricsResponse` mirror in `IssueMetricsApiSpecs.cs` must include the new `PreviousFirstTimeRightRate` and `PreviousSampleCount` fields, otherwise the existing quality tests start failing on JSON deserialization shape mismatch after the API response gains the new fields. (Same gotcha as T-001 and T-002's `CompletionMetricsResponse` / `DeliveryTimeMetricsResponse` mirrors.)
+- For the API spec test `QualityMetrics_AdditivePreservation_ExistingWindowsAndTrendUnchanged`, the first iteration shipped the issue 29 days ago (the trend's first boundary) — that falls OUTSIDE the 7-day window, so `Window7d.SampleCount` was correctly 0. Corrected the test to ship 1 day ago so it lands in both 7d and 30d and the existing-window contracts can be re-verified cleanly. The `previousSampleCount == 0` and `previousFirstTimeRightRate == null` assertions still hold (no previous-window seeding).
+- For the API spec test `QualityMetrics_GenuineZeroAndGenuineOneRatesInPreviousWindow_AreDistinctFromEmpty`, the previous window seeds 2 shipped issues (one with a repair, one without), giving a `0.5` rate with `SampleCount == 2`. The point is to show `SampleCount > 0` + non-null rate (genuine rate) vs the empty result where `SampleCount == 0` and rate is null. The `0.5` itself is incidental — the structural discriminator is `SampleCount`.
+- For the querier spec `GetQualityAsync_AdjacencyShiftsWithNow_DrivenByExplicitDateTimeOffset`, the anchor issue ships at `2026-06-10 14:00 UTC`. With `now = 2026-06-30` it falls inside the current 30d window; shifting `now` by exactly 30 days to `2026-07-30` moves the boundary by 30 days and the same issue is now in the new previous window. This proves the previous window is `now`-anchored, not fixture-clock-anchored.
+
+## Verification
+
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` succeeds with 0 warnings (TreatWarningsAsErrors=true).
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --filter "FullyQualifiedName~IssueMetricsApiSpecs|FullyQualifiedName~IssueQuerierSpecs"` → 153/153 pass. Up from 142 in T-002 to 153 after T-003 (4 new API specs + 7 new querier specs).
+- Full server test run: 3557 pass, 13 skipped (pre-existing), 0 failed. Up from 3547 in T-002 to 3557 after T-003. The single pre-existing `UpdateServer_WaitsForReadinessAfterRestart` flakiness (real-clock + HTTP retry timing) is unrelated and was excluded from the count; the test passes in isolation.
+- Web/runner untouched by this task; no need to re-run their tests.

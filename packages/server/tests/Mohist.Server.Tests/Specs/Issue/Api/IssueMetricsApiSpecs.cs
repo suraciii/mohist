@@ -585,6 +585,212 @@ public class IssueMetricsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task QualityMetrics_BothWindowsReturned_DeltaDerivableAcrossAdjacent30DayWindows()
+    {
+        // Fixture `now` is 2026-06-30 UTC. Current 30d window
+        // [2026-05-31, 2026-06-30]; previous 30d window
+        // [2026-05-01, 2026-05-31). Seed one shipped issue in each
+        // window with different FTR outcomes and verify both rates
+        // are returned so a consumer can derive the percentage-point
+        // delta.
+        var project = await CreateProjectAsync($"quality-both-{Guid.NewGuid():N}");
+
+        var currentShipTime = new DateTimeOffset(2026, 6, 14, 14, 0, 0, TimeSpan.Zero);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 1,
+            $"issue_quality_both_current_{Guid.NewGuid():N}",
+            $"wr_quality_both_current_{Guid.NewGuid():N}",
+            currentShipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-repair", "Build repair", 1)]),
+            ]);
+
+        var previousShipTime = new DateTimeOffset(2026, 5, 20, 14, 0, 0, TimeSpan.Zero);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 2,
+            $"issue_quality_both_previous_{Guid.NewGuid():N}",
+            $"wr_quality_both_previous_{Guid.NewGuid():N}",
+            previousShipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-ok", "Build ok", 0)]),
+            ]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        // Current 30d window: 1 sample, FTR = 0.0 (build had a repair).
+        Assert.Equal(1, payload.Window30d.SampleCount);
+        Assert.Equal(0.0, payload.Window30d.FirstTimeRightRate);
+        // Previous 30d window: 1 sample, FTR = 1.0 (no repairs).
+        Assert.Equal(1, payload.PreviousSampleCount);
+        Assert.Equal(1.0, payload.PreviousFirstTimeRightRate);
+        // Delta is 1.0 - 0.0 = 1.0 percentage-point — derivable in
+        // a single read from the two rates.
+        Assert.Equal(
+            1.0 - 0.0,
+            payload.PreviousFirstTimeRightRate!.Value - payload.Window30d.FirstTimeRightRate!.Value,
+            precision: 5);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task QualityMetrics_PreviousWindowEmpty_ReportsNullRateIndependentOfCurrentWindow()
+    {
+        // Only seed a current-window issue. The previous window is
+        // empty (no shipped issues fell in it). `previousSampleCount`
+        // must be 0 and `previousFirstTimeRightRate` must be the
+        // defined `null` (empty), evaluated independently of the
+        // current window's populated rate.
+        var project = await CreateProjectAsync($"quality-prev-empty-{Guid.NewGuid():N}");
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var shipTime = now.AddDays(-1);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 1,
+            $"issue_quality_prev_empty_{Guid.NewGuid():N}",
+            $"wr_quality_prev_empty_{Guid.NewGuid():N}",
+            shipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-ok", "Build ok", 0)]),
+            ]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        // Current window is populated.
+        Assert.Equal(1, payload.Window30d.SampleCount);
+        Assert.Equal(1.0, payload.Window30d.FirstTimeRightRate);
+        // Previous window is empty — discriminator sampleCount is 0
+        // and the rate is null (NOT a fabricated 0.0 / 1.0).
+        Assert.Equal(0, payload.PreviousSampleCount);
+        Assert.Null(payload.PreviousFirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task QualityMetrics_GenuineZeroAndGenuineOneRatesInPreviousWindow_AreDistinctFromEmpty()
+    {
+        // The previous window has at least one shipped issue, so the
+        // empty (zero-sample) result is NOT what we are seeing. Two
+        // cases: (a) all previous-window issues had a check that
+        // triggered a repair → genuine rate 0.0 with sampleCount > 0;
+        // (b) all previous-window issues were FTR → genuine rate 1.0
+        // with sampleCount > 0. Both must be reported as rates (not
+        // null) and be distinguishable from the empty result.
+        var project = await CreateProjectAsync($"quality-prev-distinct-{Guid.NewGuid():N}");
+
+        // (a) Genuine 0.0: one previous-window issue with a repair.
+        var zeroShipTime = new DateTimeOffset(2026, 5, 5, 14, 0, 0, TimeSpan.Zero);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 1,
+            $"issue_quality_prev_zero_{Guid.NewGuid():N}",
+            $"wr_quality_prev_zero_{Guid.NewGuid():N}",
+            zeroShipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-repair", "Build repair", 1)]),
+            ]);
+
+        // (b) Genuine 1.0: a separate previous-window issue, all FTR.
+        var oneShipTime = new DateTimeOffset(2026, 5, 20, 14, 0, 0, TimeSpan.Zero);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 2,
+            $"issue_quality_prev_one_{Guid.NewGuid():N}",
+            $"wr_quality_prev_one_{Guid.NewGuid():N}",
+            oneShipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-ok", "Build ok", 0)]),
+            ]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        // 2 contributing samples → genuine rate 0.5 (1 FTR, 1 not).
+        // This proves the rate is computed (not fabricated) and is
+        // structurally distinct from the empty (sampleCount 0, null
+        // rate) result the previous-empty test pins.
+        Assert.Equal(2, payload.PreviousSampleCount);
+        Assert.NotNull(payload.PreviousFirstTimeRightRate);
+        Assert.Equal(0.5, payload.PreviousFirstTimeRightRate!.Value, precision: 5);
+        // sampleCount must be > 0 — i.e. the rate is genuine, not the
+        // empty-result null.
+        Assert.NotEqual(0, payload.PreviousSampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task QualityMetrics_AdditivePreservation_ExistingWindowsAndTrendUnchanged()
+    {
+        // The previous-window addition must be strictly additive: the
+        // existing window7d/window30d/Trend shapes are preserved
+        // byte-for-byte for a consumer that does not read the
+        // previous-window fields. Seed an issue 1 day ago so it
+        // falls in both 7d and 30d and the trend has a populated
+        // point, exactly as `ShippedIssuesWithRepairs` does.
+        var project = await CreateProjectAsync($"quality-additive-{Guid.NewGuid():N}");
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var shipTime = now.AddDays(-1);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 1,
+            $"issue_quality_additive_{Guid.NewGuid():N}",
+            $"wr_quality_additive_{Guid.NewGuid():N}",
+            shipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-repair", "Build repair", 1)]),
+            ]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        // Existing window7d preserved.
+        Assert.Equal(1, payload.Window7d.SampleCount);
+        Assert.Equal(0.0, payload.Window7d.FirstTimeRightRate);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
+        // Existing window30d preserved.
+        Assert.Equal(1, payload.Window30d.SampleCount);
+        Assert.Equal(0.0, payload.Window30d.FirstTimeRightRate);
+        Assert.Contains(payload.Window30d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(payload.Window30d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        // Existing trend series preserved (30 dense per-day buckets).
+        Assert.NotNull(payload.Trend);
+        Assert.Equal("day", payload.Trend.Bucket);
+        Assert.Equal(30, payload.Trend.Points.Length);
+        Assert.Equal(payload.Window30d.From, payload.Trend.From);
+        Assert.Equal(payload.Window30d.To, payload.Trend.To);
+        // New previous-window fields: empty result (no previous-window
+        // issues seeded). The previous-window addition does not touch
+        // any existing field.
+        Assert.Equal(0, payload.PreviousSampleCount);
+        Assert.Null(payload.PreviousFirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task QualityMetrics_UnknownProject_ReturnsNotFound()
     {
         using var response = await _client.GetAsync(
@@ -1838,7 +2044,12 @@ public class IssueMetricsApiSpecs
     private sealed record StageReworkRateDto(string Stage, int EnteredCount, double? ReworkRate);
     private sealed record QualityTrendPointDto(string Boundary, int SampleCount, double? FirstTimeRightRate, double? ReworkRate);
     private sealed record QualityTrendDto(string Bucket, string From, string To, QualityTrendPointDto[] Points);
-    private sealed record QualityMetricsResponse(QualityMetricsWindowDto Window7d, QualityMetricsWindowDto Window30d, QualityTrendDto Trend);
+    private sealed record QualityMetricsResponse(
+        QualityMetricsWindowDto Window7d,
+        QualityMetricsWindowDto Window30d,
+        double? PreviousFirstTimeRightRate,
+        int PreviousSampleCount,
+        QualityTrendDto Trend);
 
     private sealed record DeliveryTimePointDto(int IssueNumber, string CompletedAt, double LeadDays, double? CycleDays);
     private sealed record DeliveryTimeMetricsResponse(DeliveryTimePointDto[] Points, double? PreviousCycleDays);

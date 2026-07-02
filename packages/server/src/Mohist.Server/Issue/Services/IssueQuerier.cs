@@ -604,16 +604,35 @@ public class IssueQuerier : IScopedService
         double? ReworkRate);
 
     /// <summary>
-    /// The result of <see cref="GetQualityAsync"/>. Both windows are
-    /// returned together so callers can compare recent and longer-term
-    /// quality in a single read. <see cref="Trend"/> is a strictly
-    /// additive per-day series spanning the trailing 30-day window,
-    /// pre-sized so every day is emitted; rates are <c>null</c> for
-    /// empty buckets.
+    /// The previous-adjacent-window first-time-right rate. <see cref="SampleCount"/>
+    /// is the number of shipped-in-window issues and is the empty
+    /// discriminator: <c>SampleCount == 0</c> means no shipped issues fell
+    /// in the window (the defined empty result, structurally distinguishable
+    /// from a genuine <c>0</c> or <c>1</c> rate). <see cref="FirstTimeRightRate"/>
+    /// is the arithmetic mean of the per-issue FTR classification
+    /// (<c>true</c>/<c>false</c>) over the same population. Computed over
+    /// <c>[now − 2W, now − W]</c> using the identical ship-time windowing
+    /// and first-time-right classification the current 30-day window uses.
+    /// </summary>
+    public sealed record QualityPreviousWindow(
+        int SampleCount,
+        double? FirstTimeRightRate);
+
+    /// <summary>
+    /// The result of <see cref="GetQualityAsync"/>. Both the current 30-day
+    /// window and the immediately-preceding 30-day window are returned
+    /// together so callers can derive a percentage-point delta in a single
+    /// read. <see cref="Window7d"/> and <see cref="Trend"/> are preserved
+    /// unchanged. <see cref="PreviousWindow"/> is strictly additive: it is
+    /// the previous-window FTR rate plus its <see cref="QualityPreviousWindow.SampleCount"/>
+    /// discriminator; the existing 7-day and 30-day single-point rates,
+    /// the per-stage rework rates, and the per-bucket trend series are
+    /// unchanged.
     /// </summary>
     public sealed record QualityMetricsResult(
         QualityMetricsWindow Window7d,
         QualityMetricsWindow Window30d,
+        QualityPreviousWindow PreviousWindow,
         QualityTrend Trend);
 
     /// <summary>
@@ -647,6 +666,22 @@ public class IssueQuerier : IScopedService
     /// event time, matching <see cref="GetCompletionBucketsAsync"/>. Rates
     /// are computed from existing workflow-run state and durable check events;
     /// no new data collection is introduced.
+    /// <para>
+    /// In addition to the 7-day and 30-day single-point rates, the result
+    /// also carries the previous-adjacent-window
+    /// <see cref="QualityMetricsResult.PreviousWindow"/> first-time-right
+    /// rate over <c>[now − 60d, now − 30d)</c> — the same length as the
+    /// current 30-day window and immediately preceding it, using the
+    /// identical ship-time windowing and first-time-right classification.
+    /// The previous-window rate is the arithmetic mean of the per-issue
+    /// FTR flag over shipped-in-previous-window issues. The window's
+    /// <see cref="QualityPreviousWindow.SampleCount"/> is the empty
+    /// discriminator (<c>0</c> ⟹ no shipped issues fell in the window,
+    /// structurally distinguishable from a genuine <c>0</c> or <c>1</c>
+    /// rate). The two windows are evaluated independently: the current
+    /// window can be non-empty while the previous window is empty and
+    /// vice-versa.
+    /// </para>
     /// </summary>
     public async Task<QualityMetricsResult> GetQualityAsync(
         string projectId,
@@ -658,6 +693,13 @@ public class IssueQuerier : IScopedService
         var window7dTo = now;
         var window30dFrom = now.AddDays(-30);
         var window30dTo = now;
+
+        // Previous 30-day window — same length as the current window,
+        // immediately preceding it. The upper bound is exclusive so the
+        // boundary moment belongs to the current window (matches the
+        // delivery-time surface's [now − 2W, now − W) shape).
+        var previous30dFrom = now.AddDays(-60);
+        var previous30dTo = window30dFrom;
 
         // Pre-sized 30 UTC calendar-day buckets inclusive of today. Every
         // bucket is emitted so the consuming chart's x-axis never compresses.
@@ -742,6 +784,7 @@ public class IssueQuerier : IScopedService
         // Single-pass classification and bucketing.
         var window7d = new QualityAccumulator();
         var window30d = new QualityAccumulator();
+        var previous30d = new QualityFirstTimeRightAccumulator();
 
         foreach (var issue in issues)
         {
@@ -785,12 +828,43 @@ public class IssueQuerier : IScopedService
                 if (trendIndexByBoundary.TryGetValue(shipDay, out var trendIdx))
                     Accumulate(trendBuckets[trendIdx], isFirstTimeRight, stageRework);
             }
+            else if (shipTime >= previous30dFrom && shipTime < previous30dTo)
+            {
+                // Previous window contributes ONLY the FTR scalar; the
+                // per-stage rework breakdown and per-day trend series
+                // are current-window-only contracts and stay unchanged.
+                Accumulate(previous30d, isFirstTimeRight);
+            }
         }
 
         return new QualityMetricsResult(
             BuildWindow(window7dFrom, window7dTo, window7d),
             BuildWindow(window30dFrom, window30dTo, window30d),
+            BuildPreviousWindow(previous30d),
             BuildTrend(window30dFrom, window30dTo, trendBoundaries, trendBuckets));
+    }
+
+    private static QualityPreviousWindow BuildPreviousWindow(QualityFirstTimeRightAccumulator accumulator)
+    {
+        var sampleCount = accumulator.SampleCount;
+        double? firstTimeRightRate = sampleCount == 0
+            ? null
+            : (double)accumulator.FirstTimeRightCount / sampleCount;
+        return new QualityPreviousWindow(sampleCount, firstTimeRightRate);
+    }
+
+    private sealed class QualityFirstTimeRightAccumulator
+    {
+        public int SampleCount { get; set; }
+        public int FirstTimeRightCount { get; set; }
+    }
+
+    private static void Accumulate(
+        QualityFirstTimeRightAccumulator accumulator,
+        bool isFirstTimeRight)
+    {
+        accumulator.SampleCount++;
+        if (isFirstTimeRight) accumulator.FirstTimeRightCount++;
     }
 
     private static (bool IsFirstTimeRight, IReadOnlyDictionary<string, bool> StageRework) ClassifyRuns(
