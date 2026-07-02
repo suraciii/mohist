@@ -1,8 +1,8 @@
-import { useEffect, useRef, useCallback, useState, useContext } from 'react'
+import { useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { EventName, Issue, LiveTaskState, RebaseConflictState } from '../../entities/issue'
-import { dispatchAgentEvent, useAgentStatus } from '../../entities/agent'
+import type { EventName, LiveTaskState, RebaseConflictState } from '../../entities/issue'
+import { dispatchAgentEvent } from '../../entities/agent'
 import type { AgentDetailEventMap } from '../../entities/agent'
 import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
 import { dispatchTimelineEvent } from '../../entities/issue/model/timeline-events'
@@ -13,7 +13,6 @@ import { useProject } from '../../entities/project'
 import { LiveTaskContext } from '../../entities/issue'
 import { useEventsConnection } from '../../shared/api/events-hub'
 import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
-import { RuntimeToastContext } from '../../shared/ui/toast'
 import {
   isAgentDetailEvent,
   routeTranscriptEventName,
@@ -21,6 +20,12 @@ import {
   unwrapTranscriptEnvelope,
 } from './model/event-envelope'
 import { buildTimelineLiveEvent } from './model/timeline-live-event'
+import {
+  notifyApprovalRequestedToast,
+  notifyRunLifecycleToast,
+} from './model/run-lifecycle-toast'
+import { useRunnerDropNotice } from './use-runner-drop-notice'
+import { getCurrentIssueNumber, useViewedIssueRef } from './use-viewed-issue'
 
 /**
  * Compile-time guard: every name the switch can route (i.e. every key of
@@ -43,92 +48,6 @@ void _subscriptionCoversSwitch
 
 export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName, buildTimelineLiveEvent, parseInboxItemPersistedHint, getCurrentIssueNumber }
 
-
-function getCurrentIssueNumber(): number | null {
-  const match = window.location.pathname.match(/\/issues\/(\d+)/)
-  return match ? parseInt(match[1], 10) : null
-}
-
-/**
- * Surface a runner-drop notice whenever `useAgentStatus()` transitions to
- * `runnerAvailable === false`. The notice is delivered through the runtime
- * toast host (and via the host's `onNotice` sink into Activity), never as
- * inline issue content.
- */
-function useRunnerDropNotice(): void {
-  const { data: agentStatus } = useAgentStatus()
-  const toastCtx = useContext(RuntimeToastContext)
-  const lastSeen = useRef<boolean | null>(null)
-
-  useEffect(() => {
-    if (!agentStatus || !toastCtx) return
-    const next = agentStatus.runnerAvailable === false
-    if (lastSeen.current === null) {
-      lastSeen.current = next
-      return
-    }
-    if (next === lastSeen.current) return
-    lastSeen.current = next
-    if (next) {
-      toastCtx.push({
-        tone: 'transport',
-        title: 'Runner dropped',
-        body: agentStatus.runnerMessage ?? 'The workflow runner is no longer reachable. Workflows will resume when it reconnects.',
-        testId: 'runtime-toast-runner-dropped',
-        ttlMs: 8_000,
-      })
-    } else {
-      toastCtx.push({
-        tone: 'transport',
-        title: 'Runner reconnected',
-        body: 'The workflow runner is back online.',
-        testId: 'runtime-toast-runner-reconnected',
-        ttlMs: 5_000,
-      })
-    }
-  }, [agentStatus, toastCtx])
-}
-
-function findIssueNumber(
-  queryClient: ReturnType<typeof useQueryClient>,
-  issueId: string,
-): number | null {
-  const matches = queryClient.getQueriesData<Issue[]>({ queryKey: ['issues'] })
-  for (const [, data] of matches) {
-    if (Array.isArray(data)) {
-      const found = data.find((i) => i.id === issueId)
-      if (found) {
-        return found.number
-      }
-    }
-  }
-  return null
-}
-
-function notifyRunLifecycleToast(
-  queryClient: ReturnType<typeof useQueryClient>,
-  viewedIssue: number | null,
-  issueId: string,
-  kind: 'pause' | 'error',
-): void {
-  const issueNumber = findIssueNumber(queryClient, issueId)
-  if (issueNumber === null || issueNumber === viewedIssue) return
-  if (kind === 'pause') {
-    toast.info(`Issue #${issueNumber} needs approval`)
-  } else {
-    toast.error(`Issue #${issueNumber} encountered an error`)
-  }
-}
-
-function notifyApprovalRequestedToast(
-  queryClient: ReturnType<typeof useQueryClient>,
-  viewedIssue: number | null,
-  evt: { issueId?: string; issueNumber?: number },
-): void {
-  const issueNumber = evt.issueNumber ?? (evt.issueId ? findIssueNumber(queryClient, evt.issueId) : null)
-  if (issueNumber === null || issueNumber === undefined || issueNumber === viewedIssue) return
-  toast.info(`Issue #${issueNumber} needs approval`)
-}
 
 /**
  * Apply the declarative result of `decideReverseDnsOutcome` to its four
@@ -174,33 +93,11 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
   const [activeTaskId] = useState<string | null>(null)
   const [activeTaskElapsedMs] = useState<number | null>(null)
   const [rebaseConflict, setRebaseConflict] = useState<RebaseConflictState | null>(null)
-  const viewedIssueRef = useRef<number | null>(getCurrentIssueNumber())
+  const viewedIssueRef = useViewedIssueRef()
   // Subscribe to SignalR connection transitions so transport notices are
   // routed to the toast host / Activity surface instead of any inline issue
   // content. The hook itself owns publishing.
   useRunnerDropNotice()
-
-  useEffect(() => {
-    const update = () => {
-      viewedIssueRef.current = getCurrentIssueNumber()
-    }
-    window.addEventListener('popstate', update)
-    const origPush = history.pushState
-    const origReplace = history.replaceState
-    history.pushState = function (...args) {
-      origPush.apply(this, args)
-      update()
-    }
-    history.replaceState = function (...args) {
-      origReplace.apply(this, args)
-      update()
-    }
-    return () => {
-      window.removeEventListener('popstate', update)
-      history.pushState = origPush
-      history.replaceState = origReplace
-    }
-  }, [])
 
   const handleEvent = useCallback(
     (eventName: string, rawData: unknown, options?: { dispatchAgentDetail?: boolean }) => {
