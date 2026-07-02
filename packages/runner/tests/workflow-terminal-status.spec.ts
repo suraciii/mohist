@@ -38,6 +38,21 @@ describe("isTerminalWorkflowStatus", () => {
     expect(isTerminalWorkflowStatus("Pending")).toBe(false)
   })
 
+  it("ReturnsFalseForCreated", () => {
+    // New vocabulary value from the D1 state machine: built but not
+    // started. Must be non-terminal — a freshly-built workflow still
+    // owns its workspace.
+    expect(isTerminalWorkflowStatus("Created")).toBe(false)
+  })
+
+  it("ReturnsFalseForReady", () => {
+    // New vocabulary value from the D1 state machine: assigned, waiting
+    // for the bound runner to pick up work. Must be non-terminal — the
+    // bound runner may still come back and pick the work up, so cleanup
+    // cannot mark the workspace eligible.
+    expect(isTerminalWorkflowStatus("Ready")).toBe(false)
+  })
+
   it("ReturnsFalseForNull", () => {
     expect(isTerminalWorkflowStatus(null)).toBe(false)
   })

@@ -58,6 +58,20 @@ run in `Running` with no in-flight work and no `ChecksWorkId` —
 `Ready` (assigned, dispatchable work = the re-queued check), so
 the next poll picks the work up.
 
+### Runner-side `WorkflowRunStatusName` mirrors the server enum contract
+
+`packages/runner/src/runtime/workflow-terminal-status.ts` exports a
+TS union whose values must stay in sync with the server's
+`WorkflowRunStatus` enum (D1). Listed in canonical D1 order:
+`Created | Pending | Ready | Running | AwaitingApproval | Paused |
+Stopped | Completed | Failed`. The cleanup safety logic only looks
+at `TERMINAL_WORKFLOW_STATUSES`, which is intentionally fixed at the
+three terminal values — adding a new server enum value requires
+updating the union here so the `isTerminalWorkflowStatus` type
+guard narrows correctly for any string the server sends, but no
+behavioral change is needed. New enum values are added in their D1
+position; future readers can map 1:1 to the server enum.
+
 ## Decisions and gotchas
 
 ### T-001 inherits partial state from a prior attempt
@@ -214,3 +228,74 @@ regression. The 2 previously-failing structural tests in
 `RunnerPollSchedulingSpecs` go green (file-path / indentation /
 comment-stripping fixes). All 9 querier specs and all 5
 poll-scheduling specs pass.
+
+## T-003 status
+
+### Cleanup-guard vocabulary widening only
+
+Per design D7, the cleanup-safety logic in
+`packages/runner/src/runtime/workflow-terminal-status.ts` was
+already correct by construction (everything not in
+`TERMINAL_WORKFLOW_STATUSES` blocks removal) — T-003 only needed
+to widen the `WorkflowRunStatusName` union type to add `"Created"`
+and `"Ready"`, matching the new server enum contract from D1.
+
+The final shape:
+
+- `WorkflowRunStatusName = "Created" | "Pending" | "Ready" | "Running" | "AwaitingApproval" | "Paused" | "Stopped" | "Completed" | "Failed"`
+- `TERMINAL_WORKFLOW_STATUSES` remains exactly `{ "Completed", "Stopped", "Failed" }`
+
+Union entries are listed in the canonical D1 enum order so a future
+reader maps 1:1 to the server enum.
+
+### New convergence-guard tests pinning the cleanup contract
+
+The task acceptance criterion calls out that a workspace owned by a
+workflow run in `created`, `pending`, or `ready` state must never be
+removed by automatic cleanup. The runner's convergence backstop is the
+authoritative enforcement point for that contract (active → eligible
+transitions happen only on terminal reports), so three new
+explicit-per-status tests were added to
+`packages/runner/tests/cleanup-convergence.spec.ts`:
+
+- `RunOnce_OnCreatedStatus_LeavesEntryActive (D1 created — built not started)`
+- `RunOnce_OnPendingStatus_LeavesEntryActive (D1 pending — waiting for claim)`
+- `RunOnce_OnReadyStatus_LeavesEntryActive (D1 ready — assigned, waiting for pickup)`
+
+Each asserts `{ queried: 1, transitioned: 0, dropped: 0 }` and verifies
+the registry entry remains in phase `active` with `terminalAt === null`.
+The existing
+`RunOnce_OnNonTerminalStatus_LeavesEntryActive` /
+`RunOnce_OnRunningStatus_LeavesEntryActive` /
+`RunOnce_OnPausedStatus_LeavesEntryActive` tests cover the other
+non-terminal values.
+
+### Terminal-set is still tested as exactly three values
+
+`workflow-terminal-status.spec.ts`'s
+`TerminalStatusesSetExactlyMatchesTheThreeTerminalStates` already
+pins `TERMINAL_WORKFLOW_STATUSES = ["Completed", "Failed", "Stopped"]`
+after sort — T-003 did not need to touch it. Two new
+negative-case tests (`ReturnsFalseForCreated`, `ReturnsFalseForReady`)
+were added to `isTerminalWorkflowStatus`'s describe block so a
+regression in either new value would surface immediately.
+
+### SignalR push handler expands its non-terminal vocabulary
+
+`runner-signalr-workflow-status.spec.ts::OnNonTerminalPush_LeavesEntryActive`
+previously iterated `["Running", "Paused", "AwaitingApproval", "Pending"]`;
+that loop now includes `["Created", …, "Ready", …]` for the full D1
+vocabulary. The handler body in
+`runner-signalr.ts::handleWorkflowRunStatus` was unchanged — the
+guard delegates to `isTerminalWorkflowStatus`, which is correct by
+construction.
+
+### Net effect of T-003
+
+No behavioral code change beyond the union widening. The cleanup
+safety logic was already correct by construction; adding the new
+enum values to the type union keeps the TS-side wire-shape contract
+in sync with the server's `WorkflowRunStatus` enum from D1.
+
+All 758 runner tests pass (`npm test -w packages/runner` → 55 files,
+55 passed). `tsc -p packages/runner --noEmit` is clean.

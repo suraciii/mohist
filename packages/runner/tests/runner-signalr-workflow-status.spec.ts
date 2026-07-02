@@ -163,7 +163,10 @@ describe("RunnerSignalRClient.ReceiveWorkflowRunStatus (T-003 push)", () => {
     const { handler } = await newClient(registry)
     // Server only pushes terminal statuses today (per RunnerWorkflowStatusRouter),
     // but the handler must defensively tolerate anything that arrives.
-    for (const status of ["Running", "Paused", "AwaitingApproval", "Pending"]) {
+    // The full new vocabulary (D1) is exercised here so a regression in
+    // any single value would be caught: any non-terminal status reported
+    // via push must leave the registry entry active and un-stamped.
+    for (const status of ["Created", "Pending", "Ready", "Running", "Paused", "AwaitingApproval"]) {
       await handler({ workflowRunId: "wr-1", status })
       expect(registry.get("wr-1")?.phase).toBe("active")
       expect(registry.get("wr-1")?.terminalAt).toBeNull()
