@@ -348,7 +348,7 @@ describe("classifyGhFailure", () => {
           case "retry-safe": return ""
         }
       })()
-      expect(classifyGhFailure(phrase, loser)).toBe<GitHubPrErrorCode>(winning)
+      expect(classifyGhFailure(phrase as string, loser as string)).toBe<GitHubPrErrorCode>(winning)
     }
   })
 
