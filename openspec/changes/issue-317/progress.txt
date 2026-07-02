@@ -1,0 +1,105 @@
+# Issue 317 progress
+
+Working memory for the partial-split refactor of `MohistCliCommands.Issue.cs`.
+Each task appends its findings; the next task reads the section it cares about.
+
+## Codebase Patterns
+
+### `partial class` + private-access cross-partial rule (from C# language)
+
+- `internal static partial class` merges all partials into one class at compile
+  time, so `private static` members declared in the core partial are visible
+  from every cluster partial with no visibility widening. This is what makes
+  the carve viable — no `[InternalsVisibleTo]` or `internal` bump needed.
+
+### C# tuple-destructuring shadowing gotcha
+
+- Both `ValidateOutput` and `ResolveProjectId` helpers return
+  `(T, int Exit)`. Many handlers call **both** helpers in the same scope, so
+  destructuring both as `var (..., exit) = ...` causes CS0128
+  (`exit` redeclared).
+- Convention used here: the **first** call uses the helper name's own
+  semantics (`var (mode, exit) = ValidateOutput(...)`) and the **second** call
+  uses a helper-specific alias for the exit (`var (resolvedProjectId,
+  resolveExit) = await ResolveProjectId(...)`). This keeps each call site
+  readable while letting both helpers live in the same scope.
+- Same rule of thumb applies to any future cross-cutting helper that returns
+  `(T, int)`: name the exit after the helper (e.g. `validateExit`,
+  `lookupExit`) to avoid collisions.
+
+### Helper bodies are verbatim from `EpicCommands.ValidateOutput` / pure delegation
+
+- `ValidateOutput` byte-for-byte matches `EpicCommands.ValidateOutput`
+  (MohistCliCommands.Epic.cs:38). Do not "improve" it during carve steps —
+  the match is the contract that keeps behavior preservation reviewable.
+- `ResolveProjectId` is a pure-delegation wrapper. It adds no I/O and writes
+  no extra diagnostics; `api.ResolveProjectIdAsync` already owns all error
+  output and returns `null` on failure. The wrapper just turns `null` into
+  exit code `1` symmetrically with `ValidateOutput`. If future carve steps
+  touch the helper, this no-I/O invariant must hold.
+
+### Two `internal` → `private` flips (D5)
+
+- `ParseLabelsFromIssue` (line ~502) and `PrintCreateGuidance` (line ~680)
+  flipped from `internal` to `private` once T-001 landed. They are called
+  only from `BuildUpdate` / `LoadCurrentLabelsAsync` and `BuildCreate`
+  respectively, both in the CRUD cluster. Repo-wide grep confirmed zero
+  external callers — compile gate is the safe check. Subsequent carve steps
+  move them to `Issue.Crud.cs` and they stay `private`.
+
+### Idiom-collapse replacement shape
+
+- 24× output-mode blocks and 31× project-id blocks all share a uniform 7-line
+  / 3-line shape across the file. 22 output-mode sites were byte-identical
+  and replaced via `edit.replaceAll`. 2 outliers used `invalidOutput` as the
+  pattern variable name and were handled individually. The standard pattern
+  never matched the helper body itself, so `replaceAll` was safe.
+- Two sites had an inner `var mode = ((...)validation).Mode;` redeclaration
+  inside a nested block (`BuildArchive` inside `if (allCompleted)`,
+  `BuildSessionFollowup` at top level after `BodyInputResolver.ResolveAsync`).
+  These inner redeclarations were dropped — outer `mode` from the helper is
+  reused.
+
+### `IssueTemplatesPath` placement
+
+- Stays in the core partial even though only the Template cluster calls it —
+  the cli-module-structure spec enumerates it as a required core shared
+  helper alongside `NumberArg`/`ProjectIssuesPath`/`IsOptionProvided`.
+  Carve steps preserve this placement.
+
+## Behavioral invariants to preserve in later carve steps
+
+- Command names / aliases (`list`/`ls`, `force-stop`, `unarchive`, `logs`/
+  `events`/`diff`/`commits`, `coder-sessions`, `prerequisites`,
+  `prereq add`/`prereq remove`, `feedback` create/list/show,
+  `comment add`, etc.) — verbatim.
+- Flag / option names and shapes (`--project`/`--project-id`,
+  `--all`/`--archived`, `--all-completed`, `--stage-models` / `--stage-model-variants`
+  with `@file` expansion, `--body`/`--body-file`/`--body-stdin`, etc.) —
+  verbatim.
+- HTTP path shapes under `/api/projects/{id}/issues/...`,
+  `/api/issue-templates?projectId={id}` — verbatim.
+- `mo issue update` PATCH field-omission semantics — verbatim.
+- Output formats (`table`, `json`) and exit codes (`0`, `1`) — verbatim.
+
+## Test status at T-001 close
+
+- `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj` — 0 Warning(s),
+  0 Error(s) (Directory.Build.props sets `TreatWarningsAsErrors=true`).
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/... --filter
+  'FullyQualifiedName~CliIssue'` — 231 passed, 0 failed.
+- Full CLI test project — 559 passed, 0 failed (covers non-Issue specs too).
+- Server tests via `dotnet test Mohist.sln` — 3525 passed, 13 skipped
+  (pre-existing skips, not introduced by this task).
+- `vitest` for web/runner — `vitest` not installed in this environment;
+  unrelated to this task. Recorded as an environment note, not a regression.
+
+## File metrics after T-001
+
+- `MohistCliCommands.Issue.cs` shrank from 2268 → 2137 lines
+  (Δ −131L). The 24 + 31 inline idiom lines collapsed into single-line
+  helper calls plus the check.
+- scc Complexity still to be re-measured after all 8 carve tasks complete;
+  this task is required to land first because partial visibility / shared
+  helper accessibility only works after `static partial class` + `ValidateOutput`
+  + `ResolveProjectId` exist.

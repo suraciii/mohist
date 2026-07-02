@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace Mohist.Cli;
 
-internal static class IssueCommands
+internal static partial class IssueCommands
 {
     public static Command Build(MohistCliApi api)
     {
@@ -86,9 +86,8 @@ internal static class IssueCommands
 
             async Task<int> ListAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
                 if (labels is { Length: > 0 })
                 {
                     var labelError = LabelDelta.ValidateFilterTokens(labels);
@@ -104,13 +103,8 @@ internal static class IssueCommands
                     Priority: priority,
                     Archived: archived ? true : null,
                     All: all ? true : null);
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     ProjectIssuesPath(resolvedProjectId, "/issues") + query,
                     mode,
@@ -179,9 +173,8 @@ internal static class IssueCommands
 
             async Task<int> CreateAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
                 var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
                 if (draftState == MohistCliCommands.DraftFlagState.Conflicting)
                 {
@@ -333,16 +326,10 @@ internal static class IssueCommands
 
             async Task<int> GetAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}"),
                     mode,
@@ -357,6 +344,26 @@ internal static class IssueCommands
         var result = ctx.GetResult(option);
         if (result is null) return false;
         return !result.Implicit;
+    }
+
+    private static (string Mode, int Exit) ValidateOutput(MohistCliApi api, string? output)
+    {
+        var validation = MohistCliApi.ValidateOutputMode(output);
+        if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+        {
+            api.Error.WriteLine(invalid.Message);
+            return ("json", 1);
+        }
+        return (((MohistCliApi.OutputModeResult.Valid)validation).Mode, 0);
+    }
+
+    private static async Task<(string ProjectId, int Exit)> ResolveProjectId(
+        MohistCliApi api, string? project, string? projectId)
+    {
+        var resolved = await api.ResolveProjectIdAsync(project, projectId);
+        if (resolved is null)
+            return ("", 1);
+        return (resolved, 0);
     }
 
     private static Command BuildUpdate(MohistCliApi api)
@@ -433,9 +440,8 @@ internal static class IssueCommands
                     api.Error.WriteLine("--repository cannot be used with 'issue update' — repository ownership is immutable after creation");
                     return 1;
                 }
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
                 var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
                 if (draftState == MohistCliCommands.DraftFlagState.Conflicting)
                 {
@@ -538,7 +544,7 @@ internal static class IssueCommands
         }
     }
 
-    internal static IReadOnlyDictionary<string, string> ParseLabelsFromIssue(System.Text.Json.Nodes.JsonNode? data)
+    private static IReadOnlyDictionary<string, string> ParseLabelsFromIssue(System.Text.Json.Nodes.JsonNode? data)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         if (data is null) return result;
@@ -574,9 +580,8 @@ internal static class IssueCommands
 
             async Task<int> ActAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintPostAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/{name}"),
                     new { });
@@ -616,16 +621,10 @@ internal static class IssueCommands
                     api.Error.WriteLine("--message is required and must not be empty");
                     return 1;
                 }
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/reject");
                 return await api.PrintPostWithOutputAsync(
                     path,
@@ -665,9 +664,8 @@ internal static class IssueCommands
                     api.Error.WriteLine("--stage is required and must not be empty");
                     return 1;
                 }
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
                 var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/rerun-from-stage");
                 return await api.PrintPostAsync(path, new { stage });
             }
@@ -697,16 +695,10 @@ internal static class IssueCommands
 
             async Task<int> StopAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/stop");
                 return await api.PrintPostWithOutputAsync(
                     path,
@@ -718,7 +710,7 @@ internal static class IssueCommands
         return cmd;
     }
 
-    internal static void PrintCreateGuidance(System.Text.Json.Nodes.JsonNode? data, TextWriter output)
+    private static void PrintCreateGuidance(System.Text.Json.Nodes.JsonNode? data, TextWriter output)
     {
         if (data is null) return;
         var blocker = data["blocker"];
@@ -774,9 +766,8 @@ internal static class IssueCommands
 
             async Task<int> RebaseAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintPostAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/rebase"),
                     new { baseBranch });
@@ -813,12 +804,8 @@ internal static class IssueCommands
 
             async Task<int> ArchiveAsync()
             {
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalidOutput)
-                {
-                    api.Error.WriteLine(invalidOutput.Message);
-                    return 1;
-                }
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
 
                 if (allCompleted && number is not null)
                 {
@@ -832,13 +819,11 @@ internal static class IssueCommands
                     return 1;
                 }
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
 
                 if (allCompleted)
                 {
-                    var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
                     return await api.PrintPostWithOutputAsync(
                         ProjectIssuesPath(resolvedProjectId, "/issues/archive-completed"),
                         new { },
@@ -872,9 +857,8 @@ internal static class IssueCommands
 
             async Task<int> GetAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintGetAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/{name}"));
             }
@@ -903,16 +887,10 @@ internal static class IssueCommands
 
             async Task<int> SessionsAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/coder-sessions"),
                     mode,
@@ -965,16 +943,10 @@ internal static class IssueCommands
 
             async Task<int> ShowAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
                     $"/issues/{MohistCliCommands.Escape(number!)}/sessions/{MohistCliCommands.Escape(name!)}");
@@ -1010,16 +982,10 @@ internal static class IssueCommands
 
             async Task<int> TranscriptAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
                     $"/issues/{MohistCliCommands.Escape(number!)}/sessions/{MohistCliCommands.Escape(name!)}/transcript");
@@ -1055,16 +1021,10 @@ internal static class IssueCommands
 
             async Task<int> CompactAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
                     $"/issues/{MohistCliCommands.Escape(number!)}/sessions/{MohistCliCommands.Escape(name!)}/compact");
@@ -1101,16 +1061,10 @@ internal static class IssueCommands
 
             async Task<int> ResetAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
                     $"/issues/{MohistCliCommands.Escape(number!)}/sessions/{MohistCliCommands.Escape(name!)}/reset");
@@ -1159,16 +1113,11 @@ internal static class IssueCommands
 
             async Task<int> FollowupAsync()
             {
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalidOutput)
-                {
-                    api.Error.WriteLine(invalidOutput.Message);
-                    return 1;
-                }
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
 
                 var resolvedText = await BodyInputResolver.ResolveAsync(
                     text, textFile, textStdin,
@@ -1178,7 +1127,6 @@ internal static class IssueCommands
                     return 1;
                 var textValue = ((BodyInputResolver.Result.Success)resolvedText).Body;
 
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
                     $"/issues/{MohistCliCommands.Escape(number!)}/sessions/{MohistCliCommands.Escape(name!)}/followup");
@@ -1215,16 +1163,10 @@ internal static class IssueCommands
 
             async Task<int> StatusAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow/status"),
                     mode,
@@ -1246,9 +1188,8 @@ internal static class IssueCommands
 
             async Task<int> TimelineAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintGetAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow/timeline"));
             }
@@ -1290,16 +1231,10 @@ internal static class IssueCommands
 
             async Task<int> GetAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
 
                 var profilePath = ProjectIssuesPath(
                     resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow-profile");
@@ -1369,16 +1304,10 @@ internal static class IssueCommands
                     api.Error.WriteLine($"prompt key '{key}' must not contain '/'");
                     return 1;
                 }
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow-profile/prompts/{Uri.EscapeDataString(key!)}/preview"),
                     new { },
@@ -1447,17 +1376,11 @@ internal static class IssueCommands
                     return 1;
                 }
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
 
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
 
                 var issuePath = ProjectIssuesPath(
                     resolvedProjectId,
@@ -1666,17 +1589,11 @@ internal static class IssueCommands
                     return 1;
                 }
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
 
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
 
                 var issuePath = ProjectIssuesPath(
                     resolvedProjectId,
@@ -1835,16 +1752,10 @@ internal static class IssueCommands
                     api.Error.WriteLine("--stage is required");
                     return 1;
                 }
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var resolved = await BodyInputResolver.ResolveAsync(
                     body, bodyFile, false, api.FileSystem, api.StandardInput, api.Error);
                 if (resolved is BodyInputResolver.Result.Failure)
@@ -1885,16 +1796,10 @@ internal static class IssueCommands
 
             async Task<int> ListAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/feedback");
                 if (!string.IsNullOrWhiteSpace(stage))
                     path += $"?stage={Uri.EscapeDataString(stage!)}";
@@ -1936,21 +1841,15 @@ internal static class IssueCommands
 
             async Task<int> ShowAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
                 if (string.IsNullOrWhiteSpace(feedbackId) && !latest)
                 {
                     api.Error.WriteLine("Either --feedback <id> or --latest is required");
                     return 1;
                 }
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var basePath = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/feedback");
 
                 if (!string.IsNullOrWhiteSpace(feedbackId))
@@ -2039,16 +1938,10 @@ internal static class IssueCommands
 
             async Task<int> AddAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/prerequisites");
                 return await api.PrintPostWithOutputAsync(
                     path,
@@ -2086,16 +1979,10 @@ internal static class IssueCommands
 
             async Task<int> RemoveAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
                     $"/issues/{MohistCliCommands.Escape(number!)}/prerequisites/{prereqNumber}");
@@ -2143,16 +2030,10 @@ internal static class IssueCommands
 
             async Task<int> AddAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 var resolved = await BodyInputResolver.ResolveAsync(
                     body, bodyFile, false, api.FileSystem, api.StandardInput, api.Error);
                 if (resolved is BodyInputResolver.Result.Failure)
@@ -2195,16 +2076,10 @@ internal static class IssueCommands
 
             async Task<int> ListAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     IssueTemplatesPath(resolvedProjectId, "/"),
                     mode,
@@ -2239,16 +2114,10 @@ internal static class IssueCommands
                     api.Error.WriteLine("Template name is required");
                     return 1;
                 }
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     IssueTemplatesPath(resolvedProjectId, $"/{name}"),
                     mode,
