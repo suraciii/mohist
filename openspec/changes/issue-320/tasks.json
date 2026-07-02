@@ -86,7 +86,7 @@
       "type": "WRITE",
       "output": "pages/dashboard/productivity/ProductivityZone.tsx 与 ProductivityZone.test.tsx 更新；SnapshotRow.tsx / SnapshotRow.test.tsx 删除",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "无需 spec delta——现有 spec 未要求 Productivity zone 内含 weekly-snapshot 块，移除仅靠单测约束（proposal/design 明确）。useCompletionSnapshot 保留，因其为 entities/issue 公共导出且有独立测试。"
     }
   ]
