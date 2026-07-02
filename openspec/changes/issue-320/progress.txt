@@ -1,0 +1,14 @@
+# Issue #320 — Build Progress
+
+## Codebase Patterns
+
+- Web tests use `vitest` + `@testing-library/react`. `npm run test:run -w packages/web` runs the full suite (~3700 tests, <15s). Targeted runs accept a path: `npm run test:run -w packages/web -- <path>`.
+- Web typecheck is `npm run typecheck -w packages/web` → `tsc -b`. Catches unused imports / dead code; must stay green.
+- Dashboard attention hero lives at `packages/web/src/widgets/attention-hero/ui/AttentionHero.tsx`. The `AllClearState` is a private sub-component; its `data-testid="dashboard-zone-attention"` is shared with the attention/loading variants by design.
+- Testid `productivity-placeholder` is the only place in the source tree that referenced the stale productivity-preview copy; deleting the `<div>` in `AllClearState` was sufficient — no other consumers.
+
+## T-001 — Remove Productivity placeholder from All-clear
+
+- Source: removed the `<div data-testid="productivity-placeholder">…</div>` block inside `AllClearState`. `ApprovalWaitSummary` and the all-clear message remain. No imports became orphaned.
+- Tests: flipped two positive `getByTestId('productivity-placeholder')` assertions to `queryByTestId(...).not.toBeInTheDocument()` in `AttentionHero.test.tsx` (around the "renders the all-clear state with All clear message and Productivity placeholder…" test and the "renders the all-clear state when agentStatus is undefined…" test). Both tests renamed to drop the now-misleading "and Productivity placeholder" suffix.
+- Verification: `npm run typecheck -w packages/web` clean; `npm run test:run -w packages/web` → 240 files / 3717 tests passing. Targeted `AttentionHero.test.tsx` → 32 tests passing.
