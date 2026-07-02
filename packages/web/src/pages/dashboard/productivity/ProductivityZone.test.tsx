@@ -3,10 +3,6 @@ import '@testing-library/jest-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 
-vi.mock('./SnapshotRow', () => ({
-  SnapshotRow: () => <div data-testid="snapshot-row" />,
-}))
-
 vi.mock('./EpicProgressList', () => ({
   EpicProgressList: () => <div data-testid="epic-progress-list" />,
 }))

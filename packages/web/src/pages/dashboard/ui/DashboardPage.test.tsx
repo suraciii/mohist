@@ -5,8 +5,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 
-const mockUseNavigate = vi.hoisted(() => vi.fn())
-
 const mocks = vi.hoisted(() => ({
   projects: [] as any[],
   isLoading: false,
@@ -21,14 +19,6 @@ const mocks = vi.hoisted(() => ({
   qualityMetrics: undefined as any,
   deliveryTime: undefined as { points: { issueNumber: number; completedAt: string; leadDays: number; cycleDays: number | null }[] } | undefined,
 }))
-
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useNavigate: () => mockUseNavigate,
-  }
-})
 
 vi.mock('../../../entities/project', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/project')>()
@@ -309,48 +299,16 @@ describe('DashboardPage', () => {
       expect(screen.getByTestId('create-project-dialog')).toBeInTheDocument()
     })
   })
-})
 
-describe('DashboardPage Ask Agent entry (T-005)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
+  it('does not render the Ask Agent entry in the dashboard hero', () => {
     mocks.projects = [
       { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
     ]
-    mocks.useIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
-  })
 
-  afterEach(() => {
-    cleanup()
-  })
-
-  it('renders an Ask Agent button in the hero area', () => {
     renderPage()
 
-    const button = screen.getByTestId('ask-agent-project')
-    expect(button).toBeTruthy()
-    expect(button.textContent).toContain('Ask Agent')
-  })
-
-  it('navigates to the composer without any context ref when clicked', () => {
-    renderPage()
-
-    const button = screen.getByTestId('ask-agent-project')
-    fireEvent.click(button)
-
-    expect(mockUseNavigate).toHaveBeenCalledWith(
-      expect.stringContaining('/agent-sessions/new'),
-    )
-  })
-
-  it('navigates to the composer without any query params (no issue/epic ref)', () => {
-    renderPage()
-
-    const button = screen.getByTestId('ask-agent-project')
-    fireEvent.click(button)
-
-    const callArg = mockUseNavigate.mock.calls[0][0] as string
-    expect(callArg).toMatch(/\/agent-sessions\/new$/)
+    const hero = screen.getByTestId('dashboard-hero')
+    expect(hero.querySelector('[data-testid="ask-agent-project"]')).toBeNull()
+    expect(screen.queryByTestId('ask-agent-project')).not.toBeInTheDocument()
   })
 })

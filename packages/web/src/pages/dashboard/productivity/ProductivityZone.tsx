@@ -6,7 +6,6 @@ import { EpicProgressList } from './EpicProgressList'
 import { FtrTrendChart } from './FtrTrendChart'
 import { InvestmentPanel } from './InvestmentPanel'
 import { QualityPanel } from './QualityPanel'
-import { SnapshotRow } from './SnapshotRow'
 import { StageDurationChart } from './StageDurationChart'
 import { ThroughputChart } from './ThroughputChart'
 
@@ -17,7 +16,6 @@ export function ProductivityZone() {
       aria-label="Productivity zone"
       className="flex flex-col gap-4"
     >
-      <SnapshotRow />
       <EpicProgressList />
       <CompletionTrend />
       <ThroughputChart />

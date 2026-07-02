@@ -288,14 +288,6 @@ function AllClearState({ approvalWait }: AllClearStateProps) {
       <p className="text-sm text-emerald-700/80 mb-3">
         Nothing needs your attention right now.
       </p>
-      <div
-        data-testid="productivity-placeholder"
-        className="rounded-md border border-dashed border-emerald-200 bg-background/40 p-3 mb-3"
-      >
-        <p className="text-xs text-muted-foreground">
-          Productivity preview will appear here once it ships.
-        </p>
-      </div>
       <ApprovalWaitSummary approvalWait={approvalWait} />
     </section>
   )
