@@ -1,8 +1,8 @@
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Data.Sessions;
-using Mohist.Server.Sessions.Services;
+using Mohist.Server.Sessions;
 
-namespace Mohist.Server.Workflow.Services.Sessions;
+namespace Mohist.Server.Sessions.Services;
 
 internal static class SessionTranscriptBuilder
 {

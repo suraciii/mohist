@@ -7,7 +7,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Tests.Support;
-using Mohist.Server.Workflow.Services.Sessions;
+using Mohist.Server.Sessions.Services;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Api;

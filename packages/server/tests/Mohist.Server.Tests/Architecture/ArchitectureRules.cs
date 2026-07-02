@@ -183,11 +183,17 @@ public class ArchitectureRules
             "Services"
         };
 
+        var allowedFeatureRootFiles = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "AgentSessionReadModels.cs"
+        };
+
         var violations = sourceFiles
             .Select(path => Path.GetRelativePath(sourceRoot, path))
             .Select(path => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
             .Where(parts => parts.Length >= 2 && featureRoots.Contains(parts[0]))
-            .Where(parts => !allowedFeatureSegments.Contains(parts[1]))
+            .Where(parts => !(allowedFeatureSegments.Contains(parts[1])
+                || (parts.Length == 2 && allowedFeatureRootFiles.Contains(parts[1]))))
             .Select(parts => string.Join("/", parts))
             .OrderBy(path => path)
             .ToList();

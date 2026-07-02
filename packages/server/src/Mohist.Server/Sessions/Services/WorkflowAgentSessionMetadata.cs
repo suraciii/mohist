@@ -1,6 +1,6 @@
 using Mohist.Server.Sessions.Domain;
 
-namespace Mohist.Server.Workflow.Services.Sessions;
+namespace Mohist.Server.Sessions.Services;
 
 public sealed record WorkflowAgentSessionContext(
     string ProjectId,
