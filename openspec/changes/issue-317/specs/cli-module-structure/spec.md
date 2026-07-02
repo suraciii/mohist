@@ -2,12 +2,12 @@
 
 ### Requirement: Issue 命令按子命令簇 partial 拆分
 
-`IssueCommands` SHALL 声明为 `static partial class`，按子命令簇拆分为多个 partial 分文件。核心 partial SHALL 只包含 `Build()` 公共入口与跨簇共享 helper（`NumberArg`、`ProjectIssuesPath`、`IssueTemplatesPath`、`IsOptionProvided`），对齐 #254 已落地的 `Update.*.cs` / `TableRenderer` partial 先例。各子命令簇（CRUD、生命周期动作、Session、Workflow config、Feedback、Prereq、Comment、Template）SHALL 各自驻留在独立的 partial 分文件中，SHALL NOT 回填到核心 partial。两个无外部调用方的既有 `internal` helper（`ParseLabelsFromIssue`、`PrintCreateGuidance`）SHALL 随所属簇迁移并改回 `private`。
+`IssueCommands` SHALL 声明为 `static partial class`，按子命令簇拆分为多个 partial 分文件。核心 partial SHALL 只包含 `Build()` 公共入口与跨簇共享 helper（`NumberArg`、`ProjectIssuesPath`、`IssueTemplatesPath`、`IsOptionProvided`，以及本变更新增的 `ValidateOutput`、`ResolveProjectId`），对齐 #254 已落地的 `Update.*.cs` / `TableRenderer` partial 先例。各子命令簇（CRUD、生命周期动作、Session、Workflow config、Feedback、Prereq、Comment、Template）SHALL 各自驻留在独立的 partial 分文件中，SHALL NOT 回填到核心 partial。两个无外部调用方的既有 `internal` helper（`ParseLabelsFromIssue`、`PrintCreateGuidance`）SHALL 随所属簇迁移并改回 `private`。
 
 #### Scenario: 核心 partial 只保留 Build 与共享 helper
 
 - **WHEN** 检查 `IssueCommands` 核心 partial 文件的内容
-- **THEN** 它 SHALL 只包含 `Build()` 入口与 `NumberArg`、`ProjectIssuesPath`、`IssueTemplatesPath`、`IsOptionProvided` 共享 helper
+- **THEN** 它 SHALL 只包含 `Build()` 入口与 `NumberArg`、`ProjectIssuesPath`、`IssueTemplatesPath`、`IsOptionProvided`、`ValidateOutput`、`ResolveProjectId` 共享 helper
 - **AND** SHALL NOT 包含任何具体子命令的构建方法或处理器
 
 #### Scenario: 子命令簇各自独立成 partial 分文件
