@@ -431,3 +431,171 @@ Focused runs all green:
   schema definition (computed column SQL expression + index
   shape), `IMigrator` application of the named migration, and
   round-trip insert/read.
+
+## T-005 status
+
+### `FrontendStatus` was already a no-op for the new enum values
+
+The existing `FrontendStatus(raw)` only special-cases
+`AwaitingApproval` → `awaiting-approval`; every other enum
+value flows through `ToLowerInvariant()`. So the new
+`Created`, `Pending`, `Ready`, `Running` values already map
+correctly to `created`, `pending`, `ready`, `running`. T-005
+only needed to make `FrontendStatus` test-visible (it was
+`private`) and to add the `BuildPendingWork` guard widening
+that was flagged as out-of-scope for T-001 (per
+`### BuildPendingWork guard is intentionally a T-005 concern`).
+
+### `BuildPendingWork` guard: from `Status == Running` to `Status is Ready or Running`
+
+`BuildPendingWork` (in `WorkflowStatusMapper.cs`) was guarded
+`Status != Running → null`. The new state machine means a
+`Ready` (assigned, has work, no in-flight) run has
+dispatchable work that the UI needs to surface, so the guard
+is widened to `Status is not (Ready or Running) → null`. The
+follow-on `task status != Completed/Failed` and
+`any check != Passed` checks stay as they were.
+
+A side benefit: when a `Ready` row is correctly
+re-`Advance()`'d to `Running` by the activation-time shim
+(see the `### ReconcileReadyStatusWithInFlightWork()` block
+in `## Codebase Patterns`), the UI no longer has a window
+where the work indicator silently disappears.
+
+### `BuildPendingWork` made public for direct unit testing
+
+`BuildPendingWork` was `private`. T-005 makes it
+`public static` so the new
+`WorkflowStatusMapperBuildPendingWorkSpecs` can exercise it
+in isolation (it was previously reachable only through
+`BuildStatusView` end-to-end, which made "for Ready vs for
+Running" impossible to assert without seeding an entire
+WorkflowGrain fixture). `FrontendStatus` was also promoted
+from `private` to `public` for the same reason.
+
+### `WorkflowRunStatus` model type was updated, not removed
+
+The task asked to "remove or correct" the stale
+`WorkflowRunStatus` type in
+`packages/web/src/entities/issue/model/workflow-run.ts`. I
+chose to correct it (matches the server contract exactly:
+`created | pending | ready | running | awaiting-approval |
+paused | stopped | completed | failed`) rather than remove
+it, so any future consumer that imports the canonical
+vocabulary gets a type-correct shape out of the box. The
+co-declared `WorkflowRun` interface (the other stale shape
+in the same file) was removed because it duplicated the
+server's `WorkflowTimeline` shape, is not used by any
+hook/component today, and would have been a footgun to
+keep around per D6.
+
+### `WorkflowRunStatusPill` is the new live carrier of the run-level status
+
+`packages/web/src/widgets/issue-workflow/ui/WorkflowRunStatusPill.tsx`
+is a small presentation component that maps a
+`WorkflowTimeline.status` string to a colored pill. The
+three diagnosing states get distinct color treatments:
+
+- `pending` — violet (`bg-violet-100 text-violet-800`,
+  `CircleDashedIcon`) — "Pending runner" (capacity-shortage
+  diagnosis).
+- `ready` — cyan (`bg-cyan-100 text-cyan-800`,
+  `PlayCircleIcon`) — "Ready to run" (stuck-runner
+  diagnosis).
+- `running` — blue (`bg-blue-100 text-blue-800`,
+  `ActivityIcon`) — "Running".
+
+Other states (`created`, `awaiting-approval`, `paused`,
+`completed`, `failed`, `stopped`) get their own visually
+distinct pills so a reviewer can tell a paused workflow
+from a stopped one at a glance. Unknown / null / undefined
+statuses fall through to a neutral gray `Unknown` pill so
+the layout never collapses if the server adds a value
+the web hasn't learned yet (defensive contract).
+
+### Render placement: issue detail header, alongside `HealthPill`
+
+Per D6 the precise render placement was an
+implementation-time decision. I placed the pill in the
+issue detail header next to the existing `WorkflowStagePill`
+and `HealthPill` (in `IssueDetailPage.tsx`, around the
+`mb-8` header `<div>`). This is the lowest-disruption
+placement that:
+
+- puts the new status indicator where reviewers already
+  look for run-level health signals,
+- is the same site that `issue.workflowStatus` (the legacy
+  carrier) is already surfaced (via `EventTimelinePanel` and
+  `ActivityDialog`), so the new pill completes the
+  set rather than splitting the signal,
+- does not require touching `RuntimeDecisionSurface`
+  (which already derives its own `RuntimeSummary` from
+  `timeline.status` via `deriveRuntimeDecision`), and
+- does not add a second live carrier of the same string in
+  the workflow stage bar.
+
+### `WorkflowRunStatusPill` test coverage
+
+`WorkflowRunStatusPill.test.tsx` (13 facts) pins:
+
+- `data-testid="workflow-run-status-pending|ready|running"`
+  each maps to a distinct testid (visual-distinct
+  assertion).
+- pending/ready/running each have distinct className
+  color tokens (`bg-violet-100` / `bg-cyan-100` /
+  `bg-blue-100`).
+- one pill per status, with no overlap testid leak.
+- awaiting-approval, paused, created, completed, failed,
+  stopped each get their own presentation.
+- unknown / null / undefined fall through to the
+  `workflow-run-status-unknown` testid so the layout
+  never collapses.
+
+A separate `IssueDetailPage` describe block
+(`IssueDetailPage workflow run status pill (issue-318
+T-005)`, 3 facts) pins the integration: when the
+`useWorkflowTimeline` mock returns a timeline with
+`status: 'pending'` / `'ready'` / `'running'`, the
+detail page renders the corresponding
+`data-testid="workflow-run-status-..."` pill, with the
+matching `data-status` attribute.
+
+### Test results
+
+- `WorkflowStatusMapperFrontendStatusSpecs` (18 facts:
+  9 enum values × theory + 9 dedicated Run↔string
+  asserts): 18/18 pass.
+- `Specs.Workflow.*`: 583/583 pass.
+- `DeliveryTimeMetrics_*` tests: 6/6 pass in isolation;
+  the 4 flakes in the full parallel run are the
+  pre-existing flakes noted in T-001's progress.txt and
+  verified as unrelated to issue-318.
+- Server (full): 3446/3463 pass (4 pre-existing flakes
+  unrelated to T-005).
+- Web: 3594/3595 pass (1 pre-existing skip, 13 new pill
+  facts + 3 new detail-page integration facts).
+
+### Net effect of T-005
+
+- `WorkflowStatusMapper.FrontendStatus` made `public`;
+  all new enum values already mapped correctly via
+  `ToLowerInvariant()` (awaiting-approval hyphenation
+  preserved).
+- `WorkflowStatusMapper.BuildPendingWork` guard widened
+  from `Status != Running` to `Status is not (Ready or
+  Running)`; `BuildPendingWork` made `public` for direct
+  unit testing.
+- 18 new server unit facts in
+  `WorkflowStatusMapperFrontendStatusSpecs.cs` pin the
+  mapper's status string + pending-work contract.
+- New web component `WorkflowRunStatusPill` renders
+  `pending` / `ready` / `running` as three visually
+  distinct pills (color + icon + label), with
+  defensively distinct treatments for the rest of the
+  D1 vocabulary.
+- New web component wired into the issue detail header
+  next to `WorkflowStagePill` and `HealthPill`; a
+  3-fact detail-page integration test pins the wire-up.
+- Stale `WorkflowRunStatus` type corrected to match
+  the server enum; stale `WorkflowRun` interface
+  removed.

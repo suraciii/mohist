@@ -8,7 +8,8 @@ import { useAgentStatus } from '../../../entities/agent'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
-import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
+import { IssueModelSelector } from '../../../features/select-issue-model'
+import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, WorkflowRunStatusPill, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
 import { ActivityDialog } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -153,6 +154,7 @@ export function IssueDetailPage() {
               {issue.isDraft && <DraftPill />}
               {isArchived && <ArchivedPill archivedAt={issue.archivedAt} />}
               <WorkflowStagePill stage={issue.workflowStage ?? undefined} />
+              <WorkflowRunStatusPill status={workflowTimeline?.status ?? null} />
               <HealthPill health={issue.health} />
               {!isArchived && isAgentRunningOnThis && (
                 <span
