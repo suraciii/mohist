@@ -30,26 +30,17 @@ public class ProjectWorkflowProfileManager : IScopedService
 
     private static SystemTemplateInfo[] BuildSystemTemplates()
     {
-        var defaultDefinition = MohistWorkflow.Definition;
-        var defaultDescription = string.IsNullOrWhiteSpace(defaultDefinition.Description)
-            ? "No description provided"
-            : defaultDefinition.Description!;
-
-        var githubPrDescription = string.IsNullOrWhiteSpace(MohistGithubPrIssueWorkflowProfile.GithubPrDescription)
-            ? "No description provided"
-            : MohistGithubPrIssueWorkflowProfile.GithubPrDescription.TrimEnd();
-
         return
         [
             new SystemTemplateInfo(
                 Id: IssueWorkflowProfiles.LocalId,
                 Name: "Mohist Local",
-                Description: defaultDescription,
+                Description: MohistWorkflow.ResolveDescription(MohistWorkflow.Definition),
                 IsDefault: true),
             new SystemTemplateInfo(
                 Id: IssueWorkflowProfiles.GithubPrId,
                 Name: "Mohist GitHub PR",
-                Description: githubPrDescription,
+                Description: MohistWorkflow.ResolveDescription(MohistWorkflow.GithubPrWorkflowDefinition),
                 IsDefault: false),
         ];
     }

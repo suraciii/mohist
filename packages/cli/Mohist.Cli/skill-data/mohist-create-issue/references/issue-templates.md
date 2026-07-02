@@ -6,8 +6,8 @@ Use this template when creating a Mohist issue. The file is the only contract be
 
 | Field | Required | Values |
 |---|---|---|
-| `recommended_workflow` | yes | An enabled profile id returned by `mo workflow list --described`. If discovery returns no enabled profile, stop and ask the user to enable a workflow first. |
-| `recommended_workflow_reason` | yes | One sentence that names the matched `suitable_for` tag(s), or explains that the first enabled discovered profile was selected because no specific match existed. Use the YAML `\|` block scalar for multi-line reasons. |
+| `recommended_workflow` | yes | An enabled profile id returned by `mo workflow list --described`. The skill's selection rule (default profile → operator-chosen enabled id → first enabled profile as last resort) decides which id you write here. If discovery returns no enabled profile, stop and ask the user to enable a workflow first. |
+| `recommended_workflow_reason` | yes | One short natural-language sentence explaining the choice — for example that you used the project's default, that you used the operator's explicit choice, or that no default was configured and you used the first enabled profile as a last resort. Use the YAML `\|` block scalar for multi-line reasons. |
 | `risk` | yes | One of `low`, `medium`, `high`. Driver must be documented in `## Product Shape` or `## Acceptance Criteria`. |
 
 ## Template
@@ -16,8 +16,8 @@ Use this template when creating a Mohist issue. The file is the only contract be
 ---
 recommended_workflow: <enabled-profile-id-from-discovery>
 recommended_workflow_reason: |
-  No specific workflow matched the issue content; selecting the first enabled
-  workflow returned by mo workflow list --described.
+  Using the project's default workflow profile returned by mo workflow list
+  --described.
 risk: medium
 ---
 
@@ -60,7 +60,7 @@ A UI affordance problem: the create-issue dialog offers no risk selector.
 ```markdown
 ---
 recommended_workflow: <enabled-profile-id-from-discovery>
-recommended_workflow_reason: Content covers a UI affordance and a feature addition; selected the enabled workflow whose suitable_for tags cover local feature work.
+recommended_workflow_reason: Using the project's default workflow profile as the operator has not specified a different one for this issue.
 risk: low
 ---
 
@@ -107,6 +107,7 @@ in the Web UI binding. No data-model change needed.
 - [ ] All three required fields are present and non-empty.
 - [ ] `risk` is exactly one of `low`, `medium`, `high`.
 - [ ] `recommended_workflow` is a real enabled id returned by `mo workflow list --described`; if no enabled profile is returned, do not create the issue until the user enables a workflow.
+- [ ] `recommended_workflow_reason` is one short natural-language sentence explaining the choice (default, operator-chosen, or first-enabled fallback) — no tag citations or scoring rationale.
 - [ ] Sections appear in order: User Voice, Product Shape, [Domain Model], Acceptance Criteria, Non-Goals. Domain Model is optional.
 - [ ] The body contains no source paths, file names, line numbers, or symbol names.
 - [ ] User has confirmed the workflow, risk, and a body summary before running `mo issue create --body-file`.

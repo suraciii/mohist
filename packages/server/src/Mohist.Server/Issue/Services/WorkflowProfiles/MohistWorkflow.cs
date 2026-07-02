@@ -22,6 +22,14 @@ public static class MohistWorkflow
         return Definition;
     }
 
+    private const string MissingDescriptionFallback = "No description provided";
+
+    public static string ResolveDescription(WorkflowDefinition definition)
+    {
+        var description = definition?.Description;
+        return string.IsNullOrWhiteSpace(description) ? MissingDescriptionFallback : description!.TrimEnd();
+    }
+
     private static WorkflowDefinition LoadLocalDefinition()
     {
         var path = ResolveDefinitionPath(LocalDefinitionFileName);

@@ -31,7 +31,6 @@ public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
     public abstract string DisplayName { get; }
     public abstract string Description { get; }
     public abstract bool IsDefault { get; }
-    public abstract IReadOnlyList<string> SuitableFor { get; }
     public virtual WorkflowDefinition Definition => MohistWorkflow.Definition;
 
     public Dictionary<string, string> LoadPrompts() => _promptLoader.LoadAll();

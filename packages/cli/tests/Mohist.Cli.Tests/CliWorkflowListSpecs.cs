@@ -38,7 +38,7 @@ public class CliWorkflowListSpecs
                     success = true,
                     data = new[]
                     {
-                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline.", suitableFor = new[] { "default", "feature" } },
+                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
                     },
                 });
             }
@@ -69,7 +69,7 @@ public class CliWorkflowListSpecs
                     success = true,
                     data = new[]
                     {
-                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline.", suitableFor = new[] { "default", "feature" } },
+                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
                     },
                 });
             }
@@ -98,8 +98,8 @@ public class CliWorkflowListSpecs
                     success = true,
                     data = new[]
                     {
-                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline.", suitableFor = new[] { "default", "feature" } },
-                        new { id = "mohist/github-pr", displayName = "GitHub PR Workflow", description = "PR pipeline.", suitableFor = new[] { "pr", "review" } },
+                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
+                        new { id = "mohist/github-pr", displayName = "GitHub PR Workflow", description = "PR pipeline." },
                     },
                 });
             }
@@ -117,6 +117,43 @@ public class CliWorkflowListSpecs
         var stdout = output.ToString();
         Assert.Contains("mohist/local", stdout);
         Assert.Contains("mohist/github-pr", stdout);
+        Assert.Contains("Standard pipeline.", stdout);
+        Assert.Contains("PR pipeline.", stdout);
+        Assert.DoesNotContain("Suitable for", stdout);
+        Assert.DoesNotContain("(not specified)", stdout);
+    }
+
+    [Fact]
+    public async Task WorkflowListDescribed_RendersIdDisplayNameAndDescriptionWithoutSuitableForLine()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=proj_abc")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new[]
+                    {
+                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
+                    },
+                });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["workflow", "list", "--described", "--project", "proj_abc"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("mohist/local", stdout);
+        Assert.Contains("Mohist Local Workflow", stdout);
+        Assert.Contains("Standard pipeline.", stdout);
+        Assert.DoesNotContain("Suitable for", stdout);
+        Assert.DoesNotContain("(not specified)", stdout);
     }
 
     [Fact]
@@ -131,7 +168,7 @@ public class CliWorkflowListSpecs
                     success = true,
                     data = new[]
                     {
-                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline.", suitableFor = new[] { "default", "feature" } },
+                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
                     },
                 });
             }
@@ -255,7 +292,7 @@ public class CliWorkflowListSpecs
                     success = true,
                     data = new[]
                     {
-                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline.", suitableFor = new[] { "default", "feature" } },
+                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
                     },
                 });
             }
@@ -300,5 +337,21 @@ public class CliWorkflowListSpecs
         Assert.Contains("project_not_found", error.ToString());
         Assert.DoesNotContain("degraded", error.ToString());
         Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public async Task WorkflowList_HelpMentionsDescribedOptionAndOmitsSuitableForWording()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["workflow", "list", "--help"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("--described", stdout);
+        Assert.DoesNotContain("suitable_for", stdout);
     }
 }

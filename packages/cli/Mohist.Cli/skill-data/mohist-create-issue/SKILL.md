@@ -26,35 +26,39 @@ Before recommending a workflow, discover what is available:
 mo workflow list --described
 ```
 
-This prints each workflow profile's `id`, display name, description, and `suitable_for` tags, for example:
+This prints each enabled workflow profile's `id`, display name, and natural-language description, for example:
 
 ```
 mohist/local — Mohist Local Workflow
-  Standard autonomous plan→build→check→merge pipeline.
-  Suitable for: feature, bugfix, refactor, default
+  Default general-purpose workflow. Runs the local plan→build→check→merge pipeline against the active project.
+
+mohist/github-pr — Mohist GitHub PR Workflow
+  Default general-purpose workflow. Drives the same plan→build→check→merge pipeline and publishes the result as a GitHub Pull Request via the `gh` CLI on the runner host and `gh auth login` against the target repository.
 ```
 
-Parse the output to collect each profile's `id` and its `suitable_for` tags. If the line reads `(not specified)`, treat the profile as having no declared suitability signal.
+Use this output as the source of truth for the `id` of any profile you write into the frontmatter. The natural-language description tells you what the profile does; you do not parse or score structured tags.
 
-### Matching content to a workflow
+### Selecting a workflow
 
-Match the PRD content to a profile using rule-based comparison against `suitable_for` tags:
+Pick `recommended_workflow` using **default or operator choice** — there is no tag-based scoring. Concretely:
 
-1. Summarize the content in 3–5 keywords (for example: `ui`, `feature`, `bug`, `docs`, `refactor`, `infra`, `security`).
-2. For each discovered profile, score it by counting how many of its `suitable_for` tags overlap the keywords.
-3. Recommend the profile with the highest overlap.
-4. Write `recommended_workflow_reason` as one short sentence that names the matched tag(s) and ties them to the content — not a copy of the profile description. Example: `Content covers a UI affordance and a feature addition, matching feature-flow's suitable_for: ui, feature.`
+1. **Default profile for the project.** The project is configured with a default workflow profile (the operator's standing choice for issues on this project). Use that id if it appears in the `--described` output as enabled. This is the recommended path.
+2. **Operator-chosen enabled id.** If the operator explicitly names a profile (in this turn, or in prior context for this issue), use that id — provided it is enabled in the `--described` output. Reject the operator's choice politely if the id is not enabled, and ask them to enable it or pick another.
+3. **First enabled profile as last resort.** If there is no project default and the operator has not chosen one, the first enabled profile, else fail with an actionable error.
 
-If two profiles tie, prefer the more specific one (fewer, more targeted tags). If all candidates score zero, fall back to the default below.
-
-### Default fallback when nothing matches
-
-When no profile's `suitable_for` description matches the content (every candidate scores zero, or `suitable_for` is unspecified for all profiles), default to:
-
-- `recommended_workflow`: the first enabled profile, else fail with an actionable error.
-- `recommended_workflow_reason: No specific workflow matched the issue content; using the first enabled profile.`
+Do not score profiles against content keywords. Do not look for suitability tags. The natural-language description exists to tell a human reader what the profile does; it is not a scoring input for the agent.
 
 If workflow discovery is unavailable, stop before writing frontmatter and ask the user to fix discovery first. If no profile is enabled for the project, stop before writing frontmatter and ask the user to enable a workflow first. Do not invent a recommendation or create frontmatter until discovery returns at least one enabled profile.
+
+### Writing `recommended_workflow_reason`
+
+`recommended_workflow_reason` is one short sentence in natural language that explains **why** the chosen id was selected. It does not cite matched tags, scoring, or any rule the operator cannot verify by reading the description. Choose the wording to match the path you took:
+
+- Default profile used: e.g. `Using the project's default workflow profile.` or `Selected the project's configured default workflow.`
+- Operator-chosen id: e.g. `Using mohist/github-pr per your instruction.` or `Selected mohist/github-pr as you requested for this issue.`
+- First-enabled fallback: e.g. `No project default is configured; using the first enabled workflow returned by mo workflow list --described.`
+
+Keep it to one sentence. The YAML `|` block scalar is the right tool if the sentence wraps across two lines. Do not pad the reason with restatements of the profile's own description — the description already lives in the system, not the frontmatter.
 
 ### Risk assessment
 
@@ -74,8 +78,8 @@ Supported fields:
 
 | Field | Required | Description |
 |---|---|---|
-| `recommended_workflow` | yes | Profile id from `mo workflow list --described`, or the first enabled profile as fallback. |
-| `recommended_workflow_reason` | yes | One sentence explaining why this workflow was chosen, referencing matched `suitable_for` tags or the fallback rationale. Multi-line values use the YAML `\|` block scalar. |
+| `recommended_workflow` | yes | Profile id from `mo workflow list --described`, chosen by the default-or-operator rule above (or the first enabled profile as last resort). |
+| `recommended_workflow_reason` | yes | One short natural-language sentence explaining the choice (default, operator-chosen, or first-enabled fallback). Multi-line values use the YAML `\|` block scalar. |
 | `risk` | yes | One of `low`, `medium`, `high`. |
 
 Unrecognized keys are ignored by the CLI; do not invent additional fields. The full frontmatter + body template is at `references/issue-templates.md`.
@@ -119,8 +123,8 @@ Never run `mo issue create --body-file` without confirmation. The body file is a
 ### End-to-end creation checklist
 
 - [ ] `mo workflow list --described` was run and parsed.
-- [ ] `recommended_workflow` is populated (best match or first enabled profile).
-- [ ] `recommended_workflow_reason` references the matched `suitable_for` tags or states the fallback.
+- [ ] `recommended_workflow` is populated (project default, operator-chosen enabled id, or first enabled profile).
+- [ ] `recommended_workflow_reason` is one natural-language sentence explaining the choice (default, operator, or first-enabled fallback) — no tag citations.
 - [ ] `risk` is `low`, `medium`, or `high`, with the driver noted in the body.
 - [ ] The body's sections appear in order: User Voice, Product Shape, [Domain Model], Acceptance Criteria, Non-Goals. Domain Model is optional (omit for pure technical changes).
 - [ ] `mo label list` was run; labels applied via `-l key=value` (invented when the catalog is empty or has no match); confirmed with the user.

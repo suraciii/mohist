@@ -894,18 +894,6 @@ internal sealed class MohistCliApi
             var description = profile?["description"]?.GetValue<string>() ?? "";
             _out.WriteLine($"{id} — {displayName}");
             _out.WriteLine($"  {description}");
-
-            var suitableFor = profile?["suitableFor"];
-            if (suitableFor is JsonArray tags && tags.Count > 0)
-            {
-                var items = tags.Select(t => t?.GetValue<string>() ?? "").Where(s => !string.IsNullOrWhiteSpace(s));
-                _out.WriteLine($"  Suitable for: {string.Join(", ", items)}");
-            }
-            else
-            {
-                _out.WriteLine("  Suitable for: (not specified)");
-            }
-
             _out.WriteLine();
         }
     }

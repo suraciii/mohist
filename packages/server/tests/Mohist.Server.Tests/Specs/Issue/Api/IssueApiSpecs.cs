@@ -2,6 +2,7 @@ using Mohist.Server.Tests.Support;
 using Xunit;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace Mohist.Server.Tests.Specs.Issue.Api;
 
@@ -132,7 +133,7 @@ public class IssueApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task WorkflowProfilesEndpoint_ReturnsIdDisplayNameDescriptionAndSuitableFor()
+    public async Task WorkflowProfilesEndpoint_ReturnsIdDisplayNameDescriptionWithoutSuitableFor()
     {
         var profiles = await _client.GetDataAsync<WorkflowProfileDescriptionDto[]>("/api/workflow-profiles");
 
@@ -141,16 +142,30 @@ public class IssueApiSpecs
         var defaultProfile = Assert.Single(profiles, p => p.Id == "mohist/local");
         Assert.Equal("Mohist Local", defaultProfile.DisplayName);
         Assert.Contains("Mohist pipeline", defaultProfile.Description);
-        Assert.NotNull(defaultProfile.SuitableFor);
-        Assert.NotEmpty(defaultProfile.SuitableFor);
-        Assert.All(defaultProfile.SuitableFor, item => Assert.False(string.IsNullOrWhiteSpace(item)));
 
         var prProfile = Assert.Single(profiles, p => p.Id == "mohist/github-pr");
         Assert.Equal("Mohist GitHub PR", prProfile.DisplayName);
         Assert.Contains("Mohist pipeline", prProfile.Description);
-        Assert.NotNull(prProfile.SuitableFor);
-        Assert.NotEmpty(prProfile.SuitableFor);
-        Assert.All(prProfile.SuitableFor, item => Assert.False(string.IsNullOrWhiteSpace(item)));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task WorkflowProfilesEndpoint_ResponsePayloadHasNoSuitableForField()
+    {
+        var raw = await _client.GetStringAsync("/api/workflow-profiles");
+
+        using var document = JsonDocument.Parse(raw);
+        Assert.True(document.RootElement.TryGetProperty("data", out var data));
+        Assert.Equal(JsonValueKind.Array, data.ValueKind);
+        Assert.All(data.EnumerateArray(), element =>
+        {
+            Assert.True(element.TryGetProperty("id", out _));
+            Assert.True(element.TryGetProperty("displayName", out _));
+            Assert.True(element.TryGetProperty("description", out _));
+            Assert.False(element.TryGetProperty("suitableFor", out _),
+                "workflow-profiles response must not serialize a suitableFor field");
+        });
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -268,7 +283,7 @@ public class IssueApiSpecs
 
     private sealed record IssueDto(int Number, string Id, CommentDto[] Comments, PrerequisiteDto[] Prerequisites, bool IsDraft, bool CanStart, BlockerDto? Blocker, PrimaryEpicDto? PrimaryEpic, string WorkflowProfileId);
     private sealed record WorkflowProfileDto(string Id, string Name, string Description);
-    private sealed record WorkflowProfileDescriptionDto(string Id, string DisplayName, string Description, string[] SuitableFor);
+    private sealed record WorkflowProfileDescriptionDto(string Id, string DisplayName, string Description);
     private sealed record ProjectDto(string Id);
     private sealed record CommentDto(string Id, string Body);
     private sealed record PrerequisiteDto(int Number, bool Completed);

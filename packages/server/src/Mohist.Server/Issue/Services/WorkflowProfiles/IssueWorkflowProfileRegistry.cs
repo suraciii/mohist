@@ -40,7 +40,7 @@ public class IssueWorkflowProfileRegistry : IScopedService
     public IReadOnlyList<WorkflowProfileDescription> ListDescribed() => _profiles.Values
         .OrderByDescending(p => p.IsDefault)
         .ThenBy(p => p.Id, StringComparer.OrdinalIgnoreCase)
-        .Select(p => new WorkflowProfileDescription(p.Id, p.DisplayName, p.Description, p.SuitableFor))
+        .Select(p => new WorkflowProfileDescription(p.Id, p.DisplayName, p.Description))
         .ToList();
 
     public WorkflowProfileInfo Default => ToInfo(Get(IssueWorkflowProfiles.LocalId));
@@ -53,13 +53,10 @@ public class IssueWorkflowProfileRegistry : IScopedService
         return _profiles.TryGetValue(id, out var profile) ? profile.Id : null;
     }
 
-    public bool Matches(string profileId, string? context) =>
-        SuitableForMatcher.Matches(Get(profileId).SuitableFor, context);
-
     private static WorkflowProfileInfo ToInfo(IIssueWorkflowProfile profile) =>
         new(profile.Id, profile.DisplayName, profile.Description, profile.IsDefault);
 }
 
 public sealed record WorkflowProfileInfo(string Id, string DisplayName, string Description, bool IsDefault);
 
-public sealed record WorkflowProfileDescription(string Id, string DisplayName, string Description, IReadOnlyList<string> SuitableFor);
+public sealed record WorkflowProfileDescription(string Id, string DisplayName, string Description);
