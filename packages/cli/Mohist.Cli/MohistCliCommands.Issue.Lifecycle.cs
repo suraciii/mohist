@@ -1,0 +1,273 @@
+using System.CommandLine;
+
+namespace Mohist.Cli;
+
+internal static partial class IssueCommands
+{
+    private static Command BuildAction(string name, string description, MohistCliApi api)
+    {
+        var cmd = new Command(name, $"{description} an issue");
+        var numberArg = NumberArg();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            return ActAsync();
+
+            async Task<int> ActAsync()
+            {
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                return await api.PrintPostAsync(
+                    ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/{name}"),
+                    new { });
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildReject(MohistCliApi api)
+    {
+        var cmd = new Command("reject", "Reject the workflow run with a message (request changes at an approval gate)");
+        var numberArg = NumberArg();
+        var messageOpt = new Option<string?>("--message", "-m")
+        {
+            Description = "Reject reason / change request message (required)",
+        };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(messageOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var message = ctx.GetValue(messageOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return RejectAsync();
+
+            async Task<int> RejectAsync()
+            {
+                if (string.IsNullOrWhiteSpace(message))
+                {
+                    api.Error.WriteLine("--message is required and must not be empty");
+                    return 1;
+                }
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
+                var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/reject");
+                return await api.PrintPostWithOutputAsync(
+                    path,
+                    new { message },
+                    mode,
+                    nameof(MohistCliApi.TableShape.IssueShow));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildRerunFromStage(MohistCliApi api)
+    {
+        var cmd = new Command("rerun-from-stage", "Rerun the workflow from a specified stage (invalidates the target stage and all later stages, creating new attempts)");
+        var numberArg = NumberArg();
+        var stageOpt = new Option<string>("--stage")
+        {
+            Description = "Target stage to rerun from (e.g. plan, build, check, integrate)",
+        };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(stageOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var stage = ctx.GetValue(stageOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            return RerunFromStageAsync();
+
+            async Task<int> RerunFromStageAsync()
+            {
+                if (string.IsNullOrWhiteSpace(stage))
+                {
+                    api.Error.WriteLine("--stage is required and must not be empty");
+                    return 1;
+                }
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/rerun-from-stage");
+                return await api.PrintPostAsync(path, new { stage });
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildStop(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "stop",
+            "Stop the workflow run permanently (terminal — cannot be resumed; use 'force-stop' if you want a pause you can resume)");
+        var numberArg = NumberArg();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return StopAsync();
+
+            async Task<int> StopAsync()
+            {
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
+                var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/stop");
+                return await api.PrintPostWithOutputAsync(
+                    path,
+                    new { },
+                    mode,
+                    nameof(MohistCliApi.TableShape.IssueShow));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildRebase(MohistCliApi api)
+    {
+        var cmd = new Command("rebase", "Rebase issue branch");
+        var numberArg = NumberArg();
+        var baseBranchOpt = new Option<string?>("--base-branch", "-b") { Description = "Base branch to rebase onto" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(baseBranchOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var baseBranch = ctx.GetValue(baseBranchOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            return RebaseAsync();
+
+            async Task<int> RebaseAsync()
+            {
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                return await api.PrintPostAsync(
+                    ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/rebase"),
+                    new { baseBranch });
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildArchive(MohistCliApi api)
+    {
+        var cmd = new Command("archive", "Archive issues");
+        var numberArg = new Argument<string?>("number")
+        {
+            Description = "Issue number (omit with --all-completed)",
+            Arity = ArgumentArity.ZeroOrOne,
+            DefaultValueFactory = _ => null,
+        };
+        var allCompletedOpt = new Option<bool>("--all-completed") { Description = "Archive all completed issues" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(allCompletedOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var allCompleted = ctx.GetValue(allCompletedOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var number = ctx.GetValue(numberArg);
+            var output = ctx.GetValue(outputOpt);
+            return ArchiveAsync();
+
+            async Task<int> ArchiveAsync()
+            {
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
+
+                if (allCompleted && number is not null)
+                {
+                    api.Error.WriteLine("<number> and --all-completed are mutually exclusive");
+                    return 1;
+                }
+
+                if (!allCompleted && string.IsNullOrWhiteSpace(number))
+                {
+                    api.Error.WriteLine("<number> is required unless --all-completed is used");
+                    return 1;
+                }
+
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+
+                if (allCompleted)
+                {
+                    return await api.PrintPostWithOutputAsync(
+                        ProjectIssuesPath(resolvedProjectId, "/issues/archive-completed"),
+                        new { },
+                        mode,
+                        nameof(MohistCliApi.TableShape.IssueArchiveCompleted),
+                        rawJson: true);
+                }
+
+                return await api.PrintPostAsync(
+                    ProjectIssuesPath(resolvedProjectId, $"/issues/{Uri.EscapeDataString(number!)}/archive"),
+                    new { });
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildGetSub(string name, MohistCliApi api)
+    {
+        var cmd = new Command(name, $"Show issue {name}");
+        var numberArg = NumberArg();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            return GetAsync();
+
+            async Task<int> GetAsync()
+            {
+                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                return await api.PrintGetAsync(
+                    ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/{name}"));
+            }
+        });
+        return cmd;
+    }
+}
