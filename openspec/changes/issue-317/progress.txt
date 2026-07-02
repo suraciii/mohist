@@ -328,7 +328,76 @@ Each task appends its findings; the next task reads the section it cares about.
   → 86 passed, 0 failed (workflow config get/preview/clear/set,
   `--stage-models` / `--stage-model-variants` `@file` expansion,
   PATCH semantics, execution config flags all bit-for-bit green).
+- Spec gate: full CLI issue suite — 231 passed, 0 failed (matches
+  T-001/T-002/T-003/T-004 baseline).
+- Spec gate: full CLI test project — 559 passed, 0 failed (matches
+  T-004 baseline, no regression in neighboring clusters).
+
+## Carve notes for T-006 (Feedback)
+
+### Feedback cluster sat as one contiguous region (after T-005)
+
+- The Feedback cluster after T-005 sat as a single contiguous block from
+  line 83 (`BuildFeedback`) to line 279 (close brace of `ExtractLatestId`)
+  in the 511-line core file. The seam anchor at the boundary
+  `ExtractLatestId` → `BuildPrereq` was a clean single `edit`
+  find/replace with no shared-helper bookkeeping (T-002's three-region
+  CRUD problem does not recur here — Feedback sat entirely between
+  `ResolveProjectId` and `BuildPrereq`).
+- 5 methods (~200 lines) dropped out via one `edit` covering the whole
+  cluster verbatim. The result: 204-line
+  `MohistCliCommands.Issue.Feedback.cs` partial, 311-line core.
+  Net Δ −200L.
+
+### `ExtractLatestId` moved per D1 call-graph ownership
+
+- `ExtractLatestId` was physically sitting near `BuildArchive` /
+  `BuildStop` in the Lifecycle region of the pre-T-003 file, but its
+  sole caller is `BuildFeedbackShow` (line 245 in the pre-T-006 core
+  file). Design D1 cluster-ownership rule says it goes with its caller
+  cluster, so it lands in `Issue.Feedback.cs` not `Issue.Lifecycle.cs`.
+- This is the first D1-physical-vs-call-graph-ownership carve in the
+  series; previous tasks (T-002/T-003/T-004/T-005) had methods that
+  physically sat within their caller's region. Pattern confirmed: any
+  helper called by only one cluster goes with that cluster even if it
+  physically sits elsewhere.
+
+### Core-file using-directive trim
+
+- After the Feedback carve the core file's body uses neither
+  `System.Net.Http` (no `HttpRequestException` catches) nor
+  `System.Text.Json.Nodes` (no `JsonNode?` shapes). Both imports were
+  dropped from the core `using` block, mirroring the trim rules
+  established in T-002/T-003/T-004/T-005 carve notes.
+- `System.CommandLine.Parsing` import (used by `IsOptionProvided`'s
+  `ParseResult` / `Option` signatures) stays because `IsOptionProvided`
+  is a shared helper that lives in the core partial.
+
+### Feedback partial `using` block is single-import
+
+- Only `using System.CommandLine;` is needed — no `System.Net.Http`
+  (no `HttpRequestException` catches in the cluster), no
+  `System.Text.Json.Nodes` (the cluster's only `JsonNode?` shape,
+  `ExtractLatestId`, uses fully-qualified
+  `System.Text.Json.Nodes.JsonNode?` / `JsonArray` / `JsonObject` so no
+  import is needed), no `System.CommandLine.Parsing` (no direct
+  `ParseResult` / `Option` signatures beyond their `Command`
+  constructor paths). `BodyInputResolver` and `MohistCliApi` live in
+  the same namespace (`Mohist.Cli`) so no extra import is needed.
+
+## File metrics after T-006
+
+- `MohistCliCommands.Issue.cs` shrank from 511 → 311 lines
+  (Δ −200L). The 204-line `MohistCliCommands.Issue.Feedback.cs`
+  partial offsets by 204 gross, 200 net (no shared-helper region —
+  Feedback methods sit in one block).
+- Spec gate: `dotnet build packages/cli/Mohist.Cli/Mohist.Cli.csproj`
+  → 0 Warning(s), 0 Error(s).
+- Spec gate: `dotnet test packages/cli/tests/Mohist.Cli.Tests/...
+  --filter 'FullyQualifiedName~CliIssueCommentAndFeedbackSpecs'`
+  → 13 passed, 0 failed (feedback create/list/show + comment add output
+  and exit codes bit-for-bit green).
 - Spec gate: full CLI issue suite — 231 passed, 0 failed
-  (matches T-001/T-002/T-003/T-004 baseline).
+  (matches T-001/T-002/T-003/T-004/T-005 baseline).
 - Spec gate: full CLI test project — 559 passed, 0 failed
-  (matches T-004 baseline, no regression in neighboring clusters).
+  (matches T-005 baseline, no regression in neighboring clusters).
