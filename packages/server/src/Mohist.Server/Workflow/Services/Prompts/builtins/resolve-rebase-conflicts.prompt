@@ -10,57 +10,26 @@ Read the current Mohist issue details before interpreting this task:
 mo issue show ${{ issue.number }} --project-id ${{ project.id }}
 ```
 
-## Context
+## Goal
 
-`mohist/rebase` left an in-progress rebase against
-`${{ repository.baseBranch }}` because conflicts occurred during the
-post-`base-moved` recovery for the GitHub PR merge. `mohist/rebase` reported
-`errorCode: conflict` and left the rebase in progress so that an explicit
-agent task — this one — can resolve the conflicts and complete the rebase.
+A rebase of `${{ workspace.branch }}` onto `${{ repository.baseBranch }}` is in
+progress and has stopped. Make it complete successfully: the rebased branch must
+build and typecheck green, and preserve the intent of both sides.
 
-`${{ workspace.branch }}` is the workflow branch you must rebase.
-`${{ repository.baseBranch }}` is the target base.
+The rebase is in progress — do not abort it. Do not push from this task; the
+workflow runs the explicit `recover:push` task once the rebase completes.
 
-## Resolution Rules
+## Principles
 
-1. **Preserve both sides.** Never drop or overwrite either side's changes.
-2. **Resolve every conflict.** Search for `<<<<<<<`, `=======`, `>>>>>>>` across
-   all files. No markers may remain.
-3. **Run the smallest relevant verification.** After resolving, run
-   `dotnet build` / `npm run typecheck` etc. as needed to confirm the resolved
-   state compiles and tests still pass.
-4. **Commit each resolution.** After resolving, stage and commit with a
-   descriptive message.
-
-## Steps — Loop Until Complete
-
-The rebase may have conflicts in MULTIPLE commits. Keep looping:
-
-1. Run `git status` and read the conflicting file list. The rebase is already
-   in progress; do NOT run `git rebase --abort`.
-2. For each conflict file, understand what `${{ repository.baseBranch }}`
-   changed and what the issue's branch changed.
-3. Merge both changes intelligently. Remove all conflict markers.
-4. `git add` the resolved files.
-5. `git rebase --continue`. Provide a commit message if prompted (use the
-   default or describe the resolution).
-6. If `git rebase --continue` succeeds — done. Run final build verification.
-7. If `git rebase --continue` reports more conflicts — go back to step 2.
-   Do NOT stop until the rebase completes.
-8. Do not push from this task. After the rebase completes successfully, the
-   workflow will run the explicit `recover:push` task before retrying the merge.
-
-## Output
-
-```markdown
-## Resolved Rebase Conflicts
-- conflict 1: file path — what was merged
-- conflict 2: file path — what was merged
-
-## Verification
-- `git status` clean, no rebase-merge / rebase-apply dir
-- `git log --oneline -5` shows the rebased commits on top of
-  `${{ repository.baseBranch }}`
-- Build / typecheck run and result
-- No push was performed by this task
-```
+- **Find the root cause, don't just clear markers.** Understand why the rebase
+  stopped before changing anything. Conflicts are not always text markers — the
+  base may have moved, renamed, split, or deleted code that this branch also
+  changed.
+- **Follow the code, not the file.** If the base relocated code, re-apply this
+  branch's change where the code now lives, and take the base's version of where
+  it used to live.
+- **Preserve intent, not text.** Keep the purpose of both sides; the literal
+  text is negotiable.
+- **Green is the bar.** The rebase is done when the branch builds and
+  typechecks — not when `git rebase --continue` succeeds. If git silently
+  auto-merged a broken result, fix it.
