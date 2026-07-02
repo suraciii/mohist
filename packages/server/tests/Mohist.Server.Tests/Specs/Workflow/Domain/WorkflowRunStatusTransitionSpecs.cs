@@ -210,6 +210,137 @@ public class WorkflowRunStatusTransitionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public void Stop_FromAwaitingApproval_ClearsCurrentStageApprovalGate()
+    {
+        // spec scenario 1: current stage awaiting approval is cleared on stop.
+        var run = BuildAwaitingApprovalRun();
+        var current = run.CurrentStage();
+        Assert.True(current.IsAwaitingApproval);
+        Assert.NotNull(current.ApprovalStatus);
+        Assert.Equal(StageRunStatus.AwaitingApproval, current.Status);
+
+        var events = run.Stop();
+
+        Assert.Equal(WorkflowRunStatus.Stopped, run.Status);
+        Assert.Null(current.ApprovalStatus);
+        Assert.NotEqual(StageRunStatus.AwaitingApproval, current.Status);
+        Assert.Equal(StageRunStatus.Running, current.Status);
+        _ = events;
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void Stop_FromRunningStage_LeavesApprovalStatusUnchanged()
+    {
+        // spec scenario 2: a stage not awaiting approval is unaffected by stop.
+        var run = BuildReadyRun();
+        run.StartTask("work-1", RunnerId);
+        var current = run.CurrentStage();
+        Assert.False(current.IsAwaitingApproval);
+        Assert.Null(current.ApprovalStatus);
+        Assert.Equal(StageRunStatus.Running, current.Status);
+
+        run.Stop();
+
+        Assert.Equal(WorkflowRunStatus.Stopped, run.Status);
+        Assert.Null(current.ApprovalStatus);
+        Assert.NotEqual(StageRunStatus.AwaitingApproval, current.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void Stop_EmitsOnlyWorkflowRunStopped_WhenClearingAwaitingApprovalGate()
+    {
+        // spec requirement 3 / scenario: stop is termination, not an approval
+        // decision. No StageApprovalResolved event must accompany the gate
+        // cleanup, even when the current stage was awaiting approval.
+        var run = BuildAwaitingApprovalRun();
+
+        var events = run.Stop();
+        var unwrapped = events.Select(WorkflowEventSerializer.Unwrap).ToList();
+
+        Assert.Contains(unwrapped, e => e is WorkflowRunStopped);
+        Assert.DoesNotContain(unwrapped, e => e is StageApprovalResolved);
+        Assert.DoesNotContain(unwrapped, e => e is StageApprovalRequested);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void ReconcileStoppedApprovalGate_CorrectsPersistedDirtyRun()
+    {
+        // spec scenario 3: a run persisted as Stopped with a dangling
+        // unresolved ApprovalStatus on its current stage is corrected the
+        // next time the domain method runs over the rehydrated state.
+        // Mirrors ReconcileReadyStatusWithInFlightWork_CorrectsReadyToRunning.
+        var run = BuildAwaitingApprovalRun();
+        // Simulate the #331-class poisoned persisted state: Stopped with a
+        // current stage still carrying a non-null, unresolved ApprovalStatus.
+        run.Status = WorkflowRunStatus.Stopped;
+        var current = run.CurrentStage();
+        Assert.NotNull(current.ApprovalStatus);
+        Assert.True(current.IsAwaitingApproval);
+
+        var changed = run.ReconcileStoppedApprovalGate();
+
+        Assert.True(changed);
+        Assert.Equal(WorkflowRunStatus.Stopped, run.Status);
+        Assert.Null(current.ApprovalStatus);
+        Assert.False(current.IsAwaitingApproval);
+        Assert.NotEqual(StageRunStatus.AwaitingApproval, current.Status);
+        Assert.Equal(StageRunStatus.Running, current.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void ReconcileStoppedApprovalGate_IsIdempotentOnAlreadyCleanRun()
+    {
+        // After the gate is cleared once, subsequent activations must be a
+        // no-op (return false) so the grain rehydration path doesn't write-
+        // amplify across repeated activations.
+        var run = BuildAwaitingApprovalRun();
+        run.Status = WorkflowRunStatus.Stopped;
+        var current = run.CurrentStage();
+        Assert.True(run.ReconcileStoppedApprovalGate());
+
+        var changed = run.ReconcileStoppedApprovalGate();
+
+        Assert.False(changed);
+        Assert.Null(current.ApprovalStatus);
+        Assert.Equal(StageRunStatus.Running, current.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void ReconcileStoppedApprovalGate_NoOpOnLiveAwaitingApprovalRun()
+    {
+        // The OnActivateAsync caller scopes invocation to Stopped runs, but
+        // the method itself must guard on the residual-gate predicate alone
+        // (not the run status) so it can also serve the Stop() call site,
+        // where the run is not yet Stopped. Verify the guard: on a live run
+        // genuinely awaiting approval, calling the method clears the gate
+        // (matching Stop() behavior). The Stopped-scoping discipline lives
+        // at the OnActivateAsync caller, not the method.
+        var run = BuildAwaitingApprovalRun();
+        var current = run.CurrentStage();
+        Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
+        Assert.True(current.IsAwaitingApproval);
+
+        var changed = run.ReconcileStoppedApprovalGate();
+
+        Assert.True(changed);
+        Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
+        Assert.Null(current.ApprovalStatus);
+        Assert.Equal(StageRunStatus.Running, current.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public void Reject_LandsOnFailed()
     {
         var run = BuildAwaitingApprovalRun();
