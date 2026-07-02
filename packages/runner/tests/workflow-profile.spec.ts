@@ -113,7 +113,6 @@ describe("mohist local workflow profile", () => {
     const yaml = await readFile(profileFiles["mohist/local"], "utf8")
     const integrate = yaml.slice(yaml.indexOf("  - stage: integrate"))
 
-    expect(integrate).toContain("id: integrate:spec-sync")
     expect(integrate).toContain("id: integrate:archive-change")
     expect(integrate).toContain("id: integrate:rebase")
     expect(integrate).toContain("uses: mohist/rebase")

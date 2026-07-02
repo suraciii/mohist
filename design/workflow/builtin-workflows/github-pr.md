@@ -208,15 +208,6 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
   resources:
     - project-integration
   tasks:
-    - id: spec-sync
-      title: Sync specs
-      uses: mohist/acp-agent
-      with:
-        session: integrate
-        prompt: ${{ prompts.spec-sync }}
-        agent: ${{ vars.agent }}
-      # specs/ 不存在时（纯性能/重构 issue），spec-sync 跳过，不算失败。
-
     - id: archive-change
       title: Archive change
       uses: mohist/archive-change

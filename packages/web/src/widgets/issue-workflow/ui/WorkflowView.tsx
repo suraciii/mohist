@@ -1298,10 +1298,7 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   let deliveryFailureLabel: string | null = null
 
   if (blockedReason) {
-    if (blockedReason.includes('spec-sync') || blockedReason.includes('spec sync')) {
-      failingStep = 'Sync main specs'
-      nextAction = 'Check the OpenSpec delta specs for conflicts with existing requirements. Return to Build to fix spec issues.'
-    } else if (blockedReason.includes('archive')) {
+    if (blockedReason.includes('archive')) {
       failingStep = 'Archive OpenSpec change'
       nextAction = 'Check disk space and permissions. Retry the archive step or return to Build.'
     } else if (deliveryGuidance) {

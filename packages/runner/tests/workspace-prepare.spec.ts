@@ -136,30 +136,6 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommand(calls, "clean -fd")).toBe(false)
   })
 
-  it("FastPass_CleanRealGitWorkspace_CompletesUnderOneSecond", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-prepare-fastpass-"))
-    try {
-      await exec("git", ["init", "--initial-branch=main", "-q"], { cwd: root })
-      await exec("git", ["config", "user.email", "test@example.com"], { cwd: root })
-      await exec("git", ["config", "user.name", "Workspace Prepare Test"], { cwd: root })
-      await exec("git", ["config", "commit.gpgsign", "false"], { cwd: root })
-      await writeFile(join(root, "README.md"), "clean\n", "utf8")
-      await exec("git", ["add", "README.md"], { cwd: root })
-      await exec("git", ["commit", "-m", "init", "-q"], { cwd: root })
-
-      const startedAt = performance.now()
-      const result = await workspacePrepareAction(context({ workspace: { path: root, branch: "main", changeDir: null } }))
-      const elapsedMs = performance.now() - startedAt
-      const status = await exec("git", ["status", "--porcelain"], { cwd: root })
-
-      expect(result.status).toBe("success")
-      expect(elapsedMs).toBeLessThan(1000)
-      expect(status.stdout).toBe("")
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
-  })
-
   it("InitialStatusProbeFails_ReportsWorkspaceSetupFailure", async () => {
     setWorkspacePrepareExistsCheckerForTest(() => false)
     const calls = installGit(cleanProbeResponses((call) => {

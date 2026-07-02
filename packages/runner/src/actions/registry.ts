@@ -12,7 +12,7 @@ import {
   mergeGitHubPrAction,
 } from "./github-pr.js"
 import { githubPrStatusAction } from "./github-pr-status.js"
-import { archiveChangeAction, openspecArtifactsAction, openspecSyncAction, openspecTasksAction } from "./openspec.js"
+import { archiveChangeAction, openspecArtifactsAction, openspecTasksAction } from "./openspec.js"
 import { rebaseAction, rebaseStatusAction } from "./rebase.js"
 import { git as defaultGit } from "./git.js"
 import { pushAction } from "./push.js"
@@ -48,7 +48,6 @@ export function createDefaultRegistry() {
   registry.register("core/marker", markerAction)
   registry.register("mohist/acp-agent", acpAgentAction)
   registry.register("mohist/openspec-tasks", openspecTasksAction)
-  registry.register("mohist/openspec-sync", openspecSyncAction)
   registry.register("mohist/openspec-artifacts", openspecArtifactsAction)
   registry.register("mohist/archive-change", archiveChangeAction)
   registry.register("mohist/rebase", rebaseAction)

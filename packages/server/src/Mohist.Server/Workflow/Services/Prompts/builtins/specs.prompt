@@ -1,6 +1,6 @@
 ---
 name: "Create Spec Files"
-description: "Writes spec delta files (ADDED/MODIFIED/REMOVED)"
+description: "Writes behavior specs for the current change"
 tags: [plan, openspec]
 stage: plan
 ---
@@ -13,8 +13,8 @@ mo issue show ${{ issue.number }} --project-id ${{ project.id }}
 <artifact id="specs" schema="mohist-default">
 
 <task>
-Create specification files that define WHAT the system should do.
-Detailed specifications for the current change.
+Create specification files that define WHAT the system should do for this change.
+Each spec describes the required behavior this change must deliver, as normative requirements and scenarios.
 </task>
 
 <dependencies>
@@ -31,30 +31,15 @@ Write to: `${{ openspecChangeDir }}/specs/<capability>/spec.md`
 </output>
 
 <instruction>
-Create one spec file per capability listed in the proposal's Capabilities section.
+Create one spec file per capability listed in the proposal's Capabilities section, using the exact kebab-case name from the proposal.
 
-- New capabilities: use the exact kebab-case name from the proposal, writing each spec to `${{ openspecChangeDir }}/specs/<capability>/spec.md`.
-- Modified capabilities: use the existing spec folder name from `openspec/specs/<capability>/` when creating the delta spec at `${{ openspecChangeDir }}/specs/<capability>/spec.md`.
+Read the existing code to understand current behavior. Specs describe the target behavior for THIS change directly — do not write `## ADDED/MODIFIED/REMOVED` delta sections, and do not reference any other spec file. Each spec is a self-contained statement of what this change requires.
 
-Delta operations use `##` headers:
-- **ADDED Requirements**: New capabilities
-- **MODIFIED Requirements**: Changed behavior. MUST include full updated content.
-- **REMOVED Requirements**: Deprecated features. MUST include **Reason** and **Migration**.
-- **RENAMED Requirements**: Name changes only. Use FROM:/TO: format.
-
-MODIFIED requirements workflow:
-1. Locate the existing requirement in `openspec/specs/<capability>/spec.md`.
-2. Copy the ENTIRE requirement block from `### Requirement:` through all scenarios.
-3. Paste under `## MODIFIED Requirements` and edit to reflect new behavior.
-4. Ensure header text matches exactly, ignoring whitespace.
-
-Common pitfall: Using MODIFIED with partial content loses detail at archive time. If adding new concerns without changing existing behavior, use ADDED instead.
+If a capability introduces new behavior, state the new requirements. If a capability changes existing behavior, state the resulting requirement as it should be after this change (read the code to capture what exists today, then describe the target).
 </instruction>
 
 <template>
-<!-- Use this as the structure for each spec file. Fill in the sections. -->
-## ADDED Requirements
-
+<!-- Use this as the structure for each spec file. Fill in the requirements. -->
 ### Requirement: <!-- requirement name -->
 <!-- requirement text -->
 
@@ -64,6 +49,7 @@ Common pitfall: Using MODIFIED with partial content loses detail at archive time
 </template>
 
 <format>
+- Start each spec file directly with requirement blocks (no `## ADDED/MODIFIED/REMOVED` headers).
 - Each requirement: `### Requirement: <name>` followed by description.
 - Use SHALL/MUST for normative requirements. Avoid should/may.
 - Each scenario: `#### Scenario: <name>` with WHEN/THEN format.
@@ -75,6 +61,7 @@ Common pitfall: Using MODIFIED with partial content loses detail at archive time
 - Every capability listed in proposal.md has a corresponding spec file.
 - Every requirement has at least one scenario.
 - Specs are testable and use normative SHALL/MUST language.
+- Specs describe target behavior directly, without delta operation headers.
 </success_criteria>
 
 </artifact>

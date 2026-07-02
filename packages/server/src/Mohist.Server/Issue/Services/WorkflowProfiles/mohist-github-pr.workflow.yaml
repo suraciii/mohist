@@ -235,14 +235,6 @@ stages:
       - id: workspace-prepare
         title: Prepare workspace
         uses: mohist/workspace-prepare
-      - id: spec-sync
-        title: Sync specs
-        uses: mohist/acp-agent
-        with:
-          session: integrate
-          prompt: ${{ prompts.spec-sync }}
-          agent: ${{ vars.agent }}
-
       - id: archive-change
         title: Archive change
         uses: mohist/archive-change
