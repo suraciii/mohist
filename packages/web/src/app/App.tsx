@@ -26,6 +26,7 @@ import { EpicListPage } from '../pages/epics/ui/EpicListPage'
 import { EpicDetailPage } from '../pages/epic-detail/ui/EpicDetailPage'
 import { RunnerDetailPage } from '../pages/runner-detail/ui/RunnerDetailPage'
 import { InboxPage } from '../pages/inbox/ui/InboxPage'
+import { InsightsPage } from '../pages/insights/ui/InsightsPage'
 import { AgentListPage } from '../pages/agent-list/ui/AgentListPage'
 import { AgentDetailPage } from '../pages/agent-detail/ui/AgentDetailPage'
 import { AgentSessionComposerPage } from '../pages/agent-session-composer/ui/AgentSessionComposerPage'
@@ -81,6 +82,7 @@ function AppContent() {
                 <Route path="epics" element={<EpicListPage />} />
                 <Route path="epics/:id" element={<EpicDetailPage />} />
                 <Route path="inbox" element={<InboxPage />} />
+                <Route path="insights" element={<InsightsPage />} />
                 <Route path="runners/:runnerId" element={<RunnerDetailPage />} />
               </Route>
             </Route>

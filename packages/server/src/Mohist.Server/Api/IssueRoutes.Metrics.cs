@@ -14,6 +14,7 @@ public static partial class IssueRoutes
             string projectRef,
             string? bucket,
             IssueQuerier issuesQuery,
+            TimeProvider timeProvider,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
@@ -26,7 +27,7 @@ public static partial class IssueRoutes
                 var result = await issuesQuery.GetCompletionBucketsAsync(
                     project.Id,
                     IssueQuerier.CompletionBucket.Day,
-                    DateTimeOffset.UtcNow);
+                    timeProvider.GetUtcNow());
                 return ApiResults.Ok(BuildResponse(result));
             }
 
@@ -35,7 +36,7 @@ public static partial class IssueRoutes
                 var result = await issuesQuery.GetCompletionBucketsAsync(
                     project.Id,
                     IssueQuerier.CompletionBucket.Week,
-                    DateTimeOffset.UtcNow);
+                    timeProvider.GetUtcNow());
                 return ApiResults.Ok(BuildResponse(result));
             }
 
@@ -54,5 +55,13 @@ public static partial class IssueRoutes
                 To: result.WindowTo.ToString("o")),
             Buckets: result.Buckets
                 .Select(b => new CompletionMetricsBucketDto(b.Boundary, b.Completed, b.Failed))
-                .ToArray());
+                .ToArray(),
+            CurrentTotal: new CompletionMetricsTotalsDto(
+                Completed: result.CurrentTotal.Completed,
+                Failed: result.CurrentTotal.Failed,
+                SampleCount: result.CurrentTotal.SampleCount),
+            PreviousTotal: new CompletionMetricsTotalsDto(
+                Completed: result.PreviousTotal.Completed,
+                Failed: result.PreviousTotal.Failed,
+                SampleCount: result.PreviousTotal.SampleCount));
 }

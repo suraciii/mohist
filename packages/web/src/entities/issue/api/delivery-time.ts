@@ -11,6 +11,7 @@ export interface DeliveryTimePointDto {
 
 export interface DeliveryTimeMetricsResponse {
   points: DeliveryTimePointDto[]
+  previousCycleDays?: number | null
 }
 
 export function fetchDeliveryTime(projectId: string) {

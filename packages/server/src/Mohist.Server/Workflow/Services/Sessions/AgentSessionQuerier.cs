@@ -942,6 +942,133 @@ public class AgentSessionQuerier : IScopedService
             new AgentCostMetricDto(todaySamples > 0 ? todayCost : null, todayCurrency, todaySamples));
     }
 
+    /// <summary>
+    /// Computes windowed (current + previous) spend and per-issue cost for
+    /// the agent-cost surface (issue-322 T-004 / design D1, D2). Both windows
+    /// are 30 days; the previous window is the same length as the current
+    /// window and immediately precedes it. Both advance with the current
+    /// time. Spend is the sum of per-session
+    /// <see cref="AgentUsageSummary.CostAmount"/> over sessions whose
+    /// creation time falls in the window; per-issue cost is the window's
+    /// spend divided by the count of issues completed (reached
+    /// <see cref="IssueStatus.Done"/>) within the window. Each metric's
+    /// emptiness is evaluated independently per metric per window:
+    /// no sessions ⟹ empty spend; no completed issues ⟹ empty per-issue
+    /// cost. The two emptiness states share no fallback — a window with
+    /// spend but no completed issues returns a real spend and an empty
+    /// per-issue cost, and vice-versa.
+    /// </summary>
+    public async Task<AgentCostWindowedData> GetCostWindowedAsync(string projectId, CancellationToken ct = default)
+    {
+        var now = Now();
+        var currentFrom = now.Date.AddDays(-29);
+        var currentTo = now.Date.AddDays(1);
+        var previousFrom = currentFrom.AddDays(-30);
+        var previousTo = currentFrom;
+
+        var sessions = await _sessionQuery.ListByLabelsAsync(
+            Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
+            AgentSessionQueryOrder.CreatedAscending,
+            ct: ct);
+
+        double currentSpend = 0d;
+        int currentSamples = 0;
+        string? currentCurrency = null;
+
+        double previousSpend = 0d;
+        int previousSamples = 0;
+        string? previousCurrency = null;
+
+        foreach (var record in sessions)
+        {
+            var usage = AgentSessionJsonHelper.Usage(record.Session);
+            if (!HasUsage(usage)) continue;
+
+            var createdAt = record.Session.Status.CreatedAt;
+            var costAmount = usage.CostAmount ?? 0d;
+
+            if (createdAt >= currentFrom && createdAt < currentTo)
+            {
+                currentSpend += costAmount;
+                currentSamples++;
+                currentCurrency ??= usage.CostCurrency;
+            }
+            else if (createdAt >= previousFrom && createdAt < previousTo)
+            {
+                previousSpend += costAmount;
+                previousSamples++;
+                previousCurrency ??= usage.CostCurrency;
+            }
+        }
+
+        var (currentCompleted, previousCompleted) = await LoadCompletedIssueCountsAsync(
+            projectId, currentFrom, currentTo, previousFrom, previousTo, ct);
+
+        return new AgentCostWindowedData(
+            BuildFigure(currentSpend, currentSamples, currentCurrency, currentCompleted),
+            BuildFigure(previousSpend, previousSamples, previousCurrency, previousCompleted));
+    }
+
+    private static AgentCostWindowedFigure BuildFigure(
+        double spend,
+        int sessionSamples,
+        string? currency,
+        int completedIssues)
+    {
+        var spendDto = new AgentCostMetricDto(
+            sessionSamples > 0 ? spend : null,
+            currency,
+            sessionSamples);
+
+        AgentCostMetricDto perIssueCostDto;
+        if (completedIssues <= 0)
+        {
+            perIssueCostDto = new AgentCostMetricDto(null, currency, 0);
+        }
+        else if (sessionSamples <= 0)
+        {
+            // Genuine-empty: no spend recorded in the window. Per-issue cost
+            // has no numerator to divide by; surface the empty result rather
+            // than fabricating a 0.0 to match a fabricated spend.
+            perIssueCostDto = new AgentCostMetricDto(null, currency, 0);
+        }
+        else
+        {
+            perIssueCostDto = new AgentCostMetricDto(spend / completedIssues, currency, 1);
+        }
+
+        return new AgentCostWindowedFigure(spendDto, perIssueCostDto);
+    }
+
+    private async Task<(int CurrentCount, int PreviousCount)> LoadCompletedIssueCountsAsync(
+        string projectId,
+        DateTime currentFrom,
+        DateTime currentTo,
+        DateTime previousFrom,
+        DateTime previousTo,
+        CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId)
+            .ToListAsync(ct);
+
+        var current = 0;
+        var previous = 0;
+        foreach (var issue in IssueRowMapper.Deserialize(rows))
+        {
+            if (issue.Status != IssueStatus.Done) continue;
+            var completedAt = issue.CompletedAt;
+            if (!completedAt.HasValue) continue;
+
+            if (completedAt.Value >= currentFrom && completedAt.Value < currentTo)
+                current++;
+            else if (completedAt.Value >= previousFrom && completedAt.Value < previousTo)
+                previous++;
+        }
+        return (current, previous);
+    }
+
     private static bool HasUsage(AgentUsageSummary usage)
     {
         return usage.InputTokens.HasValue

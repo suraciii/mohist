@@ -8,11 +8,18 @@ export interface AgentCostMetricDto {
   sampleCount: number
 }
 
+export interface AgentCostWindowedFigureDto {
+  spend: AgentCostMetricDto
+  perIssueCost: AgentCostMetricDto
+}
+
 export interface AgentCostRollupDto {
   totalCost: AgentCostMetricDto
   todayCost: AgentCostMetricDto
   doneIssuesCount: number
   costPerShip: AgentCostMetricDto
+  currentWindow?: AgentCostWindowedFigureDto
+  previousWindow?: AgentCostWindowedFigureDto
 }
 
 export function fetchCostRollup(projectId: string) {

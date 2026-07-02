@@ -34,5 +34,6 @@ public static partial class IssueRoutes
                     CompletedAt: p.CompletedAt.ToString("o"),
                     LeadDays: p.LeadDays,
                     CycleDays: p.CycleDays))
-                .ToArray());
+                .ToArray(),
+            PreviousCycleDays: result.PreviousAverageCycleDays);
 }

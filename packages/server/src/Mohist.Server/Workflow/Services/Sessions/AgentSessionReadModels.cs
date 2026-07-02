@@ -380,12 +380,58 @@ public sealed record AgentCostMetricDto(
     string? Currency,
     int SampleCount);
 
+/// <summary>
+/// One windowed cost figure for the agent-cost surface. <see cref="Spend"/>
+/// is the sum of per-session <c>UsageSummary.CostAmount</c> over sessions
+/// whose creation time falls in the window; <see cref="PerIssueCost"/> is
+/// the window's spend divided by the count of issues completed
+/// (<see cref="IssueStatus.Done"/>) within the window. Each metric uses
+/// the existing <see cref="AgentCostMetricDto"/> empty idiom
+/// (<c>amount == null</c> ⟹ empty, distinct from a genuine <c>0.0</c>)
+/// and the two emptiness states are evaluated independently per metric
+/// per window (no sessions ⟹ empty spend; no completed issues ⟹ empty
+/// per-issue cost). Strictly additive: existing cumulative rollup and
+/// 7-day usage timeseries are unchanged.
+/// </summary>
+public sealed record AgentCostWindowedFigure(
+    AgentCostMetricDto Spend,
+    AgentCostMetricDto PerIssueCost);
+
+/// <summary>
+/// Response shape for the agent-cost rollup endpoint. The existing
+/// cumulative rollup (<see cref="TotalCost"/>, <see cref="TodayCost"/>,
+/// <see cref="DoneIssuesCount"/>, <see cref="CostPerShip"/>) and the
+/// existing 7-day usage timeseries are preserved byte-for-byte;
+/// <see cref="CurrentWindow"/> and <see cref="PreviousWindow"/> are
+/// strictly additive — current-window and previous-adjacent-window
+/// (same length, immediately preceding) spend and per-issue cost for
+/// trend derivation.
+/// </summary>
 public sealed record AgentCostRollupDto(
     AgentCostMetricDto TotalCost,
     AgentCostMetricDto TodayCost,
     int DoneIssuesCount,
-    AgentCostMetricDto CostPerShip);
+    AgentCostMetricDto CostPerShip,
+    AgentCostWindowedFigure CurrentWindow,
+    AgentCostWindowedFigure PreviousWindow);
 
 public sealed record AgentCostRollupRawData(
     AgentCostMetricDto TotalCost,
     AgentCostMetricDto TodayCost);
+
+/// <summary>
+/// The windowed cost figures produced by
+/// <see cref="AgentSessionQuerier.GetCostWindowedAsync"/>. Both windows
+/// are 30 days; the previous window is the same length as the current
+/// window and immediately precedes it. Both advance with the current
+/// time. <see cref="CurrentSpend"/> is the sum of in-window per-session
+/// <c>UsageSummary.CostAmount</c> values; <see cref="PreviousSpend"/>
+/// is the same over the previous window.
+/// <see cref="CurrentCompletedIssueCount"/> /
+/// <see cref="PreviousCompletedIssueCount"/> are the in-window
+/// completed-issue counts; per-issue cost is spend / count. Each
+/// emptiness state is evaluated independently per metric per window.
+/// </summary>
+public sealed record AgentCostWindowedData(
+    AgentCostWindowedFigure CurrentWindow,
+    AgentCostWindowedFigure PreviousWindow);

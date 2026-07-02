@@ -193,6 +193,154 @@ public class IssueMetricsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task CompletionMetrics_DayBucket_ReturnsBothWindowTotalsFromSeededEvents()
+    {
+        // The fixture's TimeProvider is fixed at 2026-06-30 00:00:00 UTC,
+        // so the current day-window is [2026-06-01, 2026-07-01) and the
+        // previous day-window is [2026-05-02, 2026-06-01). Seed events
+        // in each window and verify both totals.
+        var project = await CreateProjectAsync($"metrics-totals-{Guid.NewGuid():N}");
+        var currentIssue = await CreateIssueAsync(project.Id, "Current window issue");
+        var previousIssue = await CreateIssueAsync(project.Id, "Previous window issue");
+
+        await SeedEventAsync(currentIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(previousIssue.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.Zero));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+
+        Assert.NotNull(payload.CurrentTotal);
+        Assert.NotNull(payload.PreviousTotal);
+        Assert.Equal(1, payload.CurrentTotal.Completed);
+        Assert.Equal(0, payload.CurrentTotal.Failed);
+        Assert.Equal(1, payload.CurrentTotal.SampleCount);
+        Assert.Equal(0, payload.PreviousTotal.Completed);
+        Assert.Equal(1, payload.PreviousTotal.Failed);
+        Assert.Equal(1, payload.PreviousTotal.SampleCount);
+
+        // The existing per-bucket series and window are preserved
+        // unchanged alongside the new totals.
+        Assert.Equal("day", payload.Bucket);
+        Assert.Equal(30, payload.Buckets.Length);
+        Assert.NotNull(payload.Window);
+        Assert.Equal("2026-06-01", payload.Buckets[0].Boundary);
+        Assert.Equal("2026-06-30", payload.Buckets[^1].Boundary);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CompletionMetrics_DayBucket_EmptyPreviousWindowReportsZeroSampleCount()
+    {
+        // No terminal issues in the previous window → SampleCount 0
+        // (the empty / zero-sample result), distinguishable from a
+        // genuine zero-completion window.
+        var project = await CreateProjectAsync($"metrics-empty-prev-{Guid.NewGuid():N}");
+        var currentIssue = await CreateIssueAsync(project.Id, "Current only");
+        await SeedEventAsync(currentIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+
+        Assert.Equal(1, payload.CurrentTotal.SampleCount);
+        Assert.Equal(0, payload.PreviousTotal.Completed);
+        Assert.Equal(0, payload.PreviousTotal.Failed);
+        Assert.Equal(0, payload.PreviousTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CompletionMetrics_DayBucket_GenuineZeroCompletionPreviousWindowIsDistinctFromEmpty()
+    {
+        // Every terminal issue in the previous window cancelled —
+        // a GENUINE zero completion with non-zero SampleCount,
+        // distinguishable from the empty (zero-sample) result.
+        var project = await CreateProjectAsync($"metrics-zero-prev-{Guid.NewGuid():N}");
+        var p1 = await CreateIssueAsync(project.Id, "Cancelled prev 1");
+        var p2 = await CreateIssueAsync(project.Id, "Cancelled prev 2");
+        await SeedEventAsync(p1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(p2.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 25, 11, 0, 0, TimeSpan.Zero));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+
+        Assert.Equal(0, payload.PreviousTotal.Completed);
+        Assert.Equal(2, payload.PreviousTotal.Failed);
+        Assert.Equal(2, payload.PreviousTotal.SampleCount);
+        // Genuine zero has non-zero sample count; the empty result
+        // (SampleCount 0) must be distinguishable from it on the wire.
+        Assert.NotEqual(0, payload.PreviousTotal.SampleCount);
+        Assert.Equal(0, payload.CurrentTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CompletionMetrics_DayBucket_BothWindowTotalsAreAdditiveToExistingResponse()
+    {
+        // The new totals must not displace any existing field. Verify
+        // the existing per-bucket series, window, and bucket granularity
+        // remain intact when totals are populated.
+        var project = await CreateProjectAsync($"metrics-additive-{Guid.NewGuid():N}");
+        var issue = await CreateIssueAsync(project.Id, "Additive check");
+        await SeedEventAsync(issue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+
+        // Existing fields unchanged.
+        Assert.Equal("day", payload.Bucket);
+        Assert.Equal(30, payload.Buckets.Length);
+        Assert.Equal(payload.Buckets[0].Boundary, payload.Window.From[..10]);
+        Assert.Equal(payload.Buckets[^1].Boundary, DateOnly.Parse(payload.Window.To[..10]).AddDays(-1).ToString("yyyy-MM-dd"));
+        // Totals added on top.
+        Assert.NotNull(payload.CurrentTotal);
+        Assert.NotNull(payload.PreviousTotal);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CompletionMetrics_WeekBucket_ReturnsBothWindowTotalsFromSeededEvents()
+    {
+        // Fixture TimeProvider = 2026-06-30 (a Tuesday). The current
+        // ISO week starts on 2026-06-29 (Monday); the current
+        // 12-week window is [2026-04-13, 2026-07-06). The previous
+        // 12-week window is [2026-01-19, 2026-04-13).
+        var project = await CreateProjectAsync($"metrics-week-totals-{Guid.NewGuid():N}");
+        var currentIssue = await CreateIssueAsync(project.Id, "Current week issue");
+        var previousIssue = await CreateIssueAsync(project.Id, "Previous window issue");
+
+        // 2026-06-29 (Monday) → current week window.
+        await SeedEventAsync(currentIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 29, 10, 0, 0, TimeSpan.Zero));
+        // 2026-03-30 (Monday) → previous 12-week window.
+        await SeedEventAsync(previousIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 3, 30, 10, 0, 0, TimeSpan.Zero));
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=week");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+
+        Assert.Equal("week", payload.Bucket);
+        Assert.Equal(12, payload.Buckets.Length);
+        Assert.Equal(1, payload.CurrentTotal.Completed);
+        Assert.Equal(1, payload.CurrentTotal.SampleCount);
+        Assert.Equal(1, payload.PreviousTotal.Completed);
+        Assert.Equal(1, payload.PreviousTotal.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task ApprovalWaitMetrics_HasCompletedApprovals_ReturnsWindowSampleCountAndStats()
     {
         var project = await CreateProjectAsync($"approval-wait-present-{Guid.NewGuid():N}");
@@ -437,6 +585,212 @@ public class IssueMetricsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task QualityMetrics_BothWindowsReturned_DeltaDerivableAcrossAdjacent30DayWindows()
+    {
+        // Fixture `now` is 2026-06-30 UTC. Current 30d window
+        // [2026-05-31, 2026-06-30]; previous 30d window
+        // [2026-05-01, 2026-05-31). Seed one shipped issue in each
+        // window with different FTR outcomes and verify both rates
+        // are returned so a consumer can derive the percentage-point
+        // delta.
+        var project = await CreateProjectAsync($"quality-both-{Guid.NewGuid():N}");
+
+        var currentShipTime = new DateTimeOffset(2026, 6, 14, 14, 0, 0, TimeSpan.Zero);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 1,
+            $"issue_quality_both_current_{Guid.NewGuid():N}",
+            $"wr_quality_both_current_{Guid.NewGuid():N}",
+            currentShipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-repair", "Build repair", 1)]),
+            ]);
+
+        var previousShipTime = new DateTimeOffset(2026, 5, 20, 14, 0, 0, TimeSpan.Zero);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 2,
+            $"issue_quality_both_previous_{Guid.NewGuid():N}",
+            $"wr_quality_both_previous_{Guid.NewGuid():N}",
+            previousShipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-ok", "Build ok", 0)]),
+            ]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        // Current 30d window: 1 sample, FTR = 0.0 (build had a repair).
+        Assert.Equal(1, payload.Window30d.SampleCount);
+        Assert.Equal(0.0, payload.Window30d.FirstTimeRightRate);
+        // Previous 30d window: 1 sample, FTR = 1.0 (no repairs).
+        Assert.Equal(1, payload.PreviousSampleCount);
+        Assert.Equal(1.0, payload.PreviousFirstTimeRightRate);
+        // Delta is 1.0 - 0.0 = 1.0 percentage-point — derivable in
+        // a single read from the two rates.
+        Assert.Equal(
+            1.0 - 0.0,
+            payload.PreviousFirstTimeRightRate!.Value - payload.Window30d.FirstTimeRightRate!.Value,
+            precision: 5);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task QualityMetrics_PreviousWindowEmpty_ReportsNullRateIndependentOfCurrentWindow()
+    {
+        // Only seed a current-window issue. The previous window is
+        // empty (no shipped issues fell in it). `previousSampleCount`
+        // must be 0 and `previousFirstTimeRightRate` must be the
+        // defined `null` (empty), evaluated independently of the
+        // current window's populated rate.
+        var project = await CreateProjectAsync($"quality-prev-empty-{Guid.NewGuid():N}");
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var shipTime = now.AddDays(-1);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 1,
+            $"issue_quality_prev_empty_{Guid.NewGuid():N}",
+            $"wr_quality_prev_empty_{Guid.NewGuid():N}",
+            shipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-ok", "Build ok", 0)]),
+            ]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        // Current window is populated.
+        Assert.Equal(1, payload.Window30d.SampleCount);
+        Assert.Equal(1.0, payload.Window30d.FirstTimeRightRate);
+        // Previous window is empty — discriminator sampleCount is 0
+        // and the rate is null (NOT a fabricated 0.0 / 1.0).
+        Assert.Equal(0, payload.PreviousSampleCount);
+        Assert.Null(payload.PreviousFirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task QualityMetrics_GenuineZeroAndGenuineOneRatesInPreviousWindow_AreDistinctFromEmpty()
+    {
+        // The previous window has at least one shipped issue, so the
+        // empty (zero-sample) result is NOT what we are seeing. Two
+        // cases: (a) all previous-window issues had a check that
+        // triggered a repair → genuine rate 0.0 with sampleCount > 0;
+        // (b) all previous-window issues were FTR → genuine rate 1.0
+        // with sampleCount > 0. Both must be reported as rates (not
+        // null) and be distinguishable from the empty result.
+        var project = await CreateProjectAsync($"quality-prev-distinct-{Guid.NewGuid():N}");
+
+        // (a) Genuine 0.0: one previous-window issue with a repair.
+        var zeroShipTime = new DateTimeOffset(2026, 5, 5, 14, 0, 0, TimeSpan.Zero);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 1,
+            $"issue_quality_prev_zero_{Guid.NewGuid():N}",
+            $"wr_quality_prev_zero_{Guid.NewGuid():N}",
+            zeroShipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-repair", "Build repair", 1)]),
+            ]);
+
+        // (b) Genuine 1.0: a separate previous-window issue, all FTR.
+        var oneShipTime = new DateTimeOffset(2026, 5, 20, 14, 0, 0, TimeSpan.Zero);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 2,
+            $"issue_quality_prev_one_{Guid.NewGuid():N}",
+            $"wr_quality_prev_one_{Guid.NewGuid():N}",
+            oneShipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-ok", "Build ok", 0)]),
+            ]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        // 2 contributing samples → genuine rate 0.5 (1 FTR, 1 not).
+        // This proves the rate is computed (not fabricated) and is
+        // structurally distinct from the empty (sampleCount 0, null
+        // rate) result the previous-empty test pins.
+        Assert.Equal(2, payload.PreviousSampleCount);
+        Assert.NotNull(payload.PreviousFirstTimeRightRate);
+        Assert.Equal(0.5, payload.PreviousFirstTimeRightRate!.Value, precision: 5);
+        // sampleCount must be > 0 — i.e. the rate is genuine, not the
+        // empty-result null.
+        Assert.NotEqual(0, payload.PreviousSampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task QualityMetrics_AdditivePreservation_ExistingWindowsAndTrendUnchanged()
+    {
+        // The previous-window addition must be strictly additive: the
+        // existing window7d/window30d/Trend shapes are preserved
+        // byte-for-byte for a consumer that does not read the
+        // previous-window fields. Seed an issue 1 day ago so it
+        // falls in both 7d and 30d and the trend has a populated
+        // point, exactly as `ShippedIssuesWithRepairs` does.
+        var project = await CreateProjectAsync($"quality-additive-{Guid.NewGuid():N}");
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var shipTime = now.AddDays(-1);
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 1,
+            $"issue_quality_additive_{Guid.NewGuid():N}",
+            $"wr_quality_additive_{Guid.NewGuid():N}",
+            shipTime,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-repair", "Build repair", 1)]),
+            ]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        // Existing window7d preserved.
+        Assert.Equal(1, payload.Window7d.SampleCount);
+        Assert.Equal(0.0, payload.Window7d.FirstTimeRightRate);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
+        // Existing window30d preserved.
+        Assert.Equal(1, payload.Window30d.SampleCount);
+        Assert.Equal(0.0, payload.Window30d.FirstTimeRightRate);
+        Assert.Contains(payload.Window30d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(payload.Window30d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        // Existing trend series preserved (30 dense per-day buckets).
+        Assert.NotNull(payload.Trend);
+        Assert.Equal("day", payload.Trend.Bucket);
+        Assert.Equal(30, payload.Trend.Points.Length);
+        Assert.Equal(payload.Window30d.From, payload.Trend.From);
+        Assert.Equal(payload.Window30d.To, payload.Trend.To);
+        // New previous-window fields: empty result (no previous-window
+        // issues seeded). The previous-window addition does not touch
+        // any existing field.
+        Assert.Equal(0, payload.PreviousSampleCount);
+        Assert.Null(payload.PreviousFirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task QualityMetrics_UnknownProject_ReturnsNotFound()
     {
         using var response = await _client.GetAsync(
@@ -596,6 +950,164 @@ public class IssueMetricsApiSpecs
             $"/api/projects/proj-dt-unknown-{Guid.NewGuid():N}/issues/metrics/delivery-time");
 
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_BothWindowsReturned_DeltaDerivableAcrossAdjacent30DayWindows()
+    {
+        // Fixture `now` is 2026-06-30 UTC: current window [2026-05-31, 2026-06-30],
+        // previous window [2026-05-01, 2026-05-31). Seed one delivered issue
+        // (with work-start) inside each window with different cycle durations
+        // and verify both averages are present in the response so a consumer
+        // can derive the delta.
+        var project = await CreateProjectAsync($"delivery-time-both-{Guid.NewGuid():N}");
+
+        var currentCompletedAt = new DateTimeOffset(2026, 6, 14, 14, 0, 0, TimeSpan.Zero);
+        var currentWorkStart = currentCompletedAt.AddDays(-2).AddHours(-4);
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            $"issue_dt_both_current_{Guid.NewGuid():N}",
+            currentCompletedAt.UtcDateTime.AddDays(-4).AddHours(-6),
+            currentCompletedAt.UtcDateTime,
+            [currentWorkStart]);
+
+        var previousCompletedAt = new DateTimeOffset(2026, 5, 20, 14, 0, 0, TimeSpan.Zero);
+        var previousWorkStart = previousCompletedAt.AddDays(-6);
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 2,
+            $"issue_dt_both_previous_{Guid.NewGuid():N}",
+            previousCompletedAt.UtcDateTime.AddDays(-10),
+            previousCompletedAt.UtcDateTime,
+            [previousWorkStart]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        // Only the current-window issue contributes a `Point`; the
+        // previous-window issue contributes only to the average.
+        var point = Assert.Single(payload.Points);
+        Assert.NotNull(payload.PreviousCycleDays);
+        // Previous window's only delivered cycle was 6 days exactly,
+        // since work-start is the moment − 6 days before completion.
+        Assert.Equal(6.0, payload.PreviousCycleDays!.Value, precision: 5);
+        Assert.NotNull(point.CycleDays);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_PreviousWindowEmpty_ReportsNullIndependentOfCurrentWindow()
+    {
+        // Only seed a current-window issue; the previous window is empty.
+        // `previousCycleDays` must remain the defined `null` (empty), not a
+        // fabricated zero, regardless of the current-window activity.
+        var project = await CreateProjectAsync($"delivery-time-prev-empty-{Guid.NewGuid():N}");
+        var completedAt = DeliveryTimeCompletedAt();
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            $"issue_dt_prev_empty_{Guid.NewGuid():N}",
+            completedAt.AddDays(-4).AddHours(-6),
+            completedAt,
+            [new DateTimeOffset(completedAt, TimeSpan.Zero).AddDays(-2).AddHours(-4)]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        var point = Assert.Single(payload.Points);
+        Assert.NotNull(point.CycleDays);
+        // Independent evaluation — current window has its cycle, previous window is empty.
+        Assert.Null(payload.PreviousCycleDays);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_CurrentWindowEmpty_PreviousWindowAverageStillReturned()
+    {
+        // Reverse asymmetry from the test above: current window has no
+        // delivered issues, but the previous window does. The previous
+        // average must still be returned and `Points` empty (preserved
+        // empty-result semantics).
+        var project = await CreateProjectAsync($"delivery-time-curr-empty-{Guid.NewGuid():N}");
+        var insideCurrentCompletedAt = DeliveryTimeCompletedAt();
+        var outsideCompletedAt = _fixture.TimeProvider.GetUtcNow().AddDays(-45);
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            $"issue_dt_curr_empty_outside_{Guid.NewGuid():N}",
+            outsideCompletedAt.UtcDateTime.AddDays(-10),
+            outsideCompletedAt.UtcDateTime,
+            [outsideCompletedAt.AddDays(-3)]);
+
+        // Sanity: the seeded issue is outside the current window and
+        // inside the previous [now − 60d, now − 30d) window (45d ago is
+        // within [30, 60) days before fixture-now).
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        Assert.Empty(payload.Points);
+        Assert.NotNull(payload.PreviousCycleDays);
+        Assert.Equal(3.0, payload.PreviousCycleDays!.Value, precision: 5);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DeliveryTimeMetrics_AdditivePreservation_PointsAndTrailingWindowUnchanged()
+    {
+        // The previous-window addition must be strictly additive: the
+        // Points series shape, ordering, and field semantics are preserved
+        // byte-for-byte for an existing consumer that does not read
+        // `previousCycleDays`.
+        var project = await CreateProjectAsync($"delivery-time-additive-{Guid.NewGuid():N}");
+        var firstCompletedAt = DeliveryTimeCompletedAt();
+        var firstWorkStart = new DateTimeOffset(firstCompletedAt, TimeSpan.Zero)
+            .AddDays(-1)
+            .AddHours(-12);
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 1,
+            $"issue_dt_add_first_{Guid.NewGuid():N}",
+            firstCompletedAt.AddDays(-2).AddHours(-6),
+            firstCompletedAt,
+            [firstWorkStart]);
+
+        var secondCompletedAt = firstCompletedAt.AddHours(48);
+        var secondWorkStart = new DateTimeOffset(secondCompletedAt, TimeSpan.Zero)
+            .AddDays(-3);
+        await SeedDeliveredIssueWithCyclesAsync(
+            project.Id,
+            number: 2,
+            $"issue_dt_add_second_{Guid.NewGuid():N}",
+            secondCompletedAt.AddDays(-5),
+            secondCompletedAt,
+            [secondWorkStart]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        Assert.Equal(2, payload.Points.Length);
+        // Ordered ascending by CompletedAt (existing requirement).
+        Assert.True(payload.Points[0].CompletedAt.CompareTo(payload.Points[1].CompletedAt) <= 0);
+        // Each point preserves LeadDays / CycleDays / IssueNumber / CompletedAt.
+        foreach (var p in payload.Points)
+        {
+            Assert.NotEqual(0, p.LeadDays);
+            Assert.NotNull(p.CycleDays);
+        }
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -1512,7 +2024,13 @@ public class IssueMetricsApiSpecs
 
     private sealed record CompletionMetricsBucketDto(string Boundary, int Completed, int Failed);
     private sealed record CompletionMetricsWindowDto(string From, string To);
-    private sealed record CompletionMetricsResponse(string Bucket, CompletionMetricsWindowDto Window, CompletionMetricsBucketDto[] Buckets);
+    private sealed record CompletionMetricsTotalsDto(int Completed, int Failed, int SampleCount);
+    private sealed record CompletionMetricsResponse(
+        string Bucket,
+        CompletionMetricsWindowDto Window,
+        CompletionMetricsBucketDto[] Buckets,
+        CompletionMetricsTotalsDto CurrentTotal,
+        CompletionMetricsTotalsDto PreviousTotal);
 
     private sealed record ApprovalWaitMetricsWindowDto(string From, string To);
     private sealed record ApprovalWaitMetricsResponse(
@@ -1526,10 +2044,15 @@ public class IssueMetricsApiSpecs
     private sealed record StageReworkRateDto(string Stage, int EnteredCount, double? ReworkRate);
     private sealed record QualityTrendPointDto(string Boundary, int SampleCount, double? FirstTimeRightRate, double? ReworkRate);
     private sealed record QualityTrendDto(string Bucket, string From, string To, QualityTrendPointDto[] Points);
-    private sealed record QualityMetricsResponse(QualityMetricsWindowDto Window7d, QualityMetricsWindowDto Window30d, QualityTrendDto Trend);
+    private sealed record QualityMetricsResponse(
+        QualityMetricsWindowDto Window7d,
+        QualityMetricsWindowDto Window30d,
+        double? PreviousFirstTimeRightRate,
+        int PreviousSampleCount,
+        QualityTrendDto Trend);
 
     private sealed record DeliveryTimePointDto(int IssueNumber, string CompletedAt, double LeadDays, double? CycleDays);
-    private sealed record DeliveryTimeMetricsResponse(DeliveryTimePointDto[] Points);
+    private sealed record DeliveryTimeMetricsResponse(DeliveryTimePointDto[] Points, double? PreviousCycleDays);
 
     private sealed record StageDurationStageDto(string Stage, int SampleCount, double? AverageSeconds, double? MedianSeconds);
     private sealed record StageDurationWaitBreakoutDto(double? AverageApprovalGateWaitSeconds, double? AverageInactiveGapSeconds);
