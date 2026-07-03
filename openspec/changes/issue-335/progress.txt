@@ -189,3 +189,93 @@
 - Full server `dotnet test` → 3572 passed, 0 failed, 13 skipped
   (one flaky AgentSessionSpecs retry failure on first run that succeeds
   on re-run; pre-existing/unrelated).
+
+## Decisions (T-002)
+
+- **T-002 decision — D-impl-4**: pure data backfill modeled on
+  `20260629120000_BackfillIssueCompletedAt` — no `BuildTargetModel` override,
+  no Designer partial, no model-snapshot update. `[Migration]` attribute
+  lives on the partial class in the same .cs file. The spec
+  (`MigrationClass_DoesNotOverrideBuildTargetModel`) guards the invariant
+  by reflecting on the derived type and asserting the resolved method
+  declares on `Microsoft.EntityFrameworkCore.Migrations.Migration` (the
+  base), not on `BackfillIssueEventsTerminalTypeRename`. A genuine override
+  on the derived class would imply a model change, which would need a
+  Designer partial and a snapshot update — the test catches that drift.
+- **T-002 decision — D-impl-5**: timestamp `20260702120000` chosen over a
+  tighter alternative because it (a) is strictly later than
+  `20260629120000_BackfillIssueCompletedAt`, satisfying the design D4
+  requirement, and (b) follows the same day-of-publication convention as
+  the prior raw-SQL migration (`120000` mid-day suffix).
+- **T-002 decision — D-impl-6**: Down is symmetric (canonical→legacy
+  rewrite), unlike `BackfillIssueCompletedAt` whose Down is a no-op
+  (additive completedAt). Per design D4 / open question 2, the symmetric
+  Down is the chosen posture for this rename; pre-rename rows return to
+  legacy AND post-rename rows are also rewritten back, so a clean
+  rollback of mixed-era data is possible. The
+  `UpThenDown_RoundTripsTerminalTypes_AcrossEras` spec exercises the
+  mixed-era rollback path explicitly.
+
+## Gotchas (T-002)
+
+- `Migration.BuildTargetModel` is virtual on the EF base, so a naïve
+  `GetMethod("BuildTargetModel")` reflection check always returns
+  non-null. The right invariant is "no override on the derived class" —
+  check `method.DeclaringType == typeof(Migration)` instead of asserting
+  the method is null. (First pass on the spec used the null check and
+  failed for this reason.)
+- `dotnet test --filter FullyQualifiedName~BackfillIssue…` against the
+  full suite does not pick up the new spec until after a clean
+  `dotnet build` — the test binary is keyed to the test assembly build
+  output, so a stale build silently filters the new spec out.
+- The historical `20260629120000_BackfillIssueCompletedAt` migration and
+  its dedicated spec were intentionally NOT touched (per T-001 D-impl-2
+  and design D6). On a fresh DB both migrations are no-ops on empty
+  data; on an already-migrated DB only the new migration runs.
+
+## Files touched (T-002)
+
+### Source
+- `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260702120000_BackfillIssueEventsTerminalTypeRename.cs` —
+  new raw-SQL EF migration. `Up` rewrites
+  `IssueEvents.Type = 'com.mohist.issue.closed' → 'com.mohist.issue.cancelled'`
+  and `'com.mohist.issue.work-completed' → 'com.mohist.issue.completed'`
+  (idempotent: second run matches zero rows). `Down` is symmetric
+  (canonical→legacy). No `BuildTargetModel` override, no Designer
+  partial, no model-snapshot update. No snapshot/status/enum change.
+
+### Tests
+- `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Domain/BackfillIssueEventsTerminalTypeRenameMigrationSpecs.cs` —
+  new migration spec, 13 tests under SQLite + raw SQL (no real DB
+  engine, no wall-clock, in-memory `SqliteConnection`):
+  `Up_RewritesLegacyClosedRows_ToCancelled`,
+  `Up_RewritesLegacyWorkCompletedRows_ToCompleted`,
+  `Up_RewritesBothLegacyTerminalTypes_InSingleRun`,
+  `Up_SecondRun_IsIdempotent`,
+  `Up_DoesNotTouchCanonicalRows_WrittenAfterRename`,
+  `Up_OnEmptyIssueEvents_IsNoOp`,
+  `Down_RewritesCanonicalRows_BackToLegacy`,
+  `Down_SecondRun_IsIdempotent`,
+  `UpThenDown_RoundTripsTerminalTypes_AcrossEras`,
+  `Up_DoesNotAlterIssueState_OrStatus`,
+  `Up_PreRenameAndPostRename_TerminalRowsClassifyIdentically`,
+  `DatabaseMigrate_IncludesBackfillIssueEventsTerminalTypeRenameMigration`,
+  `MigrationClass_DoesNotOverrideBuildTargetModel`.
+
+## Test summary (T-002)
+
+- `dotnet build Mohist.sln` → 0 warnings, 0 errors (warnings-as-errors).
+- `dotnet test Mohist.sln --filter
+  FullyQualifiedName~BackfillIssueEventsTerminalTypeRenameMigrationSpecs`
+  → 13 passed, 0 failed, 0 skipped.
+- `dotnet test Mohist.sln --filter
+  FullyQualifiedName~BackfillIssueCompletedAtMigrationSpecs` →
+  7 passed, 0 failed, 0 skipped (regression: existing migration spec
+  still green; the historical file was not touched).
+- `dotnet test Mohist.sln --filter "…StageAttributionSpecs|…IssueQuerierSpecs|…IssueMetricsApiSpecs"`
+  → 167 passed, 0 failed, 0 skipped (regression: T-001 spec surface
+  unaffected by the new migration).
+- Full server `dotnet test -p:SkipWebBuild=true` →
+  3585 passed, 0 failed, 13 skipped (3572 from T-001 + 13 new). The 13
+  skipped are the pre-existing `IssueWorkflowProfileApiSpecs` and
+  `IssueFeedbackApiSpecs` skips, unchanged from T-001.
