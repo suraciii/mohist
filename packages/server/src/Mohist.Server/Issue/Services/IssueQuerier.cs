@@ -1491,7 +1491,7 @@ public class IssueQuerier : IScopedService
             StringComparer.Ordinal);
         // Per-issue lifecycle event stream needed for the shared
         // attribution core (`IssueStageAttribution.Attribute`).
-        // Captures WorkStarted / WorkCompleted / Closed / Reopened so
+        // Captures WorkStarted / Completed / Cancelled / Reopened so
         // the stage-duration surface and the stage-population snapshot
         // job produce the same "latest stage" verdict for the same
         // issue.
