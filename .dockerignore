@@ -1,0 +1,60 @@
+# Build artifacts & caches
+**/bin/
+**/obj/
+**/dist/
+**/node_modules/
+build/
+.publish/
+nupkg/
+*.tsbuildinfo
+coverage/
+.nyc_output/
+
+# VCS & metadata
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Docs, design, tests — not needed to build the server image
+docs/
+design/
+openspec/
+test/
+*.md
+!packages/web/**/*.md
+!packages/server/**/*.md
+
+# Tooling config not consumed by the build
+.agents/
+.idea/
+.vscode/
+.editorconfig
+
+# Editor/OS noise
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Local env & secrets
+.env
+.env.*
+*.log
+
+# CLI is not part of the server image (we publish only Mohist.Server.csproj,
+# not the whole solution), so exclude its sources to shrink the context.
+# Its package.json isn't referenced by the npm workspaces (only web/runner are),
+# so dropping it entirely is safe.
+packages/cli/
+
+# Runner is a host-side executor and never runs inside the server container.
+# Keep its package.json out so the npm workspace set matches what we build.
+# (We only run `npm run build:web`; runner deps are never installed.)
+packages/runner/src/
+packages/runner/dist/
+packages/runner/scripts/
+packages/runner/tsconfig.json
+packages/runner/vitest.config.*
+packages/runner/test/
