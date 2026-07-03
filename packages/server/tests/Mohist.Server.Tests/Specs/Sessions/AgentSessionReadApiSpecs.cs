@@ -393,8 +393,8 @@ public class AgentSessionReadApiSpecs
         {
             TurnId = turn.Id,
             Sequence = 1,
-            Type = "session_closed",
-            CorrelationKey = $"session_closed_{Guid.NewGuid():N}",
+            Type = TranscriptPartTypes.SessionClosed,
+            CorrelationKey = $"session.closed_{Guid.NewGuid():N}",
             PayloadJson = $$"""{"status":"failed","ts":"{{startedAt.AddMinutes(5):O}}"}""",
             LastSeenAt = startedAt.AddMinutes(5),
         });
