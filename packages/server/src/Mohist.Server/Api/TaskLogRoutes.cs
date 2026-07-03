@@ -25,6 +25,7 @@ public static class TaskLogRoutes
 {
     public const string RouteWorkflow = "/api/workflow-runs/{workflowRunId}/work/{workId}/task-log";
     public const string RouteAgentJob = "/api/agent-jobs/{agentJobId}/work/{workId}/task-log";
+    public const string RunnerIdHeader = "x-mohist-runner-id";
 
     public const string OwnerKindWorkflow = TaskLogOwnershipKinds.Workflow;
     public const string OwnerKindAgentJob = TaskLogOwnershipKinds.AgentJob;
@@ -87,10 +88,26 @@ public static class TaskLogRoutes
         if (validation.Error is not null)
             return ApiResults.BadRequest(validation.Error);
 
-        await service.AppendAsync(ownerKind, ownerId, workId, validation.Lines, body.Truncated, cancellationToken);
+        var runnerId = request.Headers[RunnerIdHeader].ToString();
+        if (string.IsNullOrWhiteSpace(runnerId))
+            return ApiResults.BadRequest($"'{RunnerIdHeader}' header is required");
+
+        bool accepted;
+        try
+        {
+            accepted = await service.AppendAsync(runnerId, ownerKind, ownerId, workId, validation.Lines, body.Truncated, cancellationToken);
+        }
+        catch (ArgumentException ex)
+        {
+            return ApiResults.BadRequest(ex.Message);
+        }
+
+        if (!accepted)
+            return ApiResults.NotFound("Active runner work item not found");
 
         return ApiResults.Ok(new
         {
+            runnerId,
             ownerKind,
             ownerId,
             workId,

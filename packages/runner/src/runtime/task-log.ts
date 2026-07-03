@@ -120,10 +120,16 @@ export function createCredentialMaskerFromEnvironment(env: NodeJS.ProcessEnv = p
  * Order matters when patterns can overlap; the first match wins.
  */
 const KNOWN_PATTERNS: ReadonlyArray<{ pattern: RegExp; replace: (match: string, ...groups: string[]) => string }> = [
-  // https://user:pass@host/...  (also http, ssh-style user@host remains readable)
+  // https://user:pass@host/...  Redact the full user-info segment: token
+  // remotes often put the token in the username slot (`token:x-oauth-basic`).
   {
     pattern: /\b([a-z][a-z0-9+.\-]*:\/\/)([^:\s/]+):([^@\s/]+)@/gi,
-    replace: (_match, scheme: string, user: string) => `${scheme}${user}:${REDACTED}@`,
+    replace: (_match, scheme: string) => `${scheme}${REDACTED}@`,
+  },
+  // https://token:@host/...  (empty password still means the username is secret)
+  {
+    pattern: /\b([a-z][a-z0-9+.\-]*:\/\/)([^:\s/]{12,}):@/gi,
+    replace: (_match, scheme: string) => `${scheme}${REDACTED}@`,
   },
   // https://token@host/...  (personal access tokens embedded in git remotes)
   {

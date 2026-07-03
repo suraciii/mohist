@@ -16,11 +16,13 @@ namespace Mohist.Server.Runner.Services;
 public sealed class TaskLogService : IScopedService
 {
     private readonly TaskLogStore _store;
+    private readonly RunnerWorkStore _runnerWorks;
     private readonly WorkflowRunQuerier _runQuerier;
 
-    public TaskLogService(TaskLogStore store, WorkflowRunQuerier runQuerier)
+    public TaskLogService(TaskLogStore store, RunnerWorkStore runnerWorks, WorkflowRunQuerier runQuerier)
     {
         _store = store;
+        _runnerWorks = runnerWorks;
         _runQuerier = runQuerier;
     }
 
@@ -29,14 +31,27 @@ public sealed class TaskLogService : IScopedService
     /// reports whether head lines were dropped so the web client can
     /// surface that to users.
     /// </summary>
-    public Task AppendAsync(
+    public async Task<bool> AppendAsync(
+        string runnerId,
         string ownerKind,
         string ownerId,
         string workId,
         IReadOnlyList<TaskLogLine> entries,
         bool truncated,
         CancellationToken ct = default)
-        => _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated, ct);
+    {
+        if (string.IsNullOrWhiteSpace(runnerId))
+            throw new ArgumentException("runnerId must be provided", nameof(runnerId));
+
+        ValidateBatchCaps(entries);
+
+        var work = await _runnerWorks.FindAsync(runnerId, ownerKind, ownerId, workId, ct);
+        if (work is null || work.Status != RunnerWorkStatus.Outstanding)
+            return false;
+
+        await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated, ct);
+        return true;
+    }
 
     /// <summary>
     /// Cursor-paginated query over a work item's captured lines,
@@ -84,6 +99,21 @@ public sealed class TaskLogService : IScopedService
         }
 
         return null;
+    }
+
+    private static void ValidateBatchCaps(IReadOnlyList<TaskLogLine> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        if (entries.Count > TaskLogUploadLimits.MaxEntries)
+            throw new ArgumentException($"Too many entries ({entries.Count}); max {TaskLogUploadLimits.MaxEntries}", nameof(entries));
+
+        var totalTextLength = 0;
+        foreach (var entry in entries)
+        {
+            totalTextLength += entry.Text?.Length ?? 0;
+            if (totalTextLength > TaskLogUploadLimits.MaxTotalTextLength)
+                throw new ArgumentException($"Task-log text payload exceeds {TaskLogUploadLimits.MaxTotalTextLength} characters", nameof(entries));
+        }
     }
 }
 

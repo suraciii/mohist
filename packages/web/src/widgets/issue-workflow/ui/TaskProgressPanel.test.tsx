@@ -155,6 +155,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
       expect(screen.getByText('Cloning repo')).toBeInTheDocument()
     })
     expect(screen.getByText('[workspace-prep]')).toBeInTheDocument()
+    expect(screen.getByText('08:00:00.000')).toBeInTheDocument()
     expect(screen.getByText('[action:rebase]')).toBeInTheDocument()
     expect(screen.getByText('[cleanup]')).toBeInTheDocument()
     expect(screen.getByText('CONFLICT (content): Merge conflict in src/foo.ts')).toBeInTheDocument()
@@ -182,6 +183,41 @@ describe('TaskProgressPanel — task execution log panel', () => {
     expect(scroll.className).toContain('max-h-64')
     expect(screen.getByText('Patch failed at 0001 feat: add foo')).toBeInTheDocument()
     expect(screen.getByText('CONFLICT (content): Merge conflict in src/foo.ts')).toBeInTheDocument()
+  })
+
+  it('scrolls to the retained tail when log lines render', async () => {
+    const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return this.getAttribute('data-testid') === 'task-log-scroll' ? 1234 : 0
+      },
+    })
+
+    try {
+      mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
+      setLogPage({
+        lines: [
+          makeLine({ seq: 4999, source: 'action:rebase', text: 'CONFLICT (content): Merge conflict in src/foo.ts' }),
+          makeLine({ seq: 5000, source: 'action:rebase', text: 'Patch failed at 0001 feat: add foo' }),
+        ],
+        nextCursor: null,
+        truncated: true,
+      })
+
+      render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+
+      await expandFailedTask('Rebase onto master')
+
+      const scroll = await waitFor(() => screen.getByTestId('task-log-scroll') as HTMLElement)
+      await waitFor(() => expect(scroll.scrollTop).toBe(1234))
+    } finally {
+      if (scrollHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scrollHeightDescriptor)
+      } else {
+        delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight
+      }
+    }
   })
 
   it('shows a truncation indicator when the response reports truncated: true', async () => {

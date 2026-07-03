@@ -46,6 +46,8 @@ public class TaskLogStore
         if (string.IsNullOrWhiteSpace(workId))
             throw new ArgumentException("workId must be provided", nameof(workId));
         ArgumentNullException.ThrowIfNull(entries);
+        if (entries.Count > TaskLogUploadLimits.MaxEntries)
+            throw new ArgumentException($"Too many task-log entries ({entries.Count}); max {TaskLogUploadLimits.MaxEntries}", nameof(entries));
         ValidateEntries(entries);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -169,6 +171,7 @@ public class TaskLogStore
     private static void ValidateEntries(IReadOnlyList<TaskLogLine> entries)
     {
         long previous = 0;
+        var totalTextLength = 0;
         for (var i = 0; i < entries.Count; i++)
         {
             var entry = entries[i];
@@ -186,6 +189,9 @@ public class TaskLogStore
                 throw new ArgumentException($"Task-log text must be provided at index {i}", nameof(entries));
             if (entry.Text.Length > TaskLogUploadLimits.MaxTextLength)
                 throw new ArgumentException($"Task-log text exceeds {TaskLogUploadLimits.MaxTextLength} characters at index {i}", nameof(entries));
+            totalTextLength += entry.Text.Length;
+            if (totalTextLength > TaskLogUploadLimits.MaxTotalTextLength)
+                throw new ArgumentException($"Task-log text payload exceeds {TaskLogUploadLimits.MaxTotalTextLength} characters", nameof(entries));
             previous = entry.Seq;
         }
     }

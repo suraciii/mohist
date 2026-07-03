@@ -195,7 +195,7 @@ export class ServerConnection {
     }
     const response = await fetch(this.taskLogUrl(ownerId, workId, ownerKind), {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-mohist-runner-id": this.options.runnerId },
       body: JSON.stringify(body),
       signal,
     })

@@ -15,15 +15,30 @@ describe("CredentialMasker", () => {
   it("MasksUserInfoPasswordInHttpsRemoteUrl", () => {
     const masked = masker.mask("fatal: unable to access 'https://alice:hunter2@github.com/x/y.git'")
     expect(masked).not.toContain("hunter2")
-    expect(masked).toContain("alice")
+    expect(masked).not.toContain("alice")
     expect(masked).toContain("***")
   })
 
   it("MasksUserInfoPasswordInHttpRemoteUrl", () => {
     const masked = masker.mask("error: failed to fetch http://ci:supersecret@host.example/repo")
     expect(masked).not.toContain("supersecret")
-    expect(masked).toContain("ci")
+    expect(masked).not.toContain("ci")
     expect(masked).toContain("***")
+  })
+
+  it("MasksTokenUsernameInOauthRemoteUrl", () => {
+    const token = "ghp_abcdefghijklmnopqrstuvwxyz1234"
+    const masked = masker.mask(`fatal: https://${token}:x-oauth-basic@github.com/org/repo.git failed`)
+    expect(masked).not.toContain(token)
+    expect(masked).not.toContain("x-oauth-basic")
+    expect(masked).toContain("https://***@github.com/org/repo.git")
+  })
+
+  it("MasksTokenUsernameWithEmptyPasswordInRemoteUrl", () => {
+    const token = "ghp_abcdefghijklmnopqrstuvwxyz1234"
+    const masked = masker.mask(`fatal: https://${token}:@github.com/org/repo.git failed`)
+    expect(masked).not.toContain(token)
+    expect(masked).toContain("https://***@github.com/org/repo.git")
   })
 
   it("MasksTokenStyleUrlWithoutUser", () => {
@@ -212,7 +227,7 @@ describe("TaskLogger single sink", () => {
     expect(flushed.entries).toHaveLength(1)
     const text = flushed.entries[0]!.text
     expect(text).not.toContain("hunter2")
-    expect(text).toContain("alice")
+    expect(text).not.toContain("alice")
   })
 
   it("ReturnsAssignedSeqAndKeepsMonotonicOrderAcrossWrites", () => {

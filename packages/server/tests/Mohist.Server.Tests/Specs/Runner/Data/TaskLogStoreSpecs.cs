@@ -279,6 +279,37 @@ public class TaskLogStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AppendAsync_RejectsBatchOverEntryLimit()
+    {
+        var entries = Enumerable.Range(1, TaskLogUploadLimits.MaxEntries + 1)
+            .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "action", "line"))
+            .ToList();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _store.AppendAsync(
+            "workflow",
+            "owner",
+            "work",
+            entries,
+            false));
+    }
+
+    [Fact]
+    public async Task AppendAsync_RejectsBatchOverTotalTextLimit()
+    {
+        var now = _timeProvider.GetUtcNow();
+        var entries = Enumerable.Range(1, 31)
+            .Select(seq => new TaskLogLine(seq, now, "action", new string('x', TaskLogUploadLimits.MaxTextLength)))
+            .ToList();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _store.AppendAsync(
+            "workflow",
+            "owner",
+            "work",
+            entries,
+            false));
+    }
+
+    [Fact]
     public async Task QueryAsync_ClampsHugeLimitsToMaximum()
     {
         var ownerKind = "workflow";

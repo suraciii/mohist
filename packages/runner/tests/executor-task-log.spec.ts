@@ -8,6 +8,7 @@ import { WorkExecutor } from "../src/runtime/executor.js"
 import { TaskLogCollector } from "../src/runtime/task-log.js"
 import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
+import type { WorkspaceManager } from "../src/runtime/workspace.js"
 
 let workDir: string
 
@@ -27,10 +28,10 @@ function makeRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): A
   return registry
 }
 
-function buildExecutor(registry: ActionRegistry): WorkExecutor {
+function buildExecutor(registry: ActionRegistry, workspaceManager: WorkspaceManager = verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null })): WorkExecutor {
   return new WorkExecutor(
     registry,
-    verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+    workspaceManager,
     {} as never,
     {} as never,
     null,
@@ -52,8 +53,8 @@ function buildWork(overrides: Partial<WorkItem> = {}): WorkItem {
   }
 }
 
-async function runWith(registry: ActionRegistry, work: WorkItem = buildWork()): Promise<{ result: ActionResult; collector: TaskLogCollector }> {
-  const executor = buildExecutor(registry)
+async function runWith(registry: ActionRegistry, work: WorkItem = buildWork(), workspaceManager?: WorkspaceManager): Promise<{ result: ActionResult; collector: TaskLogCollector }> {
+  const executor = buildExecutor(registry, workspaceManager)
   const collector = new TaskLogCollector()
   const execution = await (executor as unknown as {
     executeWithLog: (work: WorkItem, signal: AbortSignal, collector: TaskLogCollector | null) => Promise<{ result: ActionResult; collector: TaskLogCollector }>
@@ -84,6 +85,59 @@ describe("WorkExecutor task-log phase wiring (T-003)", () => {
     expect(allSeqs).toEqual([...allSeqs].sort((a, b) => a - b))
     expect(rebaseSeqs[1]).toBe(rebaseSeqs[0]! + 1)
     expect(others.every((seq) => seq > rebaseSeqs[0]! || seq < rebaseSeqs[1]!)).toBe(true)
+  })
+
+  it("PassesWorkspacePreparationOutputThroughWorkspacePrepSource", async () => {
+    const registry = makeRegistry(async () => ({ status: "success", message: "ok" }))
+    const workspaceManager = verifyOnlyWorkspaceManager(
+      { path: workDir, branch: null, changeDir: null },
+      (log) => log?.write("workspace-prep", "clone output from workspace preparation"),
+    )
+
+    const { collector } = await runWith(registry, buildWork(), workspaceManager)
+
+    const entries = collector.flush().entries.filter((entry) => entry.source === "workspace-prep")
+    expect(entries.map((entry) => entry.text)).toContain("clone output from workspace preparation")
+  })
+
+  it("CapturesBranchCheckOutputWithBranchCheckSource", async () => {
+    setExecutorGitRunnerForTest(async (_workDir, args, _signal, options) => {
+      options?.sink?.log.write(options.sink.source, `git ${args.join(" ")}`)
+      return {
+        success: true,
+        stdout: args.join(" ") === "rev-parse --abbrev-ref HEAD" ? "main\n" : "",
+        stderr: "",
+        exitCode: 0,
+        combinedOutput: "",
+      }
+    })
+    const registry = makeRegistry(async () => ({ status: "failure", message: "stop after start check" }))
+
+    const { collector } = await runWith(registry, buildWork({ variables: { workspace: { path: workDir, branch: "main", changeDir: null } } }))
+
+    const entries = collector.flush().entries.filter((entry) => entry.source === "branch-check")
+    expect(entries.map((entry) => entry.text)).toContain("git rev-parse --abbrev-ref HEAD")
+  })
+
+  it("CapturesCleanWorktreeOutputWithCleanupSource", async () => {
+    setExecutorGitRunnerForTest(async (_workDir, args, _signal, options) => {
+      options?.sink?.log.write(options.sink.source, `git ${args.join(" ")}`)
+      const joined = args.join(" ")
+      return {
+        success: true,
+        stdout: joined === "rev-parse --abbrev-ref HEAD" ? "main\n" : joined === "rev-parse --is-inside-work-tree" ? "true\n" : "",
+        stderr: "",
+        exitCode: 0,
+        combinedOutput: "",
+      }
+    })
+    const registry = makeRegistry(async () => ({ status: "success", message: "ok" }))
+
+    const { collector } = await runWith(registry, buildWork({ variables: { workspace: { path: workDir, branch: "main", changeDir: null } } }))
+
+    const entries = collector.flush().entries.filter((entry) => entry.source === "cleanup")
+    expect(entries.map((entry) => entry.text)).toContain("git rev-parse --is-inside-work-tree")
+    expect(entries.map((entry) => entry.text)).toContain("git diff --cached --name-only")
   })
 
   it("CapturesFailingOpsCommandOutputInCollector", async () => {

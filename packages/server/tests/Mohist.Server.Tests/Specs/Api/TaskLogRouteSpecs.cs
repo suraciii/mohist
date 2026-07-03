@@ -3,9 +3,12 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Api;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
@@ -17,6 +20,7 @@ namespace Mohist.Server.Tests.Specs.Api;
 public class TaskLogRouteSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
+    private const string RunnerId = "runner-tasklog-spec";
 
     public TaskLogRouteSpecs(MohistIntegrationFixture fixture)
     {
@@ -129,6 +133,38 @@ public class TaskLogRouteSpecs
             workflowRunId, projectId, issueNumber);
     }
 
+    private async Task SeedRunnerWorkAsync(string runnerId, string ownerKind, string ownerId, string workId, string status = "outstanding")
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        db.RunnerWorks.Add(new RunnerWorkRow
+        {
+            RunnerId = runnerId,
+            OwnerKind = ownerKind,
+            OwnerId = ownerId,
+            WorkId = workId,
+            TakenAt = _fixture.TimeProvider.GetUtcNow(),
+            Status = status,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<HttpResponseMessage> PostTaskLogAsync(string url, object body, string runnerId = RunnerId)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = JsonContent.Create(body, options: JSON.Options),
+        };
+        request.Headers.TryAddWithoutValidation(TaskLogRoutes.RunnerIdHeader, runnerId);
+        return await _fixture.Client.SendAsync(request);
+    }
+
+    private object OneLineBody(string text = "line") => new
+    {
+        entries = new[] { new { seq = 1L, timestamp = _fixture.TimeProvider.GetUtcNow(), source = "action", text } },
+        truncated = false,
+    };
+
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
@@ -136,6 +172,7 @@ public class TaskLogRouteSpecs
     {
         var workflowRunId = $"wr-tasklog-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
+        await SeedRunnerWorkAsync(RunnerId, "workflow", workflowRunId, workId);
         var now = _fixture.TimeProvider.GetUtcNow();
         var body = new
         {
@@ -147,7 +184,7 @@ public class TaskLogRouteSpecs
             truncated = false,
         };
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
+        using var response = await PostTaskLogAsync(
             $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
             body);
 
@@ -175,8 +212,9 @@ public class TaskLogRouteSpecs
     {
         var agentJobId = $"aj-tasklog-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
+        await SeedRunnerWorkAsync(RunnerId, "agent-job", agentJobId, workId);
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
+        using var response = await PostTaskLogAsync(
             $"/api/agent-jobs/{agentJobId}/work/{workId}/task-log",
             new
             {
@@ -225,7 +263,7 @@ public class TaskLogRouteSpecs
         var workId = $"work-{Guid.NewGuid():N}";
         var now = _fixture.TimeProvider.GetUtcNow();
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
+        using var response = await PostTaskLogAsync(
             $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
             new
             {
@@ -248,17 +286,17 @@ public class TaskLogRouteSpecs
         var workflowRunId = $"wr-tasklog-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
 
-        using var missingTimestamp = await _fixture.Client.PostAsJsonAsync(
+        using var missingTimestamp = await PostTaskLogAsync(
             $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
             new { entries = new[] { new { seq = 1L, source = "action", text = "line" } }, truncated = false });
         Assert.Equal(HttpStatusCode.BadRequest, missingTimestamp.StatusCode);
 
-        using var emptySource = await _fixture.Client.PostAsJsonAsync(
+        using var emptySource = await PostTaskLogAsync(
             $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
             new { entries = new[] { new { seq = 1L, timestamp = _fixture.TimeProvider.GetUtcNow(), source = "", text = "line" } }, truncated = false });
         Assert.Equal(HttpStatusCode.BadRequest, emptySource.StatusCode);
 
-        using var hugeText = await _fixture.Client.PostAsJsonAsync(
+        using var hugeText = await PostTaskLogAsync(
             $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
             new { entries = new[] { new { seq = 1L, timestamp = _fixture.TimeProvider.GetUtcNow(), source = "action", text = new string('x', TaskLogUploadLimits.MaxTextLength + 1) } }, truncated = false });
         Assert.Equal(HttpStatusCode.BadRequest, hugeText.StatusCode);
@@ -269,11 +307,16 @@ public class TaskLogRouteSpecs
     [Fact]
     public async Task UploadEndpoint_DoesNotInvokeAnyGrain()
     {
-        // Independence from report: an upload that completes must
-        // not have changed any workflow state. We verify that the
-        // workflow run row (if any) is unchanged after upload.
+        // Dependency-boundary guard: task-log upload is a service/store
+        // write path. It must not gain Orleans grain dependencies later.
+        Assert.DoesNotContain(
+            typeof(TaskLogService).GetConstructors().SelectMany(c => c.GetParameters()),
+            p => p.ParameterType.Namespace?.Contains("Grains", StringComparison.Ordinal) == true
+                || p.ParameterType.Name.Contains("Grain", StringComparison.Ordinal));
+
         var workflowRunId = $"wr-tasklog-isolated-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
+        await SeedRunnerWorkAsync(RunnerId, "workflow", workflowRunId, workId);
         var now = _fixture.TimeProvider.GetUtcNow();
         var body = new
         {
@@ -281,7 +324,7 @@ public class TaskLogRouteSpecs
             truncated = false,
         };
 
-        using var response = await _fixture.Client.PostAsJsonAsync(
+        using var response = await PostTaskLogAsync(
             $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
             body);
 
@@ -294,6 +337,90 @@ public class TaskLogRouteSpecs
         var runRow = await db.WorkflowRuns.AsNoTracking()
             .FirstOrDefaultAsync(r => r.WorkflowRunId == workflowRunId);
         Assert.Null(runRow);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task UploadEndpoint_UnknownOwnerWork_ReturnsNotFoundAndDoesNotPersist()
+    {
+        var workflowRunId = $"wr-tasklog-missing-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+
+        using var response = await PostTaskLogAsync(
+            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
+            OneLineBody("forged"));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var count = await db.TaskLogEntries.AsNoTracking()
+            .CountAsync(e => e.OwnerKind == "workflow" && e.OwnerId == workflowRunId && e.WorkId == workId);
+        Assert.Equal(0, count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task UploadEndpoint_CrossOwnerOverwrite_IsRejectedAndExistingLogStaysIntact()
+    {
+        var allowedOwnerId = $"wr-tasklog-owner-{Guid.NewGuid():N}";
+        var forgedOwnerId = $"wr-tasklog-forged-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        await SeedRunnerWorkAsync(RunnerId, "workflow", allowedOwnerId, workId);
+
+        using (var accepted = await PostTaskLogAsync(
+            $"/api/workflow-runs/{allowedOwnerId}/work/{workId}/task-log",
+            OneLineBody("original")))
+        {
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        }
+
+        using var forged = await PostTaskLogAsync(
+            $"/api/workflow-runs/{forgedOwnerId}/work/{workId}/task-log",
+            OneLineBody("forged"));
+
+        Assert.Equal(HttpStatusCode.NotFound, forged.StatusCode);
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var original = await db.TaskLogEntries.AsNoTracking()
+            .SingleAsync(e => e.OwnerKind == "workflow" && e.OwnerId == allowedOwnerId && e.WorkId == workId);
+        Assert.Equal("original", original.Text);
+        var forgedCount = await db.TaskLogEntries.AsNoTracking()
+            .CountAsync(e => e.OwnerKind == "workflow" && e.OwnerId == forgedOwnerId && e.WorkId == workId);
+        Assert.Equal(0, forgedCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task UploadEndpoint_SecondRunnerCannotReplaceAnotherRunnersLog()
+    {
+        var workflowRunId = $"wr-tasklog-runner-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        await SeedRunnerWorkAsync(RunnerId, "workflow", workflowRunId, workId);
+
+        using (var accepted = await PostTaskLogAsync(
+            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
+            OneLineBody("from assigned runner")))
+        {
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        }
+
+        using var rejected = await PostTaskLogAsync(
+            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
+            OneLineBody("from second runner"),
+            runnerId: $"runner-forged-{Guid.NewGuid():N}");
+
+        Assert.Equal(HttpStatusCode.NotFound, rejected.StatusCode);
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var row = await db.TaskLogEntries.AsNoTracking()
+            .SingleAsync(e => e.OwnerKind == "workflow" && e.OwnerId == workflowRunId && e.WorkId == workId);
+        Assert.Equal("from assigned runner", row.Text);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -327,6 +454,7 @@ public class TaskLogRouteSpecs
         var issueNumber = await CreateIssueAsync(projectId, "with logs");
         var (workflowRunId, workId) = await SeedWorkflowRunAsync(projectId, "build.1", workId: $"work-{Guid.NewGuid():N}");
         await BindIssueToWorkflowRunAsync(projectId, issueNumber, workflowRunId);
+        await SeedRunnerWorkAsync(RunnerId, "workflow", workflowRunId, workId);
 
         var now = _fixture.TimeProvider.GetUtcNow();
         var entries = Enumerable.Range(1, 5).Select(seq => new
@@ -337,7 +465,7 @@ public class TaskLogRouteSpecs
             text = $"line {seq}",
         }).ToArray();
 
-        using (var upload = await _fixture.Client.PostAsJsonAsync(
+        using (var upload = await PostTaskLogAsync(
             $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
             new { entries, truncated = false }))
         {
@@ -387,6 +515,7 @@ public class TaskLogRouteSpecs
         var issueNumber = await CreateIssueAsync(projectId, "truncated logs");
         var (workflowRunId, workId) = await SeedWorkflowRunAsync(projectId, "build.1", workId: $"work-{Guid.NewGuid():N}");
         await BindIssueToWorkflowRunAsync(projectId, issueNumber, workflowRunId);
+        await SeedRunnerWorkAsync(RunnerId, "workflow", workflowRunId, workId);
 
         var now = _fixture.TimeProvider.GetUtcNow();
         var entries = Enumerable.Range(1, 3).Select(seq => new
@@ -397,7 +526,7 @@ public class TaskLogRouteSpecs
             text = $"tail {seq}",
         }).ToArray();
 
-        using (var upload = await _fixture.Client.PostAsJsonAsync(
+        using (var upload = await PostTaskLogAsync(
             $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
             new { entries, truncated = true }))
         {

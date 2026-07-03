@@ -345,16 +345,29 @@ export class RunnerHost {
       // artifact uploads (design D7).
       const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
       const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
+      const uploadController = new AbortController()
+      let timeout: ReturnType<typeof setTimeout> | null = null
       try {
-        await this.connection.uploadTaskLog(
-          ownerId,
-          work.workId,
-          batch,
-          signal,
-          ownerKind,
-        )
+        await Promise.race([
+          this.connection.uploadTaskLog(
+            ownerId,
+            work.workId,
+            batch,
+            uploadController.signal,
+            ownerKind,
+          ),
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => {
+              uploadController.abort()
+              reject(new Error(`task-log upload timed out after ${TASK_LOG_UPLOAD_TIMEOUT_MS}ms`))
+            }, TASK_LOG_UPLOAD_TIMEOUT_MS)
+            timeout.unref?.()
+          }),
+        ])
       } catch (flushError) {
         console.error("task-log upload failed for work", work.workId, flushError)
+      } finally {
+        if (timeout) clearTimeout(timeout)
       }
     }
 
@@ -442,6 +455,8 @@ export class RunnerHost {
     }
   }
 }
+
+const TASK_LOG_UPLOAD_TIMEOUT_MS = 250
 
 async function delay(ms: number, signal: AbortSignal) {
   if (signal.aborted) throw signal.reason

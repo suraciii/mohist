@@ -210,6 +210,35 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     errorSpy.mockRestore()
   })
 
+  it("PendingUploadIsTimedOut_ReportStillSucceeds", async () => {
+    vi.clearAllMocks()
+    getConnectionId.mockReturnValue("conn-1")
+    probeLiveness.mockResolvedValue(true)
+    forceReconnect.mockResolvedValue(undefined)
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    uploadTaskLog.mockImplementationOnce(() => new Promise(() => undefined))
+    report.mockResolvedValue({})
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    poll.mockResolvedValueOnce(workWith({ workflowRunId: "wf-pending", workId: "work-pending", agentJobId: "aj-pending" })).mockImplementation(async () => null)
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    const controller = new AbortController()
+    const host = buildHost()
+    const run = host.run(controller.signal)
+    await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+
+    expect(uploadTaskLog).toHaveBeenCalledTimes(1)
+    expect(report).toHaveBeenCalledTimes(1)
+    expect(errorSpy.mock.calls.some((call) => call.some((arg) => typeof arg === "string" && arg.includes("task-log upload failed")))).toBe(true)
+
+    errorSpy.mockRestore()
+  })
+
   it("ReportCarriesTheVerdict_WhenLogUploadSucceeds", async () => {
     vi.clearAllMocks()
     getConnectionId.mockReturnValue("conn-1")
