@@ -2,16 +2,29 @@
 
 Mohist 是 self-hosted 产品。这篇覆盖长跑部署、开机自启、远程访问、备份。
 
-## 部署形态选型
+## 两种部署模式
 
-| 形态 | 适合 | 优缺点 |
+Mohist server 支持两种长跑部署模式，选其一即可。**两种模式下 runner 都跑在宿主机上**（它要操作你的 git 仓库、调 opencode/git/gh 等 shell 工具，不属于容器）。
+
+| 模式 | 适合 | 说明 |
 |---|---|---|
-| **开发模式**（dev:server / dev:runner / dev:web） | 本地开发、试用 | 简单，但要 3 个终端，关机就停 |
-| **本地 daemon** | 笔记本日常使用 | 单进程，关机就停 |
-| **家用 server / NAS** | always-on 场景 | 真正的 fire-and-forget |
-| **远程 VPS** | 出差时也能访问 | 网络配置复杂 |
+| **systemd 模式** | Linux 主机（NUC / NAS / VPS / 笔记本） | 原生进程，`mo install` 自动写 unit、开机自启；runner 也可一并装成 unit。改动小、与系统最贴合。 |
+| **Docker 模式** | 任何装了 Docker 的环境；想要隔离 / 易迁移 / 不想装 .NET SDK | server 跑在容器里，状态全部落在挂载卷；runner 仍在宿主机上连容器。 |
 
-下面分场景给步骤。
+选定模式后，按对应章节操作；后续的远程访问、备份、升级章节会同时给出两种模式的做法。
+
+| 场景 | 推荐模式 | 见 |
+|---|---|---|
+| 本地开发、试用 | 开发模式（`dev:server` / `dev:runner` / `dev:web`） | [快速上手](getting-started.md) |
+| 笔记本日常使用 | systemd 模式（本地 daemon） | systemd 模式 → 场景 1 |
+| 家用 server / NAS（always-on） | systemd 或 Docker | systemd 模式 → 场景 2；或 Docker 模式 |
+| 远程 VPS（出差访问） | 任一 + 反代/VPN | 远程访问章节 |
+
+---
+
+# systemd 模式
+
+通过 `mo` CLI 把 server（可选 runner）装成 systemd user service。下面按场景给步骤。
 
 ## 场景 1：本地 daemon（你的笔记本）
 
@@ -97,11 +110,83 @@ sudo -u mohist ssh-keygen -t ed25519
 - **磁盘空间**：每个 issue 一个 worktree，会占空间。定期 `git worktree prune`
 - **网络**：Server / Runner 默认监听 localhost。远程访问要绑 0.0.0.0 + 配反代（见下）
 
-## 场景 3：远程访问
+---
+
+# Docker 模式
+
+不想装 .NET SDK / 想要隔离和易迁移的话，用容器跑 server。web SPA 已在构建期打包进镜像，状态全部落在挂载卷。runner 仍留在宿主机上，通过 HTTP 连容器里的 server。
+
+### 构建
+
+仓库根有 `Dockerfile`（多阶段：Node 编译 web → .NET publish server → aspnet 运行时）：
+
+```bash
+git clone <repo> && cd mohist
+docker build -t mohist-server .
+```
+
+镜像基于 .NET 11 preview（`mcr.microsoft.com/dotnet/nightly/aspnet:11.0-preview`），匹配仓库的 `global.json`。
+
+### 跑起来
+
+**单容器**（命名卷持久化）：
+
+```bash
+docker run -d \
+  -p 3456:3456 \
+  -v mohist-data:/data \
+  --name mohist \
+  --restart unless-stopped \
+  mohist-server
+```
+
+**docker compose**（推荐，仓库已带 `docker-compose.yml`）：
+
+```bash
+docker compose up -d
+docker compose logs -f
+```
+
+验证：`curl http://localhost:3456/api/health` 应返回 `{"status":"ok",...}`。
+
+### 数据持久化
+
+镜像内 `HOME=/data`，而 server 的所有状态都解析自 `$HOME/.mohist/`（主库 `mohist.db`、`otel.db`、`attachments/`、`artifacts/`、`system-update.json`）。所以挂一个卷到 `/data` 就托管了全部：
+
+```bash
+# 看卷实际位置
+docker volume inspect mohist-data
+
+# 备份
+docker run --rm -v mohist-data:/d -v "$PWD":/backup alpine \
+  tar czf /backup/mohist-data-$(date +%Y%m%d).tgz -C /d .
+
+# 还原
+docker run --rm -v mohist-data:/d -v "$PWD":/backup alpine \
+  tar xzf /backup/mohist-data-YYYYMMDD.tgz -C /d
+```
+
+想直接在宿主上看到数据文件，把 compose 里的卷换成绑定挂载（`./data:/data`），并让宿主目录归 uid 1001（容器内用户）：`sudo chown -R 1001:1001 ./data`。
+
+### 让 runner 连上
+
+runner 留在宿主机上（systemd 模式下装法见上文「场景 2」），起的时候指向容器：
+
+```bash
+SERVER_URL=http://localhost:3456 RUNNER_ID=my-runner npm start
+```
+
+务必显式设 `RUNNER_ID`——容器化后 server 的主机名/网络变了，runner id 默认基于 hostname，漂移会让 workflow 的 sticky assignment 失配。
+
+---
+
+# 远程访问（两种模式通用）
+
+下面的方案对 systemd 模式和 Docker 模式都适用，区别只是反代上游指向哪：systemd 模式指向 `localhost:3456`，Docker 模式指向容器映射出的同一端口。
+
+## 方案 A：反向代理 + HTTPS（推荐）
 
 你想从外网（出差、咖啡馆、手机）访问家里的 Mohist。
-
-### 方案 A：反向代理 + HTTPS（推荐）
 
 用 Caddy / nginx 反代 Mohist Server，自动 HTTPS：
 
@@ -127,7 +212,7 @@ mo config set server.tls.cert /path/to/cert.pem
 mo config set server.tls.key /path/to/key.pem
 ```
 
-### 方案 B：Tailscale / WireGuard VPN（推荐 - 简单）
+## 方案 B：Tailscale / WireGuard VPN（推荐 - 简单）
 
 把家里 server 和你的设备拉进同一个 VPN：
 
@@ -145,7 +230,7 @@ http://your-server-tailscale-name:3456
 
 不需要域名、不需要证书、不需要端口转发。这是 self-host 远程访问的甜蜜点。
 
-### 方案 C：Cloudflare Tunnel（穿透 NAT）
+## 方案 C：Cloudflare Tunnel（穿透 NAT）
 
 家里 NAT 后面、没公网 IP 时：
 
@@ -168,8 +253,8 @@ Mohist 的数据分两类：
 ### 1. 必须备份
 
 - **Mohist database**（SQLite）：包含所有 issue、epic、workflow state、events
-  - 位置看 `mo config list` 的 storage 配置
-  - 默认 `~/.mohist/data/` 或类似
+  - systemd 模式：位置看 `mo config list` 的 storage 配置，默认 `~/.mohist/mohist.db`
+  - Docker 模式：卷 `/data/.mohist/mohist.db`，备份见上文「Docker 模式 → 数据持久化」
 
 - **你的项目仓库**：含所有 issue 产物（`openspec/changes/`）
   - 因为已经 commit 到 git，远程仓库就是备份
@@ -181,22 +266,33 @@ Mohist 的数据分两类：
 
 ### 备份策略
 
-**最简**：每天 cron 备份 Mohist database：
+**systemd 模式**：每天 cron 备份 Mohist database：
 
 ```bash
 # /etc/cron.daily/mohist-backup
-cp ~/.mohist/data/mohist.db ~/.mohist/data/mohist.db.$(date +%Y%m%d).bak
+cp ~/.mohist/mohist.db ~/.mohist/mohist.db.$(date +%Y%m%d).bak
 # 保留最近 30 天
-find ~/.mohist/data/ -name "mohist.db.*.bak" -mtime +30 -delete
+find ~/.mohist/ -name "mohist.db.*.bak" -mtime +30 -delete
 ```
 
-**严肃**：用 restic / borg backup 增量备份到异地：
+**Docker 模式**：备份命名卷：
 
 ```bash
-restic -r /backup/mohist backup ~/.mohist/data <repo>/openspec
+docker run --rm -v mohist-data:/d -v "$PWD":/backup alpine \
+  tar czf /backup/mohist-data-$(date +%Y%m%d).tgz -C /d .
+```
+
+**严肃**（两种模式都适用）：用 restic / borg backup 增量备份到异地。systemd 模式备份 `~/.mohist/`，Docker 模式备份命名卷或绑定挂载的宿主目录：
+
+```bash
+restic -r /backup/mohist backup ~/.mohist <repo>/openspec
 ```
 
 ## 升级
+
+升级前**备份数据库**。Mohist 还没有自动迁移（roadmap），版本间 schema 偶尔会变。
+
+**systemd 模式**：
 
 ```bash
 cd /opt/mohist
@@ -207,16 +303,30 @@ mo update            # 重建并以受管理方式重启 server + runner（同�
 # 或只更新其一：mo update server / mo update runner
 ```
 
-升级前**备份数据库**。Mohist 还没有自动迁移（roadmap），版本间 schema 偶尔会变。
+**Docker 模式**：
+
+```bash
+# 用 registry 镜像：
+docker compose pull
+# 或本地重建：
+docker compose build
+docker compose up -d     # 重启到新镜像，数据卷保留
+```
+
+> ⚠️ Docker 模式下 runner 仍在宿主机上，升级 server 不会动 runner。runner 自己的升级照 systemd 模式的 `mo update runner` 或重新 `npm run build:runner`。
 
 ## 监控（可选）
 
-简单的健康检查：
+简单的健康检查（两种模式都用同一个端点 `/api/health`，区别只是失败后怎么重启）：
+
+**systemd 模式**：
 
 ```bash
 # user cron 每 5 分钟检查（user service 要加 --user）
 */5 * * * * curl -sf http://localhost:3456/api/health || systemctl --user restart mohist
 ```
+
+**Docker 模式**：镜像已内置 `HEALTHCHECK`（打 `/api/health`），`docker ps` 会显示健康状态；搭配 compose 的 `restart: unless-stopped`，容器挂掉会自动拉起。
 
 严肃监控：把 Mohist 日志接到 Loki / ELK，把 health 接到 Prometheus / Uptime Kuma。
 
@@ -239,4 +349,4 @@ Roadmap（已知不足）：
 
 ---
 
-对应源码：`mo install`（`packages/cli/`）、`scripts/`。
+对应源码：systemd 模式见 `mo install`（`packages/cli/`）、`scripts/`；Docker 模式见仓库根 `Dockerfile` / `docker-compose.yml`。
