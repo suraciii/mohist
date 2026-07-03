@@ -1929,7 +1929,7 @@ public class IssueMetricsApiSpecs
             SpecVersion = "1.0",
             Subject = number.ToString(),
             DataContentType = "application/json",
-            Data = IssueEventSerializer.ToData(new IssueWorkCompleted(workflowRunId)),
+            Data = IssueEventSerializer.ToData(new IssueCompleted(workflowRunId)),
             ExtensionsJson = "{}",
         });
         await db.SaveChangesAsync();
