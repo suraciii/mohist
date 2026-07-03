@@ -90,24 +90,11 @@ public sealed class SystemUpdateService : ISingletonService
             var failedState = startedState ?? await _store.GetLatestAsync(cancellationToken);
             if (failedState is not null)
             {
-                var failedAt = DateTimeOffset.UtcNow;
-                failedState = failedState with
-                {
-                    Status = "failed",
-                    Stage = failedState.Stage,
-                    Reason = ex.Message,
-                    UpdatedAt = failedAt,
-                    CompletedAt = failedAt,
-                    Logs = AppendLog(failedState.Logs, new SystemUpdateLogEntry(failedAt, failedState.Stage, ex.Message))
-                };
-                await _store.SaveAsync(failedState, cancellationToken);
+                failedState = await FailAsync(failedState, ex.Message, cancellationToken);
                 return (true, null, null, ToResponse(failedState));
             }
 
             throw;
-        }
-        finally
-        {
         }
     }
 
@@ -128,18 +115,18 @@ public sealed class SystemUpdateService : ISingletonService
                 && !string.Equals(runningHash, latest.SourceHead, StringComparison.Ordinal))
             {
                 var supersededAt = DateTimeOffset.UtcNow;
-                latest = latest with
-                {
-                    Status = "superseded",
-                    Stage = "Superseded",
-                    RunningGitHash = runningHash,
-                    Reason = "Server runtime has advanced past this job's source HEAD; this update is no longer relevant.",
-                    UpdatedAt = supersededAt,
-                    CompletedAt = supersededAt,
-                    Logs = AppendLog(latest.Logs, new SystemUpdateLogEntry(supersededAt, "Superseded", $"Running git hash '{runningHash}' differs from job source HEAD '{latest.SourceHead}'; marking job as superseded."))
-                };
-                await _store.SaveAsync(latest, cancellationToken);
-                await _store.ReleaseLockAsync(latest.JobId, cancellationToken);
+                latest = await PersistTransitionAsync(
+                    latest with
+                    {
+                        Status = "superseded",
+                        Stage = "Superseded",
+                        RunningGitHash = runningHash,
+                        Reason = "Server runtime has advanced past this job's source HEAD; this update is no longer relevant.",
+                        CompletedAt = supersededAt
+                    },
+                    cancellationToken,
+                    new SystemUpdateLogEntry(supersededAt, "Superseded", $"Running git hash '{runningHash}' differs from job source HEAD '{latest.SourceHead}'; marking job as superseded."),
+                    releaseLock: true);
                 return ToResponse(latest);
             }
 
@@ -151,15 +138,15 @@ public sealed class SystemUpdateService : ISingletonService
                 if (shouldPersistWaiting)
                 {
                     var waitingAt = DateTimeOffset.UtcNow;
-                    latest = latest with
-                    {
-                        Status = "waiting-for-reconnect",
-                        Stage = "Waiting for reconnect",
-                        Reason = failureReason,
-                        UpdatedAt = waitingAt,
-                        Logs = AppendLog(latest.Logs, new SystemUpdateLogEntry(waitingAt, "Waiting for reconnect", failureReason))
-                    };
-                    await _store.SaveAsync(latest, cancellationToken);
+                    latest = await PersistTransitionAsync(
+                        latest with
+                        {
+                            Status = "waiting-for-reconnect",
+                            Stage = "Waiting for reconnect",
+                            Reason = failureReason
+                        },
+                        cancellationToken,
+                        new SystemUpdateLogEntry(waitingAt, "Waiting for reconnect", failureReason));
                 }
             }
             else
@@ -167,15 +154,15 @@ public sealed class SystemUpdateService : ISingletonService
                 if (!string.IsNullOrWhiteSpace(runningHash) && runningHash == latest.SourceHead)
                 {
                     var now = DateTimeOffset.UtcNow;
-                    latest = latest with
-                    {
-                        RunningGitHash = runningHash,
-                        SourceHead = info.Source.Head,
-                        Reason = "Server runtime matches source HEAD and readiness checks passed",
-                        UpdatedAt = now,
-                        Logs = AppendLog(latest.Logs, new SystemUpdateLogEntry(now, "Ready", $"Server runtime matches source HEAD and asset {readiness.RootAssetPath} is ready"))
-                    };
-                    await _store.SaveAsync(latest, cancellationToken);
+                    latest = await PersistTransitionAsync(
+                        latest with
+                        {
+                            RunningGitHash = runningHash,
+                            SourceHead = info.Source.Head,
+                            Reason = "Server runtime matches source HEAD and readiness checks passed"
+                        },
+                        cancellationToken,
+                        new SystemUpdateLogEntry(now, "Ready", $"Server runtime matches source HEAD and asset {readiness.RootAssetPath} is ready"));
 
                     if (!string.IsNullOrWhiteSpace(latest.RunnerUnit))
                     {
@@ -185,16 +172,16 @@ public sealed class SystemUpdateService : ISingletonService
                     }
 
                     var completedAt = DateTimeOffset.UtcNow;
-                    latest = latest with
-                    {
-                        Status = "succeeded",
-                        Outcome = "succeeded",
-                        Stage = "Ready",
-                        UpdatedAt = completedAt,
-                        CompletedAt = completedAt,
-                    };
-                    await _store.SaveAsync(latest, cancellationToken);
-                    await _store.ReleaseLockAsync(latest.JobId, cancellationToken);
+                    latest = await PersistTransitionAsync(
+                        latest with
+                        {
+                            Status = "succeeded",
+                            Outcome = "succeeded",
+                            Stage = "Ready",
+                            CompletedAt = completedAt
+                        },
+                        cancellationToken,
+                        releaseLock: true);
                 }
             }
         }
@@ -260,7 +247,6 @@ public sealed class SystemUpdateService : ISingletonService
                 logs = AppendLog(logs, entry);
             }
         }
-        logs = AppendLog(logs, new SystemUpdateLogEntry(now, stage, $"CLI reported outcome '{outcome}' with status '{status}'."));
 
         var completedAt = SystemUpdateJobState.TerminalStatuses.Contains(status) ? now : baseState.CompletedAt;
 
@@ -277,7 +263,6 @@ public sealed class SystemUpdateService : ISingletonService
             Reason = unavailableCapability ?? baseState.Reason,
             Outcome = outcome,
             UnavailableCapability = unavailableCapability,
-            UpdatedAt = now,
             CompletedAt = completedAt,
             Logs = logs
         };
@@ -285,15 +270,9 @@ public sealed class SystemUpdateService : ISingletonService
         await SupersedeStaleWebJobsAsync(next, cancellationToken);
 
         var current = await _store.GetLatestAsync(cancellationToken);
-        if (current is null || !string.Equals(current.JobId, baseState.JobId, StringComparison.Ordinal))
-        {
-            await _store.SaveAsync(next, cancellationToken);
-        }
-        else
-        {
-            await _store.SaveIfCurrentAsync(current, next, cancellationToken);
-        }
-        await _store.ReleaseLockAsync(next.JobId, cancellationToken);
+        var expected = current is not null && string.Equals(current.JobId, baseState.JobId, StringComparison.Ordinal) ? current : null;
+        var outcomeEntry = new SystemUpdateLogEntry(now, stage, $"CLI reported outcome '{outcome}' with status '{status}'.");
+        next = await PersistTransitionAsync(next, cancellationToken, outcomeEntry, releaseLock: true, expected: expected);
         return ToResponse(next);
     }
 
@@ -311,17 +290,18 @@ public sealed class SystemUpdateService : ISingletonService
             return;
 
         var now = DateTimeOffset.UtcNow;
-        var superseded = existing with
-        {
-            Status = "superseded",
-            Stage = "Superseded",
-            Reason = "A newer CLI-triggered update has completed; this job is no longer relevant.",
-            UpdatedAt = now,
-            CompletedAt = now,
-            Logs = AppendLog(existing.Logs, new SystemUpdateLogEntry(now, "Superseded", $"CLI update {cliState.JobId} completed with source HEAD '{cliState.SourceHead}'; this job is superseded."))
-        };
-        await _store.SaveIfCurrentAsync(existing, superseded, cancellationToken);
-        await _store.ReleaseLockAsync(superseded.JobId, cancellationToken);
+        var superseded = await PersistTransitionAsync(
+            existing with
+            {
+                Status = "superseded",
+                Stage = "Superseded",
+                Reason = "A newer CLI-triggered update has completed; this job is no longer relevant.",
+                CompletedAt = now
+            },
+            cancellationToken,
+            new SystemUpdateLogEntry(now, "Superseded", $"CLI update {cliState.JobId} completed with source HEAD '{cliState.SourceHead}'; this job is superseded."),
+            releaseLock: true,
+            expected: existing);
     }
 
     public async Task<RuntimeConsistencyResponse> GetConsistencyAsync(CancellationToken cancellationToken = default)
@@ -507,35 +487,23 @@ public sealed class SystemUpdateService : ISingletonService
             }
 
             var waitingAt = DateTimeOffset.UtcNow;
-            state = state with
-            {
-                Status = "waiting-for-reconnect",
-                Stage = "Waiting for reconnect",
-                Reason = "Server restart requested. Waiting for the new runtime to reconnect.",
-                UpdatedAt = waitingAt,
-                Logs = AppendLog(state.Logs, new SystemUpdateLogEntry(waitingAt, "Waiting for reconnect", "Server restart requested. Waiting for the new runtime to reconnect."))
-            };
-            await _store.SaveAsync(state, cancellationToken);
+            state = await PersistTransitionAsync(
+                state with
+                {
+                    Status = "waiting-for-reconnect",
+                    Stage = "Waiting for reconnect",
+                    Reason = "Server restart requested. Waiting for the new runtime to reconnect."
+                },
+                cancellationToken,
+                new SystemUpdateLogEntry(waitingAt, "Waiting for reconnect", "Server restart requested. Waiting for the new runtime to reconnect."));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "System update failed");
-            var failedAt = DateTimeOffset.UtcNow;
-            state = state with
-            {
-                Status = "failed",
-                Reason = ex.Message,
-                UpdatedAt = failedAt,
-                CompletedAt = failedAt,
-                Logs = AppendLog(state.Logs, new SystemUpdateLogEntry(failedAt, state.Stage, ex.Message))
-            };
+            state = await FailAsync(state, ex.Message, cancellationToken);
             if (runnerWasPresent && !string.IsNullOrWhiteSpace(state.RunnerUnit))
             {
                 state = await TryRestoreRunnerAsync(state, runnerWasPresent: true, cancellationToken);
-            }
-            else
-            {
-                await _store.SaveAsync(state, cancellationToken);
             }
         }
         finally
@@ -552,21 +520,20 @@ public sealed class SystemUpdateService : ISingletonService
     {
         if (!runnerWasPresent || string.IsNullOrWhiteSpace(state.RunnerUnit))
         {
-            await _store.SaveAsync(state, cancellationToken);
-            return state;
+            return await PersistTransitionAsync(state, cancellationToken);
         }
 
-        var restoringState = state with
-        {
-            Stage = "Restoring runner",
-            Status = "running",
-            Reason = "Update failed before server restart completed; attempting to restore the trusted runner unit.",
-            UpdatedAt = DateTimeOffset.UtcNow,
-            CompletedAt = null,
-            Outcome = null,
-            UnavailableCapability = null
-        };
-        await _store.SaveAsync(restoringState, cancellationToken);
+        var restoringState = await PersistTransitionAsync(
+            state with
+            {
+                Stage = "Restoring runner",
+                Status = "running",
+                Reason = "Update failed before server restart completed; attempting to restore the trusted runner unit.",
+                CompletedAt = null,
+                Outcome = null,
+                UnavailableCapability = null
+            },
+            cancellationToken);
 
         var restored = await RunCommandAsync(
             restoringState,
@@ -580,36 +547,29 @@ public sealed class SystemUpdateService : ISingletonService
         {
             var recoveredAt = DateTimeOffset.UtcNow;
             var failureReason = state.Reason;
-            var recovered = restored with
-            {
-                Status = "recovered",
-                Stage = "Recovered",
-                Reason = failureReason,
-                Outcome = "recovered",
-                UnavailableCapability = null,
-                UpdatedAt = recoveredAt,
-                CompletedAt = recoveredAt,
-                Logs = AppendLog(restored.Logs, new SystemUpdateLogEntry(recoveredAt, "Recovered", "Runner restore succeeded after update failure; Mohist is available with warnings."))
-            };
-            await _store.SaveAsync(recovered, cancellationToken);
-            return recovered;
+            return await PersistTransitionAsync(
+                restored with
+                {
+                    Status = "recovered",
+                    Stage = "Recovered",
+                    Reason = failureReason,
+                    Outcome = "recovered",
+                    UnavailableCapability = null,
+                    CompletedAt = recoveredAt
+                },
+                cancellationToken,
+                new SystemUpdateLogEntry(recoveredAt, "Recovered", "Runner restore succeeded after update failure; Mohist is available with warnings."));
         }
 
-        var failedAt = DateTimeOffset.UtcNow;
-        var restoreFailureReason = state.Reason;
-        var failed = restored with
-        {
-            Status = "failed",
-            Stage = "Failed",
-            Reason = restoreFailureReason,
-            Outcome = "failed",
-            UnavailableCapability = "Runner",
-            UpdatedAt = failedAt,
-            CompletedAt = failedAt,
-            Logs = AppendLog(restored.Logs, new SystemUpdateLogEntry(failedAt, "Failed", "Runner restore failed after update failure. Workflows are unavailable. Start the runner manually with: mo server start --runner"))
-        };
-        await _store.SaveAsync(failed, cancellationToken);
-        return failed;
+        return await FailAsync(
+            restored,
+            state.Reason!,
+            cancellationToken,
+            stage: "Failed",
+            outcome: "failed",
+            unavailableCapability: "Runner",
+            logStage: "Failed",
+            logMessage: "Runner restore failed after update failure. Workflows are unavailable. Start the runner manually with: mo server start --runner");
     }
 
     private (string Error, string Code)? ValidateStart(SystemInfoResponse info)
@@ -667,13 +627,10 @@ public sealed class SystemUpdateService : ISingletonService
         CancellationToken cancellationToken)
     {
         var startedAt = DateTimeOffset.UtcNow;
-        state = state with
-        {
-            Stage = stage,
-            UpdatedAt = startedAt,
-            Logs = AppendLog(state.Logs, new SystemUpdateLogEntry(startedAt, stage, $"Running {fileName} {string.Join(' ', args)}"))
-        };
-        await _store.SaveAsync(state, cancellationToken);
+        state = await PersistTransitionAsync(
+            state with { Stage = stage },
+            cancellationToken,
+            new SystemUpdateLogEntry(startedAt, stage, $"Running {fileName} {string.Join(' ', args)}"));
 
         var result = await _commandRunner.RunAsync(new SystemCommandRequest(fileName, args, workingDirectory, stage), cancellationToken);
         var finishedAt = DateTimeOffset.UtcNow;
@@ -683,26 +640,64 @@ public sealed class SystemUpdateService : ISingletonService
 
         if (result.ExitCode != 0)
         {
-            state = state with
-            {
-                Status = "failed",
-                Stage = stage,
-                Reason = message,
-                UpdatedAt = finishedAt,
-                CompletedAt = finishedAt,
-                Logs = AppendLog(state.Logs, new SystemUpdateLogEntry(finishedAt, stage, message))
-            };
-            await _store.SaveAsync(state, cancellationToken);
-            return state;
+            return await FailAsync(state, message, cancellationToken, stage: stage);
         }
 
-        state = state with
+        return await PersistTransitionAsync(
+            state,
+            cancellationToken,
+            new SystemUpdateLogEntry(finishedAt, stage, message));
+    }
+
+    private async Task<SystemUpdateJobState> PersistTransitionAsync(
+        SystemUpdateJobState next,
+        CancellationToken cancellationToken,
+        SystemUpdateLogEntry? logEntry = null,
+        bool releaseLock = false,
+        SystemUpdateJobState? expected = null)
+    {
+        var logs = logEntry is not null ? AppendLog(next.Logs, logEntry) : next.Logs;
+        var timestamp = logEntry?.At ?? DateTimeOffset.UtcNow;
+        next = next with
         {
-            UpdatedAt = finishedAt,
-            Logs = AppendLog(state.Logs, new SystemUpdateLogEntry(finishedAt, stage, message))
+            Logs = logs,
+            UpdatedAt = timestamp
         };
-        await _store.SaveAsync(state, cancellationToken);
-        return state;
+        if (expected is not null)
+            await _store.SaveIfCurrentAsync(expected, next, cancellationToken);
+        else
+            await _store.SaveAsync(next, cancellationToken);
+        if (releaseLock)
+            await _store.ReleaseLockAsync(next.JobId, cancellationToken);
+        return next;
+    }
+
+    private async Task<SystemUpdateJobState> FailAsync(
+        SystemUpdateJobState state,
+        string reason,
+        CancellationToken cancellationToken,
+        string? stage = null,
+        string? outcome = null,
+        string? unavailableCapability = null,
+        string? logStage = null,
+        string? logMessage = null,
+        bool releaseLock = false)
+    {
+        var failedAt = DateTimeOffset.UtcNow;
+        var next = state with
+        {
+            Status = "failed",
+            Stage = stage ?? state.Stage,
+            Reason = reason,
+            Outcome = outcome,
+            UnavailableCapability = unavailableCapability,
+            CompletedAt = failedAt
+        };
+        return await PersistTransitionAsync(
+            next,
+            cancellationToken,
+            new SystemUpdateLogEntry(failedAt, logStage ?? stage ?? state.Stage, logMessage ?? reason),
+            releaseLock: releaseLock);
     }
 
     private static IReadOnlyList<SystemUpdateLogEntry> AppendLog(IReadOnlyList<SystemUpdateLogEntry> logs, SystemUpdateLogEntry entry)
@@ -712,21 +707,6 @@ public sealed class SystemUpdateService : ISingletonService
         if (next.Count > MaxLogEntries)
             next = next[^MaxLogEntries..];
         return next;
-    }
-
-    private async Task<SystemUpdateJobState> FailAsync(SystemUpdateJobState state, string reason, CancellationToken cancellationToken)
-    {
-        var failedAt = DateTimeOffset.UtcNow;
-        state = state with
-        {
-            Status = "failed",
-            Reason = reason,
-            UpdatedAt = failedAt,
-            CompletedAt = failedAt,
-            Logs = AppendLog(state.Logs, new SystemUpdateLogEntry(failedAt, state.Stage, reason))
-        };
-        await _store.SaveAsync(state, cancellationToken);
-        return state;
     }
 
     private static SystemUpdateStatusResponse ToResponse(SystemUpdateJobState state)
