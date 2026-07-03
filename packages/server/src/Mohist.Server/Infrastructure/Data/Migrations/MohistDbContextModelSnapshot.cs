@@ -731,6 +731,76 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("RunnerWorks", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.TaskLogBatchRow", b =>
+                {
+                    b.Property<string>("OwnerKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Truncated")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("UploadedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("OwnerKind", "OwnerId", "WorkId");
+
+                    b.ToTable("TaskLogBatches", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.TaskLogEntryRow", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OwnerId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerKind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Seq")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("Timestamp")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerKind", "OwnerId", "WorkId", "Seq")
+                        .IsUnique()
+                        .HasDatabaseName("IX_TaskLogEntries_Owner_WorkId_Seq");
+
+                    b.ToTable("TaskLogEntries", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionRow", b =>
                 {
                     b.Property<string>("Id")
@@ -1325,10 +1395,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("MetadataProjectId");
 
-                    b.HasIndex("MetadataProjectId", "AssignedRunnerId", "CreatedAt");
-
                     b.HasIndex("Status", "AssignedRunnerId")
                         .HasDatabaseName("IX_WorkflowRuns_Status");
+
+                    b.HasIndex("MetadataProjectId", "AssignedRunnerId", "CreatedAt");
 
                     b.ToTable("WorkflowRuns");
                 });

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { arrayInput, numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
-import { deleteFile, exists, readText, runCommand, writeText } from "../system/process.js"
+import { deleteFile, exists, readText, runCommand, writeText, type CommandLineOptions } from "../system/process.js"
 import { acpAgentAction } from "./acp-agent.js"
 import { resolveActionPath } from "./expectations.js"
 import {
@@ -14,12 +14,18 @@ import {
 import { githubPrStatusAction } from "./github-pr-status.js"
 import { archiveChangeAction, openspecArtifactsAction, openspecTasksAction } from "./openspec.js"
 import { rebaseAction, rebaseStatusAction } from "./rebase.js"
-import { git as defaultGit } from "./git.js"
+import { git as defaultGit, type GitOptions } from "./git.js"
 import { pushAction } from "./push.js"
 import { workspacePrepareAction } from "./workspace-prepare.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
-type GitRunner = typeof defaultGit
+type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
+  success: boolean
+  stdout: string
+  stderr: string
+  exitCode: number
+  combinedOutput: string
+}>
 
 let git: GitRunner = defaultGit
 
@@ -65,7 +71,7 @@ export function createDefaultRegistry() {
 async function processAction(context: ActionContext): Promise<ActionResult> {
   const command = context.uses === "core/process" ? stringInput(context.with, "command") : context.uses
   if (!command) return { status: "failure", message: "Process action requires command" }
-  const result = await runCommand(command, arrayInput(context.with, "args").map(String), context.workDir, context.signal)
+  const result = await runCommand(command, arrayInput(context.with, "args").map(String), context.workDir, context.signal, undefined, logLineOptions(context, "action:process"))
   return result.exitCode === 0
     ? { status: "success", message: "Process completed", output: result.stdout.trim(), exitCode: result.exitCode }
     : { status: "failure", message: result.stderr.trim() || `Process exited with code ${result.exitCode}`, output: result.stdout.trim(), exitCode: result.exitCode }
@@ -80,7 +86,7 @@ async function scriptAction(context: ActionContext): Promise<ActionResult> {
   try {
     const timeoutMs = numberInput(context.with, "timeout")
     const signal = timeoutMs ? timeoutSignal(context.signal, timeoutMs) : context.signal
-    const result = await runCommand(shell, [file], context.workDir, signal)
+    const result = await runCommand(shell, [file], context.workDir, signal, undefined, logLineOptions(context, "action:script"))
     return {
       status: result.exitCode === 0 ? "success" : "failure",
       message: result.exitCode === 0 ? "Script completed" : `Script failed: ${firstLine(run)}`,
@@ -131,19 +137,20 @@ export async function mergeReadyAction(context: ActionContext): Promise<ActionRe
   const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
   const checkedAt = new Date().toISOString()
+  const opts: GitOptions | undefined = context.log ? { sink: { log: context.log, source: "action:merge-ready" } } : undefined
 
   // Ref-only preflight: the workflow workspace never has its branch
   // switched. The branch-stable contract requires this action to never
   // run `checkout`, `merge --squash`, `fetch`, or any clone — only
   // `rev-parse` and `merge-base` against the workflow workspace refs.
-  const base = await git(workDir, ["rev-parse", baseRef], context.signal)
+  const base = await git(workDir, ["rev-parse", baseRef], context.signal, opts)
   if (!base.success) return mergeReadyResult(false, baseBranch, null, null, null, `Could not resolve base branch '${baseRef}'`, base.exitCode, [], checkedAt)
 
-  const head = await git(workDir, ["rev-parse", source], context.signal)
+  const head = await git(workDir, ["rev-parse", source], context.signal, opts)
   if (!head.success) return mergeReadyResult(false, baseBranch, base.stdout.trim(), null, null, "Could not resolve source", head.exitCode, [], checkedAt)
 
-  const mergeBase = await git(workDir, ["merge-base", baseRef, source], context.signal)
-  const ancestorCheck = await git(workDir, ["merge-base", "--is-ancestor", baseRef, source], context.signal)
+  const mergeBase = await git(workDir, ["merge-base", baseRef, source], context.signal, opts)
+  const ancestorCheck = await git(workDir, ["merge-base", "--is-ancestor", baseRef, source], context.signal, opts)
   const mergeBaseSha = mergeBase.success ? mergeBase.stdout.trim() : null
 
   if (!ancestorCheck.success) {
@@ -174,6 +181,10 @@ function firstLine(value: string) {
 
 function trim(value: string) {
   return value.length <= 20_000 ? value : value.slice(0, 20_000)
+}
+
+function logLineOptions(context: ActionContext, source: string): CommandLineOptions | undefined {
+  return context.log ? { onLine: (line) => context.log!.write(source, line) } : undefined
 }
 
 function timeoutSignal(parent: AbortSignal, timeoutMs: number) {

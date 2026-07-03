@@ -2,6 +2,7 @@ import { hostname } from "node:os"
 import type { CleanupPolicy, JsonObject, RenderedWorkItem, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItemResult } from "../core/types.js"
 import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
+import type { TaskLogBatch } from "../runtime/task-log.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
@@ -163,6 +164,73 @@ export class ServerConnection {
     return `${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/artifact-uploads`
   }
 
+  /**
+   * Upload a task-log terminal batch to the dedicated, independent
+   * task-log channel. Mirrors {@link uploadArtifact}'s routing shape
+   * (owner-kind pair), but the body is JSON, not multipart, and the
+   * server endpoint is a separate store (`TaskLogStore`) that does
+   * not invoke any grain — the upload is decoupled from the report
+   * call and from status adjudication (design D1 / D6 / D7).
+   *
+   * `ownerKind` defaults to `"workflow"` for backwards compatibility
+   * with callers that always dispatch workflow-scoped work; pass
+   * `"agent-job"` explicitly for agent-job dispatches (same algorithm
+   * as `artifact-side-effects.ts:107`).
+   */
+  async uploadTaskLog(
+    ownerId: string,
+    workId: string,
+    batch: TaskLogBatch,
+    signal: AbortSignal,
+    ownerKind: string = "workflow",
+  ): Promise<TaskLogUploadResult> {
+    const body = {
+      entries: batch.entries.map((entry) => ({
+        seq: entry.seq,
+        timestamp: entry.timestamp.toISOString(),
+        source: entry.source,
+        text: entry.text,
+      })),
+      truncated: batch.truncated,
+    }
+    const response = await fetch(this.taskLogUrl(ownerId, workId, ownerKind), {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-mohist-runner-id": this.options.runnerId },
+      body: JSON.stringify(body),
+      signal,
+    })
+    const text = await response.text()
+    let payload: Record<string, unknown> | null = null
+    if (text) {
+      try {
+        payload = JSON.parse(text) as Record<string, unknown>
+      } catch {
+        payload = null
+      }
+    }
+    if (!response.ok) {
+      const errorMessage = extractErrorMessage(payload, text) ?? `task-log upload failed: ${response.status}`
+      const error = new Error(errorMessage) as Error & { code?: string; status: number }
+      error.status = response.status
+      const code = readString(payload ?? {}, ["code"])
+      if (code) error.code = code
+      throw error
+    }
+    const data = readObject(payload, ["data"]) ?? payload ?? {}
+    return {
+      accepted: readNumber(data, ["accepted"]) ?? batch.entries.length,
+      truncated: readBoolean(data, ["truncated"]) ?? batch.truncated,
+    }
+  }
+
+  private taskLogUrl(ownerId: string, workId: string, ownerKind: string) {
+    if (ownerKind === "agent-job") {
+      return `${this.options.serverUrl.replace(/\/$/, "")}/api/agent-jobs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/task-log`
+    }
+
+    return `${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/task-log`
+  }
+
   async getWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, signal: AbortSignal): Promise<WorkflowAgentSession | null> {
     const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}`), { method: "GET", signal })
     if (response.status === 404) return null
@@ -285,6 +353,11 @@ export interface ArtifactUploadResponse {
   createdAt: string | null
   expiresAt: string | null
   idempotent: boolean
+}
+
+export interface TaskLogUploadResult {
+  accepted: number
+  truncated: boolean
 }
 
 function readObject(value: unknown, path: string[]): Record<string, unknown> | null {

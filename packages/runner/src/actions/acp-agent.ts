@@ -12,9 +12,11 @@ export { resolveCompactionConfig, defaultCompactionConfig } from "./acp/compacti
 export type { CompactionConfig, CompactionStrategy } from "./acp/compaction.js"
 
 async function restoreAgentToolNoise(context: ActionContext) {
+  const log = context.log
+  const lineOptions = log ? { onLine: (line: string) => log.write("action:acp-agent", line) } : undefined
   for (const path of [".opencode/package-lock.json", ".opencode/bun.lock", ".opencode/node_modules/.package-lock.json"]) {
     try {
-      await runCommand("git", ["checkout", "--", path], context.workDir, context.signal)
+      await runCommand("git", ["checkout", "--", path], context.workDir, context.signal, undefined, lineOptions)
     } catch {
       // Tool-noise cleanup must never turn a successful agent run into a failure.
     }

@@ -1,4 +1,4 @@
-import { runCommand, type CommandResult } from "../system/process.js"
+import { runCommand, type CommandLineOptions, type CommandResult } from "../system/process.js"
 import { classifyGhFailure, looksLikeRetrySafe } from "./github-pr-classify.js"
 import {
   classifyPrChecks,
@@ -81,6 +81,7 @@ export async function waitChecksAndMergePr(
   subject: string,
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string) => void,
+  options?: CommandLineOptions,
 ): Promise<WaitChecksAndMergeOk | WaitChecksAndMergeFailure> {
   const viewResult = await runGhReadWithRetry(
     gh,
@@ -90,6 +91,7 @@ export async function waitChecksAndMergePr(
     record,
     "gh-pr-view",
     `pr view ${prNumber} --json state,mergeCommit,url,number,mergeStateStatus`,
+    options,
   )
   const viewOutput = combinedGhOutput(viewResult)
   if (viewResult.exitCode !== 0) {
@@ -137,7 +139,7 @@ export async function waitChecksAndMergePr(
     return initialMergeStateFailure
   }
 
-  const checksWait = await waitForPrChecks(gh, workDir, prNumber, signal, record)
+  const checksWait = await waitForPrChecks(gh, workDir, prNumber, signal, record, options)
   if (checksWait.kind === "failure") {
     const prefix = checksWait.errorCode === "pr-checks-unavailable"
       ? "checks status unavailable"
@@ -184,6 +186,7 @@ export async function waitChecksAndMergePr(
       record,
       "gh-pr-merge-ready",
       `pr view ${prNumber} --json mergeStateStatus`,
+      options,
     )
     const mergeStatusOutput = combinedGhOutput(mergeStatusResult)
     if (mergeStatusResult.exitCode !== 0) {
@@ -227,7 +230,7 @@ export async function waitChecksAndMergePr(
   }
 
   const mergeArgs = ["pr", "merge", String(prNumber), "--squash", "--subject", subject, "--body", ""]
-  const mergeResult = await gh("gh", mergeArgs, workDir, signal)
+  const mergeResult = await gh("gh", mergeArgs, workDir, signal, undefined, options)
   const mergeOutput = combinedGhOutput(mergeResult)
   record("gh-pr-merge", `pr merge ${prNumber} --squash --subject "${subject}"`, mergeResult.exitCode, mergeOutput)
   if (mergeResult.exitCode !== 0) {
@@ -248,6 +251,7 @@ export async function waitChecksAndMergePr(
     record,
     "gh-pr-view-confirm",
     `pr view ${prNumber} --json state,mergeCommit,url`,
+    options,
   )
   const recheckOutput = combinedGhOutput(recheck)
   if (recheck.exitCode !== 0) {
@@ -319,6 +323,7 @@ async function waitForPrChecks(
   prNumber: number,
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string) => void,
+  options?: CommandLineOptions,
 ): Promise<PrChecksWaitResult> {
   // Timestamp of the first poll that saw zero check runs, or null once checks
   // have appeared. Used to bound how long we wait before treating the branch
@@ -341,6 +346,7 @@ async function waitForPrChecks(
       record,
       "gh-pr-checks",
       `pr view ${prNumber} --json statusCheckRollup`,
+      options,
     )
     const checksOutput = combinedGhOutput(checksResult)
     let unavailable: { message: string; output: string } | null = null
@@ -438,10 +444,11 @@ async function runGhReadWithRetry(
   record: (name: string, command: string, exitCode: number, output: string) => void,
   recordName: string,
   recordCommand: string,
+  options?: CommandLineOptions,
 ): Promise<CommandResult> {
   let attempt = 0
   for (;;) {
-    const result = await gh("gh", args, workDir, signal)
+    const result = await gh("gh", args, workDir, signal, undefined, options)
     const transient = result.exitCode !== 0
       && attempt < ghTransientRetryLimit
       && looksLikeRetrySafe(`${result.stdout}\n${result.stderr}`)

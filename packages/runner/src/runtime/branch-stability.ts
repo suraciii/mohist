@@ -1,5 +1,18 @@
 import type { JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
 import { git } from "./git-probe.js"
+import type { TaskLogger } from "./task-log.js"
+
+/**
+ * `source` label recorded against every captured branch-stability
+ * line. Distinct from the action body's `action:*` tag so the web
+ * viewer can phase-distinguish the boundary probe from the action
+ * itself.
+ */
+export const BRANCH_CHECK_SOURCE = "branch-check"
+
+function branchCheckSink(log: TaskLogger | null | undefined) {
+  return log ? { log, source: BRANCH_CHECK_SOURCE } : undefined
+}
 
 export interface BranchStabilityEvidence {
   kind: "branch-stability"
@@ -33,8 +46,9 @@ export function expectedWorkspaceBranch(variables: JsonObject): string | null {
   return typeof branch === "string" && branch.length > 0 ? branch : null
 }
 
-export async function readCurrentBranch(workDir: string, signal: AbortSignal): Promise<CurrentBranchResult> {
-  const probe = await git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal)
+export async function readCurrentBranch(workDir: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<CurrentBranchResult> {
+  const sink = branchCheckSink(log)
+  const probe = await git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal, sink ? { sink } : undefined)
   if (!probe.success) {
     const stderr = (probe.stderr ?? "").toLowerCase()
     if (stderr.includes("not a git repository")) {
@@ -44,7 +58,7 @@ export async function readCurrentBranch(workDir: string, signal: AbortSignal): P
   }
   const branch = probe.stdout.trim()
   if (branch === "HEAD") {
-    const refProbe = await git(workDir, ["rev-parse", "HEAD"], signal)
+    const refProbe = await git(workDir, ["rev-parse", "HEAD"], signal, sink ? { sink } : undefined)
     return { branch: null, ref: refProbe.success ? refProbe.stdout.trim() : null, detached: true, nonGit: false, error: null }
   }
   return { branch, ref: branch, detached: false, nonGit: false, error: null }
@@ -111,11 +125,12 @@ export async function checkBranchStability(
   expectedBranch: string | null,
   boundary: "start" | "end",
   signal: AbortSignal,
+  log: TaskLogger | null = null,
 ): Promise<
   | { kind: "ok"; evidence: BranchStabilityEvidence }
   | { kind: "violation"; result: WorkItemResult }
 > {
-  const observed = await readCurrentBranch(workDir, signal)
+  const observed = await readCurrentBranch(workDir, signal, log)
   if (expectedBranch === null) {
     const evidence: BranchStabilityEvidence = {
       kind: "branch-stability",

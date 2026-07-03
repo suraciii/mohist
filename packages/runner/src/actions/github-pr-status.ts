@@ -1,9 +1,10 @@
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
-import { runCommand } from "../system/process.js"
+import { runCommand, type CommandLineOptions } from "../system/process.js"
 
 type GhRunner = typeof runCommand
+const ACTION_SOURCE = "action:github-pr-status"
 
 let gh: GhRunner = runCommand
 
@@ -127,6 +128,7 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
 
   const steps: GitHubPrStatusStep[] = []
+  const ghOpts = ghLineOptions(context)
   const recordStep = (name: string, command: string, exitCode: number, output: string) => {
     steps.push({ name, command, exitCode, output })
   }
@@ -137,6 +139,8 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
     ["pr", "view", String(prNumber), "--json", prViewFields.join(",")],
     workDir,
     context.signal,
+    undefined,
+    ghOpts,
   )
   const viewOutput = combinedGhOutput(viewResult)
   recordStep("gh-pr-view", `pr view ${prNumber} --json ${prViewFields.join(",")}`, viewResult.exitCode, viewOutput)
@@ -223,6 +227,10 @@ function evaluateExpectation(expectation: GitHubPrStatusExpectation, ctx: Expect
     default:
       return false
   }
+}
+
+function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
+  return context.log ? { onLine: (line) => context.log!.write(ACTION_SOURCE, line) } : undefined
 }
 
 function buildPrViewFields(expect: GitHubPrStatusExpectation[]): string[] {

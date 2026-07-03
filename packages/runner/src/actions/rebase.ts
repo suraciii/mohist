@@ -2,14 +2,31 @@ import { join } from "node:path"
 import { exists } from "../system/process.js"
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { stringInput } from "../core/json.js"
-import { git as defaultGit } from "./git.js"
+import { git as defaultGit, type GitOptions } from "./git.js"
 import { isIssueFieldSource, resolveIssueField } from "./issue-fields.js"
 
-type GitRunner = typeof defaultGit
+type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
+  success: boolean
+  stdout: string
+  stderr: string
+  exitCode: number
+  combinedOutput: string
+}>
 type ExistsChecker = typeof exists
 type GitResult = Awaited<ReturnType<GitRunner>>
 let git: GitRunner = defaultGit
 let pathExists: ExistsChecker = exists
+
+/**
+ * `source` tag recorded against every captured `mohist/rebase` action
+ * body line. Phase-distinguished from `branch-check` and `workspace-prep`
+ * so the web viewer can tell which ops phase produced which line.
+ */
+const ACTION_SOURCE = "action:rebase"
+
+function sinkOptions(context: ActionContext): GitOptions | undefined {
+  return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
+}
 
 export type RebaseGitResult = GitResult
 
@@ -26,7 +43,8 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
   const remote = stringInput(context.with, "remote") ?? null
   const squash = booleanInput(context.with, "squash") === true
   const baseRef = remote ? `${remote}/${baseBranch}` : baseBranch
-  const abortResult = await abortRebaseIfInProgress(context)
+  const opts = sinkOptions(context)
+  const abortResult = await abortRebaseIfInProgress(context, opts)
   if (!abortResult.success) {
     return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, abortResult.combinedOutput, "retry-safe", abortResult.exitCode)
   }
@@ -36,26 +54,26 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
     return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, squashMessageResult.message, "retry-safe", 1)
   }
   if (remote) {
-    const fetch = await git(context.workDir, ["fetch", remote, baseBranch], context.signal)
+    const fetch = await git(context.workDir, ["fetch", remote, baseBranch], context.signal, opts)
     if (!fetch.success) {
       return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, fetch.combinedOutput, "retry-safe", fetch.exitCode)
     }
   }
-  const baseShaResult = await git(context.workDir, ["rev-parse", baseRef], context.signal)
+  const baseShaResult = await git(context.workDir, ["rev-parse", baseRef], context.signal, opts)
   if (!baseShaResult.success) {
     return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, baseShaResult.combinedOutput, "retry-safe", baseShaResult.exitCode)
   }
   const baseSha = baseShaResult.stdout.trim()
-  const sourceCommit = await commitPendingChanges(context.workDir, `Prepare rebase onto ${baseBranch}`, context.signal)
+  const sourceCommit = await commitPendingChanges(context.workDir, `Prepare rebase onto ${baseBranch}`, context.signal, opts)
   if (!sourceCommit.success) {
     return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, null, null, null, false, [], 0, sourceCommit.combinedOutput, "retry-safe", sourceCommit.exitCode)
   }
-  const before = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
+  const before = await git(context.workDir, ["rev-parse", "HEAD"], context.signal, opts)
   const beforeSha = before.success ? before.stdout.trim() : null
 
-  const result = await git(context.workDir, ["rebase", baseRef], context.signal)
+  const result = await git(context.workDir, ["rebase", baseRef], context.signal, opts)
   if (result.success) {
-    const after = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
+    const after = await git(context.workDir, ["rev-parse", "HEAD"], context.signal, opts)
     const afterSha = after.success ? after.stdout.trim() : null
     return await runSquashIfRequested({
       context,
@@ -74,7 +92,7 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
     })
   }
 
-  let conflicts = await conflictFiles(context)
+  let conflicts = await conflictFiles(context, opts)
   if (conflicts.length === 0) {
     return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, [], 0, result.combinedOutput, "retry-safe", result.exitCode)
   }
@@ -87,7 +105,7 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
     return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, conflicts, 0, result.combinedOutput, "conflict", 1, true)
   }
 
-  await git(context.workDir, ["rebase", "--abort"], context.signal)
+  await git(context.workDir, ["rebase", "--abort"], context.signal, opts)
   return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, conflicts, 0, result.combinedOutput, "conflict", 1, false)
 }
 
@@ -159,7 +177,7 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
       1,
     )
   }
-  const softReset = await git(req.context.workDir, ["reset", "--soft", req.baseSha], req.context.signal)
+  const softReset = await git(req.context.workDir, ["reset", "--soft", req.baseSha], req.context.signal, sinkOptions(req.context))
   if (!softReset.success) {
     return rebaseOutput(
       false,
@@ -178,7 +196,7 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
       softReset.exitCode,
     )
   }
-  const commit = await git(req.context.workDir, ["commit", "-m", req.squashMessage], req.context.signal)
+  const commit = await git(req.context.workDir, ["commit", "-m", req.squashMessage], req.context.signal, sinkOptions(req.context))
   if (!commit.success) {
     return rebaseOutput(
       false,
@@ -197,7 +215,7 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
       commit.exitCode,
     )
   }
-  const squashedHead = await git(req.context.workDir, ["rev-parse", "HEAD"], req.context.signal)
+  const squashedHead = await git(req.context.workDir, ["rev-parse", "HEAD"], req.context.signal, sinkOptions(req.context))
   const squashedHeadSha = squashedHead.success ? squashedHead.stdout.trim() : null
   const squashOutput = [req.rebaseOutput, softReset.combinedOutput, commit.combinedOutput].filter(Boolean).join("\n\n")
   return rebaseOutput(
@@ -306,11 +324,12 @@ export async function rebaseStatusAction(context: ActionContext): Promise<Action
   const baseBranch = stringInput(context.with, "baseBranch") ?? "main"
   const remote = stringInput(context.with, "remote")
   const baseRef = remote ? `${remote}/${baseBranch}` : baseBranch
-  const conflicts = await conflictFiles(context)
-  const rebaseInProgress = await isRebaseInProgress(context)
-  const head = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
-  const base = await git(context.workDir, ["rev-parse", baseRef], context.signal)
-  const mergeBase = base.success ? await git(context.workDir, ["merge-base", baseRef, "HEAD"], context.signal) : null
+  const opts = sinkOptions(context)
+  const conflicts = await conflictFiles(context, opts)
+  const rebaseInProgress = await isRebaseInProgress(context, opts)
+  const head = await git(context.workDir, ["rev-parse", "HEAD"], context.signal, opts)
+  const base = await git(context.workDir, ["rev-parse", baseRef], context.signal, opts)
+  const mergeBase = base.success ? await git(context.workDir, ["merge-base", baseRef, "HEAD"], context.signal, opts) : null
   const verified = !rebaseInProgress && conflicts.length === 0 && head.success && base.success && mergeBase?.success === true && mergeBase.stdout.trim() === base.stdout.trim()
   const output = JSON.stringify({
     kind: "rebase-status",
@@ -328,20 +347,21 @@ export async function rebaseStatusAction(context: ActionContext): Promise<Action
   return verified ? { status: "success", message: "Rebase verified", output } : { status: "failure", message: "Rebase is not complete or not clean", output }
 }
 
-async function conflictFiles(context: ActionContext) {
-  const status = await git(context.workDir, ["diff", "--name-only", "--diff-filter=U"], context.signal)
+async function conflictFiles(context: ActionContext, opts?: GitOptions) {
+  const status = await git(context.workDir, ["diff", "--name-only", "--diff-filter=U"], context.signal, opts)
   if (!status.success || !status.stdout.trim()) return []
   return [...new Set(status.stdout.split("\n").map((line) => line.trim()).filter(Boolean))]
 }
 
 async function verifyRebaseComplete(context: ActionContext, baseBranch: string) {
-  const rebaseInProgress = await isRebaseInProgress(context)
-  const conflicts = await conflictFiles(context)
-  const head = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
-  const base = await git(context.workDir, ["rev-parse", baseBranch], context.signal)
-  const mergeBase = base.success ? await git(context.workDir, ["merge-base", baseBranch, "HEAD"], context.signal) : null
-  const branch = await git(context.workDir, ["branch", "--show-current"], context.signal)
-  const statusPorcelain = await git(context.workDir, ["status", "--porcelain"], context.signal)
+  const opts = sinkOptions(context)
+  const rebaseInProgress = await isRebaseInProgress(context, opts)
+  const conflicts = await conflictFiles(context, opts)
+  const head = await git(context.workDir, ["rev-parse", "HEAD"], context.signal, opts)
+  const base = await git(context.workDir, ["rev-parse", baseBranch], context.signal, opts)
+  const mergeBase = base.success ? await git(context.workDir, ["merge-base", baseBranch, "HEAD"], context.signal, opts) : null
+  const branch = await git(context.workDir, ["branch", "--show-current"], context.signal, opts)
+  const statusPorcelain = await git(context.workDir, ["status", "--porcelain"], context.signal, opts)
 
   const detached = branch.exitCode !== 0 || !branch.stdout.trim() || branch.stdout.trim() === "HEAD"
   const dirty = statusPorcelain.success && statusPorcelain.stdout.trim().length > 0
@@ -367,26 +387,26 @@ async function verifyRebaseComplete(context: ActionContext, baseBranch: string) 
   return { ok, output }
 }
 
-async function commitPendingChanges(workDir: string, message: string, signal: AbortSignal) {
-  const status = await git(workDir, ["status", "--porcelain"], signal)
+async function commitPendingChanges(workDir: string, message: string, signal: AbortSignal, opts?: GitOptions) {
+  const status = await git(workDir, ["status", "--porcelain"], signal, opts)
   if (!status.success || !status.stdout.trim()) return status.success ? { ...status, combinedOutput: "" } : status
 
-  const add = await git(workDir, ["add", "."], signal)
+  const add = await git(workDir, ["add", "."], signal, opts)
   if (!add.success) return add
 
-  return await git(workDir, ["commit", "-m", message], signal)
+  return await git(workDir, ["commit", "-m", message], signal, opts)
 }
 
-async function abortRebaseIfInProgress(context: ActionContext) {
-  const inProgress = await isRebaseInProgress(context)
+async function abortRebaseIfInProgress(context: ActionContext, opts?: GitOptions) {
+  const inProgress = await isRebaseInProgress(context, opts)
   if (!inProgress) return okGitResult()
-  return await git(context.workDir, ["rebase", "--abort"], context.signal)
+  return await git(context.workDir, ["rebase", "--abort"], context.signal, opts)
 }
 
-async function isRebaseInProgress(context: ActionContext) {
-  const merge = await git(context.workDir, ["rev-parse", "--git-path", "rebase-merge"], context.signal)
+async function isRebaseInProgress(context: ActionContext, opts?: GitOptions) {
+  const merge = await git(context.workDir, ["rev-parse", "--git-path", "rebase-merge"], context.signal, opts)
   if (merge.success && pathExists(resolveGitPath(context.workDir, merge.stdout.trim()))) return true
-  const apply = await git(context.workDir, ["rev-parse", "--git-path", "rebase-apply"], context.signal)
+  const apply = await git(context.workDir, ["rev-parse", "--git-path", "rebase-apply"], context.signal, opts)
   return apply.success && pathExists(resolveGitPath(context.workDir, apply.stdout.trim()))
 }
 

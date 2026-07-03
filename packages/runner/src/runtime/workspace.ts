@@ -5,6 +5,19 @@ import type { JsonObject, RenderedWorkItem } from "../core/types.js"
 import { getSegments, stringAt } from "../core/json-path.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from "../system/process.js"
 import type { WorkspaceRegistry } from "./workspace-registry.js"
+import type { TaskLogger } from "./task-log.js"
+
+/**
+ * `source` tag recorded against every captured workspace-preparation
+ * line. Distinct from the action body's `action:*` tag so the web
+ * viewer can phase-distinguish the clone / branch / worktree setup
+ * from the action itself.
+ */
+export const WORKSPACE_PREP_SOURCE = "workspace-prep"
+
+function workspacePrepSink(log: TaskLogger | null | undefined) {
+  return log ? { log, source: WORKSPACE_PREP_SOURCE } : undefined
+}
 
 export class WorkspaceMissingError extends Error {
   readonly kind = "workspace-missing"
@@ -62,7 +75,7 @@ export class WorkspaceManager {
   // run branch. Idempotent — a workspace already on this run's branch is
   // left alone (cheap re-entry); anything else is (re)created from the
   // latest base.
-  async prepare(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
+  async prepare(work: RenderedWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
     const gitUrl = stringAt(variables, ["repository", "gitUrl"])
     const baseBranch = stringAt(variables, ["repository", "baseBranch"]) ?? "main"
@@ -83,17 +96,17 @@ export class WorkspaceManager {
       ? resolve(suppliedPath)
       : issueWorkspacePath(this.runnerRoot, projectName, issueNumber)
 
-    if (await this.hasRunBranch(workspacePath, runBranch, signal)) {
+    if (await this.hasRunBranch(workspacePath, runBranch, signal, log)) {
       // Re-entry: this run already has its branch here. Switch back to it,
       // recovering from any in-flight rebase/merge that crashed mid-op.
-      await this.reenterRunBranch(workspacePath, runBranch, signal)
+      await this.reenterRunBranch(workspacePath, runBranch, signal, log)
     } else {
       // Fresh run at this path: a pristine clone + a new run branch off
       // the latest base. Any leftover directory (a previous run's) is
       // replaced so the new run starts clean.
-      await this.verifyBaseBranch(gitUrl, baseBranch, signal)
-      await this.cloneFresh(workspacePath, gitUrl, signal)
-      await this.createRunBranch(workspacePath, baseBranch, runBranch, signal)
+      await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
+      await this.cloneFresh(workspacePath, gitUrl, signal, log)
+      await this.createRunBranch(workspacePath, baseBranch, runBranch, signal, log)
     }
 
     await ensureMarkerExcluded(workspacePath)
@@ -109,7 +122,7 @@ export class WorkspaceManager {
     return { path: workspacePath, branch: runBranch, changeDir: changeDir ? join(workspacePath, changeDir) : null }
   }
 
-  async verify(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
+  async verify(work: RenderedWorkItem, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
     const issueNumber = numberAt(variables, ["issue", "number"])
     const runId = stringAt(variables, ["mohist", "runId"]) ?? work.workflowRunId
@@ -131,7 +144,7 @@ export class WorkspaceManager {
     // first" (the #166 fatality). The gate is non-destructive: the
     // `reset --hard <runBranch>` aligns the tree to the run branch ref,
     // which has not moved because the failed rebase never advanced it.
-    await this.runHealthGate(workspacePath, runBranch, signal)
+    await this.runHealthGate(workspacePath, runBranch, signal, log)
 
     if (!exists(workspacePath)) {
       throw new WorkspaceMissingError(
@@ -156,7 +169,7 @@ export class WorkspaceManager {
       )
     }
 
-    await verifyWorkspaceBranch(workspacePath, runBranch, signal)
+    await verifyWorkspaceBranch(workspacePath, runBranch, signal, log)
 
     if (this.registry) {
       await this.registry.refreshMaterializedAt(runId ?? "")
@@ -172,16 +185,18 @@ export class WorkspaceManager {
   // True only when <path> is a git clone that already has <runBranch> —
   // i.e. this run is already set up here. Everything else (missing dir,
   // non-git dir, a previous run's clone) is treated as "not prepared".
-  private async hasRunBranch(workspacePath: string, runBranch: string, signal: AbortSignal): Promise<boolean> {
+  private async hasRunBranch(workspacePath: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<boolean> {
     if (!exists(workspacePath) || !exists(join(workspacePath, ".git"))) return false
-    const result = await runCommand("git", ["-C", workspacePath, "rev-parse", "--verify", `refs/heads/${runBranch}`], ".", signal)
+    const sink = workspacePrepSink(log)
+    const result = await runCommand("git", ["-C", workspacePath, "rev-parse", "--verify", `refs/heads/${runBranch}`], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
     return result.exitCode === 0
   }
 
-  private async cloneFresh(workspacePath: string, gitUrl: string, signal: AbortSignal): Promise<void> {
+  private async cloneFresh(workspacePath: string, gitUrl: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
     if (exists(workspacePath)) await deleteDirectory(workspacePath)
     await ensureDir(join(workspacePath, ".."))
-    const result = await runCommand("git", ["clone", gitUrl, workspacePath], ".", signal)
+    const sink = workspacePrepSink(log)
+    const result = await runCommand("git", ["clone", gitUrl, workspacePath], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
     if (result.exitCode !== 0) {
       // Drop any partial clone git left behind so a retry starts clean.
       await deleteDirectory(workspacePath).catch(() => {})
@@ -191,8 +206,9 @@ export class WorkspaceManager {
 
   // Create the run branch off the latest base. A fresh clone already has
   // up-to-date origin/<base> refs, so no separate fetch is needed.
-  private async createRunBranch(workspacePath: string, baseBranch: string, runBranch: string, signal: AbortSignal): Promise<void> {
-    const create = await runCommand("git", ["-C", workspacePath, "checkout", "-b", runBranch, `origin/${baseBranch}`], workspacePath, signal)
+  private async createRunBranch(workspacePath: string, baseBranch: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+    const sink = workspacePrepSink(log)
+    const create = await runCommand("git", ["-C", workspacePath, "checkout", "-b", runBranch, `origin/${baseBranch}`], workspacePath, signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
     if (create.exitCode !== 0) {
       throw new Error(`Configured base branch '${baseBranch}' cannot be resolved from repository gitUrl.`)
     }
@@ -202,8 +218,9 @@ export class WorkspaceManager {
   // base branch genuinely does not exist at the source. A non-zero exit
   // (repo unreachable / auth) is left for the clone step to surface with
   // its own error; only a reachable repo with an absent branch fails here.
-  private async verifyBaseBranch(gitUrl: string, baseBranch: string, signal: AbortSignal): Promise<void> {
-    const result = await runCommand("git", ["ls-remote", "--heads", gitUrl, baseBranch], ".", signal)
+  private async verifyBaseBranch(gitUrl: string, baseBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+    const sink = workspacePrepSink(log)
+    const result = await runCommand("git", ["ls-remote", "--heads", gitUrl, baseBranch], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
     if (result.exitCode === 0 && result.stdout.trim() === "") {
       throw new Error(`Configured base branch '${baseBranch}' cannot be resolved from repository gitUrl.`)
     }
@@ -214,35 +231,40 @@ export class WorkspaceManager {
   // unusable; the run branch ref itself is untouched (git only advances it
   // on success), so aborting the op and resetting to the ref realigns the
   // tree without losing the run's commits.
-  private async reenterRunBranch(workspacePath: string, runBranch: string, signal: AbortSignal): Promise<void> {
-    const checkout = await runCommand("git", ["-C", workspacePath, "checkout", runBranch], workspacePath, signal)
+  private async reenterRunBranch(workspacePath: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
+    const sink = workspacePrepSink(log)
+    const lineOptions = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
+    const checkout = await runCommand("git", ["-C", workspacePath, "checkout", runBranch], workspacePath, signal, undefined, lineOptions)
     if (checkout.exitCode === 0) return
-    await runCommand("git", ["-C", workspacePath, "rebase", "--abort"], workspacePath, signal).catch(() => {})
-    await runCommand("git", ["-C", workspacePath, "merge", "--abort"], workspacePath, signal).catch(() => {})
-    await runCommand("git", ["-C", workspacePath, "cherry-pick", "--abort"], workspacePath, signal).catch(() => {})
-    await runCommand("git", ["-C", workspacePath, "checkout", runBranch], workspacePath, signal).catch(() => {})
-    const reset = await runCommand("git", ["-C", workspacePath, "reset", "--hard", runBranch], workspacePath, signal)
+    await runCommand("git", ["-C", workspacePath, "rebase", "--abort"], workspacePath, signal, undefined, lineOptions).catch(() => {})
+    await runCommand("git", ["-C", workspacePath, "merge", "--abort"], workspacePath, signal, undefined, lineOptions).catch(() => {})
+    await runCommand("git", ["-C", workspacePath, "cherry-pick", "--abort"], workspacePath, signal, undefined, lineOptions).catch(() => {})
+    await runCommand("git", ["-C", workspacePath, "checkout", runBranch], workspacePath, signal, undefined, lineOptions).catch(() => {})
+    const reset = await runCommand("git", ["-C", workspacePath, "reset", "--hard", runBranch], workspacePath, signal, undefined, lineOptions)
     if (reset.exitCode !== 0) {
       throw new Error(`Could not restore workspace to run branch ${runBranch}: ${checkout.stderr || reset.stderr || reset.stdout}`)
     }
   }
 
-  private async runHealthGate(workspacePath: string, runBranch: string, signal: AbortSignal): Promise<void> {
+  private async runHealthGate(workspacePath: string, runBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
     if (!exists(workspacePath)) return
     if (!exists(join(workspacePath, ".git"))) return
 
     const residual = await this.detectResidualState(workspacePath, signal)
     if (!residual) return
 
+    const sink = workspacePrepSink(log)
+    const lineOptions = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
+
     if (residual === "rebase") {
-      await runCommand("git", ["-C", workspacePath, "rebase", "--abort"], workspacePath, signal)
+      await runCommand("git", ["-C", workspacePath, "rebase", "--abort"], workspacePath, signal, undefined, lineOptions)
     } else if (residual === "merge") {
-      await runCommand("git", ["-C", workspacePath, "merge", "--abort"], workspacePath, signal)
+      await runCommand("git", ["-C", workspacePath, "merge", "--abort"], workspacePath, signal, undefined, lineOptions)
     } else if (residual === "cherry-pick") {
-      await runCommand("git", ["-C", workspacePath, "cherry-pick", "--abort"], workspacePath, signal)
+      await runCommand("git", ["-C", workspacePath, "cherry-pick", "--abort"], workspacePath, signal, undefined, lineOptions)
     }
 
-    const reset = await runCommand("git", ["-C", workspacePath, "reset", "--hard", runBranch], workspacePath, signal)
+    const reset = await runCommand("git", ["-C", workspacePath, "reset", "--hard", runBranch], workspacePath, signal, undefined, lineOptions)
     if (reset.exitCode !== 0) {
       throw new Error(`runHealthGate: could not reset workspace to ${runBranch}: ${reset.stderr || reset.stdout}`)
     }
@@ -344,8 +366,10 @@ async function hasSameMarker(workspacePath: string, expected: IssueWorkspaceMark
   }
 }
 
-async function verifyWorkspaceBranch(workspacePath: string, expectedBranch: string, signal: AbortSignal) {
-  const branch = await runCommand("git", ["-C", workspacePath, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal)
+async function verifyWorkspaceBranch(workspacePath: string, expectedBranch: string, signal: AbortSignal, log: TaskLogger | null = null) {
+  const sink = workspacePrepSink(log)
+  const lineOptions = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
+  const branch = await runCommand("git", ["-C", workspacePath, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal, undefined, lineOptions)
   if (branch.exitCode !== 0) {
     throw new WorkspaceBranchMismatchError(
       `Workflow workspace ${workspacePath} branch probe failed; expected ${expectedBranch}.`,
@@ -359,7 +383,7 @@ async function verifyWorkspaceBranch(workspacePath: string, expectedBranch: stri
   const observed = branch.stdout.trim()
   if (observed === expectedBranch) return
   if (observed === "HEAD") {
-    const ref = await runCommand("git", ["-C", workspacePath, "rev-parse", "HEAD"], ".", signal)
+    const ref = await runCommand("git", ["-C", workspacePath, "rev-parse", "HEAD"], ".", signal, undefined, lineOptions)
     throw new WorkspaceBranchMismatchError(
       `Workflow workspace ${workspacePath} is detached; expected branch ${expectedBranch}.`,
       workspacePath,

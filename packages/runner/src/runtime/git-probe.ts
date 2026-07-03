@@ -1,6 +1,11 @@
-import { git as defaultGit } from "../actions/git.js"
+import { git as defaultGit, type GitOptions } from "../actions/git.js"
 
-export type GitRunner = (workDir: string, args: string[], signal: AbortSignal) => Promise<{
+export type GitRunner = (
+  workDir: string,
+  args: string[],
+  signal: AbortSignal,
+  options?: GitOptions,
+) => Promise<{
   success: boolean
   stdout: string
   stderr: string
@@ -15,3 +20,4 @@ export function setExecutorGitRunnerForTest(runner: GitRunner | null) {
 }
 
 export { git }
+export type { GitOptions }

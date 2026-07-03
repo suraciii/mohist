@@ -18,6 +18,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Workflow.Storage;
@@ -128,6 +129,8 @@ public static class MohistServiceRegistration
         });
         services.AddScoped<RunnerDefinitionStore>();
         services.AddScoped<RunnerWorkStore>();
+        services.AddScoped<TaskLogService>();
+        services.AddScoped<TaskLogStore>();
         services.AddSignalR()
             .AddJsonProtocol(options =>
             {

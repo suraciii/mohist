@@ -1,5 +1,5 @@
 import { request, ApiError, projectApiPath } from '../../../shared/api/client'
-import type { ApprovalFeedback, CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, StoredCloudEventDto, WorkflowArtifact, WorkflowArtifactDirectory, WorkflowArtifactDirectoryEntry, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
+import type { ApprovalFeedback, CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, StoredCloudEventDto, TaskLogPage, WorkflowArtifact, WorkflowArtifactDirectory, WorkflowArtifactDirectoryEntry, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
 
 export interface IssueWorkflowVariables {
   vars?: Record<string, unknown> | null
@@ -315,4 +315,17 @@ export function removePrerequisite(number: number, prerequisiteNumber: number, p
   return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/prerequisites/${prerequisiteNumber}`), {
     method: 'DELETE',
   })
+}
+
+export interface IssueWorkflowTaskLogParams {
+  cursor?: number | null
+  limit?: number | null
+}
+
+export function getIssueWorkflowTaskLog(number: number, taskId: string, params: IssueWorkflowTaskLogParams = {}, projectId?: string | null) {
+  const search = new URLSearchParams()
+  if (params.cursor != null) search.set('cursor', String(params.cursor))
+  if (params.limit != null) search.set('limit', String(params.limit))
+  const qs = search.toString()
+  return request<TaskLogPage>(projectApiPath(projectId, `/issues/${number}/workflow/tasks/${encodeURIComponent(taskId)}/logs${qs ? `?${qs}` : ''}`))
 }

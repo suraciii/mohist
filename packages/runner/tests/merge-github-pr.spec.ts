@@ -63,6 +63,13 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
   }
 }
 
+function withLog(ctx: ActionContext, writes: Array<{ source: string; text: string }>): ActionContext {
+  return {
+    ...ctx,
+    log: { write: (source: string, text: string) => { writes.push({ source, text }); return writes.length } } as never,
+  }
+}
+
 function installGit(respond: () => never) {
   setGitHubPrGitRunnerForTest(async () => await respond())
 }
@@ -149,6 +156,38 @@ describe("mohist/merge-github-pr action", () => {
       errorCode: null,
       message: null,
     })
+  })
+
+  it("forwards gh command output to the task log sink", async () => {
+    const writes: Array<{ source: string; text: string }> = []
+    installMoIssueShow()
+    installGit(() => { throw new Error("git should not be called") })
+    setGitHubPrGhRunnerForTest(async (cmd, args, _cwd, _signal, _env, options) => {
+      const full = [cmd, ...args].join(" ")
+      options?.onLine?.(`captured ${full}`)
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
+          return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
+        case "gh pr view 42 --json statusCheckRollup":
+          return ghOk(checksRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
+        case "gh pr view 42 --json mergeStateStatus":
+          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
+        case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
+          return ghOk("Merged pull request #42\n")
+        case "gh pr view 42 --json state,mergeCommit,url":
+          return ghOk(JSON.stringify({ state: "MERGED", url: "https://github.com/example/repo/pull/42", mergeCommit: { oid: "merge-sha-1" } }))
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await mergeGitHubPrAction(withLog(context({ prNumber: 42, method: "squash", subjectFrom: "issue.title" }), writes))
+
+    expect(result.status).toBe("success")
+    expect(writes.some((write) => write.source === "action:merge-github-pr" && write.text.includes("gh pr merge 42"))).toBe(true)
   })
 
   it("resolves an open PR from source/target when prNumber is omitted", async () => {

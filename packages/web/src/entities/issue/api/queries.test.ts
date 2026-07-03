@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
-import { useIssueEvents, useWorkspaceStatus } from './queries'
+import { useIssueEvents, useIssueWorkflowTaskLog, useWorkspaceStatus } from './queries'
 import * as clientModule from './client'
 
 const useQueryMock = vi.fn()
 const useProjectMock = vi.fn()
 const getIssueEventsMock = vi.fn()
 const getWorkspaceStatusMock = vi.fn()
+const getIssueWorkflowTaskLogMock = vi.fn()
 
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
@@ -23,6 +24,7 @@ vi.mock('./client', async (importOriginal) => {
     ...actual,
     getIssueEvents: (...args: unknown[]) => getIssueEventsMock(...args),
     getWorkspaceStatus: (...args: unknown[]) => getWorkspaceStatusMock(...args),
+    getIssueWorkflowTaskLog: (...args: unknown[]) => getIssueWorkflowTaskLogMock(...args),
   }
 })
 
@@ -31,10 +33,12 @@ beforeEach(() => {
   useProjectMock.mockReset()
   getIssueEventsMock.mockReset()
   getWorkspaceStatusMock.mockReset()
+  getIssueWorkflowTaskLogMock.mockReset()
   useProjectMock.mockReturnValue({ projectId: 'proj-1' })
   useQueryMock.mockReturnValue({ data: [], isLoading: false })
   getIssueEventsMock.mockResolvedValue([])
   getWorkspaceStatusMock.mockResolvedValue({ exists: true })
+  getIssueWorkflowTaskLogMock.mockResolvedValue({ lines: [], nextCursor: null, truncated: false })
   void clientModule
 })
 
@@ -165,6 +169,18 @@ describe('useWorkspaceStatus', () => {
     expect(config.refetchInterval({ state: { data: { reason: 'git_error', ahead: 0, behind: 0 } } })).toBe(5_000)
     expect(config.refetchInterval({ state: { data: { exists: true } } })).toBe(5_000)
     expect(config.refetchInterval({ state: { data: { exists: true, ahead: 1, behind: 2 } } })).toBe(30_000)
+  })
+})
+
+describe('useIssueWorkflowTaskLog', () => {
+  it('includes workflowRunId in the cache key so reruns with the same task id do not reuse old logs', () => {
+    useIssueWorkflowTaskLog(161, 'build.1', { limit: 5000 }, true, 'wr-1')
+    useIssueWorkflowTaskLog(161, 'build.1', { limit: 5000 }, true, 'wr-2')
+
+    const first = useQueryMock.mock.calls[0][0]
+    const second = useQueryMock.mock.calls[1][0]
+    expect(first.queryKey).toEqual([161, 'build.1', 'proj-1', 'wr-1', 'workflow-task-log', { limit: 5000 }])
+    expect(second.queryKey).toEqual([161, 'build.1', 'proj-1', 'wr-2', 'workflow-task-log', { limit: 5000 }])
   })
 })
 
