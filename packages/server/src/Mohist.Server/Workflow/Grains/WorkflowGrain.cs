@@ -72,6 +72,19 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             _runDirty = false;
         }
 
+        // Self-heal persisted dirty state (#331-class): a run previously
+        // stopped under the pre-fix code may have a Stopped run status with a
+        // dangling awaiting-approval gate on its current stage. Stop() cannot
+        // repair this (it throws on a terminal run), so we correct it on grain
+        // reactivation. The reconcile is idempotent — repeated activations are
+        // no-ops once the gate is cleared — and the Stopped-only scope keeps a
+        // live run genuinely awaiting approval untouched.
+        if (_run is not null && _run.Status == WorkflowRunStatus.Stopped && _run.ReconcileStoppedApprovalGate())
+        {
+            await _runStore.SaveAsync(_run, ct);
+            _runDirty = false;
+        }
+
         _lastKnownRunnerId = _run?.Assignment?.RunnerId;
     }
 

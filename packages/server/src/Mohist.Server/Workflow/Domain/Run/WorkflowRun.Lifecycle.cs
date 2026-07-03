@@ -127,6 +127,14 @@ public static partial class WorkflowRunExtensions
         {
             if (run.Status is not (WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}, stop requires a non-terminal started state");
+
+            // Clear the current stage's residual awaiting-approval gate before
+            // flipping the run to Stopped so a stopped run never carries a
+            // dangling gate. Mirrors the AddRuntimeTasks approval-invalidation
+            // pattern (WorkflowRun.Work.cs:94-98). The stage is left as Running,
+            // not Completed: the run-level Stopped is authoritative and matches
+            // existing stop-from-Ready semantics.
+            run.ReconcileStoppedApprovalGate();
             run.Status = WorkflowRunStatus.Stopped;
             return [new WorkflowRunStopped()];
         }
