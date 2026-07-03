@@ -1,6 +1,6 @@
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
-using Mohist.Server.Workflow.Services.Sessions;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Tests.Support.TestData;
 

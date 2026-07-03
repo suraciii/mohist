@@ -1,6 +1,6 @@
 using Mohist.Server.Sessions.Domain;
 
-namespace Mohist.Server.Workflow.Services.Sessions;
+namespace Mohist.Server.Sessions.Services;
 
 /// <summary>
 /// Context for a generic (non-workflow) AgentSession produced from an Agent

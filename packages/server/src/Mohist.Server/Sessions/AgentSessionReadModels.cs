@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Mohist.Server.Workflow.Services.Sessions;
+namespace Mohist.Server.Sessions;
 
 public sealed record AgentUsageDto(
     long? InputTokens,
@@ -245,7 +245,7 @@ public sealed record AgentSessionListContextRefsDto(
 /// Read shape for the generic-session summary route
 /// (<c>GET /api/projects/{projectRef}/agent-sessions/{sessionId}</c>),
 /// surfaced as the
-/// <see cref="Workflow.Services.Sessions.AgentSessionQuerier.GetGenericSessionSummaryAsync"/>
+/// <see cref="Sessions.Services.AgentSessionQuerier.GetGenericSessionSummaryAsync"/>
 /// response. Issue-130 T-003 / design D4: the summary carries the
 /// resolved Agent profile identity (id + name), the session status in
 /// the spec vocabulary (<c>running</c> / <c>completed</c> / <c>failed</c>
@@ -421,7 +421,7 @@ public sealed record AgentCostRollupRawData(
 
 /// <summary>
 /// The windowed cost figures produced by
-/// <see cref="AgentSessionQuerier.GetCostWindowedAsync"/>. Both windows
+/// <see cref="Sessions.Services.AgentSessionQuerier.GetCostWindowedAsync"/>. Both windows
 /// are 30 days; the previous window is the same length as the current
 /// window and immediately precedes it. Both advance with the current
 /// time. <see cref="CurrentSpend"/> is the sum of in-window per-session

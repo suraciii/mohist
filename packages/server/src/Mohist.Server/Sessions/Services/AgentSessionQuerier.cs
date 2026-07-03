@@ -11,28 +11,26 @@ using Mohist.Server.Issue.Services;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Services;
 
-namespace Mohist.Server.Workflow.Services.Sessions;
+namespace Mohist.Server.Sessions.Services;
 
 /// <summary>
 /// Queries <see cref="AgentSession"/> records in the context of workflow runs.
 /// </summary>
 /// <remarks>
-/// <see cref="AgentSession"/> is a peer-level aggregate root, NOT a child of <see cref="WorkflowRun"/>.
-/// The association between a session and a workflow run is by reference only — a <see cref="TaskRun"/>
+/// <see cref="AgentSession"/> is a peer-level aggregate root, NOT a child of <see cref="Mohist.Server.Workflow.Domain.Run.WorkflowRun"/>.
+/// The association between a session and a workflow run is by reference only — a <see cref="Mohist.Server.Workflow.Domain.Run.TaskRun"/>
 /// refers to a session and the run is the aggregate root that contains that task.
 /// No ownership relationship exists.
 /// </remarks>
 public class AgentSessionQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly WorkflowQuerier _workflowQuerier;
+    private readonly Mohist.Server.Workflow.Services.WorkflowQuerier _workflowQuerier;
     private readonly AgentSessionQuery _sessionQuery;
     private readonly TimeProvider _timeProvider;
 
-    public AgentSessionQuerier(IDbContextFactory<MohistDbContext> dbFactory, WorkflowQuerier workflowQuerier, AgentSessionQuery sessionQuery, TimeProvider timeProvider)
+    public AgentSessionQuerier(IDbContextFactory<MohistDbContext> dbFactory, Mohist.Server.Workflow.Services.WorkflowQuerier workflowQuerier, AgentSessionQuery sessionQuery, TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
         _workflowQuerier = workflowQuerier;
@@ -1498,13 +1496,13 @@ public class AgentSessionQuerier : IScopedService
             .ToList();
     }
 
-    private static WorkflowRun? DeserializeWorkflowRun(string json)
+    private static Mohist.Server.Workflow.Domain.Run.WorkflowRun? DeserializeWorkflowRun(string json)
     {
-        try { return JsonSerializer.Deserialize<WorkflowRun>(json, Infrastructure.Data.Sessions.AgentSessionJson.JsonOptions); }
+        try { return JsonSerializer.Deserialize<Mohist.Server.Workflow.Domain.Run.WorkflowRun>(json, Infrastructure.Data.Sessions.AgentSessionJson.JsonOptions); }
         catch { return null; }
     }
 
-    private static async Task<Dictionary<string, WorkflowRun?>> LoadWorkflowRunsForReconciliationAsync(
+    private static async Task<Dictionary<string, Mohist.Server.Workflow.Domain.Run.WorkflowRun?>> LoadWorkflowRunsForReconciliationAsync(
         MohistDbContext db, List<AgentSessionRecord> sessions, CancellationToken ct)
     {
         var workflowIds = sessions
@@ -1518,7 +1516,7 @@ public class AgentSessionQuerier : IScopedService
             .Where(r => workflowIds.Contains(r.WorkflowRunId))
             .ToListAsync(ct);
 
-        var runs = new Dictionary<string, WorkflowRun?>(StringComparer.Ordinal);
+        var runs = new Dictionary<string, Mohist.Server.Workflow.Domain.Run.WorkflowRun?>(StringComparer.Ordinal);
         foreach (var row in rows)
             runs[row.WorkflowRunId] = DeserializeWorkflowRun(row.State);
         return runs;
@@ -1526,19 +1524,19 @@ public class AgentSessionQuerier : IScopedService
 
     /// <summary>
     /// Determines whether <paramref name="session"/> is associated with <paramref name="run"/>
-    /// by reference through a <see cref="TaskRun"/>, not by ownership.
+    /// by reference through a <see cref="Mohist.Server.Workflow.Domain.Run.TaskRun"/>, not by ownership.
     /// </summary>
     /// <remarks>
-    /// <see cref="AgentSession"/> is a peer aggregate, never owned by <see cref="WorkflowRun"/>.
-    /// The association is established through a <see cref="TaskRun"/> session reference and
+    /// <see cref="AgentSession"/> is a peer aggregate, never owned by <see cref="Mohist.Server.Workflow.Domain.Run.WorkflowRun"/>.
+    /// The association is established through a <see cref="Mohist.Server.Workflow.Domain.Run.TaskRun"/> session reference and
     /// relies on the single-runner assignment invariant: if the run is assigned, the session MUST
     /// belong to the same runner (<see cref="WorkflowAssignmentInfo.RunnerId"/> == session.RunnerId)
     /// and the task identified by <see cref="AgentSessionQueryMetadataKeys.WorkId"/> (if running)
     /// MUST match the session's work item (the task whose reference links them).
-    /// When the run has no assignment yet (<see cref="WorkflowRun.AssignedTo"/> is null), any active
+    /// When the run has no assignment yet (<see cref="Mohist.Server.Workflow.Domain.Run.WorkflowRun.AssignedTo"/> is null), any active
     /// session known by workflow-run-id is provisionally accepted.
     /// </remarks>
-    private static bool IsSessionAssociatedWithRun(WorkflowRun run, AgentSessionRecord session)
+    private static bool IsSessionAssociatedWithRun(Mohist.Server.Workflow.Domain.Run.WorkflowRun run, AgentSessionRecord session)
     {
         if (run.AssignedTo is null) return true;
 

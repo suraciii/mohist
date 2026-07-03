@@ -153,7 +153,7 @@ public class SessionFollowupApiSpecs
         var (project, issue, workflowRunId, _) = await CreateAndStartSessionAsync("followup-target", sessionName: "plan");
 
         await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<Mohist.Server.Workflow.Services.Sessions.AgentSessionQuerier>();
+        var querier = scope.ServiceProvider.GetRequiredService<Mohist.Server.Sessions.Services.AgentSessionQuerier>();
 
         var target = await querier.ResolveFollowupTargetAsync(project.Id, issue.Number, "plan");
 
