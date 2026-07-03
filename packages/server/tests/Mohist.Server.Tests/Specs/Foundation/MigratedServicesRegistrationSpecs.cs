@@ -75,6 +75,8 @@ public class MigratedServicesRegistrationSpecs
         yield return new object[] { typeof(IssueRepositoryResolver), ServiceLifetime.Singleton };
         yield return new object[] { typeof(IssueIdentityResolver), ServiceLifetime.Scoped };
         yield return new object[] { typeof(IssueQuerier), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(IssueMetricsQuerier), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(IssueReadModelLoader), ServiceLifetime.Scoped };
         yield return new object[] { typeof(AgentQuerier), ServiceLifetime.Scoped };
         yield return new object[] { typeof(EpicQuerier), ServiceLifetime.Scoped };
         yield return new object[] { typeof(LabelCatalogService), ServiceLifetime.Scoped };

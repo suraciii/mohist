@@ -479,12 +479,11 @@ public class IssueWorkflowCompletionHandlerSpecs
     private static IssueQuerier NewIssueQuerier(IDbContextFactory<MohistDbContext> dbFactory) =>
         new(
             dbFactory,
-            profiles: null!,
             projects: null!,
-            resolver: null!,
             configService: null!,
             effectiveProfileResolver: null!,
-            projectProfileManager: null!);
+            projectProfileManager: null!,
+            loader: null!);
 
     /// <summary>
     /// Minimal <see cref="IServiceScopeFactory"/> for the handler
@@ -561,12 +560,11 @@ public class IssueWorkflowCompletionHandlerSpecs
                 services.AddSingleton(dbFactory);
                 services.AddScoped<IssueQuerier>(sp => new IssueQuerier(
                     sp.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
-                    profiles: null!,
                     projects: null!,
-                    resolver: null!,
                     configService: null!,
                     effectiveProfileResolver: null!,
-                    projectProfileManager: null!));
+                    projectProfileManager: null!,
+                    loader: null!));
                 _provider = services.BuildServiceProvider();
                 ServiceProvider = _provider;
             }
