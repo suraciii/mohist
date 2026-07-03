@@ -4,7 +4,6 @@ using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -218,11 +217,6 @@ public class IssueQuerier : IScopedService
     {
         var resolved = _effectiveProfileResolver.Resolve(issue.WorkflowProfileId, projectDefaultTemplateId, disabledIds);
         return IssueReadModelLoader.BuildInfo(issue, project, resolved);
-    }
-
-    internal static RepositoryInfo? ResolveIssueRepository(IssueRepositoryResolver resolver, Domain.Issue issue, ProjectInfo? project)
-    {
-        return resolver.Resolve(project, issue.RepositoryRef).Repository;
     }
 
     private async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)
