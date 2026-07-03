@@ -111,7 +111,7 @@ public class EpicProgressionSpecs
         // The in-progress issue is cancelled (terminal), the serial
         // in-progress slot is cleared, and reconcile must pick the
         // next startable issue. This is the scenario that requires
-        // subscribing to IssueClosed (T-003), but the reconcile logic
+        // subscribing to IssueCancelled, but the reconcile logic
         // itself is T-002.
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");

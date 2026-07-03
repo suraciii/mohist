@@ -17,12 +17,12 @@ export type EventMap = {
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunRetrying]: { issueId: string; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.WorkflowRunRerunning]: { issueId: string; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueCreated]: { issueId: string; projectId: string }
-  [REVERSE_DNS_EVENT_TYPES.IssueClosed]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueCancelled]: { issueId: string; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueArchived]: { issueId: string; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueUnarchived]: { issueId: string; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueReopened]: { issueId: string; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueWorkStarted]: { issueId: string; projectId: string }
-  [REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueCompleted]: { issueId: string; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged]: { issueId: string; projectId: string; oldLabels?: Record<string, string>; labels?: Record<string, string> }
   [REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged]: { issueId: string; projectId: string; priority: string }
   [REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded]: { issueId: string; projectId: string; prerequisiteId: string }

@@ -391,15 +391,15 @@ public class IssueQuerier : IScopedService
         StageDurationWaitBreakout WaitBreakout);
 
     // CloudEvents reverse-DNS bus types that mark a terminal transition.
-    // <c>com.mohist.issue.work-completed</c> → <c>completed</c> (Done).
-    // <c>com.mohist.issue.closed</c> → <c>failed</c> (Cancelled).
-    internal const string WorkCompletedType = "com.mohist.issue.work-completed";
-    internal const string ClosedType = "com.mohist.issue.closed";
+    // <c>com.mohist.issue.completed</c> → <c>completed</c> (Done).
+    // <c>com.mohist.issue.cancelled</c> → <c>failed</c> (Cancelled).
+    internal const string CompletedType = EventCatalog.ReverseDns.IssueCompleted;
+    internal const string CancelledType = EventCatalog.ReverseDns.IssueCancelled;
     internal const string IssueSourcePrefix = "/mohist/issues/";
 
     /// <summary>
-    /// Buckets the project's terminal-issue transitions (<c>work-completed</c>
-    /// and <c>closed</c>) from the durable <c>IssueEvents</c> table by
+    /// Buckets the project's terminal-issue transitions (<c>completed</c>
+    /// and <c>cancelled</c>) from the durable <c>IssueEvents</c> table by
     /// <c>IssueEvents.Time</c>, not by issue <c>updatedAt</c>. The window
     /// is fixed: <paramref name="bucket"/> = <see cref="CompletionBucket.Day"/>
     /// returns 30 trailing UTC days; <see cref="CompletionBucket.Week"/>
@@ -506,7 +506,7 @@ public class IssueQuerier : IScopedService
             .Select(e => new { e.Source, e.Type, e.Time, e.Id })
             .ToListAsync();
         var sourceSet = new HashSet<string>(projectSources, StringComparer.Ordinal);
-        var terminalTypes = new HashSet<string>(StringComparer.Ordinal) { WorkCompletedType, ClosedType };
+        var terminalTypes = new HashSet<string>(StringComparer.Ordinal) { CompletedType, CancelledType };
         var latestTerminalByIssue = candidates
             .Where(r => sourceSet.Contains(r.Source)
                 && terminalTypes.Contains(r.Type))
@@ -533,7 +533,7 @@ public class IssueQuerier : IScopedService
             // window that holds it.
             if (row.Time >= windowFrom && row.Time < windowTo)
             {
-                if (row.Type == WorkCompletedType)
+                if (row.Type == CompletedType)
                 {
                     currentTotal = currentTotal with { Completed = currentTotal.Completed + 1 };
                 }
@@ -548,7 +548,7 @@ public class IssueQuerier : IScopedService
                     : DateOnly.FromDateTime(ISOWeekHelper.StartOfIsoWeek(row.Time.UtcDateTime));
                 if (indexByBoundary.TryGetValue(boundary, out var idx))
                 {
-                    if (row.Type == WorkCompletedType)
+                    if (row.Type == CompletedType)
                     {
                         points[idx] = points[idx] with { Completed = points[idx].Completed + 1 };
                     }
@@ -560,7 +560,7 @@ public class IssueQuerier : IScopedService
             }
             else if (row.Time >= previousFrom && row.Time < previousTo)
             {
-                if (row.Type == WorkCompletedType)
+                if (row.Type == CompletedType)
                 {
                     previousTotal = previousTotal with { Completed = previousTotal.Completed + 1 };
                 }
@@ -662,7 +662,7 @@ public class IssueQuerier : IScopedService
     /// Aggregates AI quality signals (first-time-right rate and per-stage
     /// rework rate) over trailing 7-day and 30-day windows. Only issues
     /// whose status is <see cref="IssueStatus.Done"/> participate. Window
-    /// membership is anchored on the <c>com.mohist.issue.work-completed</c>
+    /// membership is anchored on the <c>com.mohist.issue.completed</c>
     /// event time, matching <see cref="GetCompletionBucketsAsync"/>. Rates
     /// are computed from existing workflow-run state and durable check events;
     /// no new data collection is introduced.
@@ -758,9 +758,9 @@ public class IssueQuerier : IScopedService
                     if (!string.IsNullOrWhiteSpace(workflowRunId) && runIdsByIssue.TryGetValue(issueId, out var ids))
                         ids.Add(workflowRunId);
                 }
-                else if (e.Type == WorkCompletedType)
+                else if (e.Type == CompletedType)
                 {
-                    // Keep the latest work-completed time if multiple exist.
+                    // Keep the latest completion time if multiple exist.
                     if (!shipTimes.TryGetValue(issueId, out var existing) || e.Time > existing)
                         shipTimes[issueId] = e.Time;
 
@@ -1400,7 +1400,7 @@ public class IssueQuerier : IScopedService
     /// anchored on completion time (shared with <see cref="GetDeliveryTimesAsync"/>).
     /// Derived purely from already-persisted workflow-run events
     /// (<c>StageStarted</c> / <c>StageCompleted</c>) and lifecycle events
-    /// (<c>IssueWorkStarted</c> / <c>IssueWorkCompleted</c>) — no new
+    /// (<c>IssueWorkStarted</c> / <c>IssueCompleted</c>) — no new
     /// collection, no schema change.
     /// <para>
     /// Aggregation is in-memory (EF Core SQLite cannot translate
@@ -1491,7 +1491,7 @@ public class IssueQuerier : IScopedService
             StringComparer.Ordinal);
         // Per-issue lifecycle event stream needed for the shared
         // attribution core (`IssueStageAttribution.Attribute`).
-        // Captures WorkStarted / WorkCompleted / Closed / Reopened so
+        // Captures WorkStarted / Completed / Cancelled / Reopened so
         // the stage-duration surface and the stage-population snapshot
         // job produce the same "latest stage" verdict for the same
         // issue.
@@ -1510,12 +1510,12 @@ public class IssueQuerier : IScopedService
                 var issueId = e.Source[IssueSourcePrefix.Length..];
 
                 // Record every lifecycle event the shared attribution
-                // core consumes; the WorkStarted / WorkCompleted
+                // core consumes; the WorkStarted / Completed
                 // branches below also drive the existing per-issue
                 // run-id / earliest-start accumulators.
                 if (e.Type == WorkStartedType
-                    || e.Type == WorkCompletedType
-                    || e.Type == ClosedType
+                    || e.Type == CompletedType
+                    || e.Type == CancelledType
                     || e.Type == "com.mohist.issue.reopened")
                 {
                     if (!lifecycleEventsByIssue.TryGetValue(issueId, out var list))
@@ -1546,7 +1546,7 @@ public class IssueQuerier : IScopedService
                     if (!string.IsNullOrWhiteSpace(wrId) && runIdsByIssue.TryGetValue(issueId, out var ids))
                         ids.Add(wrId);
                 }
-                else if (e.Type == WorkCompletedType)
+                else if (e.Type == CompletedType)
                 {
                     var wrId = ReadWorkflowRunId(e.Data);
                     if (!string.IsNullOrWhiteSpace(wrId) && runIdsByIssue.TryGetValue(issueId, out var ids))
@@ -1798,8 +1798,8 @@ public class IssueQuerier : IScopedService
     /// produces the issue's single attributed stage for the day.
     /// <para>
     /// Lifecycle events come from the per-issue <c>IssueEvents</c> the
-    /// caller has already loaded (work-started / work-completed /
-    /// closed / reopened); stage events come from the per-run
+    /// caller has already loaded (work-started / completed /
+    /// cancelled / reopened); stage events come from the per-run
     /// <c>WorkflowRunEvents</c> the caller has already loaded. The
     /// day bound is <paramref name="dayEndUtc"/>; events past the
     /// bound are caller-filtered (SQLite cannot translate

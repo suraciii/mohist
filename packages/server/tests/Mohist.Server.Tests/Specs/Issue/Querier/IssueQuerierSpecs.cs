@@ -810,9 +810,9 @@ public class IssueQuerierSpecs
         var i3 = SeedIssue(db, project, "issue_df_3");
         await db.SaveChangesAsync();
 
-        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, i2.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 18, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, i3.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 6, 19, 9, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i2.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 17, 18, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i3.Id, IssueQuerier.CancelledType, new DateTimeOffset(2026, 6, 19, 9, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -839,7 +839,7 @@ public class IssueQuerierSpecs
         await db.SaveChangesAsync();
 
         // The completion event is in week 1 (early June).
-        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
         // The issue's `updatedAt` is in week 2 (a later edit/archive
         // touched it). The metric MUST keep the issue in the week 1
         // bucket, because bucketing reads `IssueEvents.Time` (terminal
@@ -874,9 +874,9 @@ public class IssueQuerierSpecs
         // in week 2. The endpoint counts only the latest terminal
         // event, so the earlier terminal bucket must not retain a stale
         // failure count.
-        SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CancelledType, new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
         SeedEvent(db, i1.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 12, 10, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 6, 15, 10, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CancelledType, new DateTimeOffset(2026, 6, 15, 10, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -900,9 +900,9 @@ public class IssueQuerierSpecs
         var i1 = SeedIssue(db, project, "issue_recomplete_1");
         await db.SaveChangesAsync();
 
-        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
         SeedEvent(db, i1.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 18, 8, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 19, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 19, 8, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -928,9 +928,9 @@ public class IssueQuerierSpecs
 
         // Two same-type terminal events for the same issue in the
         // same day: must count as 1, not 2.
-        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
-        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 16, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 17, 16, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -955,8 +955,8 @@ public class IssueQuerierSpecs
         var b1 = SeedIssue(db, projectB, "issue_scope_b_1");
         await db.SaveChangesAsync();
 
-        SeedEvent(db, a1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, b1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 9, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, a1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, b1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 17, 9, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -1104,11 +1104,11 @@ public class IssueQuerierSpecs
         await db.SaveChangesAsync();
 
         // Current window events (within trailing 30d ending 2026-06-20).
-        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, i2.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i2.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero));
         // Previous window event — with now=2026-06-19, the previous
         // day-window is [2026-04-21, 2026-05-21).
-        SeedEvent(db, i3.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i3.Id, IssueQuerier.CancelledType, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -1142,11 +1142,11 @@ public class IssueQuerierSpecs
         await db.SaveChangesAsync();
 
         // Earlier terminal event in the previous window [2026-04-21, 2026-05-21).
-        SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CancelledType, new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero));
         // Reopen (non-terminal) sits between the two terminals.
         SeedEvent(db, i1.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 12, 10, 0, 0, TimeSpan.Zero));
         // Latest terminal event (the only one counted) lives in the current window.
-        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 10, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 17, 10, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -1180,7 +1180,7 @@ public class IssueQuerierSpecs
         await db.SaveChangesAsync();
 
         // One current-window completion only; previous window has no events.
-        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -1213,8 +1213,8 @@ public class IssueQuerierSpecs
 
         // now = 2026-06-19; previous day-window = [2026-04-21, 2026-05-21).
         // Place two failed (cancelled) events inside that range.
-        SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 5, 9, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, i2.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 11, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CancelledType, new DateTimeOffset(2026, 5, 5, 9, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i2.Id, IssueQuerier.CancelledType, new DateTimeOffset(2026, 5, 10, 11, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -1247,7 +1247,7 @@ public class IssueQuerierSpecs
 
         // Event lands in the previous window for `now=2026-06-19`:
         // previous day-window = [2026-04-21, 2026-05-21).
-        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -1536,7 +1536,7 @@ public class IssueQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_ftr_1", workflowRunId: "wr_quality_ftr_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_ftr_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-2), "wr_quality_ftr_1");
         await SeedWorkflowRunAsync(db, "wr_quality_ftr_1", QualityRunState("wr_quality_ftr_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -1564,7 +1564,7 @@ public class IssueQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_rework_1", workflowRunId: "wr_quality_rework_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_rework_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-2), "wr_quality_rework_1");
         await SeedWorkflowRunAsync(db, "wr_quality_rework_1", QualityRunState("wr_quality_rework_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 1)]),
@@ -1595,7 +1595,7 @@ public class IssueQuerierSpecs
         SeedIssue(db, project, "issue_quality_status_backlog", workflowRunId: null, status: IssueStatus.Backlog);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, shipped.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_status_shipped");
+        SeedEvent(db, shipped.Id, IssueQuerier.CompletedType, now.AddDays(-2), "wr_quality_status_shipped");
         await SeedWorkflowRunAsync(db, "wr_quality_status_shipped", QualityRunState("wr_quality_status_shipped", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await SeedWorkflowRunAsync(db, "wr_quality_status_inprogress", QualityRunState("wr_quality_status_inprogress", [("plan", [("plan-ok", "Plan ok", 1)])]));
         await db.SaveChangesAsync();
@@ -1622,7 +1622,7 @@ public class IssueQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_stage_1", workflowRunId: "wr_quality_stage_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_stage_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-2), "wr_quality_stage_1");
         await SeedWorkflowRunAsync(db, "wr_quality_stage_1", QualityRunState("wr_quality_stage_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -1658,9 +1658,9 @@ public class IssueQuerierSpecs
         var old = SeedIssue(db, project, "issue_quality_win_old", workflowRunId: "wr_quality_win_old", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, recent.Id, IssueQuerier.WorkCompletedType, now.AddDays(-3), "wr_quality_win_recent");
-        SeedEvent(db, mid.Id, IssueQuerier.WorkCompletedType, now.AddDays(-20), "wr_quality_win_mid");
-        SeedEvent(db, old.Id, IssueQuerier.WorkCompletedType, now.AddDays(-40), "wr_quality_win_old");
+        SeedEvent(db, recent.Id, IssueQuerier.CompletedType, now.AddDays(-3), "wr_quality_win_recent");
+        SeedEvent(db, mid.Id, IssueQuerier.CompletedType, now.AddDays(-20), "wr_quality_win_mid");
+        SeedEvent(db, old.Id, IssueQuerier.CompletedType, now.AddDays(-40), "wr_quality_win_old");
 
         await SeedWorkflowRunAsync(db, "wr_quality_win_recent", QualityRunState("wr_quality_win_recent", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await SeedWorkflowRunAsync(db, "wr_quality_win_mid", QualityRunState("wr_quality_win_mid", [("plan", [("plan-ok", "Plan ok", 0)])]));
@@ -1716,8 +1716,8 @@ public class IssueQuerierSpecs
         var onlyPlan = SeedIssue(db, project, "issue_quality_denom_plan", workflowRunId: "wr_quality_denom_plan", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, reachedIntegrate.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_denom_integrate");
-        SeedEvent(db, onlyPlan.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_denom_plan");
+        SeedEvent(db, reachedIntegrate.Id, IssueQuerier.CompletedType, now.AddDays(-2), "wr_quality_denom_integrate");
+        SeedEvent(db, onlyPlan.Id, IssueQuerier.CompletedType, now.AddDays(-2), "wr_quality_denom_plan");
 
         await SeedWorkflowRunAsync(db, "wr_quality_denom_integrate", QualityRunState("wr_quality_denom_integrate", [
             ("plan", [("plan-ok", "Plan ok", 1)]),
@@ -1756,7 +1756,7 @@ public class IssueQuerierSpecs
 
         SeedEvent(db, issue.Id, "com.mohist.issue.work-started", now.AddDays(-5), "wr_quality_lifecycle_first");
         SeedEvent(db, issue.Id, "com.mohist.issue.work-started", now.AddDays(-2), "wr_quality_lifecycle_final");
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_lifecycle_final");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-1), "wr_quality_lifecycle_final");
 
         await SeedWorkflowRunAsync(db, "wr_quality_lifecycle_first", QualityRunState("wr_quality_lifecycle_first", [
             ("plan", [("plan-repair", "Plan repair", 1)]),
@@ -1793,7 +1793,7 @@ public class IssueQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_rerun_repair_1", workflowRunId: "wr_quality_rerun_repair_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_rerun_repair_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-1), "wr_quality_rerun_repair_1");
         await SeedWorkflowRunAsync(db, "wr_quality_rerun_repair_1", QualityRunState("wr_quality_rerun_repair_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("check", [("review", "Review", 0)]),
@@ -1835,7 +1835,7 @@ public class IssueQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_check_retry_1", workflowRunId: "wr_quality_check_retry_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_check_retry_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-1), "wr_quality_check_retry_1");
         await SeedWorkflowRunAsync(db, "wr_quality_check_retry_1", QualityRunState("wr_quality_check_retry_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("check", [("review", "Review", 0)]),
@@ -1870,7 +1870,7 @@ public class IssueQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_missing_run_1", workflowRunId: "wr_quality_missing_run_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_missing_run_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-2), "wr_quality_missing_run_1");
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -1893,7 +1893,7 @@ public class IssueQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_corrupt_run_1", workflowRunId: "wr_quality_corrupt_run_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_corrupt_run_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-2), "wr_quality_corrupt_run_1");
         await db.Database.ExecuteSqlRawAsync(
             "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
             "wr_quality_corrupt_run_1",
@@ -1921,8 +1921,8 @@ public class IssueQuerierSpecs
         var b1 = SeedIssue(db, projectB, "issue_quality_scope_b_1", workflowRunId: "wr_quality_scope_b_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, a1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero), "wr_quality_scope_a_1");
-        SeedEvent(db, b1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero), "wr_quality_scope_b_1");
+        SeedEvent(db, a1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero), "wr_quality_scope_a_1");
+        SeedEvent(db, b1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero), "wr_quality_scope_b_1");
 
         await SeedWorkflowRunAsync(db, "wr_quality_scope_a_1", QualityRunState("wr_quality_scope_a_1", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await SeedWorkflowRunAsync(db, "wr_quality_scope_b_1", QualityRunState("wr_quality_scope_b_1", [("plan", [("plan-ok", "Plan ok", 1)])]));
@@ -1985,7 +1985,7 @@ public class IssueQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_leading_1", workflowRunId: "wr_quality_trend_leading_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, shipTime, "wr_quality_trend_leading_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, shipTime, "wr_quality_trend_leading_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_leading_1", QualityRunState("wr_quality_trend_leading_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
         ]));
@@ -2016,8 +2016,8 @@ public class IssueQuerierSpecs
         var notFtrDay17 = SeedIssue(db, project, "issue_quality_trend_ftr_b", workflowRunId: "wr_quality_trend_ftr_b", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, ftrDay17.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2).AddHours(1), "wr_quality_trend_ftr_a");
-        SeedEvent(db, notFtrDay17.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2).AddHours(1), "wr_quality_trend_ftr_b");
+        SeedEvent(db, ftrDay17.Id, IssueQuerier.CompletedType, now.AddDays(-2).AddHours(1), "wr_quality_trend_ftr_a");
+        SeedEvent(db, notFtrDay17.Id, IssueQuerier.CompletedType, now.AddDays(-2).AddHours(1), "wr_quality_trend_ftr_b");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_ftr_a", QualityRunState("wr_quality_trend_ftr_a", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await SeedWorkflowRunAsync(db, "wr_quality_trend_ftr_b", QualityRunState("wr_quality_trend_ftr_b", [("plan", [("plan-repair", "Plan repair", 1)])]));
         await db.SaveChangesAsync();
@@ -2044,7 +2044,7 @@ public class IssueQuerierSpecs
         var reworked = SeedIssue(db, project, "issue_quality_trend_rework_1", workflowRunId: "wr_quality_trend_rework_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, reworked.Id, IssueQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_trend_rework_1");
+        SeedEvent(db, reworked.Id, IssueQuerier.CompletedType, now.AddDays(-1), "wr_quality_trend_rework_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_rework_1", QualityRunState("wr_quality_trend_rework_1", [
             ("plan", [("plan-repair", "Plan repair", 1)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -2073,7 +2073,7 @@ public class IssueQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_multistage_1", workflowRunId: "wr_quality_trend_multistage_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-3), "wr_quality_trend_multistage_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-3), "wr_quality_trend_multistage_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_multistage_1", QualityRunState("wr_quality_trend_multistage_1", [
             ("plan", [("plan-repair", "Plan repair", 1)]),
             ("build", [("build-repair", "Build repair", 1)]),
@@ -2110,7 +2110,7 @@ public class IssueQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_empty_1", workflowRunId: "wr_quality_trend_empty_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_trend_empty_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-1), "wr_quality_trend_empty_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_empty_1", QualityRunState("wr_quality_trend_empty_1", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await db.SaveChangesAsync();
 
@@ -2155,9 +2155,9 @@ public class IssueQuerierSpecs
 
         // Even if these non-Done issues had terminal events, they
         // must not appear in any trend bucket.
-        SeedEvent(db, inProgress.Id, IssueQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_trend_ns_inprog");
-        SeedEvent(db, backlog.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2));
-        SeedEvent(db, cancelled.Id, IssueQuerier.ClosedType, now.AddDays(-3));
+        SeedEvent(db, inProgress.Id, IssueQuerier.CompletedType, now.AddDays(-1), "wr_quality_trend_ns_inprog");
+        SeedEvent(db, backlog.Id, IssueQuerier.CompletedType, now.AddDays(-2));
+        SeedEvent(db, cancelled.Id, IssueQuerier.CancelledType, now.AddDays(-3));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -2187,7 +2187,7 @@ public class IssueQuerierSpecs
         // Anchor the ship event on day 5 of the trailing window
         // (now.AddDays(-5) → 2026-06-14, a Sunday).
         var shipTime = now.AddDays(-5);
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, shipTime, "wr_quality_trend_anchor_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, shipTime, "wr_quality_trend_anchor_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_anchor_1", QualityRunState("wr_quality_trend_anchor_1", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await db.SaveChangesAsync();
 
@@ -2214,7 +2214,7 @@ public class IssueQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_today_1", workflowRunId: "wr_quality_trend_today_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, shipTime, "wr_quality_trend_today_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, shipTime, "wr_quality_trend_today_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_today_1", QualityRunState("wr_quality_trend_today_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
         ]));
@@ -2248,7 +2248,7 @@ public class IssueQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_midday_1", workflowRunId: "wr_quality_trend_midday_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, shipTime, "wr_quality_trend_midday_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, shipTime, "wr_quality_trend_midday_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_midday_1", QualityRunState("wr_quality_trend_midday_1", [
             ("plan", [("plan-repair", "Plan repair", 1)]),
         ]));
@@ -2281,7 +2281,7 @@ public class IssueQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_additive_1", workflowRunId: "wr_quality_trend_additive_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_trend_additive_1");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-2), "wr_quality_trend_additive_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_additive_1", QualityRunState("wr_quality_trend_additive_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -2324,14 +2324,14 @@ public class IssueQuerierSpecs
 
         var previousShipTime = new DateTime(2026, 5, 10, 14, 0, 0, DateTimeKind.Utc);
         var previousIssue = SeedIssue(db, project, "issue_quality_prev_adj_prev", workflowRunId: "wr_quality_prev_adj_prev", status: IssueStatus.Done);
-        SeedEvent(db, previousIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(previousShipTime, TimeSpan.Zero), "wr_quality_prev_adj_prev");
+        SeedEvent(db, previousIssue.Id, IssueQuerier.CompletedType, new DateTimeOffset(previousShipTime, TimeSpan.Zero), "wr_quality_prev_adj_prev");
         await SeedWorkflowRunAsync(db, "wr_quality_prev_adj_prev", QualityRunState("wr_quality_prev_adj_prev", [
             ("plan", [("plan-repair", "Plan repair", 1)]),
         ]));
 
         var currentShipTime = new DateTime(2026, 6, 5, 14, 0, 0, DateTimeKind.Utc);
         var currentIssue = SeedIssue(db, project, "issue_quality_prev_adj_curr", workflowRunId: "wr_quality_prev_adj_curr", status: IssueStatus.Done);
-        SeedEvent(db, currentIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(currentShipTime, TimeSpan.Zero), "wr_quality_prev_adj_curr");
+        SeedEvent(db, currentIssue.Id, IssueQuerier.CompletedType, new DateTimeOffset(currentShipTime, TimeSpan.Zero), "wr_quality_prev_adj_curr");
         await SeedWorkflowRunAsync(db, "wr_quality_prev_adj_curr", QualityRunState("wr_quality_prev_adj_curr", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -2364,7 +2364,7 @@ public class IssueQuerierSpecs
         var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
 
         var issue = SeedIssue(db, project, "issue_quality_prev_empty_only", workflowRunId: "wr_quality_prev_empty_only", status: IssueStatus.Done);
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_prev_empty_only");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-1), "wr_quality_prev_empty_only");
         await SeedWorkflowRunAsync(db, "wr_quality_prev_empty_only", QualityRunState("wr_quality_prev_empty_only", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -2398,7 +2398,7 @@ public class IssueQuerierSpecs
 
         var previousShipTime = new DateTime(2026, 5, 10, 14, 0, 0, DateTimeKind.Utc);
         var issue = SeedIssue(db, project, "issue_quality_curr_empty_prev", workflowRunId: "wr_quality_curr_empty_prev", status: IssueStatus.Done);
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(previousShipTime, TimeSpan.Zero), "wr_quality_curr_empty_prev");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, new DateTimeOffset(previousShipTime, TimeSpan.Zero), "wr_quality_curr_empty_prev");
         await SeedWorkflowRunAsync(db, "wr_quality_curr_empty_prev", QualityRunState("wr_quality_curr_empty_prev", [
             ("plan", [("plan-repair", "Plan repair", 1)]),
         ]));
@@ -2435,7 +2435,7 @@ public class IssueQuerierSpecs
         // (a) Previous-window issue with a RepairScheduled event → FTR = false.
         var repairShipTime = new DateTime(2026, 5, 5, 14, 0, 0, DateTimeKind.Utc);
         var repairIssue = SeedIssue(db, project, "issue_quality_prev_ftr_repair", workflowRunId: "wr_quality_prev_ftr_repair", status: IssueStatus.Done);
-        SeedEvent(db, repairIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(repairShipTime, TimeSpan.Zero), "wr_quality_prev_ftr_repair");
+        SeedEvent(db, repairIssue.Id, IssueQuerier.CompletedType, new DateTimeOffset(repairShipTime, TimeSpan.Zero), "wr_quality_prev_ftr_repair");
         await SeedWorkflowRunAsync(db, "wr_quality_prev_ftr_repair", QualityRunState("wr_quality_prev_ftr_repair", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("check", [("review", "Review", 0)]),
@@ -2449,7 +2449,7 @@ public class IssueQuerierSpecs
         // (b) Previous-window issue with no repair → FTR = true.
         var cleanShipTime = new DateTime(2026, 5, 12, 14, 0, 0, DateTimeKind.Utc);
         var cleanIssue = SeedIssue(db, project, "issue_quality_prev_ftr_clean", workflowRunId: "wr_quality_prev_ftr_clean", status: IssueStatus.Done);
-        SeedEvent(db, cleanIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(cleanShipTime, TimeSpan.Zero), "wr_quality_prev_ftr_clean");
+        SeedEvent(db, cleanIssue.Id, IssueQuerier.CompletedType, new DateTimeOffset(cleanShipTime, TimeSpan.Zero), "wr_quality_prev_ftr_clean");
         await SeedWorkflowRunAsync(db, "wr_quality_prev_ftr_clean", QualityRunState("wr_quality_prev_ftr_clean", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -2489,7 +2489,7 @@ public class IssueQuerierSpecs
         // that determines which window hosts it.
         var anchor = new DateTime(2026, 6, 10, 14, 0, 0, DateTimeKind.Utc);
         var issue = SeedIssue(db, project, "issue_quality_prev_shift_anchor", workflowRunId: "wr_quality_prev_shift_anchor", status: IssueStatus.Done);
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(anchor, TimeSpan.Zero), "wr_quality_prev_shift_anchor");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, new DateTimeOffset(anchor, TimeSpan.Zero), "wr_quality_prev_shift_anchor");
         await SeedWorkflowRunAsync(db, "wr_quality_prev_shift_anchor", QualityRunState("wr_quality_prev_shift_anchor", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -2534,21 +2534,21 @@ public class IssueQuerierSpecs
 
         // (a) FTR — no repair.
         var ftr1 = SeedIssue(db, project, "issue_quality_prev_mean_ftr1", workflowRunId: "wr_quality_prev_mean_ftr1", status: IssueStatus.Done);
-        SeedEvent(db, ftr1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 5, 1, 14, 0, 0, TimeSpan.Zero), "wr_quality_prev_mean_ftr1");
+        SeedEvent(db, ftr1.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 5, 1, 14, 0, 0, TimeSpan.Zero), "wr_quality_prev_mean_ftr1");
         await SeedWorkflowRunAsync(db, "wr_quality_prev_mean_ftr1", QualityRunState("wr_quality_prev_mean_ftr1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
         ]));
 
         // (b) FTR — no repair.
         var ftr2 = SeedIssue(db, project, "issue_quality_prev_mean_ftr2", workflowRunId: "wr_quality_prev_mean_ftr2", status: IssueStatus.Done);
-        SeedEvent(db, ftr2.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 5, 5, 14, 0, 0, TimeSpan.Zero), "wr_quality_prev_mean_ftr2");
+        SeedEvent(db, ftr2.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 5, 5, 14, 0, 0, TimeSpan.Zero), "wr_quality_prev_mean_ftr2");
         await SeedWorkflowRunAsync(db, "wr_quality_prev_mean_ftr2", QualityRunState("wr_quality_prev_mean_ftr2", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
         ]));
 
         // (c) Not FTR — one check had a repair.
         var repaired = SeedIssue(db, project, "issue_quality_prev_mean_repaired", workflowRunId: "wr_quality_prev_mean_repaired", status: IssueStatus.Done);
-        SeedEvent(db, repaired.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 5, 10, 14, 0, 0, TimeSpan.Zero), "wr_quality_prev_mean_repaired");
+        SeedEvent(db, repaired.Id, IssueQuerier.CompletedType, new DateTimeOffset(2026, 5, 10, 14, 0, 0, TimeSpan.Zero), "wr_quality_prev_mean_repaired");
         await SeedWorkflowRunAsync(db, "wr_quality_prev_mean_repaired", QualityRunState("wr_quality_prev_mean_repaired", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-repair", "Build repair", 1)]),
@@ -2580,7 +2580,7 @@ public class IssueQuerierSpecs
         var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
 
         var issue = SeedIssue(db, project, "issue_quality_prev_additive", workflowRunId: "wr_quality_prev_additive", status: IssueStatus.Done);
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_prev_additive");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, now.AddDays(-2), "wr_quality_prev_additive");
         await SeedWorkflowRunAsync(db, "wr_quality_prev_additive", QualityRunState("wr_quality_prev_additive", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-repair", "Build repair", 1)]),
@@ -2808,9 +2808,9 @@ public class IssueQuerierSpecs
             createdAt: createdAt,
             completedAt: latestCompletedAt);
         SeedEvent(db, issue.Id, IssueQuerier.WorkStartedType, firstStart);
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, firstCompletionRecorded);
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, firstCompletionRecorded);
         SeedEvent(db, issue.Id, "com.mohist.issue.reopened", reopenedAt);
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, latestCompletionRecorded);
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, latestCompletionRecorded);
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -2906,7 +2906,7 @@ public class IssueQuerierSpecs
         // serialized state — the canonical helper does not capture these
         // for non-Done states.
         UpdateCompletedAtAndCreatedAt(db, issue.Id, createdAt, closedAt);
-        SeedEvent(db, issue.Id, IssueQuerier.ClosedType, new DateTimeOffset(closedAt, TimeSpan.Zero));
+        SeedEvent(db, issue.Id, IssueQuerier.CancelledType, new DateTimeOffset(closedAt, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -3430,7 +3430,7 @@ public class IssueQuerierSpecs
             completedAt: completedAt,
             workflowRunId: currentRunId);
         SeedEvent(db, issue.Id, IssueQuerier.WorkStartedType, workStartedAt, workflowRunId: priorRunId);
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, completedAt, workflowRunId: currentRunId);
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, completedAt, workflowRunId: currentRunId);
         await db.SaveChangesAsync();
 
         await SeedWorkflowRunAsync(db, priorRunId, ApprovalRunState(priorRunId, workStartedAt, TimeSpan.FromHours(1)));
@@ -3486,7 +3486,7 @@ public class IssueQuerierSpecs
             createdAt: new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc),
             completedAt: completedAt);
         SeedEvent(db, issue.Id, IssueQuerier.WorkStartedType, completedAt.AddHours(-4));
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, completedAt, workflowRunId: "wr_sd_completed_run");
+        SeedEvent(db, issue.Id, IssueQuerier.CompletedType, completedAt, workflowRunId: "wr_sd_completed_run");
         await db.SaveChangesAsync();
 
         await SeedWorkflowRunAsync(db, "wr_sd_completed_run", ApprovalRunState("wr_sd_completed_run", completedAt.AddHours(-4), TimeSpan.Zero));

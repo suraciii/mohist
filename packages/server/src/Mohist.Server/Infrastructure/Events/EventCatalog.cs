@@ -77,7 +77,6 @@ public static class EventCatalog
         ReverseDns.IssueCompleted,
         ReverseDns.IssueCancelled,
         ReverseDns.IssueWorkStarted,
-        ReverseDns.IssueWorkCompleted,
         ReverseDns.InboxItemPersisted,
     };
 
@@ -127,7 +126,6 @@ public static class EventCatalog
         public const string IssueCompleted = "com.mohist.issue.completed";
         public const string IssueCancelled = "com.mohist.issue.cancelled";
         public const string IssueWorkStarted = "com.mohist.issue.work-started";
-        public const string IssueWorkCompleted = "com.mohist.issue.work-completed";
 
         public const string InboxItemPersisted = "com.mohist.inbox.item-persisted";
     }

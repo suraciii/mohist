@@ -104,8 +104,8 @@ export function describeEvent(type: string, payload: Record<string, unknown> = {
     case 'com.mohist.issue.created':
       return 'Issue created'
 
-    case 'com.mohist.issue.closed':
-      return 'Issue closed'
+    case 'com.mohist.issue.cancelled':
+      return 'Issue cancelled'
 
     case 'com.mohist.issue.archived':
       return 'Issue archived'
@@ -119,8 +119,8 @@ export function describeEvent(type: string, payload: Record<string, unknown> = {
     case 'com.mohist.issue.work-started':
       return 'Work started'
 
-    case 'com.mohist.issue.work-completed':
-      return 'Work completed'
+    case 'com.mohist.issue.completed':
+      return 'Issue completed'
 
     case 'com.mohist.issue.labels-changed':
       if (labels && oldLabels) {

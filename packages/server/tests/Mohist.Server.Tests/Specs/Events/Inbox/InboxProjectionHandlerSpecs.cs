@@ -120,7 +120,7 @@ public class InboxProjectionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
-    public async Task IssueWorkCompleted_ProducesIssueCompletedItemInOwningProject()
+    public async Task IssueCompleted_ProducesIssueCompletedItemInOwningProject()
     {
         await using var database = InboxProjectionTestSupport.CreateDatabase();
         await InboxProjectionTestSupport.SeedIssueAsync(database,
@@ -131,7 +131,7 @@ public class InboxProjectionHandlerSpecs
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
-            type: EventCatalog.ReverseDns.IssueWorkCompleted,
+            type: EventCatalog.ReverseDns.IssueCompleted,
             projectId: "proj_a",
             issueId: "issue_1",
             issueNumber: 9,
@@ -289,7 +289,7 @@ public class InboxProjectionHandlerSpecs
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
-            type: EventCatalog.ReverseDns.IssueWorkCompleted,
+            type: EventCatalog.ReverseDns.IssueCompleted,
             projectId: "proj_a",
             issueId: "issue_1",
             issueNumber: 1,
@@ -318,7 +318,7 @@ public class InboxProjectionHandlerSpecs
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
-            type: EventCatalog.ReverseDns.IssueWorkCompleted,
+            type: EventCatalog.ReverseDns.IssueCompleted,
             projectId: "proj_b",
             issueId: "issue_1",
             issueNumber: 1,
@@ -449,7 +449,7 @@ public class InboxProjectionHandlerSpecs
         var evt = new CloudEvent(
             id: "evt-no-issue",
             source: new Uri("/mohist/issue/issue_x", UriKind.Relative),
-            type: EventCatalog.ReverseDns.IssueWorkCompleted,
+            type: EventCatalog.ReverseDns.IssueCompleted,
             time: DateTimeOffset.UtcNow,
             data: null,
             extensions: new Dictionary<string, string>
@@ -538,7 +538,7 @@ public class InboxProjectionHandlerSpecs
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
-            type: EventCatalog.ReverseDns.IssueWorkCompleted,
+            type: EventCatalog.ReverseDns.IssueCompleted,
             projectId: "proj_a",
             issueId: "issue_missing",
             issueNumber: 7,
@@ -597,7 +597,7 @@ public class InboxProjectionHandlerSpecs
     {
         var handler = InboxProjectionTestSupport.CreateHandler(InboxProjectionTestSupport.CreateDatabase());
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "p", "i", 1, "e1")));
-        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkCompleted, "p", "i", 1, "e2")));
+        Assert.True(handler.Filter(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "p", "i", 1, "e2")));
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "w", "e3")));
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "w", "e4")));
     }
@@ -611,7 +611,7 @@ public class InboxProjectionHandlerSpecs
         Assert.False(handler.Filter(new CloudEvent(
             id: "e",
             source: new Uri("/mohist/issue/issue_1", UriKind.Relative),
-            type: "com.mohist.issue.closed",
+            type: EventCatalog.ReverseDns.IssueCancelled,
             time: DateTimeOffset.UtcNow,
             data: null)));
     }
@@ -625,10 +625,10 @@ public class InboxProjectionHandlerSpecs
             typeof(InboxProjectionHandler), typeof(SubscriptionAttribute));
         Assert.NotNull(attr);
         Assert.Equal(
-            "com.mohist.workflow.run.failed|" +
-            "com.mohist.workflow.stage.approval-requested|" +
-            "com.mohist.issue.work-started|" +
-            "com.mohist.issue.work-completed",
+            EventCatalog.ReverseDns.WorkflowRunFailed + "|" +
+            EventCatalog.ReverseDns.StageApprovalRequested + "|" +
+            EventCatalog.ReverseDns.IssueWorkStarted + "|" +
+            EventCatalog.ReverseDns.IssueCompleted,
             attr!.Type);
     }
 
@@ -661,7 +661,7 @@ public class InboxProjectionHandlerSpecs
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "wf_1", "evt-failed"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "wf_2", "evt-approval"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "proj_a", "issue_1", 1, "evt-started"), CancellationToken.None);
-        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkCompleted, "proj_a", "issue_1", 1, "evt-completed"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "proj_a", "issue_1", 1, "evt-completed"), CancellationToken.None);
 
         var items = await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a");
         Assert.Equal(4, items.Count);
@@ -691,7 +691,7 @@ public class InboxProjectionHandlerSpecs
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
         var evt = InboxProjectionTestSupport.BuildIssueEvent(
-            type: EventCatalog.ReverseDns.IssueWorkCompleted,
+            type: EventCatalog.ReverseDns.IssueCompleted,
             projectId: "proj_a",
             issueId: "issue_1",
             issueNumber: 1,
@@ -762,7 +762,7 @@ public class InboxProjectionHandlerSpecs
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "wf_fail", "evt-f"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "wf_approve", "evt-a"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "proj_a", "issue_1", 1, "evt-s"), CancellationToken.None);
-        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkCompleted, "proj_a", "issue_1", 1, "evt-c"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "proj_a", "issue_1", 1, "evt-c"), CancellationToken.None);
 
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }

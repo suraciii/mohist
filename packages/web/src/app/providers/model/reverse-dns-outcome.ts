@@ -81,7 +81,7 @@ export function decideReverseDnsOutcome(
   const issueNumber = readIssueNumber(parsed)
   if (issueNumber === null) return { handled: false }
 
-  if (eventName === REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted) {
+  if (eventName === REVERSE_DNS_EVENT_TYPES.IssueCompleted) {
     if (isRebasePayload(parsed)) {
       const rebased = typeof parsed.rebased === 'boolean' ? parsed.rebased : true
       return {

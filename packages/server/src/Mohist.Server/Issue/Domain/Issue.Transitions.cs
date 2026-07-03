@@ -178,7 +178,7 @@ public sealed partial class Issue
         _completedAt = completedAt;
         _status = IssueStatus.Done;
         Touch(completedAt);
-        RecordEvent(new IssueWorkCompleted(workflowRunId));
+        RecordEvent(new IssueCompleted(workflowRunId));
         return true;
     }
 
@@ -208,7 +208,7 @@ public sealed partial class Issue
         _completedAt = completedAt;
         _status = IssueStatus.Cancelled;
         Touch(completedAt);
-        RecordEvent(new IssueClosed(reason));
+        RecordEvent(new IssueCancelled(reason));
     }
 
     public void Reopen(DateTime? now = null)

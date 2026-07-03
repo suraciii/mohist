@@ -850,9 +850,9 @@ public class StagePopulationSnapshotServiceSpecs
             Number = number,
             State = json,
         });
-        SeedIssueEvent(db, issueId, "com.mohist.issue.work-started",
+        SeedIssueEvent(db, issueId, EventCatalog.ReverseDns.IssueWorkStarted,
             completedAt.AddHours(-3), workflowRunId: wrId);
-        SeedIssueEvent(db, issueId, "com.mohist.issue.work-completed",
+        SeedIssueEvent(db, issueId, EventCatalog.ReverseDns.IssueCompleted,
             completedAt, workflowRunId: wrId);
         await db.SaveChangesAsync();
         return issue;
@@ -884,9 +884,9 @@ public class StagePopulationSnapshotServiceSpecs
             Number = number,
             State = json,
         });
-        SeedIssueEvent(db, issueId, "com.mohist.issue.work-started",
+        SeedIssueEvent(db, issueId, EventCatalog.ReverseDns.IssueWorkStarted,
             closedAt.AddHours(-5), workflowRunId: wrId);
-        SeedIssueEvent(db, issueId, "com.mohist.issue.closed",
+        SeedIssueEvent(db, issueId, EventCatalog.ReverseDns.IssueCancelled,
             closedAt);
         await db.SaveChangesAsync();
         return issue;

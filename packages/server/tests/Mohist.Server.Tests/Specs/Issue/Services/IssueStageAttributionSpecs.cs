@@ -39,7 +39,7 @@ public class IssueStageAttributionSpecs
     [Fact]
     public void WorkStartedAndNoCompletion_AttributesAsLatestStage()
     {
-        // In-flight: work started, no work-completed, latest
+        // In-flight: work started, no completion, latest
         // StageStarted is "build". Spec: "an in-flight issue is
         // attributed to the stage it most recently entered".
         var events = new[]
@@ -85,7 +85,7 @@ public class IssueStageAttributionSpecs
             NewEvent(EventCatalog.ReverseDns.IssueWorkStarted, t: new DateTimeOffset(2026, 6, 30, 1, 0, 0, TimeSpan.Zero), id: 1),
             NewEvent(EventCatalog.ReverseDns.StageStarted, stage: "plan", t: new DateTimeOffset(2026, 6, 30, 1, 0, 5, TimeSpan.Zero), id: 2),
             NewEvent(EventCatalog.ReverseDns.StageCompleted, stage: "plan", t: new DateTimeOffset(2026, 6, 30, 2, 0, 0, TimeSpan.Zero), id: 3),
-            NewEvent(EventCatalog.ReverseDns.IssueWorkCompleted, t: new DateTimeOffset(2026, 7, 1, 0, 30, 0, TimeSpan.Zero), id: 4),
+            NewEvent(EventCatalog.ReverseDns.IssueCompleted, t: new DateTimeOffset(2026, 7, 1, 0, 30, 0, TimeSpan.Zero), id: 4),
         };
 
         var result = IssueStageAttribution.Attribute(events, DefaultStageOrder, DayEnd);
@@ -96,16 +96,14 @@ public class IssueStageAttributionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public void IssueClosedAsOfDay_AttributesAsCancelled_ExcludedFromPopulation()
+    public void IssueCancelledAsOfDay_AttributesAsCancelled_ExcludedFromPopulation()
     {
         // Spec: "A cancelled issue is excluded from the population".
-        // The durable event is com.mohist.issue.closed (the
-        // catalog-listed com.mohist.issue.cancelled is never produced;
-        // see design D5).
+        // The durable event is com.mohist.issue.cancelled.
         var events = new[]
         {
             NewEvent(EventCatalog.ReverseDns.IssueWorkStarted, t: new DateTimeOffset(2026, 6, 29, 1, 0, 0, TimeSpan.Zero), id: 1),
-            NewEvent("com.mohist.issue.closed", t: new DateTimeOffset(2026, 6, 30, 5, 0, 0, TimeSpan.Zero), id: 2),
+            NewEvent(EventCatalog.ReverseDns.IssueCancelled, t: new DateTimeOffset(2026, 6, 30, 5, 0, 0, TimeSpan.Zero), id: 2),
         };
 
         var result = IssueStageAttribution.Attribute(events, DefaultStageOrder, DayEnd);
@@ -242,8 +240,8 @@ public class IssueStageAttributionSpecs
         var events = new[]
         {
             NewEvent(EventCatalog.ReverseDns.IssueWorkStarted, t: new DateTimeOffset(2026, 6, 25, 1, 0, 0, TimeSpan.Zero), id: 1),
-            NewEvent(EventCatalog.ReverseDns.IssueWorkCompleted, t: new DateTimeOffset(2026, 6, 26, 1, 0, 0, TimeSpan.Zero), id: 2),
-            NewEvent("com.mohist.issue.closed", t: new DateTimeOffset(2026, 6, 27, 1, 0, 0, TimeSpan.Zero), id: 3),
+            NewEvent(EventCatalog.ReverseDns.IssueCompleted, t: new DateTimeOffset(2026, 6, 26, 1, 0, 0, TimeSpan.Zero), id: 2),
+            NewEvent(EventCatalog.ReverseDns.IssueCancelled, t: new DateTimeOffset(2026, 6, 27, 1, 0, 0, TimeSpan.Zero), id: 3),
             NewEvent("com.mohist.issue.reopened", t: new DateTimeOffset(2026, 6, 28, 1, 0, 0, TimeSpan.Zero), id: 4),
         };
 
@@ -266,8 +264,8 @@ public class IssueStageAttributionSpecs
         var events = new[]
         {
             NewEvent(EventCatalog.ReverseDns.IssueWorkStarted, t: new DateTimeOffset(2026, 6, 20, 1, 0, 0, TimeSpan.Zero), id: 1),
-            NewEvent(EventCatalog.ReverseDns.IssueWorkCompleted, t: new DateTimeOffset(2026, 6, 25, 1, 0, 0, TimeSpan.Zero), id: 2),
-            NewEvent("com.mohist.issue.closed", t: new DateTimeOffset(2026, 6, 26, 1, 0, 0, TimeSpan.Zero), id: 3),
+            NewEvent(EventCatalog.ReverseDns.IssueCompleted, t: new DateTimeOffset(2026, 6, 25, 1, 0, 0, TimeSpan.Zero), id: 2),
+            NewEvent(EventCatalog.ReverseDns.IssueCancelled, t: new DateTimeOffset(2026, 6, 26, 1, 0, 0, TimeSpan.Zero), id: 3),
         };
 
         var result = IssueStageAttribution.Attribute(events, DefaultStageOrder, DayEnd);

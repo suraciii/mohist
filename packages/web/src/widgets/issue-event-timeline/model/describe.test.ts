@@ -44,6 +44,27 @@ describe('describeEvent', () => {
       .toBe('Issue created')
   })
 
+  it('describes issue cancelled under the canonical cancelled id', () => {
+    expect(describeEvent('com.mohist.issue.cancelled', {}))
+      .toBe('Issue cancelled')
+  })
+
+  it('describes issue completed under the canonical completed id', () => {
+    expect(describeEvent('com.mohist.issue.completed', {}))
+      .toBe('Issue completed')
+  })
+
+  it('does NOT recognise the legacy closed or work-completed ids as terminal timeline labels', () => {
+    // The legacy ids are gone from the producer vocabulary; the timeline
+    // describer must fall through to the prettified-type fallback for
+    // any pre-rename row that may still be encountered (e.g. via a
+    // backfilled read or a stray event).
+    expect(describeEvent('com.mohist.issue.closed', {}))
+      .toBe('Closed')
+    expect(describeEvent('com.mohist.issue.work-completed', {}))
+      .toBe('Work Completed')
+  })
+
   it('describes priority changed', () => {
     expect(describeEvent('com.mohist.issue.priority-changed', { priority: 'high' }))
       .toBe('Issue priority set to high')
