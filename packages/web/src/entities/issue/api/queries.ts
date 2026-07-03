@@ -1,10 +1,39 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ApiError } from '../../../shared/api/client'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
-import type { ApprovalFeedback, Issue, IssueWorkflowProfileYamlResponse } from '../model/types'
-import type { CreateFeedbackRequest, IssueWorkflowArtifactListParams } from './client'
-import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssueEvents, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, requestChangesIssue, unarchiveIssue, updateIssue, updateIssueWorkflowProfileYaml } from './client'
+import type { ApprovalFeedback, Issue, IssueWorkflowProfileYamlResponse, TaskLogPage } from '../model/types'
+import type { CreateFeedbackRequest, IssueWorkflowArtifactListParams, IssueWorkflowTaskLogParams } from './client'
+import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssueEvents, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getIssueWorkflowTaskLog, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, requestChangesIssue, unarchiveIssue, updateIssue, updateIssueWorkflowProfileYaml } from './client'
 import { invalidateApprovalWait } from './approval-wait'
+
+const EMPTY_TASK_LOG_PAGE: TaskLogPage = { lines: [], nextCursor: null, truncated: false }
+
+async function fetchIssueWorkflowTaskLogOrEmpty(
+  issueNumber: number,
+  taskId: string,
+  params: IssueWorkflowTaskLogParams,
+  projectId: string,
+): Promise<TaskLogPage> {
+  try {
+    return await getIssueWorkflowTaskLog(issueNumber, taskId, params, projectId)
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return EMPTY_TASK_LOG_PAGE
+    }
+    throw err
+  }
+}
+
+export function useIssueWorkflowTaskLog(issueNumber: number, taskId: string | null | undefined, params: IssueWorkflowTaskLogParams = {}, enabled: boolean = true) {
+  const { projectId } = useProject()
+  const safeTaskId = typeof taskId === 'string' && taskId.length > 0 ? taskId : null
+  return useQuery({
+    queryKey: [issueNumber, safeTaskId, projectId, 'workflow-task-log', params],
+    queryFn: () => fetchIssueWorkflowTaskLogOrEmpty(issueNumber, safeTaskId!, params, projectId!),
+    enabled: enabled && issueNumber > 0 && !!safeTaskId && !!projectId,
+  })
+}
 
 export function useIssueWorkflowArtifacts(issueNumber: number, params: IssueWorkflowArtifactListParams = {}, enabled: boolean = true) {
   const { projectId } = useProject()

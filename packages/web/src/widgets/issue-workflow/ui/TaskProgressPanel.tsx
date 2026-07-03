@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components
 import type { StageTaskState, WorkflowStage } from '../../../entities/issue'
 import { useWorkflowTimeline } from '../../../entities/issue'
 import { resolveDeliveryFailureFromMessage, resolveDeliveryFailureFromOutput } from '../../../shared/lib/delivery-failure'
+import { TaskLogPanel } from './TaskLogPanel'
 
 function parseTaskOutput(raw: string | null | undefined): unknown {
   if (typeof raw !== 'string') return null
@@ -40,7 +41,7 @@ function StageTaskStatusIcon({ status }: { status: StageTaskState['status'] }) {
   return <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/30 flex-shrink-0" />
 }
 
-function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolean }) {
+function TaskItem({ task, isRunning, issueNumber }: { task: StageTaskState; isRunning: boolean; issueNumber: number }) {
   const [expanded, setExpanded] = useState(false)
   const isFailed = task.status === 'failed'
   const isInProgress = isRunning && task.status === 'running'
@@ -165,6 +166,9 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
           <p className="text-xs text-red-600 whitespace-pre-wrap">
             {typeof task.output === 'string' ? task.output : task.output != null ? JSON.stringify(task.output) : 'Task failed'}
           </p>
+          {typeof task.taskId === 'string' && task.taskId.length > 0 && (
+            <TaskLogPanel issueNumber={issueNumber} taskId={task.taskId} />
+          )}
         </div>
       )}
     </div>
@@ -278,7 +282,7 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
 
         <div className="space-y-1">
           {tasks.map((task) => (
-            <TaskItem key={task.taskId} task={task} isRunning={isAgentRunning} />
+            <TaskItem key={task.taskId} task={task} isRunning={isAgentRunning} issueNumber={issueNumber} />
           ))}
         </div>
       </CardContent>
