@@ -279,3 +279,149 @@
   3585 passed, 0 failed, 13 skipped (3572 from T-001 + 13 new). The 13
   skipped are the pre-existing `IssueWorkflowProfileApiSpecs` and
   `IssueFeedbackApiSpecs` skips, unchanged from T-001.
+
+## Decisions (T-003)
+
+- **T-003 decision — D-impl-7**: chose `'Issue cancelled'` and
+  `'Issue completed'` as the timeline human labels, matching the
+  canonical event names and the cancellation counterpart phrasing. This
+  matches design.md open question 3's lean and the proposal's
+  ("Issue closed" → "Issue cancelled", "Work completed" → "Issue
+  completed") wording.
+- **T-003 decision — D-impl-8**: pinned the legacy-id absence in
+  `canonical-event-types.test.ts` with a dedicated `does NOT contain
+  the legacy IssueClosed or IssueWorkCompleted ids or constants`
+  test, alongside the updated positive-inclusion assertions. This
+  makes the spec scenario
+  ("registry SHALL NOT contain `com.mohist.issue.closed` or
+  `com.mohist.issue.work-completed`") explicit rather than implicit,
+  mirroring the structural guard that the server's exhaustive union
+  + constant set enforces at compile time.
+- **T-003 decision — D-impl-9**: kept the LiveTaskProvider
+  integration-outcome arm keyed on `IssueCompleted` only — the
+  legacy `IssueWorkCompleted` arm is deleted, and a live
+  `IssueWorkCompleted` event would now flow through the
+  default-invalidation path. The design (D3) is "every consumer keyed
+  on legacy ids swept to canonical"; no dual-read of legacy ids is
+  required (the spec scenario "completion event routes to the issue
+  handler and invalidates the issue query cache" is keyed on the
+  canonical id exclusively).
+- **T-003 decision — D-impl-10**: the legacy `com.mohist.issue.closed`
+  / `com.mohist.issue.work-completed` ids in `describe.ts` fall
+  through to the `prettifyType` default — the timeline describer
+  has no terminal case for them. A regression test pins that
+  fallthrough explicitly so any future reintroduction of the legacy
+  case would surface as a test failure. Per design D3 web half,
+  the timeline vocabulary no longer carries the legacy ids; the
+  fallthrough is the desired behavior.
+
+## Gotchas (T-003)
+
+- The legacy `com.mohist.issue.closed` timeline fallback (via
+  `prettifyType`) renders as `'Closed'` because `prettifyType`
+  strips the `com.mohist.(workflow|issue).` prefix. So the
+  fallthrough label is not `'Com Mohist Issue Closed'`; the
+  regression test pins the actual fallthrough string.
+- The web's typed `EventMap` in `entities/issue/@x/events.ts` is
+  enforced at compile time: if a name is added to the canonical
+  registry but not to the typed map, every consumer that destructures
+  the payload fails. Removing `IssueClosed`/`IssueWorkCompleted`
+  forced the removal of the matching `EventMap` rows in the same
+  edit; the partial-registry / typed-map mismatch the union guard
+  detects was avoided because the sweep was done in lockstep.
+- `EventName` (the union of all subscribed names) is also derived
+  from `EventMap`; deleting the two rows removed them from
+  `EventName` automatically. The `canonical-event-types.test.ts`
+  `EventName (union) is consistent with EVENT_TYPES (runtime list)`
+  test was updated to drop the two legacy names from its
+  exhaustive listing.
+- The four targeted test files (`canonical-event-types.test.ts`,
+  `reverse-dns-outcome.test.ts`, `LiveTaskProvider.test.ts`,
+  `live-task-cloud-event.test.tsx`) all reference the
+  canonical registry by constant — no inline id strings — so the
+  rename touched only the constant references in those tests,
+  not the dispatch payloads (which had to use the literal
+  `'com.mohist.issue.completed'` only in the envelope construction
+  tests that verify the runtime wire id).
+
+## Files touched (T-003)
+
+### Source
+- `packages/web/src/shared/lib/canonical-event-types.ts` —
+  `IssueClosed: 'com.mohist.issue.closed'` →
+  `IssueCancelled: 'com.mohist.issue.cancelled'` and
+  `IssueWorkCompleted: 'com.mohist.issue.work-completed'` →
+  `IssueCompleted: 'com.mohist.issue.completed'`. No other
+  entries touched.
+- `packages/web/src/widgets/issue-event-timeline/model/describe.ts` —
+  terminal case `com.mohist.issue.closed` → `'Issue cancelled'`
+  (`com.mohist.issue.cancelled`); terminal case
+  `com.mohist.issue.work-completed` → `'Issue completed'`
+  (`com.mohist.issue.completed`). Non-terminal cases
+  (created/archived/unarchived/reopened/work-started) unchanged.
+- `packages/web/src/entities/issue/@x/events.ts` —
+  `EventMap` rows for `IssueClosed` / `IssueWorkCompleted`
+  renamed to `IssueCancelled` / `IssueCompleted`. Field shape
+  preserved (`{ issueId: string; projectId: string }`).
+- `packages/web/src/app/providers/handle-event.ts` —
+  `ROUTE` dispatch table key for the two terminal transitions
+  swapped to `IssueCancelled` / `IssueCompleted`. `issueHandler`
+  unchanged (still invalidates `['issues']` and
+  `['issues', 'detail', issueId]`). The
+  `_AssertRouteSubscribes` guard stays green because both names
+  remain in `EVENT_TYPES`.
+- `packages/web/src/app/providers/model/reverse-dns-outcome.ts` —
+  `decideReverseDnsOutcome` first arm keys on
+  `REVERSE_DNS_EVENT_TYPES.IssueCompleted` instead of
+  `REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted`. The rebase
+  / merge outcome semantics (rebase → clear conflict +
+  dispatch `rebase_completed`; merge → success toast) are
+  unchanged.
+
+### Tests
+- `packages/web/tests/canonical-event-types.test.ts` —
+  positive-inclusion test for issue-lifecycle events now
+  expects `IssueCancelled` / `IssueCompleted`; a new test
+  asserts that neither the legacy ids nor the legacy constants
+  are present in `EVENT_TYPES` / `REVERSE_DNS_EVENT_TYPES`;
+  the `EventName`-vs-`EVENT_TYPES` consistency listing is
+  updated to drop `IssueClosed` / `IssueWorkCompleted`.
+- `packages/web/src/app/providers/model/reverse-dns-outcome.test.ts` —
+  every reference to `REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted`
+  in `decideReverseDnsOutcome` test arms swapped for
+  `REVERSE_DNS_EVENT_TYPES.IssueCompleted`; test descriptions
+  and comments updated accordingly. No test scenario added or
+  removed.
+- `packages/web/src/app/providers/LiveTaskProvider.test.ts` —
+  the two `IssueWorkCompleted + rebase/merge payload` arms in
+  the `LiveTaskProvider reverse-DNS integration outcome`
+  describe block now drive `IssueCompleted`. Test descriptions
+  and the `IssueWorkCompleted` comment in the no-match fallback
+  test are updated.
+- `packages/web/tests/live-task-cloud-event.test.tsx` —
+  the two `onEvent('com.mohist.issue.work-completed', …)`
+  envelopes (merge-success toast + rebase-completed dispatch)
+  now use `'com.mohist.issue.completed'`. Test descriptions
+  updated. The `WorkflowRunFailed` arms remain keyed on
+  `com.mohist.workflow.run.failed` / `com.mohist.workflow.stage.failed`
+  (not part of T-003 scope).
+- `packages/web/src/widgets/issue-event-timeline/model/describe.test.ts` —
+  new tests pin the canonical `com.mohist.issue.cancelled` /
+  `com.mohist.issue.completed` labels (`'Issue cancelled'` /
+  `'Issue completed'`) and the legacy-id fallthrough to the
+  prettified-type default.
+
+## Test summary (T-003)
+
+- `npm run typecheck -w packages/web` → 0 errors (clean).
+- `npm run test:run -w packages/web -- tests/canonical-event-types.test.ts
+  src/app/providers/model/reverse-dns-outcome.test.ts
+  src/app/providers/LiveTaskProvider.test.ts
+  tests/live-task-cloud-event.test.tsx` → 97 passed, 1 skipped,
+  0 failed. The skipped case is the pre-existing
+  `it.skip('shows approval toast for legacy approval_requested events')`
+  in `live-task-cloud-event.test.tsx`, unrelated to T-003.
+- Full web `npm run test:run -w packages/web` → 3984 passed,
+  1 skipped, 0 failed (3981 baseline from pre-T-003 + 3 new
+  tests in `canonical-event-types.test.ts` and
+  `describe.test.ts`). All 254 test files green.

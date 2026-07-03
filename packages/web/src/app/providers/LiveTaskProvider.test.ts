@@ -648,7 +648,7 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     return mocks.useEventsConnection.mock.calls[0][1] as (eventName: string, data: unknown) => void
   }
 
-  it('clears rebase conflict, dispatches rebase_completed, and invalidates ["issues"] on IssueWorkCompleted + rebase payload', () => {
+  it('clears rebase conflict, dispatches rebase_completed, and invalidates ["issues"] on IssueCompleted + rebase payload', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
     queryClient.setQueryData(['issues'], [makeIssue('iss-rebase', 7)])
@@ -683,7 +683,7 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     mocks.toastSuccess.mockClear()
 
     act(() => {
-      handleEvent(REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted, {
+      handleEvent(REVERSE_DNS_EVENT_TYPES.IssueCompleted, {
         issueId: 'iss-rebase',
         issueNumber: 7,
         outcome: 'rebase_completed',
@@ -710,7 +710,7 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     offRebase()
   })
 
-  it('fires toast.success("Issue #N merged successfully") and invalidates ["issues"] on IssueWorkCompleted + merge payload', () => {
+  it('fires toast.success("Issue #N merged successfully") and invalidates ["issues"] on IssueCompleted + merge payload', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
     queryClient.setQueryData(['issues'], [makeIssue('iss-merge', 13)])
@@ -718,7 +718,7 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     const handleEvent = mountWith(queryClient)
 
     act(() => {
-      handleEvent(REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted, {
+      handleEvent(REVERSE_DNS_EVENT_TYPES.IssueCompleted, {
         issueId: 'iss-merge',
         issueNumber: 13,
         outcome: 'merge_completed',
@@ -842,13 +842,13 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
 
     const handleEvent = mountWith(queryClient)
 
-    // IssueWorkCompleted with neither a rebase nor a merge payload: the
+    // IssueCompleted with neither a rebase nor a merge payload: the
     // outcome handler must return false (no rebase dispatch, no toast, no
     // setRebaseConflict) and the switch arm runs its default invalidation
     // instead. We pin those default invalidations to make sure the
     // outcome handler did not silently fire any of its own.
     act(() => {
-      handleEvent(REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted, {
+      handleEvent(REVERSE_DNS_EVENT_TYPES.IssueCompleted, {
         issueId: 'iss-fall',
         issueNumber: 5,
         outcome: 'something_else',

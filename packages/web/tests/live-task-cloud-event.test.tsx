@@ -368,7 +368,7 @@ describe('LiveTaskProvider transcript routing', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
   })
 
-  it('shows merge completion toast for reverse-DNS work-completed events', async () => {
+  it('shows merge completion toast for reverse-DNS completed events', async () => {
     const queryClient = new QueryClient()
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
@@ -387,11 +387,11 @@ describe('LiveTaskProvider transcript routing', () => {
     const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
     const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
 
-    onEvent('com.mohist.issue.work-completed', {
+    onEvent('com.mohist.issue.completed', {
       id: 'evt-merge-1',
       source: '/mohist/test',
       specVersion: '1.0',
-      type: 'com.mohist.issue.work-completed',
+      type: 'com.mohist.issue.completed',
       payload: { issueId: 'issue-1', projectId: 'project-1', issueNumber: 82, operation: 'merge' },
     })
 
@@ -432,7 +432,7 @@ describe('LiveTaskProvider transcript routing', () => {
     })
   })
 
-  it('dispatches rebase completion for reverse-DNS work-completed events', async () => {
+  it('dispatches rebase completion for reverse-DNS completed events', async () => {
     const queryClient = new QueryClient()
     const seen: unknown[] = []
     const off = onRebaseEvent((event) => seen.push(event))
@@ -452,11 +452,11 @@ describe('LiveTaskProvider transcript routing', () => {
     const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
     const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
 
-    onEvent('com.mohist.issue.work-completed', {
+    onEvent('com.mohist.issue.completed', {
       id: 'evt-rebase-1',
       source: '/mohist/test',
       specVersion: '1.0',
-      type: 'com.mohist.issue.work-completed',
+      type: 'com.mohist.issue.completed',
       payload: { issueId: 'issue-1', projectId: 'project-1', issueNumber: 82, operation: 'rebase', rebased: true },
     })
 
