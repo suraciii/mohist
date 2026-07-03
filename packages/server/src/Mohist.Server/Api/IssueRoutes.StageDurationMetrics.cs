@@ -12,13 +12,13 @@ public static partial class IssueRoutes
         group.MapGet("/metrics/stage-duration", async (
             HttpContext ctx,
             string projectRef,
-            IssueQuerier issuesQuery,
+            IssueMetricsQuerier metricsQuery,
             TimeProvider timeProvider,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var result = await issuesQuery.GetStageDurationsAsync(
+            var result = await metricsQuery.GetStageDurationsAsync(
                 project.Id,
                 timeProvider.GetUtcNow());
 
@@ -26,7 +26,7 @@ public static partial class IssueRoutes
         });
     }
 
-    private static StageDurationMetricsResponse BuildResponse(IssueQuerier.StageDurationResult result) =>
+    private static StageDurationMetricsResponse BuildResponse(IssueMetricsQuerier.StageDurationResult result) =>
         new(
             Window: new StageDurationMetricsWindowDto(
                 From: result.Window.From.ToString("o"),

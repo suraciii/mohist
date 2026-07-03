@@ -12,13 +12,13 @@ public static partial class IssueRoutes
         group.MapGet("/metrics/quality", async (
             HttpContext ctx,
             string projectRef,
-            IssueQuerier issuesQuery,
+            IssueMetricsQuerier metricsQuery,
             TimeProvider timeProvider,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var result = await issuesQuery.GetQualityAsync(
+            var result = await metricsQuery.GetQualityAsync(
                 project.Id,
                 timeProvider.GetUtcNow());
 
@@ -26,7 +26,7 @@ public static partial class IssueRoutes
         });
     }
 
-    private static QualityMetricsResponse BuildResponse(IssueQuerier.QualityMetricsResult result) =>
+    private static QualityMetricsResponse BuildResponse(IssueMetricsQuerier.QualityMetricsResult result) =>
         new(
             Window7d: BuildWindow(result.Window7d),
             Window30d: BuildWindow(result.Window30d),
@@ -34,7 +34,7 @@ public static partial class IssueRoutes
             PreviousSampleCount: result.PreviousWindow.SampleCount,
             Trend: BuildTrend(result.Trend));
 
-    private static QualityMetricsWindowDto BuildWindow(IssueQuerier.QualityMetricsWindow window) =>
+    private static QualityMetricsWindowDto BuildWindow(IssueMetricsQuerier.QualityMetricsWindow window) =>
         new(
             From: window.From.ToString("o"),
             To: window.To.ToString("o"),
@@ -44,7 +44,7 @@ public static partial class IssueRoutes
                 .Select(s => new StageReworkRateDto(s.Stage, s.EnteredCount, s.ReworkRate))
                 .ToArray());
 
-    private static QualityTrendDto BuildTrend(IssueQuerier.QualityTrend trend) =>
+    private static QualityTrendDto BuildTrend(IssueMetricsQuerier.QualityTrend trend) =>
         new(
             Bucket: trend.Bucket,
             From: trend.Window30dFrom.ToString("o"),
