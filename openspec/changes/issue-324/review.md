@@ -1,65 +1,70 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
 
 ## Repaired Items
 
-_None._
+- [ID: item-1]
+  Severity: info
+  Scope: formatting
+  Evidence: In `IssueRoutes.Helpers.cs`, the XML doc originally for `GetRequiredProject` (lines 29-39 in the pre-fix state) appeared before the newly inserted `TryParseRangeParameter` method, causing the doc to incorrectly attach to `TryParseRangeParameter` (which then had two `<summary>` blocks) while `GetRequiredProject` had no doc. Moved the `GetRequiredProject` XML doc from above `TryParseRangeParameter` to directly above `GetRequiredProject`.
+  Verification: `dotnet build Mohist.sln -p:SkipWebBuild=true --nologo` — 0 warnings, 0 errors. File inspected at `IssueRoutes.Helpers.cs:29-72` — `TryParseRangeParameter` has one `<summary>` block at lines 29-36, and `GetRequiredProject` has its `<summary>` + `<remarks>` at lines 61-71.
+  Status: resolved
 
 ## Blocking Items
 
-- [ID: item-1]
-  Severity: blocking
-  Scope: packages/web/src/pages/insights/panels/QualityPanel.tsx:133-137
-  Evidence: The `QualityPanel` renders static labels `title="Last 7 days"` and `title="Last 30 days"` regardless of the active range. When the selector is set to `90d`, the `window30d` DTO slot (driven by the range per design D3) actually spans 90 days of data, but the UI label still reads "Last 30 days". This is misleading to the operator — the label no longer describes the data being shown. The spec requires "Per-chart window badges reflect the selected range" (insights-time-range spec: line 68-69). The `QualityWindow` panel does not derive its title from the actual window data at all.
-  SuggestedAction: Derive the `QualityWindow` title from the actual `window.from`/`window.to` fields (or pass the range to derive a label like "Last 7 days" / "Last 30 days" / "Last 90 days" dynamically), matching how `StageDurationChart` and `FtrTrendChart` already derive their window labels from response data.
-  Verification: Render `QualityPanel` with `range="90d"`, verify the primary window label reflects the 90-day span (not the hard-coded "Last 30 days").
-  Status: open
-
-- [ID: item-2]
-  Severity: blocking
-  Scope: packages/web/src/pages/insights/panels/CumulativeFlowChart.tsx:153, packages/web/src/pages/insights/panels/StageDurationChart.tsx:89, packages/web/src/pages/insights/panels/CostTrendChart.tsx:76
-  Evidence: Three panel components destructure the `range` prop with a rename to `_range`: `{ range: _range }`. The leading underscore prefix is a well-established TypeScript convention for *unused* variables (and is often enforced by linters as `no-unused-vars: ["error", { "argsIgnorePattern": "^_" }]`). However, `_range` IS actually used — it is passed to the respective hook (e.g. `useCumulativeFlow(_range)`). This violates the common convention and will confuse maintainers who expect `_`-prefixed identifiers to be intentionally unused.
-  SuggestedAction: Use the parameter name `range` directly instead of renaming. If there is a naming conflict with a local variable, rename the local variable instead, or use a meaningful name like `selectedRange`.
-  Verification: Grep for `range: _range` — none should remain.
-  Status: open
+_None._
 
 ## Follow-up Items
 
+- [ID: item-2]
+  Severity: follow-up
+  Scope: packages/server/src/Mohist.Server/Api/ (AgentRoutes.cs + IssueRoutes.Helpers.cs)
+  Evidence: `AgentRoutes.TryParseRange` (private, line 75) and `IssueRoutes.TryParseRangeParameter` (internal, line 37) have identical bodies — both parse the range string via `MetricsRange.TryParse`, return null on omit, and produce the same `"unsupported_range"` 400 error shape. The fix commit consolidated the inline duplication within each class but left the cross-class duplication intact.
+  SuggestedAction: Extract a shared helper (e.g. `MetricsRange.TryParseRouteParameter`) or promote `IssueRoutes.TryParseRangeParameter` to `public` so `AgentRoutes` can reuse it.
+  Status: follow-up
+
 - [ID: item-3]
   Severity: follow-up
-  Scope: packages/web/src/entities/*/api/*.ts (all 7 hook files)
-  Evidence: All seven changed hooks import `InsightsRange` from `../../../pages/insights/model/insights-range`. This creates an inverse dependency — the `entities` layer depends on the `pages` layer, which is architecturally inverted (entities should not know about pages). This was likely done to reuse the same type across the codebase, but the `InsightsRange` type (`'7d' | '30d' | '90d'`) is a domain type, not a page concern.
-  SuggestedAction: Move `InsightsRange` to a shared location (e.g. `entities/shared/types` or `shared/api`) so both `entities` and `pages` can import it without layering violations. This is non-blocking because it does not cause a runtime bug, but it is an architectural smell worth addressing.
-  Status: follow-up
-
-- [ID: item-4]
-  Severity: follow-up
-  Scope: packages/server/src/Mohist.Server/Api/ (6 route files + AgentRoutes.cs)
-  Evidence: The same 6-line range-parsing pattern (`string.IsNullOrWhiteSpace(range)` → `MetricsRange.TryParse` → `ApiResults.BadRequest`) is duplicated verbatim across all seven route files. This is copy-paste coupling with a non-trivial validation surface — any change to the validation logic would require touching all seven files. The body and error code string are also identical.
-  SuggestedAction: Extract a helper method on the route group (e.g. `TryParseRangeParameter(string? range, out int? windowDays, out IResult? errorResult)`) that encapsulates the parse + 400 path, then call it from each route with a one-liner. This reduces the blast radius of future changes to the range vocabulary.
-  Status: follow-up
-
-- [ID: item-5]
-  Severity: follow-up
-  Scope: packages/web/src/entities/issue/api/completion-trend.ts (vs other hook files)
-  Evidence: `useCompletionTrend` and `useCompletionThroughput` construct their `queryKey` with an inline ternary (`range ? [...] : [...]`), while all other hooks (`useDeliveryTime`, `useQualityMetrics`, `useStageDuration`, `useCumulativeFlow`, `useAgentUsage`, `useCostRollup`) use a separately exported `*QueryKey` helper function. The two approaches produce correct keys but are inconsistent across the codebase and harder to test in isolation (the inline ternary requires invoking the hook, while the exported helper can be tested directly).
-  SuggestedAction: Unify on the exported-helper pattern used by the six other hooks, either in this change or a follow-up cleanup.
+  Scope: packages/server/src/Mohist.Server/Api/AgentRoutes.cs:57
+  Evidence: `GetCostWindowedAsync` at `AgentSessionQuerier.cs:1012` loads ALL project sessions via `ListByLabelsAsync` without `from`/`to` time-range parameters, then filters by `CreatedAt` in memory. This was not corrected during M3 even though the method now accepts a variable `windowDays` parameter and `GetUsageTimeseriesAsync` (the sibling method) correctly scopes its query with time bounds.
+  SuggestedAction: Add `from`/`to` parameters to the session list query to bound the fetch to the window's time range.
   Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-6]
+- [ID: item-4]
   Severity: warning
-  Scope: packages/server/src/Mohist.Server/Workflow/Services/Sessions/AgentSessionQuerier.cs:1012
-  Evidence: `GetCostWindowedAsync` loads ALL project sessions (`ListByLabelsAsync` without `from`/`to` time-range parameters, line 1012) and then filters by `CreatedAt` in memory (line 1033-1044). For projects with large session histories, this pulls unnecessary rows. By contrast, `GetUsageTimeseriesAsync` (line 789-794) correctly passes `from`/`to` to limit the query scope. The cost-windowed method was not updated to use time-range filtering during M3 even though it now accepts a variable `windowDays` parameter.
-  SuggestedAction: Add `from`/`to` parameters to the `ListByLabelsAsync` call in `GetCostWindowedAsync` so the DB query is bounded to the window's time range. This is a pre-existing performance issue that was not addressed in this change.
+  Scope: packages/server/src/Mohist.Server/Api/IssueRoutes.ApprovalMetrics.cs:26
+  Evidence: The approval-wait route continues to bind `DateTimeOffset.UtcNow` directly (not via `TimeProvider`). This is a pre-existing wart from issue-295, documented in design.md and explicitly out of scope for M3. The range parameterization is correctly applied.
   Status: pre-existing
 
-- [ID: item-7]
-  Severity: info
-  Scope: packages/server/src/Mohist.Server/Api/IssueRoutes.ApprovalMetrics.cs:39
-  Evidence: The approval-wait route continues to use `DateTimeOffset.UtcNow` as its clock source (line 39), rather than an injected `TimeProvider`. This is documented in design.md (line 27-28) as a pre-existing wart (issue-295) that is not in scope for M3. The range parameterization is correctly applied; this note is for traceability only.
-  Status: pre-existing
+## Verification Summary
 
-<promise>FAIL</promise>
+| Check | Result |
+|---|---|
+| `dotnet build Mohist.sln -p:SkipWebBuild=true` | 0 warnings, 0 errors |
+| `npm run typecheck -w packages/web` | Clean |
+| `npm run typecheck -w packages/runner` | Clean |
+| `npm run test:run -w packages/web` | 4041 passed, 1 skipped, 0 failed |
+| `grep -rn '_range' packages/web/src/pages/insights/panels/` | No matches (item-2 resolved) |
+| `grep -rn 'from.*pages/insights' packages/web/src/entities/` | No matches (item-3 resolved) |
+| All 7 hooks import `InsightsRange` from `../../shared/insights-range` | Confirmed |
+| All 8 panels accept `range: InsightsRange` prop | Confirmed |
+| QualityPanel `window30d` title derives from `formatWindowTitle(window30d)` | Confirmed |
+| `completion-trend.ts` exports `completionTrendQueryKey` / `completionThroughputQueryKey` | Confirmed (item-5 resolved) |
+
+## Acceptance Criteria Coverage
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | Insights page provides global selector (7d/30d/90d) | `InsightsRangeSelector.tsx` — segmented-button with exactly 3 presets; `InsightsPage.tsx` owns `useState<InsightsRange>('30d')` with `data-range` attr |
+| 2 | Signal summary + all charts refresh on switch | `InsightsPage.tsx` — 5 page-level hooks receive `range`; `InsightsCharts.tsx` forwards `range` to all 8 panels; tests verify hook invocation on switch |
+| 3 | ≥6 server metrics endpoints accept `range` | 7 endpoint route files accept `string? range`: completion, delivery-time, stage-duration, quality, cumulative-flow, approval-wait, agent/usage (T-002), agent/cost (T-002) |
+| 4 | Cumulative-flow D6 re-evaluated | D6 reversed in `CumulativeFlowQuerier.cs` — window is range-driven, 90d on omit; D6 doc-comments updated; spec asserts 90d-default + range-driven |
+| 5 | Agent/cost supports range aggregation | `AgentSessionQuerier.GetCostWindowedAsync` accepts `int? windowDays`; `/agent/cost` binds `range`; windowed figures scale; all-time figures unaffected (tested) |
+| 6 | Frontend hooks fold range into queryKey | All 8 hooks: present range ⇒ fold into key; absent ⇒ omit from key; tests assert 3 ranges ⇒ 3 distinct keys |
+| 7 | Back-compat: omit range ⇒ original windows | `MetricsRange.TryParse` returns null day-count on omit; each querier substitutes `?? <fixedDefault>`; spec asserts omit-equality for every endpoint |
+| 8 | typecheck + test pass (web + server) | See verification table above |
+
+<promise>PASS</promise>

@@ -27,17 +27,6 @@ public static partial class IssueRoutes
     }
 
     /// <summary>
-    /// Returns the project resolved by <see cref="ProjectResolutionEndpointFilter"/>.
-    /// Throws if the filter has not run for the current request — that almost
-    /// always means the route group forgot to apply the filter.
-    /// </summary>
-    /// <remarks>
-    /// This helper is a thin wrapper around
-    /// <see cref="ProjectResolutionHttpContextExtensions.GetResolvedProject"/>;
-    /// we keep it so that IssueRoutes handlers can express "I need the project"
-    /// without explicitly taking a dependency on the filter contract.
-    /// </remarks>
-    /// <summary>
     /// Parses the <c>range</c> query parameter into a day count for
     /// the downstream querier. Returns <c>true</c> when the range is
     /// either omitted/empty (<paramref name="windowDays"/> = null,
@@ -69,6 +58,17 @@ public static partial class IssueRoutes
         return true;
     }
 
+    /// <summary>
+    /// Returns the project resolved by <see cref="ProjectResolutionEndpointFilter"/>.
+    /// Throws if the filter has not run for the current request — that almost
+    /// always means the route group forgot to apply the filter.
+    /// </summary>
+    /// <remarks>
+    /// This helper is a thin wrapper around
+    /// <see cref="ProjectResolutionHttpContextExtensions.GetResolvedProject"/>;
+    /// we keep it so that IssueRoutes handlers can express "I need the project"
+    /// without explicitly taking a dependency on the filter contract.
+    /// </remarks>
     internal static ProjectInfo GetRequiredProject(HttpContext context)
         => context.GetResolvedProject();
 
