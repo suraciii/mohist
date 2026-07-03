@@ -425,8 +425,8 @@ public class AgentSessionQuerier : IScopedService
     }
 
     /// <summary>
-    /// Reads the most recent <c>session.closed</c> / <c>session_closed</c>
-    /// transcript event and returns its <c>status</c> field
+    /// Reads the most recent <c>session.closed</c> transcript event and
+    /// returns its <c>status</c> field
     /// (<c>completed</c> / <c>failed</c> / <c>stopped</c>), or <c>null</c>
     /// when no terminal event has been recorded yet. Used by
     /// <see cref="ResolveGenericCancelTargetAsync"/> to short-circuit the
@@ -442,7 +442,7 @@ public class AgentSessionQuerier : IScopedService
 
         var closed = await db.AgentSessionTranscriptParts.AsNoTracking()
             .Where(p => turnIds.Contains(p.TurnId)
-                && (p.Type == "session_closed" || p.Type == "session.closed"))
+                && p.Type == TranscriptPartTypes.SessionClosed)
             .OrderByDescending(p => p.Sequence)
             .ThenByDescending(p => p.Id)
             .Select(p => p.PayloadJson)

@@ -308,7 +308,7 @@ public class GenericAgentSessionSummarySpecs
                     TurnId = turn.Id,
                     Sequence = 100,
                     Type = TranscriptPartTypes.SessionClosed,
-                    CorrelationKey = "session_closed",
+                    CorrelationKey = "session.closed",
                     PayloadJson = JsonSerializer.Serialize(new
                     {
                         status = terminalStatus,

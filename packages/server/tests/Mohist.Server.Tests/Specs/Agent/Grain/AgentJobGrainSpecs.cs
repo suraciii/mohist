@@ -368,7 +368,7 @@ public class AgentJobGrainSpecs
                     .ToListAsync();
                 if (turnIds.Count == 0) return null;
                 return await db.AgentSessionTranscriptParts
-                    .Where(p => turnIds.Contains(p.TurnId) && p.Type == "session_closed")
+                    .Where(p => turnIds.Contains(p.TurnId) && p.Type == TranscriptPartTypes.SessionClosed)
                     .Select(p => p.PayloadJson)
                     .FirstOrDefaultAsync();
             },

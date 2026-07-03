@@ -61,7 +61,7 @@ public class AgentSessionSpecs
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
         Assert.NotNull(card.LastActivity);
-        Assert.Equal("session_closed", card.LastActivity!.Text);
+        Assert.Equal("session.closed", card.LastActivity!.Text);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -318,7 +318,7 @@ public class AgentSessionSpecs
         var parts = await LoadTranscriptPartsAsync(db, session.Id);
         Assert.Equal([1L, 2L], parts.Select(e => e.Sequence).ToArray());
         Assert.Equal("text", parts[0].Type);
-        Assert.Equal("session_closed", parts[1].Type);
+        Assert.Equal("session.closed", parts[1].Type);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -737,7 +737,7 @@ public class AgentSessionSpecs
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var runtimeEvents = (await LoadTranscriptPartsAsync(db, session.Id)).ToList();
         Assert.Equal(2, runtimeEvents.Count);
-        Assert.Equal("session_closed", runtimeEvents[0].Type);
+        Assert.Equal("session.closed", runtimeEvents[0].Type);
         Assert.Equal("usage", runtimeEvents[1].Type);
     }
 

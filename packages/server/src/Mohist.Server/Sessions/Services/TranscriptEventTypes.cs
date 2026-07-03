@@ -26,6 +26,6 @@ internal static class TranscriptPartTypes
     public const string Status = "status";
     public const string Usage = "usage";
     public const string Model = "model";
-    public const string SessionClosed = "session_closed";
+    public const string SessionClosed = "session.closed";
     public const string Compaction = "compaction";
 }
