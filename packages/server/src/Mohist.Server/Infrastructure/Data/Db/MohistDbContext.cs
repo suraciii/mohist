@@ -19,7 +19,7 @@ using Mohist.Server.Infrastructure.Data.Inbox;
 using Mohist.Server.Infrastructure.Data.StagePopulation;
 using Mohist.Server.Inbox;
 using Mohist.Server.Project.Domain;
-using Mohist.Server.Workflow.Services.Sessions;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Infrastructure.Data.Db;
 

@@ -7,7 +7,7 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Services.Sessions;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Tests.Specs.Workflow;
 using Orleans;

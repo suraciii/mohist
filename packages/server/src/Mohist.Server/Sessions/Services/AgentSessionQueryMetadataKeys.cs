@@ -1,4 +1,4 @@
-namespace Mohist.Server.Workflow.Services.Sessions;
+namespace Mohist.Server.Sessions.Services;
 
 public static class AgentSessionQueryMetadataKeys
 {
