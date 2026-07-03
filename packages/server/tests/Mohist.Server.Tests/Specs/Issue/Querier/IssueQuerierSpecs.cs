@@ -771,6 +771,9 @@ public class IssueQuerierSpecs
             IssueQuerier.LabelFilterTokens("stream=frontend,module=auth"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task ListAsync_ForDoneIssue_IncludesCompletedAt()
     {
         using var scope = _fixture.Services.CreateScope();

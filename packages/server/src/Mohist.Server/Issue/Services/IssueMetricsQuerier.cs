@@ -97,12 +97,36 @@ public class IssueMetricsQuerier : IScopedService
     /// The result of <see cref="GetCompletionBucketsAsync"/>. <see cref="Buckets"/>
     /// is dense — every bucket in the fixed trailing window is present, even
     /// when its counts are zero, so callers can render a continuous chart.
+    /// <see cref="CurrentTotal"/> and <see cref="PreviousTotal"/> are strictly
+    /// additive: the existing per-bucket series, window bounds, and fixed
+    /// bucket granularity are preserved unchanged. Both totals aggregate the
+    /// latest-terminal-event classification (completed vs cancelled) over
+    /// the current window <c>[now − W, now]</c> and the immediately-preceding
+    /// window of the same length <c>[now − 2W, now − W]</c>.
     /// </summary>
     public sealed record CompletionBucketsResult(
         string Bucket,
         DateTimeOffset WindowFrom,
         DateTimeOffset WindowTo,
-        IReadOnlyList<CompletionBucketPoint> Buckets);
+        IReadOnlyList<CompletionBucketPoint> Buckets,
+        CompletionTotal CurrentTotal,
+        CompletionTotal PreviousTotal);
+
+    /// <summary>
+    /// Window-scoped completion totals. <see cref="Completed"/> and
+    /// <see cref="Failed"/> are aggregated from the latest-terminal-event
+    /// classification across every issue whose terminal event falls in
+    /// the window. <see cref="SampleCount"/> is the number of terminal
+    /// issues contributing — the discriminator that distinguishes the
+    /// empty (zero-sample) result (<c>SampleCount == 0</c>, no terminal
+    /// issues fell in the window) from a genuine zero-completion window
+    /// (<c>SampleCount > 0</c>, every terminal issue cancelled and none
+    /// completed).
+    /// </summary>
+    public sealed record CompletionTotal(
+        int Completed,
+        int Failed,
+        int SampleCount);
 
     /// <summary>
     /// The trailing window returned by <see cref="GetApprovalWaitAsync"/>.
@@ -146,9 +170,19 @@ public class IssueMetricsQuerier : IScopedService
     /// is empty (not an error, not a fabricated zero) when the trailing
     /// window contains no delivered issues; an empty list length is the
     /// empty signal the consuming chart relies on.
+    /// <see cref="PreviousAverageCycleDays"/> is strictly additive: it is the
+    /// average cycle time over the immediately-preceding window of the same
+    /// length as the current 30-day trailing window
+    /// (<c>[now − 2W, now − W]</c>), computed with the identical
+    /// earliest-work-start-to-final-completion definition and
+    /// completion-time windowing. <c>null</c> is the defined empty result
+    /// when the previous window has no delivered issues, structurally
+    /// distinguishable from a genuine zero-duration average; it is
+    /// evaluated independently of <see cref="Points"/>.
     /// </summary>
     public sealed record DeliveryTimeResult(
-        IReadOnlyList<DeliveryTimePoint> Points);
+        IReadOnlyList<DeliveryTimePoint> Points,
+        double? PreviousAverageCycleDays);
 
     /// <summary>
     /// The trailing window returned by <see cref="GetStageDurationsAsync"/>.
@@ -229,16 +263,35 @@ public class IssueMetricsQuerier : IScopedService
         double? ReworkRate);
 
     /// <summary>
-    /// The result of <see cref="GetQualityAsync"/>. Both windows are
-    /// returned together so callers can compare recent and longer-term
-    /// quality in a single read. <see cref="Trend"/> is a strictly
-    /// additive per-day series spanning the trailing 30-day window,
-    /// pre-sized so every day is emitted; rates are <c>null</c> for
-    /// empty buckets.
+    /// The previous-adjacent-window first-time-right rate. <see cref="SampleCount"/>
+    /// is the number of shipped-in-window issues and is the empty
+    /// discriminator: <c>SampleCount == 0</c> means no shipped issues fell
+    /// in the window (the defined empty result, structurally distinguishable
+    /// from a genuine <c>0</c> or <c>1</c> rate). <see cref="FirstTimeRightRate"/>
+    /// is the arithmetic mean of the per-issue FTR classification
+    /// (<c>true</c>/<c>false</c>) over the same population. Computed over
+    /// <c>[now − 2W, now − W]</c> using the identical ship-time windowing
+    /// and first-time-right classification the current 30-day window uses.
+    /// </summary>
+    public sealed record QualityPreviousWindow(
+        int SampleCount,
+        double? FirstTimeRightRate);
+
+    /// <summary>
+    /// The result of <see cref="GetQualityAsync"/>. Both the current 30-day
+    /// window and the immediately-preceding 30-day window are returned
+    /// together so callers can derive a percentage-point delta in a single
+    /// read. <see cref="Window7d"/> and <see cref="Trend"/> are preserved
+    /// unchanged. <see cref="PreviousWindow"/> is strictly additive: it is
+    /// the previous-window FTR rate plus its <see cref="QualityPreviousWindow.SampleCount"/>
+    /// discriminator; the existing 7-day and 30-day single-point rates,
+    /// the per-stage rework rates, and the per-bucket trend series are
+    /// unchanged.
     /// </summary>
     public sealed record QualityMetricsResult(
         QualityMetricsWindow Window7d,
         QualityMetricsWindow Window30d,
+        QualityPreviousWindow PreviousWindow,
         QualityTrend Trend);
 
     /// <summary>
@@ -284,6 +337,8 @@ public class IssueMetricsQuerier : IScopedService
 
         DateTimeOffset windowFrom;
         DateTimeOffset windowTo;
+        DateTimeOffset previousFrom;
+        DateTimeOffset previousTo;
         IReadOnlyList<DateOnly> boundaries;
 
         if (bucket == CompletionBucket.Day)
@@ -292,6 +347,8 @@ public class IssueMetricsQuerier : IScopedService
             var today = DateOnly.FromDateTime(now.UtcDateTime.Date);
             windowFrom = new DateTimeOffset(today.AddDays(-29).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
             windowTo = new DateTimeOffset(today.AddDays(1).ToDateTime(new TimeOnly(0, 0)), TimeSpan.Zero);
+            previousFrom = new DateTimeOffset(today.AddDays(-59).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            previousTo = windowFrom;
             boundaries = Enumerable.Range(0, 30)
                 .Select(i => today.AddDays(-29 + i))
                 .ToList();
@@ -303,6 +360,9 @@ public class IssueMetricsQuerier : IScopedService
             var firstWeek = currentWeek.AddDays(-7 * 11);
             windowFrom = new DateTimeOffset(firstWeek, TimeSpan.Zero);
             windowTo = new DateTimeOffset(currentWeek.AddDays(7), TimeSpan.Zero);
+            var previousFirstWeek = firstWeek.AddDays(-7 * 12);
+            previousFrom = new DateTimeOffset(previousFirstWeek, TimeSpan.Zero);
+            previousTo = windowFrom;
             boundaries = Enumerable.Range(0, 12)
                 .Select(i => DateOnly.FromDateTime(firstWeek.AddDays(7 * i)))
                 .ToList();
@@ -315,42 +375,52 @@ public class IssueMetricsQuerier : IScopedService
                 Failed: 0))
             .ToList();
 
-        // Scan IssueEvents for the project's terminal transitions.
-        // Completion uses its own type filter (`WorkCompletedType` +
-        // `ClosedType`) and per-issue "latest terminal event" selection
-        // — it does NOT use the shared prelude's load+map+project path
-        // because the metric's only input is durable event times, not
-        // the read model.
         var terminalEvents = await ScanIssueEventsByProjectSourceAsync(
             db, projectId, typeFilter: [WorkCompletedType, ClosedType]);
 
-        var rows = terminalEvents
+        var latestTerminalByIssue = terminalEvents
             .GroupBy(r => r.Source, StringComparer.Ordinal)
             .Select(g => g
                 .OrderByDescending(r => r.Time)
                 .ThenByDescending(r => r.Id)
                 .First())
-            .Where(r => r.Time >= windowFrom && r.Time < windowTo)
             .ToList();
 
         var indexByBoundary = boundaries
             .Select((b, i) => (Boundary: b, Index: i))
             .ToDictionary(t => t.Boundary, t => t.Index);
 
-        foreach (var row in rows)
-        {
-            var boundary = bucket == CompletionBucket.Day
-                ? DateOnly.FromDateTime(row.Time.UtcDateTime.Date)
-                : DateOnly.FromDateTime(ISOWeekHelper.StartOfIsoWeek(row.Time.UtcDateTime));
-            if (!indexByBoundary.TryGetValue(boundary, out var idx)) continue;
+        var currentTotal = new CompletionTotal(Completed: 0, Failed: 0, SampleCount: 0);
+        var previousTotal = new CompletionTotal(Completed: 0, Failed: 0, SampleCount: 0);
 
-            if (row.Type == WorkCompletedType)
+        foreach (var row in latestTerminalByIssue)
+        {
+            if (row.Time >= windowFrom && row.Time < windowTo)
             {
-                points[idx] = points[idx] with { Completed = points[idx].Completed + 1 };
+                if (row.Type == WorkCompletedType)
+                    currentTotal = currentTotal with { Completed = currentTotal.Completed + 1 };
+                else
+                    currentTotal = currentTotal with { Failed = currentTotal.Failed + 1 };
+                currentTotal = currentTotal with { SampleCount = currentTotal.SampleCount + 1 };
+
+                var boundary = bucket == CompletionBucket.Day
+                    ? DateOnly.FromDateTime(row.Time.UtcDateTime.Date)
+                    : DateOnly.FromDateTime(ISOWeekHelper.StartOfIsoWeek(row.Time.UtcDateTime));
+                if (indexByBoundary.TryGetValue(boundary, out var idx))
+                {
+                    if (row.Type == WorkCompletedType)
+                        points[idx] = points[idx] with { Completed = points[idx].Completed + 1 };
+                    else
+                        points[idx] = points[idx] with { Failed = points[idx].Failed + 1 };
+                }
             }
-            else
+            else if (row.Time >= previousFrom && row.Time < previousTo)
             {
-                points[idx] = points[idx] with { Failed = points[idx].Failed + 1 };
+                if (row.Type == WorkCompletedType)
+                    previousTotal = previousTotal with { Completed = previousTotal.Completed + 1 };
+                else
+                    previousTotal = previousTotal with { Failed = previousTotal.Failed + 1 };
+                previousTotal = previousTotal with { SampleCount = previousTotal.SampleCount + 1 };
             }
         }
 
@@ -358,7 +428,9 @@ public class IssueMetricsQuerier : IScopedService
             Bucket: bucket == CompletionBucket.Day ? "day" : "week",
             WindowFrom: windowFrom,
             WindowTo: windowTo,
-            Buckets: points);
+            Buckets: points,
+            CurrentTotal: currentTotal,
+            PreviousTotal: previousTotal);
     }
 
     /// <summary>
@@ -381,6 +453,9 @@ public class IssueMetricsQuerier : IScopedService
         var window30dFrom = now.AddDays(-30);
         var window30dTo = now;
 
+        var previous30dFrom = now.AddDays(-60);
+        var previous30dTo = window30dFrom;
+
         // Pre-sized 30 UTC calendar-day buckets inclusive of today. Every
         // bucket is emitted so the consuming chart's x-axis never compresses.
         var today = DateOnly.FromDateTime(now.UtcDateTime.Date);
@@ -395,13 +470,6 @@ public class IssueMetricsQuerier : IScopedService
         for (var i = 0; i < trendBuckets.Length; i++)
             trendBuckets[i] = new QualityTrendAccumulator();
 
-        // Load the project's issues via the shared read-model loader so
-        // every read surface agrees on the issue population and the
-        // workflow/feedback projection shape. Metrics need the raw
-        // WorkflowRun (not the projected view) because RepairCount is
-        // dropped by WorkflowStatusMapper; WorkflowRunEvents provide
-        // the durable history that mutable stage snapshots lose on
-        // rerun/retry.
         var issues = await _loader.LoadProjectedAsync(db, projectId);
 
         var projectIssueIds = issues.Select(i => i.Id).ToList();
@@ -434,7 +502,6 @@ public class IssueMetricsQuerier : IScopedService
                 }
                 else if (e.Type == WorkCompletedType)
                 {
-                    // Keep the latest work-completed time if multiple exist.
                     if (!shipTimes.TryGetValue(issueId, out var existing) || e.Time > existing)
                         shipTimes[issueId] = e.Time;
 
@@ -454,9 +521,9 @@ public class IssueMetricsQuerier : IScopedService
         var allRunIds = runIdsByIssue.Values.SelectMany(ids => ids).ToArray();
         var (runs, eventFactsByRun) = await LoadAndPairWorkflowRunsAsync(db, allRunIds);
 
-        // Single-pass classification and bucketing.
         var window7d = new QualityAccumulator();
         var window30d = new QualityAccumulator();
+        var previous30d = new QualityFirstTimeRightAccumulator();
 
         foreach (var issue in issues)
         {
@@ -500,11 +567,16 @@ public class IssueMetricsQuerier : IScopedService
                 if (trendIndexByBoundary.TryGetValue(shipDay, out var trendIdx))
                     Accumulate(trendBuckets[trendIdx], isFirstTimeRight, stageRework);
             }
+            else if (shipTime >= previous30dFrom && shipTime < previous30dTo)
+            {
+                Accumulate(previous30d, isFirstTimeRight);
+            }
         }
 
         return new QualityMetricsResult(
             BuildWindow(window7dFrom, window7dTo, window7d),
             BuildWindow(window30dFrom, window30dTo, window30d),
+            BuildPreviousWindow(previous30d),
             BuildTrend(window30dFrom, window30dTo, trendBoundaries, trendBuckets));
     }
 
@@ -617,6 +689,13 @@ public class IssueMetricsQuerier : IScopedService
         var windowFrom = now.AddDays(-30);
         var windowTo = now;
 
+        // Previous window: same length, immediately preceding the current
+        // window. The two windows are evaluated independently; this gives
+        // the consumer the cycle-time baseline it needs to derive a trend
+        // in a single read.
+        var previousWindowFrom = now.AddDays(-60);
+        var previousWindowTo = windowFrom;
+
         // Resolve the project's issue set. We use `db.Issues` directly
         // (not the projected read model) so the local-filters below see
         // the raw `Status`/`CreatedAt`/`CompletedAt` fields without
@@ -628,7 +707,9 @@ public class IssueMetricsQuerier : IScopedService
 
         if (issueRows.Count == 0)
         {
-            return new DeliveryTimeResult(Array.Empty<DeliveryTimePoint>());
+            return new DeliveryTimeResult(
+                Array.Empty<DeliveryTimePoint>(),
+                PreviousAverageCycleDays: null);
         }
 
         var issuesById = IssueRowMapper.ById(issueRows, projectId)
@@ -662,21 +743,15 @@ public class IssueMetricsQuerier : IScopedService
         }
 
         var points = new List<DeliveryTimePoint>(issuesById.Count);
+        double previousCycleSum = 0;
+        int previousCycleCount = 0;
+
         foreach (var issue in issuesById.Values)
         {
-            // Only delivered issues participate. Cancelled issues carry
-            // no lead/cycle contribution per the spec; still-in-flight
-            // issues (Backlog/InProgress) lack `CompletedAt` and are
-            // skipped here.
             if (issue.Status != IssueStatus.Done) continue;
             if (issue.CompletedAt is null) continue;
 
             var completedAtDt = DateTime.SpecifyKind(issue.CompletedAt.Value, DateTimeKind.Utc);
-            if (completedAtDt < windowFrom.UtcDateTime || completedAtDt > windowTo.UtcDateTime) continue;
-
-            var createdAtUtc = DateTime.SpecifyKind(issue.CreatedAt, DateTimeKind.Utc);
-            var leadSpan = completedAtDt - createdAtUtc;
-            var leadDays = leadSpan.TotalDays;
 
             double? cycleDays = null;
             if (earliestWorkStartedByIssue.TryGetValue(issue.Id, out var firstStart))
@@ -685,11 +760,25 @@ public class IssueMetricsQuerier : IScopedService
                 cycleDays = cycleSpan.TotalDays;
             }
 
-            points.Add(new DeliveryTimePoint(
-                IssueNumber: issue.Number,
-                CompletedAt: new DateTimeOffset(completedAtDt, TimeSpan.Zero),
-                LeadDays: leadDays,
-                CycleDays: cycleDays));
+            if (completedAtDt >= windowFrom.UtcDateTime && completedAtDt <= windowTo.UtcDateTime)
+            {
+                var createdAtUtc = DateTime.SpecifyKind(issue.CreatedAt, DateTimeKind.Utc);
+                var leadSpan = completedAtDt - createdAtUtc;
+                var leadDays = leadSpan.TotalDays;
+
+                points.Add(new DeliveryTimePoint(
+                    IssueNumber: issue.Number,
+                    CompletedAt: new DateTimeOffset(completedAtDt, TimeSpan.Zero),
+                    LeadDays: leadDays,
+                    CycleDays: cycleDays));
+            }
+            else if (cycleDays.HasValue
+                && completedAtDt >= previousWindowFrom.UtcDateTime
+                && completedAtDt < previousWindowTo.UtcDateTime)
+            {
+                previousCycleSum += cycleDays.Value;
+                previousCycleCount++;
+            }
         }
 
         // Order by completion time ascending so the consuming chart can
@@ -697,7 +786,13 @@ public class IssueMetricsQuerier : IScopedService
         // right → newer).
         points.Sort(static (a, b) => a.CompletedAt.CompareTo(b.CompletedAt));
 
-        return new DeliveryTimeResult(points);
+        double? previousAverageCycleDays = previousCycleCount == 0
+            ? null
+            : previousCycleSum / previousCycleCount;
+
+        return new DeliveryTimeResult(
+            Points: points,
+            PreviousAverageCycleDays: previousAverageCycleDays);
     }
 
     /// <summary>
@@ -1207,6 +1302,29 @@ public class IssueMetricsQuerier : IScopedService
         accumulator.SampleCount++;
         if (isFirstTimeRight) accumulator.FirstTimeRightCount++;
         if (stageRework.Values.Any(v => v)) accumulator.ReworkedAtAnyStageCount++;
+    }
+
+    private sealed class QualityFirstTimeRightAccumulator
+    {
+        public int SampleCount { get; set; }
+        public int FirstTimeRightCount { get; set; }
+    }
+
+    private static void Accumulate(
+        QualityFirstTimeRightAccumulator accumulator,
+        bool isFirstTimeRight)
+    {
+        accumulator.SampleCount++;
+        if (isFirstTimeRight) accumulator.FirstTimeRightCount++;
+    }
+
+    private static QualityPreviousWindow BuildPreviousWindow(QualityFirstTimeRightAccumulator accumulator)
+    {
+        var sampleCount = accumulator.SampleCount;
+        double? firstTimeRightRate = sampleCount == 0
+            ? null
+            : (double)accumulator.FirstTimeRightCount / sampleCount;
+        return new QualityPreviousWindow(sampleCount, firstTimeRightRate);
     }
 
     private QualityTrend BuildTrend(

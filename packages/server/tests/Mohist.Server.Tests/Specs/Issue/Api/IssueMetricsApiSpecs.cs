@@ -203,8 +203,8 @@ public class IssueMetricsApiSpecs
         var currentIssue = await CreateIssueAsync(project.Id, "Current window issue");
         var previousIssue = await CreateIssueAsync(project.Id, "Previous window issue");
 
-        await SeedEventAsync(currentIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(previousIssue.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(currentIssue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(previousIssue.Id, IssueMetricsQuerier.ClosedType, new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -239,7 +239,7 @@ public class IssueMetricsApiSpecs
         // genuine zero-completion window.
         var project = await CreateProjectAsync($"metrics-empty-prev-{Guid.NewGuid():N}");
         var currentIssue = await CreateIssueAsync(project.Id, "Current only");
-        await SeedEventAsync(currentIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(currentIssue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -263,8 +263,8 @@ public class IssueMetricsApiSpecs
         var project = await CreateProjectAsync($"metrics-zero-prev-{Guid.NewGuid():N}");
         var p1 = await CreateIssueAsync(project.Id, "Cancelled prev 1");
         var p2 = await CreateIssueAsync(project.Id, "Cancelled prev 2");
-        await SeedEventAsync(p1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(p2.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 5, 25, 11, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(p1.Id, IssueMetricsQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(p2.Id, IssueMetricsQuerier.ClosedType, new DateTimeOffset(2026, 5, 25, 11, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -290,7 +290,7 @@ public class IssueMetricsApiSpecs
         // remain intact when totals are populated.
         var project = await CreateProjectAsync($"metrics-additive-{Guid.NewGuid():N}");
         var issue = await CreateIssueAsync(project.Id, "Additive check");
-        await SeedEventAsync(issue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(issue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -321,9 +321,9 @@ public class IssueMetricsApiSpecs
         var previousIssue = await CreateIssueAsync(project.Id, "Previous window issue");
 
         // 2026-06-29 (Monday) → current week window.
-        await SeedEventAsync(currentIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 29, 10, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(currentIssue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 29, 10, 0, 0, TimeSpan.Zero));
         // 2026-03-30 (Monday) → previous 12-week window.
-        await SeedEventAsync(previousIssue.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 3, 30, 10, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(previousIssue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 3, 30, 10, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=week");
