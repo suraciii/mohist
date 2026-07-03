@@ -40,6 +40,7 @@ public static class MohistApiRegistration
         app.MapRunnerStatusRoutes();
         app.MapRunnerIdentityRoutes();
         app.MapWorkflowArtifactUploadRoutes();
+        app.MapTaskLogRoutes();
         app.MapHub<RunnerHub>("/hubs/runner");
         app.MapHub<MohistHub>("/hubs/events");
         app.MapOtlpRoutes();

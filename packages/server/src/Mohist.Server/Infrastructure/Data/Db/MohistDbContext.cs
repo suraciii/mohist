@@ -68,6 +68,8 @@ public class MohistDbContext : DbContext
     public DbSet<InboxItemRow> InboxItems { get; set; } = null!;
     public DbSet<InboxSubscriptionRow> InboxSubscriptions { get; set; } = null!;
     public DbSet<StagePopulationSnapshotRow> StagePopulationSnapshots { get; set; } = null!;
+    public DbSet<TaskLogEntryRow> TaskLogEntries { get; set; } = null!;
+    public DbSet<TaskLogBatchRow> TaskLogBatches { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -597,6 +599,36 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Reason).HasMaxLength(256);
             entity.HasIndex(e => new { e.RunnerId, e.Status });
             entity.HasIndex(e => new { e.RunnerId, e.OwnerKind, e.OwnerId, e.WorkId });
+        });
+
+        modelBuilder.Entity<TaskLogEntryRow>(entity =>
+        {
+            entity.ToTable("TaskLogEntries");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.OwnerKind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.OwnerId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.Seq).IsRequired();
+            entity.Property(e => e.Timestamp).IsRequired();
+            entity.Property(e => e.Source).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Text).IsRequired();
+            // issue-336 T-001: composite index supports cursor pagination
+            // over (OwnerKind, OwnerId, WorkId, Seq) and also enforces
+            // owner-kind routing isolation between workflow and agent-job
+            // entries (the two owner kinds share no key space).
+            entity.HasIndex(e => new { e.OwnerKind, e.OwnerId, e.WorkId, e.Seq })
+                .HasDatabaseName("IX_TaskLogEntries_Owner_WorkId_Seq");
+        });
+
+        modelBuilder.Entity<TaskLogBatchRow>(entity =>
+        {
+            entity.ToTable("TaskLogBatches");
+            entity.HasKey(e => new { e.OwnerKind, e.OwnerId, e.WorkId });
+            entity.Property(e => e.OwnerKind).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.OwnerId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.UploadedAt).IsRequired();
         });
 
         modelBuilder.Entity<InboxItemRow>(entity =>

@@ -16,6 +16,7 @@ public static partial class IssueRoutes
         projectIssues.MapIssueWorkflowProfile();
         projectIssues.MapIssueRebase();
         projectIssues.MapIssueWorkflowArtifacts();
+        projectIssues.MapIssueWorkflowTaskLogs();
         projectIssues.MapIssueMetrics();
         projectIssues.MapIssueApprovalMetrics();
         projectIssues.MapIssueQualityMetrics();

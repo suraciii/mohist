@@ -1,0 +1,20 @@
+# Issue 336 progress notes
+
+## Codebase Patterns
+
+- **Test client helpers**: `_fixture.Client.PostDataAsync<T>(...)` and `PostOkAsync(...)` exist in `Support/ApiTestClient.cs` for creating projects/issues.
+- **Time provider**: `_fixture.TimeProvider` is a `FakeTimeProvider` available on the integration fixture — use it for deterministic timestamps in tests.
+- **Workflow run seeding**: `IWorkflowRunStore.SaveAsync(new WorkflowRun { ... })` is the canonical way to seed a workflow run in tests (see `InboxApiSpecs.cs:333`, `TaskLogRouteSpecs.cs:76`).
+- **Issue-to-workflow binding**: `IssueRow.WorkflowRunId` is a computed column sourced from `State` JSON; tests use raw SQL `UPDATE Issues SET State = json_set(State, '$.workflowRunId', json_quote({0}))` to bind.
+- **Pagination JSON contract**: `nextCursor` MUST be emitted even when null. The default `JSON.Options` uses `DefaultIgnoreCondition = WhenWritingNull`, which omits null fields. The fix is to use a DTO record with `[JsonIgnore(Condition = JsonIgnoreCondition.Never)]` on the nullable cursor property (see `Issue/Services/IssueInfo.cs:39`, `Api/IssueRoutes.Dtos.cs:207`). Anonymous objects like `new { nextCursor = (long?)null }` get the key dropped silently, which fails tests asserting on `JsonValueKind.Null`.
+
+## Architecture rules
+
+- `*Store` classes must live under `Mohist.Server.Infrastructure.Data.*` (ArchitectureRules.DataStores_AreInInfrastructureData).
+- `*Row` EF entities must live under `Mohist.Server.Infrastructure.Data.*`.
+- Feature directories (Runner, Workflow, Issue, etc.) may only contain `Domain/`, `Grains/`, `Services/` subfolders — no `Api/`, `Infrastructure/`, etc.
+
+## TaskLogService notes (T-001)
+
+- `TaskLogService.QueryByTaskIdAsync` resolves `taskId` -> `workId` by walking `run.Stages[].Tasks[].Id` against the taskId and returning the first non-empty `WorkId`. Requires `WorkflowRunQuerier.LoadAsync` (no grain call).
+- `TaskLogOwnershipKinds.Workflow = "workflow"` and `AgentJob = "agent-job"` are the canonical owner-kind strings; the runner computes these via the same algorithm as `artifact-side-effects.ts:107`.

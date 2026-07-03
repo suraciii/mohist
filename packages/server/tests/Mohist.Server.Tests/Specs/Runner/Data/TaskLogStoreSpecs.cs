@@ -1,0 +1,256 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Runner;
+using Mohist.Server.Tests.Support;
+using Xunit;
+
+namespace Mohist.Server.Tests.Specs.Runner.Data;
+
+[Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+[Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+public class TaskLogStoreSpecs : IAsyncLifetime
+{
+    private readonly string _dbPath;
+    private readonly DbContextOptions<MohistDbContext> _options;
+    private readonly TaskLogStore _store;
+    private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+
+    public TaskLogStoreSpecs()
+    {
+        _dbPath = Path.Combine(Path.GetTempPath(), $"task-log-store-{Guid.NewGuid():N}.db");
+        _options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite($"Data Source={_dbPath}")
+            .Options;
+        _store = new TaskLogStore(new Factory(_options), _timeProvider);
+
+        using var db = new MohistDbContext(_options);
+        db.Database.EnsureCreated();
+    }
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        await using var db = new MohistDbContext(_options);
+        await db.Database.EnsureDeletedAsync();
+        if (File.Exists(_dbPath)) File.Delete(_dbPath);
+    }
+
+    [Fact]
+    public async Task AppendAsync_PersistsEntriesAndBatchMetadata()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        var entries = new List<TaskLogLine>
+        {
+            new(1, _timeProvider.GetUtcNow(), "workspace-prep", "Cloning repo..."),
+            new(2, _timeProvider.GetUtcNow(), "workspace-prep", "Checkout done"),
+        };
+
+        await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated: false);
+
+        await using var db = new MohistDbContext(_options);
+        var rows = await db.TaskLogEntries.AsNoTracking()
+            .Where(e => e.OwnerKind == ownerKind && e.OwnerId == ownerId && e.WorkId == workId)
+            .OrderBy(e => e.Seq)
+            .ToListAsync();
+        Assert.Equal(2, rows.Count);
+        Assert.Equal(1, rows[0].Seq);
+        Assert.Equal(2, rows[1].Seq);
+        Assert.Equal("workspace-prep", rows[0].Source);
+        Assert.Equal("Checkout done", rows[1].Text);
+
+        var batch = await db.TaskLogBatches.AsNoTracking()
+            .FirstOrDefaultAsync(b => b.OwnerKind == ownerKind && b.OwnerId == ownerId && b.WorkId == workId);
+        Assert.NotNull(batch);
+        Assert.False(batch!.Truncated);
+        Assert.Equal(_timeProvider.GetUtcNow(), batch.UploadedAt);
+    }
+
+    [Fact]
+    public async Task QueryAsync_OrdersEntriesByAscendingSeq()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        var now = _timeProvider.GetUtcNow();
+        var entries = new List<TaskLogLine>
+        {
+            new(3, now.AddSeconds(2), "action:rebase", "Applying: fix-bug"),
+            new(1, now, "workspace-prep", "Cloning"),
+            new(2, now.AddSeconds(1), "branch-check", "Stable"),
+        };
+
+        await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated: false);
+
+        var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 10);
+
+        Assert.Equal(3, page.Lines.Count);
+        Assert.Equal(1, page.Lines[0].Seq);
+        Assert.Equal(2, page.Lines[1].Seq);
+        Assert.Equal(3, page.Lines[2].Seq);
+        Assert.Equal("workspace-prep", page.Lines[0].Source);
+        Assert.Equal(now, page.Lines[0].Timestamp);
+        Assert.Null(page.NextCursor);
+        Assert.False(page.Truncated);
+    }
+
+    [Fact]
+    public async Task QueryAsync_CursorPaginatesAndReturnsNullCursorAtEnd()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        var entries = Enumerable.Range(1, 7)
+            .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "action", $"line {seq}"))
+            .ToList();
+
+        await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated: false);
+
+        var first = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 3);
+        Assert.Equal(3, first.Lines.Count);
+        Assert.Equal(1, first.Lines[0].Seq);
+        Assert.Equal(3, first.Lines[2].Seq);
+        Assert.Equal(3L, first.NextCursor);
+
+        var second = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: 3, limit: 3);
+        Assert.Equal(3, second.Lines.Count);
+        Assert.Equal(4, second.Lines[0].Seq);
+        Assert.Equal(6, second.Lines[2].Seq);
+        Assert.Equal(6L, second.NextCursor);
+
+        var final = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: 6, limit: 3);
+        Assert.Single(final.Lines);
+        Assert.Equal(7, final.Lines[0].Seq);
+        Assert.Null(final.NextCursor);
+    }
+
+    [Fact]
+    public async Task QueryAsync_ReturnsEmptyPageForUnknownWorkItem()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+
+        var page = await _store.QueryAsync(ownerKind, ownerId, "missing-work", afterSeq: null, limit: 10);
+
+        Assert.Empty(page.Lines);
+        Assert.Null(page.NextCursor);
+        Assert.False(page.Truncated);
+    }
+
+    [Fact]
+    public async Task QueryAsync_ReportsTruncatedFlagFromStoredBatch()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        var entries = Enumerable.Range(1, 3)
+            .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "action", $"tail {seq}"))
+            .ToList();
+
+        await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated: true);
+
+        var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 10);
+        Assert.True(page.Truncated);
+        Assert.Equal(3, page.Lines.Count);
+    }
+
+    [Fact]
+    public async Task AppendAsync_TwiceForSameWorkItem_ReplacesPreviousBatch()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+
+        var first = new List<TaskLogLine>
+        {
+            new(1, _timeProvider.GetUtcNow(), "workspace-prep", "first"),
+            new(2, _timeProvider.GetUtcNow(), "workspace-prep", "second"),
+        };
+        await _store.AppendAsync(ownerKind, ownerId, workId, first, truncated: false);
+
+        _timeProvider.Advance(TimeSpan.FromSeconds(5));
+
+        var second = new List<TaskLogLine>
+        {
+            new(1, _timeProvider.GetUtcNow(), "action", "retry-1"),
+        };
+        await _store.AppendAsync(ownerKind, ownerId, workId, second, truncated: true);
+
+        var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 10);
+        Assert.Single(page.Lines);
+        Assert.Equal("action", page.Lines[0].Source);
+        Assert.Equal("retry-1", page.Lines[0].Text);
+        Assert.True(page.Truncated);
+
+        await using var db = new MohistDbContext(_options);
+        var batchCount = await db.TaskLogBatches.AsNoTracking()
+            .CountAsync(b => b.OwnerKind == ownerKind && b.OwnerId == ownerId && b.WorkId == workId);
+        Assert.Equal(1, batchCount);
+    }
+
+    [Fact]
+    public async Task AppendAsync_DifferentOwnerKinds_KeepEntriesSeparate()
+    {
+        var workflowRunId = $"wr-{Guid.NewGuid():N}";
+        var agentJobId = $"aj-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        var now = _timeProvider.GetUtcNow();
+
+        await _store.AppendAsync("workflow", workflowRunId, workId,
+            new List<TaskLogLine> { new(1, now, "action", "from-workflow") },
+            truncated: false);
+
+        await _store.AppendAsync("agent-job", agentJobId, workId,
+            new List<TaskLogLine> { new(1, now, "action", "from-agent-job") },
+            truncated: false);
+
+        var workflowPage = await _store.QueryAsync("workflow", workflowRunId, workId, afterSeq: null, limit: 10);
+        var agentPage = await _store.QueryAsync("agent-job", agentJobId, workId, afterSeq: null, limit: 10);
+
+        Assert.Single(workflowPage.Lines);
+        Assert.Equal("from-workflow", workflowPage.Lines[0].Text);
+        Assert.Single(agentPage.Lines);
+        Assert.Equal("from-agent-job", agentPage.Lines[0].Text);
+    }
+
+    [Fact]
+    public async Task AppendAsync_NullOrEmptyArgs_Throw()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _store.AppendAsync("", "owner", "work", new List<TaskLogLine>(), false));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _store.AppendAsync("workflow", "", "work", new List<TaskLogLine>(), false));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _store.AppendAsync("workflow", "owner", "", new List<TaskLogLine>(), false));
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            _store.AppendAsync("workflow", "owner", "work", null!, false));
+    }
+
+    [Fact]
+    public async Task AppendAsync_EmptyEntriesList_StillRecordsBatchMetadata()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+
+        await _store.AppendAsync(ownerKind, ownerId, workId, new List<TaskLogLine>(), truncated: false);
+
+        var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 10);
+        Assert.Empty(page.Lines);
+        Assert.Null(page.NextCursor);
+        Assert.False(page.Truncated);
+    }
+
+    private sealed class Factory : IDbContextFactory<MohistDbContext>
+    {
+        private readonly DbContextOptions<MohistDbContext> _options;
+
+        public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
+
+        public MohistDbContext CreateDbContext() => new(_options);
+    }
+}
