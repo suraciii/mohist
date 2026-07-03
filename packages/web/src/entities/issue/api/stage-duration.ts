@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { projectApiPath, request } from '../../../shared/api/client'
 import { useProject } from '../../project/@x/project-context'
+import type { InsightsRange } from '../../../pages/insights/model/insights-range'
 
 export interface StageDurationMetricsWindow {
   from: string
@@ -26,22 +27,33 @@ export interface StageDurationMetricsResponse {
   waitBreakout: StageDurationWaitBreakoutDto | null
 }
 
-export function fetchStageDuration(projectId: string) {
+function buildStageDurationQueryString(range?: InsightsRange): string {
+  if (!range) return ''
+  return `?range=${range}`
+}
+
+export function fetchStageDuration(projectId: string, range?: InsightsRange) {
   return request<StageDurationMetricsResponse>(
-    projectApiPath(projectId, '/issues/metrics/stage-duration'),
+    projectApiPath(projectId, `/issues/metrics/stage-duration${buildStageDurationQueryString(range)}`),
   )
 }
 
-export const stageDurationQueryKey = (projectId?: string | null) =>
-  projectId
+export const stageDurationQueryKey = (projectId?: string | null, range?: InsightsRange | null) => {
+  if (range) {
+    return projectId
+      ? ['issues', 'metrics', 'stage-duration', range, projectId] as const
+      : ['issues', 'metrics', 'stage-duration', range] as const
+  }
+  return projectId
     ? ['issues', 'metrics', 'stage-duration', projectId] as const
     : ['issues', 'metrics', 'stage-duration'] as const
+}
 
-export function useStageDuration() {
+export function useStageDuration(range?: InsightsRange) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: stageDurationQueryKey(projectId),
-    queryFn: () => fetchStageDuration(projectId!),
+    queryKey: stageDurationQueryKey(projectId, range),
+    queryFn: () => fetchStageDuration(projectId!, range),
     enabled: !!projectId,
     staleTime: 60_000,
   })

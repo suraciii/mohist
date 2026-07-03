@@ -55,3 +55,61 @@
 - `packages/server/tests/Mohist.Server.Tests/Specs/Api/AgentCostRollupApiSpecs.cs` (T-002) — 5 new tests (range 90d scales window; range 7d scales window; range does not affect all-time figures; omitted range reproduces 30-day; unknown range ⇒ 400; accepted range values theory).
 - `packages/server/tests/Mohist.Server.Tests/Specs/Api/AgentUsageTimeseriesApiSpecs.cs` (T-002) — 7 new tests (range 7d/30d daily; range 90d weekly 13 buckets; omitted reproduces 7d/7-bucket daily; unknown ⇒ 400; accepted range values theory; granularity field reports per range; cumulative series follows bucket grid).
 - `packages/server/tests/Mohist.Server.Tests/Specs/Sessions/AgentSessionQuerierSpecs.cs` (T-002) — 8 new unit tests covering querier-level window math (string-independent): cost 7d/90d windows, cost omit ⇒ 30d, usage omit ⇒ 7d/7-bucket daily, usage 7d/30d/90d bucket counts + granularity, cumulative series follows bucket grid.
+## Codebase Patterns (T-003 additions)
+
+- **InsightsRange lives at `packages/web/src/pages/insights/model/insights-range.ts`:** a `const` tuple `INSIGHTS_RANGES = ['7d', '30d', '90d'] as const` derives the `InsightsRange` union; `DEFAULT_INSIGHTS_RANGE = '30d'` and an `isInsightsRange` type guard are co-located. Imported by every hook that needs range threading (avoids a circular dep through `entities/`).
+- **Optional `range?: InsightsRange` is a thread, not a contract change.** Each of the eight hooks uses the same shape: `queryKey` ternaries (`range ? [..., range, projectId] : [..., projectId]`) mirror the existing `'week'`/`'day'` fold already in `useCompletionTrend`/`useCompletionThroughput`; URL build via `buildXQueryString(range)` returns `''` when range is absent, and `?range=...` when present (composed with `?bucket=` on the completion hook via `URLSearchParams`). When range is omitted, both the URL and the key keep their pre-existing shape, so Dashboard consumers (`FactoryStatusHeadline` calling `useCostRollup()`, `AttentionHero` calling `useApprovalWait()`) hit the back-compat branch by construction without any new test fixtures.
+- **InsightsRangeSelector is a segmented-button control with `role="group"` + `aria-pressed` per option.** The selector control renders exactly three buttons (`data-testid="insights-range-option-{7d|30d|90d}"`); there is no `<input type="date">`/`<input type="range">`/`<select>` element — the test pins both the count and the absence of any picker so a future regression that adds a from/to control fails the spec rather than slipping in.
+- **InsightsCharts receives `range` as a prop and forwards it to every panel/hook.** Each chart-group's `render: (range) => ReactNode` is called with the prop value; `EpicProgressList` is rendered without a range parameter (the `useEpics` query key is unchanged, the Dashboard exemption is structural). The `InsightsCharts.test.tsx` mocks all eight metrics hooks + `useEpics` and asserts `useEpics` is NOT called with `'7d'` while the other eight ARE — a structural back-compat guard.
+- **M2 window badges re-base from returned `rangeFrom`/`rangeTo`:** no badge code was touched in T-003. `ThroughputChart`/`CumulativeFlowChart`/`CycleTimeChart`/`StageDurationChart`/`FtrTrendChart`/`CostTrendChart` all derive their badges from the response payload, so a fresh data load after a range switch updates the badge automatically. The InsightsPage test asserts the throughput badge text re-renders to `'30d' → '7d' → '90d'` on selector clicks — this is the spec scenario "Badges follow the selected range".
+- **`useApprovalWait` deliberately stays range-less** (the design open question is closed by "leave for now"): only the Dashboard consumes it, and the server contract is ready if a future Insights consumer appears. This keeps the hook's surface minimal.
+
+## Decisions (T-003)
+
+- **Hook arg signature is consistent across the eight:** `useX(range?: InsightsRange)`. Eight of the eight take the same shape (no positional defaults, no aliases), so future readers can predict the API from a single example. The `?` is mandatory — required arg would break `FactoryStatusHeadline` and `AttentionHero` callers.
+- **InsightsCharts is range-driven, not selector-driven:** the selector is a page-level state; `InsightsCharts` is a stateless prop receiver. The selector component itself does NOT know about queries — it just emits `onChange(range)`. This keeps the selector unit-testable in isolation (`InsightsRangeSelector.test.tsx` exercises only the control, no mocks).
+- **`InsightsPage` re-derives `range` as a single source via `useState`:** no React context, no URL `?range=` query param. Per design D6, prop-threading is explicit and trivially assertable; shareable-link state is deferred.
+
+## Gotchas (T-003)
+
+- **`completion-trend` is the only hook that composes `range` with another query param** (`bucket`): both `useCompletionTrend` (week) and `useCompletionThroughput` (day) must use `URLSearchParams` so the resulting string is `?bucket=...&range=...`. A naive template literal `${bucket}${range}` would produce `?bucket=week?range=30d` when both are present. The build helper `buildCompletionTrendQueryString` does this correctly via `URLSearchParams`.
+- **`cumulativeFlowQueryKey`/`deliveryTimeQueryKey`/etc. are exported for reuse.** Two patterns coexist in the codebase: (a) inline ternary in `useCompletionTrend`/`useCompletionThroughput`; (b) exported key builder (e.g. `cumulativeFlowQueryKey(projectId, range)`). Both keep the same omit-vs-present shape; the exported builder is preferred when a future invalidate/optimistic caller wants to address the key. The two patterns are equivalent; tests for both verify the omit shape byte-for-byte.
+- **`useAgentUsage` test is in a new file `agent-usage.test.ts`** (was previously unaccounted for in the hook-coverage map). All other six hooks had existing test files; this one was added in T-003 to lock the range-threading contract alongside the new hook surface.
+
+## Verification (T-003)
+
+- `npm run typecheck -w packages/web` — clean (no errors, no warnings).
+- `npm run test:run -w packages/web` — 4041 passed | 1 skipped, 0 failed.
+- `npm run typecheck -w packages/runner` — clean.
+- Targeted Insightspage tests pass (selector offers 3 presets, defaults 30d, switching invokes the 5 page-level hooks, charts panel receives the range, throughput window badge updates to the new range on every switch).
+- Targeted InsightsCharts tests pass (4 chart groups, 8 chart panels forwarded range, useEpics NOT forwarded range, 30d→90d prop change re-invokes every panel hook).
+- Targeted InsightsRangeSelector tests pass (3 buttons, aria-pressed on active, onChange invoked with the selected range).
+- Targeted hook tests for all 8 hooks pass: range-less key shape unchanged, range folds into key, three ranges produce three distinct keys, range appended to URL when present, range omitted from URL when absent.
+- Dashboard back-compat: `FactoryStatusHeadline` calls `useCostRollup()` (no range) and `AttentionHero` calls `useApprovalWait()` (unchanged hook surface) — both widget test suites pass with no fixture changes.
+
+## Files Touched (T-003)
+
+- `packages/web/src/pages/insights/model/insights-range.ts` (new) — D6 wire vocabulary + default + type guard.
+- `packages/web/src/pages/insights/model/index.ts` — re-export `INSIGHTS_RANGES`/`DEFAULT_INSIGHTS_RANGE`/`InsightsRange`/`isInsightsRange`.
+- `packages/web/src/pages/insights/index.ts` — re-export `INSIGHTS_RANGES`/`DEFAULT_INSIGHTS_RANGE`/`InsightsRange` for downstream consumers.
+- `packages/web/src/pages/insights/ui/InsightsRangeSelector.tsx` (new) — segmented-button control.
+- `packages/web/src/pages/insights/ui/InsightsRangeSelector.test.tsx` (new) — 3-button/no-picker/active-aria/onChange specs.
+- `packages/web/src/pages/insights/ui/InsightsPage.tsx` — owns `useState<InsightsRange>('30d')`, renders the selector, threads `range` to the five page-level hooks and to `InsightsCharts` as a prop.
+- `packages/web/src/pages/insights/ui/InsightsPage.test.tsx` — global time-range selector block: 6 new tests (selector renders, default 30d, hook invocation, switch re-applies, charts prop, window badge forwarding).
+- `packages/web/src/pages/insights/ui/InsightsCharts.tsx` — `range` prop, `CHART_GROUPS` render closures receive `range`, `EpicProgressList` rendered without range.
+- `packages/web/src/pages/insights/ui/InsightsCharts.test.tsx` — 4 chart groups, range forwarding block: 2 new tests (forwarding to all 8 panel hooks except `useEpics`; re-application on prop change 30d→90d).
+- `packages/web/src/entities/issue/api/completion-trend.ts` — `range?: InsightsRange` arg on `useCompletionTrend`/`useCompletionThroughput`; `buildCompletionTrendQueryString` composes `bucket`+`range` via `URLSearchParams`; keys fold `range` between `'week'`/`'day'` and `projectId`.
+- `packages/web/src/entities/issue/api/completion-trend.test.ts` — `useCompletionTrend range threading` and `useCompletionThroughput range threading` blocks: 5 + 5 tests each (omit-equality, fold, cache isolation × 3 ranges, URL append, URL omit).
+- `packages/web/src/entities/issue/api/cumulative-flow.ts` — `range?: InsightsRange` arg, exported `cumulativeFlowQueryKey(projectId, range)` builder.
+- `packages/web/src/entities/issue/api/cumulative-flow.test.ts` — 5 range-threading tests + 2 query-key builder tests.
+- `packages/web/src/entities/issue/api/delivery-time.ts` — same pattern.
+- `packages/web/src/entities/issue/api/delivery-time.test.ts` — 5 range-threading tests.
+- `packages/web/src/entities/issue/api/stage-duration.ts` — same pattern.
+- `packages/web/src/entities/issue/api/stage-duration.test.ts` — 5 range-threading tests.
+- `packages/web/src/entities/issue/api/quality-metrics.ts` — same pattern.
+- `packages/web/src/entities/issue/api/quality-metrics.test.ts` — 5 range-threading tests.
+- `packages/web/src/entities/agent/api/cost-rollup.ts` — same pattern.
+- `packages/web/src/entities/agent/api/cost-rollup.test.ts` — 5 range-threading tests + 2 query-key builder tests.
+- `packages/web/src/entities/agent/api/agent-usage.ts` — same pattern.
+- `packages/web/src/entities/agent/api/agent-usage.test.ts` (new) — full hook coverage (key shape, projectId scoping, fetch URL, staleTime, enabled/disabled flags) + 3 query-key builder tests + 5 range-threading tests + 1 fetch tests.
+- Eight panel files (`ThroughputChart.tsx`, `CompletionTrend.tsx`, `CumulativeFlowChart.tsx`, `CycleTimeChart.tsx`, `StageDurationChart.tsx`, `QualityPanel.tsx`, `FtrTrendChart.tsx`, `InvestmentPanel.tsx`, `CostTrendChart.tsx`) — accept `range: InsightsRange` and pass it to their respective hook. InvestmentPanel and CumulativeFlowChart use a `_range` underscore-prefixed name internally because they consume the prop to feed the hook but don't read it for badge text (badge derives from response data).

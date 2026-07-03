@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useStageDuration } from '../../../entities/issue'
 import type { StageDurationMetricsResponse, StageDurationStageDto } from '../../../entities/issue'
+import type { InsightsRange } from '../model/insights-range'
 import {
   ChartContainer,
   ChartAccessibility,
@@ -85,8 +86,8 @@ function hasPlottableStages(
   )
 }
 
-export function StageDurationChart() {
-  const { data, isLoading, isError } = useStageDuration()
+export function StageDurationChart({ range: _range }: { range: InsightsRange }) {
+  const { data, isLoading, isError } = useStageDuration(_range)
   const [lens, setLens] = useState<DurationLens>('average')
 
   const visibleCount = data

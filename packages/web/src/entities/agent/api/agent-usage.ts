@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { projectApiPath, request } from '../../../shared/api/client'
 import { useProject } from '../../project/@x/project-context'
+import type { InsightsRange } from '../../../pages/insights/model/insights-range'
 
 export interface AgentUsageBucketDto {
   bucketStart: string
@@ -28,22 +29,33 @@ export interface AgentUsageTimeseriesDto {
   cumulativeCostPerShip?: CumulativeCostPerShipPointDto[] | null
 }
 
-export function fetchAgentUsage(projectId: string) {
+function buildAgentUsageQueryString(range?: InsightsRange): string {
+  if (!range) return ''
+  return `?range=${range}`
+}
+
+export function fetchAgentUsage(projectId: string, range?: InsightsRange) {
   return request<AgentUsageTimeseriesDto>(
-    projectApiPath(projectId, '/agent/usage'),
+    projectApiPath(projectId, `/agent/usage${buildAgentUsageQueryString(range)}`),
   )
 }
 
-export const agentUsageQueryKey = (projectId?: string | null) =>
-  projectId
+export const agentUsageQueryKey = (projectId?: string | null, range?: InsightsRange | null) => {
+  if (range) {
+    return projectId
+      ? ['agent', 'usage', range, projectId] as const
+      : ['agent', 'usage', range] as const
+  }
+  return projectId
     ? ['agent', 'usage', projectId] as const
     : ['agent', 'usage'] as const
+}
 
-export function useAgentUsage() {
+export function useAgentUsage(range?: InsightsRange) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: agentUsageQueryKey(projectId),
-    queryFn: () => fetchAgentUsage(projectId!),
+    queryKey: agentUsageQueryKey(projectId, range),
+    queryFn: () => fetchAgentUsage(projectId!, range),
     enabled: !!projectId,
     staleTime: 60_000,
   })

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -363,5 +363,103 @@ describe('InsightsPage investment sub-trend breakdown', () => {
     const perIssueRow = rows.find((row) => row.getAttribute('data-metric') === 'perIssue')!
     expect(spendRow.getAttribute('data-state')).toBe('full')
     expect(perIssueRow.getAttribute('data-state')).toBe('currentOnly')
+  })
+})
+
+describe('InsightsPage global time-range selector', () => {
+  it('renders exactly three presets (7d / 30d / 90d) with no custom from/to picker', () => {
+    renderPage()
+
+    expect(screen.getByTestId('insights-range-selector')).toBeInTheDocument()
+    expect(screen.getByTestId('insights-range-option-7d')).toBeInTheDocument()
+    expect(screen.getByTestId('insights-range-option-30d')).toBeInTheDocument()
+    expect(screen.getByTestId('insights-range-option-90d')).toBeInTheDocument()
+
+    const selector = screen.getByTestId('insights-range-selector')
+    expect(selector.querySelector('input[type="date"]')).toBeNull()
+    expect(selector.querySelector('input[type="range"]')).toBeNull()
+  })
+
+  it('defaults to 30d on first load (no preset pre-selected other than 30d)', () => {
+    renderPage()
+
+    const page = screen.getByTestId('insights-page')
+    expect(page.getAttribute('data-range')).toBe('30d')
+
+    const option7d = screen.getByTestId('insights-range-option-7d')
+    const option30d = screen.getByTestId('insights-range-option-30d')
+    const option90d = screen.getByTestId('insights-range-option-90d')
+    expect(option7d.getAttribute('data-active')).toBe('false')
+    expect(option30d.getAttribute('data-active')).toBe('true')
+    expect(option90d.getAttribute('data-active')).toBe('false')
+  })
+
+  it('invokes the five page-level hooks with the default 30d range on first render', () => {
+    renderPage()
+
+    expect(mocks.useCompletionThroughput).toHaveBeenCalledWith('30d')
+    expect(mocks.useDeliveryTime).toHaveBeenCalledWith('30d')
+    expect(mocks.useQualityMetrics).toHaveBeenCalledWith('30d')
+    expect(mocks.useCostRollup).toHaveBeenCalledWith('30d')
+    expect(mocks.useStageDuration).toHaveBeenCalledWith('30d')
+  })
+
+  it('re-applies the new range to the five page-level hooks when the operator switches the selector', () => {
+    mocks.useCompletionThroughput.mockReturnValue({ data: populatedCompletion(), isLoading: false })
+    mocks.useDeliveryTime.mockReturnValue({ data: populatedDelivery(), isLoading: false })
+    mocks.useQualityMetrics.mockReturnValue({ data: populatedQuality(), isLoading: false })
+    mocks.useCostRollup.mockReturnValue({ data: populatedCost(), isLoading: false })
+    mocks.useStageDuration.mockReturnValue({ data: populatedStageDuration(), isLoading: false })
+
+    renderPage()
+
+    mocks.useCompletionThroughput.mockClear()
+    mocks.useDeliveryTime.mockClear()
+    mocks.useQualityMetrics.mockClear()
+    mocks.useCostRollup.mockClear()
+    mocks.useStageDuration.mockClear()
+
+    fireEvent.click(screen.getByTestId('insights-range-option-7d'))
+
+    expect(mocks.useCompletionThroughput).toHaveBeenCalledWith('7d')
+    expect(mocks.useDeliveryTime).toHaveBeenCalledWith('7d')
+    expect(mocks.useQualityMetrics).toHaveBeenCalledWith('7d')
+    expect(mocks.useCostRollup).toHaveBeenCalledWith('7d')
+    expect(mocks.useStageDuration).toHaveBeenCalledWith('7d')
+    expect(screen.getByTestId('insights-page').getAttribute('data-range')).toBe('7d')
+
+    fireEvent.click(screen.getByTestId('insights-range-option-90d'))
+
+    expect(mocks.useCompletionThroughput).toHaveBeenLastCalledWith('90d')
+    expect(mocks.useDeliveryTime).toHaveBeenLastCalledWith('90d')
+    expect(mocks.useQualityMetrics).toHaveBeenLastCalledWith('90d')
+    expect(mocks.useCostRollup).toHaveBeenLastCalledWith('90d')
+    expect(mocks.useStageDuration).toHaveBeenLastCalledWith('90d')
+    expect(screen.getByTestId('insights-page').getAttribute('data-range')).toBe('90d')
+  })
+
+  it('passes the current range to InsightsCharts so chart panels re-render', () => {
+    renderPage()
+
+    const charts = screen.getByTestId('insights-charts')
+    expect(charts.getAttribute('data-range')).toBe('30d')
+
+    fireEvent.click(screen.getByTestId('insights-range-option-90d'))
+
+    expect(screen.getByTestId('insights-charts').getAttribute('data-range')).toBe('90d')
+  })
+
+  it('forwards the new range to each chart panel header via the throughput window badge', () => {
+    renderPage()
+
+    expect(screen.getByTestId('throughput-chart-window').textContent).toBe('30d')
+
+    fireEvent.click(screen.getByTestId('insights-range-option-7d'))
+
+    expect(screen.getByTestId('throughput-chart-window').textContent).toBe('7d')
+
+    fireEvent.click(screen.getByTestId('insights-range-option-90d'))
+
+    expect(screen.getByTestId('throughput-chart-window').textContent).toBe('90d')
   })
 })

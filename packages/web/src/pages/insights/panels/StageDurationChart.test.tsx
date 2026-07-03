@@ -67,7 +67,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: undefined, isLoading: true, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-loading')).toBeInTheDocument()
     expect(screen.queryByTestId('stage-duration-chart')).toBeInTheDocument()
@@ -78,7 +78,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: new Error('fail') })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-error')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
@@ -88,7 +88,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildEmpty(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const empty = screen.getByTestId('chart-container-empty')
     expect(empty).toBeInTheDocument()
@@ -100,7 +100,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: undefined, isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
@@ -110,7 +110,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-container-loading')).not.toBeInTheDocument()
@@ -124,7 +124,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.getByTestId('stage-bar-plan')).toBeInTheDocument()
     expect(screen.getByTestId('stage-bar-build')).toBeInTheDocument()
@@ -150,7 +150,7 @@ describe('StageDurationChart', () => {
       isError: false,
     })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.getByTestId('stage-bar-plan')).toBeInTheDocument()
     expect(screen.getByTestId('stage-bar-build')).toBeInTheDocument()
@@ -162,7 +162,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const plan = screen.getByTestId('stage-bar-fill-plan')
     const build = screen.getByTestId('stage-bar-fill-build')
@@ -185,7 +185,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const plan = screen.getByTestId('stage-bar-fill-plan')
     expect(plan.getAttribute('class')).toContain('fill-chart-2')
@@ -198,7 +198,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const avg = screen.getByTestId('stage-duration-lens-average')
     const med = screen.getByTestId('stage-duration-lens-median')
@@ -214,7 +214,7 @@ describe('StageDurationChart', () => {
     const fetchSpy = vi.fn()
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const planAvg = screen.getByTestId('stage-bar-fill-plan').getAttribute('style') || ''
     expect(planAvg).toMatch(/scaleX\(0\.[0-9]+\)/)
@@ -244,7 +244,7 @@ describe('StageDurationChart', () => {
       isError: false,
     })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
 
@@ -264,7 +264,7 @@ describe('StageDurationChart', () => {
       isError: false,
     })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const annotation = screen.getByTestId('flow-efficiency-annotation')
     expect(annotation).toBeInTheDocument()
@@ -279,7 +279,7 @@ describe('StageDurationChart', () => {
       isError: false,
     })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.queryByTestId('flow-efficiency-annotation')).not.toBeInTheDocument()
   })
@@ -297,7 +297,7 @@ describe('StageDurationChart', () => {
       isError: false,
     })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const annotation = screen.getByTestId('wait-breakout-annotation')
     expect(annotation).toBeInTheDocument()
@@ -318,7 +318,7 @@ describe('StageDurationChart', () => {
       isError: false,
     })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.queryByTestId('wait-breakout-annotation')).not.toBeInTheDocument()
   })
@@ -329,7 +329,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const legend = screen.getByTestId('chart-legend')
     expect(legend).toBeInTheDocument()
@@ -345,7 +345,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const svg = document.querySelector('svg[role="img"]')
     expect(svg).toBeInTheDocument()
@@ -358,7 +358,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const summary = screen.getByTestId('chart-sr-summary')
     expect(summary).toBeInTheDocument()
@@ -374,7 +374,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(document.querySelectorAll('.tabular-nums').length).toBeGreaterThan(0)
   })
@@ -383,7 +383,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.getByTestId('chart-axis-bottom')).toBeInTheDocument()
   })
@@ -392,7 +392,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.getByTestId('stage-bar-value-plan')).toBeInTheDocument()
     expect(screen.getByTestId('stage-bar-value-integrate')).toBeInTheDocument()
@@ -403,7 +403,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const maxLabel = screen.getByTestId('stage-bar-value-build')
     expect(maxLabel).toHaveAttribute('text-anchor', 'end')
@@ -417,7 +417,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const plan = screen.getByTestId('stage-bar-fill-plan')
     const style = plan.getAttribute('style') || ''
@@ -430,7 +430,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(true)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const plan = screen.getByTestId('stage-bar-fill-plan')
     const style = plan.getAttribute('style') || ''
@@ -443,7 +443,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const section = screen.getByTestId('stage-duration-chart')
     expect(section).toBeInTheDocument()
@@ -454,7 +454,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.getByText('Stage Duration')).toBeInTheDocument()
   })
@@ -471,7 +471,7 @@ describe('StageDurationChart', () => {
       isError: false,
     })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     const badge = screen.getByTestId('stage-duration-chart-window')
     expect(badge).toBeInTheDocument()
@@ -483,7 +483,7 @@ describe('StageDurationChart', () => {
     mockMatchMedia(false)
     mockUseStageDuration.mockReturnValue({ data: undefined, isLoading: false, isError: false })
 
-    render(<StageDurationChart />)
+    render(<StageDurationChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
     expect(screen.queryByTestId('stage-duration-chart-window')).not.toBeInTheDocument()

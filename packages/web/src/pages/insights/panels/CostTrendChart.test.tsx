@@ -79,7 +79,7 @@ describe('CostTrendChart', () => {
   it('renders loading state via ChartContainer', () => {
     mockUseAgentUsage.mockReturnValue({ data: undefined, isLoading: true, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-loading')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
@@ -88,7 +88,7 @@ describe('CostTrendChart', () => {
   it('renders error state via ChartContainer', () => {
     mockUseAgentUsage.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: new Error('fail') })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-error')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
@@ -101,7 +101,7 @@ describe('CostTrendChart', () => {
       isError: false,
     })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const empty = screen.getByTestId('chart-container-empty')
     expect(empty).toBeInTheDocument()
@@ -116,7 +116,7 @@ describe('CostTrendChart', () => {
       isError: false,
     })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const empty = screen.getByTestId('chart-container-empty')
     expect(empty).toBeInTheDocument()
@@ -127,7 +127,7 @@ describe('CostTrendChart', () => {
   it('renders resolved chart content with accessibility wrapper', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-container-loading')).not.toBeInTheDocument()
@@ -140,7 +140,7 @@ describe('CostTrendChart', () => {
   it('renders one bar per bucket with height encoding cost', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const barSeries = screen.getByTestId('bar-series')
     expect(barSeries.children).toHaveLength(7)
@@ -155,7 +155,7 @@ describe('CostTrendChart', () => {
 
     mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const barSeries = screen.getByTestId('bar-series')
     expect(barSeries.children).toHaveLength(7)
@@ -169,7 +169,7 @@ describe('CostTrendChart', () => {
   it('trend line renders with markers for valid costPerShip points', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const lineSeries = screen.getByTestId('line-series')
     expect(lineSeries).toBeInTheDocument()
@@ -187,7 +187,7 @@ describe('CostTrendChart', () => {
 
     mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const lineSeries = screen.getByTestId('line-series')
     const markers = lineSeries.querySelectorAll('circle')
@@ -202,7 +202,7 @@ describe('CostTrendChart', () => {
 
     mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const paths = screen.getByTestId('line-series').querySelectorAll('path')
     expect(paths.length).toBeGreaterThan(1)
@@ -216,7 +216,7 @@ describe('CostTrendChart', () => {
 
     mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const markers = screen.getByTestId('line-series').querySelectorAll('circle')
     expect(markers).toHaveLength(7)
@@ -236,7 +236,7 @@ describe('CostTrendChart', () => {
       isError: false,
     })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     expect(screen.getByTestId('bar-series')).toBeInTheDocument()
     expect(screen.queryByTestId('line-series')).not.toBeInTheDocument()
@@ -247,7 +247,7 @@ describe('CostTrendChart', () => {
 
     mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     expect(screen.getByTestId('bar-series')).toBeInTheDocument()
     expect(screen.queryByTestId('line-series')).not.toBeInTheDocument()
@@ -258,7 +258,7 @@ describe('CostTrendChart', () => {
 
     mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     expect(screen.queryByTestId('chart-legend')).not.toBeInTheDocument()
   })
@@ -266,7 +266,7 @@ describe('CostTrendChart', () => {
   it('legend rendered when both series present, ordered bar then line', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const legend = screen.getByTestId('chart-legend')
     expect(legend).toBeInTheDocument()
@@ -285,7 +285,7 @@ describe('CostTrendChart', () => {
   it('renders left and right axes when trend is present', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     expect(screen.getByTestId('chart-axis-left')).toBeInTheDocument()
     expect(screen.getByTestId('chart-axis-right')).toBeInTheDocument()
@@ -296,7 +296,7 @@ describe('CostTrendChart', () => {
 
     mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     expect(screen.getByTestId('chart-axis-left')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-axis-right')).not.toBeInTheDocument()
@@ -307,7 +307,7 @@ describe('CostTrendChart', () => {
   it('bars use fill-chart-2 theme token', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const bar = screen.getByTestId('bar-0')
     const classes = bar.getAttribute('class') ?? ''
@@ -318,7 +318,7 @@ describe('CostTrendChart', () => {
   it('trend line uses stroke-chart-5 theme token', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const path = screen.getByTestId('line-series').querySelector('path')
     const classes = path?.getAttribute('class') ?? ''
@@ -328,7 +328,7 @@ describe('CostTrendChart', () => {
   it('left axis uses stroke-chart-2 and fill-chart-2', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const axis = screen.getByTestId('chart-axis-left')
     const axisLine = axis.querySelector('line')
@@ -340,7 +340,7 @@ describe('CostTrendChart', () => {
   it('right axis uses stroke-chart-5 and fill-chart-5', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const axis = screen.getByTestId('chart-axis-right')
     const axisLine = axis.querySelector('line')
@@ -354,7 +354,7 @@ describe('CostTrendChart', () => {
   it('accessibility sr-only summary is rendered', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const summary = screen.getByTestId('chart-sr-summary')
     expect(summary).toBeInTheDocument()
@@ -370,7 +370,7 @@ describe('CostTrendChart', () => {
       isError: false,
     })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const summary = screen.getByTestId('chart-sr-summary')
     expect(summary.textContent).toContain('Jun 22 to Jun 28')
@@ -380,7 +380,7 @@ describe('CostTrendChart', () => {
   it('chart svg has role=img and aria-label', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const svg = document.querySelector('svg[role="img"]')
     expect(svg).toBeInTheDocument()
@@ -393,7 +393,7 @@ describe('CostTrendChart', () => {
   it('numeric labels use tabular-nums', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const axisTexts = document.querySelectorAll('.tabular-nums')
     expect(axisTexts.length).toBeGreaterThan(0)
@@ -404,7 +404,7 @@ describe('CostTrendChart', () => {
   it('bars have transform transition by default', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const bar = screen.getByTestId('bar-0')
     expect(bar.style.transition).toContain('transform')
@@ -414,7 +414,7 @@ describe('CostTrendChart', () => {
     setPrefersReducedMotion(true)
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const bar = screen.getByTestId('bar-0')
     expect(bar.style.transition).toBe('none')
@@ -431,7 +431,7 @@ describe('CostTrendChart', () => {
       isError: false,
     })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const empty = screen.getByTestId('chart-container-empty')
     expect(empty.textContent).toContain('once an agent session reports usage on this project')
@@ -442,7 +442,7 @@ describe('CostTrendChart', () => {
   it('renders within a section with testid', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const section = screen.getByTestId('cost-trend-chart')
     expect(section).toBeInTheDocument()
@@ -452,7 +452,7 @@ describe('CostTrendChart', () => {
   it('shows section heading', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     expect(screen.getByText('Cost Trend')).toBeInTheDocument()
   })
@@ -462,7 +462,7 @@ describe('CostTrendChart', () => {
   it('renders day label for each bucket', () => {
     mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     expect(screen.getByText('Jun 22')).toBeInTheDocument()
     expect(screen.getByText('Jun 28')).toBeInTheDocument()
@@ -480,7 +480,7 @@ describe('CostTrendChart', () => {
       isError: false,
     })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     const badge = screen.getByTestId('cost-trend-chart-window')
     expect(badge).toBeInTheDocument()
@@ -495,7 +495,7 @@ describe('CostTrendChart', () => {
       isError: false,
     })
 
-    render(<CostTrendChart />)
+    render(<CostTrendChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
     expect(screen.queryByTestId('cost-trend-chart-window')).not.toBeInTheDocument()

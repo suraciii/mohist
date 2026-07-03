@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { costRollupQueryKey, fetchCostRollup, useCostRollup } from './cost-rollup'
+import { agentUsageQueryKey, fetchAgentUsage, useAgentUsage } from './agent-usage'
 
 const useQueryMock = vi.fn()
 const useProjectMock = vi.fn()
@@ -21,26 +21,26 @@ beforeEach(() => {
   useQueryMock.mockReturnValue({ data: undefined, isLoading: false })
 })
 
-describe('useCostRollup', () => {
-  it('uses the query key ["agent","cost-rollup", projectId]', () => {
-    useCostRollup()
+describe('useAgentUsage', () => {
+  it('uses the query key ["agent","usage", projectId]', () => {
+    useAgentUsage()
 
     expect(useQueryMock).toHaveBeenCalledTimes(1)
     const config = useQueryMock.mock.calls[0][0]
-    expect(config.queryKey).toEqual(['agent', 'cost-rollup', 'proj-1'])
+    expect(config.queryKey).toEqual(['agent', 'usage', 'proj-1'])
   })
 
   it('uses the query key scoped to the projectId returned by useProject', () => {
     useProjectMock.mockReturnValue({ projectId: 'proj-other' })
 
-    useCostRollup()
+    useAgentUsage()
 
     const config = useQueryMock.mock.calls[0][0]
-    expect(config.queryKey).toEqual(['agent', 'cost-rollup', 'proj-other'])
+    expect(config.queryKey).toEqual(['agent', 'usage', 'proj-other'])
   })
 
-  it('fetches the project agent cost rollup endpoint', async () => {
-    useCostRollup()
+  it('issues GET .../agent/usage without a query string by default', async () => {
+    useAgentUsage()
 
     const config = useQueryMock.mock.calls[0][0]
     expect(typeof config.queryFn).toBe('function')
@@ -51,10 +51,10 @@ describe('useCostRollup', () => {
         JSON.stringify({
           success: true,
           data: {
-            totalCost: { amount: 1.5, currency: 'USD', sampleCount: 3 },
-            todayCost: { amount: 0.25, currency: 'USD', sampleCount: 1 },
-            doneIssuesCount: 6,
-            costPerShip: { amount: 0.25, currency: 'USD', sampleCount: 1 },
+            rangeFrom: '2026-06-22',
+            rangeTo: '2026-06-29',
+            bucketGranularity: 'day',
+            buckets: [],
           },
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -62,20 +62,17 @@ describe('useCostRollup', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const data = await config.queryFn()
+    await config.queryFn()
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/agent/cost')
-    expect(data.totalCost.amount).toBe(1.5)
-    expect(data.totalCost.currency).toBe('USD')
-    expect(data.totalCost.sampleCount).toBe(3)
-    expect(data.doneIssuesCount).toBe(6)
-    expect(data.costPerShip.amount).toBe(0.25)
+    expect(calledPath).toBe('/api/projects/proj-1/agent/usage')
+
+    vi.unstubAllGlobals()
   })
 
-  it('uses a 60 second staleTime', () => {
-    useCostRollup()
+  it('applies a 60 second staleTime', () => {
+    useAgentUsage()
 
     const config = useQueryMock.mock.calls[0][0]
     expect(config.staleTime).toBe(60_000)
@@ -84,47 +81,49 @@ describe('useCostRollup', () => {
   it('is disabled when projectId is missing', () => {
     useProjectMock.mockReturnValue({ projectId: null })
 
-    useCostRollup()
+    useAgentUsage()
 
     const config = useQueryMock.mock.calls[0][0]
     expect(config.enabled).toBe(false)
   })
 
   it('is enabled when projectId is set', () => {
-    useCostRollup()
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useAgentUsage()
 
     const config = useQueryMock.mock.calls[0][0]
     expect(config.enabled).toBe(true)
   })
 })
 
-describe('costRollupQueryKey', () => {
+describe('agentUsageQueryKey', () => {
   it('returns a project-scoped key when a projectId is provided', () => {
-    expect(costRollupQueryKey('proj-1')).toEqual([
-      'agent',
-      'cost-rollup',
-      'proj-1',
-    ])
+    expect(agentUsageQueryKey('proj-1')).toEqual(['agent', 'usage', 'proj-1'])
   })
 
   it('returns the shared prefix when projectId is missing', () => {
-    expect(costRollupQueryKey()).toEqual(['agent', 'cost-rollup'])
-    expect(costRollupQueryKey(null)).toEqual(['agent', 'cost-rollup'])
+    expect(agentUsageQueryKey()).toEqual(['agent', 'usage'])
+    expect(agentUsageQueryKey(null)).toEqual(['agent', 'usage'])
+  })
+
+  it('folds the range into the key when provided alongside projectId', () => {
+    expect(agentUsageQueryKey('proj-1', '90d')).toEqual(['agent', 'usage', '90d', 'proj-1'])
   })
 })
 
-describe('fetchCostRollup', () => {
-  it('calls the agent cost endpoint for the given projectId', async () => {
+describe('fetchAgentUsage', () => {
+  it('calls the agent usage endpoint for the given projectId', async () => {
     const fetchMock = vi.fn<typeof fetch>()
     fetchMock.mockResolvedValue(
       new Response(
         JSON.stringify({
           success: true,
           data: {
-            totalCost: { amount: 0, currency: 'USD', sampleCount: 2 },
-            todayCost: { amount: null, currency: null, sampleCount: 0 },
-            doneIssuesCount: 0,
-            costPerShip: { amount: null, currency: null, sampleCount: 0 },
+            rangeFrom: '2026-06-22',
+            rangeTo: '2026-06-29',
+            bucketGranularity: 'day',
+            buckets: [],
           },
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -132,42 +131,39 @@ describe('fetchCostRollup', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const data = await fetchCostRollup('proj-1')
+    await fetchAgentUsage('proj-1')
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
     const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/agent/cost')
-    expect(data.totalCost.amount).toBe(0)
-    expect(data.totalCost.sampleCount).toBe(2)
-    expect(data.doneIssuesCount).toBe(0)
-    expect(data.costPerShip.amount).toBeNull()
+    expect(calledPath).toBe('/api/projects/proj-1/agent/usage')
+
+    vi.unstubAllGlobals()
   })
 })
 
-describe('useCostRollup range threading', () => {
-  it('preserves the existing queryKey shape when range is omitted (Dashboard FactoryStatusHeadline back-compat)', () => {
+describe('useAgentUsage range threading', () => {
+  it('preserves the existing queryKey shape when range is omitted (Dashboard back-compat)', () => {
     useProjectMock.mockReturnValue({ projectId: 'proj-1' })
 
-    useCostRollup()
+    useAgentUsage()
 
     const config = useQueryMock.mock.calls[0][0]
-    expect(config.queryKey).toEqual(['agent', 'cost-rollup', 'proj-1'])
+    expect(config.queryKey).toEqual(['agent', 'usage', 'proj-1'])
   })
 
   it('folds the range into the queryKey when supplied', () => {
     useProjectMock.mockReturnValue({ projectId: 'proj-1' })
 
-    useCostRollup('7d')
+    useAgentUsage('90d')
     const config = useQueryMock.mock.calls[0][0]
-    expect(config.queryKey).toEqual(['agent', 'cost-rollup', '7d', 'proj-1'])
+    expect(config.queryKey).toEqual(['agent', 'usage', '90d', 'proj-1'])
   })
 
   it('produces a different queryKey for each range (cache isolation)', () => {
     useProjectMock.mockReturnValue({ projectId: 'proj-1' })
 
-    useCostRollup('7d')
-    useCostRollup('30d')
-    useCostRollup('90d')
+    useAgentUsage('7d')
+    useAgentUsage('30d')
+    useAgentUsage('90d')
 
     const key7 = useQueryMock.mock.calls[0][0].queryKey
     const key30 = useQueryMock.mock.calls[1][0].queryKey
@@ -180,7 +176,7 @@ describe('useCostRollup range threading', () => {
   it('appends range=... to the fetch URL when supplied', async () => {
     useProjectMock.mockReturnValue({ projectId: 'proj-1' })
 
-    useCostRollup('90d')
+    useAgentUsage('30d')
 
     const config = useQueryMock.mock.calls[0][0]
     const fetchMock = vi.fn<typeof fetch>()
@@ -189,10 +185,10 @@ describe('useCostRollup range threading', () => {
         JSON.stringify({
           success: true,
           data: {
-            totalCost: { amount: 0, currency: 'USD', sampleCount: 0 },
-            todayCost: { amount: 0, currency: 'USD', sampleCount: 0 },
-            doneIssuesCount: 0,
-            costPerShip: { amount: null, currency: null, sampleCount: 0 },
+            rangeFrom: '2026-05-02',
+            rangeTo: '2026-06-01',
+            bucketGranularity: 'day',
+            buckets: [],
           },
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -203,7 +199,7 @@ describe('useCostRollup range threading', () => {
     await config.queryFn()
 
     const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/agent/cost?range=90d')
+    expect(calledPath).toBe('/api/projects/proj-1/agent/usage?range=30d')
 
     vi.unstubAllGlobals()
   })
@@ -211,7 +207,7 @@ describe('useCostRollup range threading', () => {
   it('omits the range parameter from the URL when no range is supplied', async () => {
     useProjectMock.mockReturnValue({ projectId: 'proj-1' })
 
-    useCostRollup()
+    useAgentUsage()
 
     const config = useQueryMock.mock.calls[0][0]
     const fetchMock = vi.fn<typeof fetch>()
@@ -220,10 +216,10 @@ describe('useCostRollup range threading', () => {
         JSON.stringify({
           success: true,
           data: {
-            totalCost: { amount: 0, currency: 'USD', sampleCount: 0 },
-            todayCost: { amount: 0, currency: 'USD', sampleCount: 0 },
-            doneIssuesCount: 0,
-            costPerShip: { amount: null, currency: null, sampleCount: 0 },
+            rangeFrom: '2026-06-22',
+            rangeTo: '2026-06-29',
+            bucketGranularity: 'day',
+            buckets: [],
           },
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -234,7 +230,7 @@ describe('useCostRollup range threading', () => {
     await config.queryFn()
 
     const [calledPath] = fetchMock.mock.calls[0]
-    expect(calledPath).toBe('/api/projects/proj-1/agent/cost')
+    expect(calledPath).toBe('/api/projects/proj-1/agent/usage')
     expect(calledPath).not.toContain('range=')
 
     vi.unstubAllGlobals()

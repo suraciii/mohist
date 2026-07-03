@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQualityMetrics } from '../../../entities/issue'
 import type { QualityTrendDto, QualityTrendPointDto } from '../../../entities/issue'
+import type { InsightsRange } from '../model/insights-range'
 import {
   ChartContainer,
   ChartAccessibility,
@@ -64,8 +65,8 @@ function hasTrendData(data: { trend?: QualityTrendDto } | undefined): boolean {
   return trend.points.some((p) => p.sampleCount > 0)
 }
 
-export function FtrTrendChart() {
-  const { data, isLoading, isError } = useQualityMetrics()
+export function FtrTrendChart({ range }: { range: InsightsRange }) {
+  const { data, isLoading, isError } = useQualityMetrics(range)
   const [showRework, setShowRework] = useState(false)
 
   const trend = data?.trend

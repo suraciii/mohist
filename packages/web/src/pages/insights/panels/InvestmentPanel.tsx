@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChevronRightIcon } from 'lucide-react'
 import { useCostRollup } from '../../../entities/agent'
 import type { AgentCostRollupDto } from '../../../entities/agent'
+import type { InsightsRange } from '../model/insights-range'
 import { formatCost } from '../../../shared/lib/format-compact'
 
 const INVESTMENT_PANEL_TESTID = 'productivity-investment'
@@ -22,9 +23,9 @@ function isSpendEmpty(rollup: AgentCostRollupDto | undefined): boolean {
   return !rollup || rollup.totalCost.sampleCount === 0
 }
 
-export function InvestmentPanel() {
+export function InvestmentPanel({ range }: { range: InsightsRange }) {
   const [expanded, setExpanded] = useState(false)
-  const { data } = useCostRollup()
+  const { data } = useCostRollup(range)
   const rollup = data
   const empty = isSpendEmpty(rollup)
   const totalCost = rollup?.totalCost

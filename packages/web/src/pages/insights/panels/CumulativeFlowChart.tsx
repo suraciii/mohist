@@ -3,6 +3,7 @@ import type {
   CumulativeFlowDayDto,
   CumulativeFlowResponse,
 } from '../../../entities/issue'
+import type { InsightsRange } from '../model/insights-range'
 import {
   ChartContainer,
   ChartAccessibility,
@@ -149,8 +150,8 @@ function singleSnapshotSliceWidth(rangeFrom: string, rangeTo: string): number {
   return Math.max(8, plotWidth / Math.max(daySpan, 1))
 }
 
-export function CumulativeFlowChart() {
-  const { data, isLoading, isError } = useCumulativeFlow()
+export function CumulativeFlowChart({ range: _range }: { range: InsightsRange }) {
+  const { data, isLoading, isError } = useCumulativeFlow(_range)
 
   const status = isLoading
     ? 'loading'

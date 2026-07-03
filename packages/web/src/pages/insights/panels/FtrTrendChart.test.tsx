@@ -54,7 +54,7 @@ function buildTrendData(): QualityMetricsResponse {
 }
 
 function renderChart() {
-  return render(<FtrTrendChart />)
+  return render(<FtrTrendChart range="30d" />)
 }
 
 describe('FtrTrendChart', () => {
@@ -407,7 +407,7 @@ describe('FtrTrendChart', () => {
     fireEvent.click(screen.getByLabelText('Toggle rework rate overlay'))
     expect(screen.getAllByTestId('line-series')).toHaveLength(2)
 
-    rerender(<FtrTrendChart />)
+    rerender(<FtrTrendChart range="30d" />)
     expect(screen.getAllByTestId('line-series')).toHaveLength(2)
   })
 

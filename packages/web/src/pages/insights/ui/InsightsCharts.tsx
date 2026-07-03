@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { ChartGroup } from './ChartGroup'
+import type { InsightsRange } from '../model/insights-range'
 import { EpicProgressList } from '../panels/EpicProgressList'
 import { ThroughputChart } from '../panels/ThroughputChart'
 import { CompletionTrend } from '../panels/CompletionTrend'
@@ -17,7 +18,7 @@ interface GroupSpec {
   id: DimensionId
   title: string
   question: string
-  render: () => ReactNode
+  render: (range: InsightsRange) => ReactNode
 }
 
 const CHART_GROUPS: readonly GroupSpec[] = [
@@ -25,12 +26,12 @@ const CHART_GROUPS: readonly GroupSpec[] = [
     id: 'output',
     title: '产出',
     question: '你交付了多少？',
-    render: () => (
+    render: (range) => (
       <>
         <EpicProgressList />
-        <ThroughputChart />
-        <CompletionTrend />
-        <CumulativeFlowChart />
+        <ThroughputChart range={range} />
+        <CompletionTrend range={range} />
+        <CumulativeFlowChart range={range} />
       </>
     ),
   },
@@ -38,10 +39,10 @@ const CHART_GROUPS: readonly GroupSpec[] = [
     id: 'delivery',
     title: '交付效率',
     question: '多快？',
-    render: () => (
+    render: (range) => (
       <>
-        <CycleTimeChart />
-        <StageDurationChart />
+        <CycleTimeChart range={range} />
+        <StageDurationChart range={range} />
       </>
     ),
   },
@@ -49,10 +50,10 @@ const CHART_GROUPS: readonly GroupSpec[] = [
     id: 'quality',
     title: '质量',
     question: '一次做对了吗？',
-    render: () => (
+    render: (range) => (
       <>
-        <QualityPanel />
-        <FtrTrendChart />
+        <QualityPanel range={range} />
+        <FtrTrendChart range={range} />
       </>
     ),
   },
@@ -60,21 +61,25 @@ const CHART_GROUPS: readonly GroupSpec[] = [
     id: 'investment',
     title: '投入',
     question: '花了多少？',
-    render: () => (
+    render: (range) => (
       <>
-        <InvestmentPanel />
-        <CostTrendChart />
+        <InvestmentPanel range={range} />
+        <CostTrendChart range={range} />
       </>
     ),
   },
 ]
 
-export function InsightsCharts() {
+interface InsightsChartsProps {
+  range: InsightsRange
+}
+
+export function InsightsCharts({ range }: InsightsChartsProps) {
   return (
-    <div className="flex flex-col gap-6" data-testid="insights-charts">
+    <div className="flex flex-col gap-6" data-testid="insights-charts" data-range={range}>
       {CHART_GROUPS.map(({ id, title, question, render }) => (
         <ChartGroup key={id} id={id} title={title} question={question}>
-          {render()}
+          {render(range)}
         </ChartGroup>
       ))}
     </div>

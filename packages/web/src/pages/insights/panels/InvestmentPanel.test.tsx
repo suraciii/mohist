@@ -40,7 +40,7 @@ function renderPanel() {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider>
         <MemoryRouter initialEntries={['/']}>
-          <InvestmentPanel />
+          <InvestmentPanel range="30d" />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,

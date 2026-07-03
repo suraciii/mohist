@@ -1,5 +1,6 @@
 import { useQualityMetrics } from '../../../entities/issue'
 import type { QualityMetricsWindowDto } from '../../../entities/issue'
+import type { InsightsRange } from '../model/insights-range'
 
 const PANEL_TESTID = 'productivity-quality'
 const EMPTY_TESTID = 'productivity-quality-empty'
@@ -91,8 +92,8 @@ function QualityWindow({ title, window, testidSuffix }: QualityWindowProps) {
   )
 }
 
-export function QualityPanel() {
-  const { data } = useQualityMetrics()
+export function QualityPanel({ range }: { range: InsightsRange }) {
+  const { data } = useQualityMetrics(range)
   const window7d = data?.window7d
   const window30d = data?.window30d
   const hasSamples = (window7d?.sampleCount ?? 0) > 0 || (window30d?.sampleCount ?? 0) > 0
