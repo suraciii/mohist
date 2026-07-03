@@ -17,6 +17,10 @@ jobs:
     name: .NET build and test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY: false
+      DOTNET_GENERATE_ASPNET_CERT: false
 
     steps:
       - name: Checkout
@@ -27,8 +31,24 @@ jobs:
         with:
           global-json-file: global.json
 
+      # Project uses Central Package Management (Directory.Packages.props) with
+      # no packages.lock.json, so setup-dotnet's `cache: true` (which requires a
+      # lock file) cannot be used. Cache the restored NuGet global packages
+      # folder keyed on the props hash instead, to skip re-downloading ~120
+      # packages from nuget.org on every run.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore Mohist.sln
+
       - name: Build
-        run: dotnet build Mohist.sln -p:SkipWebBuild=true
+        run: dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore
 
       - name: Test
         run: dotnet test Mohist.sln -p:SkipWebBuild=true --no-build
