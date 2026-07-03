@@ -12,13 +12,13 @@ public static partial class IssueRoutes
         group.MapGet("/metrics/delivery-time", async (
             HttpContext ctx,
             string projectRef,
-            IssueQuerier issuesQuery,
+            IssueMetricsQuerier metricsQuery,
             TimeProvider timeProvider,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var result = await issuesQuery.GetDeliveryTimesAsync(
+            var result = await metricsQuery.GetDeliveryTimesAsync(
                 project.Id,
                 timeProvider.GetUtcNow());
 
@@ -26,7 +26,7 @@ public static partial class IssueRoutes
         });
     }
 
-    private static DeliveryTimeMetricsResponse BuildResponse(IssueQuerier.DeliveryTimeResult result) =>
+    private static DeliveryTimeMetricsResponse BuildResponse(IssueMetricsQuerier.DeliveryTimeResult result) =>
         new(
             Points: result.Points
                 .Select(p => new DeliveryTimePointDto(

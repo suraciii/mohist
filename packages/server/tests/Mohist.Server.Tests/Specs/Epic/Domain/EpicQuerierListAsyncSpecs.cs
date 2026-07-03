@@ -431,7 +431,7 @@ public class EpicQuerierListAsyncSpecs
     private sealed class ThrowingIssueQuerier : IssueQuerier
     {
         public ThrowingIssueQuerier()
-            : base(null!, null!, null!, null!, null!, null!, null!)
+            : base(null!, null!, null!, null!, null!, null!)
         {
         }
 

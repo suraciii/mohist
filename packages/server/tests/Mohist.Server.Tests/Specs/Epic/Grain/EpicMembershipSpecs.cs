@@ -568,7 +568,7 @@ public class EpicMembershipSpecs
     /// </summary>
     private sealed class ThrowingIssueQuerier : IssueQuerier
     {
-        public ThrowingIssueQuerier() : base(null!, null!, null!, null!, null!, null!, null!) { }
+        public ThrowingIssueQuerier() : base(null!, null!, null!, null!, null!, null!) { }
 
         public new Task<List<IssueReadModel>> ListAsync(
             string projectId,

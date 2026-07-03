@@ -13,7 +13,7 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             string? bucket,
-            IssueQuerier issuesQuery,
+            IssueMetricsQuerier metricsQuery,
             TimeProvider timeProvider,
             CancellationToken ct) =>
         {
@@ -24,18 +24,18 @@ public static partial class IssueRoutes
             if (string.IsNullOrWhiteSpace(bucket)
                 || string.Equals(bucket, "day", StringComparison.OrdinalIgnoreCase))
             {
-                var result = await issuesQuery.GetCompletionBucketsAsync(
+                var result = await metricsQuery.GetCompletionBucketsAsync(
                     project.Id,
-                    IssueQuerier.CompletionBucket.Day,
+                    IssueMetricsQuerier.CompletionBucket.Day,
                     timeProvider.GetUtcNow());
                 return ApiResults.Ok(BuildResponse(result));
             }
 
             if (string.Equals(bucket, "week", StringComparison.OrdinalIgnoreCase))
             {
-                var result = await issuesQuery.GetCompletionBucketsAsync(
+                var result = await metricsQuery.GetCompletionBucketsAsync(
                     project.Id,
-                    IssueQuerier.CompletionBucket.Week,
+                    IssueMetricsQuerier.CompletionBucket.Week,
                     timeProvider.GetUtcNow());
                 return ApiResults.Ok(BuildResponse(result));
             }
@@ -47,7 +47,7 @@ public static partial class IssueRoutes
         });
     }
 
-    private static CompletionMetricsResponse BuildResponse(IssueQuerier.CompletionBucketsResult result) =>
+    private static CompletionMetricsResponse BuildResponse(IssueMetricsQuerier.CompletionBucketsResult result) =>
         new(
             Bucket: result.Bucket,
             Window: new CompletionMetricsWindowDto(

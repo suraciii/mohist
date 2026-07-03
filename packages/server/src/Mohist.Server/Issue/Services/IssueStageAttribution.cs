@@ -4,7 +4,7 @@ namespace Mohist.Server.Issue.Services;
 
 /// <summary>
 /// Shared stage-attribution core used by both
-/// <see cref="IssueQuerier.GetStageDurationsAsync"/> (the
+/// <see cref="IssueMetricsQuerier.GetStageDurationsAsync"/> (the
 /// <c>workflow-stage-duration-metrics</c> surface) and the
 /// stage-population snapshot job. The two surfaces must agree on the
 /// issue's latest stage under the same

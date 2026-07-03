@@ -311,7 +311,7 @@ public class IssueStartReadinessDomainSpecs
           "number": 42,
           "title": "Legacy issue",
           "body": null,
-          "labels": [],
+          "labels": {},
           "priority": "p2",
           "repositoryRef": null,
           "createdAt": "2026-01-01T00:00:00Z",

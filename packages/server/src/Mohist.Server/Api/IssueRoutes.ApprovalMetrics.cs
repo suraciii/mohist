@@ -12,12 +12,12 @@ public static partial class IssueRoutes
         group.MapGet("/metrics/approval-wait", async (
             HttpContext ctx,
             string projectRef,
-            IssueQuerier issuesQuery,
+            IssueMetricsQuerier metricsQuery,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
 
-            var result = await issuesQuery.GetApprovalWaitAsync(
+            var result = await metricsQuery.GetApprovalWaitAsync(
                 project.Id,
                 DateTimeOffset.UtcNow);
 
@@ -25,7 +25,7 @@ public static partial class IssueRoutes
         });
     }
 
-    private static ApprovalWaitMetricsResponse BuildResponse(IssueQuerier.ApprovalWaitResult result) =>
+    private static ApprovalWaitMetricsResponse BuildResponse(IssueMetricsQuerier.ApprovalWaitResult result) =>
         new(
             Window: new ApprovalWaitMetricsWindowDto(
                 From: result.Window.From.ToString("o"),
