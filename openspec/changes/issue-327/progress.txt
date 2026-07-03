@@ -48,8 +48,34 @@ Acceptance verified:
 
 - [x] T-001 — event-naming unification (lowest blast radius, do first)
 - [x] T-002 — collapse transcript loading + context-ref helpers
-- [ ] T-003 — extract `AgentActivityFeedAssembler`
+- [x] T-003 — extract `AgentActivityFeedAssembler`
 - [ ] T-004 — extract `AgentUsageReporter`
 - [ ] T-005 — delete dead `ToAgentSessionDto` / `AgentSessionDto`
 
 Underlying assumptions: per AGENTS.md no-version-compat stance, persisted `session_closed` rows from any prior dev run lose terminal-state resolution post-T-001. Default is no backfill; documented in the change's design Risks section.
+
+## T-003 — Extract `AgentActivityFeedAssembler`
+
+Changes:
+- `packages/server/src/Mohist.Server/Sessions/Services/AgentActivityFeedAssembler.cs` (new, sealed, IScopedService): own ctor takes `IDbContextFactory<MohistDbContext>`, `AgentSessionQuerier`, `AgentSessionQuery`, `WorkflowQuerier`, `TimeProvider`. Owns `GetActivityAsync` + private `ToActivityCard` / `BuildTaskProgressMapAsync` / `LoadLatestEventsAsync` / `ToPreview` / `ExtractPreviewText` / `Truncate` / `Labels`. Calls through to core for `ReconcileActiveSessionsAsync`, `LoadEventSummariesAsync`, `LoadIssueTitlesAsync`, `IssueTitle`, `IssueNumber`, `Label`, `ToUsageDto`, `ToEventSummaryDto`, `ToProjection` (all bumped to `internal static`).
+- `packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuerier.cs`: ctor dropped the `_workflowQuerier` arg; `GetActivityAsync`, `ToActivityCard`, `BuildTaskProgressMapAsync`, `LoadLatestEventsAsync`, `ToPreview`, `ExtractPreviewText`, `Truncate` removed. Helpers bumped from `private static` → `internal static` because they're now shared between core + assembler: `Label`, `IssueNumber`, `Annotation`, `ToEventSummaryDto`, `ToUsageDto(AgentSession)` (already internal), `BuildLineageDto` (already internal), `ReconcileActiveSessionsAsync`, `LoadEventSummariesAsync`, `LoadIssueTitlesAsync`, `IssueTitle`, `ToProjection`. Cost / cancellation / metadata / reconciliation / followup / generic-summary / list / `ToAgentSessionDto` / `ToWorkflowDto` / `ToSummaryDto` / `BuildSessionMetadataDtoAsync` / `ComputePreWindowSpendAsync` / `ComputeCumulativeCostPerShipAsync` / `LoadCompletedIssueCountsAsync` / `HasUsage` / `UsageBucketData` / `LoadTerminalFactsAsync` / `LoadTranscriptAsync` / `ReadTerminalStateAsync` / `FindCurrentSessionAsync` / `FindGenericSessionAsync` / `BuildLineageDto` / `IsActiveSession` / `IsSessionAssociatedWithRun` / `LoadWorkflowRunsForReconciliationAsync` / `DeserializeWorkflowRun` / `Labels` (still used by `ListCurrentAsync`) stay put for T-004/T-005.
+- `packages/server/src/Mohist.Server/Api/AgentRoutes.cs:33` — /activity route now resolves `AgentActivityFeedAssembler activityFeed` instead of `AgentSessionQuerier sessions`; calls `activityFeed.GetActivityAsync(project.Id, limit, waiting: ..., capacity: ..., ct)`. Other routes (/usage, /cost, /sessions) still resolve `AgentSessionQuerier`.
+- `packages/server/tests/.../Foundation/MigratedServicesRegistrationSpecs.cs:87` — added `yield return new object[] { typeof(AgentActivityFeedAssembler), ServiceLifetime.Scoped };` between `AgentSessionQuerier` and `AgentSessionResolver`.
+- `packages/server/tests/.../Sessions/GenericAgentSessionSummarySpecs.cs:210` — direct-construction site updated for the new 3-arg ctor (`new AgentSessionQuerier(factory, sessionQuery, TimeProvider)`); dropped the `null!` for `_workflowQuerier` and the obsolete comment.
+- `packages/server/tests/.../Sessions/AgentActivityFeedAssemblerSpecs.cs` (new, 6 specs via MohistIntegrationFixture): empty-state summary, generic agent-launch card projects `agent_{id}` issueId + `Issue #N` fallback + agentId/agentName, waiting cards forwarded verbatim and counted separately from session-active count, limit clamped to [1, 200], null-waiting defaulting to empty list, workflow-source card omits agent fields.
+
+Acceptance verified:
+- `rg "GetActivityAsync\|ToActivityCard\|BuildTaskProgressMapAsync\|LoadLatestEventsAsync" packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuerier.cs` → 0 hits.
+- `rg "ToPreview\|ExtractPreviewText\|Truncate" packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuerier.cs` → 0 hits.
+- `MigratedServicesRegistrationSpecs.AgentActivityFeedAssembler` registered as Self with Scoped lifetime, both production + fixture paths.
+- `AgentSessionActivityVisibilitySpecs` (5 specs that hit the /activity JSON endpoint end-to-end) pass — byte-identical response to pre-split.
+- `dotnet test Mohist.sln`: 3603 passed, 0 failed, 13 pre-existing skipped (added 6 new specs). `npm test`: 805 runner tests pass.
+- Build under `TreatWarningsAsErrors`: 0 warnings, 0 errors.
+
+## Gotchas
+- `LoadIssueTitlesAsync` and `IssueTitle` are conceptually "activity-feed" (their only caller is the assembly code path), but `ListCurrentAsync` also uses them to project `AgentSessionInfoDto.IssueTitle`. So they become shared (`internal static`) rather than moving into the assembler — moving them would either force `ListCurrentAsync` to call back through the assembler (violating D2 one-way dependency) or duplicate the SQL projection. Keeping them shared is byte-identical and avoids the back-edge.
+- `LoadEventSummariesAsync` is shared for the same reason (used by both `ListCurrentAsync` / `ListAgentSessionsAsync` and the assembler's activity-card projection). Made `internal static`, calls go through `AgentSessionQuerier.LoadEventSummariesAsync`.
+- `ToProjection(string, AgentSessionTranscriptPartRow)` is a tiny but shared helper (used by `LoadLatestEventsAsync` in the assembler; used by the transcript summaries in core). Bumped to `internal static` rather than moved because, again, multiple consumers exist; record type `TranscriptEventProjection` was already `internal sealed record` so nothing else had to change.
+- The assembler file lives under `Sessions/Services/` and `using Mohist.Server.Sessions.Domain;` is required for `AgentSessionTranscriptSummary` (the DTO collection type used in `LoadEventSummariesAsync`'s return dictionary). The other DTOs (`ActivityCardDto`, `ActivitySummaryDto`, …) are in the `Mohist.Server.Sessions` namespace, not `Sessions.Domain`.
+- `ActivityCardDto` carries `agent_{agentId}` issueId for agent-launch sessions vs `issue_{projectId}_{number}` for workflow sessions — verified by `AgentActivityFeedAssemblerSpecs.WorkflowSessionCard_OmitsAgentFields` (workflow card null for agentId/agentName) and `…GenericAgentLaunchSession_ProjectsAgentIdAndIssueTitleFallback` (generic card populated).
+- `StatusName(s, Now())` is gated by a 5-min `ActiveRuntimeEventWindow` against `LastDataAt`. Seeding an `AgentSessionStatusSnapshot` without `LastDataAt` produces `inactive` cards even with `AgentRuntimeSessionId` bound — a unit-spec gotcha worth knowing if a future refactor wants to assert `Summary.Active == n` against freshly-inserted sessions.

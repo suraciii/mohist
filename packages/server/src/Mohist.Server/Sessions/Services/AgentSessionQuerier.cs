@@ -8,7 +8,6 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 
@@ -26,14 +25,12 @@ namespace Mohist.Server.Sessions.Services;
 public class AgentSessionQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly Mohist.Server.Workflow.Services.WorkflowQuerier _workflowQuerier;
     private readonly AgentSessionQuery _sessionQuery;
     private readonly TimeProvider _timeProvider;
 
-    public AgentSessionQuerier(IDbContextFactory<MohistDbContext> dbFactory, Mohist.Server.Workflow.Services.WorkflowQuerier workflowQuerier, AgentSessionQuery sessionQuery, TimeProvider timeProvider)
+    public AgentSessionQuerier(IDbContextFactory<MohistDbContext> dbFactory, AgentSessionQuery sessionQuery, TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
-        _workflowQuerier = workflowQuerier;
         _sessionQuery = sessionQuery;
         _timeProvider = timeProvider;
     }
@@ -140,13 +137,14 @@ public class AgentSessionQuerier : IScopedService
     /// The cap is clamped to <c>[1, 200]</c>; the default <c>50</c>
     /// matches the established project-wide list
     /// (<see cref="ListCurrentAsync"/>) and the active-agents readout
-    /// (<see cref="GetActivityAsync"/>). Status vocabulary: <c>running</c>
-    /// / <c>completed</c> / <c>failed</c> / <c>stopped</c>. The legacy
-    /// runner protocol's <c>cancelled</c> alias is normalised to
-    /// <c>stopped</c> at this read boundary. Sessions whose runner has
-    /// not yet bound <c>AgentSessionId</c> and which have no terminal
-    /// fact appear as <c>pending</c> and surface only in the
-    /// <c>recent</c> grouping.
+    /// (<see cref="AgentActivityFeedAssembler.GetActivityAsync"/>, which
+    /// absorbed the activity-feed projection in issue-327 T-003). Status
+    /// vocabulary: <c>running</c> / <c>completed</c> / <c>failed</c> /
+    /// <c>stopped</c>. The legacy runner protocol's <c>cancelled</c>
+    /// alias is normalised to <c>stopped</c> at this read boundary.
+    /// Sessions whose runner has not yet bound <c>AgentSessionId</c> and
+    /// which have no terminal fact appear as <c>pending</c> and surface
+    /// only in the <c>recent</c> grouping.
     /// </remarks>
     public async Task<IReadOnlyList<AgentSessionListItemDto>> ListAgentSessionsAsync(
         string projectId,
@@ -667,81 +665,6 @@ public class AgentSessionQuerier : IScopedService
             : null;
     }
 
-    public async Task<ActivityDto> GetActivityAsync(string projectId, int? limit = null, IReadOnlyList<ActivityWaitingCardDto>? waiting = null, RunnerCapacityView? capacity = null, CancellationToken ct = default)
-    {
-        var take = Math.Clamp(limit ?? 50, 1, 200);
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var sessions = await _sessionQuery.ListByLabelsAsync(
-                Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
-                AgentSessionQueryOrder.CreatedDescending,
-                take,
-                ct: ct);
-        sessions = await ReconcileActiveSessionsAsync(db, sessions, ct);
-
-        var sessionIds = sessions.Select(s => s.Session.Id).ToArray();
-        var latestEvents = await LoadLatestEventsAsync(db, sessionIds, ct);
-        var eventSummaries = await LoadEventSummariesAsync(db, sessionIds, ct);
-        var issueTitles = await LoadIssueTitlesAsync(db, projectId, sessions.Select(IssueNumber), ct);
-        var taskProgressMap = await BuildTaskProgressMapAsync(sessions, ct);
-
-        var cards = sessions
-            .Select(record => ToActivityCard(record, latestEvents.GetValueOrDefault(record.Session.Id), eventSummaries.GetValueOrDefault(record.Session.Id), IssueTitle(issueTitles, IssueNumber(record)), taskProgressMap.GetValueOrDefault(record.Session.Id)))
-            .ToList();
-
-        waiting ??= [];
-        var slots = new ActivitySlotUsageDto(capacity?.UsedSlots ?? 0, capacity?.TotalSlots ?? 0);
-        var summary = new ActivitySummaryDto(
-            cards.Count(c => c.Status == "active"),
-            waiting.Count,
-            0,
-            0,
-            slots);
-
-        return new ActivityDto(summary, cards, waiting.ToList());
-    }
-
-    private async Task<Dictionary<string, ActivityTaskProgressDto>> BuildTaskProgressMapAsync(IReadOnlyList<AgentSessionRecord> sessions, CancellationToken ct)
-    {
-        var result = new Dictionary<string, ActivityTaskProgressDto>(StringComparer.Ordinal);
-        var workflowRunIds = sessions
-            .Select(s => Label(s, AgentSessionQueryMetadataKeys.WorkflowRunId))
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Select(id => id!)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        if (workflowRunIds.Length == 0) return result;
-
-        var statusTasks = workflowRunIds.Select(async wrid =>
-        {
-            var status = await _workflowQuerier.GetStatusAsync(wrid);
-            return (WorkflowRunId: wrid, Status: status);
-        });
-        var statuses = await Task.WhenAll(statusTasks);
-        var statusByWorkflow = statuses.ToDictionary(x => x.WorkflowRunId, x => x.Status, StringComparer.Ordinal);
-
-        foreach (var session in sessions)
-        {
-            var workflowRunId = Label(session, AgentSessionQueryMetadataKeys.WorkflowRunId);
-            if (workflowRunId is null || !statusByWorkflow.TryGetValue(workflowRunId, out var status) || status is null)
-                continue;
-
-            var currentStageId = status.CurrentStage;
-            if (string.IsNullOrWhiteSpace(currentStageId))
-                continue;
-
-            var stage = status.Stages.FirstOrDefault(s => string.Equals(s.Stage, currentStageId, StringComparison.OrdinalIgnoreCase));
-            if (stage is null)
-                continue;
-
-            var completed = stage.Tasks.Count(t => string.Equals(t.Status, "completed", StringComparison.OrdinalIgnoreCase));
-            var total = stage.Tasks.Count;
-            if (total > 0)
-                result[session.Session.Id] = new ActivityTaskProgressDto(completed, total);
-        }
-
-        return result;
-    }
-
     /// <summary>
     /// Computes the agent-usage timeseries (issue-322 T-005 / design D5).
     /// <paramref name="windowDays"/> selects the trailing-window length
@@ -1126,24 +1049,7 @@ public class AgentSessionQuerier : IScopedService
             CostCurrency);
     }
 
-    private static async Task<Dictionary<string, TranscriptEventProjection>> LoadLatestEventsAsync(
-        MohistDbContext db, string[] sessionIds, CancellationToken ct)
-    {
-        if (sessionIds.Length == 0) return [];
-
-        var loaded = await TranscriptPartLoader.LoadAsync(db, sessionIds, ct: ct);
-        if (loaded.Parts.Count == 0) return [];
-
-        var result = new Dictionary<string, TranscriptEventProjection>(StringComparer.Ordinal);
-        foreach (var part in loaded.Parts.OrderBy(e => e.LastSeenAt).ThenBy(e => e.Id))
-            if (loaded.SessionByTurnId.TryGetValue(part.TurnId, out var sessionId))
-                result[sessionId] = ToProjection(sessionId, part);
-
-        return result;
-    }
-
-
-    private static async Task<Dictionary<string, AgentSessionTranscriptSummary>> LoadEventSummariesAsync(
+    internal static async Task<Dictionary<string, AgentSessionTranscriptSummary>> LoadEventSummariesAsync(
         MohistDbContext db, IEnumerable<string> sessionIds, CancellationToken ct)
     {
         var loaded = await TranscriptPartLoader.LoadAsync(db, sessionIds, ct: ct);
@@ -1158,69 +1064,17 @@ public class AgentSessionQuerier : IScopedService
                 g.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson))), StringComparer.Ordinal);
     }
 
-    private ActivityCardDto ToActivityCard(AgentSessionRecord record, TranscriptEventProjection? latestEvent, AgentSessionTranscriptSummary? eventSummary, string issueTitle, ActivityTaskProgressDto? taskProgress)
-    {
-        var s = record.Session;
-        var lastActivityAt = AgentSessionJsonHelper.LastActivityAt(s).ToString("o");
-        var issueNumber = IssueNumber(record);
-        var projectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty;
-        var sessionName = Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? s.Id;
-        var stage = Label(record, AgentSessionQueryMetadataKeys.Stage);
-        var workId = Label(record, AgentSessionQueryMetadataKeys.WorkId);
-        var workType = Label(record, AgentSessionQueryMetadataKeys.WorkType);
-        var sourceKind = Label(record, AgentSessionQueryMetadataKeys.SourceKind);
-
-        if (string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
-        {
-            var agentId = Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty;
-            var agentName = Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty;
-            return new ActivityCardDto(
-                $"agent_{agentId}",
-                issueNumber,
-                issueTitle,
-                stage ?? string.Empty,
-                null,
-                s.Id,
-                AgentSessionJsonHelper.StatusName(s, Now()),
-                s.Settings.Model,
-                null,
-                s.Status.CreatedAt.ToString("o"),
-                null,
-                lastActivityAt,
-                new ActivityWorkItemDto(workType ?? "task", workId ?? sessionName, workId ?? sessionName, stage, null),
-                taskProgress,
-                latestEvent is null ? null : ToPreview(latestEvent),
-                null,
-                agentId,
-                agentName,
-                ToEventSummaryDto(eventSummary),
-                ToUsageDto(s));
-        }
-
-        return new ActivityCardDto(
-            $"issue_{projectId}_{issueNumber}",
-            issueNumber,
-            issueTitle,
-            stage ?? string.Empty,
-            null,
-            s.Id,
-            AgentSessionJsonHelper.StatusName(s, Now()),
-            s.Settings.Model,
-            null,
-            s.Status.CreatedAt.ToString("o"),
-            null,
-            lastActivityAt,
-            new ActivityWorkItemDto(workType ?? "task", workId ?? sessionName, workId ?? sessionName, stage, null),
-            taskProgress,
-            latestEvent is null ? null : ToPreview(latestEvent),
-            null,
-            null,
-            null,
-            ToEventSummaryDto(eventSummary),
-            ToUsageDto(s));
-    }
-
-    private static async Task<Dictionary<int, string>> LoadIssueTitlesAsync(
+    /// <summary>
+    /// Loads the issue titles for the given (project, issue-numbers) batch.
+    /// Shared between the core querier's <see cref="ListCurrentAsync"/>
+    /// projection and the activity feed card projection
+    /// (<see cref="AgentActivityFeedAssembler"/>, issue-327 T-003 / design
+    /// D2). Internal so the assembler can call through without taking on
+    /// the DB connection itself; the (project, numbers) tuple is the
+    /// natural shared boundary because both projections need exactly the
+    /// same titles for the same set of sessions.
+    /// </summary>
+    internal static async Task<Dictionary<int, string>> LoadIssueTitlesAsync(
         MohistDbContext db,
         string projectId,
         IEnumerable<int> issueNumbers,
@@ -1237,41 +1091,17 @@ public class AgentSessionQuerier : IScopedService
             .ToDictionary(kv => kv.Key, kv => kv.Value.Title);
     }
 
-    private static string IssueTitle(IReadOnlyDictionary<int, string> titles, int issueNumber) =>
+    /// <summary>
+    /// Resolves a single issue title with the "Issue #{number}" fallback.
+    /// Shared between the core querier's <see cref="ListCurrentAsync"/>
+    /// projection and the activity feed card projection
+    /// (<see cref="AgentActivityFeedAssembler"/>), identical fallback
+    /// semantics — keep the two projections byte-aligned (issue-327 T-003).
+    /// </summary>
+    internal static string IssueTitle(IReadOnlyDictionary<int, string> titles, int issueNumber) =>
         titles.TryGetValue(issueNumber, out var title) && !string.IsNullOrWhiteSpace(title)
             ? title
             : $"Issue #{issueNumber}";
-
-    private static ActivityPreviewDto ToPreview(TranscriptEventProjection e)
-    {
-        var text = ExtractPreviewText(e.PayloadJson);
-        var kind = e.Type.Contains("tool", StringComparison.OrdinalIgnoreCase) ? "tool" : "text";
-        return new ActivityPreviewDto(kind, string.IsNullOrWhiteSpace(text) ? e.Type : Truncate(text, 120), e.CreatedAt.ToString("o"));
-    }
-
-    private static string ExtractPreviewText(string json)
-    {
-        try
-        {
-            var payload = JSON.DeserializeElement(json);
-            if (payload.ValueKind == JsonValueKind.String) return payload.GetString() ?? string.Empty;
-            if (payload.ValueKind != JsonValueKind.Object) return string.Empty;
-            foreach (var key in new[] { "title", "toolName", "text", "message", "command" })
-            {
-                if (payload.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String)
-                    return value.GetString() ?? string.Empty;
-            }
-            if (payload.TryGetProperty("content", out var content)
-                && content.ValueKind == JsonValueKind.Object
-                && content.TryGetProperty("text", out var contentText)
-                && contentText.ValueKind == JsonValueKind.String)
-                return contentText.GetString() ?? string.Empty;
-        }
-        catch { }
-        return string.Empty;
-    }
-
-    private static string Truncate(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "\u2026";
 
     private AgentSessionDto ToAgentSessionDto(AgentSessionRecord record)
     {
@@ -1333,12 +1163,12 @@ public class AgentSessionQuerier : IScopedService
     internal static string? Label(AgentSessionRecord record, string key) =>
         record.Label(key) ?? record.Session.Metadata.Label(key);
 
-    private static int IssueNumber(AgentSessionRecord record) =>
+    internal static int IssueNumber(AgentSessionRecord record) =>
         int.TryParse(Label(record, AgentSessionQueryMetadataKeys.IssueNumber), out var issueNumber)
             ? issueNumber
             : 0;
 
-    private static string? Annotation(AgentSession session, string key) => session.Metadata.Annotation(key);
+    internal static string? Annotation(AgentSession session, string key) => session.Metadata.Annotation(key);
 
     private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;
 
@@ -1383,7 +1213,7 @@ public class AgentSessionQuerier : IScopedService
             .ToList();
     }
 
-    private static AgentEventSummaryDto ToEventSummaryDto(AgentSessionTranscriptSummary? s) =>
+    internal static AgentEventSummaryDto ToEventSummaryDto(AgentSessionTranscriptSummary? s) =>
         s is null
             ? new AgentEventSummaryDto(null, null, null, null, null, null)
             : new(
@@ -1438,7 +1268,7 @@ public class AgentSessionQuerier : IScopedService
         return result;
     }
 
-    private static TranscriptEventProjection ToProjection(string sessionId, AgentSessionTranscriptPartRow part) => new()
+    internal static TranscriptEventProjection ToProjection(string sessionId, AgentSessionTranscriptPartRow part) => new()
     {
         Id = part.Id,
         SessionId = sessionId,
@@ -1450,7 +1280,7 @@ public class AgentSessionQuerier : IScopedService
         CreatedAt = part.LastSeenAt,
     };
 
-    private static async Task<IReadOnlyList<AgentSessionRecord>> ReconcileActiveSessionsAsync(
+    internal static async Task<IReadOnlyList<AgentSessionRecord>> ReconcileActiveSessionsAsync(
         MohistDbContext db,
         IReadOnlyList<AgentSessionRecord> sessions,
         CancellationToken ct)

@@ -30,12 +30,12 @@ public static class AgentRoutes
             return ApiResults.Ok(await sessions.ListCurrentAsync(project.Id, status, limit ?? 50));
         });
 
-        group.MapGet("/activity", async (HttpContext context, int? limit, AgentSessionQuerier sessions, IssueQuerier issues, RunnerStatusService runnerStatus, CancellationToken ct) =>
+        group.MapGet("/activity", async (HttpContext context, int? limit, AgentActivityFeedAssembler activityFeed, IssueQuerier issues, RunnerStatusService runnerStatus, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
             var capacity = await runnerStatus.GetCapacityAsync(project.Id);
             var waiting = await BuildWaitingCardsAsync(issues, project.Id, ct);
-            return ApiResults.Ok(await sessions.GetActivityAsync(project.Id, limit, waiting: waiting, capacity: capacity, ct: ct));
+            return ApiResults.Ok(await activityFeed.GetActivityAsync(project.Id, limit, waiting: waiting, capacity: capacity, ct: ct));
         });
 
         group.MapGet("/usage", async (HttpContext context, string? range, AgentSessionQuerier sessions, CancellationToken ct) =>

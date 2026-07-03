@@ -205,9 +205,7 @@ public class GenericAgentSessionSummarySpecs
     private static AgentSessionQuerier CreateQuerier(IDbContextFactory<MohistDbContext> factory)
     {
         var sessionQuery = new AgentSessionQuery(factory, TimeProvider);
-        // GetGenericSessionSummaryAsync does not touch _workflowQuerier,
-        // so passing null is safe for focused unit testing.
-        return new AgentSessionQuerier(factory, null!, sessionQuery, TimeProvider);
+        return new AgentSessionQuerier(factory, sessionQuery, TimeProvider);
     }
 
     private static async Task SeedGenericSessionAsync(
