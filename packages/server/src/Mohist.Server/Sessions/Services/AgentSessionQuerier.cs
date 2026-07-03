@@ -719,27 +719,6 @@ public class AgentSessionQuerier : IScopedService
             ? title
             : $"Issue #{issueNumber}";
 
-    private AgentSessionDto ToAgentSessionDto(AgentSessionRecord record)
-    {
-        var s = record.Session;
-        var usage = AgentSessionJsonHelper.Usage(s);
-        return new AgentSessionDto(
-            s.Id,
-            Label(record, AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
-            IssueNumber(record),
-            Label(record, AgentSessionQueryMetadataKeys.WorkflowRunId) ?? string.Empty,
-            Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? string.Empty,
-            Label(record, AgentSessionQueryMetadataKeys.WorkId),
-            Label(record, AgentSessionQueryMetadataKeys.WorkType),
-            Label(record, AgentSessionQueryMetadataKeys.Stage),
-            Annotation(s, AgentSessionQueryMetadataKeys.Title), s.Runtime.RunnerId, s.Status.AgentRuntimeSessionId,
-            AgentSessionJsonHelper.StatusName(s, Now()), s.Settings.Model, s.Runtime.WorkDir, null, null,
-            s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), null,
-            s.Status.LastDataAt?.ToString("o"), null, null,
-            new AgentEventSummaryDto(null, null, null, null, null, null),
-            ToUsageDto(usage));
-    }
-
     private WorkflowSessionDto ToWorkflowDto(AgentSessionRecord record, TerminalFact? terminalFact = null)
     {
         var s = record.Session;

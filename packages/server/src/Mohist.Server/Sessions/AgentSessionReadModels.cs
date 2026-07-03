@@ -37,32 +37,6 @@ public sealed record AgentEventSummaryDto(
     int? ToolCallCount,
     int? ToolErrorCount);
 
-public sealed record AgentSessionDto(
-    string Id,
-    string ProjectId,
-    int IssueNumber,
-    string WorkflowRunId,
-    string SessionName,
-    string? WorkId,
-    string? WorkType,
-    string? Stage,
-    string? Title,
-    string? RunnerId,
-    string? AgentSessionId,
-    [property: JsonPropertyName("status")] string Status,
-    string? Model,
-    string? WorkDir,
-    string? ChangeDir,
-    int? ProcessPid,
-    string CreatedAt,
-    string? StartedAt,
-    string? CompletedAt,
-    string? LastDataAt,
-    string? FailureReason,
-    int? ExitCode,
-    [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
-    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
-
 public sealed record AgentSessionMetadataDto(
     string Id,
     string SessionName,

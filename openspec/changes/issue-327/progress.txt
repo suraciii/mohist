@@ -47,10 +47,10 @@ Acceptance verified:
 ## Stage status (per design migration plan)
 
 - [x] T-001 — event-naming unification (lowest blast radius, do first)
-- [x] T-002 — collapse transcript loading + context-ref helpers
+- [x] T-002 — collapse transcript loading and context-ref helpers
 - [x] T-003 — extract `AgentActivityFeedAssembler`
 - [x] T-004 — extract `AgentUsageReporter`
-- [ ] T-005 — delete dead `ToAgentSessionDto` / `AgentSessionDto`
+- [x] T-005 — delete dead `ToAgentSessionDto` / `AgentSessionDto`
 
 Underlying assumptions: per AGENTS.md no-version-compat stance, persisted `session_closed` rows from any prior dev run lose terminal-state resolution post-T-001. Default is no backfill; documented in the change's design Risks section.
 
@@ -100,3 +100,15 @@ Acceptance verified:
 - The reporter is self-contained — no dependency on `AgentSessionQuerier`. It only shares the static `Labels` helper to build the `(projectId)` label dictionary the same way the core querier does. Promoting `Labels` to `internal static` is the lightest shared seam; making it `public static` would expose an implementation helper to the world unnecessarily.
 - `AgentUsageReporterSpecs` doubles as a refactor-regression canary: the 6 windowed specs were originally authored against `AgentSessionQuerier.GetCostWindowedAsync` and now drive `AgentUsageReporter.GetCostWindowedAsync`. Their continued green status across the same seeded data + pinned `FakeTimeProvider` (2026-06-30) is the strongest byte-for-byte evidence the move was lossless. The 3 new rollup specs + 3 new timeseries specs round out the coverage so the reporter's other two public methods aren't merely covered through their JSON API specs.
 - The renumbered `MigratedServicesRegistrationSpecs` order matters only for human readability — the underlying test data is positional, but adjacent services in the same domain stay adjacent.
+
+## T-005 — Delete dead `ToAgentSessionDto` / `AgentSessionDto`
+
+Changes:
+- `packages/server/src/Mohist.Server/Sessions/AgentSessionReadModels.cs:40-64` — deleted the 25-line `public sealed record AgentSessionDto(...)` DTO definition (no consumers anywhere).
+- `packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuerier.cs:722-741` — deleted the 20-line `private AgentSessionDto ToAgentSessionDto(AgentSessionRecord record)` method (zero call sites after the T-003 activity-feed relocation); adjacent `ToWorkflowDto` and `ToSummaryDto` untouched.
+
+Acceptance verified:
+- `grep -rn '\bAgentSessionDto\b' packages/` → 0 hits (excludes the unrelated `RunnerAgentSessionDto` test record via word boundary). `grep -rn 'AgentSessionDto' packages/` → only the 4 unrelated `RunnerAgentSessionDto` lines in `WorkflowSessionSpecs.cs:99,107,114,331`.
+- `grep -rn 'ToAgentSessionDto' packages/` → 0 hits.
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors.
+- `dotnet test Mohist.sln`: 3612 passed, 0 failed, 13 pre-existing skipped (identical to T-004 baseline; no Session regression). `npm test`: 805 runner tests pass.
