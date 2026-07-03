@@ -10,90 +10,82 @@
 
 - [ID: item-1]
   Severity: blocking
-  Scope: packages/runner/src/runtime/task-log.ts
-  Evidence: The credential masker preserves the user-info username for `scheme://user:password@host` URLs (`packages/runner/src/runtime/task-log.ts:122-127`), and the tests explicitly lock in preserving `alice` / `ci` (`packages/runner/tests/task-log.spec.ts:15-27`, `packages/runner/tests/task-log.spec.ts:206-215`). A common token remote shape such as `https://ghp_abcdefghijklmnopqrstuvwxyz1234:x-oauth-basic@github.com/org/repo.git` therefore matches the first pattern and is persisted as `https://ghp_abcdefghijklmnopqrstuvwxyz1234:***@github.com/...`, leaking the token before buffering/upload/display. This violates the issue and spec requirement that git remote credentials are masked before the line reaches the buffer (`openspec/changes/issue-336/specs/ops-task-log-capture/spec.md:45-53`). [disallowed:security posture change]
-  SuggestedAction: Mask the full user-info credential segment, or at minimum detect token-like usernames before preserving them. Add regression cases for token-as-username forms including `https://<token>:x-oauth-basic@...` and `https://<token>:@...`.
-  Verification: Add the regression tests above, then run `npm run typecheck -w packages/runner` and `npm test -w packages/runner`.
+  Scope: packages/runner/src/runtime/workspace.ts, packages/runner/src/runtime/executor.ts
+  Evidence: Workspace clone failures still copy the raw repository URL into the reported task message. `cloneFresh` invokes `git clone` with `gitUrl` and throws `git clone failed for ${gitUrl}: ...` on failure (`packages/runner/src/runtime/workspace.ts:195-203`). `workspaceSetupFailure` then copies that error message into `WorkItemResult.message` (`packages/runner/src/runtime/executor.ts:257-264`), and `ServerConnection.report` sends `message` unchanged (`packages/runner/src/server/connection.ts:59-81`). A credentialed remote such as `https://ghp_secret:x-oauth-basic@github.com/org/repo.git` can therefore leak through the task verdict even though task-log lines themselves are masked. This violates the issue's sensitive-output requirement because the Web still displays the unmasked failure message. [disallowed:security posture change]
+  SuggestedAction: Reuse the task-log credential masker, or equivalent centralized sanitizer, for workspace setup error messages before they become report messages. Add a failed clone/workspace-setup test with a credentialed git URL and assert neither uploaded log lines nor reported `message` contain the token.
+  Verification: Run `npm run typecheck -w packages/runner` and `npm test -w packages/runner` after adding the regression.
   Status: open
 
 - [ID: item-2]
-  Severity: blocking
-  Scope: packages/runner/src/runtime/host.ts
-  Evidence: `flushTaskLog` awaits `connection.uploadTaskLog(...)` with the main work signal (`packages/runner/src/runtime/host.ts:338-355`) and the normal path awaits that flush before calling `connection.report` (`packages/runner/src/runtime/host.ts:395-404`). If the task-log endpoint is slow or hangs, the verdict report is delayed indefinitely; if the shared signal aborts while upload is pending, the report path can be skipped. That conflicts with the design requirement that log upload is best-effort and must never block or fail the report (`openspec/changes/issue-336/design.md:167-170`). The current tests cover success and rejected upload (`packages/runner/tests/runner-host-task-log.spec.ts:142-211`) but not a pending upload.
-  SuggestedAction: Bound the task-log upload with a short independent timeout/signal or otherwise ensure the verdict report is attempted even when upload never resolves. Add a host test where `uploadTaskLog` returns a never-resolving promise and assert `report` is still called promptly.
-  Verification: Run the new pending-upload host test plus `npm test -w packages/runner`.
+  Severity: warning
+  Scope: packages/runner/src/runtime/worktree-enforcement.ts
+  Evidence: The cleanup stale-index-lock recovery path still runs an ops command outside the task-log sink. `recoverStaleIndexLock` captures the `git rev-parse --git-path index.lock` probe through the cleanup sink (`packages/runner/src/runtime/worktree-enforcement.ts:77-80`), but then calls `lockHolderProbe(workDir, lockPath, signal)` without passing the logger (`packages/runner/src/runtime/worktree-enforcement.ts:112`). The default probe runs `runCommand("lsof", [lockPath], ...)` without `onLine` (`packages/runner/src/runtime/worktree-enforcement.ts:131-134`). Any stdout/stderr from that cleanup command is not recorded with source `cleanup`, violating the single-sink and cleanup-source acceptance criteria. [disallowed:product behavior change]
+  SuggestedAction: Thread the cleanup sink into `LockHolderProbe`/`defaultLockHolderProbe` and pass `onLine: line => log.write("cleanup", line)` for the `lsof` command. Add a stale-lock recovery test that exercises the default probe via a fake command runner and asserts the `lsof` output is captured as `cleanup`.
+  Verification: Run the new stale-lock test plus `npm test -w packages/runner`.
   Status: open
 
 - [ID: item-3]
-  Severity: blocking
-  Scope: packages/server/src/Mohist.Server/Api/TaskLogRoutes.cs, packages/server/src/Mohist.Server/Infrastructure/Data/Runner/TaskLogStore.cs
-  Evidence: The task-log upload routes accept `workflowRunId` / `agentJobId` and `workId` directly from the URL (`packages/server/src/Mohist.Server/Api/TaskLogRoutes.cs:34-52`) and immediately persist them (`packages/server/src/Mohist.Server/Api/TaskLogRoutes.cs:86-90`). The store deletes existing entries for the tuple before inserting the new batch (`packages/server/src/Mohist.Server/Infrastructure/Data/Runner/TaskLogStore.cs:54-63`, `packages/server/src/Mohist.Server/Infrastructure/Data/Runner/TaskLogStore.cs:81-96`). The route specs even prove arbitrary ids are accepted (`packages/server/tests/Mohist.Server.Tests/Specs/Api/TaskLogRouteSpecs.cs:135-169`). By contrast, the adjacent artifact upload path resolves active work context and returns not-found when no active work exists (`packages/server/src/Mohist.Server/Workflow/Services/Artifacts/WorkflowArtifactUploadService.cs:115-117`, `packages/server/src/Mohist.Server/Api/WorkflowArtifactUploadRoutes.cs:137-140`). Any caller that reaches the internal endpoint can forge or erase review evidence for guessed owner/work ids. [disallowed:data safety/security posture change]
-  SuggestedAction: Validate that the owner/work tuple corresponds to an active or otherwise authorized runner work item before writing. Preserve the no-status-adjudication invariant by validating against the runner work ledger or an equivalent runner-side authorization boundary, not by adding logs to `WorkResult`.
-  Verification: Add negative API tests for unknown owner/work, cross-owner overwrite, and second-caller replacement; run `dotnet test Mohist.sln -p:SkipWebBuild=true`.
+  Severity: warning
+  Scope: packages/runner/src/runtime/host.ts, packages/server/src/Mohist.Server/Runner/Services/TaskLogService.cs
+  Evidence: Legitimate terminal batches can be lost by timing rather than by real upload failure. The runner races `uploadTaskLog` against a fixed 250 ms timeout and swallows timeout failures (`packages/runner/src/runtime/host.ts:348-371`, `packages/runner/src/runtime/host.ts:459`). The server then only accepts uploads while the runner-work row is still `Outstanding` (`packages/server/src/Mohist.Server/Runner/Services/TaskLogService.cs:48-50`). A near-capacity batch can be valid by the implemented caps (`MAX_TASK_LOG_LINES = 5000` in `packages/runner/src/runtime/task-log.ts:32`; server text cap in `packages/server/src/Mohist.Server/Infrastructure/TaskLogDtos.cs:29-35`) but still be dropped if upload/DB work takes longer than 250 ms, and it cannot be retried after report marks the work terminal. This undermines the Phase 1 expectation that logs are available after task completion. [disallowed:product behavior and data-safety trade-off]
+  SuggestedAction: Decouple report progress from log upload without imposing a tiny fixed deadline on normal uploads, or allow authenticated same-runner terminal uploads for the just-finished work item. Add a host/service integration-style test where a valid large batch resolves after more than 250 ms and verify the intended durable behavior.
+  Verification: Run the new delayed/large-batch tests plus `npm test -w packages/runner` and `dotnet test Mohist.sln -p:SkipWebBuild=true`.
   Status: open
 
 - [ID: item-4]
   Severity: warning
-  Scope: packages/server/src/Mohist.Server/Runner/Services/TaskLogService.cs, packages/server/src/Mohist.Server/Infrastructure/Data/Runner/TaskLogStore.cs
-  Evidence: Batch count and total text caps are enforced only in the API route (`packages/server/src/Mohist.Server/Api/TaskLogRoutes.cs:81-128`). `TaskLogService.AppendAsync` delegates directly to the store (`packages/server/src/Mohist.Server/Runner/Services/TaskLogService.cs:32-39`), while `TaskLogStore.ValidateEntries` checks per-entry shape and per-line length but not `MaxEntries` or `MaxTotalTextLength` (`packages/server/src/Mohist.Server/Infrastructure/Data/Runner/TaskLogStore.cs:169-190`). Because both service and store are registered in DI (`packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs:130-133`), an internal caller can bypass the same data-safety caps that protect the HTTP surface. [disallowed:data safety behavior change]
-  SuggestedAction: Move authoritative batch caps into `TaskLogService` or `TaskLogStore`, leaving route validation as a precheck. Add service/store tests for `MaxEntries + 1` and total text over `MaxTotalTextLength`.
-  Verification: Run the new store/service tests plus `dotnet test Mohist.sln -p:SkipWebBuild=true`.
+  Scope: packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx
+  Evidence: The Web viewer ignores cursor pagination. It always calls `useIssueWorkflowTaskLog(issueNumber, taskId, { limit: 5000 }, ...)` (`packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:22-24`) and renders only `data.lines` (`packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:32-69`). The API contract explicitly returns `nextCursor`, and the persistence spec requires clients to be able to fetch following pages when a page is not final (`openspec/changes/issue-336/specs/task-log-persistence/spec.md:43-57`). The server also allows a page max of 5000 while upload caps are higher (`packages/server/src/Mohist.Server/Infrastructure/Data/Runner/TaskLogStore.cs:162-168`, `packages/server/src/Mohist.Server/Infrastructure/TaskLogDtos.cs:29-35`), so a valid non-null `nextCursor` response silently hides remaining log lines.
+  SuggestedAction: Either fetch all pages for the retained log, or expose an explicit load-more control that follows `nextCursor`. Add a Web test where the first response has `nextCursor` set and assert additional lines can be reached.
+  Verification: Run `npm run typecheck -w packages/web` and `npm run test:run -w packages/web`.
   Status: open
 
 - [ID: item-5]
-  Severity: test-gap
-  Scope: packages/runner/tests/runner-host-task-log.spec.ts
-  Evidence: The suite verifies successful upload-before-report and rejected upload swallowed (`packages/runner/tests/runner-host-task-log.spec.ts:142-211`), but it does not test the critical best-effort case where `uploadTaskLog` never resolves. This missing test allowed item-2 to ship despite the comment claiming the report is never blocked (`packages/runner/src/runtime/host.ts:328-355`).
-  SuggestedAction: Add a pending-upload test that fails unless `report` is attempted without waiting forever for task-log upload.
-  Verification: Run `npm test -w packages/runner -- tests/runner-host-task-log.spec.ts`.
+  Severity: minor
+  Scope: packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.tsx, packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx
+  Evidence: The expanded log UI is not keyboard/accessibility complete. The row button toggles expansion but does not expose `aria-expanded` or `aria-controls` (`packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.tsx:67-95`). The scrollable log region uses `overflow-y-auto` but has no `tabIndex`, role, or accessible name (`packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:48-52`). Keyboard and assistive-tech users may not be able to discover or focus the long log region reliably.
+  SuggestedAction: Add an id for the expanded content, wire `aria-expanded`/`aria-controls` on the button, and make the log region focusable with an accessible label such as `role="log"` or `aria-label="Execution log"` plus `tabIndex={0}`. Add Testing Library assertions for the expanded state and focusable log region.
+  Verification: Run `npm run test:run -w packages/web -- TaskProgressPanel` and the full Web test suite.
   Status: open
 
 - [ID: item-6]
   Severity: test-gap
-  Scope: packages/runner/tests/executor-task-log.spec.ts
-  Evidence: The executor task-log tests cover action writes, `core/process`, and `core/script` (`packages/runner/tests/executor-task-log.spec.ts:64-218`), but they do not directly exercise workspace-prep, branch-check, or cleanup command paths. The implementation wires these sources in `WorkspaceManager`, branch stability, and clean-worktree enforcement (`packages/runner/src/runtime/workspace.ts:16-20`, `packages/runner/src/runtime/branch-stability.ts:11-15`, `packages/runner/src/runtime/worktree-enforcement.ts:22-26`), which are explicit acceptance criteria, but a source-label regression there would not fail the current task-log test surface.
-  SuggestedAction: Add focused tests that produce captured lines from workspace preparation, branch stability, and cleanup and assert `workspace-prep`, `branch-check`, and `cleanup` source labels.
-  Verification: Run the new tests plus `npm test -w packages/runner`.
+  Scope: packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx, packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.test.tsx
+  Evidence: Timestamp rendering and its test are timezone-dependent. `formatTimestamp` parses an ISO timestamp and formats with local-time getters (`getHours`, `getMinutes`, etc.) (`packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:12-19`). The test feeds `2026-07-03T08:00:00.000Z` (`packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.test.tsx:94-101`, `packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.test.tsx:138-158`) and expects `08:00:00.000`, which only holds when the test environment timezone is UTC.
+  SuggestedAction: Format task-log timestamps explicitly in UTC, or compute the expected local display from the same formatter in the test. Add a targeted run under a non-UTC `TZ` to prove the test is deterministic.
+  Verification: Run `TZ=Asia/Shanghai npm run test:run -w packages/web -- TaskProgressPanel` and the normal Web suite.
   Status: open
 
 - [ID: item-7]
-  Severity: test-gap
-  Scope: packages/server/tests/Mohist.Server.Tests/Specs/Api/TaskLogRouteSpecs.cs
-  Evidence: `UploadEndpoint_DoesNotInvokeAnyGrain` uploads to a non-existent workflow run and only asserts that no `WorkflowRuns` row was created (`packages/server/tests/Mohist.Server.Tests/Specs/Api/TaskLogRouteSpecs.cs:270-297`). That would not catch a future call to an existing workflow grain or report path. The independence requirement is central to the issue (`openspec/changes/issue-336/specs/task-log-persistence/spec.md:1-16`).
-  SuggestedAction: Add a dependency-boundary test or spy/fake that fails on `WorkflowGrain` / `RunnerGrain.ReportWorkflowResultAsync` involvement, or structure the route/service dependencies so this cannot compile.
-  Verification: Run `dotnet test Mohist.sln -p:SkipWebBuild=true`.
+  Severity: warning
+  Scope: packages/server/src/Mohist.Server/Api/TaskLogRoutes.cs
+  Evidence: Upload size limits are enforced only after the entire JSON body is deserialized. `HandleUploadAsync` materializes `TaskLogUploadRequest` from `request.Body` first (`packages/server/src/Mohist.Server/Api/TaskLogRoutes.cs:66-73`), and only then checks entry count and total text length (`packages/server/src/Mohist.Server/Api/TaskLogRoutes.cs:82-89`, `packages/server/src/Mohist.Server/Api/TaskLogRoutes.cs:119-151`). The limit constants cap entries/text after allocation (`packages/server/src/Mohist.Server/Infrastructure/TaskLogDtos.cs:29-35`), but they do not prevent an oversized request body from consuming memory before rejection. [disallowed:data-safety behavior change]
+  SuggestedAction: Add request body size enforcement for the upload endpoint, for example via endpoint/request-size metadata or an early `Content-Length` guard plus bounded streaming parsing. Add API tests for bodies over the configured byte budget.
+  Verification: Run the new API tests plus `dotnet test Mohist.sln -p:SkipWebBuild=true`.
   Status: open
 
 - [ID: item-8]
   Severity: test-gap
-  Scope: packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.test.tsx
-  Evidence: The web requirement says each rendered line displays timestamp, source, and text (`openspec/changes/issue-336/specs/task-log-viewer/spec.md:11-15`). The component renders a formatted timestamp (`packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:12-20`, `packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:63-67`), but the test named for source/timestamp/text only asserts source labels and text, not the timestamp (`packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.test.tsx:138-163`).
-  SuggestedAction: Assert the rendered timestamp, for example `08:00:00.000`, in the line-rendering test.
-  Verification: Run `npm run test:run -w packages/web -- TaskProgressPanel` and `npm run test:run -w packages/web`.
+  Scope: packages/runner/tests/git-sink.spec.ts, packages/runner/tests/process.spec.ts
+  Evidence: New runner tests use real external processes in the default test suite, violating `design/testing.md`'s hard rule that tests must not touch real processes or real git/shell binaries (`design/testing.md:42-63`, `design/testing.md:144-148`). `git-sink.spec.ts` invokes real `git --version`, `git help status`, and a bogus git command (`packages/runner/tests/git-sink.spec.ts:6-22`, `packages/runner/tests/git-sink.spec.ts:24-37`, `packages/runner/tests/git-sink.spec.ts:39-68`). `process.spec.ts` spawns real Node child processes through `runCommand(process.execPath, ...)` (`packages/runner/tests/process.spec.ts:4-12`, `packages/runner/tests/process.spec.ts:80-115`, `packages/runner/tests/process.spec.ts:140-151`). These tests can fail on hosts without git/node in PATH or under process scheduling pressure, and they make the task-log coverage less deterministic.
+  SuggestedAction: Replace real git/process usage with injected fakes or a mocked `child_process.spawn` harness that can deterministically emit stdout/stderr chunks, close events, and abort behavior.
+  Verification: Run `npm test -w packages/runner` in an environment with no git binary available and with fake timers enabled for abort/timing cases.
+  Status: open
+
+- [ID: item-9]
+  Severity: test-gap
+  Scope: packages/runner test suite
+  Evidence: The current snapshot did not satisfy the issue acceptance criterion that runner tests pass. `npm test -w packages/runner` failed with `tests/issue-112-regression.spec.ts > AgentTaskLeavesChanges_CleanupExhausts_TaskFailsBeforeDelivery` timing out after 5000 ms. A targeted rerun of `npm test -w packages/runner -- tests/issue-112-regression.spec.ts` passed, which points to a suite-level flake/load-sensitive timeout rather than a deterministic single-test failure, but the default runner suite is still not reliably green in this candidate.
+  SuggestedAction: De-flake the regression by removing real-time/process sensitivity or increasing determinism with explicit fake signals. Also audit whether the new real-process tests in item-8 increase enough parallel load to trigger this timeout.
+  Verification: Run `npm test -w packages/runner` repeatedly from a clean process; the command must pass without relying on isolated reruns.
   Status: open
 
 ## Follow-up Items
 
-- [ID: item-9]
-  Severity: follow-up
-  Scope: packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx
-  Evidence: `TaskLogPanel` auto-scrolls to the bottom when the number of lines changes (`packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:26-30`), but the test only checks that the panel is scrollable (`packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.test.tsx:165-185`). Auto-scroll is useful for tail-retained failure context, but it is extra behavior beyond the explicit scrollable-panel acceptance criterion.
-  SuggestedAction: Add a focused jsdom test that mocks `scrollHeight` and asserts `scrollTop` after lines render if auto-tail behavior is intended to be stable.
-  Status: follow-up
+- None.
 
 ## Pre-existing or Out-of-scope Items
 
-- None.
-
-## Verification Summary
-
-- `mo issue show 336 --project-id proj_f6c141d63b6243bfbb481737b2243b87` read and checked against the candidate.
-- Reviewed proposal, design, tasks, specs, self-review, and all files changed relative to `origin/master...HEAD`.
-- `npm run typecheck -w packages/runner` passed.
-- `npm test -w packages/runner` passed: 63 files, 869 tests.
-- `dotnet test Mohist.sln -p:SkipWebBuild=true` passed: 3647 passed, 13 skipped.
-- `npm run typecheck -w packages/web` passed.
-- `npm run test:run -w packages/web` passed: 259 files, 4076 passed, 1 skipped.
-- An earlier all-in-one `npm test` attempt hit the 120s tool timeout while running combined verification; the constituent server, runner, and web commands passed when rerun separately.
+- None identified separately from the current candidate. The runner-suite timeout may be pre-existing, but it occurred under the required verification command for this snapshot and therefore remains listed as a blocking verification item.
 
 <promise>FAIL</promise>
