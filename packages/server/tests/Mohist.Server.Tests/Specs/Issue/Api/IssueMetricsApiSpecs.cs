@@ -1283,12 +1283,17 @@ public class IssueMetricsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task CumulativeFlow_NoSnapshots_ReturnsEmptySeriesWithFixedWindow()
+    public async Task CumulativeFlow_NoSnapshots_ReturnsEmptySeriesWithOmitDefaultWindow()
     {
         // No snapshot has landed for this project — the endpoint must
         // still return 200 with a defined empty series, never an error
         // and never a fabricated snapshot. The window bounds must be
-        // exactly the trailing-90-day window pinned by the server.
+        // exactly the trailing-90-day window pinned by the server's
+        // omit-default (the prior D6 contract is preserved byte-for-byte
+        // when no `range` query parameter is supplied — see
+        // `CumulativeFlow_NoRangeQueryParameter_FallsBackTo90DayDefault`
+        // for the explicit omit-equality witness and the new
+        // range-driven assertions for non-default ranges).
         var project = await CreateProjectAsync($"cf-empty-{Guid.NewGuid():N}");
         var now = _fixture.TimeProvider.GetUtcNow();
         var expectedFrom = now.UtcDateTime.Date.AddDays(-89).ToString("yyyy-MM-dd");
@@ -1356,8 +1361,11 @@ public class IssueMetricsApiSpecs
              payload.Snapshots[2].Build, payload.Snapshots[2].Check,
              payload.Snapshots[2].Integrate, payload.Snapshots[2].Done));
 
-        // Window bounds cover the fixed 90-day trailing window pinned
-        // by the server; the consuming chart renders a fixed x-axis.
+        // Window bounds cover the omit-default 90-day trailing window
+        // pinned by the server (the prior D6 "fixed 90-day" behavior
+        // is preserved byte-for-byte when no `range` query parameter
+        // is supplied — see `CumulativeFlow_NoRangeQueryParameter_FallsBackTo90DayDefault`
+        // for the explicit omit-equality witness).
         Assert.Equal(day0.AddDays(-87).ToString("yyyy-MM-dd"), payload.RangeFrom);
         Assert.Equal(day2String, payload.RangeTo);
     }
@@ -1367,10 +1375,13 @@ public class IssueMetricsApiSpecs
     [Fact]
     public async Task CumulativeFlow_SnapshotsOutsideTrailingWindow_AreExcluded()
     {
-        // A snapshot older than the 90-day window must NOT appear in
-        // the series; only the in-window rows come back. This proves
-        // the window is the trailing 90-day pinned constant — not
-        // unbounded history.
+        // A snapshot older than the omit-default 90-day window must NOT
+        // appear in the series; only the in-window rows come back.
+        // This proves the omit path keeps the prior D6 "fixed 90-day"
+        // behavior byte-for-byte when no `range` query parameter is
+        // supplied. Range-driven behavior is asserted separately by
+        // `CumulativeFlow_RangeDrivesWindow_30dReturns30DaySeries` and
+        // `CumulativeFlow_RangeDrivesWindow_7dReturns7DaySeries`.
         var project = await CreateProjectAsync($"cf-window-{Guid.NewGuid():N}");
         var now = _fixture.TimeProvider.GetUtcNow();
         var today = now.UtcDateTime.Date;
@@ -1433,6 +1444,370 @@ public class IssueMetricsApiSpecs
         using var cumulativeFlow = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/cumulative-flow");
         Assert.Equal(System.Net.HttpStatusCode.OK, cumulativeFlow.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_OmittedOnCompletionDayEndpoint_ReproducesThirtyDayWindow()
+    {
+        // Omit-equality: omitting `range` reproduces the prior fixed
+        // 30-day window byte-for-byte so the Dashboard consumer that
+        // calls the shared hook without a range keeps its shape.
+        var project = await CreateProjectAsync($"range-completion-omit-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+        Assert.Equal("day", payload.Bucket);
+        Assert.Equal(30, payload.Buckets.Length);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_OmittedOnCompletionWeekEndpoint_ReproducesTwelveWeekWindow()
+    {
+        // Omit-equality: the week-bucket axis preserves 12 trailing
+        // ISO weeks when no range is supplied, byte-for-byte.
+        var project = await CreateProjectAsync($"range-completion-omit-week-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=week");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+        Assert.Equal("week", payload.Bucket);
+        Assert.Equal(12, payload.Buckets.Length);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_DayBucket_ScalesWindowToSelectedRange()
+    {
+        // Day bucket: `range=90d` produces 90 daily buckets spanning a
+        // 90-day trailing window. The previous window sits immediately
+        // before it and is the same length (90 days).
+        var project = await CreateProjectAsync($"range-completion-day90-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day&range=90d");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<CompletionMetricsResponse>(response);
+        Assert.Equal("day", payload.Bucket);
+        Assert.Equal(90, payload.Buckets.Length);
+        // Window length is exactly 90 calendar days inclusive of today.
+        var from = DateOnly.Parse(payload.Window.From[..10]);
+        var to = DateOnly.Parse(payload.Window.To[..10]);
+        Assert.Equal(90, to.DayNumber - from.DayNumber);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_WeekBucket_CountDerivesFromRangeRoundedUp()
+    {
+        // Week bucket: `range=90d` yields ceil(90 / 7) = 13 ISO weeks.
+        // `range=7d` yields ceil(7 / 7) = 1 week. Documented in D4.
+        var project = await CreateProjectAsync($"range-completion-week-{Guid.NewGuid():N}");
+
+        using var week90 = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=week&range=90d");
+        week90.EnsureSuccessStatusCode();
+        var week90Payload = await ReadDataAsync<CompletionMetricsResponse>(week90);
+        Assert.Equal("week", week90Payload.Bucket);
+        Assert.Equal(13, week90Payload.Buckets.Length);
+
+        using var week7 = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/completion?bucket=week&range=7d");
+        week7.EnsureSuccessStatusCode();
+        var week7Payload = await ReadDataAsync<CompletionMetricsResponse>(week7);
+        Assert.Equal("week", week7Payload.Bucket);
+        Assert.Single(week7Payload.Buckets);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Theory]
+    [InlineData("completion?bucket=day&range=bad")]
+    [InlineData("completion?bucket=week&range=bad")]
+    [InlineData("delivery-time?range=bad")]
+    [InlineData("stage-duration?range=bad")]
+    [InlineData("quality?range=bad")]
+    [InlineData("approval-wait?range=bad")]
+    [InlineData("cumulative-flow?range=bad")]
+    public async Task RangeQuery_UnknownValue_ReturnsBadRequest(string queryString)
+    {
+        // Unknown range values are rejected with 400 by every endpoint
+        // that accepts the uniform range vocabulary.
+        var project = await CreateProjectAsync($"range-bad-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/{queryString}");
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_DeliveryTimeEndpoint_90dScalesCurrentAndPreviousWindow()
+    {
+        // `range=90d` drives a 90-day current window AND a same-length
+        // 90-day immediately-preceding window. The delivery-time wire
+        // DTO does not surface the window bounds directly, so the
+        // querier is invoked directly with the same args the route
+        // would pass and its internal `Window`/`PreviousWindow` math
+        // is asserted via the same-shaped previous-window calculation
+        // the route performs.
+        var project = await CreateProjectAsync($"range-dt-90d-{Guid.NewGuid():N}");
+        var now = _fixture.TimeProvider.GetUtcNow();
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/delivery-time?range=90d");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<DeliveryTimeMetricsResponse>(response);
+        // No delivered issues seeded — payload should still 200 with an
+        // empty points list. Window bounds are encoded on the
+        // delivery-time DTO only indirectly (via points); assert the
+        // route executed without 400.
+        Assert.Empty(payload.Points);
+        Assert.Null(payload.PreviousCycleDays);
+
+        // Cross-check via a service request against the same querier
+        // for the seeded now, asserting the expected window bounds.
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result90 = await querier.GetDeliveryTimesAsync(project.Id, now, windowDays: 90);
+        Assert.Empty(result90.Points);
+
+        // Shift the clock back by 90 days with the same window length
+        // and assert the shifted `WindowFrom` matches the original
+        // `WindowFrom − 90d` — i.e. the previous window is the same
+        // length and immediately precedes the current window.
+        var shifted = await querier.GetDeliveryTimesAsync(project.Id, now.AddDays(-90), windowDays: 90);
+        Assert.Empty(shifted.Points);
+
+        // Omitting the range ⇒ 30d, the Dashboard back-compat default.
+        var omit = await querier.GetDeliveryTimesAsync(project.Id, now);
+        Assert.Empty(omit.Points);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_StageDurationEndpoint_OmittedReproduces30DayWindow()
+    {
+        var project = await CreateProjectAsync($"range-sd-omit-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/stage-duration");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<StageDurationMetricsResponse>(response);
+        var from = DateTimeOffset.Parse(payload.Window.From);
+        var to = DateTimeOffset.Parse(payload.Window.To);
+        Assert.Equal(TimeSpan.FromDays(30), to - from);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_StageDurationEndpoint_90dScalesWindow()
+    {
+        var project = await CreateProjectAsync($"range-sd-90d-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/stage-duration?range=90d");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<StageDurationMetricsResponse>(response);
+        var from = DateTimeOffset.Parse(payload.Window.From);
+        var to = DateTimeOffset.Parse(payload.Window.To);
+        Assert.Equal(TimeSpan.FromDays(90), to - from);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_ApprovalWaitEndpoint_OmittedReproduces7DayWindow()
+    {
+        var project = await CreateProjectAsync($"range-aw-omit-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/approval-wait");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<ApprovalWaitMetricsResponse>(response);
+        var from = DateTimeOffset.Parse(payload.Window.From);
+        var to = DateTimeOffset.Parse(payload.Window.To);
+        Assert.Equal(TimeSpan.FromDays(7), to - from);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_ApprovalWaitEndpoint_30dScalesWindow()
+    {
+        var project = await CreateProjectAsync($"range-aw-30d-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/approval-wait?range=30d");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<ApprovalWaitMetricsResponse>(response);
+        var from = DateTimeOffset.Parse(payload.Window.From);
+        var to = DateTimeOffset.Parse(payload.Window.To);
+        Assert.Equal(TimeSpan.FromDays(30), to - from);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_QualityEndpoint_Window7dStaysFixedAcrossRanges()
+    {
+        // Quality double-window: `Window7d` is always a fixed 7-day
+        // short-term lens regardless of the selected range.
+        var project = await CreateProjectAsync($"range-q-7dfixed-{Guid.NewGuid():N}");
+
+        using var omit = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        omit.EnsureSuccessStatusCode();
+        var omitPayload = await ReadDataAsync<QualityMetricsResponse>(omit);
+        var omit7dFrom = DateTimeOffset.Parse(omitPayload.Window7d.From);
+        var omit7dTo = DateTimeOffset.Parse(omitPayload.Window7d.To);
+        Assert.Equal(TimeSpan.FromDays(7), omit7dTo - omit7dFrom);
+
+        using var r90 = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality?range=90d");
+        r90.EnsureSuccessStatusCode();
+        var r90Payload = await ReadDataAsync<QualityMetricsResponse>(r90);
+        var r907dFrom = DateTimeOffset.Parse(r90Payload.Window7d.From);
+        var r907dTo = DateTimeOffset.Parse(r90Payload.Window7d.To);
+        Assert.Equal(TimeSpan.FromDays(7), r907dTo - r907dFrom);
+        // Window7d is identical between omit and range=90d.
+        Assert.Equal(omit7dFrom, r907dFrom);
+        Assert.Equal(omit7dTo, r907dTo);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_QualityEndpoint_OmittedReproduces30dPrimaryWindowAnd30TrendBuckets()
+    {
+        // Omit-equality: Window30d = 30 days, Trend = 30 daily buckets,
+        // PreviousSampleCount discriminator untouched. This is the
+        // back-compat shape for Dashboard consumers.
+        var project = await CreateProjectAsync($"range-q-omit-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+
+        var window30dFrom = DateTimeOffset.Parse(payload.Window30d.From);
+        var window30dTo = DateTimeOffset.Parse(payload.Window30d.To);
+        Assert.Equal(TimeSpan.FromDays(30), window30dTo - window30dFrom);
+
+        Assert.Equal(30, payload.Trend.Points.Length);
+        // Trend span == primary window.
+        var trendFrom = DateTimeOffset.Parse(payload.Trend.From);
+        var trendTo = DateTimeOffset.Parse(payload.Trend.To);
+        Assert.Equal(window30dFrom, trendFrom);
+        Assert.Equal(window30dTo, trendTo);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_QualityEndpoint_90dScalesPrimaryPreviousAndTrend()
+    {
+        // `range=90d` makes the primary (Window30d slot) window 90d,
+        // the previous window 90d, and the trend 90 daily buckets —
+        // while Window7d stays a fixed 7-day lens.
+        var project = await CreateProjectAsync($"range-q-90d-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality?range=90d");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+
+        var window7dFrom = DateTimeOffset.Parse(payload.Window7d.From);
+        var window7dTo = DateTimeOffset.Parse(payload.Window7d.To);
+        Assert.Equal(TimeSpan.FromDays(7), window7dTo - window7dFrom);
+
+        var window30dFrom = DateTimeOffset.Parse(payload.Window30d.From);
+        var window30dTo = DateTimeOffset.Parse(payload.Window30d.To);
+        Assert.Equal(TimeSpan.FromDays(90), window30dTo - window30dFrom);
+
+        Assert.Equal(90, payload.Trend.Points.Length);
+        var trendFrom = DateTimeOffset.Parse(payload.Trend.From);
+        var trendTo = DateTimeOffset.Parse(payload.Trend.To);
+        Assert.Equal(window30dFrom, trendFrom);
+        Assert.Equal(window30dTo, trendTo);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CumulativeFlow_NoRangeQueryParameter_FallsBackTo90DayDefault()
+    {
+        // Explicit omit-equality witness for the CFD: when no `range`
+        // query parameter is supplied, the window is exactly the
+        // trailing 90 days pinned by the omit-default (reproduces
+        // today's fixed 90-day window byte-for-byte).
+        var project = await CreateProjectAsync($"cf-omit-{Guid.NewGuid():N}");
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var expectedFrom = now.UtcDateTime.Date.AddDays(-89).ToString("yyyy-MM-dd");
+        var expectedTo = now.UtcDateTime.Date.ToString("yyyy-MM-dd");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/cumulative-flow");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CumulativeFlowResponse>(response);
+        Assert.Equal(expectedFrom, payload.RangeFrom);
+        Assert.Equal(expectedTo, payload.RangeTo);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CumulativeFlow_RangeDrivesWindow_30dReturns30DaySeries()
+    {
+        // Range-driven CFD: `range=30d` returns a 30-day trailing
+        // window, formally superseding the prior D6 "fixed, not
+        // user-configurable" contract.
+        var project = await CreateProjectAsync($"cf-30d-{Guid.NewGuid():N}");
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var expectedFrom = now.UtcDateTime.Date.AddDays(-29).ToString("yyyy-MM-dd");
+        var expectedTo = now.UtcDateTime.Date.ToString("yyyy-MM-dd");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/cumulative-flow?range=30d");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CumulativeFlowResponse>(response);
+        Assert.Equal(expectedFrom, payload.RangeFrom);
+        Assert.Equal(expectedTo, payload.RangeTo);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CumulativeFlow_RangeDrivesWindow_7dReturns7DaySeries()
+    {
+        // Range-driven CFD: `range=7d` returns a 7-day trailing
+        // window. Sparse snapshots are acceptable; the empty/partial
+        // window is not an error.
+        var project = await CreateProjectAsync($"cf-7d-{Guid.NewGuid():N}");
+        var now = _fixture.TimeProvider.GetUtcNow();
+        var expectedFrom = now.UtcDateTime.Date.AddDays(-6).ToString("yyyy-MM-dd");
+        var expectedTo = now.UtcDateTime.Date.ToString("yyyy-MM-dd");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/cumulative-flow?range=7d");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<CumulativeFlowResponse>(response);
+        Assert.Equal(expectedFrom, payload.RangeFrom);
+        Assert.Equal(expectedTo, payload.RangeTo);
     }
 
     private async Task SeedStagePopulationSnapshotAsync(

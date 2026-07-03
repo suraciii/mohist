@@ -13,13 +13,26 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             IssueMetricsQuerier metricsQuery,
+            string? range,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
 
+            int? windowDays = null;
+            if (!string.IsNullOrWhiteSpace(range))
+            {
+                if (!MetricsRange.TryParse(range, out var days))
+                    return ApiResults.BadRequest(
+                        "Unsupported range value. Accepted values: '7d', '30d', '90d'.",
+                        "unsupported_range",
+                        new { range });
+                windowDays = days;
+            }
+
             var result = await metricsQuery.GetApprovalWaitAsync(
                 project.Id,
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                windowDays);
 
             return ApiResults.Ok(BuildResponse(result));
         });

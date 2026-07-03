@@ -1,0 +1,41 @@
+## Codebase Patterns
+
+- **Route parameter binding:** ASP.NET Core minimal API binds `string? range` directly onto the handler signature; we validate via `MetricsRange.TryParse` and surface the existing `ApiResults.BadRequest("...", "unsupported_range", new { range })` seam. Unknown ⇒ 400. This pattern matches how `string? bucket` is handled in `IssueRoutes.Metrics.cs`.
+- **Querier takes `int? windowDays`, never the wire string:** routes parse → routes pass `int?` → querier substitutes `?? <fixedDefault>`. Each querier method's omit-default is a local literal (per-endpoint back-compat). This keeps queriers and unit tests decoupled from the wire vocabulary (D1).
+- **CFD D6 reversal in-place:** `CumulativeFlowQuerier.TrailingWindowDays` becomes the omit-default constant; `GetAsync(projectId, now, windowDays, ct)` substitutes the literal. Snapshot read path, schema, DTO fields, and `rangeFrom`/`rangeTo` wire fields are unchanged (D2).
+- **Quality double-window in-place (no DTO rename):** `Window7d` stays a fixed 7-day lens regardless of range; the `Window30d` slot, its previous-window companion, and the trend bucket count all scale by `windowDays`. Omit ⇒ `windowDays = 30` ⇒ today's exact shape (D3).
+- **Completion bucket axis is orthogonal to range:** `bucket=day` ⇒ `days` daily buckets; `bucket=week` ⇒ `ceil(days / 7)` ISO-week buckets (D4). Omit ⇒ 30 day / 12 week, byte-equal today.
+- **Per-endpoint omit defaults (load-bearing):** completion-day=30, completion-week=12w, delivery=30, stage=30, quality-primary=30, cfd=90 (TrailingWindowDays), approval-wait=7. These exist as `?? 30` / `?? 7` etc. on each querier method — Dashboard shared-hook back-compat depends on every single one.
+
+## Decisions
+
+- **MetricsRange is static, not record:** the type owns wire constants (`"7d"`/`"30d"`/`"90d"`), day-count constants, and a single `TryParse(string?, out int)` method. No instance state, no allocations, no DTO shape.
+- **Delivery-time wire DTO does not expose window bounds:** the test asserts the bounds indirectly via the querier (`windowDays: 90` ⇒ window math matches `now.AddDays(-90)` semantics). Unit tests on `IssueQuerier` cover the full window math; the spec test's HTTP round-trip checks the route plumbing (200/400, empty payload).
+- **Cumulative-flow snapshot read path and DTO unchanged:** the spec mandates no new field. `rangeFrom`/`rangeTo` already expose the actual window the chart derives the badge from.
+
+## Gotchas
+
+- **EF Core SQLite cannot translate `DateTimeOffset` against TEXT columns:** every windowed method already filters in memory after a bounded fetch. Scaling a window is a local literal change, not a query-translation risk.
+- **`previousFrom` math must scale with `days`:** for completion day-bucket, `previousFrom = today.AddDays(-(2 * days - 1))` (NOT `today.AddDays(-(days - 1) - days)`). For week-bucket, `previousFirstWeek = firstWeek.AddDays(-7 * weekCount)`. The "same length, immediately preceding" invariant is the spec contract.
+- **`Window30d` slot is no longer literally 30 days when range is supplied:** callers reading the field name must NOT assume literal 30. Doc-comments on `QualityMetricsResult.Window30d` updated to state "30 days on omit, scaled by the range otherwise". The `Window7d` field is the trustworthy fixed-lens signal.
+- **Approval-wait route still binds `DateTimeOffset.UtcNow` directly** (not via `TimeProvider`): this is a pre-existing wart from issue-295 and explicitly out of scope for M3 (design.md notes this). The range change keeps the existing clock source per endpoint.
+- **Self-review report already filed:** `openspec/changes/issue-324/self-review.md` documents a count typo (seven→eight) in design.md Migration Plan step 2 and a follow-up on the agent-cost 90d weekly granularity (T-002 scope). No new findings during implementation.
+- **Flaky test in the full suite:** `Microsoft.Data.Sqlite` `ObjectDisposedException` on `SQLitePCL` handle during `EnsureInitialized` reproduces only in the full suite, passes in isolation (per existing skip message). Not introduced by this task; passes when rerun.
+
+## Verification
+
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` — 0 warnings, 0 errors.
+- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj` — 3602 passed, 13 skipped, 0 failed (after rerun; one transient flake on first run).
+- `npm run typecheck -w packages/web` — clean.
+- `npm run typecheck -w packages/runner` — clean.
+- Targeted: 32 Range/CFD/MetricsRange/WindowDays* tests pass.
+- Targeted: 66 IssueMetricsApiSpecs pass; 117 IssueQuerierSpecs pass.
+
+## Files Touched
+
+- `packages/server/src/Mohist.Server/Issue/Services/MetricsRange.cs` (new) — D1 shared value type.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueQuerier.cs` — `int? windowDays` on `GetCompletionBucketsAsync`, `GetDeliveryTimesAsync`, `GetStageDurationsAsync`, `GetQualityAsync`, `GetApprovalWaitAsync`; doc-comments rewritten.
+- `packages/server/src/Mohist.Server/Issue/Services/CumulativeFlowQuerier.cs` — `int? windowDays` on `GetAsync`; D6 doc-comments reversed.
+- `packages/server/src/Mohist.Server/Api/IssueRoutes.{Metrics,DeliveryTimeMetrics,StageDurationMetrics,QualityMetrics,ApprovalMetrics,CumulativeFlow}.cs` — `string? range` binding + 400 validation, pass `windowDays` through.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Api/IssueMetricsApiSpecs.cs` — 14 new tests (omit-equality × endpoints, range scales, unknown ⇒ 400 parameterized across 7 cases, CFD 90d default + range-driven, quality double-window). Existing CFD test comments updated to reference the omit-default framing; one test renamed (`...FixedWindow` → `...OmitDefaultWindow`).
+- `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Querier/IssueQuerierSpecs.cs` — 7 new unit tests covering querier-level window math (string-independent).

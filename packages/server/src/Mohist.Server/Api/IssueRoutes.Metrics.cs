@@ -14,20 +14,31 @@ public static partial class IssueRoutes
             string projectRef,
             string? bucket,
             IssueMetricsQuerier metricsQuery,
+            string? range,
             TimeProvider timeProvider,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
 
-            // v1 contract: only fixed `day` / `week` bucketing is
-            // honored. Custom bucket size or time range is rejected.
+            int? windowDays = null;
+            if (!string.IsNullOrWhiteSpace(range))
+            {
+                if (!MetricsRange.TryParse(range, out var days))
+                    return ApiResults.BadRequest(
+                        "Unsupported range value. Accepted values: '7d', '30d', '90d'.",
+                        "unsupported_range",
+                        new { range });
+                windowDays = days;
+            }
+
             if (string.IsNullOrWhiteSpace(bucket)
                 || string.Equals(bucket, "day", StringComparison.OrdinalIgnoreCase))
             {
                 var result = await metricsQuery.GetCompletionBucketsAsync(
                     project.Id,
                     IssueMetricsQuerier.CompletionBucket.Day,
-                    timeProvider.GetUtcNow());
+                    timeProvider.GetUtcNow(),
+                    windowDays);
                 return ApiResults.Ok(BuildResponse(result));
             }
 
@@ -36,7 +47,8 @@ public static partial class IssueRoutes
                 var result = await metricsQuery.GetCompletionBucketsAsync(
                     project.Id,
                     IssueMetricsQuerier.CompletionBucket.Week,
-                    timeProvider.GetUtcNow());
+                    timeProvider.GetUtcNow(),
+                    windowDays);
                 return ApiResults.Ok(BuildResponse(result));
             }
 
