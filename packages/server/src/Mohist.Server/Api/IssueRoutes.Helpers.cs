@@ -27,6 +27,38 @@ public static partial class IssueRoutes
     }
 
     /// <summary>
+    /// Parses the <c>range</c> query parameter into a day count for
+    /// the downstream querier. Returns <c>true</c> when the range is
+    /// either omitted/empty (<paramref name="windowDays"/> = null,
+    /// per-endpoint back-compat default) or a valid preset;
+    /// returns <c>false</c> and populates <paramref name="error"/> with
+    /// a 400 result when the value is present but not recognised.
+    /// </summary>
+    internal static bool TryParseRangeParameter(string? range, out int? windowDays, out IResult? error)
+    {
+        if (string.IsNullOrWhiteSpace(range))
+        {
+            windowDays = null;
+            error = null;
+            return true;
+        }
+
+        if (!MetricsRange.TryParse(range, out var days))
+        {
+            windowDays = null;
+            error = ApiResults.BadRequest(
+                "Unsupported range value. Accepted values: '7d', '30d', '90d'.",
+                "unsupported_range",
+                new { range });
+            return false;
+        }
+
+        windowDays = days;
+        error = null;
+        return true;
+    }
+
+    /// <summary>
     /// Returns the project resolved by <see cref="ProjectResolutionEndpointFilter"/>.
     /// Throws if the filter has not run for the current request — that almost
     /// always means the route group forgot to apply the filter.

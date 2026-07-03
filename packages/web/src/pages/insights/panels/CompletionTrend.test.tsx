@@ -40,7 +40,7 @@ function renderTrend() {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider>
         <MemoryRouter initialEntries={['/']}>
-          <CompletionTrend />
+          <CompletionTrend range="30d" />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,

@@ -38,20 +38,28 @@ public static class AgentRoutes
             return ApiResults.Ok(await sessions.GetActivityAsync(project.Id, limit, waiting: waiting, capacity: capacity, ct: ct));
         });
 
-        group.MapGet("/usage", async (HttpContext context, AgentSessionQuerier sessions, CancellationToken ct) =>
+        group.MapGet("/usage", async (HttpContext context, string? range, AgentSessionQuerier sessions, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-            return ApiResults.Ok(await sessions.GetUsageTimeseriesAsync(project.Id, ct));
+
+            if (!TryParseRange(range, out var windowDays, out var rangeError))
+                return rangeError;
+
+            return ApiResults.Ok(await sessions.GetUsageTimeseriesAsync(project.Id, windowDays, ct));
         });
 
-        group.MapGet("/cost", async (HttpContext context, AgentSessionQuerier sessions, IssueQuerier issues, CancellationToken ct) =>
+        group.MapGet("/cost", async (HttpContext context, string? range, AgentSessionQuerier sessions, IssueQuerier issues, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
+
+            if (!TryParseRange(range, out var windowDays, out var rangeError))
+                return rangeError;
+
             var cost = await sessions.GetCostRollupAsync(project.Id, ct);
             var projectIssues = await issues.ListAsync(project.Id, project, all: true);
             var doneIssuesCount = projectIssues.Count(i => i.Status == "done");
             var costPerShip = BuildCostPerShip(cost.TotalCost, doneIssuesCount);
-            var windowed = await sessions.GetCostWindowedAsync(project.Id, ct);
+            var windowed = await sessions.GetCostWindowedAsync(project.Id, windowDays, ct);
 
             return ApiResults.Ok(new AgentCostRollupDto(
                 cost.TotalCost,
@@ -63,6 +71,30 @@ public static class AgentRoutes
         });
 
         return app;
+    }
+
+    private static bool TryParseRange(string? range, out int? windowDays, out IResult? error)
+    {
+        if (string.IsNullOrWhiteSpace(range))
+        {
+            windowDays = null;
+            error = null;
+            return true;
+        }
+
+        if (!MetricsRange.TryParse(range, out var days))
+        {
+            windowDays = null;
+            error = ApiResults.BadRequest(
+                "Unsupported range value. Accepted values: '7d', '30d', '90d'.",
+                "unsupported_range",
+                new { range });
+            return false;
+        }
+
+        windowDays = days;
+        error = null;
+        return true;
     }
 
     private static AgentCostMetricDto BuildCostPerShip(AgentCostMetricDto totalCost, int doneIssuesCount)

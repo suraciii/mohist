@@ -14,20 +14,23 @@ public static partial class IssueRoutes
             string projectRef,
             string? bucket,
             IssueMetricsQuerier metricsQuery,
+            string? range,
             TimeProvider timeProvider,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
 
-            // v1 contract: only fixed `day` / `week` bucketing is
-            // honored. Custom bucket size or time range is rejected.
+            if (!TryParseRangeParameter(range, out var windowDays, out var rangeError))
+                return rangeError;
+
             if (string.IsNullOrWhiteSpace(bucket)
                 || string.Equals(bucket, "day", StringComparison.OrdinalIgnoreCase))
             {
                 var result = await metricsQuery.GetCompletionBucketsAsync(
                     project.Id,
                     IssueMetricsQuerier.CompletionBucket.Day,
-                    timeProvider.GetUtcNow());
+                    timeProvider.GetUtcNow(),
+                    windowDays);
                 return ApiResults.Ok(BuildResponse(result));
             }
 
@@ -36,7 +39,8 @@ public static partial class IssueRoutes
                 var result = await metricsQuery.GetCompletionBucketsAsync(
                     project.Id,
                     IssueMetricsQuerier.CompletionBucket.Week,
-                    timeProvider.GetUtcNow());
+                    timeProvider.GetUtcNow(),
+                    windowDays);
                 return ApiResults.Ok(BuildResponse(result));
             }
 

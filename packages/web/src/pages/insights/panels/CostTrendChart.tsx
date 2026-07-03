@@ -1,5 +1,6 @@
 import { useAgentUsage } from '../../../entities/agent'
 import type { AgentUsageTimeseriesDto } from '../../../entities/agent'
+import type { InsightsRange } from '../model/insights-range'
 import {
   ChartContainer,
   ChartAccessibility,
@@ -72,8 +73,8 @@ function hasUsageData(data: AgentUsageTimeseriesDto | undefined): data is AgentU
   return hasBucketUsage || hasMeasuredCumulativeCost
 }
 
-export function CostTrendChart() {
-  const { data, isLoading, isError } = useAgentUsage()
+export function CostTrendChart({ range }: { range: InsightsRange }) {
+  const { data, isLoading, isError } = useAgentUsage(range)
 
   const status = isLoading ? 'loading'
     : isError ? 'error'

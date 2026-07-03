@@ -65,7 +65,7 @@ describe('ThroughputChart', () => {
   it('renders loading state via ChartContainer', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: undefined, isLoading: true, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-loading')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
@@ -74,7 +74,7 @@ describe('ThroughputChart', () => {
   it('renders error state via ChartContainer', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: new Error('fail') })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-error')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
@@ -87,7 +87,7 @@ describe('ThroughputChart', () => {
       isError: false,
     })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const empty = screen.getByTestId('chart-container-empty')
     expect(empty).toBeInTheDocument()
@@ -102,7 +102,7 @@ describe('ThroughputChart', () => {
       isError: false,
     })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const empty = screen.getByTestId('chart-container-empty')
     expect(empty).toBeInTheDocument()
@@ -119,7 +119,7 @@ describe('ThroughputChart', () => {
       isError: false,
     })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     expect(screen.queryByTestId('chart-container-empty')).not.toBeInTheDocument()
     expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
@@ -128,7 +128,7 @@ describe('ThroughputChart', () => {
   it('renders resolved chart content with accessibility wrapper', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-container-loading')).not.toBeInTheDocument()
@@ -142,7 +142,7 @@ describe('ThroughputChart', () => {
     const data = buildThroughputData()
     mockUseCompletionThroughput.mockReturnValue({ data, isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const barSeries = screen.getByTestId('segmented-bar-series')
     expect(barSeries.children).toHaveLength(data.buckets.length)
@@ -157,7 +157,7 @@ describe('ThroughputChart', () => {
   it('completed segment fill uses fill-chart-2 and failed uses fill-chart-4', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const completedSeg = screen.getByTestId('segment-0-0')
     expect(completedSeg.getAttribute('class')).toContain('fill-chart-2')
@@ -174,7 +174,7 @@ describe('ThroughputChart', () => {
 
     mockUseCompletionThroughput.mockReturnValue({ data, isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const completedSeg = screen.getByTestId('segment-2-0')
     expect(completedSeg.style.transform).toContain('scaleY(0)')
@@ -191,7 +191,7 @@ describe('ThroughputChart', () => {
 
     mockUseCompletionThroughput.mockReturnValue({ data, isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const completedScale = Number(screen.getByTestId('segment-2-0').style.transform.match(/scaleY\(([\d.]+)\)/)?.[1] ?? 0)
     const completedSeg = screen.getByTestId('segment-2-0')
@@ -207,7 +207,7 @@ describe('ThroughputChart', () => {
   it('renders line series for 7-day moving average computed over completed counts', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const lineSeries = screen.getByTestId('line-series')
     expect(lineSeries).toBeInTheDocument()
@@ -219,7 +219,7 @@ describe('ThroughputChart', () => {
   it('MA uses stroke-chart-5 and fill-chart-5 theme tokens', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const path = screen.getByTestId('line-series').querySelector('path')
     const pathClasses = path?.getAttribute('class') ?? ''
@@ -234,7 +234,7 @@ describe('ThroughputChart', () => {
   it('renders ChartLegend with three entries (Completed, Failed, 7-day average)', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const legend = screen.getByTestId('chart-legend')
     expect(legend).toBeInTheDocument()
@@ -246,7 +246,7 @@ describe('ThroughputChart', () => {
   it('legend entries are disambiguated by label and shape (non-color channels)', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const legend = screen.getByTestId('chart-legend')
     const entries = legend.querySelectorAll('span')
@@ -269,7 +269,7 @@ describe('ThroughputChart', () => {
       isError: false,
     })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const empty = screen.getByTestId('chart-container-empty')
     expect(empty.textContent).toContain('Throughput appears once an issue completes on this project')
@@ -280,7 +280,7 @@ describe('ThroughputChart', () => {
   it('left axis uses stroke-chart-2 and fill-chart-2', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const axis = screen.getByTestId('chart-axis-left')
     const axisLine = axis.querySelector('line')
@@ -294,7 +294,7 @@ describe('ThroughputChart', () => {
   it('accessibility sr-only summary is rendered with window, peak, total, average', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const summary = screen.getByTestId('chart-sr-summary')
     expect(summary).toBeInTheDocument()
@@ -308,7 +308,7 @@ describe('ThroughputChart', () => {
   it('formats date-only bucket boundaries as local calendar labels without UTC day shift', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     expect(screen.getByText('Jun 1')).toBeInTheDocument()
     expect(screen.getByText('Jun 7')).toBeInTheDocument()
@@ -318,7 +318,7 @@ describe('ThroughputChart', () => {
   it('chart svg has role=img and aria-label', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const svg = document.querySelector('svg[role="img"]')
     expect(svg).toBeInTheDocument()
@@ -331,7 +331,7 @@ describe('ThroughputChart', () => {
   it('numeric labels use tabular-nums', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const axisTexts = document.querySelectorAll('.tabular-nums')
     expect(axisTexts.length).toBeGreaterThan(0)
@@ -342,7 +342,7 @@ describe('ThroughputChart', () => {
   it('segments have transform transition by default', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const seg = screen.getByTestId('segment-0-0')
     expect(seg.style.transition).toContain('transform')
@@ -352,7 +352,7 @@ describe('ThroughputChart', () => {
     setPrefersReducedMotion(true)
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const seg = screen.getByTestId('segment-0-0')
     expect(seg.style.transition).toBe('none')
@@ -365,7 +365,7 @@ describe('ThroughputChart', () => {
   it('renders within a section with testid and aria-label', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const section = screen.getByTestId('throughput-chart')
     expect(section).toBeInTheDocument()
@@ -375,7 +375,7 @@ describe('ThroughputChart', () => {
   it('shows section heading', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     expect(screen.getByText('Throughput')).toBeInTheDocument()
   })
@@ -385,7 +385,7 @@ describe('ThroughputChart', () => {
   it('renders first and last day label', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     expect(screen.getByText('Jun 1')).toBeInTheDocument()
     expect(screen.getByText('Jun 7')).toBeInTheDocument()
@@ -394,7 +394,7 @@ describe('ThroughputChart', () => {
   it('renders fewer than 30 day labels for 30-day window', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: build30dayData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const labelTexts = document.querySelectorAll('svg text')
     const dayLabels = [...labelTexts].filter(t =>
@@ -409,7 +409,7 @@ describe('ThroughputChart', () => {
   it('shows a 30d window badge in the header chrome', () => {
     mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
 
-    render(<ThroughputChart />)
+    render(<ThroughputChart range="30d" />)
 
     const badge = screen.getByTestId('throughput-chart-window')
     expect(badge).toBeInTheDocument()

@@ -486,6 +486,152 @@ public class AgentCostRollupApiSpecs
         Assert.Equal(1, costResponse.PreviousWindow.Spend.SampleCount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetCost_Range90d_ScalesWindowedCurrentAndPreviousWindow()
+    {
+        // `range=90d` re-bases the windowed current/previous spend and
+        // per-issue-cost to a 90-day current window and a 90-day
+        // immediately-preceding previous window. Sessions placed 60d ago
+        // (in current) and 120d ago (in previous) verify the boundary;
+        // the 5d-ago session stays inside both windows (current under
+        // both 30d and 90d).
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-60).AddHours(8),
+            costAmount: 1.00, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddDays(-120).AddHours(8),
+            costAmount: 0.50, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddDays(-200).AddHours(8),
+            costAmount: 9.99, costCurrency: "USD");
+
+        var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
+            $"/api/projects/{project.Id}/agent/cost?range=90d");
+
+        Assert.Equal(1.00, response.CurrentWindow.Spend.Amount);
+        Assert.Equal(1, response.CurrentWindow.Spend.SampleCount);
+        Assert.Equal(0.50, response.PreviousWindow.Spend.Amount);
+        Assert.Equal(1, response.PreviousWindow.Spend.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetCost_Range7d_ScalesWindowedCurrentAndPreviousWindow()
+    {
+        // `range=7d` re-bases the windowed current/previous window to
+        // 7 days each. Sessions placed 3d ago (current) and 10d ago
+        // (previous) verify the boundary.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-3).AddHours(8),
+            costAmount: 0.30, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddDays(-10).AddHours(8),
+            costAmount: 0.10, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddDays(-20).AddHours(8),
+            costAmount: 9.99, costCurrency: "USD");
+
+        var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
+            $"/api/projects/{project.Id}/agent/cost?range=7d");
+
+        Assert.Equal(0.30, response.CurrentWindow.Spend.Amount);
+        Assert.Equal(1, response.CurrentWindow.Spend.SampleCount);
+        Assert.Equal(0.10, response.PreviousWindow.Spend.Amount);
+        Assert.Equal(1, response.PreviousWindow.Spend.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetCost_Range_DoesNotAffectAllTimeFigures()
+    {
+        // All-time `totalCost`, `todayCost`, all-time `costPerShip`, and
+        // `doneIssuesCount` are byte-identical with and without a range.
+        // Only the windowed current/previous figures re-base.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddHours(8),
+            costAmount: 0.10, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(8),
+            costAmount: 0.20, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddDays(-100).AddHours(8),
+            costAmount: 0.99, costCurrency: "USD");
+        for (var i = 0; i < 4; i++)
+            await InsertIssueWithStatusAsync(project.Id, i + 1, $"d{i + 1}", IssueStatus.Done);
+
+        var omit = await _client.GetDataAsync<AgentCostRollupResponseDto>(
+            $"/api/projects/{project.Id}/agent/cost");
+        var r90 = await _client.GetDataAsync<AgentCostRollupResponseDto>(
+            $"/api/projects/{project.Id}/agent/cost?range=90d");
+        var r7 = await _client.GetDataAsync<AgentCostRollupResponseDto>(
+            $"/api/projects/{project.Id}/agent/cost?range=7d");
+
+        // All-time figures are byte-identical regardless of range.
+        Assert.Equal(omit.TotalCost.Amount, r90.TotalCost.Amount);
+        Assert.Equal(omit.TotalCost.SampleCount, r90.TotalCost.SampleCount);
+        Assert.Equal(omit.TotalCost.Currency, r90.TotalCost.Currency);
+        Assert.Equal(omit.TodayCost.Amount, r90.TodayCost.Amount);
+        Assert.Equal(omit.TodayCost.SampleCount, r90.TodayCost.SampleCount);
+        Assert.Equal(omit.DoneIssuesCount, r90.DoneIssuesCount);
+        Assert.Equal(omit.CostPerShip.Amount, r90.CostPerShip.Amount);
+
+        Assert.Equal(omit.TotalCost.Amount, r7.TotalCost.Amount);
+        Assert.Equal(omit.TotalCost.SampleCount, r7.TotalCost.SampleCount);
+        Assert.Equal(omit.TodayCost.Amount, r7.TodayCost.Amount);
+        Assert.Equal(omit.TodayCost.SampleCount, r7.TodayCost.SampleCount);
+        Assert.Equal(omit.DoneIssuesCount, r7.DoneIssuesCount);
+        Assert.Equal(omit.CostPerShip.Amount, r7.CostPerShip.Amount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetCost_OmittedRange_Reproduces30DayWindow()
+    {
+        // Omit-equality witness: omitting `range` reproduces today's
+        // fixed 30-day windowed figures. A session at 10d ago (in
+        // current 30d window) is included; a session at 40d ago is in
+        // the previous 30d window; a session at 80d ago is ignored.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-10).AddHours(8),
+            costAmount: 0.40, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddDays(-40).AddHours(8),
+            costAmount: 0.20, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddDays(-80).AddHours(8),
+            costAmount: 9.99, costCurrency: "USD");
+
+        var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
+            $"/api/projects/{project.Id}/agent/cost");
+
+        Assert.Equal(0.40, response.CurrentWindow.Spend.Amount);
+        Assert.Equal(1, response.CurrentWindow.Spend.SampleCount);
+        Assert.Equal(0.20, response.PreviousWindow.Spend.Amount);
+        Assert.Equal(1, response.PreviousWindow.Spend.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetCost_UnknownRange_ReturnsBadRequest()
+    {
+        var project = await CreateProjectAsync();
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/agent/cost?range=bad");
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Theory]
+    [InlineData("7d")]
+    [InlineData("30d")]
+    [InlineData("90d")]
+    public async Task GetCost_AcceptedRangeValues_AllReturnOk(string range)
+    {
+        var project = await CreateProjectAsync();
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/agent/cost?range={range}");
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync()
     {
         var name = $"cost-{Guid.NewGuid():N}";

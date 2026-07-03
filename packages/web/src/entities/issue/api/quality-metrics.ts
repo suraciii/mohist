@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { projectApiPath, request } from '../../../shared/api/client'
 import { useProject } from '../../project/@x/project-context'
+import type { InsightsRange } from '../../shared/insights-range'
 
 export interface StageReworkRateDto {
   stage: string
@@ -38,22 +39,33 @@ export interface QualityMetricsResponse {
   trend?: QualityTrendDto
 }
 
-export function fetchQualityMetrics(projectId: string) {
+function buildQualityMetricsQueryString(range?: InsightsRange): string {
+  if (!range) return ''
+  return `?range=${range}`
+}
+
+export function fetchQualityMetrics(projectId: string, range?: InsightsRange) {
   return request<QualityMetricsResponse>(
-    projectApiPath(projectId, '/issues/metrics/quality'),
+    projectApiPath(projectId, `/issues/metrics/quality${buildQualityMetricsQueryString(range)}`),
   )
 }
 
-export const qualityMetricsQueryKey = (projectId?: string | null) =>
-  projectId
+export const qualityMetricsQueryKey = (projectId?: string | null, range?: InsightsRange | null) => {
+  if (range) {
+    return projectId
+      ? ['issues', 'metrics', 'quality', range, projectId] as const
+      : ['issues', 'metrics', 'quality', range] as const
+  }
+  return projectId
     ? ['issues', 'metrics', 'quality', projectId] as const
     : ['issues', 'metrics', 'quality'] as const
+}
 
-export function useQualityMetrics() {
+export function useQualityMetrics(range?: InsightsRange) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: qualityMetricsQueryKey(projectId),
-    queryFn: () => fetchQualityMetrics(projectId!),
+    queryKey: qualityMetricsQueryKey(projectId, range),
+    queryFn: () => fetchQualityMetrics(projectId!, range),
     enabled: !!projectId,
     staleTime: 60_000,
   })

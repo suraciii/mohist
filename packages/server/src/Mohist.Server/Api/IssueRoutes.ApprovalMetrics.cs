@@ -13,13 +13,18 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             IssueMetricsQuerier metricsQuery,
+            string? range,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
 
+            if (!TryParseRangeParameter(range, out var windowDays, out var rangeError))
+                return rangeError;
+
             var result = await metricsQuery.GetApprovalWaitAsync(
                 project.Id,
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                windowDays);
 
             return ApiResults.Ok(BuildResponse(result));
         });

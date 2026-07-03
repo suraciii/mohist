@@ -12,15 +12,20 @@ public static partial class IssueRoutes
         group.MapGet("/metrics/cumulative-flow", async (
             HttpContext ctx,
             string projectRef,
+            string? range,
             CumulativeFlowQuerier cumulativeFlow,
             TimeProvider timeProvider,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
 
+            if (!TryParseRangeParameter(range, out var windowDays, out var rangeError))
+                return rangeError;
+
             var result = await cumulativeFlow.GetAsync(
                 project.Id,
                 timeProvider.GetUtcNow(),
+                windowDays,
                 ct);
 
             return ApiResults.Ok(BuildResponse(result));

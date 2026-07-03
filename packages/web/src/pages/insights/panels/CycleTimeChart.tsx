@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useDeliveryTime } from '../../../entities/issue'
 import type { DeliveryTimeMetricsResponse } from '../../../entities/issue'
+import type { InsightsRange } from '../model/insights-range'
 import {
   ChartContainer,
   ChartAccessibility,
@@ -78,8 +79,8 @@ function hasPlottablePoints(
   return data.points.length > 0
 }
 
-export function CycleTimeChart() {
-  const { data, isLoading, isError } = useDeliveryTime()
+export function CycleTimeChart({ range }: { range: InsightsRange }) {
+  const { data, isLoading, isError } = useDeliveryTime(range)
   const [lens, setLens] = useState<DurationLens>('lead')
 
   const visibleCount = data && lens === 'cycle'
@@ -105,7 +106,7 @@ export function CycleTimeChart() {
             data-testid="cycle-time-chart-window"
             className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs tabular-nums text-muted-foreground"
           >
-            30d
+            {range}
           </span>
           <LensToggle value={lens} onChange={setLens} />
         </div>

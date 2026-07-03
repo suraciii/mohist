@@ -445,6 +445,132 @@ public class AgentUsageTimeseriesApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_Range7d_Daily7Buckets()
+    {
+        // `range=7d` ⇒ day(7). Recorded in design.md D5.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage?range=7d");
+
+        Assert.Equal("day", response.BucketGranularity);
+        Assert.Equal(7, response.Buckets.Count);
+        Assert.Equal(TimeSpan.FromDays(7), response.RangeTo - response.RangeFrom);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_Range30d_Daily30Buckets()
+    {
+        // `range=30d` ⇒ day(30). Recorded in design.md D5.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-15).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage?range=30d");
+
+        Assert.Equal("day", response.BucketGranularity);
+        Assert.Equal(30, response.Buckets.Count);
+        Assert.Equal(TimeSpan.FromDays(30), response.RangeTo - response.RangeFrom);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_Range90d_Weekly13Buckets()
+    {
+        // `range=90d` ⇒ week(ceil(90/7)=13). Recorded in design.md D5.
+        // The bucketGranularity field reports the chosen granularity
+        // (week) and the cumulative-cost-per-ship sub-series follows
+        // the same bucket grid.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-20).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.05, costCurrency: "USD");
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage?range=90d");
+
+        Assert.Equal("week", response.BucketGranularity);
+        Assert.Equal(13, response.Buckets.Count);
+        Assert.Equal(TimeSpan.FromDays(90), response.RangeTo - response.RangeFrom);
+        Assert.NotNull(response.CumulativeCostPerShip);
+        Assert.Equal(response.Buckets.Count, response.CumulativeCostPerShip!.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_OmittedRange_Reproduces7Day7BucketDaily()
+    {
+        // Omit-equality witness: omitting `range` reproduces today's
+        // fixed 7-day / 7-bucket daily timeseries — the Dashboard
+        // back-compat default.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
+
+        var response = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage");
+
+        Assert.Equal("day", response.BucketGranularity);
+        Assert.Equal(7, response.Buckets.Count);
+        Assert.Equal(TimeSpan.FromDays(7), response.RangeTo - response.RangeFrom);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_UnknownRange_ReturnsBadRequest()
+    {
+        var project = await CreateProjectAsync();
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/agent/usage?range=bad");
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Theory]
+    [InlineData("7d")]
+    [InlineData("30d")]
+    [InlineData("90d")]
+    public async Task GetUsage_AcceptedRangeValues_AllReturnOk(string range)
+    {
+        var project = await CreateProjectAsync();
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/agent/usage?range={range}");
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task GetUsage_Range90d_BucketGranularityReportsWeekly()
+    {
+        // The existing `bucketGranularity` field reports the chosen
+        // granularity: day for 7d/30d, week for 90d. Asserted
+        // explicitly so the wire contract is documented.
+        var project = await CreateProjectAsync();
+
+        var r7 = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage?range=7d");
+        var r30 = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage?range=30d");
+        var r90 = await _client.GetDataAsync<UsageTimeseriesResponseDto>(
+            $"/api/projects/{project.Id}/agent/usage?range=90d");
+
+        Assert.Equal("day", r7.BucketGranularity);
+        Assert.Equal("day", r30.BucketGranularity);
+        Assert.Equal("week", r90.BucketGranularity);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync()
     {
         var name = $"usage-{Guid.NewGuid():N}";

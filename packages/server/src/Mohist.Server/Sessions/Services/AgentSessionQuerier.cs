@@ -762,10 +762,27 @@ public class AgentSessionQuerier : IScopedService
         return result;
     }
 
-    public async Task<AgentUsageTimeseriesDto> GetUsageTimeseriesAsync(string projectId, CancellationToken ct = default)
+    /// <summary>
+    /// Computes the agent-usage timeseries (issue-322 T-005 / design D5).
+    /// <paramref name="windowDays"/> selects the trailing-window length
+    /// (the Insights M3 selector vocabulary: <c>7</c>, <c>30</c>, or
+    /// <c>90</c>); <c>null</c> reproduces today's fixed 7-day / 7-bucket
+    /// daily window (Dashboard back-compat default). The bucket
+    /// granularity adapts to the selected range so the series remains
+    /// legible: daily for 7d and 30d, weekly (ISO week) for 90d so the
+    /// chart does not compress into 90 adjacent bars. The
+    /// <see cref="AgentUsageTimeseriesDto.BucketGranularity"/> field
+    /// reports the chosen granularity (<c>"day"</c> / <c>"week"</c>);
+    /// the cumulative-cost-per-ship sub-series follows the same bucket
+    /// grid.
+    /// </summary>
+    public async Task<AgentUsageTimeseriesDto> GetUsageTimeseriesAsync(string projectId, int? windowDays = null, CancellationToken ct = default)
     {
-        var rangeTo = Now().Date.AddDays(1);
-        var rangeFrom = rangeTo.AddDays(-7);
+        var now = Now();
+        var days = windowDays ?? 7;
+        var (bucketKind, bucketCount, bucketSizeDays) = ResolveUsageBucketGranularity(days);
+        var rangeTo = now.Date.AddDays(1);
+        var rangeFrom = rangeTo.AddDays(-days);
 
         var windowSessions = await _sessionQuery.ListByLabelsAsync(
             Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
@@ -774,9 +791,15 @@ public class AgentSessionQuerier : IScopedService
             to: rangeTo,
             ct: ct);
 
-        var buckets = new UsageBucketData[7];
-        for (var i = 0; i < 7; i++)
-            buckets[i] = new UsageBucketData(rangeFrom.AddDays(i), rangeFrom.AddDays(i + 1));
+        var buckets = new UsageBucketData[bucketCount];
+        for (var i = 0; i < bucketCount; i++)
+        {
+            var start = rangeFrom.AddDays(i * bucketSizeDays);
+            var end = i == bucketCount - 1
+                ? rangeTo
+                : rangeFrom.AddDays((i + 1) * bucketSizeDays);
+            buckets[i] = new UsageBucketData(start, end);
+        }
 
         foreach (var record in windowSessions)
         {
@@ -784,8 +807,8 @@ public class AgentSessionQuerier : IScopedService
             if (!HasUsage(usage)) continue;
 
             var createdAt = record.Session.Status.CreatedAt;
-            var bucketIndex = (int)(createdAt.Date - rangeFrom.Date).Days;
-            if (bucketIndex < 0 || bucketIndex >= 7) continue;
+            var bucketIndex = (int)((createdAt.Date - rangeFrom.Date).TotalDays / bucketSizeDays);
+            if (bucketIndex < 0 || bucketIndex >= bucketCount) continue;
 
             var bucket = buckets[bucketIndex];
             var costAmount = usage.CostAmount ?? 0d;
@@ -800,14 +823,29 @@ public class AgentSessionQuerier : IScopedService
         var preWindow = await ComputePreWindowSpendAsync(projectId, rangeFrom, ct);
 
         var cumulative = await ComputeCumulativeCostPerShipAsync(
-            projectId, rangeFrom, preWindow.Spend, preWindow.Samples, preWindow.Currency, buckets, ct);
+            projectId, rangeFrom, preWindow.Spend, preWindow.Samples, preWindow.Currency, buckets, bucketSizeDays, ct);
 
         return new AgentUsageTimeseriesDto(
             rangeFrom,
             rangeTo,
-            "day",
+            bucketKind,
             buckets.Select(b => b.ToDto()).ToList(),
             cumulative);
+    }
+
+    /// <summary>
+    /// Maps the supplied trailing-window length to the bucket
+    /// granularity that keeps the series legible (issue-324 T-002 /
+    /// design D5): 7d ⇒ day(7), 30d ⇒ day(30), 90d ⇒ week(~13). For
+    /// weekly buckets the trailing edge of the last bucket is clamped
+    /// to <see cref="GetUsageTimeseriesAsync"/>'s exclusive <c>rangeTo</c>
+    /// so the series covers exactly the requested day-span. Recorded
+    /// in <c>design.md</c> per the spec requirement.
+    /// </summary>
+    private static (string Kind, int Count, int SizeDays) ResolveUsageBucketGranularity(int days)
+    {
+        if (days >= MetricsRange.NinetyDayCount) return ("week", (int)Math.Ceiling(days / 7.0), 7);
+        return ("day", days, 1);
     }
 
     private sealed record PreWindowSpendResult(double Spend, int Samples, string? Currency);
@@ -847,6 +885,7 @@ public class AgentSessionQuerier : IScopedService
         int preWindowSamples,
         string? currency,
         UsageBucketData[] buckets,
+        int bucketSizeDays,
         CancellationToken ct)
     {
         List<DateTime> shippedDates;
@@ -863,16 +902,16 @@ public class AgentSessionQuerier : IScopedService
         }
 
         var preWindowShipped = shippedDates.Count(d => d < rangeFrom);
-        var result = new List<CumulativeCostPerShipPointDto>(7);
+        var result = new List<CumulativeCostPerShipPointDto>(buckets.Length);
         double cumulativeCost = preWindowSpend;
         int cumulativeSamples = preWindowSamples;
         var cumulativeShipped = preWindowShipped;
         string? resolvedCurrency = currency;
 
-        for (var i = 0; i < 7; i++)
+        for (var i = 0; i < buckets.Length; i++)
         {
-            var dayStart = rangeFrom.AddDays(i);
-            var dayEnd = rangeFrom.AddDays(i + 1);
+            var dayStart = rangeFrom.AddDays((long)i * bucketSizeDays);
+            var dayEnd = rangeFrom.AddDays((long)(i + 1) * bucketSizeDays);
 
             cumulativeCost += buckets[i].CostAmount;
             cumulativeSamples += buckets[i].SampleCount;
@@ -943,8 +982,11 @@ public class AgentSessionQuerier : IScopedService
     /// <summary>
     /// Computes windowed (current + previous) spend and per-issue cost for
     /// the agent-cost surface (issue-322 T-004 / design D1, D2). Both windows
-    /// are 30 days; the previous window is the same length as the current
-    /// window and immediately precedes it. Both advance with the current
+    /// are 30 days when <paramref name="windowDays"/> is <c>null</c> (the
+    /// Dashboard back-compat default); when a value is supplied — the
+    /// Insights M3 selector vocabulary (<c>7</c> / <c>30</c> / <c>90</c>) —
+    /// both windows scale to that length and the previous window is the
+    /// same length, immediately preceding. Both advance with the current
     /// time. Spend is the sum of per-session
     /// <see cref="AgentUsageSummary.CostAmount"/> over sessions whose
     /// creation time falls in the window; per-issue cost is the window's
@@ -956,12 +998,13 @@ public class AgentSessionQuerier : IScopedService
     /// spend but no completed issues returns a real spend and an empty
     /// per-issue cost, and vice-versa.
     /// </summary>
-    public async Task<AgentCostWindowedData> GetCostWindowedAsync(string projectId, CancellationToken ct = default)
+    public async Task<AgentCostWindowedData> GetCostWindowedAsync(string projectId, int? windowDays = null, CancellationToken ct = default)
     {
         var now = Now();
-        var currentFrom = now.Date.AddDays(-29);
+        var days = windowDays ?? 30;
+        var currentFrom = now.Date.AddDays(-(days - 1));
         var currentTo = now.Date.AddDays(1);
-        var previousFrom = currentFrom.AddDays(-30);
+        var previousFrom = currentFrom.AddDays(-days);
         var previousTo = currentFrom;
 
         var sessions = await _sessionQuery.ListByLabelsAsync(

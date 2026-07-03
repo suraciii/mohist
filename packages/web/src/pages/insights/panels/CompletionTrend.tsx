@@ -1,5 +1,6 @@
 import { useCompletionTrend } from '../../../entities/issue'
 import type { CompletionBucketPoint } from '../../../entities/issue'
+import type { InsightsRange } from '../model/insights-range'
 import { ChartAccessibility, ChartContainer, LineSeries } from '../charts'
 import type { LinePoint } from '../charts'
 
@@ -76,8 +77,8 @@ function Sparkline({ completedCounts, summary }: SparklineProps) {
   )
 }
 
-export function CompletionTrend() {
-  const { data, isLoading, isError } = useCompletionTrend()
+export function CompletionTrend({ range }: { range: InsightsRange }) {
+  const { data, isLoading, isError } = useCompletionTrend(range)
 
   const buckets = data?.buckets ?? []
   const completedCounts = buckets.map((bucket) => bucket.completed)

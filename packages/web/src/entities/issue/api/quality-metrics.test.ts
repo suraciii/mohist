@@ -112,3 +112,96 @@ describe('useQualityMetrics', () => {
     expect(config.enabled).toBe(true)
   })
 })
+
+describe('useQualityMetrics range threading', () => {
+  it('preserves the existing queryKey shape when range is omitted (Dashboard back-compat)', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useQualityMetrics()
+
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.queryKey).toEqual(['issues', 'metrics', 'quality', 'proj-1'])
+  })
+
+  it('folds the range into the queryKey when supplied', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useQualityMetrics('7d')
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.queryKey).toEqual(['issues', 'metrics', 'quality', '7d', 'proj-1'])
+  })
+
+  it('produces a different queryKey for each range (cache isolation)', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useQualityMetrics('7d')
+    useQualityMetrics('30d')
+    useQualityMetrics('90d')
+
+    const key7 = useQueryMock.mock.calls[0][0].queryKey
+    const key30 = useQueryMock.mock.calls[1][0].queryKey
+    const key90 = useQueryMock.mock.calls[2][0].queryKey
+    expect(key7).not.toEqual(key30)
+    expect(key7).not.toEqual(key90)
+    expect(key30).not.toEqual(key90)
+  })
+
+  it('appends range=... to the fetch URL when supplied', async () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useQualityMetrics('90d')
+
+    const config = useQueryMock.mock.calls[0][0]
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            window7d: { from: '2026-05-25T00:00:00+00:00', to: '2026-06-01T00:00:00+00:00', sampleCount: 0, firstTimeRightRate: null, stages: [] },
+            window30d: { from: '2026-03-03T00:00:00+00:00', to: '2026-06-01T00:00:00+00:00', sampleCount: 0, firstTimeRightRate: null, stages: [] },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await config.queryFn()
+
+    const [calledPath] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/issues/metrics/quality?range=90d')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('omits the range parameter from the URL when no range is supplied', async () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useQualityMetrics()
+
+    const config = useQueryMock.mock.calls[0][0]
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            window7d: { from: '2026-06-20T00:00:00+00:00', to: '2026-06-27T00:00:00+00:00', sampleCount: 0, firstTimeRightRate: null, stages: [] },
+            window30d: { from: '2026-05-28T00:00:00+00:00', to: '2026-06-27T00:00:00+00:00', sampleCount: 0, firstTimeRightRate: null, stages: [] },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await config.queryFn()
+
+    const [calledPath] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/issues/metrics/quality')
+    expect(calledPath).not.toContain('range=')
+
+    vi.unstubAllGlobals()
+  })
+})
