@@ -18,3 +18,15 @@
 
 - `TaskLogService.QueryByTaskIdAsync` resolves `taskId` -> `workId` by walking `run.Stages[].Tasks[].Id` against the taskId and returning the first non-empty `WorkId`. Requires `WorkflowRunQuerier.LoadAsync` (no grain call).
 - `TaskLogOwnershipKinds.Workflow = "workflow"` and `AgentJob = "agent-job"` are the canonical owner-kind strings; the runner computes these via the same algorithm as `artifact-side-effects.ts:107`.
+
+## TaskLog capture engine notes (T-002)
+
+- `runCommand` (`packages/runner/src/system/process.ts:61`) gained an optional `CommandLineOptions` argument with `onLine`/`onClose` callbacks. stdout and stderr share one ordered emit sequence with NO stream dimension (design D3). Each stream's line state is a `{ carry }` buffer so a chunk arriving mid-line is held across reads; a final partial line is flushed in `drainTail` once per stream inside the `close` handler (post-exit drain — design D4).
+- The aggregate `CommandResult` is unchanged when `onLine` is not supplied; the existing `Buffer.concat(stdout).toString("utf8")` path runs in the `close` handler before `resolve`, so the byte-identical contract is preserved.
+- The single sink is `TaskLogger.write(source, text)` in `packages/runner/src/runtime/task-log.ts`. It masks BEFORE assigning `seq` and BEFORE handing to the collector, so a raw credential can never land in the buffer (design D5).
+- `MAX_TASK_LOG_LINES = 5_000` is the single named tunable capacity constant. Head-drop truncation runs inside `TaskLogCollector.append`; discarded `seq` values are not reused because the next-seq counter advances unconditionally. `firstSeq()` returns `null` only when the buffer is empty.
+- `CredentialMasker` covers (Phase 1, intentionally minimal — encoding-variant defense deferred): `https://user:pass@host`, `https://token@host`, `Bearer <token>`, GitHub PAT prefixes (`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`), `sk-…` style keys, and `Basic <base64>`. Runtime-known secrets can be primed with `registerSecret(secret)` (≥ 6 chars).
+- `ServerConnection.uploadTaskLog(ownerId, workId, batch, signal, ownerKind="workflow")` mirrors `uploadArtifact`'s owner-kind routing: `"workflow"` → `/api/workflow-runs/{id}/work/{wid}/task-log`, `"agent-job"` → `/api/agent-jobs/{id}/work/{wid}/task-log`. Body is JSON `{ entries: [{seq, timestamp (ISO), source, text}], truncated }`. No multipart, no grain involvement.
+- `ActionContext.log?: TaskLogger | null` is the new context surface; the executor wiring (T-003) is what constructs and threads the per-work `TaskLogger` into `baseContext(...)`.
+- Tests use `vi.useFakeTimers()` + `vi.setSystemTime(...)` to inject the clock for timestamps; collector timestamps come from the injected `now` so the sink + collector are deterministic without wall-clock.
+- All 850 runner tests pass (805 baseline + 45 new: 11 in process.spec.ts, 26 in task-log.spec.ts, 10 in server-connection-task-log.spec.ts).
