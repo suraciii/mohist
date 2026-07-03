@@ -2,15 +2,32 @@ import { stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { runCommand } from "../system/process.js"
-import { git as defaultGit } from "./git.js"
+import { git as defaultGit, type GitOptions } from "./git.js"
 import { resolveCreatePrText } from "./github-pr-issue-fields.js"
 import { combinedGhOutput, extractPrNumberFromUrl, parsePrListWithDraft } from "./github-pr-parse.js"
 import { classifyGhFailure } from "./github-pr-classify.js"
 import { getGitHubPrGh, getGitHubPrGit, runGhPrecheck } from "./github-pr-runtime.js"
 import type { CreateGitHubPrOutput, GitHubPrErrorCode, GitHubPrStep } from "./github-pr-types.js"
 
-type GitRunner = typeof defaultGit
+type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
+  success: boolean
+  stdout: string
+  stderr: string
+  exitCode: number
+  combinedOutput: string
+}>
 type GhRunner = typeof runCommand
+
+/**
+ * `source` tag recorded against every captured `mohist/create-github-pr`
+ * action body line. Phase-distinguished so the web viewer can tell
+ * which ops phase produced which line.
+ */
+const ACTION_SOURCE = "action:create-github-pr"
+
+function sinkOptions(context: ActionContext): GitOptions | undefined {
+  return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
+}
 
 export async function createGitHubPrAction(context: ActionContext): Promise<ActionResult> {
   const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
@@ -59,9 +76,10 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
   }
 
   const explicitSource = source !== "HEAD"
+  const gitOpts = sinkOptions(context)
   const branchProbe = explicitSource
     ? { success: true as const, name: source }
-    : await resolveCurrentBranch(git, workDir, context.signal)
+    : await resolveCurrentBranch(git, workDir, context.signal, gitOpts)
   if (explicitSource) {
     record("git-source-anchor", `use source ${source}`, 0, source)
   } else {
@@ -71,12 +89,12 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
     return fail("retry-safe", `Could not resolve current branch: ${branchProbe.combinedOutput}`, { output: branchProbe.combinedOutput })
   }
 
-  const baseSha = await resolveBaseSha(git, workDir, remote, target, context.signal, record)
+  const baseSha = await resolveBaseSha(git, workDir, remote, target, context.signal, record, gitOpts)
   if (baseSha.kind === "failure") {
     return fail(baseSha.failureKind, baseSha.message, { output: baseSha.output, branch: branchProbe.name })
   }
 
-  const pushResult = await git(workDir, ["push", "--force-with-lease", remote, branchProbe.name], context.signal)
+  const pushResult = await git(workDir, ["push", "--force-with-lease", remote, branchProbe.name], context.signal, sinkOptions(context))
   record("git-push", `push --force-with-lease ${remote} ${branchProbe.name}`, pushResult.exitCode, pushResult.combinedOutput)
   if (!pushResult.success) {
     return fail(
@@ -197,8 +215,8 @@ export async function openOrReusePr(
 export interface ResolveCurrentBranchOk { success: true; name: string }
 export interface ResolveCurrentBranchFailure { success: false; exitCode: number; combinedOutput: string }
 
-export async function resolveCurrentBranch(git: GitRunner, workDir: string, signal: AbortSignal): Promise<ResolveCurrentBranchOk | ResolveCurrentBranchFailure> {
-  const result = await git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal)
+export async function resolveCurrentBranch(git: GitRunner, workDir: string, signal: AbortSignal, opts?: GitOptions): Promise<ResolveCurrentBranchOk | ResolveCurrentBranchFailure> {
+  const result = await git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal, opts)
   if (!result.success) {
     return { success: false, exitCode: result.exitCode, combinedOutput: result.combinedOutput }
   }
@@ -228,13 +246,14 @@ export async function resolveBaseSha(
   target: string,
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string) => void,
+  opts?: GitOptions,
 ): Promise<BaseShaOk | BaseShaFailure> {
-  const fetch = await git(workDir, ["fetch", remote, target], signal)
+  const fetch = await git(workDir, ["fetch", remote, target], signal, opts)
   record("git-fetch-base", `fetch ${remote} ${target}`, fetch.exitCode, fetch.combinedOutput)
   if (!fetch.success) {
     return { kind: "failure", failureKind: "retry-safe", message: `git fetch ${remote} ${target} failed: ${fetch.combinedOutput}`, output: fetch.combinedOutput }
   }
-  const resolve = await git(workDir, ["rev-parse", `${remote}/${target}`], signal)
+  const resolve = await git(workDir, ["rev-parse", `${remote}/${target}`], signal, opts)
   record("git-rev-parse-base", `rev-parse ${remote}/${target}`, resolve.exitCode, resolve.combinedOutput)
   if (!resolve.success) {
     return { kind: "failure", failureKind: "retry-safe", message: `git rev-parse ${remote}/${target} failed: ${resolve.combinedOutput}`, output: resolve.combinedOutput }

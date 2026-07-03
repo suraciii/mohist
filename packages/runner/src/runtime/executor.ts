@@ -21,6 +21,7 @@ import {
 import { executeCheckDispatch, type CheckDeclaration } from "./check-execution.js"
 import { tryRecovery } from "./recovery.js"
 import { cleanupAgentAction, enforceCleanWorktree } from "./worktree-enforcement.js"
+import { TaskLogCollector, TaskLogger } from "./task-log.js"
 
 const COMPLETED_STATUSES = new Set(["completed", "success", "succeeded", "pass", "passed"])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
@@ -41,6 +42,15 @@ export class WorkExecutor {
     private readonly sessionManager: AcpSessionManager,
     private acpConnection: SharedAcpConnection | null,
     private readonly fallbackWorkDir = process.cwd(),
+    /**
+     * Injected clock for {@link TaskLogCollector} timestamps. Defaults
+     * to `Date.now` (real wall clock). Tests override it so the per-work
+     * log timestamps are deterministic without `vi.useFakeTimers`
+     * bleeding into other modules. Hosts do not typically override —
+     * the existing `n` convention threads this from the executor's
+     * constructor so the value is per-host, not per-work.
+     */
+    private readonly now: () => Date = () => new Date(),
   ) {}
 
   updateAcpConnection(acp: SharedAcpConnection | null) {
@@ -48,29 +58,46 @@ export class WorkExecutor {
   }
 
   async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
+    return this.executeWithLog(work, signal, null).then((exec) => exec.result)
+  }
+
+  /**
+   * Per-work execution that exposes the buffered
+   * {@link TaskLogCollector} so the host can flush it as a terminal
+   * batch via the independent task-log channel (design D6). Callers
+   * that do not care about the collector (tests, ad-hoc CLI usage) can
+   * keep calling {@link execute}.
+   */
+  async executeWithLog(work: RenderedWorkItem, signal: AbortSignal, collector: TaskLogCollector | null): Promise<WorkExecution> {
+    const ownedCollector = collector ?? new TaskLogCollector({ now: this.now })
+    const logger = new TaskLogger({ collector: ownedCollector })
     let resolvedWorkspace: ResolvedWorkspace
     if (work.ownerKind !== "agent-job") {
-      const precheck = await this.prepareWorkspace(work, signal)
-      if (precheck.kind === "failure") return precheck.result
+      const precheck = await this.prepareWorkspace(work, signal, logger)
+      if (precheck.kind === "failure") return { result: precheck.result, collector: ownedCollector }
       resolvedWorkspace = precheck.workspace
     } else {
       resolvedWorkspace = this.workspaceFromVariables(work)
     }
 
-    if (work.workType === "checks") return await this.executeChecks(work, resolvedWorkspace, signal)
-    return await this.executeOne(work, resolvedWorkspace, signal)
+    if (work.workType === "checks") {
+      const result = await this.executeChecks(work, resolvedWorkspace, signal, logger)
+      return { result, collector: ownedCollector }
+    }
+    const result = await this.executeOne(work, resolvedWorkspace, signal, logger)
+    return { result, collector: ownedCollector }
   }
 
-  private async prepareWorkspace(work: RenderedWorkItem, signal: AbortSignal): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
+  private async prepareWorkspace(work: RenderedWorkItem, signal: AbortSignal, log: TaskLogger): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
     try {
-      const info = await this.workspaceManager.prepare(work, signal)
+      const info = await this.workspaceManager.prepare(work, signal, log)
       return { kind: "ok", workspace: infoToResolved(info) }
     } catch (error) {
       return { kind: "failure", result: workspaceSetupFailure(work, error) }
     }
   }
 
-  private async executeOne(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<WorkItemResult> {
+  private async executeOne(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
     const action = this.actions.resolve(work.uses)
     if (!action) return failure(work, `No action found for '${work.uses}'`)
 
@@ -84,18 +111,18 @@ export class WorkExecutor {
       const workspaceRoot = this.workspaceRoot(variables)
       const workDir = await this.resolveWorkDir(renderedWith, workspaceRoot)
       const expectedBranch = expectedWorkspaceBranch(variables)
-      const startCheck = await checkBranchStability(work, workDir, expectedBranch, "start", signal)
+      const startCheck = await checkBranchStability(work, workDir, expectedBranch, "start", signal, log)
       if (startCheck.kind === "violation") {
         return startCheck.result
       }
-      const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir })
+      const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection, log), with: renderedWith, workDir })
       const normalized = normalize(work, result)
       const recoveryResult = tryRecovery(work, normalized)
       if (recoveryResult) return recoveryResult
       if (normalized.status !== "completed") {
         return attachBranchStabilityEvidence(normalized, startCheck.evidence)
       }
-      const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal)
+      const endCheck = await checkBranchStability(work, workDir, expectedBranch, "end", signal, log)
       if (endCheck.kind === "violation") {
         return endCheck.result
       }
@@ -108,7 +135,8 @@ export class WorkExecutor {
         variables,
         signal,
         cleanupAgentAction,
-        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.sessionManager, this.acpConnection, this.connection) },
+        { baseContext: (cleanupWork, cleanupVariables, cleanupSignal) => baseContext(cleanupWork, cleanupVariables, cleanupSignal, this.sessionManager, this.acpConnection, this.connection, log) },
+        log,
       )
       if (worktreeResult.status !== "completed") {
         return attachBranchStabilityEvidence(worktreeResult, evidenceStack)
@@ -122,14 +150,14 @@ export class WorkExecutor {
     }
   }
 
-  private async executeChecks(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<WorkItemResult> {
+  private async executeChecks(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal, log: TaskLogger): Promise<WorkItemResult> {
     const variables = await this.variables(work, resolvedWorkspace, signal)
     const rawChecks: unknown[] = Array.isArray(work.with?.checks) ? work.with.checks : []
     const checks = rawChecks.filter(isCheck)
     const workspaceRoot = this.workspaceRoot(variables)
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
-      context: baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection),
+      context: baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection, log),
       formatUnresolved: formatCheckUnresolvedError,
       resolveWorkDir: (withInput) => this.resolveWorkDir(withInput, workspaceRoot),
       toCheckStatus,
@@ -181,6 +209,18 @@ export class WorkExecutor {
   }
 }
 
+/**
+ * Per-work execution outcome. The {@link TaskLogCollector} is returned
+ * alongside the {@link WorkItemResult} so the host (`RunnerHost`) can
+ * flush it as a terminal batch via the independent task-log channel
+ * even when the work failed (best-effort: flush never blocks or fails
+ * the report). Design D6.
+ */
+export interface WorkExecution {
+  result: WorkItemResult
+  collector: TaskLogCollector
+}
+
 type ResolvedWorkspace = { path: string, branch: string | null, changeDir: string | null }
 
 function infoToResolved(info: { path: string, branch?: string | null, changeDir?: string | null }): ResolvedWorkspace {
@@ -191,7 +231,7 @@ function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject 
   return { path: workspace.path, branch: workspace.branch, changeDir: workspace.changeDir }
 }
 
-function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: AbortSignal, sessionManager: AcpSessionManager, acpConnection: SharedAcpConnection | null, connection: ServerConnection): Omit<ActionContext, "with" | "workDir"> {
+function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: AbortSignal, sessionManager: AcpSessionManager, acpConnection: SharedAcpConnection | null, connection: ServerConnection, log: TaskLogger | null = null): Omit<ActionContext, "with" | "workDir"> {
   return {
     workflowRunId: work.workflowRunId,
     workId: work.workId,
@@ -209,6 +249,7 @@ function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: Abor
     acpSessionManager: sessionManager,
     acpConnection,
     serverConnection: connection,
+    log,
     writeVars: async (vars) => connection.patchRunVars(work.workflowRunId, vars, signal),
   }
 }

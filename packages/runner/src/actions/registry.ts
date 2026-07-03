@@ -14,12 +14,18 @@ import {
 import { githubPrStatusAction } from "./github-pr-status.js"
 import { archiveChangeAction, openspecArtifactsAction, openspecTasksAction } from "./openspec.js"
 import { rebaseAction, rebaseStatusAction } from "./rebase.js"
-import { git as defaultGit } from "./git.js"
+import { git as defaultGit, type GitOptions } from "./git.js"
 import { pushAction } from "./push.js"
 import { workspacePrepareAction } from "./workspace-prepare.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
-type GitRunner = typeof defaultGit
+type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
+  success: boolean
+  stdout: string
+  stderr: string
+  exitCode: number
+  combinedOutput: string
+}>
 
 let git: GitRunner = defaultGit
 
@@ -131,19 +137,20 @@ export async function mergeReadyAction(context: ActionContext): Promise<ActionRe
   const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
   const checkedAt = new Date().toISOString()
+  const opts: GitOptions | undefined = context.log ? { sink: { log: context.log, source: "action:merge-ready" } } : undefined
 
   // Ref-only preflight: the workflow workspace never has its branch
   // switched. The branch-stable contract requires this action to never
   // run `checkout`, `merge --squash`, `fetch`, or any clone — only
   // `rev-parse` and `merge-base` against the workflow workspace refs.
-  const base = await git(workDir, ["rev-parse", baseRef], context.signal)
+  const base = await git(workDir, ["rev-parse", baseRef], context.signal, opts)
   if (!base.success) return mergeReadyResult(false, baseBranch, null, null, null, `Could not resolve base branch '${baseRef}'`, base.exitCode, [], checkedAt)
 
-  const head = await git(workDir, ["rev-parse", source], context.signal)
+  const head = await git(workDir, ["rev-parse", source], context.signal, opts)
   if (!head.success) return mergeReadyResult(false, baseBranch, base.stdout.trim(), null, null, "Could not resolve source", head.exitCode, [], checkedAt)
 
-  const mergeBase = await git(workDir, ["merge-base", baseRef, source], context.signal)
-  const ancestorCheck = await git(workDir, ["merge-base", "--is-ancestor", baseRef, source], context.signal)
+  const mergeBase = await git(workDir, ["merge-base", baseRef, source], context.signal, opts)
+  const ancestorCheck = await git(workDir, ["merge-base", "--is-ancestor", baseRef, source], context.signal, opts)
   const mergeBaseSha = mergeBase.success ? mergeBase.stdout.trim() : null
 
   if (!ancestorCheck.success) {
