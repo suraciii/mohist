@@ -222,6 +222,195 @@ public class AgentSessionQuerierSpecs
         Assert.Equal(1, result.PreviousWindow.PerIssueCost.SampleCount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task GetCostWindowedAsync_WindowDays7_CurrentAndPreviousEachCover7Days()
+    {
+        // windowDays=7 ⇒ current window is the last 7 days inclusive of
+        // today; previous window is the immediately-preceding 7 days.
+        // Sessions placed exactly on the boundary verify both windows
+        // independently. This is the string-independent querier-level
+        // assertion of D1 (route owns the wire parsing).
+        var project = await CreateProjectAsync();
+
+        // Current window [today-6d, today+1d).
+        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(8),
+            costAmount: 0.30, costCurrency: "USD");
+        // Previous window [today-13d, today-6d).
+        await InsertSessionAsync(project.Id, Today.AddDays(-8).AddHours(8),
+            costAmount: 0.10, costCurrency: "USD");
+        // Outside both windows.
+        await InsertSessionAsync(project.Id, Today.AddDays(-20).AddHours(8),
+            costAmount: 9.99, costCurrency: "USD");
+
+        var service = ResolveQuerier();
+        var result = await service.GetCostWindowedAsync(project.Id, windowDays: 7);
+
+        Assert.Equal(0.30, result.CurrentWindow.Spend.Amount);
+        Assert.Equal(1, result.CurrentWindow.Spend.SampleCount);
+        Assert.Equal(0.10, result.PreviousWindow.Spend.Amount);
+        Assert.Equal(1, result.PreviousWindow.Spend.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task GetCostWindowedAsync_WindowDays90_CurrentAndPreviousEachCover90Days()
+    {
+        // windowDays=90 ⇒ current window is the last 90 days; previous
+        // window is the immediately-preceding 90 days. Sessions placed
+        // 60d and 120d ago verify the boundary: 60d is in current, 120d
+        // is in previous (just inside).
+        var project = await CreateProjectAsync();
+
+        // Current window [today-89d, today+1d).
+        await InsertSessionAsync(project.Id, Today.AddDays(-60).AddHours(8),
+            costAmount: 1.00, costCurrency: "USD");
+        // Previous window [today-179d, today-89d).
+        await InsertSessionAsync(project.Id, Today.AddDays(-120).AddHours(8),
+            costAmount: 0.50, costCurrency: "USD");
+        // Outside both windows (>180d ago) — ignored.
+        await InsertSessionAsync(project.Id, Today.AddDays(-200).AddHours(8),
+            costAmount: 9.99, costCurrency: "USD");
+
+        var service = ResolveQuerier();
+        var result = await service.GetCostWindowedAsync(project.Id, windowDays: 90);
+
+        Assert.Equal(1.00, result.CurrentWindow.Spend.Amount);
+        Assert.Equal(1, result.CurrentWindow.Spend.SampleCount);
+        Assert.Equal(0.50, result.PreviousWindow.Spend.Amount);
+        Assert.Equal(1, result.PreviousWindow.Spend.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task GetCostWindowedAsync_OmittedWindowDays_Reproduces30DayWindow()
+    {
+        // Omit-equality witness: omitted windowDays falls back to the
+        // prior fixed 30-day window — the Dashboard back-compat default
+        // (FactoryStatusHeadline consumes this endpoint without a range).
+        var project = await CreateProjectAsync();
+        // Inside the 30-day current window.
+        await InsertSessionAsync(project.Id, Today.AddDays(-10).AddHours(8),
+            costAmount: 0.40, costCurrency: "USD");
+        // Outside the 30-day window but inside the 30-day previous window
+        // [today-59d, today-29d).
+        await InsertSessionAsync(project.Id, Today.AddDays(-40).AddHours(8),
+            costAmount: 0.20, costCurrency: "USD");
+
+        var service = ResolveQuerier();
+        var omit = await service.GetCostWindowedAsync(project.Id);
+
+        Assert.Equal(0.40, omit.CurrentWindow.Spend.Amount);
+        Assert.Equal(1, omit.CurrentWindow.Spend.SampleCount);
+        Assert.Equal(0.20, omit.PreviousWindow.Spend.Amount);
+        Assert.Equal(1, omit.PreviousWindow.Spend.SampleCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_OmittedWindowDays_Reproduces7Day7BucketDailyWindow()
+    {
+        // Omit-equality witness: omitted windowDays falls back to the
+        // prior fixed 7-day / 7-bucket daily window — the Dashboard
+        // back-compat default.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.05, costCurrency: "USD");
+
+        var service = ResolveQuerier();
+        var result = await service.GetUsageTimeseriesAsync(project.Id);
+
+        Assert.Equal("day", result.BucketGranularity);
+        Assert.Equal(7, result.Buckets.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_WindowDays7_Daily7Buckets()
+    {
+        // windowDays=7 ⇒ day(7). Recorded in design.md D5.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
+
+        var service = ResolveQuerier();
+        var result = await service.GetUsageTimeseriesAsync(project.Id, windowDays: 7);
+
+        Assert.Equal("day", result.BucketGranularity);
+        Assert.Equal(7, result.Buckets.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_WindowDays30_Daily30Buckets()
+    {
+        // windowDays=30 ⇒ day(30). Recorded in design.md D5.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-5).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.02, costCurrency: "USD");
+
+        var service = ResolveQuerier();
+        var result = await service.GetUsageTimeseriesAsync(project.Id, windowDays: 30);
+
+        Assert.Equal("day", result.BucketGranularity);
+        Assert.Equal(30, result.Buckets.Count);
+        // Window span is exactly 30 calendar days inclusive of today.
+        Assert.Equal(TimeSpan.FromDays(30), result.RangeTo - result.RangeFrom);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_WindowDays90_Weekly13Buckets()
+    {
+        // windowDays=90 ⇒ week(ceil(90/7)=13). Recorded in design.md D5.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-20).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.05, costCurrency: "USD");
+
+        var service = ResolveQuerier();
+        var result = await service.GetUsageTimeseriesAsync(project.Id, windowDays: 90);
+
+        Assert.Equal("week", result.BucketGranularity);
+        Assert.Equal(13, result.Buckets.Count);
+        // Window span is exactly 90 calendar days inclusive of today.
+        Assert.Equal(TimeSpan.FromDays(90), result.RangeTo - result.RangeFrom);
+        // Each weekly bucket is 7 days long, except the trailing one
+        // which clamps to rangeTo so the series covers the full span.
+        for (var i = 0; i < result.Buckets.Count - 1; i++)
+        {
+            Assert.Equal(TimeSpan.FromDays(7), result.Buckets[i].BucketEnd - result.Buckets[i].BucketStart);
+        }
+        var last = result.Buckets[^1];
+        Assert.Equal(result.RangeTo, last.BucketEnd);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_CumulativeSeriesFollowsBucketGrid()
+    {
+        // Cumulative cost-per-ship sub-series follows the same bucket
+        // grid (D5); it must have one entry per bucket regardless of
+        // granularity. For 30d daily it has 30 entries.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-3).AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0.05, costCurrency: "USD");
+
+        var service = ResolveQuerier();
+        var result = await service.GetUsageTimeseriesAsync(project.Id, windowDays: 30);
+
+        Assert.NotNull(result.CumulativeCostPerShip);
+        Assert.Equal(result.Buckets.Count, result.CumulativeCostPerShip!.Count);
+        Assert.Equal(30, result.CumulativeCostPerShip.Count);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync()
     {
         var name = $"cost-querier-{Guid.NewGuid():N}";

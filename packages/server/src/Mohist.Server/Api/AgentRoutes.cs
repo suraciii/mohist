@@ -38,20 +38,55 @@ public static class AgentRoutes
             return ApiResults.Ok(await sessions.GetActivityAsync(project.Id, limit, waiting: waiting, capacity: capacity, ct: ct));
         });
 
-        group.MapGet("/usage", async (HttpContext context, AgentSessionQuerier sessions, CancellationToken ct) =>
+        group.MapGet("/usage", async (HttpContext context, string? range, AgentSessionQuerier sessions, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-            return ApiResults.Ok(await sessions.GetUsageTimeseriesAsync(project.Id, ct));
+
+            // Uniform Insights selector vocabulary. Omit ⇒ today's fixed
+            // 7-day / 7-bucket daily window (Dashboard back-compat default
+            // — `FactoryStatusHeadline` consumes this endpoint); unknown
+            // values ⇒ 400. The querier receives the parsed day count and
+            // applies the bucket-granularity map (D5).
+            int? windowDays = null;
+            if (!string.IsNullOrWhiteSpace(range))
+            {
+                if (!MetricsRange.TryParse(range, out var days))
+                    return ApiResults.BadRequest(
+                        "Unsupported range value. Accepted values: '7d', '30d', '90d'.",
+                        "unsupported_range",
+                        new { range });
+                windowDays = days;
+            }
+
+            return ApiResults.Ok(await sessions.GetUsageTimeseriesAsync(project.Id, windowDays, ct));
         });
 
-        group.MapGet("/cost", async (HttpContext context, AgentSessionQuerier sessions, IssueQuerier issues, CancellationToken ct) =>
+        group.MapGet("/cost", async (HttpContext context, string? range, AgentSessionQuerier sessions, IssueQuerier issues, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
+
+            // Uniform Insights selector vocabulary. Omit ⇒ today's fixed
+            // 30-day windowed current/previous spend and per-issue cost
+            // (Dashboard `FactoryStatusHeadline` back-compat default);
+            // unknown values ⇒ 400. The all-time `totalCost`,
+            // `todayCost`, `doneIssuesCount`, and all-time `costPerShip`
+            // are computed before the window and remain unaffected.
+            int? windowDays = null;
+            if (!string.IsNullOrWhiteSpace(range))
+            {
+                if (!MetricsRange.TryParse(range, out var days))
+                    return ApiResults.BadRequest(
+                        "Unsupported range value. Accepted values: '7d', '30d', '90d'.",
+                        "unsupported_range",
+                        new { range });
+                windowDays = days;
+            }
+
             var cost = await sessions.GetCostRollupAsync(project.Id, ct);
             var projectIssues = await issues.ListAsync(project.Id, project, all: true);
             var doneIssuesCount = projectIssues.Count(i => i.Status == "done");
             var costPerShip = BuildCostPerShip(cost.TotalCost, doneIssuesCount);
-            var windowed = await sessions.GetCostWindowedAsync(project.Id, ct);
+            var windowed = await sessions.GetCostWindowedAsync(project.Id, windowDays, ct);
 
             return ApiResults.Ok(new AgentCostRollupDto(
                 cost.TotalCost,

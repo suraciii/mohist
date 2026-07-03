@@ -21,15 +21,26 @@
 - **Approval-wait route still binds `DateTimeOffset.UtcNow` directly** (not via `TimeProvider`): this is a pre-existing wart from issue-295 and explicitly out of scope for M3 (design.md notes this). The range change keeps the existing clock source per endpoint.
 - **Self-review report already filed:** `openspec/changes/issue-324/self-review.md` documents a count typo (seven→eight) in design.md Migration Plan step 2 and a follow-up on the agent-cost 90d weekly granularity (T-002 scope). No new findings during implementation.
 - **Flaky test in the full suite:** `Microsoft.Data.Sqlite` `ObjectDisposedException` on `SQLitePCL` handle during `EnsureInitialized` reproduces only in the full suite, passes in isolation (per existing skip message). Not introduced by this task; passes when rerun.
+- **Agent usage 90d weekly trailing bucket clamp:** the last weekly bucket's `BucketEnd` is clamped to `rangeTo` (exclusive end of the trailing window). Without this clamp, `rangeFrom + 13*7 = rangeFrom + 91` would overshoot the 90-day series. The trailing bucket's length is therefore 3 days (rangeFrom + 91d − 90d), not 7. This is correct: the bucket grid covers the requested day-span exactly, and the existing `BucketEnd` field already carries the right boundary for the chart to render.
+- **`ComputeCumulativeCostPerShipAsync` per-bucket day boundaries use `long`:** `rangeFrom.AddDays((long)i * bucketSizeDays)` avoids int overflow on long-lived projects where `(long)i * 7` for i=13 stays well within range but guards against future 365d ranges (52 weeks × 7 = 364 — safe, but explicit `long` makes intent obvious).
+
+## Codebase Patterns (T-002 additions)
+
+- **Agent cost windowed scale:** `GetCostWindowedAsync(projectId, int? windowDays = null)` substitutes `days = windowDays ?? 30` on both current and previous windows. `currentFrom = now.Date.AddDays(-(days - 1))` keeps the current window inclusive of today; `previousFrom = currentFrom.AddDays(-days)` keeps the previous window the same length immediately preceding.
+- **Agent usage granularity map (D5):** `ResolveUsageBucketGranularity(days)` returns `("week", ceil(days/7), 7)` when `days >= 90`, else `("day", days, 1)`. The querier uses the bucket count + size to lay out the bucket grid; the trailing edge of the last bucket is clamped to `rangeTo` so the series covers exactly the requested day-span. `bucketGranularity` field reports `"day"` or `"week"`; cumulative-cost-per-ship sub-series follows the same bucket grid.
+- **CumulativeCostPerShipAsync signature gained `int bucketSizeDays`:** the sub-series day boundaries are computed from `rangeFrom.AddDays((long)i * bucketSizeDays)`. The prior hard-coded `i`/`i+1` is gone; the per-bucket math now derives from the granularity map.
+- **Route validation is identical to T-001:** `string? range` → `MetricsRange.TryParse` → `int? windowDays` → querier. Unknown ⇒ 400 with `unsupported_range` code. The route owns the wire vocabulary; the querier takes `int?` and stays string-independent (testable directly with `windowDays: 90`).
 
 ## Verification
 
 - `dotnet build Mohist.sln -p:SkipWebBuild=true` — 0 warnings, 0 errors.
-- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj` — 3602 passed, 13 skipped, 0 failed (after rerun; one transient flake on first run).
+- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj` — 3627 passed, 13 skipped, 0 failed (T-002).
+- `npm test` — 805 passed (runner) + 3627 passed (server) + 13 skipped; 0 failed.
 - `npm run typecheck -w packages/web` — clean.
 - `npm run typecheck -w packages/runner` — clean.
 - Targeted: 32 Range/CFD/MetricsRange/WindowDays* tests pass.
 - Targeted: 66 IssueMetricsApiSpecs pass; 117 IssueQuerierSpecs pass.
+- Targeted: 25 AgentCostRollupApiSpecs (was 20, +5 range scenarios), 24 AgentUsageTimeseriesApiSpecs (was 17, +7 range scenarios), 14 AgentSessionQuerierSpecs (was 6, +8 windowDays unit tests) pass.
 
 ## Files Touched
 
@@ -39,3 +50,8 @@
 - `packages/server/src/Mohist.Server/Api/IssueRoutes.{Metrics,DeliveryTimeMetrics,StageDurationMetrics,QualityMetrics,ApprovalMetrics,CumulativeFlow}.cs` — `string? range` binding + 400 validation, pass `windowDays` through.
 - `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Api/IssueMetricsApiSpecs.cs` — 14 new tests (omit-equality × endpoints, range scales, unknown ⇒ 400 parameterized across 7 cases, CFD 90d default + range-driven, quality double-window). Existing CFD test comments updated to reference the omit-default framing; one test renamed (`...FixedWindow` → `...OmitDefaultWindow`).
 - `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Querier/IssueQuerierSpecs.cs` — 7 new unit tests covering querier-level window math (string-independent).
+- `packages/server/src/Mohist.Server/Workflow/Services/Sessions/AgentSessionQuerier.cs` (T-002) — `int? windowDays` on `GetCostWindowedAsync` (substitutes 30-day literals for `windowDays ?? 30`) and `GetUsageTimeseriesAsync` (substitutes 7-day literal for `windowDays ?? 7`); new `ResolveUsageBucketGranularity(days)` implements D5 map (7d/30d daily, 90d weekly); `ComputeCumulativeCostPerShipAsync` gained `int bucketSizeDays` so the sub-series follows the same bucket grid; doc-comments rewritten.
+- `packages/server/src/Mohist.Server/Api/AgentRoutes.cs` (T-002) — `string? range` binding on `/agent/cost` and `/agent/usage`; `MetricsRange.TryParse` ⇒ 400 on unknown; passes `windowDays` through to the querier.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Api/AgentCostRollupApiSpecs.cs` (T-002) — 5 new tests (range 90d scales window; range 7d scales window; range does not affect all-time figures; omitted range reproduces 30-day; unknown range ⇒ 400; accepted range values theory).
+- `packages/server/tests/Mohist.Server.Tests/Specs/Api/AgentUsageTimeseriesApiSpecs.cs` (T-002) — 7 new tests (range 7d/30d daily; range 90d weekly 13 buckets; omitted reproduces 7d/7-bucket daily; unknown ⇒ 400; accepted range values theory; granularity field reports per range; cumulative series follows bucket grid).
+- `packages/server/tests/Mohist.Server.Tests/Specs/Sessions/AgentSessionQuerierSpecs.cs` (T-002) — 8 new unit tests covering querier-level window math (string-independent): cost 7d/90d windows, cost omit ⇒ 30d, usage omit ⇒ 7d/7-bucket daily, usage 7d/30d/90d bucket counts + granularity, cumulative series follows bucket grid.
