@@ -29,10 +29,25 @@ Acceptance verified:
 - Test seeds that bypass the runtime-event → accumulator pipeline and write `AgentSessionTranscriptPartRow` directly must use the same vocabulary as the read-side filter or the test will silently lose resolution (e.g. `AgentSessionReadApiSpecs.InsertFailedGenericSessionAsync` previously seeded `session_closed` and would now fail to match `ReadTerminalStateAsync` if not updated).
 - The `CorrelationKey` column is opaque (per-call-site) — flipping it for consistency with the type is hygiene, not required for behavior.
 
+## T-002 — Collapse transcript loading + context-ref helpers
+
+Changes:
+- `Sessions/Services/TranscriptPartLoader.cs` (new): single `internal static` loader, `LoadAsync(db, sessionIds, ct, partType?)`, returns `(SessionByTurnId, Parts)`. Dedupes session ids, short-circuits empty cases, applies the part-type SQL filter at the DB boundary. Imposes no SQL ordering — callers apply their own `OrderBy` via LINQ so the byte-identical projection is preserved across all five former call sites.
+- `Sessions/Services/AgentSessionContextRefs.cs` (new): single `internal static` parser, `TryBuild(record)`, reads the four launch labels (IssueNumber / EpicNumber / Repository / WorkspacePath), parses IssueNumber as int-or-null, returns a nullable `ContextRefs` value tuple (null when all four are empty/whitespace). Both wrapper callers delegate to it.
+- `Sessions/Services/AgentSessionQuerier.cs`: rewired five former duplication sites onto the shared loader — `LoadLatestEventsAsync` (LastSeenAt,Id ordering), `LoadEventSummariesAsync` (Sequence ordering), `LoadTerminalFactsAsync` (Sequence,Id ordering + `partType: TranscriptPartTypes.SessionClosed` SQL filter), `GetGenericSessionSummaryAsync` inline projection, `BuildSessionMetadataDtoAsync` inline projection. `LoadTranscriptAsync` (single-session, returns turns+parts for `SessionTranscriptBuilder.Build`) now delegates the parts fetch to the loader while keeping its own turns fetch (the consumer needs both). The two context-ref builders (`BuildAgentSessionListContextRefs`, `BuildGenericSessionSummaryContextRefs`) are now 3-line delegations that map the shared tuple to their own distinct DTO. `Label(...)` access promoted to `internal static` so `AgentSessionContextRefs` can share it.
+- `packages/server/tests/.../Sessions/TranscriptPartLoaderSpecs.cs` (new, 7 specs): empty input, dedup, multi-session reshape, missing-turns, part-type filter with matches, part-type filter with no matches, no SQL ordering imposed.
+- `packages/server/tests/.../Sessions/AgentSessionContextRefsSpecs.cs` (new, 10 specs): all labels populated, non-numeric issue number → null IssueNumber, epic-only, all absent → null, all blank/whitespace → null, metadata-fallback resolution, round-trips through both `AgentSessionListContextRefsDto` and `GenericAgentSessionSummaryContextRefsDto` (wire-format DTOs distinct, construction logic shared).
+
+Acceptance verified:
+- All five former duplication sites call `TranscriptPartLoader.LoadAsync`; no inline `turns → turnIds → parts → sessionByTurnId-dictionary` sequence remains in `AgentSessionQuerier.cs` (verified by `rg`). `LoadTranscriptAsync` retains a turns-only query (different concern — its consumer needs both turns and parts, and the loader's `SessionByTurnId` map is a turn-id-keyed dictionary, not the turns list).
+- Both `BuildAgentSessionListContextRefs` and `BuildGenericSessionSummaryContextRefs` delegate to `AgentSessionContextRefs.TryBuild` and map the value tuple to their own distinct DTO wire shape.
+- `dotnet test Mohist.sln`: 3594 passed, 0 failed, 13 pre-existing skipped. `npm test`: 805 runner tests pass.
+- Build under `TreatWarningsAsErrors`: 0 warnings, 0 errors.
+
 ## Stage status (per design migration plan)
 
 - [x] T-001 — event-naming unification (lowest blast radius, do first)
-- [ ] T-002 — collapse transcript loading + context-ref helpers
+- [x] T-002 — collapse transcript loading + context-ref helpers
 - [ ] T-003 — extract `AgentActivityFeedAssembler`
 - [ ] T-004 — extract `AgentUsageReporter`
 - [ ] T-005 — delete dead `ToAgentSessionDto` / `AgentSessionDto`

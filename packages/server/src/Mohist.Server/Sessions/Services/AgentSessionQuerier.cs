@@ -295,19 +295,10 @@ public class AgentSessionQuerier : IScopedService
     /// </summary>
     private static AgentSessionListContextRefsDto? BuildAgentSessionListContextRefs(AgentSessionRecord record)
     {
-        var issueNumberText = Label(record, GenericAgentSessionMetadata.IssueNumber);
-        var issueNumber = int.TryParse(issueNumberText, out var parsed) ? parsed : (int?)null;
-        var epicNumber = Label(record, GenericAgentSessionMetadata.EpicNumber);
-        var repository = Label(record, GenericAgentSessionMetadata.Repository);
-        var workspacePath = Label(record, GenericAgentSessionMetadata.WorkspacePath);
-
-        if (issueNumber is null && string.IsNullOrWhiteSpace(epicNumber)
-            && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))
-        {
-            return null;
-        }
-
-        return new AgentSessionListContextRefsDto(issueNumber, epicNumber, repository, workspacePath);
+        var refs = AgentSessionContextRefs.TryBuild(record);
+        return refs is null
+            ? null
+            : new AgentSessionListContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspacePath);
     }
 
     public async Task<string?> ResolveIssueSessionIdAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
@@ -515,11 +506,10 @@ public class AgentSessionQuerier : IScopedService
         if (record is null) return null;
 
         var session = record.Session;
-        var transcript = await LoadTranscriptAsync(db, session.Id, ct);
-        var sessionByTurnId = transcript.Turns.ToDictionary(t => t.Id, t => t.SessionId);
-        var transcriptEvents = transcript.Parts
-            .Where(part => sessionByTurnId.ContainsKey(part.TurnId))
-            .Select(part => ToProjection(sessionByTurnId[part.TurnId], part))
+        var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { session.Id }, ct: ct);
+        var transcriptEvents = loaded.Parts
+            .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
+            .Select(part => ToProjection(loaded.SessionByTurnId[part.TurnId], part))
             .ToList();
 
         var summary = TranscriptEventSummaryProjector.Summarize(
@@ -565,19 +555,10 @@ public class AgentSessionQuerier : IScopedService
     /// </summary>
     private static GenericAgentSessionSummaryContextRefsDto? BuildGenericSessionSummaryContextRefs(AgentSessionRecord record)
     {
-        var issueNumberText = Label(record, GenericAgentSessionMetadata.IssueNumber);
-        var issueNumber = int.TryParse(issueNumberText, out var parsed) ? parsed : (int?)null;
-        var epicNumber = Label(record, GenericAgentSessionMetadata.EpicNumber);
-        var repository = Label(record, GenericAgentSessionMetadata.Repository);
-        var workspacePath = Label(record, GenericAgentSessionMetadata.WorkspacePath);
-
-        if (issueNumber is null && string.IsNullOrWhiteSpace(epicNumber)
-            && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))
-        {
-            return null;
-        }
-
-        return new GenericAgentSessionSummaryContextRefsDto(issueNumber, epicNumber, repository, workspacePath);
+        var refs = AgentSessionContextRefs.TryBuild(record);
+        return refs is null
+            ? null
+            : new GenericAgentSessionSummaryContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspacePath);
     }
 
     private async Task<AgentSessionMetadataDto> BuildSessionMetadataDtoAsync(
@@ -587,11 +568,10 @@ public class AgentSessionQuerier : IScopedService
         CancellationToken ct)
     {
         var domainSession = session.Session;
-        var transcript = await LoadTranscriptAsync(db, domainSession.Id, ct);
-        var sessionByTurnId = transcript.Turns.ToDictionary(t => t.Id, t => t.SessionId);
-        var transcriptEvents = transcript.Parts
-            .Where(part => sessionByTurnId.ContainsKey(part.TurnId))
-            .Select(part => ToProjection(sessionByTurnId[part.TurnId], part))
+        var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { domainSession.Id }, ct: ct);
+        var transcriptEvents = loaded.Parts
+            .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
+            .Select(part => ToProjection(loaded.SessionByTurnId[part.TurnId], part))
             .ToList();
         var partCount = transcriptEvents.Count;
         var eventSummary = TranscriptEventSummaryProjector.Summarize(
@@ -1151,48 +1131,27 @@ public class AgentSessionQuerier : IScopedService
     {
         if (sessionIds.Length == 0) return [];
 
-        var turns = await db.AgentSessionTranscriptTurns.AsNoTracking()
-            .Where(t => sessionIds.Contains(t.SessionId))
-            .ToListAsync(ct);
-        var turnIds = turns.Select(t => t.Id).ToArray();
-        if (turnIds.Length == 0) return [];
-
-        var sessionByTurnId = turns.ToDictionary(t => t.Id, t => t.SessionId);
-        var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
-            .Where(e => turnIds.Contains(e.TurnId))
-            .OrderBy(e => e.LastSeenAt)
-            .ThenBy(e => e.Id)
-            .ToListAsync(ct);
+        var loaded = await TranscriptPartLoader.LoadAsync(db, sessionIds, ct: ct);
+        if (loaded.Parts.Count == 0) return [];
 
         var result = new Dictionary<string, TranscriptEventProjection>(StringComparer.Ordinal);
-        foreach (var part in parts)
-            if (sessionByTurnId.TryGetValue(part.TurnId, out var sessionId))
+        foreach (var part in loaded.Parts.OrderBy(e => e.LastSeenAt).ThenBy(e => e.Id))
+            if (loaded.SessionByTurnId.TryGetValue(part.TurnId, out var sessionId))
                 result[sessionId] = ToProjection(sessionId, part);
 
         return result;
     }
 
+
     private static async Task<Dictionary<string, AgentSessionTranscriptSummary>> LoadEventSummariesAsync(
         MohistDbContext db, IEnumerable<string> sessionIds, CancellationToken ct)
     {
-        var ids = sessionIds.Distinct(StringComparer.Ordinal).ToArray();
-        if (ids.Length == 0) return [];
+        var loaded = await TranscriptPartLoader.LoadAsync(db, sessionIds, ct: ct);
+        if (loaded.Parts.Count == 0) return [];
 
-        var turns = await db.AgentSessionTranscriptTurns.AsNoTracking()
-            .Where(t => ids.Contains(t.SessionId))
-            .ToListAsync(ct);
-        var turnIds = turns.Select(t => t.Id).ToArray();
-        if (turnIds.Length == 0) return [];
-
-        var sessionByTurnId = turns.ToDictionary(t => t.Id, t => t.SessionId);
-        var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
-            .Where(e => turnIds.Contains(e.TurnId))
-            .OrderBy(e => e.Sequence)
-            .ToListAsync(ct);
-
-        return parts
-            .Where(part => sessionByTurnId.ContainsKey(part.TurnId))
-            .Select(part => ToProjection(sessionByTurnId[part.TurnId], part))
+        return loaded.Parts
+            .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
+            .Select(part => ToProjection(loaded.SessionByTurnId[part.TurnId], part))
             .OrderBy(e => e.Sequence)
             .GroupBy(e => e.SessionId, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => TranscriptEventSummaryProjector.Summarize(
@@ -1371,7 +1330,7 @@ public class AgentSessionQuerier : IScopedService
             ToUsageDto(s));
     }
 
-    private static string? Label(AgentSessionRecord record, string key) =>
+    internal static string? Label(AgentSessionRecord record, string key) =>
         record.Label(key) ?? record.Session.Metadata.Label(key);
 
     private static int IssueNumber(AgentSessionRecord record) =>
@@ -1453,12 +1412,11 @@ public class AgentSessionQuerier : IScopedService
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
             .ToListAsync(ct);
-        var turnIds = turns.Select(t => t.Id).ToArray();
-        var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
-            .Where(e => turnIds.Contains(e.TurnId))
+        var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { sessionId }, ct: ct);
+        var parts = loaded.Parts
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
-            .ToListAsync(ct);
+            .ToList();
         return new AgentSessionTranscriptData(turns, parts);
     }
 
@@ -1467,26 +1425,13 @@ public class AgentSessionQuerier : IScopedService
         IEnumerable<string> sessionIds,
         CancellationToken ct)
     {
-        var ids = sessionIds.Distinct(StringComparer.Ordinal).ToArray();
-        if (ids.Length == 0) return [];
-
-        var turns = await db.AgentSessionTranscriptTurns.AsNoTracking()
-            .Where(t => ids.Contains(t.SessionId))
-            .ToListAsync(ct);
-        var turnIds = turns.Select(t => t.Id).ToArray();
-        if (turnIds.Length == 0) return [];
-
-        var sessionByTurnId = turns.ToDictionary(t => t.Id, t => t.SessionId);
-        var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
-            .Where(part => turnIds.Contains(part.TurnId) && part.Type == TranscriptPartTypes.SessionClosed)
-            .OrderBy(part => part.Sequence)
-            .ThenBy(part => part.Id)
-            .ToListAsync(ct);
+        var loaded = await TranscriptPartLoader.LoadAsync(db, sessionIds, ct, partType: TranscriptPartTypes.SessionClosed);
+        if (loaded.Parts.Count == 0) return [];
 
         var result = new Dictionary<string, TerminalFact>(StringComparer.Ordinal);
-        foreach (var part in parts)
+        foreach (var part in loaded.Parts.OrderBy(part => part.Sequence).ThenBy(part => part.Id))
         {
-            if (!sessionByTurnId.TryGetValue(part.TurnId, out var sessionId)) continue;
+            if (!loaded.SessionByTurnId.TryGetValue(part.TurnId, out var sessionId)) continue;
             var fact = TerminalFact.FromPart(part);
             if (fact is not null) result[sessionId] = fact;
         }
