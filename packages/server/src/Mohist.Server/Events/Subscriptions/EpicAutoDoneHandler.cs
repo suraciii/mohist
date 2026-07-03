@@ -7,13 +7,13 @@ using Mohist.Server.Issue.Domain.Events;
 namespace Mohist.Server.Events.Subscriptions;
 
 /// <summary>
-/// Subscribes to <c>com.mohist.issue.work-completed</c> and dispatches
+/// Subscribes to <c>com.mohist.issue.completed</c> and dispatches
 /// a unified <see cref="IEpicGrain.ReconcileAfterTerminalAsync"/> call
 /// to the owning epic. Reconcile covers both the auto-done readiness
 /// check and the <c>running</c> epic's next-issue advance.
 /// </summary>
-[Subscription(Type = "com.mohist.issue.work-completed")]
-public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueWorkCompleted>
+[Subscription(Type = EventCatalog.ReverseDns.IssueCompleted)]
+public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueCompleted>
 {
     private readonly EpicReconcileDispatcher _dispatcher;
 
@@ -25,14 +25,14 @@ public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueWorkCompleted>
         _dispatcher = new EpicReconcileDispatcher(epicQuerier, grains, log);
     }
 
-    public bool Filter(CloudEvent<IssueWorkCompleted> evt) => true;
+    public bool Filter(CloudEvent<IssueCompleted> evt) => true;
 
-    public Task HandleAsync(CloudEvent<IssueWorkCompleted> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "work-completed", ct);
+    public Task HandleAsync(CloudEvent<IssueCompleted> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "completed", ct);
 }
 
 /// <summary>
-/// Subscribes to <c>com.mohist.issue.closed</c> (cancellation terminal
+/// Subscribes to <c>com.mohist.issue.cancelled</c> (cancellation terminal
 /// signal) and dispatches the same
 /// <see cref="IEpicGrain.ReconcileAfterTerminalAsync"/> call as
 /// <see cref="EpicAutoDoneHandler"/>. Both terminal events must trigger
@@ -40,29 +40,29 @@ public sealed class EpicAutoDoneHandler : ICloudEventHandler<IssueWorkCompleted>
 /// is waiting on — missing this subscription would deadlock the epic
 /// when its in-progress issue is cancelled.
 /// </summary>
-[Subscription(Type = "com.mohist.issue.closed")]
-public sealed class EpicClosedReconcileHandler : ICloudEventHandler<IssueClosed>
+[Subscription(Type = EventCatalog.ReverseDns.IssueCancelled)]
+public sealed class EpicCancelledReconcileHandler : ICloudEventHandler<IssueCancelled>
 {
     private readonly EpicReconcileDispatcher _dispatcher;
 
-    public EpicClosedReconcileHandler(
+    public EpicCancelledReconcileHandler(
         EpicQuerier epicQuerier,
         IGrainFactory grains,
-        ILogger<EpicClosedReconcileHandler> log)
+        ILogger<EpicCancelledReconcileHandler> log)
     {
         _dispatcher = new EpicReconcileDispatcher(epicQuerier, grains, log);
     }
 
-    public bool Filter(CloudEvent<IssueClosed> evt) => true;
+    public bool Filter(CloudEvent<IssueCancelled> evt) => true;
 
-    public Task HandleAsync(CloudEvent<IssueClosed> evt, CancellationToken ct) =>
-        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "closed", ct);
+    public Task HandleAsync(CloudEvent<IssueCancelled> evt, CancellationToken ct) =>
+        _dispatcher.DispatchAsync(evt.Id, evt.Extensions, evtType: "cancelled", ct);
 }
 
 /// <summary>
 /// Shared dispatch logic for terminal-event → EpicGrain reconcile
-/// wiring. Both <see cref="EpicAutoDoneHandler"/> (work-completed) and
-/// <see cref="EpicClosedReconcileHandler"/> (closed) funnel here so the
+/// wiring. Both <see cref="EpicAutoDoneHandler"/> (completed) and
+/// <see cref="EpicCancelledReconcileHandler"/> (cancelled) funnel here so the
 /// CloudEvent <c>projectid</c>/<c>issueid</c> extension parsing, epic
 /// lookup, and exception swallowing stay in one place. Kept
 /// package-internal (no <c>public</c> modifier) because this is a

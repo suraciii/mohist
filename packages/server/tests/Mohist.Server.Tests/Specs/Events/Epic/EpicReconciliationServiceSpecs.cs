@@ -28,7 +28,7 @@ public class EpicReconciliationServiceSpecs
     [Fact]
     public async Task ReconcileOnceAsync_ReadyIdleEpicMissedEvent_TransitionsToDone()
     {
-        // Simulates a missed com.mohist.issue.work-completed event: all
+        // Simulates a missed com.mohist.issue.completed event: all
         // linked issues are done, but the epic is still idle. The
         // sweep is the safety net that catches this and transitions
         // the epic to done.
@@ -273,8 +273,8 @@ public class EpicReconciliationServiceSpecs
     [Fact]
     public async Task ReconcileOnceAsync_RunningEpic_IsCandidateAndInvokesReconcile()
     {
-        // A running epic is a candidate: a missed work-completed or
-        // closed event would otherwise leave it stuck waiting for
+        // A running epic is a candidate: a missed completion or
+        // cancellation event would otherwise leave it stuck waiting for
         // the in-progress slot to clear. The sweep covers running
         // epics exactly like idle epics — the grain's
         // ReconcileAfterTerminalAsync short-circuits no-ops for the
@@ -308,7 +308,7 @@ public class EpicReconciliationServiceSpecs
     public async Task ReconcileOnceAsync_RunningEpicMissedClosedEvent_AdvancesNext()
     {
         // The risk that motivates the running-epic sweep: a missed
-        // com.mohist.issue.closed event would deadlock the epic
+        // com.mohist.issue.cancelled event would deadlock the epic
         // because the in-progress slot stays occupied. After the
         // issue is observed as cancelled in the DB and the sweep
         // runs ReconcileAfterTerminalAsync, TryStartNext must pick
@@ -341,7 +341,7 @@ public class EpicReconciliationServiceSpecs
     {
         // A running epic whose last in-progress issue is observed as
         // done in the DB (terminal event lost) must auto-mark done
-        // via the sweep — the same path the live work-completed
+        // via the sweep — the same path the live completion
         // handler drives.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");

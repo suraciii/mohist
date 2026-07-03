@@ -10,8 +10,8 @@ namespace Mohist.Server.Events.Hosting;
 
 /// <summary>
 /// Safety-net sweep for the event-driven terminal-reconcile path. The
-/// in-memory CloudEvent bus used to signal <c>com.mohist.issue.work-completed</c>
-/// and <c>com.mohist.issue.closed</c> is at-most-once and swallows
+/// in-memory CloudEvent bus used to signal <c>com.mohist.issue.completed</c>
+/// and <c>com.mohist.issue.cancelled</c> is at-most-once and swallows
 /// publish failures, so a missed event would leave a ready epic in
 /// <c>idle</c> or a <c>running</c> epic stuck waiting for the
 /// in-progress slot to clear. This service periodically walks
@@ -101,7 +101,7 @@ public sealed class EpicReconciliationService : BackgroundService
             // (ProjectId, Status, CreatedAt) index on EpicRow supports the
             // status filter. The sweep covers idle and running epics:
             //   - idle: auto-done readiness applies (mirrors manual "Mark Done").
-            //   - running: a missed work-completed/closed terminal event
+            //   - running: a missed completed/cancelled terminal event
             //     would otherwise leave a running epic stuck waiting for
             //     the in-progress slot to clear. The sweep re-invokes
             //     ReconcileAfterTerminalAsync so TryStartNext can advance

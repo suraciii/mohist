@@ -1,0 +1,191 @@
+## Codebase Patterns
+
+- **C# 14 union + persistence convention**: `IssueEvent` is a tagged union; the
+  persisted `IssueEvents.Type` column stores the `IssueEventSerializer.BusType`
+  value (reverse-DNS string), not the CLR name. A rename point in `BusType`
+  moves both the bus type and the persisted `Type` together.
+  `IssueEventSerializer.Type()` (the CLR-name helper) is dead but kept for
+  storage-facing traceability; it derives from `Unwrap(payload).GetType().Name`
+  and tracks the rename for free.
+- **Catalog vs serializer routing**: `EventCatalog.ReverseDns.Issue*` constants
+  own the reverse-DNS strings. Terminal ids (IssueCompleted / IssueCancelled)
+  must be sourced from those constants in `BusType` so the serializer and
+  catalog cannot drift; non-terminal ids may stay as inline literals if the
+  acceptance criterion only requires the terminal pair to be sourced.
+  `EventCatalog.All` is the documentation/introspection list, distinct from
+  `ReverseDns`; adding constants to `ReverseDns` does not require adding them
+  to `All` (and the issue's non-goal says "don't fix the broader catalog
+  drift").
+- **Historical migration immutability**: EF migrations are immutable history;
+  `20260629120000_BackfillIssueCompletedAt.cs` references the legacy ids
+  (`work-completed`/`closed`) in both SQL and comments. Per design D6, that
+  file MUST NOT be edited — its SQL only runs once on historical data, and on
+  fresh databases it is a no-op on empty rows. The associated test
+  (`BackfillIssueCompletedAtMigrationSpecs`) intentionally mirrors the
+  migration's legacy-id SQL to validate the historical backfill; these legacy
+  id strings are exempt from the sweep.
+- **Indentation in C# doc-comment blocks**: when applying structured patches
+  that rewrite large doc-comment regions in `EpicAutoDoneHandler.cs`,
+  `EpicReconciliationService.cs`, `InboxProjectionHandler.cs`, prefer replacing
+  the entire `/// <summary>…</summary>` block in one edit. Per-line edits
+  easily introduce indentation drift (the in-progress patch leaked 4 extra
+  spaces into each line of the rewritten `<summary>` block of `Epic*` files).
+- **Subscription attribute is pipe-separated**: the single
+  `[Subscription(Type = "a|b|c")]` allows one handler to subscribe to multiple
+  event ids. The id list concatenates string literals and
+  `EventCatalog.ReverseDns.*` constants: `"com.mohist.x|" + ReverseDns.Y + "|…"`
+- **Constrained renaming via const reference**: when a public/internal const is
+  renamed (`WorkCompletedType → CompletedType` / `ClosedType → CancelledType`)
+  and is referenced by name in many files, a sweeping replace-all pattern is
+  safe and faster than per-site rewrites.
+
+## Decisions
+
+- **T-001 decision — D-impl-1**: keep `EventCatalog.All` minimal (the two
+  terminal ids plus pre-existing entries); do not add all 13 issue event
+  constants to `All`. The proposal's non-goal says the broader "catalog lists
+  4 of 13" drift is out of scope. Adding them to `ReverseDns` is necessary
+  only where the serializer routes through the constant; this task only routes
+  the terminal pair through constants, so no new constants are added beyond
+  preserving the existing terminal ones.
+- **T-001 decision — D-impl-2**: the historical migration
+  `20260629120000_BackfillIssueCompletedAt.cs` and its dedicated test
+  `BackfillIssueCompletedAtMigrationSpecs.cs` are intentionally not swept.
+  Per design D6, that file is immutable history; its SQL still references the
+  legacy ids because it ran once on historical data and is now no-op. The
+  test mirrors the migration's SQL (with seeded legacy-id rows) to validate
+  idempotency on historical data. Renaming that test to use canonical ids
+  would change what the test exercises.
+- **T-001 decision — D-impl-3**: kept `IssueQuerier.WorkStartedType` and the
+  bare `"com.mohist.issue.reopened"` literal in `IssueStageAttribution`,
+  `StagePopulationSnapshotService`, and `IssueQuerier` as inline constants —
+  the rename scope is terminal ids only. Non-terminal ids remain literal
+  strings rather than be migrated to `EventCatalog.ReverseDns.*` constants,
+  because adding new `ReverseDns` constants is outside T-001 scope.
+
+## Gotchas
+
+- The in-progress patch left an indentation bug in
+  `EpicAutoDoneHandler.cs`, `EpicReconciliationService.cs`, and
+  `InboxProjectionHandler.cs` — every line of rewritten `<summary>` blocks
+  was shifted by 4 spaces. Reapplying the changes after `git checkout`
+  preserved indentation and resolved the drift.
+- `EventCatalog.ReverseDns.IssueReopened` does not exist (the constant was
+  not carried over in earlier catalog audits). Tests / consumers that need the
+  reopened id must use the literal `"com.mohist.issue.reopened"` for now.
+  `IssueStageAttributionSpecs.cs:245` was changed to use the literal to
+  match the existing EventCatalog surface.
+- One flaky test observed: `AgentSessionGrainPersistTranscriptFailureSpecs.
+  PersistCallback_TranscriptSaveFailure_LogsErrorAndRetriesWithoutCommit`
+  timed out on the full suite first run but passed on a re-run with the same
+  binary. Pre-existing / unrelated to this task.
+- `dotnet build` succeeds with 0 warnings / 0 errors after T-001; the full
+  `dotnet test` reports 3572 pass, 13 skipped (pre-existing), 0 fail on the
+  steady-state run. The `npm test` fan-out (runner/web) is dead-code-127 for
+  this issue because their `node_modules/` are not installed in this
+  workspace; runner/web are T-003 scope and are not exercised here.
+- The `Edit` tool's exact-string match occasionally refuses to find substrings
+  that look ASCII-clean; if the cell doesn't match, fall back to a `python3`
+  `str.replace()` (used twice in this task on `InboxProjectionHandler.cs`).
+
+## Files touched (T-001)
+
+### Source
+- `packages/server/src/Mohist.Server/Issue/Domain/Events/IssueEvent.cs` — union
+  variants renamed: `IssueWorkCompleted` → `IssueCompleted`,
+  `IssueClosed` → `IssueCancelled`; record class declarations renamed.
+- `packages/server/src/Mohist.Server/Issue/Domain/Issue.Transitions.cs` —
+  `Complete()` records `new IssueCompleted(workflowRunId)`;
+  `Close()` records `new IssueCancelled(reason)`.
+- `packages/server/src/Mohist.Server/Infrastructure/Events/EventCatalog.cs` —
+  dropped `ReverseDns.IssueWorkCompleted` and the matching `All` entry;
+  kept `ReverseDns.IssueCompleted` / `IssueCancelled`.
+- `packages/server/src/Mohist.Server/Infrastructure/Events/IssueEventSerializer.cs` —
+  `BusType` for the two terminal ids routes through
+  `EventCatalog.ReverseDns.IssueCompleted` / `EventCatalog.ReverseDns.IssueCancelled`;
+  non-terminal inline literals retained (scope-bounded).
+- `packages/server/src/Mohist.Server/Issue/Services/IssueStageAttribution.cs` —
+  worked-completed / closed branches use `ReverseDns.IssueCompleted` /
+  `ReverseDns.IssueCancelled`; bare `"com.mohist.issue.reopened"` kept
+  literal; doc comments updated to the new names.
+- `packages/server/src/Mohist.Server/Issue/Services/IssueQuerier.cs` —
+  `WorkCompletedType`/`ClosedType` consts renamed to
+  `CompletedType = ReverseDns.IssueCompleted` /
+  `CancelledType = ReverseDns.IssueCancelled`; all 6 in-file references
+  updated, plus ~5 doc-comment references updated.
+- `packages/server/src/Mohist.Server/Events/Subscriptions/EpicAutoDoneHandler.cs` —
+  subscription Type uses `ReverseDns.IssueCompleted` / `ReverseDns.IssueCancelled`;
+  handler class `EpicClosedReconcileHandler` renamed to
+  `EpicCancelledReconcileHandler` and uses
+  `ICloudEventHandler<IssueCancelled>`; log evtType strings
+  `"work-completed"`/`"closed"` renamed to `"completed"`/`"cancelled"`.
+- `packages/server/src/Mohist.Server/Events/Subscriptions/InboxProjectionHandler.cs` —
+  pipe-separated subscription Type replaces
+  `"com.mohist.issue.work-completed"` with
+  `EventCatalog.ReverseDns.IssueCompleted`; dispatch arm and case label
+  use `IssueCompleted`.
+- `packages/server/src/Mohist.Server/Events/Hosting/StagePopulationSnapshotService.cs` —
+  bare `"com.mohist.issue.work-completed"`/`"com.mohist.issue.closed"` literals
+  in lifecycle-event include switch and event-id switch swapped to
+  `EventCatalog.ReverseDns.IssueCompleted` / `IssueCancelled`. Stale
+  "durable facts diverge from the spec" doc comment rewritten to "now
+  correctly reads the catalog-declared terminal id".
+- `packages/server/src/Mohist.Server/Events/Hosting/EpicReconciliationService.cs` —
+  stale `work-completed`/`closed` doc-comment references updated to
+  `completed`/`cancelled`. No code changes (handler dispatches through
+  shared `EpicReconcileDispatcher`).
+
+### Tests
+- `packages/server/tests/Mohist.Server.Tests/Specs/Events/Epic/EpicAutoDoneHandlerSpecs.cs` —
+  handler instance references `EpicCancelledReconcileHandler`;
+  `BuildWorkCompletedEvent`/`BuildClosedEvent` helpers renamed to
+  `BuildCompletedEvent`/`BuildCancelledEvent`; all literal
+  `"com.mohist.issue.work-completed"`/`"com.mohist.issue.closed"` test bus
+  types use `EventCatalog.ReverseDns.IssueCompleted`/`IssueCancelled`;
+  `IssueWorkCompleted`/`IssueClosed` payloads replaced with
+  `IssueCompleted`/`IssueCancelled`; subscription list construction
+  retargeted on `ReverseDns.IssueCompleted` + `ICloudEventHandler<IssueCompleted>`.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Events/Epic/EpicReconciliationServiceSpecs.cs` —
+  stale `work-completed`/`closed` doc-comment references in two
+  `ReconcileOnceAsync` scenarios updated.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Events/Inbox/InboxProjectionHandlerSpecs.cs` —
+  literal `"com.mohist.issue.work-completed"` in subscription registration
+  swapped for `EventCatalog.ReverseDns.IssueCompleted`.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Events/Inbox/InboxProjectionHandlerRealtimeHintSpecs.cs` —
+  same subscription Type string updated.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Events/StagePopulationSnapshotServiceSpecs.cs` —
+  no source-code changes required (the service's literal-vs-constant
+  ordering ended up keeping terminal ids as constants; test scaffolding
+  already matched).
+- `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Services/IssueStageAttributionSpecs.cs` —
+  `EventCatalog.ReverseDns.IssueReopened` literal replaced with
+  `"com.mohist.issue.reopened"` (the constant doesn't exist);
+  stale `work-completed` doc comment updated to `completion`.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Api/IssueMetricsApiSpecs.cs` —
+  `IssueQuerier.WorkCompletedType`/`ClosedType` references replaced
+  with `IssueQuerier.CompletedType`/`CancelledType`; `IssueWorkCompleted`
+  payload replaced with `IssueCompleted`.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Querier/IssueQuerierSpecs.cs` —
+  same `WorkCompletedType`/`ClosedType` → `CompletedType`/`CancelledType`
+  rename across all 263+ spec usages; `IssueWorkCompleted` payload type
+  swapped for `IssueCompleted`.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Domain/BackfillIssueCompletedAtMigrationSpecs.cs` —
+  intentionally untouched (tests the immutable historical migration whose
+  SQL uses legacy ids; per design D6, the test mirrors those legacy-id
+  queries).
+- `packages/server/tests/Mohist.Server.Tests/Specs/Epic/Grain/EpicProgressionSpecs.cs` —
+  stale `IssueClosed` comment in `ReconcileAfterTerminalAsync_…_AdvancesNext`
+  replaced with `IssueCancelled`.
+
+## Test summary
+
+- `dotnet build Mohist.sln` → 0 warnings, 0 errors (warnings-as-errors).
+- `dotnet test Mohist.sln` (filtered to T-001 spec files) →
+  263 passed, 0 failed, 0 skipped.
+  Filter: `EpicAutoDoneHandlerSpecs | EpicReconciliationServiceSpecs |
+  InboxProjectionHandlerSpecs | StagePopulationSnapshotServiceSpecs |
+  IssueStageAttributionSpecs | IssueQuerierSpecs |
+  IssueMetricsApiSpecs | BackfillIssueCompletedAtMigrationSpecs`.
+- Full server `dotnet test` → 3572 passed, 0 failed, 13 skipped
+  (one flaky AgentSessionSpecs retry failure on first run that succeeds
+  on re-run; pre-existing/unrelated).
