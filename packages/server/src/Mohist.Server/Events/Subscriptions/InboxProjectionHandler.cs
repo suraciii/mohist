@@ -17,13 +17,13 @@ namespace Mohist.Server.Events.Subscriptions;
 ///   <item><c>com.mohist.workflow.run.failed</c>             → <c>workflow_failed</c></item>
 ///   <item><c>com.mohist.workflow.stage.approval-requested</c> → <c>approval_requested</c></item>
 ///   <item><c>com.mohist.issue.work-started</c>               → <c>issue_started</c></item>
-///   <item><c>com.mohist.issue.work-completed</c>             → <c>issue_completed</c></item>
+///   <item><c>com.mohist.issue.completed</c>                  → <c>issue_completed</c></item>
 /// </list>
 /// The handler is a single <see cref="ICloudEventHandler"/> over a
 /// pipe-separated <see cref="SubscriptionAttribute"/> because the four
 /// payload types (<see cref="WorkflowRunFailed"/>,
 /// <see cref="StageApprovalRequested"/>, <see cref="IssueWorkStarted"/>,
-/// <see cref="IssueWorkCompleted"/>) have disjoint shapes and we only
+/// <see cref="IssueCompleted"/>) have disjoint shapes and we only
 /// need a small number of fields from each. Branches dispatch through
 /// <see cref="WorkflowStageLockReleaseHandler.ExtractWorkflowRunId"/>
 /// for workflow events, or read the issue-event
@@ -64,7 +64,7 @@ namespace Mohist.Server.Events.Subscriptions;
     "com.mohist.workflow.run.failed|" +
     "com.mohist.workflow.stage.approval-requested|" +
     "com.mohist.issue.work-started|" +
-    "com.mohist.issue.work-completed")]
+    EventCatalog.ReverseDns.IssueCompleted)]
 public sealed class InboxProjectionHandler : ICloudEventHandler
 {
     private const string HintSource = "/mohist/inbox";
@@ -123,7 +123,7 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
                 await ResolveFromWorkflowRunAsync(evt, scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>(), ct).ConfigureAwait(false),
             EventCatalog.ReverseDns.IssueWorkStarted =>
                 ResolveFromIssueExtensions(evt),
-            EventCatalog.ReverseDns.IssueWorkCompleted =>
+            EventCatalog.ReverseDns.IssueCompleted =>
                 ResolveFromIssueExtensions(evt),
             _ => null,
         };
@@ -286,7 +286,7 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
             case EventCatalog.ReverseDns.IssueWorkStarted:
                 kind = NotificationKinds.IssueStarted;
                 return true;
-            case EventCatalog.ReverseDns.IssueWorkCompleted:
+            case EventCatalog.ReverseDns.IssueCompleted:
                 kind = NotificationKinds.IssueCompleted;
                 return true;
             default:

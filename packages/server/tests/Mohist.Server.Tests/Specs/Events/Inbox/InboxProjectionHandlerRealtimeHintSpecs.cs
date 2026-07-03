@@ -262,7 +262,7 @@ public class InboxProjectionHandlerRealtimeHintSpecs
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.WorkflowRunFailed, "wf_failed", "evt-f"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "wf_approval", "evt-a"), CancellationToken.None);
         await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkStarted, "proj_a", "issue_1", 1, "evt-s"), CancellationToken.None);
-        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueWorkCompleted, "proj_a", "issue_2", 2, "evt-c"), CancellationToken.None);
+        await handler.HandleAsync(InboxProjectionTestSupport.BuildIssueEvent(EventCatalog.ReverseDns.IssueCompleted, "proj_a", "issue_2", 2, "evt-c"), CancellationToken.None);
 
         Assert.Equal(4, publisher.Published.Count);
         var kinds = publisher.Published

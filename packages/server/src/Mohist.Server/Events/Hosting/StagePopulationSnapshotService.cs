@@ -27,11 +27,9 @@ namespace Mohist.Server.Events.Hosting;
 /// latest-run-wins, invalidate-on-restart</em> rule the
 /// <c>workflow-stage-duration-metrics</c> surface uses, so the two
 /// surfaces cannot disagree on an issue's latest stage. Cancelled
-/// exclusion reads the emitted <c>IssueClosed</c>
-/// (<c>com.mohist.issue.closed</c>) event, not the catalog-listed but
-/// unemitted <c>com.mohist.issue.cancelled</c> entry (the durable
-/// facts diverge from the spec text here; the implementation follows
-/// the facts).
+/// exclusion reads the emitted <c>IssueCancelled</c>
+/// (<c>com.mohist.issue.cancelled</c>) event, which the catalog
+/// declares and which <c>Issue.Close()</c> now emits.
 /// </para>
 /// <para>
 /// Per-sweep exceptions are swallowed so a single bad project never
@@ -280,7 +278,7 @@ public sealed class StagePopulationSnapshotService : BackgroundService
             profiles, effectiveProfileResolver, projectProfileManager, db, projectId);
 
         // Pull every IssueEvent for the project (work-started /
-        // work-completed / closed / reopened) and every workflow-run
+        // completed / cancelled / reopened) and every workflow-run
         // event for the project's run sources (StageStarted /
         // StageCompleted) — applied to the day bound in LINQ-to-objects
         // after materialization (SQLite cannot translate
@@ -298,8 +296,8 @@ public sealed class StagePopulationSnapshotService : BackgroundService
                 var issueId = e.Source[IssueEventPersistence.SourcePrefix.Length..];
                 var wrId = ReadWorkflowRunId(e.Data);
             if (e.Type == "com.mohist.issue.work-started"
-                || e.Type == "com.mohist.issue.work-completed"
-                || e.Type == "com.mohist.issue.closed"
+                || e.Type == EventCatalog.ReverseDns.IssueCompleted
+                || e.Type == EventCatalog.ReverseDns.IssueCancelled
                 || e.Type == "com.mohist.issue.reopened")
             {
                 if (!lifecycleByIssue.TryGetValue(issueId, out var list))
@@ -315,7 +313,7 @@ public sealed class StagePopulationSnapshotService : BackgroundService
                     WorkflowRunId: wrId));
             }
 
-            if (e.Type == "com.mohist.issue.work-started" || e.Type == "com.mohist.issue.work-completed")
+            if (e.Type == "com.mohist.issue.work-started" || e.Type == EventCatalog.ReverseDns.IssueCompleted)
             {
                 if (!runIdsByIssue.TryGetValue(issueId, out var ids))
                 {

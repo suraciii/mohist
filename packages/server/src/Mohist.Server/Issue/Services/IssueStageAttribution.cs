@@ -81,10 +81,10 @@ public static class IssueStageAttribution
     /// <list type="bullet">
     /// <item><description><c>IssueWorkStarted</c>
     /// (<c>com.mohist.issue.work-started</c>) flips state to in-progress;</description></item>
-    /// <item><description><c>IssueWorkCompleted</c>
-    /// (<c>com.mohist.issue.work-completed</c>) flips state to done;</description></item>
-    /// <item><description><c>IssueClosed</c>
-    /// (<c>com.mohist.issue.closed</c>) flips state to cancelled;</description></item>
+    /// <item><description><c>IssueCompleted</c>
+    /// (<c>com.mohist.issue.completed</c>) flips state to done;</description></item>
+    /// <item><description><c>IssueCancelled</c>
+    /// (<c>com.mohist.issue.cancelled</c>) flips state to cancelled;</description></item>
     /// <item><description><c>IssueReopened</c>
     /// (<c>com.mohist.issue.reopened</c>) flips state back to backlog.</description></item>
     /// </list>
@@ -158,11 +158,11 @@ public static class IssueStageAttribution
                 latestStage = null;
                 activeRunId = string.IsNullOrWhiteSpace(e.WorkflowRunId) ? null : e.WorkflowRunId;
             }
-            else if (string.Equals(e.Type, EventCatalog.ReverseDns.IssueWorkCompleted, StringComparison.Ordinal))
+            else if (string.Equals(e.Type, EventCatalog.ReverseDns.IssueCompleted, StringComparison.Ordinal))
             {
                 state = State.Done;
             }
-            else if (string.Equals(e.Type, "com.mohist.issue.closed", StringComparison.Ordinal))
+            else if (string.Equals(e.Type, EventCatalog.ReverseDns.IssueCancelled, StringComparison.Ordinal))
             {
                 state = State.Cancelled;
             }

@@ -62,16 +62,26 @@ describe('canonical event types', () => {
 
   it('includes the reverse-DNS names for issue lifecycle events', () => {
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueCreated)
-    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueClosed)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueCancelled)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueArchived)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueUnarchived)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueReopened)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueWorkStarted)
-    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueCompleted)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved)
+  })
+
+  it('does NOT contain the legacy IssueClosed or IssueWorkCompleted ids or constants', () => {
+    const legacyIds = ['com.mohist.issue.closed', 'com.mohist.issue.work-completed']
+    for (const legacy of legacyIds) {
+      expect(EVENT_TYPES).not.toContain(legacy)
+    }
+    const registry = REVERSE_DNS_EVENT_TYPES as Record<string, string | undefined>
+    expect(registry.IssueClosed).toBeUndefined()
+    expect(registry.IssueWorkCompleted).toBeUndefined()
   })
 
   it('includes the reverse-DNS names for agent-session events', () => {
@@ -130,12 +140,12 @@ describe('canonical event types', () => {
       REVERSE_DNS_EVENT_TYPES.WorkflowRunRetrying,
       REVERSE_DNS_EVENT_TYPES.WorkflowRunRerunning,
       REVERSE_DNS_EVENT_TYPES.IssueCreated,
-      REVERSE_DNS_EVENT_TYPES.IssueClosed,
+      REVERSE_DNS_EVENT_TYPES.IssueCancelled,
       REVERSE_DNS_EVENT_TYPES.IssueArchived,
       REVERSE_DNS_EVENT_TYPES.IssueUnarchived,
       REVERSE_DNS_EVENT_TYPES.IssueReopened,
       REVERSE_DNS_EVENT_TYPES.IssueWorkStarted,
-      REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted,
+      REVERSE_DNS_EVENT_TYPES.IssueCompleted,
       REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged,
       REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged,
       REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded,
