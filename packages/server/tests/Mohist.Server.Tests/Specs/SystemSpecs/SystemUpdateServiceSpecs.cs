@@ -934,6 +934,11 @@ public class SystemUpdateServiceSpecs
                 Assert.Equal(["--user", "restart", "mohist-runner.service"], command.Arguments);
             });
 
+        // The terminal status was saved on the background Task.Run thread;
+        // the lock is released only afterwards in RunUpdateAsync's `finally`.
+        // Waiting on the status alone races with that release, so wait for the
+        // explicit unlock signal before asserting the lock is free.
+        await store.WaitForUnlockAsync();
         Assert.True(await store.TryAcquireLockAsync("job-next"));
     }
 
@@ -972,6 +977,11 @@ public class SystemUpdateServiceSpecs
                 Assert.Equal(["--user", "restart", "mohist-runner.service"], command.Arguments);
             });
 
+        // The terminal status was saved on the background Task.Run thread;
+        // the lock is released only afterwards in RunUpdateAsync's `finally`.
+        // Waiting on the status alone races with that release, so wait for the
+        // explicit unlock signal before asserting the lock is free.
+        await store.WaitForUnlockAsync();
         Assert.True(await store.TryAcquireLockAsync("job-next"));
     }
 
@@ -1017,6 +1027,11 @@ public class SystemUpdateServiceSpecs
                 Assert.Equal(["--user", "restart", "mohist-runner.service"], command.Arguments);
             });
 
+        // The terminal status was saved on the background Task.Run thread;
+        // the lock is released only afterwards in RunUpdateAsync's `finally`.
+        // Waiting on the status alone races with that release, so wait for the
+        // explicit unlock signal before asserting the lock is free.
+        await store.WaitForUnlockAsync();
         Assert.True(await store.TryAcquireLockAsync("job-next"));
     }
 
@@ -1163,6 +1178,12 @@ public class SystemUpdateServiceSpecs
     private sealed class InMemoryUpdateStore : ISystemUpdateStore
     {
         private readonly List<StatusWaiter> _statusWaiters = [];
+        // Specs that assert the lock is free after a terminal status must wait
+        // for unlock explicitly: the production RunUpdateAsync saves the
+        // terminal status first, then releases the lock in a `finally`, so
+        // WaitForStatusAsync(terminal) can complete while the lock is still
+        // held. Mirror the StatusWaiter/CountWaiter TCS pattern.
+        private readonly List<TaskCompletionSource> _unlockWaiters = [];
         private readonly bool _acquireLock;
         private SystemUpdateJobState? _latest;
         private bool _locked;
@@ -1192,9 +1213,30 @@ public class SystemUpdateServiceSpecs
             {
                 _locked = false;
                 _lockOwnerJobId = null;
+                CompleteUnlockWaiters();
             }
 
             return Task.CompletedTask;
+        }
+
+        public Task WaitForUnlockAsync()
+        {
+            if (!_locked)
+                return Task.CompletedTask;
+
+            var waiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _unlockWaiters.Add(waiter);
+            return waiter.Task;
+        }
+
+        private void CompleteUnlockWaiters()
+        {
+            for (var i = _unlockWaiters.Count - 1; i >= 0; i--)
+            {
+                var waiter = _unlockWaiters[i];
+                _unlockWaiters.RemoveAt(i);
+                waiter.TrySetResult();
+            }
         }
 
         public Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default)
