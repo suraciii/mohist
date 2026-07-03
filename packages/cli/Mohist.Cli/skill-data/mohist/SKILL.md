@@ -19,7 +19,7 @@ Prefer the current `mo` CLI, ASP.NET Core API, or Web UI workflows. Do not instr
 When operating on Mohist issues or workflows:
 
 - Use the current `mo` CLI command surface and current .NET backend behavior as the source of truth.
-- Treat local issue artifacts under `openspec/changes/<issue>/` as authoritative when the user provides an issue context.
+- When the user provides an existing issue context, load its current state and history via `mo issue show <number>` and related read-only commands, rather than assuming any particular filesystem layout.
 - Keep changes scoped to the current issue; do not substitute adjacent cleanup or legacy behavior unless the issue explicitly requires it.
 - For local verification, prefer the smallest relevant command or test filter instead of broad full-repo runs.
 
