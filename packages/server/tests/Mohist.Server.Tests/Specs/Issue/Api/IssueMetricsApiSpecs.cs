@@ -1580,7 +1580,7 @@ public class IssueMetricsApiSpecs
         // Cross-check via a service request against the same querier
         // for the seeded now, asserting the expected window bounds.
         await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var querier = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result90 = await querier.GetDeliveryTimesAsync(project.Id, now, windowDays: 90);
         Assert.Empty(result90.Points);
 
