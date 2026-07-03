@@ -85,6 +85,7 @@ public class MigratedServicesRegistrationSpecs
         yield return new object[] { typeof(AgentSessionQuery), ServiceLifetime.Scoped };
         yield return new object[] { typeof(AgentSessionQuerier), ServiceLifetime.Scoped };
         yield return new object[] { typeof(AgentActivityFeedAssembler), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(AgentUsageReporter), ServiceLifetime.Scoped };
         yield return new object[] { typeof(AgentSessionResolver), ServiceLifetime.Scoped };
 
         // Workflow services

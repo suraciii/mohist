@@ -49,7 +49,7 @@ Acceptance verified:
 - [x] T-001 — event-naming unification (lowest blast radius, do first)
 - [x] T-002 — collapse transcript loading + context-ref helpers
 - [x] T-003 — extract `AgentActivityFeedAssembler`
-- [ ] T-004 — extract `AgentUsageReporter`
+- [x] T-004 — extract `AgentUsageReporter`
 - [ ] T-005 — delete dead `ToAgentSessionDto` / `AgentSessionDto`
 
 Underlying assumptions: per AGENTS.md no-version-compat stance, persisted `session_closed` rows from any prior dev run lose terminal-state resolution post-T-001. Default is no backfill; documented in the change's design Risks section.
@@ -79,3 +79,24 @@ Acceptance verified:
 - The assembler file lives under `Sessions/Services/` and `using Mohist.Server.Sessions.Domain;` is required for `AgentSessionTranscriptSummary` (the DTO collection type used in `LoadEventSummariesAsync`'s return dictionary). The other DTOs (`ActivityCardDto`, `ActivitySummaryDto`, …) are in the `Mohist.Server.Sessions` namespace, not `Sessions.Domain`.
 - `ActivityCardDto` carries `agent_{agentId}` issueId for agent-launch sessions vs `issue_{projectId}_{number}` for workflow sessions — verified by `AgentActivityFeedAssemblerSpecs.WorkflowSessionCard_OmitsAgentFields` (workflow card null for agentId/agentName) and `…GenericAgentLaunchSession_ProjectsAgentIdAndIssueTitleFallback` (generic card populated).
 - `StatusName(s, Now())` is gated by a 5-min `ActiveRuntimeEventWindow` against `LastDataAt`. Seeding an `AgentSessionStatusSnapshot` without `LastDataAt` produces `inactive` cards even with `AgentRuntimeSessionId` bound — a unit-spec gotcha worth knowing if a future refactor wants to assert `Summary.Active == n` against freshly-inserted sessions.
+## T-004 — Extract `AgentUsageReporter`
+
+Changes:
+- `packages/server/src/Mohist.Server/Sessions/Services/AgentUsageReporter.cs` (new, sealed, IScopedService): own ctor takes `IDbContextFactory<MohistDbContext>`, `AgentSessionQuery`, `TimeProvider`. Owns `GetUsageTimeseriesAsync` / `GetCostRollupAsync` / `GetCostWindowedAsync` + their private aggregation helpers (`ComputePreWindowSpendAsync`, `ComputeCumulativeCostPerShipAsync`, `LoadCompletedIssueCountsAsync`, `BuildFigure`, `HasUsage`, `PreWindowSpendResult`, `UsageBucketData`). Reuses the shared `AgentSessionQuerier.Labels` (promoted from `private static` → `internal static`) instead of duplicating.
+- `packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuerier.cs`: ctor unchanged; usage/cost methods (`GetUsageTimeseriesAsync`, `GetCostRollupAsync`, `GetCostWindowedAsync`) and their private aggregation helpers removed (~341 lines). `Labels` helper bumped from `private static` → `internal static` because the reporter reuses it.
+- `packages/server/src/Mohist.Server/Api/AgentRoutes.cs:41,47` — /usage and /cost routes now resolve `AgentUsageReporter usage` instead of `AgentSessionQuerier sessions`; calls `usage.GetUsageTimeseriesAsync`, `usage.GetCostRollupAsync`, `usage.GetCostWindowedAsync`.
+- `packages/server/tests/.../Foundation/MigratedServicesRegistrationSpecs.cs:88` — added `yield return new object[] { typeof(AgentUsageReporter), ServiceLifetime.Scoped };` between `AgentActivityFeedAssembler` and `AgentSessionResolver`.
+- `packages/server/tests/.../Sessions/AgentSessionQuerierSpecs.cs` → renamed to `AgentUsageReporterSpecs.cs` (and class renamed `AgentSessionQuerierSpecs` → `AgentUsageReporterSpecs`) since the only method it tested (`GetCostWindowedAsync`) moved. Resolve helper changed to `ResolveReporter()` returning `AgentUsageReporter`. All 6 original windowed specs kept verbatim — they still assert the same behavior, just through the new service. **Added 6 new specs**: 3 for `GetCostRollupAsync` (empty, total+today partitioning, sessions-without-usage skipped) + 3 for `GetUsageTimeseriesAsync` (7 empty buckets, session lands in expected bucket, cumulative-cost-per-ship aggregates pre-window + buckets with completed-issues shipped).
+
+Acceptance verified:
+- `rg "GetUsageTimeseriesAsync|GetCostRollupAsync|GetCostWindowedAsync|UsageBucketData|HasUsage|ComputePreWindowSpend|ComputeCumulativeCostPerShip|LoadCompletedIssueCounts|BuildFigure|PreWindowSpendResult" packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuerier.cs` → 0 hits.
+- `MigratedServicesRegistrationSpecs.AgentUsageReporter` registered as Self with Scoped lifetime, both production + fixture paths.
+- `AgentCostRollupApiSpecs` + `AgentUsageTimeseriesApiSpecs` (full-route JSON response specs) pass — byte-identical response to pre-split.
+- `dotnet test Mohist.sln`: 3612 passed, 0 failed, 13 pre-existing skipped (added 6 new specs). `npm test`: 805 runner tests pass.
+- Build under `TreatWarningsAsErrors`: 0 warnings, 0 errors.
+
+## Gotchas
+- `IssueRowMapper` lives under `Mohist.Server.Issue.Services`, not `Sessions.Domain` — `AgentUsageReporter` needs `using Mohist.Server.Issue.Services;` alongside the existing `Mohist.Server.Issue.Domain;` import. Same import pattern as `AgentSessionQuerier` (which has both imports already).
+- The reporter is self-contained — no dependency on `AgentSessionQuerier`. It only shares the static `Labels` helper to build the `(projectId)` label dictionary the same way the core querier does. Promoting `Labels` to `internal static` is the lightest shared seam; making it `public static` would expose an implementation helper to the world unnecessarily.
+- `AgentUsageReporterSpecs` doubles as a refactor-regression canary: the 6 windowed specs were originally authored against `AgentSessionQuerier.GetCostWindowedAsync` and now drive `AgentUsageReporter.GetCostWindowedAsync`. Their continued green status across the same seeded data + pinned `FakeTimeProvider` (2026-06-30) is the strongest byte-for-byte evidence the move was lossless. The 3 new rollup specs + 3 new timeseries specs round out the coverage so the reporter's other two public methods aren't merely covered through their JSON API specs.
+- The renumbered `MigratedServicesRegistrationSpecs` order matters only for human readability — the underlying test data is positional, but adjacent services in the same domain stay adjacent.

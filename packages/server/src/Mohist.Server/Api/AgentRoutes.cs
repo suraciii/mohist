@@ -38,28 +38,28 @@ public static class AgentRoutes
             return ApiResults.Ok(await activityFeed.GetActivityAsync(project.Id, limit, waiting: waiting, capacity: capacity, ct: ct));
         });
 
-        group.MapGet("/usage", async (HttpContext context, string? range, AgentSessionQuerier sessions, CancellationToken ct) =>
+        group.MapGet("/usage", async (HttpContext context, string? range, AgentUsageReporter usage, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
 
             if (!TryParseRange(range, out var windowDays, out var rangeError))
                 return rangeError;
 
-            return ApiResults.Ok(await sessions.GetUsageTimeseriesAsync(project.Id, windowDays, ct));
+            return ApiResults.Ok(await usage.GetUsageTimeseriesAsync(project.Id, windowDays, ct));
         });
 
-        group.MapGet("/cost", async (HttpContext context, string? range, AgentSessionQuerier sessions, IssueQuerier issues, CancellationToken ct) =>
+        group.MapGet("/cost", async (HttpContext context, string? range, AgentUsageReporter usage, IssueQuerier issues, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
 
             if (!TryParseRange(range, out var windowDays, out var rangeError))
                 return rangeError;
 
-            var cost = await sessions.GetCostRollupAsync(project.Id, ct);
+            var cost = await usage.GetCostRollupAsync(project.Id, ct);
             var projectIssues = await issues.ListAsync(project.Id, project, all: true);
             var doneIssuesCount = projectIssues.Count(i => i.Status == "done");
             var costPerShip = BuildCostPerShip(cost.TotalCost, doneIssuesCount);
-            var windowed = await sessions.GetCostWindowedAsync(project.Id, windowDays, ct);
+            var windowed = await usage.GetCostWindowedAsync(project.Id, windowDays, ct);
 
             return ApiResults.Ok(new AgentCostRollupDto(
                 cost.TotalCost,
