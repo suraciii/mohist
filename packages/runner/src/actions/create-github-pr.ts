@@ -1,7 +1,7 @@
 import { stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import type { ActionContext, ActionResult } from "../core/types.js"
-import { runCommand } from "../system/process.js"
+import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { git as defaultGit, type GitOptions } from "./git.js"
 import { resolveCreatePrText } from "./github-pr-issue-fields.js"
 import { combinedGhOutput, extractPrNumberFromUrl, parsePrListWithDraft } from "./github-pr-parse.js"
@@ -27,6 +27,10 @@ const ACTION_SOURCE = "action:create-github-pr"
 
 function sinkOptions(context: ActionContext): GitOptions | undefined {
   return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
+}
+
+function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
+  return context.log ? { onLine: (line) => context.log!.write(ACTION_SOURCE, line) } : undefined
 }
 
 export async function createGitHubPrAction(context: ActionContext): Promise<ActionResult> {
@@ -64,7 +68,8 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
     steps,
   })
 
-  const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal)
+  const ghOpts = ghLineOptions(context)
+  const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
   record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output)
   if (!ghPrecheck.ok) {
     return fail("config-error", ghPrecheck.message, { output: ghPrecheck.output })
@@ -104,7 +109,7 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
     )
   }
 
-  const opened = await openOrReusePr(gh, workDir, branchProbe.name, target, text.title, text.body, draft, context.signal, record)
+  const opened = await openOrReusePr(gh, workDir, branchProbe.name, target, text.title, text.body, draft, context.signal, record, ghOpts)
   if (opened.kind === "failure") {
     return fail(opened.errorCode, opened.message, {
       output: opened.output,
@@ -149,11 +154,12 @@ export async function openOrReusePr(
   draft: boolean,
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string) => void,
+  options?: CommandLineOptions,
 ): Promise<
   | { kind: "ok"; prNumber: number; prUrl: string; operation: "created" | "updated" | "reused"; output: string }
   | { kind: "failure"; errorCode: GitHubPrErrorCode; message: string; output: string }
 > {
-  const listResult = await gh("gh", ["pr", "list", "--head", head, "--base", base, "--state", "open", "--json", "number,url,isDraft"], workDir, signal)
+  const listResult = await gh("gh", ["pr", "list", "--head", head, "--base", base, "--state", "open", "--json", "number,url,isDraft"], workDir, signal, undefined, options)
   const listOutput = combinedGhOutput(listResult)
   record("gh-pr-list", `pr list --head ${head} --base ${base} --state open --json number,url,isDraft`, listResult.exitCode, listOutput)
   if (listResult.exitCode !== 0) {
@@ -169,7 +175,7 @@ export async function openOrReusePr(
   if (existing.length > 0) {
     const pr = existing[0]!
     const editArgs = ["pr", "edit", String(pr.number), "--title", title, "--body", body]
-    const editResult = await gh("gh", editArgs, workDir, signal)
+    const editResult = await gh("gh", editArgs, workDir, signal, undefined, options)
     const editOutput = combinedGhOutput(editResult)
     record("gh-pr-edit", `pr edit ${pr.number} --title "${title}" --body "${body}"`, editResult.exitCode, editOutput)
     if (editResult.exitCode !== 0) {
@@ -185,7 +191,7 @@ export async function openOrReusePr(
 
   const createArgs = ["pr", "create", "--head", head, "--base", base, "--title", title, "--body", body]
   if (draft) createArgs.push("--draft")
-  const createResult = await gh("gh", createArgs, workDir, signal)
+  const createResult = await gh("gh", createArgs, workDir, signal, undefined, options)
   const createOutput = combinedGhOutput(createResult)
   record("gh-pr-create", `pr create --head ${head} --base ${base} --title "${title}"${draft ? " --draft" : ""}`, createResult.exitCode, createOutput)
   if (createResult.exitCode !== 0) {

@@ -795,6 +795,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("OwnerKind", "OwnerId", "WorkId", "Seq")
+                        .IsUnique()
                         .HasDatabaseName("IX_TaskLogEntries_Owner_WorkId_Seq");
 
                     b.ToTable("TaskLogEntries", (string)null);

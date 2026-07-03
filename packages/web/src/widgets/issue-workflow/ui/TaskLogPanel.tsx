@@ -4,7 +4,10 @@ import { useIssueWorkflowTaskLog } from '../../../entities/issue'
 interface TaskLogPanelProps {
   issueNumber: number
   taskId: string
+  workflowRunId?: string | null
 }
+
+const TASK_LOG_RETAINED_LIMIT = 5000
 
 function formatTimestamp(iso: string): string {
   const parsed = new Date(iso)
@@ -16,8 +19,8 @@ function formatTimestamp(iso: string): string {
   return `${hh}:${mm}:${ss}.${ms}`
 }
 
-export function TaskLogPanel({ issueNumber, taskId }: TaskLogPanelProps) {
-  const { data, isLoading, isError } = useIssueWorkflowTaskLog(issueNumber, taskId, {}, true)
+export function TaskLogPanel({ issueNumber, taskId, workflowRunId }: TaskLogPanelProps) {
+  const { data, isLoading, isError } = useIssueWorkflowTaskLog(issueNumber, taskId, { limit: TASK_LOG_RETAINED_LIMIT }, true, workflowRunId)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {

@@ -18,18 +18,22 @@ async function fetchIssueWorkflowTaskLogOrEmpty(
   try {
     return await getIssueWorkflowTaskLog(issueNumber, taskId, params, projectId)
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
+    if (err instanceof ApiError && err.status === 404 && isMissingTaskLogEndpoint(err)) {
       return EMPTY_TASK_LOG_PAGE
     }
     throw err
   }
 }
 
-export function useIssueWorkflowTaskLog(issueNumber: number, taskId: string | null | undefined, params: IssueWorkflowTaskLogParams = {}, enabled: boolean = true) {
+function isMissingTaskLogEndpoint(err: ApiError): boolean {
+  return err.message.startsWith('Empty response from ') || err.message.startsWith('Invalid JSON response from ')
+}
+
+export function useIssueWorkflowTaskLog(issueNumber: number, taskId: string | null | undefined, params: IssueWorkflowTaskLogParams = {}, enabled: boolean = true, workflowRunId?: string | null) {
   const { projectId } = useProject()
   const safeTaskId = typeof taskId === 'string' && taskId.length > 0 ? taskId : null
   return useQuery({
-    queryKey: [issueNumber, safeTaskId, projectId, 'workflow-task-log', params],
+    queryKey: [issueNumber, safeTaskId, projectId, workflowRunId ?? null, 'workflow-task-log', params],
     queryFn: () => fetchIssueWorkflowTaskLogOrEmpty(issueNumber, safeTaskId!, params, projectId!),
     enabled: enabled && issueNumber > 0 && !!safeTaskId && !!projectId,
   })

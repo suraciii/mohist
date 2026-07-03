@@ -100,6 +100,16 @@ export class CredentialMasker {
 }
 
 const REDACTED = "***"
+const SECRET_ENV_NAME = /(?:TOKEN|PASSWORD|SECRET|API_KEY|ACCESS_KEY|AUTH)$/i
+
+export function createCredentialMaskerFromEnvironment(env: NodeJS.ProcessEnv = process.env): CredentialMasker {
+  const masker = new CredentialMasker()
+  for (const [name, value] of Object.entries(env)) {
+    if (!SECRET_ENV_NAME.test(name)) continue
+    if (typeof value === "string") masker.registerSecret(value)
+  }
+  return masker
+}
 
 /**
  * Ordered list of `RegExp` patterns covering the known credential

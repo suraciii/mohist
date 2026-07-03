@@ -51,6 +51,13 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
   }
 }
 
+function withLog(ctx: ActionContext, writes: Array<{ source: string; text: string }>): ActionContext {
+  return {
+    ...ctx,
+    log: { write: (source: string, text: string) => { writes.push({ source, text }); return writes.length } } as never,
+  }
+}
+
 function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
   setGitHubPrStatusGhRunnerForTest(async (cmd, args, cwd, _signal) => await respond(cmd, args, cwd))
 }
@@ -103,6 +110,21 @@ describe("mohist/github-pr-status action", () => {
     expect(parsed.expectations).toEqual(["open", "ready"])
     expect(parsed.missing).toEqual([])
     expect(ghCalls).toContain("gh pr view 42 --json url,state,isDraft")
+  })
+
+  it("forwards gh command output to the task log sink", async () => {
+    const writes: Array<{ source: string; text: string }> = []
+    setGitHubPrStatusGhRunnerForTest(async (cmd, args, _cwd, _signal, _env, options) => {
+      const full = [cmd, ...args].join(" ")
+      options?.onLine?.(`captured ${full}`)
+      if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_OPEN)
+      return ghFail(`unexpected gh call: ${full}`)
+    })
+
+    const result = await githubPrStatusAction(withLog(context({ prNumber: 42 }), writes))
+
+    expect(result.status).toBe("success")
+    expect(writes).toEqual([{ source: "action:github-pr-status", text: "captured gh pr view 42 --json url,state,isDraft" }])
   })
 
   it("rejects a draft PR by default", async () => {

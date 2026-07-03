@@ -1,4 +1,4 @@
-import { runCommand } from "../system/process.js"
+import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
 import { combinedGhOutput } from "./github-pr-parse.js"
 
@@ -28,8 +28,8 @@ export type GhPrecheckOk = { ok: true; output: string }
 export type GhPrecheckFailure = { ok: false; exitCode: number; output: string; message: string }
 export type GhPrecheckResult = GhPrecheckOk | GhPrecheckFailure
 
-export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal): Promise<GhPrecheckResult> {
-  const version = await gh("gh", ["--version"], workDir, signal)
+export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal, options?: CommandLineOptions): Promise<GhPrecheckResult> {
+  const version = await gh("gh", ["--version"], workDir, signal, undefined, options)
   if (version.exitCode !== 0) {
     const output = combinedGhOutput(version)
     return {
@@ -40,7 +40,7 @@ export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: Abort
     }
   }
 
-  const auth = await gh("gh", ["auth", "status"], workDir, signal)
+  const auth = await gh("gh", ["auth", "status"], workDir, signal, undefined, options)
   const authOutput = combinedGhOutput(auth)
   if (auth.exitCode !== 0) {
     return {

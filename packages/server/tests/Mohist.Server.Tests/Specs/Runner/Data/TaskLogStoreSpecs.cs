@@ -79,9 +79,9 @@ public class TaskLogStoreSpecs : IAsyncLifetime
         var now = _timeProvider.GetUtcNow();
         var entries = new List<TaskLogLine>
         {
-            new(3, now.AddSeconds(2), "action:rebase", "Applying: fix-bug"),
             new(1, now, "workspace-prep", "Cloning"),
             new(2, now.AddSeconds(1), "branch-check", "Stable"),
+            new(3, now.AddSeconds(2), "action:rebase", "Applying: fix-bug"),
         };
 
         await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated: false);
@@ -228,6 +228,71 @@ public class TaskLogStoreSpecs : IAsyncLifetime
             _store.AppendAsync("workflow", "owner", "", new List<TaskLogLine>(), false));
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
             _store.AppendAsync("workflow", "owner", "work", null!, false));
+    }
+
+    [Fact]
+    public async Task AppendAsync_RejectsDuplicateOrNonPositiveSeqValues()
+    {
+        var now = _timeProvider.GetUtcNow();
+        await Assert.ThrowsAsync<ArgumentException>(() => _store.AppendAsync(
+            "workflow",
+            "owner",
+            "work",
+            new List<TaskLogLine>
+            {
+                new(1, now, "action", "first"),
+                new(1, now, "action", "duplicate"),
+            },
+            false));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _store.AppendAsync(
+            "workflow",
+            "owner",
+            "work",
+            new List<TaskLogLine> { new(0, now, "action", "zero") },
+            false));
+    }
+
+    [Fact]
+    public async Task AppendAsync_RejectsInvalidMetadataAndOversizedText()
+    {
+        var now = _timeProvider.GetUtcNow();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _store.AppendAsync(
+            "workflow",
+            "owner",
+            "work",
+            new List<TaskLogLine> { new(1, default, "action", "line") },
+            false));
+        await Assert.ThrowsAsync<ArgumentException>(() => _store.AppendAsync(
+            "workflow",
+            "owner",
+            "work",
+            new List<TaskLogLine> { new(1, now, "", "line") },
+            false));
+        await Assert.ThrowsAsync<ArgumentException>(() => _store.AppendAsync(
+            "workflow",
+            "owner",
+            "work",
+            new List<TaskLogLine> { new(1, now, "action", new string('x', TaskLogUploadLimits.MaxTextLength + 1)) },
+            false));
+    }
+
+    [Fact]
+    public async Task QueryAsync_ClampsHugeLimitsToMaximum()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        var entries = Enumerable.Range(1, TaskLogStore.MaxLimit + 2)
+            .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "action", $"line {seq}"))
+            .ToList();
+        await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated: false);
+
+        var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: int.MaxValue);
+
+        Assert.Equal(TaskLogStore.MaxLimit, page.Lines.Count);
+        Assert.Equal(TaskLogStore.MaxLimit, page.NextCursor);
     }
 
     [Fact]

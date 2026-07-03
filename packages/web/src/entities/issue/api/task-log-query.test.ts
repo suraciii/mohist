@@ -151,16 +151,27 @@ describe('useIssueWorkflowTaskLog query function', () => {
     expect(result).toBe(page)
   })
 
-  it('returns an empty page when the endpoint is absent (404)', async () => {
+  it('returns an empty page when an older server is missing the endpoint route', async () => {
     useProjectMock.mockReturnValue({ projectId: 'proj-1' })
     useQueryMock.mockReturnValue({ data: undefined, isLoading: false })
-    getIssueWorkflowTaskLogMock.mockRejectedValue(new ApiError('endpoint missing', 404))
+    getIssueWorkflowTaskLogMock.mockRejectedValue(new ApiError('Empty response from /projects/proj-1/issues/161/workflow/tasks/build.1/logs', 404))
 
     useIssueWorkflowTaskLog(161, 'build.1')
 
     const config = useQueryMock.mock.calls[0][0]
     const result = await config.queryFn()
     expect(result).toEqual({ lines: [], nextCursor: null, truncated: false })
+  })
+
+  it('rethrows structured 404 errors so real missing resources are visible', async () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+    useQueryMock.mockReturnValue({ data: undefined, isLoading: false })
+    getIssueWorkflowTaskLogMock.mockRejectedValue(new ApiError('Issue #161 not found', 404, undefined, 'not_found'))
+
+    useIssueWorkflowTaskLog(161, 'build.1')
+
+    const config = useQueryMock.mock.calls[0][0]
+    await expect(config.queryFn()).rejects.toThrow('Issue #161 not found')
   })
 
   it('rethrows non-404 errors so callers can surface them', async () => {

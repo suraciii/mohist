@@ -46,6 +46,7 @@ public class TaskLogStore
         if (string.IsNullOrWhiteSpace(workId))
             throw new ArgumentException("workId must be provided", nameof(workId));
         ArgumentNullException.ThrowIfNull(entries);
+        ValidateEntries(entries);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -126,7 +127,7 @@ public class TaskLogStore
         if (string.IsNullOrWhiteSpace(workId))
             throw new ArgumentException("workId must be provided", nameof(workId));
 
-        var pageSize = limit is null or <= 0 ? DefaultLimit : limit.Value;
+        var pageSize = ClampLimit(limit);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var batch = await db.TaskLogBatches.AsNoTracking()
@@ -157,4 +158,35 @@ public class TaskLogStore
     }
 
     public const int DefaultLimit = 500;
+    public const int MaxLimit = 5_000;
+
+    private static int ClampLimit(int? limit)
+    {
+        if (limit is null or <= 0) return DefaultLimit;
+        return Math.Min(limit.Value, MaxLimit);
+    }
+
+    private static void ValidateEntries(IReadOnlyList<TaskLogLine> entries)
+    {
+        long previous = 0;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            if (entry.Seq <= 0)
+                throw new ArgumentException($"Task-log seq must be positive at index {i}", nameof(entries));
+            if (entry.Seq <= previous)
+                throw new ArgumentException("Task-log seq values must be strictly increasing", nameof(entries));
+            if (entry.Timestamp == default)
+                throw new ArgumentException($"Task-log timestamp must be provided at index {i}", nameof(entries));
+            if (string.IsNullOrWhiteSpace(entry.Source))
+                throw new ArgumentException($"Task-log source must be provided at index {i}", nameof(entries));
+            if (entry.Source.Length > TaskLogUploadLimits.MaxSourceLength)
+                throw new ArgumentException($"Task-log source exceeds {TaskLogUploadLimits.MaxSourceLength} characters at index {i}", nameof(entries));
+            if (entry.Text is null)
+                throw new ArgumentException($"Task-log text must be provided at index {i}", nameof(entries));
+            if (entry.Text.Length > TaskLogUploadLimits.MaxTextLength)
+                throw new ArgumentException($"Task-log text exceeds {TaskLogUploadLimits.MaxTextLength} characters at index {i}", nameof(entries));
+            previous = entry.Seq;
+        }
+    }
 }

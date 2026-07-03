@@ -234,16 +234,22 @@ describe('TaskProgressPanel — task execution log panel', () => {
     expect(screen.getByText(/No execution log captured/)).toBeInTheDocument()
   })
 
-  it('does NOT render the log panel for a completed (non-failed) task', () => {
+  it('renders the log panel for a completed task when expanded', async () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
-    setLogPage( { lines: [], nextCursor: null, truncated: false })
+    setLogPage( {
+      lines: [makeLine({ seq: 1, source: 'action:script', text: 'completed task output' })],
+      nextCursor: null,
+      truncated: false,
+    })
 
     render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
-    expect(screen.queryByTestId('task-log-panel')).not.toBeInTheDocument()
+    await expandFailedTask('Build artifacts')
+
+    expect(await screen.findByText('completed task output')).toBeInTheDocument()
   })
 
-  it('passes the issue-path query key via issueNumber and taskId', async () => {
+  it('passes the issue-path query inputs with retention limit and workflowRunId', async () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
     setLogPage( { lines: [], nextCursor: null, truncated: false })
 
@@ -252,7 +258,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
     await expandFailedTask('Rebase onto master')
 
     await waitFor(() => {
-      expect(mockedUseIssueWorkflowTaskLog).toHaveBeenCalledWith(161, 'build-task-1', {}, true)
+      expect(mockedUseIssueWorkflowTaskLog).toHaveBeenCalledWith(161, 'build-task-1', { limit: 5000 }, true, 'workflow-run-1')
     })
   })
 

@@ -25,3 +25,11 @@ public sealed record TaskLogPage(
     IReadOnlyList<TaskLogLine> Lines,
     long? NextCursor,
     bool Truncated);
+
+public static class TaskLogUploadLimits
+{
+    public const int MaxEntries = 20_000;
+    public const int MaxSourceLength = 64;
+    public const int MaxTextLength = 32_768;
+    public const int MaxTotalTextLength = 1_000_000;
+}

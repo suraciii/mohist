@@ -3,6 +3,7 @@ import type { ChildProcess } from "node:child_process"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { dirname } from "node:path"
+import { StringDecoder } from "node:string_decoder"
 
 export interface CommandResult {
   exitCode: number
@@ -72,20 +73,22 @@ export async function runCommand(
     const stderr: Buffer[] = []
     const onLine = options?.onLine
     const onClose = options?.onClose
-    const stdoutState: LineBufferState = { carry: "" }
-    const stderrState: LineBufferState = { carry: "" }
+    const stdoutState: LineBufferState = { carry: "", decoder: new StringDecoder("utf8") }
+    const stderrState: LineBufferState = { carry: "", decoder: new StringDecoder("utf8") }
     child.stdout.on("data", (chunk: Buffer) => {
       stdout.push(chunk)
-      if (onLine) emitLines(chunk.toString("utf8"), stdoutState, onLine)
+      if (onLine) emitLines(stdoutState.decoder.write(chunk), stdoutState, onLine)
     })
     child.stderr.on("data", (chunk: Buffer) => {
       stderr.push(chunk)
-      if (onLine) emitLines(chunk.toString("utf8"), stderrState, onLine)
+      if (onLine) emitLines(stderrState.decoder.write(chunk), stderrState, onLine)
     })
     child.on("error", reject)
     child.on("close", (code) => {
       const exitCode = code ?? 1
       if (onLine) {
+        emitLines(stdoutState.decoder.end(), stdoutState, onLine)
+        emitLines(stderrState.decoder.end(), stderrState, onLine)
         // Post-exit drain: flush any buffered tail that did not end with a newline.
         // Single emission per stream so we never duplicate the tail.
         drainTail(stdoutState, onLine)
@@ -99,6 +102,7 @@ export async function runCommand(
 
 interface LineBufferState {
   carry: string
+  decoder: StringDecoder
 }
 
 function emitLines(chunk: string, state: LineBufferState, onLine: (line: string) => void) {

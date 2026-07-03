@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { arrayInput, numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
-import { deleteFile, exists, readText, runCommand, writeText } from "../system/process.js"
+import { deleteFile, exists, readText, runCommand, writeText, type CommandLineOptions } from "../system/process.js"
 import { acpAgentAction } from "./acp-agent.js"
 import { resolveActionPath } from "./expectations.js"
 import {
@@ -71,7 +71,7 @@ export function createDefaultRegistry() {
 async function processAction(context: ActionContext): Promise<ActionResult> {
   const command = context.uses === "core/process" ? stringInput(context.with, "command") : context.uses
   if (!command) return { status: "failure", message: "Process action requires command" }
-  const result = await runCommand(command, arrayInput(context.with, "args").map(String), context.workDir, context.signal)
+  const result = await runCommand(command, arrayInput(context.with, "args").map(String), context.workDir, context.signal, undefined, logLineOptions(context, "action:process"))
   return result.exitCode === 0
     ? { status: "success", message: "Process completed", output: result.stdout.trim(), exitCode: result.exitCode }
     : { status: "failure", message: result.stderr.trim() || `Process exited with code ${result.exitCode}`, output: result.stdout.trim(), exitCode: result.exitCode }
@@ -86,7 +86,7 @@ async function scriptAction(context: ActionContext): Promise<ActionResult> {
   try {
     const timeoutMs = numberInput(context.with, "timeout")
     const signal = timeoutMs ? timeoutSignal(context.signal, timeoutMs) : context.signal
-    const result = await runCommand(shell, [file], context.workDir, signal)
+    const result = await runCommand(shell, [file], context.workDir, signal, undefined, logLineOptions(context, "action:script"))
     return {
       status: result.exitCode === 0 ? "success" : "failure",
       message: result.exitCode === 0 ? "Script completed" : `Script failed: ${firstLine(run)}`,
@@ -181,6 +181,10 @@ function firstLine(value: string) {
 
 function trim(value: string) {
   return value.length <= 20_000 ? value : value.slice(0, 20_000)
+}
+
+function logLineOptions(context: ActionContext, source: string): CommandLineOptions | undefined {
+  return context.log ? { onLine: (line) => context.log!.write(source, line) } : undefined
 }
 
 function timeoutSignal(parent: AbortSignal, timeoutMs: number) {

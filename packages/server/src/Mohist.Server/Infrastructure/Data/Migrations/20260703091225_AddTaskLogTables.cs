@@ -48,7 +48,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_TaskLogEntries_Owner_WorkId_Seq",
                 table: "TaskLogEntries",
-                columns: new[] { "OwnerKind", "OwnerId", "WorkId", "Seq" });
+                columns: new[] { "OwnerKind", "OwnerId", "WorkId", "Seq" },
+                unique: true);
         }
 
         /// <inheritdoc />

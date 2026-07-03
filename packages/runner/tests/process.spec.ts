@@ -124,6 +124,17 @@ describe("runCommand onLine callback", () => {
     // The \r is consumed at the boundary so the line content is plain.
     expect(lines).toEqual(["crlf", "lf"])
   })
+
+  it("DecodesUtf8SplitAcrossChunksWithoutReplacementCharacters", async () => {
+    const lines: string[] = []
+    const result = await spawnScriptWithLineCallback(
+      "const bytes = Buffer.from('文件\\n'); process.stdout.write(bytes.subarray(0, 1)); setImmediate(() => { process.stdout.write(bytes.subarray(1)); process.exit(0) })",
+      (line) => lines.push(line),
+    )
+
+    expect(lines).toEqual(["文件"])
+    expect(result.stdout).toBe("文件\n")
+  })
 })
 
 describe("runCommand signal handling", () => {

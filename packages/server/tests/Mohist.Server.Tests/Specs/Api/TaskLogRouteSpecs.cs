@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Tests.Support;
@@ -79,7 +80,7 @@ public class TaskLogRouteSpecs
             Id = workflowRunId,
             Metadata = new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: _fixture.TimeProvider.GetUtcNow(),
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = projectId,
@@ -179,7 +180,7 @@ public class TaskLogRouteSpecs
             $"/api/agent-jobs/{agentJobId}/work/{workId}/task-log",
             new
             {
-                entries = new[] { new { seq = 1L, timestamp = DateTimeOffset.UtcNow, source = "action", text = "agent-job line" } },
+                entries = new[] { new { seq = 1L, timestamp = _fixture.TimeProvider.GetUtcNow(), source = "action", text = "agent-job line" } },
                 truncated = false,
             });
 
@@ -213,6 +214,54 @@ public class TaskLogRouteSpecs
             content);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task UploadEndpoint_RejectsDuplicateSeqValues()
+    {
+        var workflowRunId = $"wr-tasklog-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        var now = _fixture.TimeProvider.GetUtcNow();
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
+            new
+            {
+                entries = new[]
+                {
+                    new { seq = 1L, timestamp = now, source = "action", text = "first" },
+                    new { seq = 1L, timestamp = now, source = "action", text = "duplicate" },
+                },
+                truncated = false,
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task UploadEndpoint_RejectsInvalidMetadataAndOversizedText()
+    {
+        var workflowRunId = $"wr-tasklog-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+
+        using var missingTimestamp = await _fixture.Client.PostAsJsonAsync(
+            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
+            new { entries = new[] { new { seq = 1L, source = "action", text = "line" } }, truncated = false });
+        Assert.Equal(HttpStatusCode.BadRequest, missingTimestamp.StatusCode);
+
+        using var emptySource = await _fixture.Client.PostAsJsonAsync(
+            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
+            new { entries = new[] { new { seq = 1L, timestamp = _fixture.TimeProvider.GetUtcNow(), source = "", text = "line" } }, truncated = false });
+        Assert.Equal(HttpStatusCode.BadRequest, emptySource.StatusCode);
+
+        using var hugeText = await _fixture.Client.PostAsJsonAsync(
+            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
+            new { entries = new[] { new { seq = 1L, timestamp = _fixture.TimeProvider.GetUtcNow(), source = "action", text = new string('x', TaskLogUploadLimits.MaxTextLength + 1) } }, truncated = false });
+        Assert.Equal(HttpStatusCode.BadRequest, hugeText.StatusCode);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

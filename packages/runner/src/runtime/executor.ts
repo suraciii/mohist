@@ -21,7 +21,7 @@ import {
 import { executeCheckDispatch, type CheckDeclaration } from "./check-execution.js"
 import { tryRecovery } from "./recovery.js"
 import { cleanupAgentAction, enforceCleanWorktree } from "./worktree-enforcement.js"
-import { TaskLogCollector, TaskLogger } from "./task-log.js"
+import { createCredentialMaskerFromEnvironment, TaskLogCollector, TaskLogger } from "./task-log.js"
 
 const COMPLETED_STATUSES = new Set(["completed", "success", "succeeded", "pass", "passed"])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
@@ -70,7 +70,7 @@ export class WorkExecutor {
    */
   async executeWithLog(work: RenderedWorkItem, signal: AbortSignal, collector: TaskLogCollector | null): Promise<WorkExecution> {
     const ownedCollector = collector ?? new TaskLogCollector({ now: this.now })
-    const logger = new TaskLogger({ collector: ownedCollector })
+    const logger = new TaskLogger({ collector: ownedCollector, masker: createCredentialMaskerFromEnvironment() })
     let resolvedWorkspace: ResolvedWorkspace
     if (work.ownerKind !== "agent-job") {
       const precheck = await this.prepareWorkspace(work, signal, logger)

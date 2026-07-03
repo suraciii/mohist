@@ -41,9 +41,10 @@ function StageTaskStatusIcon({ status }: { status: StageTaskState['status'] }) {
   return <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/30 flex-shrink-0" />
 }
 
-function TaskItem({ task, isRunning, issueNumber }: { task: StageTaskState; isRunning: boolean; issueNumber: number }) {
+function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: StageTaskState; isRunning: boolean; issueNumber: number; workflowRunId?: string | null }) {
   const [expanded, setExpanded] = useState(false)
   const isFailed = task.status === 'failed'
+  const canExpand = typeof task.taskId === 'string' && task.taskId.length > 0 && (task.status === 'failed' || task.status === 'completed')
   const isInProgress = isRunning && task.status === 'running'
   const isDeliveryTask = isDeliveryFailureTask(task)
   const taskReason = typeof task.reason === 'string' ? task.reason : null
@@ -67,8 +68,8 @@ function TaskItem({ task, isRunning, issueNumber }: { task: StageTaskState; isRu
     <div className={`rounded-md border ${isFailed ? 'border-red-200' : 'border'} overflow-hidden`}>
       <Button
         variant="ghost"
-        onClick={() => isFailed && setExpanded(!expanded)}
-        className={`w-full flex items-center gap-2 px-2.5 py-2 text-left h-auto justify-start font-normal ${isFailed ? 'hover:bg-red-50 cursor-pointer' : ''}`}
+        onClick={() => canExpand && setExpanded(!expanded)}
+        className={`w-full flex items-center gap-2 px-2.5 py-2 text-left h-auto justify-start font-normal ${isFailed ? 'hover:bg-red-50' : ''} ${canExpand ? 'cursor-pointer' : ''}`}
       >
         <StageTaskStatusIcon status={task.status} />
         <span className={`text-sm flex-1 truncate ${isFailed ? 'text-red-700' : task.status === 'completed' ? 'text-foreground/80' : 'text-muted-foreground'}`}>
@@ -85,15 +86,15 @@ function TaskItem({ task, isRunning, issueNumber }: { task: StageTaskState; isRu
             {task.attempts} attempts
           </span>
         )}
-        {isFailed && (
+        {canExpand && (
           <svg className={`h-3 w-3 text-muted-foreground/70 flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.23 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
           </svg>
         )}
       </Button>
-      {expanded && isFailed && (
-        <div className="px-2.5 pb-2 border-t border-red-100 bg-red-50/50 space-y-1.5">
-          {task.reason && (
+      {expanded && canExpand && (
+        <div className={`px-2.5 pb-2 border-t space-y-1.5 ${isFailed ? 'border-red-100 bg-red-50/50' : 'border-slate-100 bg-slate-50/50'}`}>
+          {isFailed && task.reason && (
             <p className="text-xs text-amber-600">{task.reason}</p>
           )}
           {deliveryGuidance && (
@@ -163,11 +164,13 @@ function TaskItem({ task, isRunning, issueNumber }: { task: StageTaskState; isRu
               <p className="leading-snug">{deliveryGuidance.nextAction}</p>
             </div>
           )}
-          <p className="text-xs text-red-600 whitespace-pre-wrap">
-            {typeof task.output === 'string' ? task.output : task.output != null ? JSON.stringify(task.output) : 'Task failed'}
-          </p>
+          {isFailed && (
+            <p className="text-xs text-red-600 whitespace-pre-wrap">
+              {typeof task.output === 'string' ? task.output : task.output != null ? JSON.stringify(task.output) : 'Task failed'}
+            </p>
+          )}
           {typeof task.taskId === 'string' && task.taskId.length > 0 && (
-            <TaskLogPanel issueNumber={issueNumber} taskId={task.taskId} />
+            <TaskLogPanel issueNumber={issueNumber} taskId={task.taskId} workflowRunId={workflowRunId} />
           )}
         </div>
       )}
@@ -282,7 +285,7 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
 
         <div className="space-y-1">
           {tasks.map((task) => (
-            <TaskItem key={task.taskId} task={task} isRunning={isAgentRunning} issueNumber={issueNumber} />
+            <TaskItem key={task.taskId} task={task} isRunning={isAgentRunning} issueNumber={issueNumber} workflowRunId={timeline?.workflowRunId ?? null} />
           ))}
         </div>
       </CardContent>

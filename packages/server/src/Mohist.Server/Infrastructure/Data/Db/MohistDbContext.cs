@@ -618,6 +618,7 @@ public class MohistDbContext : DbContext
             // owner-kind routing isolation between workflow and agent-job
             // entries (the two owner kinds share no key space).
             entity.HasIndex(e => new { e.OwnerKind, e.OwnerId, e.WorkId, e.Seq })
+                .IsUnique()
                 .HasDatabaseName("IX_TaskLogEntries_Owner_WorkId_Seq");
         });
 
