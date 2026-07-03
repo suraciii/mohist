@@ -1,0 +1,92 @@
+# Issue 328 — Progress
+
+## Codebase Patterns
+
+- `Mohist.Server.SystemInfo` is the namespace used by every file under
+  `packages/server/src/Mohist.Server/SystemInfo/`. Every relocated type
+  keeps this namespace, the type name, and (for records) the positional
+  parameter list unchanged so DI wiring (`MohistServiceRegistration`)
+  and HTTP contracts (DTOs in `SystemInfoDtos.cs`) keep working.
+- The static `JSON` helper used by `FileSystemSystemUpdateStore`
+  lives in `Mohist.Server.Infrastructure` — the
+  `using Mohist.Server.Infrastructure;` import is mandatory in any new
+  file that calls `JSON.Options` (the `Mohist.Server.Infrastructure.Hosting`
+  import alone is not enough).
+- `IEnvironmentVariableProvider` / `SystemEnvironmentVariableProvider`
+  come from `Mohist.Server.Infrastructure.Hosting`, not from the
+  `EnvironmentAbstractions` NuGet directly — the project aliases them.
+- `ISingletonService` is the registration marker for application-level
+  singletons (see `SystemUpdateService : ISingletonService`). DI
+  lifetimes for the relocated types (singleton for store/runner,
+  `AddHttpClient` for the probe) stay on `MohistServiceRegistration`
+  unchanged.
+- `SystemUpdateService.IsActive(state)` is referenced from
+  `FileSystemSystemUpdateStore.TryAcquireLockAsync`. It must stay on
+  `SystemUpdateService` (now `internal static`), not move with the
+  store — that's why the store file references the orchestrator.
+
+## Task T-001 (split into per-type files)
+
+- Pure mechanical relocation of cohesive collaborator types out of
+  `SystemUpdateService.cs` (1074 lines → 751 lines orchestration).
+- New files (all in `packages/server/src/Mohist.Server/SystemInfo/`):
+  - `SystemUpdateJobState.cs` (record + `ActiveStatuses` /
+    `TerminalStatuses`).
+  - `FileSystemSystemUpdateStore.cs` (`ISystemUpdateStore` + impl,
+    owning the file lock, atomic temp-file rename, and
+    `SaveIfCurrentAsync` optimistic-concurrency logic).
+  - `ProcessSystemUpdateCommandRunner.cs`
+    (`ISystemUpdateCommandRunner` + impl + `SystemCommandRequest` /
+    `SystemCommandResult`).
+  - `HttpSystemReadinessProbe.cs` (`ISystemReadinessProbe` + impl +
+    `SystemReadinessResult`, owning the health / root / bundled-asset
+    HTML parsing).
+- Sibling files untouched:
+  `RuntimeBuildInfo.cs`, `ServiceStatusChecker.cs`,
+  `GitSourceInspector.cs`, `PhysicalFileSystem.cs`,
+  `SystemdInstallDetector.cs`, `SystemdUnitParser.cs`,
+  `SystemInfoService.cs`, `SystemInfoDtos.cs`.
+- `MohistServiceRegistration` unchanged: registrations still resolve
+  `ISystemUpdateStore → FileSystemSystemUpdateStore`,
+  `ISystemUpdateCommandRunner → ProcessSystemUpdateCommandRunner`,
+  `ISystemReadinessProbe → HttpSystemReadinessProbe` with original
+  lifetimes; `SystemUpdateService` stays a singleton
+  `ISingletonService`.
+- Verification: `dotnet build Mohist.sln` succeeds with 0 warnings
+  (`TreatWarningsAsErrors` is on); full server test suite passes
+  (3661 passed, 13 pre-existing skips, 0 failed) — including all
+  `SystemUpdateServiceSpecs` (32) unchanged.
+- The CQS-violating logic at `GetLatestStatusAsync` (supersede /
+  persist-waiting / ready→restart→succeeded→release) is intentionally
+  preserved verbatim in T-001; T-003 will split it into a pure query
+  + explicit command.
+
+## Gotchas
+
+- The original file imported `using Mohist.Server.Infrastructure;`
+  solely for `JSON.Options`. When relocating `FileSystemSystemUpdateStore`
+  to its own file, that import must be carried along — the
+  `Infrastructure.Hosting` import alone does not surface the `JSON`
+  helper.
+- Record positional parameter order matters: `SystemUpdateJobState` has
+  16 positional parameters (14 required, 2 optional). Reordering
+  would silently change the persisted JSON shape via System.Text.Json
+  property name binding — keep order identical to the original.
+- `HttpSystemReadinessProbe.ProbeAsync` returns early with distinct
+  failure messages per step (`API health endpoint is not ready`,
+  `Web root is not ready`, `Web root did not reference a bundled asset`,
+  `Bundled asset is not ready`) — those strings are part of the
+  public contract surfaced via `SystemUpdateStatusResponse.Reason`,
+  so any future refactor must keep them stable.
+
+## T-001 verification (this run)
+
+- `dotnet build Mohist.sln` succeeded with 0 warnings / 0 errors.
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` passed:
+  3661 passed, 13 skipped, 0 failed (includes all `SystemUpdateServiceSpecs`
+  unchanged).
+- `npm test` runner suite passed: 58 files / 805 tests passed.
+- `git diff --name-only` shows only
+  `packages/server/src/Mohist.Server/SystemInfo/SystemUpdateService.cs`;
+  sibling files in `SystemInfo/` are untouched, and the four new files are
+  untracked additions.
