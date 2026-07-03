@@ -88,7 +88,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-loading')).toBeInTheDocument()
     expect(screen.queryByTestId('cumulative-flow-chart')).toBeInTheDocument()
@@ -104,7 +104,7 @@ describe('CumulativeFlowChart', () => {
       error: new Error('fail'),
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-error')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
@@ -118,7 +118,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const empty = screen.getByTestId('chart-container-empty')
     expect(empty).toBeInTheDocument()
@@ -134,7 +134,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
@@ -153,7 +153,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-container-empty')).not.toBeInTheDocument()
@@ -168,7 +168,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-container-loading')).not.toBeInTheDocument()
@@ -186,7 +186,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     for (const stage of ['backlog', 'plan', 'build', 'check', 'integrate', 'done']) {
       expect(screen.getByTestId(`area-band-${stage}`)).toBeInTheDocument()
@@ -212,7 +212,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     // The viewport is 500×300, with MARGIN.top = 26 and plotHeight =
     // 300 - 26 - 35 = 239; baselineY = 265.
@@ -265,7 +265,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const planPath = screen.getByTestId('area-band-plan')
     const d = planPath.getAttribute('d') || ''
@@ -294,7 +294,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const plotWidth = 500 - 50 - 24
     const x0 = 50
@@ -317,7 +317,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const path = screen.getByTestId('area-band-backlog')
     const d = path.getAttribute('d') || ''
@@ -336,7 +336,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const series = screen.getByTestId('area-series')
     const paths = Array.from(series.querySelectorAll('path'))
@@ -357,7 +357,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const legend = screen.getByTestId('chart-legend')
     expect(legend).toBeInTheDocument()
@@ -381,7 +381,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const svg = document.querySelector('svg[role="img"]')
     expect(svg).toBeInTheDocument()
@@ -400,7 +400,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const summary = screen.getByTestId('chart-sr-summary')
     expect(summary).toBeInTheDocument()
@@ -420,7 +420,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     expect(document.querySelectorAll('.tabular-nums').length).toBeGreaterThan(0)
   })
@@ -433,7 +433,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     expect(screen.getByTestId('chart-axis-left')).toBeInTheDocument()
   })
@@ -448,7 +448,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const path = screen.getByTestId('area-band-backlog')
     const style = path.getAttribute('style') || ''
@@ -464,7 +464,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const path = screen.getByTestId('area-band-backlog')
     const style = path.getAttribute('style') || ''
@@ -481,7 +481,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const section = screen.getByTestId('cumulative-flow-chart')
     expect(section).toBeInTheDocument()
@@ -496,7 +496,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     expect(screen.getByText('Cumulative Flow')).toBeInTheDocument()
   })
@@ -514,7 +514,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     const badge = screen.getByTestId('cumulative-flow-chart-window')
     expect(badge).toBeInTheDocument()
@@ -530,7 +530,7 @@ describe('CumulativeFlowChart', () => {
       isError: false,
     })
 
-    render(<CumulativeFlowChart />)
+    render(<CumulativeFlowChart range="30d" />)
 
     expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
     expect(screen.queryByTestId('cumulative-flow-chart-window')).not.toBeInTheDocument()

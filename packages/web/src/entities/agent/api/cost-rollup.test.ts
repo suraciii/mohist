@@ -143,3 +143,100 @@ describe('fetchCostRollup', () => {
     expect(data.costPerShip.amount).toBeNull()
   })
 })
+
+describe('useCostRollup range threading', () => {
+  it('preserves the existing queryKey shape when range is omitted (Dashboard FactoryStatusHeadline back-compat)', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCostRollup()
+
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.queryKey).toEqual(['agent', 'cost-rollup', 'proj-1'])
+  })
+
+  it('folds the range into the queryKey when supplied', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCostRollup('7d')
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.queryKey).toEqual(['agent', 'cost-rollup', '7d', 'proj-1'])
+  })
+
+  it('produces a different queryKey for each range (cache isolation)', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCostRollup('7d')
+    useCostRollup('30d')
+    useCostRollup('90d')
+
+    const key7 = useQueryMock.mock.calls[0][0].queryKey
+    const key30 = useQueryMock.mock.calls[1][0].queryKey
+    const key90 = useQueryMock.mock.calls[2][0].queryKey
+    expect(key7).not.toEqual(key30)
+    expect(key7).not.toEqual(key90)
+    expect(key30).not.toEqual(key90)
+  })
+
+  it('appends range=... to the fetch URL when supplied', async () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCostRollup('90d')
+
+    const config = useQueryMock.mock.calls[0][0]
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            totalCost: { amount: 0, currency: 'USD', sampleCount: 0 },
+            todayCost: { amount: 0, currency: 'USD', sampleCount: 0 },
+            doneIssuesCount: 0,
+            costPerShip: { amount: null, currency: null, sampleCount: 0 },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await config.queryFn()
+
+    const [calledPath] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/agent/cost?range=90d')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('omits the range parameter from the URL when no range is supplied', async () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCostRollup()
+
+    const config = useQueryMock.mock.calls[0][0]
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            totalCost: { amount: 0, currency: 'USD', sampleCount: 0 },
+            todayCost: { amount: 0, currency: 'USD', sampleCount: 0 },
+            doneIssuesCount: 0,
+            costPerShip: { amount: null, currency: null, sampleCount: 0 },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await config.queryFn()
+
+    const [calledPath] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/agent/cost')
+    expect(calledPath).not.toContain('range=')
+
+    vi.unstubAllGlobals()
+  })
+})

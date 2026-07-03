@@ -29,6 +29,12 @@ export { deriveDeliveryVerdict, deliverySlowestStageName, formatCycleDays } from
 export { deriveQualityVerdict } from './quality'
 export { deriveInvestmentVerdict, investmentBreakdown } from './investment'
 export type { InvestmentVerdictDetails, InvestmentSubVerdict } from './investment'
+export {
+  DEFAULT_INSIGHTS_RANGE,
+  INSIGHTS_RANGES,
+  isInsightsRange,
+  type InsightsRange,
+} from './insights-range'
 
 export interface SignalInputs {
   completion: CompletionTrendResponse | null | undefined

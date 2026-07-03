@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useCompletionTrend } from './completion-trend'
+import { useCompletionTrend, useCompletionThroughput } from './completion-trend'
 
 const useQueryMock = vi.fn()
 const useProjectMock = vi.fn()
@@ -146,6 +146,182 @@ describe('useCompletionTrend', () => {
     expect(data.buckets[0].completed).toBe(0)
     expect(data.buckets[11].completed).toBe(11)
     expect(data.window.from).toBe('2026-04-06T00:00:00+00:00')
+
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('useCompletionTrend range threading', () => {
+  it('preserves the existing queryKey shape when range is omitted (Dashboard back-compat)', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCompletionTrend()
+
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.queryKey).toEqual(['issues', 'metrics', 'completion', 'week', 'proj-1'])
+  })
+
+  it('folds the range into the queryKey when supplied', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCompletionTrend('7d')
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.queryKey).toEqual(['issues', 'metrics', 'completion', 'week', '7d', 'proj-1'])
+  })
+
+  it('produces a different queryKey for each range (cache isolation)', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCompletionTrend('7d')
+    useCompletionTrend('30d')
+    useCompletionTrend('90d')
+
+    const key7 = useQueryMock.mock.calls[0][0].queryKey
+    const key30 = useQueryMock.mock.calls[1][0].queryKey
+    const key90 = useQueryMock.mock.calls[2][0].queryKey
+    expect(key7).not.toEqual(key30)
+    expect(key7).not.toEqual(key90)
+    expect(key30).not.toEqual(key90)
+  })
+
+  it('appends range=... to the fetch URL (composed with bucket=)', async () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCompletionTrend('30d')
+
+    const config = useQueryMock.mock.calls[0][0]
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: { bucket: 'week', window: { from: '2026-05-02T00:00:00+00:00', to: '2026-06-01T00:00:00+00:00' }, buckets: [] },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await config.queryFn()
+
+    const [calledPath] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/issues/metrics/completion?bucket=week&range=30d')
+    expect(calledPath).toContain('range=30d')
+    expect(calledPath).toContain('bucket=week')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('omits the range parameter from the URL when no range is supplied', async () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCompletionTrend()
+
+    const config = useQueryMock.mock.calls[0][0]
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: { bucket: 'week', window: { from: '2026-05-02T00:00:00+00:00', to: '2026-06-01T00:00:00+00:00' }, buckets: [] },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await config.queryFn()
+
+    const [calledPath] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/issues/metrics/completion?bucket=week')
+    expect(calledPath).not.toContain('range=')
+
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('useCompletionThroughput range threading', () => {
+  it('preserves the existing queryKey shape when range is omitted (Dashboard back-compat)', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCompletionThroughput()
+
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.queryKey).toEqual(['issues', 'metrics', 'completion', 'day', 'proj-1'])
+  })
+
+  it('folds the range into the queryKey when supplied', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCompletionThroughput('90d')
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.queryKey).toEqual(['issues', 'metrics', 'completion', 'day', '90d', 'proj-1'])
+  })
+
+  it('produces a different queryKey for each range (cache isolation)', () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCompletionThroughput('7d')
+    useCompletionThroughput('30d')
+    useCompletionThroughput('90d')
+
+    const key7 = useQueryMock.mock.calls[0][0].queryKey
+    const key30 = useQueryMock.mock.calls[1][0].queryKey
+    const key90 = useQueryMock.mock.calls[2][0].queryKey
+    expect(key7).not.toEqual(key30)
+    expect(key7).not.toEqual(key90)
+    expect(key30).not.toEqual(key90)
+  })
+
+  it('appends range=... to the fetch URL (composed with bucket=day)', async () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCompletionThroughput('90d')
+
+    const config = useQueryMock.mock.calls[0][0]
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: { bucket: 'day', window: { from: '2026-03-03T00:00:00+00:00', to: '2026-06-01T00:00:00+00:00' }, buckets: [] },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await config.queryFn()
+
+    const [calledPath] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/issues/metrics/completion?bucket=day&range=90d')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('omits the range parameter from the URL when no range is supplied', async () => {
+    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+
+    useCompletionThroughput()
+
+    const config = useQueryMock.mock.calls[0][0]
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: { bucket: 'day', window: { from: '2026-05-02T00:00:00+00:00', to: '2026-06-01T00:00:00+00:00' }, buckets: [] },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await config.queryFn()
+
+    const [calledPath] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/issues/metrics/completion?bucket=day')
+    expect(calledPath).not.toContain('range=')
 
     vi.unstubAllGlobals()
   })

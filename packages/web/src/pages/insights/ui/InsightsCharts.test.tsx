@@ -70,7 +70,7 @@ function renderCharts() {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="proj-1" initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={['/demo/insights']}>
-          <InsightsCharts />
+          <InsightsCharts range="30d" />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -381,5 +381,79 @@ describe('InsightsCharts time-window annotations', () => {
       expect(group.querySelector('input[type="range"]')).toBeNull()
       expect(group.querySelector('select[name*="range" i], select[name*="window" i]')).toBeNull()
     }
+  })
+})
+
+describe('InsightsCharts range forwarding to panel hooks', () => {
+  function renderChartsWithRange(range: '7d' | '30d' | '90d') {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="proj-1" initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={['/demo/insights']}>
+            <InsightsCharts range={range} />
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+  }
+
+  it('forwards the range to every chart panel hook (except useEpics)', () => {
+    mocks.useCompletionThroughput.mockClear()
+    mocks.useCompletionTrend.mockClear()
+    mocks.useCumulativeFlow.mockClear()
+    mocks.useDeliveryTime.mockClear()
+    mocks.useStageDuration.mockClear()
+    mocks.useQualityMetrics.mockClear()
+    mocks.useCostRollup.mockClear()
+    mocks.useAgentUsage.mockClear()
+    mocks.useEpics.mockClear()
+
+    renderChartsWithRange('7d')
+
+    expect(mocks.useCompletionThroughput).toHaveBeenCalledWith('7d')
+    expect(mocks.useCompletionTrend).toHaveBeenCalledWith('7d')
+    expect(mocks.useCumulativeFlow).toHaveBeenCalledWith('7d')
+    expect(mocks.useDeliveryTime).toHaveBeenCalledWith('7d')
+    expect(mocks.useStageDuration).toHaveBeenCalledWith('7d')
+    expect(mocks.useQualityMetrics).toHaveBeenCalledWith('7d')
+    expect(mocks.useCostRollup).toHaveBeenCalledWith('7d')
+    expect(mocks.useAgentUsage).toHaveBeenCalledWith('7d')
+
+    expect(mocks.useEpics).not.toHaveBeenCalledWith('7d')
+  })
+
+  it('re-applies the new range when the prop changes from 30d to 90d', () => {
+    mocks.useCompletionThroughput.mockClear()
+    mocks.useCompletionTrend.mockClear()
+    mocks.useCumulativeFlow.mockClear()
+    mocks.useDeliveryTime.mockClear()
+    mocks.useStageDuration.mockClear()
+    mocks.useQualityMetrics.mockClear()
+    mocks.useCostRollup.mockClear()
+    mocks.useAgentUsage.mockClear()
+
+    const { rerender } = renderChartsWithRange('30d')
+
+    expect(mocks.useCompletionThroughput).toHaveBeenLastCalledWith('30d')
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="proj-1" initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={['/demo/insights']}>
+            <InsightsCharts range="90d" />
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(mocks.useCompletionThroughput).toHaveBeenLastCalledWith('90d')
+    expect(mocks.useCumulativeFlow).toHaveBeenLastCalledWith('90d')
+    expect(mocks.useDeliveryTime).toHaveBeenLastCalledWith('90d')
+    expect(mocks.useStageDuration).toHaveBeenLastCalledWith('90d')
+    expect(mocks.useQualityMetrics).toHaveBeenLastCalledWith('90d')
+    expect(mocks.useCostRollup).toHaveBeenLastCalledWith('90d')
+    expect(mocks.useAgentUsage).toHaveBeenLastCalledWith('90d')
   })
 })

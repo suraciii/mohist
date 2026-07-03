@@ -1,5 +1,6 @@
 import { useCompletionThroughput } from '../../../entities/issue'
 import type { CompletionTrendResponse } from '../../../entities/issue'
+import type { InsightsRange } from '../model/insights-range'
 import { computeMovingAverage } from './model/throughput'
 import {
   ChartContainer,
@@ -58,8 +59,8 @@ function hasThroughputData(data: CompletionTrendResponse | undefined): data is C
   return data.buckets.some(b => b.completed > 0 || b.failed > 0)
 }
 
-export function ThroughputChart() {
-  const { data, isLoading, isError } = useCompletionThroughput()
+export function ThroughputChart({ range }: { range: InsightsRange }) {
+  const { data, isLoading, isError } = useCompletionThroughput(range)
 
   const status = isLoading ? 'loading'
     : isError ? 'error'
@@ -76,7 +77,7 @@ export function ThroughputChart() {
           data-testid="throughput-chart-window"
           className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 text-xs tabular-nums text-muted-foreground"
         >
-          30d
+          {range}
         </span>
       </div>
       <ChartContainer

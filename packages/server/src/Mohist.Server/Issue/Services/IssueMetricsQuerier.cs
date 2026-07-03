@@ -331,9 +331,15 @@ public class IssueMetricsQuerier : IScopedService
     public async Task<CompletionBucketsResult> GetCompletionBucketsAsync(
         string projectId,
         CompletionBucket bucket,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        int? windowDays = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var days = windowDays ?? (bucket == CompletionBucket.Day ? 30 : 7 * 12);
+        var weekCount = bucket == CompletionBucket.Day
+            ? days
+            : (int)Math.Ceiling(days / 7.0);
 
         DateTimeOffset windowFrom;
         DateTimeOffset windowTo;
@@ -343,27 +349,25 @@ public class IssueMetricsQuerier : IScopedService
 
         if (bucket == CompletionBucket.Day)
         {
-            // 30 trailing UTC days inclusive of today.
             var today = DateOnly.FromDateTime(now.UtcDateTime.Date);
-            windowFrom = new DateTimeOffset(today.AddDays(-29).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            windowFrom = new DateTimeOffset(today.AddDays(-(days - 1)).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
             windowTo = new DateTimeOffset(today.AddDays(1).ToDateTime(new TimeOnly(0, 0)), TimeSpan.Zero);
-            previousFrom = new DateTimeOffset(today.AddDays(-59).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            previousFrom = new DateTimeOffset(today.AddDays(-(2 * days - 1)).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
             previousTo = windowFrom;
-            boundaries = Enumerable.Range(0, 30)
-                .Select(i => today.AddDays(-29 + i))
+            boundaries = Enumerable.Range(0, days)
+                .Select(i => today.AddDays(-(days - 1) + i))
                 .ToList();
         }
         else
         {
-            // 12 trailing ISO weeks inclusive of the current week.
             var currentWeek = ISOWeekHelper.StartOfIsoWeek(now.UtcDateTime);
-            var firstWeek = currentWeek.AddDays(-7 * 11);
+            var firstWeek = currentWeek.AddDays(-7 * (weekCount - 1));
             windowFrom = new DateTimeOffset(firstWeek, TimeSpan.Zero);
             windowTo = new DateTimeOffset(currentWeek.AddDays(7), TimeSpan.Zero);
-            var previousFirstWeek = firstWeek.AddDays(-7 * 12);
+            var previousFirstWeek = firstWeek.AddDays(-7 * weekCount);
             previousFrom = new DateTimeOffset(previousFirstWeek, TimeSpan.Zero);
             previousTo = windowFrom;
-            boundaries = Enumerable.Range(0, 12)
+            boundaries = Enumerable.Range(0, weekCount)
                 .Select(i => DateOnly.FromDateTime(firstWeek.AddDays(7 * i)))
                 .ToList();
         }
@@ -444,23 +448,24 @@ public class IssueMetricsQuerier : IScopedService
     /// </summary>
     public async Task<QualityMetricsResult> GetQualityAsync(
         string projectId,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        int? windowDays = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var window7dFrom = now.AddDays(-7);
         var window7dTo = now;
-        var window30dFrom = now.AddDays(-30);
+
+        var primaryDays = windowDays ?? 30;
+        var window30dFrom = now.AddDays(-primaryDays);
         var window30dTo = now;
 
-        var previous30dFrom = now.AddDays(-60);
+        var previous30dFrom = now.AddDays(-2 * primaryDays);
         var previous30dTo = window30dFrom;
 
-        // Pre-sized 30 UTC calendar-day buckets inclusive of today. Every
-        // bucket is emitted so the consuming chart's x-axis never compresses.
         var today = DateOnly.FromDateTime(now.UtcDateTime.Date);
-        var trendStart = today.AddDays(-29);
-        var trendBoundaries = Enumerable.Range(0, 30)
+        var trendStart = today.AddDays(-(primaryDays - 1));
+        var trendBoundaries = Enumerable.Range(0, primaryDays)
             .Select(i => trendStart.AddDays(i))
             .ToList();
         var trendIndexByBoundary = trendBoundaries
@@ -591,11 +596,13 @@ public class IssueMetricsQuerier : IScopedService
     /// </summary>
     public async Task<ApprovalWaitResult> GetApprovalWaitAsync(
         string projectId,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        int? windowDays = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        var windowFrom = now.AddDays(-7);
+        var days = windowDays ?? 7;
+        var windowFrom = now.AddDays(-days);
         var windowTo = now;
 
         // Load the project's issues via the shared read-model loader so
@@ -680,20 +687,16 @@ public class IssueMetricsQuerier : IScopedService
     /// </summary>
     public async Task<DeliveryTimeResult> GetDeliveryTimesAsync(
         string projectId,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        int? windowDays = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        // Fixed 30-day trailing window keyed on the completion moment.
-        // `now` is the injected anchor; never read the wall clock here.
-        var windowFrom = now.AddDays(-30);
+        var days = windowDays ?? 30;
+        var windowFrom = now.AddDays(-days);
         var windowTo = now;
 
-        // Previous window: same length, immediately preceding the current
-        // window. The two windows are evaluated independently; this gives
-        // the consumer the cycle-time baseline it needs to derive a trend
-        // in a single read.
-        var previousWindowFrom = now.AddDays(-60);
+        var previousWindowFrom = now.AddDays(-2 * days);
         var previousWindowTo = windowFrom;
 
         // Resolve the project's issue set. We use `db.Issues` directly
@@ -838,13 +841,13 @@ public class IssueMetricsQuerier : IScopedService
     /// </summary>
     public async Task<StageDurationResult> GetStageDurationsAsync(
         string projectId,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        int? windowDays = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        // Fixed 30-day trailing window keyed on the completion moment.
-        // Anchored on `Issue.CompletedAt`, mirroring delivery-time.
-        var windowFrom = now.AddDays(-30);
+        var days = windowDays ?? 30;
+        var windowFrom = now.AddDays(-days);
         var windowTo = now;
 
         // Resolve the project's issue set as `IssueReadModel` so we can

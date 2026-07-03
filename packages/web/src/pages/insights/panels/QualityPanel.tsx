@@ -1,5 +1,6 @@
 import { useQualityMetrics } from '../../../entities/issue'
 import type { QualityMetricsWindowDto } from '../../../entities/issue'
+import type { InsightsRange } from '../model/insights-range'
 
 const PANEL_TESTID = 'productivity-quality'
 const EMPTY_TESTID = 'productivity-quality-empty'
@@ -7,6 +8,17 @@ const EMPTY_TESTID = 'productivity-quality-empty'
 function formatRate(rate: number | null): string {
   if (rate === null) return '—'
   return `${Math.round(rate * 100)}%`
+}
+
+function formatWindowDayLabel(iso: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
+  if (!match) return iso
+  const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function formatWindowTitle(window: QualityMetricsWindowDto): string {
+  return `${formatWindowDayLabel(window.from)} – ${formatWindowDayLabel(window.to)}`
 }
 
 interface QualityWindowProps {
@@ -91,8 +103,8 @@ function QualityWindow({ title, window, testidSuffix }: QualityWindowProps) {
   )
 }
 
-export function QualityPanel() {
-  const { data } = useQualityMetrics()
+export function QualityPanel({ range }: { range: InsightsRange }) {
+  const { data } = useQualityMetrics(range)
   const window7d = data?.window7d
   const window30d = data?.window30d
   const hasSamples = (window7d?.sampleCount ?? 0) > 0 || (window30d?.sampleCount ?? 0) > 0
@@ -131,7 +143,7 @@ export function QualityPanel() {
       <div className="space-y-4">
         <QualityWindow title="Last 7 days" window={window7d} testidSuffix="7d" />
         <QualityWindow
-          title="Last 30 days"
+          title={formatWindowTitle(window30d)}
           window={window30d}
           testidSuffix="30d"
         />
