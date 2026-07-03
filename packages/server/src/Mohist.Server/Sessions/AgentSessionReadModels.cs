@@ -37,32 +37,6 @@ public sealed record AgentEventSummaryDto(
     int? ToolCallCount,
     int? ToolErrorCount);
 
-public sealed record AgentSessionDto(
-    string Id,
-    string ProjectId,
-    int IssueNumber,
-    string WorkflowRunId,
-    string SessionName,
-    string? WorkId,
-    string? WorkType,
-    string? Stage,
-    string? Title,
-    string? RunnerId,
-    string? AgentSessionId,
-    [property: JsonPropertyName("status")] string Status,
-    string? Model,
-    string? WorkDir,
-    string? ChangeDir,
-    int? ProcessPid,
-    string CreatedAt,
-    string? StartedAt,
-    string? CompletedAt,
-    string? LastDataAt,
-    string? FailureReason,
-    int? ExitCode,
-    [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
-    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
-
 public sealed record AgentSessionMetadataDto(
     string Id,
     string SessionName,
@@ -421,7 +395,7 @@ public sealed record AgentCostRollupRawData(
 
 /// <summary>
 /// The windowed cost figures produced by
-/// <see cref="Sessions.Services.AgentSessionQuerier.GetCostWindowedAsync"/>. Both windows
+/// <see cref="Sessions.Services.AgentUsageReporter.GetCostWindowedAsync"/>. Both windows
 /// are 30 days; the previous window is the same length as the current
 /// window and immediately precedes it. Both advance with the current
 /// time. <see cref="CurrentSpend"/> is the sum of in-window per-session

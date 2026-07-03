@@ -74,7 +74,7 @@ internal static class SessionTranscriptBuilder
                         continue;
                     }
 
-                    if (part.Type == "session_closed")
+                    if (part.Type == TranscriptPartTypes.SessionClosed)
                     {
                         var status = AgentSessionJsonHelper.GetStringProp(payload, "status") ?? "completed";
                         if (status is "failed" or "cancelled")

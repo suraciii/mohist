@@ -61,7 +61,7 @@ public class AgentSessionSpecs
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
         Assert.NotNull(card.LastActivity);
-        Assert.Equal("session_closed", card.LastActivity!.Text);
+        Assert.Equal("session.closed", card.LastActivity!.Text);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -170,6 +170,28 @@ public class AgentSessionSpecs
         Assert.False(root.TryGetProperty("turns", out _));
         Assert.False(root.TryGetProperty("assistant", out _));
         Assert.False(root.TryGetProperty("workflowLogs", out _));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task IssueSessionMetadataEndpoint_ProjectsTranscriptEventsInSequenceOrder_WhenRowsWereInsertedOutOfOrder()
+    {
+        var (project, issue, work, _) = await CreateStartedAgentSessionAsync("metadata-order", sessionName: "plan");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        await issueGrain.StartWorkAsync();
+
+        var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
+        var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await SeedOutOfOrderTranscriptPartsAsync(dbFactory, currentSession.Id);
+
+        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
+        using var doc = JsonDocument.Parse(raw);
+        var eventSummary = doc.RootElement.GetProperty("data").GetProperty("eventSummary");
+
+        Assert.Equal("sequence-last-model", eventSummary.GetProperty("resolvedModel").GetString());
+        Assert.Equal("sequence-last-failure", eventSummary.GetProperty("failureCategory").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -318,7 +340,7 @@ public class AgentSessionSpecs
         var parts = await LoadTranscriptPartsAsync(db, session.Id);
         Assert.Equal([1L, 2L], parts.Select(e => e.Sequence).ToArray());
         Assert.Equal("text", parts[0].Type);
-        Assert.Equal("session_closed", parts[1].Type);
+        Assert.Equal("session.closed", parts[1].Type);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -737,7 +759,7 @@ public class AgentSessionSpecs
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var runtimeEvents = (await LoadTranscriptPartsAsync(db, session.Id)).ToList();
         Assert.Equal(2, runtimeEvents.Count);
-        Assert.Equal("session_closed", runtimeEvents[0].Type);
+        Assert.Equal("session.closed", runtimeEvents[0].Type);
         Assert.Equal("usage", runtimeEvents[1].Type);
     }
 
@@ -1329,6 +1351,60 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
             .ToArrayAsync();
+    }
+
+    private static async Task SeedOutOfOrderTranscriptPartsAsync(IDbContextFactory<MohistDbContext> dbFactory, string sessionId)
+    {
+        var baseTime = new DateTime(2026, 6, 15, 10, 0, 0, DateTimeKind.Utc);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var turn = new AgentSessionTranscriptTurnRow
+        {
+            SessionId = sessionId,
+            Sequence = 1,
+            StartedAt = baseTime,
+            UpdatedAt = baseTime.AddMinutes(5),
+        };
+        db.AgentSessionTranscriptTurns.Add(turn);
+        await db.SaveChangesAsync();
+
+        db.AgentSessionTranscriptParts.AddRange(
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 20,
+                Type = TranscriptPartTypes.Model,
+                CorrelationKey = "metadata-model-latest-by-sequence",
+                PayloadJson = JsonSerializer.Serialize(new { resolvedModel = "sequence-last-model" }),
+                LastSeenAt = baseTime.AddMinutes(20),
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 10,
+                Type = TranscriptPartTypes.Model,
+                CorrelationKey = "metadata-model-inserted-last",
+                PayloadJson = JsonSerializer.Serialize(new { resolvedModel = "inserted-last-model" }),
+                LastSeenAt = baseTime.AddMinutes(10),
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 30,
+                Type = TranscriptPartTypes.SessionClosed,
+                CorrelationKey = "metadata-closed-latest-by-sequence",
+                PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = "sequence-last-failure" }),
+                LastSeenAt = baseTime.AddMinutes(30),
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 15,
+                Type = TranscriptPartTypes.SessionClosed,
+                CorrelationKey = "metadata-closed-inserted-last",
+                PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = "inserted-last-failure" }),
+                LastSeenAt = baseTime.AddMinutes(15),
+            });
+        await db.SaveChangesAsync();
     }
 
     private static AgentSessionMetadata WorkflowSessionMetadata(
