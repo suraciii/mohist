@@ -59,6 +59,37 @@ public static partial class WorkflowRunExtensions
             run.Status = WorkflowRunStatus.Running;
             return true;
         }
+
+        /// <summary>
+        /// Clears the current stage's residual awaiting-approval gate, when one
+        /// is present. Idempotent: returns <c>true</c> only when it actually
+        /// mutated state, so repeated activations do not write-amplify.
+        ///
+        /// Called from <see cref="WorkflowRunExtensions.Stop"/> before the run
+        /// is transitioned to <see cref="WorkflowRunStatus.Stopped"/>, and from
+        /// <c>WorkflowGrain.OnActivateAsync</c> over rehydrated state when the
+        /// run is already <see cref="WorkflowRunStatus.Stopped"/>. The guard is
+        /// the residual-gate predicate (<see cref="StageRun.IsAwaitingApproval"/>)
+        /// rather than the run status, so the same method serves both call
+        /// sites: at the <c>Stop()</c> site the run is not yet <c>Stopped</c>,
+        /// while the grain-activate caller scopes invocation to <c>Stopped</c>
+        /// runs so a live run genuinely awaiting approval is never disturbed.
+        ///
+        /// The stage is left as <see cref="StageRunStatus.Running"/> — matching
+        /// the <c>AddRuntimeTasks</c> approval-invalidation pattern and the
+        /// existing stop-from-Ready semantics. The run-level <c>Stopped</c> is
+        /// the authoritative terminal signal.
+        /// </summary>
+        public bool ReconcileStoppedApprovalGate()
+        {
+            if (run.CurrentStageId is null) return false;
+            var current = run.Stages.FirstOrDefault(s => string.Equals(s.Id, run.CurrentStageId, StringComparison.Ordinal));
+            if (current is null || !current.IsAwaitingApproval) return false;
+
+            current.ApprovalStatus = null;
+            current.Status = StageRunStatus.Running;
+            return true;
+        }
     }
 
     private static WorkflowRunStatus WaitingForDispatchStatus(WorkflowRun run) =>
