@@ -48,6 +48,13 @@ function context(withOverrides: JsonObject = {}): ActionContext {
   }
 }
 
+function withLog(ctx: ActionContext, writes: Array<{ source: string; text: string }>): ActionContext {
+  return {
+    ...ctx,
+    log: { write: (source: string, text: string) => { writes.push({ source, text }); return writes.length } } as never,
+  }
+}
+
 function installGit(respond: () => never) {
   setGitHubPrGitRunnerForTest(async () => await respond())
 }
@@ -113,6 +120,25 @@ describe("mohist/mark-github-pr-ready action", () => {
     })
     expect(output.message).toContain("already ready")
     expect(ghCalls.some((call) => call === "gh pr ready 42")).toBe(false)
+  })
+
+  it("forwards gh command output to the task log sink", async () => {
+    const writes: Array<{ source: string; text: string }> = []
+    installGit(() => { throw new Error("git should not be called") })
+    setGitHubPrGhRunnerForTest(async (cmd, args, _cwd, _signal, _env, options) => {
+      const full = [cmd, ...args].join(" ")
+      options?.onLine?.(`captured ${full}`)
+      if (full === "gh --version") return ghOk("gh version 2.0.0\n")
+      if (full === "gh auth status") return ghOk("Logged in\n")
+      if (full === "gh pr view 42 --json state,isDraft,url") return ghOk(JSON.stringify({ state: "OPEN", isDraft: true, url: "https://github.com/acme/repo/pull/42" }))
+      if (full === "gh pr ready 42") return ghOk("ready\n")
+      return ghFail(`unexpected gh call: ${full}`)
+    })
+
+    const result = await markGitHubPrReadyAction(withLog(context({ prNumber: 42 }), writes))
+
+    expect(result.status).toBe("success")
+    expect(writes.some((write) => write.source === "action:mark-github-pr-ready" && write.text.includes("gh pr ready 42"))).toBe(true)
   })
 
   it("transitions a draft PR to READY when isDraft is true", async () => {

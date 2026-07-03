@@ -63,6 +63,13 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
   }
 }
 
+function withLog(ctx: ActionContext, writes: Array<{ source: string; text: string }>): ActionContext {
+  return {
+    ...ctx,
+    log: { write: (source: string, text: string) => { writes.push({ source, text }); return writes.length } } as never,
+  }
+}
+
 function installGit(respond: (workDir: string, args: string[], signal: AbortSignal) => GitResponse | Promise<GitResponse>) {
   setGitHubPrGitRunnerForTest(async (workDir, args, signal) => await respond(workDir, args, signal))
 }
@@ -168,6 +175,32 @@ describe("mohist/create-github-pr action", () => {
       pushed: true,
       draft: true,
     })
+  })
+
+  it("forwards gh command output to the task log sink", async () => {
+    const writes: Array<{ source: string; text: string }> = []
+    installMoIssueShow()
+    installGit((_workDir, args) => {
+      const cmd = args.join(" ")
+      if (cmd === "fetch origin master") return ok("base fetched\n")
+      if (cmd === "rev-parse origin/master") return ok("base-sha-1\n")
+      if (cmd === "push --force-with-lease origin mohist/run-wr-gh-pr-1") return ok("pushed\n")
+      return fail(`unexpected git call: ${cmd}`)
+    })
+    setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
+      const full = [cmd, ...args].join(" ")
+      options?.onLine?.(`captured ${full}`)
+      if (full === "gh --version") return ghOk("gh version 2.0.0\n")
+      if (full === "gh auth status") return ghOk("Logged in\n")
+      if (full.startsWith("gh pr list")) return ghOk("[]\n")
+      if (full.startsWith("gh pr create")) return ghOk("https://github.com/acme/repo/pull/42\n")
+      return ghFail(`unexpected gh call in ${cwd}: ${full}`)
+    })
+
+    const result = await createGitHubPrAction(withLog(context({ target: "master" }), writes))
+
+    expect(result.status).toBe("success")
+    expect(writes.some((write) => write.source === "action:create-github-pr" && write.text.includes("gh pr create"))).toBe(true)
   })
 
   it("reuses an existing open PR without mutating title/body when gh pr list returns a match", async () => {

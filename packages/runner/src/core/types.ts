@@ -184,6 +184,17 @@ export interface ActionContext {
   acpConnection?: import("../runtime/acp-connection.js").SharedAcpConnection | null
   serverConnection?: import("../server/connection.js").ServerConnection | null
   /**
+   * Single sink for ops command output. Every ops output (workspace
+   * prep, branch stability, action body, cleanup) flows through
+   * `log.write(source, text)` so masking, monotonic `seq` assignment,
+   * and buffering happen in exactly one place. Exposed as a value
+   * rather than a factory because the executor thread constructs one
+   * `TaskLogger` per work item and reuses it across all phases; the
+   * logger is intentionally missing on contexts that do not capture
+   * (agent-only paths) so wiring stays opt-in.
+   */
+  log?: import("../runtime/task-log.js").TaskLogger | null
+  /**
    * Persist workflow runtime variables immediately, before the task completes.
    * This is distinct from declarative `setVars`, which only patches variables
    * after a task succeeds. Mid-execution writes are best-effort and are NOT

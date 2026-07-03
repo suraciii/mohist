@@ -12,6 +12,18 @@ import {
   type WorktreeSnapshot,
 } from "./worktree-cleanup.js"
 import { git } from "./git-probe.js"
+import type { TaskLogger } from "./task-log.js"
+
+/**
+ * `source` tag recorded against every captured clean-worktree line.
+ * Distinct from the action body's `action:*` tag so the web viewer
+ * can phase-distinguish the cleanup probe from the action itself.
+ */
+export const CLEANUP_SOURCE = "cleanup"
+
+function cleanupSink(log: TaskLogger | null | undefined) {
+  return log ? { log, source: CLEANUP_SOURCE } : undefined
+}
 
 export const DEFAULT_STALE_INDEX_LOCK_MS = 60_000
 
@@ -62,8 +74,9 @@ export function resolveStaleIndexLockMs(variables: JsonObject): number {
   return staleMs !== undefined && staleMs >= 0 ? Math.floor(staleMs) : DEFAULT_STALE_INDEX_LOCK_MS
 }
 
-export async function recoverStaleIndexLock(workDir: string, variables: JsonObject, signal: AbortSignal): Promise<GitIndexLockRecovery> {
-  const lockPathResult = await git(workDir, ["rev-parse", "--git-path", "index.lock"], signal)
+export async function recoverStaleIndexLock(workDir: string, variables: JsonObject, signal: AbortSignal, log: TaskLogger | null = null): Promise<GitIndexLockRecovery> {
+  const sink = cleanupSink(log)
+  const lockPathResult = await git(workDir, ["rev-parse", "--git-path", "index.lock"], signal, sink ? { sink } : undefined)
   if (!lockPathResult.success) {
     return {
       status: "blocked",
@@ -130,8 +143,9 @@ export async function defaultLockHolderProbe(workDir: string, lockPath: string, 
   return { held: false }
 }
 
-export async function readWorktreeSnapshot(workDir: string, signal: AbortSignal): Promise<WorktreeSnapshot> {
-  const inside = await git(workDir, ["rev-parse", "--is-inside-work-tree"], signal)
+export async function readWorktreeSnapshot(workDir: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<WorktreeSnapshot> {
+  const sink = cleanupSink(log)
+  const inside = await git(workDir, ["rev-parse", "--is-inside-work-tree"], signal, sink ? { sink } : undefined)
   if (!inside.success) {
     // Only treat the worktree as "not a git repo" (and therefore as
     // clean-by-default) when the failure is Git's standard "not a git
@@ -150,9 +164,9 @@ export async function readWorktreeSnapshot(workDir: string, signal: AbortSignal)
     return { staged: [], unstaged: [], untracked: [], isClean: true }
   }
   const checks = await Promise.all([
-    git(workDir, ["diff", "--cached", "--name-only"], signal).then((result) => ({ name: "staged", result })),
-    git(workDir, ["diff", "--name-only"], signal).then((result) => ({ name: "unstaged", result })),
-    git(workDir, ["ls-files", "--others", "--exclude-standard"], signal).then((result) => ({ name: "untracked", result })),
+    git(workDir, ["diff", "--cached", "--name-only"], signal, sink ? { sink } : undefined).then((result) => ({ name: "staged", result })),
+    git(workDir, ["diff", "--name-only"], signal, sink ? { sink } : undefined).then((result) => ({ name: "unstaged", result })),
+    git(workDir, ["ls-files", "--others", "--exclude-standard"], signal, sink ? { sink } : undefined).then((result) => ({ name: "untracked", result })),
   ])
 
   if (checks.some(({ result }) => !result.success)) {
@@ -293,13 +307,14 @@ export async function enforceCleanWorktree(
   signal: AbortSignal,
   cleanupAction: CleanupAgentAction,
   contextParts: ContextParts,
+  log: TaskLogger | null = null,
 ): Promise<WorkItemResult> {
   try {
     const agentBacked = isAgentBackedTask(work)
     const maxCleanupAttempts = resolveMaxCleanupAttempts(variables)
 
     let attempts = 0
-    let snapshot = await readWorktreeSnapshot(workDir, signal)
+    let snapshot = await readWorktreeSnapshot(workDir, signal, log)
     while (!snapshot.isClean) {
       if (!agentBacked) {
         return dirtyWorktreeFailure(result, snapshot, attempts)
@@ -307,7 +322,7 @@ export async function enforceCleanWorktree(
       if (attempts >= maxCleanupAttempts) {
         return dirtyWorktreeFailure(result, snapshot, attempts)
       }
-      const lockRecovery = await recoverStaleIndexLock(workDir, variables, signal)
+      const lockRecovery = await recoverStaleIndexLock(workDir, variables, signal, log)
       if (lockRecovery.status === "blocked") {
         return gitIndexLockFailure(result, snapshot, attempts, lockRecovery)
       }
@@ -326,7 +341,7 @@ export async function enforceCleanWorktree(
       if (cleanupResult !== "ok") {
         return cleanupResult
       }
-      snapshot = await readWorktreeSnapshot(workDir, signal)
+      snapshot = await readWorktreeSnapshot(workDir, signal, log)
     }
 
     if (attempts === 0) return result

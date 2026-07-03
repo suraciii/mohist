@@ -325,6 +325,52 @@ export class RunnerHost {
       }
     }
 
+    /**
+     * Flush the per-work task-log collector as a terminal batch via the
+     * independent task-log channel. Best-effort: a failed upload is
+     * logged and swallowed; the report (which carries the verdict) is
+     * NEVER blocked or failed by a flush failure (design D6). The
+     * collector is empty when the work failed before any phase ran,
+     * and even an empty batch is allowed to flow through (T-001
+     * spec: "A task with no captured lines returns { lines: [] } and
+     * never an error").
+     */
+    const flushTaskLog = async (collector: import("./task-log.js").TaskLogCollector | null) => {
+      if (!collector) return
+      const batch = collector.flush()
+      // Owner-id mirrors `artifact-side-effects.ts:107`: agent-job
+      // dispatches upload under `work.agentJobId`, workflow dispatches
+      // under `work.workflowRunId`. Routing through a single
+      // uploadTaskLog call keeps the task-log channel symmetric with
+      // artifact uploads (design D7).
+      const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
+      const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
+      const uploadController = new AbortController()
+      let timeout: ReturnType<typeof setTimeout> | null = null
+      try {
+        await Promise.race([
+          this.connection.uploadTaskLog(
+            ownerId,
+            work.workId,
+            batch,
+            uploadController.signal,
+            ownerKind,
+          ),
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => {
+              uploadController.abort()
+              reject(new Error(`task-log upload timed out after ${TASK_LOG_UPLOAD_TIMEOUT_MS}ms`))
+            }, TASK_LOG_UPLOAD_TIMEOUT_MS)
+            timeout.unref?.()
+          }),
+        ])
+      } catch (flushError) {
+        console.error("task-log upload failed for work", work.workId, flushError)
+      } finally {
+        if (timeout) clearTimeout(timeout)
+      }
+    }
+
     if (this.workExecutor === null) {
       // ACP connection failed to initialize at startup; fall back to the
       // per-work-item ephemeral path so the work still attempts to run.
@@ -341,7 +387,9 @@ export class RunnerHost {
         const fallback = await createSharedAcpConnection(typeof workspacePath === "string" ? workspacePath : process.cwd())
         executor.updateAcpConnection(fallback)
         try {
-          lastResult = await executor.execute(work, signal)
+          const execution = await executor.executeWithLog(work, signal, null)
+          lastResult = execution.result
+          await flushTaskLog(execution.collector)
           await this.connection.report(work, lastResult, signal)
         } finally {
           await fallback.shutdown()
@@ -358,8 +406,14 @@ export class RunnerHost {
     }
 
     try {
-      lastResult = await this.workExecutor.execute(work, signal)
+      const execution = await this.workExecutor.executeWithLog(work, signal, null)
+      lastResult = execution.result
       if (signal.aborted) return
+      // Flush BEFORE the report so the report carries the verdict while
+      // the (best-effort) upload runs in parallel with the verdict
+      // round-trip. Errors are logged and swallowed — they never block
+      // or fail the report (design D6).
+      await flushTaskLog(execution.collector)
       await this.connection.report(work, lastResult, signal)
     } catch (error) {
       lastError = error
@@ -401,6 +455,8 @@ export class RunnerHost {
     }
   }
 }
+
+const TASK_LOG_UPLOAD_TIMEOUT_MS = 250
 
 async function delay(ms: number, signal: AbortSignal) {
   if (signal.aborted) throw signal.reason

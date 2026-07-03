@@ -1,7 +1,7 @@
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { mkdir, readdir, readFile, rename, stat } from "node:fs/promises"
 import { exists, copyDirectory, deleteDirectory } from "../system/process.js"
-import { git as defaultGit } from "./git.js"
+import { git as defaultGit, type GitOptions } from "./git.js"
 import type { ActionContext, ActionResult, JsonObject, JsonValue } from "../core/types.js"
 import { isObject, objectInput, stringInput } from "../core/json.js"
 import { resolveActionPath } from "./expectations.js"
@@ -10,6 +10,18 @@ import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
 const ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX = "Archive OpenSpec change"
 const OPENSPEC_ARCHIVE_NAME_VAR_KEY = "openspecArchiveName"
 const ARCHIVE_DESTINATION_VAR_KEY = "_actions.archiveChange.destination"
+
+/**
+ * `source` tag recorded against every captured `mohist/openspec`
+ * action body line. Phase-distinguished from `branch-check` and
+ * `cleanup` so the web viewer can tell which ops phase produced
+ * which line.
+ */
+const ACTION_SOURCE = "action:openspec"
+
+function sinkOptions(context: ActionContext): GitOptions | undefined {
+  return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
+}
 
 function readLegacyArchiveName(variables: JsonObject, sourceRel: string): string | null {
   const raw = variables[ARCHIVE_DESTINATION_VAR_KEY]
@@ -35,7 +47,7 @@ function resolveEffectiveArchiveName(
   return { name: `${today}-${sourceName}`, persistedSource: null }
 }
 
-export type OpenSpecGitRunner = (workDir: string, args: string[], signal: AbortSignal) => Promise<{
+export type OpenSpecGitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
   stdout: string
   stderr: string
@@ -279,8 +291,9 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
 
   const destinationRel = relativePath(context.workDir, destination)
   const commitMessage = `${ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX}: ${sourceName}`
+  const opts = sinkOptions(context)
 
-  const addResult = await openSpecGitRunner(context.workDir, ["add", "-A", destinationRel], context.signal)
+  const addResult = await openSpecGitRunner(context.workDir, ["add", "-A", destinationRel], context.signal, opts)
   if (!addResult.success) {
     return archiveFailure("retry-safe", `git add archive change failed: ${addResult.combinedOutput || addResult.stderr || `exit ${addResult.exitCode}`}`, {
       kind: "archive-change",
@@ -291,7 +304,7 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
     })
   }
 
-  const rmResult = await openSpecGitRunner(context.workDir, ["rm", "-rf", "--cached", "--ignore-unmatch", sourceRel], context.signal)
+  const rmResult = await openSpecGitRunner(context.workDir, ["rm", "-rf", "--cached", "--ignore-unmatch", sourceRel], context.signal, opts)
   if (!rmResult.success) {
     return archiveFailure("retry-safe", `git rm --cached archive change failed: ${rmResult.combinedOutput || rmResult.stderr || `exit ${rmResult.exitCode}`}`, {
       kind: "archive-change",
@@ -302,7 +315,7 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
     })
   }
 
-  const diffResult = await openSpecGitRunner(context.workDir, ["diff", "--cached", "--name-only", "--", sourceRel, destinationRel], context.signal)
+  const diffResult = await openSpecGitRunner(context.workDir, ["diff", "--cached", "--name-only", "--", sourceRel, destinationRel], context.signal, opts)
   if (!diffResult.success) {
     return archiveFailure("retry-safe", `git diff archive change failed: ${diffResult.combinedOutput || diffResult.stderr || `exit ${diffResult.exitCode}`}`, {
       kind: "archive-change",
@@ -329,7 +342,7 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
     }
   }
 
-  const commitResult = await openSpecGitRunner(context.workDir, ["commit", "-m", commitMessage, "--", sourceRel, destinationRel], context.signal)
+  const commitResult = await openSpecGitRunner(context.workDir, ["commit", "-m", commitMessage, "--", sourceRel, destinationRel], context.signal, opts)
   if (!commitResult.success) {
     return archiveFailure("retry-safe", `git commit archive change failed: ${commitResult.combinedOutput || commitResult.stderr || `exit ${commitResult.exitCode}`}`, {
       kind: "archive-change",
@@ -341,7 +354,7 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
     })
   }
 
-  const headResult = await openSpecGitRunner(context.workDir, ["rev-parse", "HEAD"], context.signal)
+  const headResult = await openSpecGitRunner(context.workDir, ["rev-parse", "HEAD"], context.signal, opts)
   const commitSha = headResult.success ? headResult.stdout.trim() : null
 
   return {
