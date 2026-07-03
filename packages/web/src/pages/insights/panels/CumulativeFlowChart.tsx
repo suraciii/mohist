@@ -150,8 +150,8 @@ function singleSnapshotSliceWidth(rangeFrom: string, rangeTo: string): number {
   return Math.max(8, plotWidth / Math.max(daySpan, 1))
 }
 
-export function CumulativeFlowChart({ range: _range }: { range: InsightsRange }) {
-  const { data, isLoading, isError } = useCumulativeFlow(_range)
+export function CumulativeFlowChart({ range }: { range: InsightsRange }) {
+  const { data, isLoading, isError } = useCumulativeFlow(range)
 
   const status = isLoading
     ? 'loading'

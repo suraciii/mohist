@@ -19,16 +19,8 @@ public static partial class IssueRoutes
         {
             var project = GetRequiredProject(ctx);
 
-            int? windowDays = null;
-            if (!string.IsNullOrWhiteSpace(range))
-            {
-                if (!MetricsRange.TryParse(range, out var days))
-                    return ApiResults.BadRequest(
-                        "Unsupported range value. Accepted values: '7d', '30d', '90d'.",
-                        "unsupported_range",
-                        new { range });
-                windowDays = days;
-            }
+            if (!TryParseRangeParameter(range, out var windowDays, out var rangeError))
+                return rangeError;
 
             var result = await metricsQuery.GetQualityAsync(
                 project.Id,

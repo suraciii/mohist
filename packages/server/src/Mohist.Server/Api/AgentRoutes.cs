@@ -42,21 +42,8 @@ public static class AgentRoutes
         {
             var project = context.GetResolvedProject();
 
-            // Uniform Insights selector vocabulary. Omit ⇒ today's fixed
-            // 7-day / 7-bucket daily window (Dashboard back-compat default
-            // — `FactoryStatusHeadline` consumes this endpoint); unknown
-            // values ⇒ 400. The querier receives the parsed day count and
-            // applies the bucket-granularity map (D5).
-            int? windowDays = null;
-            if (!string.IsNullOrWhiteSpace(range))
-            {
-                if (!MetricsRange.TryParse(range, out var days))
-                    return ApiResults.BadRequest(
-                        "Unsupported range value. Accepted values: '7d', '30d', '90d'.",
-                        "unsupported_range",
-                        new { range });
-                windowDays = days;
-            }
+            if (!TryParseRange(range, out var windowDays, out var rangeError))
+                return rangeError;
 
             return ApiResults.Ok(await sessions.GetUsageTimeseriesAsync(project.Id, windowDays, ct));
         });
@@ -65,22 +52,8 @@ public static class AgentRoutes
         {
             var project = context.GetResolvedProject();
 
-            // Uniform Insights selector vocabulary. Omit ⇒ today's fixed
-            // 30-day windowed current/previous spend and per-issue cost
-            // (Dashboard `FactoryStatusHeadline` back-compat default);
-            // unknown values ⇒ 400. The all-time `totalCost`,
-            // `todayCost`, `doneIssuesCount`, and all-time `costPerShip`
-            // are computed before the window and remain unaffected.
-            int? windowDays = null;
-            if (!string.IsNullOrWhiteSpace(range))
-            {
-                if (!MetricsRange.TryParse(range, out var days))
-                    return ApiResults.BadRequest(
-                        "Unsupported range value. Accepted values: '7d', '30d', '90d'.",
-                        "unsupported_range",
-                        new { range });
-                windowDays = days;
-            }
+            if (!TryParseRange(range, out var windowDays, out var rangeError))
+                return rangeError;
 
             var cost = await sessions.GetCostRollupAsync(project.Id, ct);
             var projectIssues = await issues.ListAsync(project.Id, project, all: true);
@@ -98,6 +71,30 @@ public static class AgentRoutes
         });
 
         return app;
+    }
+
+    private static bool TryParseRange(string? range, out int? windowDays, out IResult? error)
+    {
+        if (string.IsNullOrWhiteSpace(range))
+        {
+            windowDays = null;
+            error = null;
+            return true;
+        }
+
+        if (!MetricsRange.TryParse(range, out var days))
+        {
+            windowDays = null;
+            error = ApiResults.BadRequest(
+                "Unsupported range value. Accepted values: '7d', '30d', '90d'.",
+                "unsupported_range",
+                new { range });
+            return false;
+        }
+
+        windowDays = days;
+        error = null;
+        return true;
     }
 
     private static AgentCostMetricDto BuildCostPerShip(AgentCostMetricDto totalCost, int doneIssuesCount)

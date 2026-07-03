@@ -86,8 +86,8 @@ function hasPlottableStages(
   )
 }
 
-export function StageDurationChart({ range: _range }: { range: InsightsRange }) {
-  const { data, isLoading, isError } = useStageDuration(_range)
+export function StageDurationChart({ range }: { range: InsightsRange }) {
+  const { data, isLoading, isError } = useStageDuration(range)
   const [lens, setLens] = useState<DurationLens>('average')
 
   const visibleCount = data

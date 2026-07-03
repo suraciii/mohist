@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { projectApiPath, request } from '../../../shared/api/client'
 import { useProject } from '../../project/@x/project-context'
-import type { InsightsRange } from '../../../pages/insights/model/insights-range'
+import type { InsightsRange } from '../../shared/insights-range'
 
 export interface CompletionBucketPoint {
   boundary: string
@@ -38,12 +38,32 @@ export function fetchCompletionTrend(projectId: string, bucket: CompletionBucket
   )
 }
 
+export const completionTrendQueryKey = (projectId?: string | null, range?: InsightsRange | null) => {
+  if (range) {
+    return projectId
+      ? ['issues', 'metrics', 'completion', 'week', range, projectId] as const
+      : ['issues', 'metrics', 'completion', 'week', range] as const
+  }
+  return projectId
+    ? ['issues', 'metrics', 'completion', 'week', projectId] as const
+    : ['issues', 'metrics', 'completion', 'week'] as const
+}
+
+export const completionThroughputQueryKey = (projectId?: string | null, range?: InsightsRange | null) => {
+  if (range) {
+    return projectId
+      ? ['issues', 'metrics', 'completion', 'day', range, projectId] as const
+      : ['issues', 'metrics', 'completion', 'day', range] as const
+  }
+  return projectId
+    ? ['issues', 'metrics', 'completion', 'day', projectId] as const
+    : ['issues', 'metrics', 'completion', 'day'] as const
+}
+
 export function useCompletionTrend(range?: InsightsRange) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: range
-      ? ['issues', 'metrics', 'completion', 'week', range, projectId]
-      : ['issues', 'metrics', 'completion', 'week', projectId],
+    queryKey: completionTrendQueryKey(projectId, range),
     queryFn: () => fetchCompletionTrend(projectId!, 'week', range),
     enabled: !!projectId,
     staleTime: 60_000,
@@ -53,9 +73,7 @@ export function useCompletionTrend(range?: InsightsRange) {
 export function useCompletionThroughput(range?: InsightsRange) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: range
-      ? ['issues', 'metrics', 'completion', 'day', range, projectId]
-      : ['issues', 'metrics', 'completion', 'day', projectId],
+    queryKey: completionThroughputQueryKey(projectId, range),
     queryFn: () => fetchCompletionTrend(projectId!, 'day', range),
     enabled: !!projectId,
     staleTime: 60_000,

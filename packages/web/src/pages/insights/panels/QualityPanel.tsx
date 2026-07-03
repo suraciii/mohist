@@ -10,6 +10,17 @@ function formatRate(rate: number | null): string {
   return `${Math.round(rate * 100)}%`
 }
 
+function formatWindowDayLabel(iso: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
+  if (!match) return iso
+  const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function formatWindowTitle(window: QualityMetricsWindowDto): string {
+  return `${formatWindowDayLabel(window.from)} – ${formatWindowDayLabel(window.to)}`
+}
+
 interface QualityWindowProps {
   title: string
   window: QualityMetricsWindowDto
@@ -132,7 +143,7 @@ export function QualityPanel({ range }: { range: InsightsRange }) {
       <div className="space-y-4">
         <QualityWindow title="Last 7 days" window={window7d} testidSuffix="7d" />
         <QualityWindow
-          title="Last 30 days"
+          title={formatWindowTitle(window30d)}
           window={window30d}
           testidSuffix="30d"
         />

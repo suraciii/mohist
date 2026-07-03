@@ -19,20 +19,8 @@ public static partial class IssueRoutes
         {
             var project = GetRequiredProject(ctx);
 
-            // Uniform range vocabulary shared by the six issue-metrics
-            // endpoints. Omitting `range` falls back to today's fixed
-            // 90-day window (the prior D6 contract); unknown values
-            // return 400.
-            int? windowDays = null;
-            if (!string.IsNullOrWhiteSpace(range))
-            {
-                if (!MetricsRange.TryParse(range, out var days))
-                    return ApiResults.BadRequest(
-                        "Unsupported range value. Accepted values: '7d', '30d', '90d'.",
-                        "unsupported_range",
-                        new { range });
-                windowDays = days;
-            }
+            if (!TryParseRangeParameter(range, out var windowDays, out var rangeError))
+                return rangeError;
 
             var result = await cumulativeFlow.GetAsync(
                 project.Id,
