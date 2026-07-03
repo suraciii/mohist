@@ -505,10 +505,7 @@ public class AgentSessionQuerier : IScopedService
 
         var session = record.Session;
         var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { session.Id }, ct: ct);
-        var transcriptEvents = loaded.Parts
-            .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
-            .Select(part => ToProjection(loaded.SessionByTurnId[part.TurnId], part))
-            .ToList();
+        var transcriptEvents = ToTranscriptProjectionsInSequenceOrder(loaded);
 
         var summary = TranscriptEventSummaryProjector.Summarize(
             transcriptEvents.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson)));
@@ -567,10 +564,7 @@ public class AgentSessionQuerier : IScopedService
     {
         var domainSession = session.Session;
         var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { domainSession.Id }, ct: ct);
-        var transcriptEvents = loaded.Parts
-            .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
-            .Select(part => ToProjection(loaded.SessionByTurnId[part.TurnId], part))
-            .ToList();
+        var transcriptEvents = ToTranscriptProjectionsInSequenceOrder(loaded);
         var partCount = transcriptEvents.Count;
         var eventSummary = TranscriptEventSummaryProjector.Summarize(
             transcriptEvents.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson)));
@@ -832,12 +826,11 @@ public class AgentSessionQuerier : IScopedService
 
     private static async Task<AgentSessionTranscriptData> LoadTranscriptAsync(MohistDbContext db, string sessionId, CancellationToken ct)
     {
-        var turns = await db.AgentSessionTranscriptTurns.AsNoTracking()
-            .Where(e => e.SessionId == sessionId)
+        var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { sessionId }, ct: ct);
+        var turns = loaded.Turns
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
-            .ToListAsync(ct);
-        var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { sessionId }, ct: ct);
+            .ToList();
         var parts = loaded.Parts
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
@@ -874,6 +867,14 @@ public class AgentSessionQuerier : IScopedService
             : part.PayloadJson,
         CreatedAt = part.LastSeenAt,
     };
+
+    private static IReadOnlyList<TranscriptEventProjection> ToTranscriptProjectionsInSequenceOrder(TranscriptPartLoaderResult loaded) =>
+        loaded.Parts
+            .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
+            .OrderBy(part => part.Sequence)
+            .ThenBy(part => part.Id)
+            .Select(part => ToProjection(loaded.SessionByTurnId[part.TurnId], part))
+            .ToList();
 
     internal static async Task<IReadOnlyList<AgentSessionRecord>> ReconcileActiveSessionsAsync(
         MohistDbContext db,

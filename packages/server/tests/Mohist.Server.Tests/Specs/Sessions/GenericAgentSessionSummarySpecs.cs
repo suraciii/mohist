@@ -106,6 +106,23 @@ public class GenericAgentSessionSummarySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task Summary_ProjectsTranscriptEventsInSequenceOrder_WhenRowsWereInsertedOutOfOrder()
+    {
+        using var fixture = new FakeAgentSessionSummaryDbContextFactory();
+        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
+        await SeedOutOfOrderTranscriptPartsAsync(fixture, SessionId);
+        var querier = CreateQuerier(fixture);
+
+        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+
+        Assert.NotNull(result);
+        Assert.Equal("sequence-last-model", result!.ResolvedModel);
+        Assert.Equal("sequence-last-failure", result.FailureCategory);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task Summary_CarriesContextRefs_WhenPresent()
     {
         using var fixture = new FakeAgentSessionSummaryDbContextFactory();
@@ -317,6 +334,59 @@ public class GenericAgentSessionSummarySpecs
             }
         }
 
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedOutOfOrderTranscriptPartsAsync(IDbContextFactory<MohistDbContext> factory, string sessionId)
+    {
+        await using var db = factory.CreateDbContext();
+        var turn = new AgentSessionTranscriptTurnRow
+        {
+            SessionId = sessionId,
+            Sequence = 1,
+            StartedAt = CreatedAt,
+            UpdatedAt = CreatedAt.AddMinutes(5),
+        };
+        db.AgentSessionTranscriptTurns.Add(turn);
+        await db.SaveChangesAsync();
+
+        db.AgentSessionTranscriptParts.AddRange(
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 20,
+                Type = TranscriptPartTypes.Model,
+                CorrelationKey = "model-latest-by-sequence",
+                PayloadJson = JsonSerializer.Serialize(new { resolvedModel = "sequence-last-model" }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(20),
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 10,
+                Type = TranscriptPartTypes.Model,
+                CorrelationKey = "model-inserted-last",
+                PayloadJson = JsonSerializer.Serialize(new { resolvedModel = "inserted-last-model" }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(10),
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 30,
+                Type = TranscriptPartTypes.SessionClosed,
+                CorrelationKey = "closed-latest-by-sequence",
+                PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = "sequence-last-failure" }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(30),
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 15,
+                Type = TranscriptPartTypes.SessionClosed,
+                CorrelationKey = "closed-inserted-last",
+                PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = "inserted-last-failure" }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(15),
+            });
         await db.SaveChangesAsync();
     }
 

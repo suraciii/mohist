@@ -10,7 +10,7 @@ namespace Mohist.Server.Tests.Specs.Sessions;
 
 /// <summary>
 /// Issue-327 T-002 / design D3: locks in the consolidated
-/// <see cref="TranscriptPartLoader.LoadAsync(MohistDbContext, IEnumerable{string}, string?, CancellationToken)"/>
+/// <see cref="TranscriptPartLoader.LoadAsync(MohistDbContext, IEnumerable{string}, CancellationToken, string?)"/>
 /// helper — the single transcript turns/parts load sequence (turns → turnIds
 /// → parts → sessionByTurnId map) used by the five former duplication
 /// sites. Verifies empty input, multi-session reshape, single-session
@@ -22,6 +22,8 @@ namespace Mohist.Server.Tests.Specs.Sessions;
 /// </summary>
 public sealed class TranscriptPartLoaderSpecs
 {
+    private static readonly DateTime FixedTime = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Fact]
     public async Task LoadAsync_EmptySessionIds_ReturnsEmptyResult()
@@ -32,6 +34,7 @@ public sealed class TranscriptPartLoaderSpecs
         var result = await TranscriptPartLoader.LoadAsync(db, Array.Empty<string>());
 
         Assert.Empty(result.SessionByTurnId);
+        Assert.Empty(result.Turns);
         Assert.Empty(result.Parts);
     }
 
@@ -40,7 +43,7 @@ public sealed class TranscriptPartLoaderSpecs
     public async Task LoadAsync_DuplicateSessionIds_AreDedupedBeforeQuery()
     {
         using var fixture = new FakeLoaderDbContextFactory();
-        var now = DateTime.UtcNow;
+        var now = FixedTime;
         await SeedSessionAsync(fixture, "sess_a", now);
         await SeedSessionAsync(fixture, "sess_b", now);
         await using var db = fixture.CreateDbContext();
@@ -50,6 +53,7 @@ public sealed class TranscriptPartLoaderSpecs
             new[] { "sess_a", "sess_a", "sess_b", "sess_b" });
 
         Assert.Equal(2, result.SessionByTurnId.Count);
+        Assert.Equal(2, result.Turns.Count);
         Assert.Empty(result.Parts);
         Assert.Contains(1L, result.SessionByTurnId.Keys);
         Assert.Contains(2L, result.SessionByTurnId.Keys);
@@ -60,7 +64,7 @@ public sealed class TranscriptPartLoaderSpecs
     public async Task LoadAsync_MultipleSessions_ReturnsSessionByTurnId_AndAllParts()
     {
         using var fixture = new FakeLoaderDbContextFactory();
-        var now = DateTime.UtcNow;
+        var now = FixedTime;
         await SeedSessionAsync(fixture, "sess_a", now, parts: new[]
         {
             ("text", "{}", now.AddSeconds(1)),
@@ -77,8 +81,10 @@ public sealed class TranscriptPartLoaderSpecs
             new[] { "sess_a", "sess_b" });
 
         Assert.Equal(2, result.SessionByTurnId.Count);
+        Assert.Equal(2, result.Turns.Count);
         Assert.Equal(3, result.Parts.Count);
         Assert.All(result.Parts, p => Assert.True(result.SessionByTurnId.ContainsKey(p.TurnId)));
+        Assert.All(result.Parts, p => Assert.Contains(result.Turns, t => t.Id == p.TurnId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -93,6 +99,7 @@ public sealed class TranscriptPartLoaderSpecs
             new[] { "sess_missing" });
 
         Assert.Empty(result.SessionByTurnId);
+        Assert.Empty(result.Turns);
         Assert.Empty(result.Parts);
     }
 
@@ -101,7 +108,7 @@ public sealed class TranscriptPartLoaderSpecs
     public async Task LoadAsync_PartTypeFilter_ReturnsOnlyMatchingParts()
     {
         using var fixture = new FakeLoaderDbContextFactory();
-        var now = DateTime.UtcNow;
+        var now = FixedTime;
         await SeedSessionAsync(fixture, "sess_a", now, parts: new[]
         {
             ("session.closed", "{}", now.AddSeconds(1)),
@@ -116,6 +123,7 @@ public sealed class TranscriptPartLoaderSpecs
             partType: TranscriptPartTypes.SessionClosed);
 
         Assert.Single(result.SessionByTurnId);
+        Assert.Single(result.Turns);
         Assert.Equal(2, result.Parts.Count);
         Assert.All(result.Parts, p => Assert.Equal(TranscriptPartTypes.SessionClosed, p.Type));
     }
@@ -125,7 +133,7 @@ public sealed class TranscriptPartLoaderSpecs
     public async Task LoadAsync_PartTypeFilter_NoMatches_ReturnsEmptyPartsList()
     {
         using var fixture = new FakeLoaderDbContextFactory();
-        var now = DateTime.UtcNow;
+        var now = FixedTime;
         await SeedSessionAsync(fixture, "sess_a", now, parts: new[]
         {
             ("text", "{}", now.AddSeconds(1)),
@@ -138,6 +146,7 @@ public sealed class TranscriptPartLoaderSpecs
             partType: TranscriptPartTypes.SessionClosed);
 
         Assert.Single(result.SessionByTurnId);
+        Assert.Single(result.Turns);
         Assert.Empty(result.Parts);
     }
 
@@ -146,7 +155,7 @@ public sealed class TranscriptPartLoaderSpecs
     public async Task LoadAsync_DoesNotImposeOrderingOnMaterializedParts()
     {
         using var fixture = new FakeLoaderDbContextFactory();
-        var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var now = FixedTime;
         await SeedSessionAsync(fixture, "sess_a", now, parts: new[]
         {
             ("a", "{}", now.AddSeconds(5)),

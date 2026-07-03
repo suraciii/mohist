@@ -7,8 +7,8 @@ namespace Mohist.Server.Sessions.Services;
 /// <summary>
 /// Shared loader for the transcript turns/parts read sequence used by the
 /// five former duplication sites (issue-327 T-002 / design D3). Returns the
-/// raw materials — a turn-id → session-id dictionary and the materialized
-/// parts list (optionally pre-filtered by part type so SQL stays the
+/// raw materials — the loaded turn rows, a turn-id → session-id dictionary,
+/// and the materialized parts list (optionally pre-filtered by part type so SQL stays the
 /// filter boundary) — and lets each caller impose its own ordering and
 /// last-wins reduction. Pure refactor: every caller's resolved projection
 /// is byte-identical to the pre-consolidation result.
@@ -19,8 +19,8 @@ internal static class TranscriptPartLoader
     /// Loads the transcript turn rows for <paramref name="sessionIds"/>, then
     /// the parts for those turn ids (optionally restricted to a single
     /// <paramref name="partType"/>), and returns the turn-id → session-id
-    /// map alongside the materialized parts list. Returns an empty map and
-    /// an empty list when <paramref name="sessionIds"/> is empty. When
+    /// map alongside the loaded turns and materialized parts list. Returns
+    /// empty collections when <paramref name="sessionIds"/> is empty. When
     /// <paramref name="sessionIds"/> is non-empty but no turns exist for it,
     /// returns an empty map and an empty list (no empty-marker records).
     /// SQL ordering is intentionally not imposed: callers apply their own
@@ -52,14 +52,15 @@ internal static class TranscriptPartLoader
 
         var parts = await partsQuery.ToListAsync(ct);
 
-        return new TranscriptPartLoaderResult(sessionByTurnId, parts);
+        return new TranscriptPartLoaderResult(turns, sessionByTurnId, parts);
     }
 }
 
 internal readonly record struct TranscriptPartLoaderResult(
+    IReadOnlyList<AgentSessionTranscriptTurnRow> Turns,
     IReadOnlyDictionary<long, string> SessionByTurnId,
     IReadOnlyList<AgentSessionTranscriptPartRow> Parts)
 {
     public static TranscriptPartLoaderResult Empty { get; } =
-        new(new Dictionary<long, string>(0), Array.Empty<AgentSessionTranscriptPartRow>());
+        new(Array.Empty<AgentSessionTranscriptTurnRow>(), new Dictionary<long, string>(0), Array.Empty<AgentSessionTranscriptPartRow>());
 }

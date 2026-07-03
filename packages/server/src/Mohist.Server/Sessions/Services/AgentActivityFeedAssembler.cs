@@ -19,7 +19,6 @@ namespace Mohist.Server.Sessions.Services;
 /// reconciliation + latest-event / event-summary / issue-title /
 /// task-progress / preview-card projection into a single
 /// <see cref="ActivityDto"/>. Depends one-way on the core
-/// <see cref="AgentSessionQuerier"/> for the
 /// <see cref="AgentSessionQuerier.ReconcileActiveSessionsAsync"/> +
 /// <see cref="AgentSessionQuerier.LoadEventSummariesAsync"/> primitives and
 /// the shared <see cref="TranscriptPartLoader"/> (T-002) — the core
@@ -42,20 +41,17 @@ namespace Mohist.Server.Sessions.Services;
 public sealed class AgentActivityFeedAssembler : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly AgentSessionQuerier _coreQuerier;
     private readonly AgentSessionQuery _sessionQuery;
     private readonly Mohist.Server.Workflow.Services.WorkflowQuerier _workflowQuerier;
     private readonly TimeProvider _timeProvider;
 
     public AgentActivityFeedAssembler(
         IDbContextFactory<MohistDbContext> dbFactory,
-        AgentSessionQuerier coreQuerier,
         AgentSessionQuery sessionQuery,
         Mohist.Server.Workflow.Services.WorkflowQuerier workflowQuerier,
         TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
-        _coreQuerier = coreQuerier;
         _sessionQuery = sessionQuery;
         _workflowQuerier = workflowQuerier;
         _timeProvider = timeProvider;
