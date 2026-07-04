@@ -46,8 +46,11 @@ internal sealed class MohistCliApi
         _standardInput = standardInput ?? Console.In;
     }
 
-    public async Task<int> PrintGetAsync(string path) =>
-        await PrintResponseAsync(await _http.GetAsync(path));
+    public async Task<int> PrintGetAsync(string path)
+    {
+        using var response = await SendAsync(HttpMethod.Get, path, body: null);
+        return response is null ? 1 : await PrintResponseAsync(response);
+    }
 
     public async Task<int> PrintProjectListAsync()
     {
@@ -86,11 +89,17 @@ internal sealed class MohistCliApi
         return 0;
     }
 
-    public async Task<int> PrintDeleteAsync(string path) =>
-        await PrintResponseAsync(await _http.DeleteAsync(path));
+    public async Task<int> PrintDeleteAsync(string path)
+    {
+        using var response = await SendAsync(HttpMethod.Delete, path, body: null);
+        return response is null ? 1 : await PrintResponseAsync(response);
+    }
 
-    public async Task<int> PrintPostAsync(string path, object body) =>
-        await PrintResponseAsync(await _http.PostAsJsonAsync(path, body, JsonOptions));
+    public async Task<int> PrintPostAsync(string path, object body)
+    {
+        using var response = await SendAsync(HttpMethod.Post, path, body);
+        return response is null ? 1 : await PrintResponseAsync(response);
+    }
 
     public async Task<PostResult> PostAndReadAsync(string path, object body)
     {
@@ -98,21 +107,16 @@ internal sealed class MohistCliApi
         return await ReadPostResultAsync(response);
     }
 
-    public async Task<int> PrintPutAsync(string path, object body) =>
-        await PrintResponseAsync(await _http.PutAsJsonAsync(path, body, JsonOptions));
+    public async Task<int> PrintPutAsync(string path, object body)
+    {
+        using var response = await SendAsync(HttpMethod.Put, path, body);
+        return response is null ? 1 : await PrintResponseAsync(response);
+    }
 
     public async Task<int> PrintPutWithOutputAsync(string path, object body, string mode, string? tableShape = null)
     {
-        try
-        {
-            using var response = await _http.PutAsJsonAsync(path, body, JsonOptions);
-            return await PrintEnvelopeAsync(response, mode, tableShape);
-        }
-        catch (HttpRequestException)
-        {
-            _err.WriteLine(ServerUnavailableMessage);
-            return 1;
-        }
+        using var response = await SendAsync(HttpMethod.Put, path, body);
+        return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
 
     /// <summary>
@@ -161,11 +165,8 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintPatchAsync(string path, object body)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Patch, path)
-        {
-            Content = JsonContent.Create(body, options: JsonOptions),
-        };
-        return await PrintResponseAsync(await _http.SendAsync(request));
+        using var response = await SendAsync(HttpMethod.Patch, path, body);
+        return response is null ? 1 : await PrintResponseAsync(response);
     }
 
     public async Task<JsonNode?> GetDataAsync(string path)
@@ -710,62 +711,26 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintWithOutputAsync(string path, string mode, string? tableShape = null)
     {
-        try
-        {
-            using var response = await _http.GetAsync(path);
-            return await PrintEnvelopeAsync(response, mode, tableShape);
-        }
-        catch (HttpRequestException)
-        {
-            _err.WriteLine(ServerUnavailableMessage);
-            return 1;
-        }
+        using var response = await SendAsync(HttpMethod.Get, path, body: null);
+        return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
 
     public async Task<int> PrintPostWithOutputAsync(string path, object body, string mode, string? tableShape = null, bool rawJson = false)
     {
-        try
-        {
-            using var response = await _http.PostAsJsonAsync(path, body, JsonOptions);
-            return await PrintEnvelopeAsync(response, mode, tableShape, rawJson: rawJson);
-        }
-        catch (HttpRequestException)
-        {
-            _err.WriteLine(ServerUnavailableMessage);
-            return 1;
-        }
+        using var response = await SendAsync(HttpMethod.Post, path, body);
+        return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape, rawJson: rawJson);
     }
 
     public async Task<int> PrintPatchWithOutputAsync(string path, object body, string mode, string? tableShape = null)
     {
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Patch, path)
-            {
-                Content = JsonContent.Create(body, options: JsonOptions),
-            };
-            using var response = await _http.SendAsync(request);
-            return await PrintEnvelopeAsync(response, mode, tableShape);
-        }
-        catch (HttpRequestException)
-        {
-            _err.WriteLine(ServerUnavailableMessage);
-            return 1;
-        }
+        using var response = await SendAsync(HttpMethod.Patch, path, body);
+        return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
 
     public async Task<int> PrintDeleteWithOutputAsync(string path, string mode, string? tableShape = null, JsonNode? successDataFallback = null)
     {
-        try
-        {
-            using var response = await _http.DeleteAsync(path);
-            return await PrintEnvelopeAsync(response, mode, tableShape, successDataFallback);
-        }
-        catch (HttpRequestException)
-        {
-            _err.WriteLine(ServerUnavailableMessage);
-            return 1;
-        }
+        using var response = await SendAsync(HttpMethod.Delete, path, body: null);
+        return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape, successDataFallback);
     }
 
     private async Task<int> PrintEnvelopeAsync(HttpResponseMessage response, string mode, string? tableShape, JsonNode? successDataFallback = null, bool rawJson = false)
@@ -1121,4 +1086,20 @@ internal sealed class MohistCliApi
 
     internal static int FailureExitCode(HttpStatusCode statusCode) =>
         statusCode == HttpStatusCode.NotFound ? 4 : 1;
+
+    private async Task<HttpResponseMessage?> SendAsync(HttpMethod method, string path, object? body)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(method, path);
+            if (body is not null)
+                request.Content = JsonContent.Create(body, options: JsonOptions);
+            return await _http.SendAsync(request);
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return null;
+        }
+    }
 }
