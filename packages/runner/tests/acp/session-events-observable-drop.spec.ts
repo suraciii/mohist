@@ -194,7 +194,7 @@ describe("emitSessionEvent observable drop (D3)", () => {
     expect(dropped).toEqual([])
   })
 
-  it("AgentJobWithoutServerConnection_StillLogsOnceButDoesNotThrow", async () => {
+  it("AgentJobWithoutServerConnection_LogsMissingConnectionOnceButDoesNotReportUnresolvedTarget", async () => {
     const { logger, collector } = capturingLogger()
     const context = baseContext({
       ownerKind: "agent-job",
@@ -213,5 +213,7 @@ describe("emitSessionEvent observable drop (D3)", () => {
       .flush()
       .entries.filter((entry) => entry.source === "action:session-events")
     expect(dropped).toHaveLength(1)
+    expect(dropped[0]!.text).toMatch(/missing server connection — session events dropped/)
+    expect(dropped[0]!.text).not.toMatch(/unresolved generic session target/)
   })
 })

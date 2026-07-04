@@ -8,6 +8,7 @@ using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.Tests.Support;
 using Orleans;
 using Xunit;
@@ -87,7 +88,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task GenericLaunch_RuntimeEvents_DeliveredToSessionId_PersistNonEmptyTranscriptTurn()
+    public async Task GenericLaunch_PolledDispatch_FakeAgentRun_PersistsNonEmptyTranscriptTurn()
     {
         var project = await CreateProjectAsync("transcript-axis-transcript");
         var agent = await CreateAgentAsync(project.Id, "transcript-axis-events-agent");
@@ -109,63 +110,67 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
 
-            await DrainRemainingDispatchAsync(_runnerId, sessionId);
+            var polledWork = await PollOnceAsync(_runnerId, sessionId);
 
-            await OpenGenericSessionAsync(project.Id, sessionId);
-
-            await _fixture.Client.PostOkAsync(
-                $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/runtime-events",
-                new
+            var fakeRun = await RunFakeAcpAgentFromPolledDispatchAsync(
+                project.Id,
+                sessionId,
+                polledWork,
+                new object[]
                 {
-                    runtimeEvents = new object[]
+                    new { type = "session.input", payload = new { text = "transcript-axis events", kind = "task" } },
+                    new { type = "message.delta", payload = new { content = new { text = "Hello transcript axis." } } },
+                    new
                     {
-                        new { type = "session.input", payload = new { text = "transcript-axis events", kind = "task" } },
-                        new { type = "message.delta", payload = new { content = new { text = "Hello transcript axis." } } },
-                        new
+                        type = "tool_call.started",
+                        payload = new
                         {
-                            type = "tool_call.started",
-                            payload = new
-                            {
-                                toolCallId = "tx-tool-1",
-                                toolName = "Read",
-                                kind = "read",
-                                status = "in_progress",
-                                title = "Read README",
-                                rawInput = new { filePath = "README.md" }
-                            }
-                        },
-                        new
+                            toolCallId = "tx-tool-1",
+                            toolName = "Read",
+                            kind = "read",
+                            status = "in_progress",
+                            title = "Read README",
+                            rawInput = new { filePath = "README.md" }
+                        }
+                    },
+                    new
+                    {
+                        type = "tool_call.completed",
+                        payload = new
                         {
-                            type = "tool_call.completed",
-                            payload = new
-                            {
-                                toolCallId = "tx-tool-1",
-                                toolName = "Read",
-                                kind = "read",
-                                status = "completed",
-                                title = "Read README",
-                                rawInput = new { filePath = "README.md" },
-                                rawOutput = new { text = "README contents" }
-                            }
-                        },
-                        new
+                            toolCallId = "tx-tool-1",
+                            toolName = "Read",
+                            kind = "read",
+                            status = "completed",
+                            title = "Read README",
+                            rawInput = new { filePath = "README.md" },
+                            rawOutput = new { text = "README contents" }
+                        }
+                    },
+                    new
+                    {
+                        type = "usage.updated",
+                        payload = new
                         {
-                            type = "usage.updated",
-                            payload = new
-                            {
-                                inputTokens = 220,
-                                outputTokens = 80,
-                                totalTokens = 300,
-                                contextWindowSize = 200000,
-                                contextWindowUsed = 300,
-                                costAmount = 0.0011,
-                                costCurrency = "USD"
-                            }
+                            inputTokens = 220,
+                            outputTokens = 80,
+                            totalTokens = 300,
+                            contextWindowSize = 200000,
+                            contextWindowUsed = 300,
+                            costAmount = 0.0011,
+                            costCurrency = "USD"
                         }
                     }
                 });
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            Assert.Equal(sessionId, fakeRun.SessionId);
+            Assert.Equal(polledWork.WorkId, fakeRun.WorkId);
+            Assert.Contains(RuntimeEventTypes.MessageDelta, fakeRun.EventTypes);
+            Assert.Contains(RuntimeEventTypes.ToolCallStarted, fakeRun.EventTypes);
+            Assert.Contains(RuntimeEventTypes.ToolCallCompleted, fakeRun.EventTypes);
+            Assert.Contains(RuntimeEventTypes.UsageUpdated, fakeRun.EventTypes);
+
             await dbFactory.WaitForTranscriptPartsAsync(sessionId, 4, _fixture.Grains);
 
             using var transcriptResponse = await _fixture.Client.GetAsync(
@@ -177,21 +182,21 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             Assert.True(transcriptData.GetProperty("turns").GetArrayLength() >= 1);
             Assert.True(transcriptData.GetProperty("partCount").GetInt32() >= 4);
 
-            var firstTurn = transcriptData.GetProperty("turns")[0];
-            Assert.Equal("transcript-axis events", firstTurn.GetProperty("user").GetProperty("text").GetString());
-            var assistant = firstTurn.GetProperty("assistant");
-            Assert.True(assistant.GetArrayLength() >= 2);
+            var turn = FindTurnByUserText(transcriptData, "transcript-axis events");
+            AssertAssistantText(turn, "Hello transcript axis.");
+            AssertAssistantTool(turn, "tx-tool-1");
 
-            bool sawMessage = false;
-            bool sawTool = false;
-            foreach (var part in assistant.EnumerateArray())
-            {
-                var type = part.GetProperty("type").GetString();
-                if (type == "text") sawMessage = true;
-                if (type == "tool") sawTool = true;
-            }
-            Assert.True(sawMessage, "expected at least one text assistant part on the generic turn");
-            Assert.True(sawTool, "expected at least one tool assistant part on the generic turn");
+            var usagePayload = Assert.Single(await LoadTranscriptPartPayloadsAsync(dbFactory, sessionId, TranscriptPartTypes.Usage));
+            Assert.Equal(220, usagePayload.GetProperty("inputTokens").GetInt64());
+            Assert.Equal(80, usagePayload.GetProperty("outputTokens").GetInt64());
+            Assert.Equal(300, usagePayload.GetProperty("totalTokens").GetInt64());
+            Assert.Equal(200000, usagePayload.GetProperty("contextWindowSize").GetInt64());
+            Assert.Equal(300, usagePayload.GetProperty("contextWindowUsed").GetInt64());
+            Assert.Equal(0.0011, usagePayload.GetProperty("costAmount").GetDouble(), precision: 4);
+            Assert.Equal("USD", usagePayload.GetProperty("costCurrency").GetString());
+
+            var closePayload = Assert.Single(await LoadTranscriptPartPayloadsAsync(dbFactory, sessionId, TranscriptPartTypes.SessionClosed));
+            Assert.Equal("completed", closePayload.GetProperty("status").GetString());
 
             using var summaryResponse = await _fixture.Client.GetAsync(
                 $"/api/projects/{project.Id}/agent-sessions/{sessionId}");
@@ -199,6 +204,14 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             var summaryPayload = await summaryResponse.Content.ReadFromJsonAsync<JsonElement>();
             var summaryData = summaryPayload.GetProperty("data");
             Assert.Equal(sessionId, summaryData.GetProperty("sessionId").GetString());
+            Assert.Equal("completed", summaryData.GetProperty("status").GetString());
+            Assert.Equal(220, summaryData.GetProperty("usage").GetProperty("inputTokens").GetInt64());
+            Assert.Equal(80, summaryData.GetProperty("usage").GetProperty("outputTokens").GetInt64());
+            Assert.Equal(300, summaryData.GetProperty("usage").GetProperty("totalTokens").GetInt64());
+            Assert.Equal(200000, summaryData.GetProperty("usage").GetProperty("contextWindowSize").GetInt64());
+            Assert.Equal(300, summaryData.GetProperty("usage").GetProperty("contextWindowUsed").GetInt64());
+            Assert.Equal(0.0011, summaryData.GetProperty("usage").GetProperty("costAmount").GetDouble(), precision: 4);
+            Assert.Equal("USD", summaryData.GetProperty("usage").GetProperty("costCurrency").GetString());
         }
         finally
         {
@@ -231,22 +244,19 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
 
-            await DrainRemainingDispatchAsync(_runnerId, sessionId);
-            await OpenGenericSessionAsync(project.Id, sessionId);
-
-            await _fixture.Client.PostOkAsync(
-                $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/runtime-events",
-                new
+            var polledWork = await PollOnceAsync(_runnerId, sessionId);
+            await RunFakeAcpAgentFromPolledDispatchAsync(
+                project.Id,
+                sessionId,
+                polledWork,
+                new object[]
                 {
-                    runtimeEvents = new object[]
-                    {
-                        new { type = "session.input", payload = new { text = "transcript-axis first turn", kind = "task" } },
-                        new { type = "message.delta", payload = new { content = new { text = "first reply" } } }
-                    }
+                    new { type = "session.input", payload = new { text = "transcript-axis first turn", kind = "task" } },
+                    new { type = "message.delta", payload = new { content = new { text = "first reply" } } }
                 });
 
             var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains);
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 2, _fixture.Grains);
 
             using var firstRead = await _fixture.Client.GetAsync(
                 $"/api/projects/{project.Id}/agent-sessions/{sessionId}/transcript");
@@ -254,9 +264,14 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             var firstPayload = await firstRead.Content.ReadFromJsonAsync<JsonElement>();
             var firstData = firstPayload.GetProperty("data");
             Assert.True(firstData.GetProperty("turns").GetArrayLength() >= 1);
-            var firstTurn = firstData.GetProperty("turns")[0];
-            Assert.Equal("transcript-axis first turn", firstTurn.GetProperty("user").GetProperty("text").GetString());
-            Assert.True(firstTurn.GetProperty("assistant").GetArrayLength() >= 1);
+            var firstTurn = FindTurnByUserText(firstData, "transcript-axis first turn");
+            AssertAssistantText(firstTurn, "first reply");
+
+            using var completedRead = await _fixture.Client.GetAsync(
+                $"/api/projects/{project.Id}/agent-sessions/{sessionId}");
+            Assert.Equal(HttpStatusCode.OK, completedRead.StatusCode);
+            var completedPayload = await completedRead.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("completed", completedPayload.GetProperty("data").GetProperty("status").GetString());
 
             await _fixture.Client.PostOkAsync(
                 $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/runtime-events",
@@ -292,33 +307,42 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                                 rawInput = new { command = "ls" },
                                 rawOutput = new { stdout = "ok" }
                             }
+                        },
+                        new
+                        {
+                            type = "usage.updated",
+                            payload = new
+                            {
+                                inputTokens = 30,
+                                outputTokens = 12,
+                                totalTokens = 42,
+                                contextWindowSize = 200000,
+                                contextWindowUsed = 512,
+                                costAmount = 0.0002,
+                                costCurrency = "USD"
+                            }
                         }
                     }
                 });
 
-            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 2, _fixture.Grains);
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 5, _fixture.Grains);
 
             using var secondRead = await _fixture.Client.GetAsync(
                 $"/api/projects/{project.Id}/agent-sessions/{sessionId}/transcript");
             Assert.Equal(HttpStatusCode.OK, secondRead.StatusCode);
             var secondPayload = await secondRead.Content.ReadFromJsonAsync<JsonElement>();
             var secondData = secondPayload.GetProperty("data");
-            Assert.True(secondData.GetProperty("turns").GetArrayLength() >= 1);
-            Assert.True(secondData.GetProperty("partCount").GetInt32() >= 2);
+            Assert.True(secondData.GetProperty("turns").GetArrayLength() >= 2);
+            Assert.True(secondData.GetProperty("partCount").GetInt32() >= 5);
 
-            bool sawText = false;
-            bool sawTool = false;
-            foreach (var turn in secondData.GetProperty("turns").EnumerateArray())
-            {
-                foreach (var part in turn.GetProperty("assistant").EnumerateArray())
-                {
-                    var type = part.GetProperty("type").GetString();
-                    if (type == "text") sawText = true;
-                    if (type == "tool") sawTool = true;
-                }
-            }
-            Assert.True(sawText, "expected at least one text assistant part across follow-up events");
-            Assert.True(sawTool, "expected at least one tool assistant part across follow-up events");
+            var initialTurn = FindTurnByUserText(secondData, "transcript-axis first turn");
+            AssertAssistantText(initialTurn, "first reply");
+            var followUpTurn = FindTurnByUserText(secondData, "transcript-axis follow-up");
+            AssertAssistantText(followUpTurn, "follow-up reply");
+            AssertAssistantTool(followUpTurn, "fu-tool-1");
+
+            var usageParts = await LoadTranscriptPartPayloadsAsync(dbFactory, sessionId, TranscriptPartTypes.Usage);
+            Assert.Contains(usageParts, payload => payload.GetProperty("totalTokens").GetInt64() == 42);
         }
         finally
         {
@@ -406,12 +430,117 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             });
     }
 
+    private async Task<FakeAgentRunResult> RunFakeAcpAgentFromPolledDispatchAsync(
+        string projectId,
+        string sessionId,
+        PollResult polledWork,
+        object[] runtimeEvents)
+    {
+        Assert.Equal(sessionId, polledWork.AgentSessionId);
+        Assert.Equal(projectId, polledWork.ProjectId);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polledWork.OwnerKind);
+        Assert.Equal(string.Empty, polledWork.WorkflowRunId);
+        Assert.False(string.IsNullOrWhiteSpace(polledWork.WorkId));
+        Assert.False(string.IsNullOrWhiteSpace(polledWork.WorkType));
+        Assert.False(string.IsNullOrWhiteSpace(polledWork.Stage));
+
+        await OpenGenericSessionAsync(projectId, sessionId);
+        await _fixture.Client.PostOkAsync(
+            $"/api/runner/{_runnerId}/agent-sessions/{projectId}/{sessionId}/runtime-events",
+            new
+            {
+                workId = polledWork.WorkId,
+                workType = polledWork.WorkType,
+                stage = polledWork.Stage,
+                runtimeEvents,
+            });
+        await ReportDispatchCompletedAsync(_runnerId, polledWork);
+
+        return new FakeAgentRunResult(
+            sessionId,
+            polledWork.WorkId,
+            polledWork.WorkType,
+            polledWork.Stage,
+            runtimeEvents.Select(ReadRuntimeEventType).ToArray());
+    }
+
+    private static string ReadRuntimeEventType(object runtimeEvent)
+    {
+        var type = runtimeEvent.GetType().GetProperty("type")?.GetValue(runtimeEvent) as string;
+        if (string.IsNullOrWhiteSpace(type))
+            throw new InvalidOperationException("Fake runtime event is missing a type");
+        return type;
+    }
+
+    private async Task ReportDispatchCompletedAsync(string runnerId, PollResult polledWork)
+    {
+        Assert.False(string.IsNullOrWhiteSpace(polledWork.AgentJobId));
+        var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(polledWork.AgentJobId!);
+        var report = await jobGrain.ReportResultAsync(
+            runnerId,
+            polledWork.WorkId,
+            new Mohist.Server.Runner.Grains.WorkResult(
+                Status: "completed",
+                Message: "ok",
+                Output: "{}",
+                ArtifactUploadIds: null,
+                ExitCode: 0));
+        Assert.True(report.Accepted, "AgentJob rejected completed report");
+    }
+
+    private static JsonElement FindTurnByUserText(JsonElement transcriptData, string text)
+    {
+        foreach (var turn in transcriptData.GetProperty("turns").EnumerateArray())
+        {
+            if (turn.GetProperty("user").GetProperty("text").GetString() == text)
+                return turn;
+        }
+
+        throw new InvalidOperationException($"No transcript turn found for prompt '{text}'");
+    }
+
+    private static void AssertAssistantText(JsonElement turn, string text)
+    {
+        Assert.Contains(turn.GetProperty("assistant").EnumerateArray(), part =>
+            part.GetProperty("type").GetString() == "text"
+            && (part.GetProperty("text").GetString()?.Contains(text, StringComparison.Ordinal) ?? false));
+    }
+
+    private static void AssertAssistantTool(JsonElement turn, string toolCallId)
+    {
+        Assert.Contains(turn.GetProperty("assistant").EnumerateArray(), part =>
+            part.GetProperty("type").GetString() == "tool"
+            && part.TryGetProperty("tool", out var tool)
+            && tool.GetProperty("toolCallId").GetString() == toolCallId);
+    }
+
+    private static async Task<IReadOnlyList<JsonElement>> LoadTranscriptPartPayloadsAsync(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        string sessionId,
+        string partType)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var turnIds = await db.AgentSessionTranscriptTurns
+            .AsNoTracking()
+            .Where(t => t.SessionId == sessionId)
+            .Select(t => t.Id)
+            .ToArrayAsync();
+        var payloads = await db.AgentSessionTranscriptParts
+            .AsNoTracking()
+            .Where(p => turnIds.Contains(p.TurnId) && p.Type == partType)
+            .OrderBy(p => p.Sequence)
+            .Select(p => p.PayloadJson)
+            .ToArrayAsync();
+        return payloads.Select(payload => JsonSerializer.Deserialize<JsonElement>(payload)).ToArray();
+    }
+
     private async Task<PollResult> PollOnceAsync(string runnerId, string expectedSessionId)
     {
         var attempts = 50;
         for (var i = 0; i < attempts; i++)
         {
             using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+            if (poll.StatusCode == HttpStatusCode.NoContent) continue;
             Assert.Equal(HttpStatusCode.OK, poll.StatusCode);
             var raw = await poll.Content.ReadAsStringAsync();
             if (string.IsNullOrWhiteSpace(raw)) continue;
@@ -436,6 +565,8 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
                 return new PollResult(
                     WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
                     WorkId: workId,
+                    WorkType: data.GetProperty("workType").GetString() ?? string.Empty,
+                    Stage: data.GetProperty("stage").GetString() ?? string.Empty,
                     AgentJobId: agentJobId,
                     ProjectId: projectId,
                     AgentSessionId: polledSessionId,
@@ -543,10 +674,19 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
     private sealed record PollResult(
         string WorkflowRunId,
         string WorkId,
+        string WorkType,
+        string Stage,
         string? AgentJobId,
         string? ProjectId,
         string? AgentSessionId,
         string? OwnerKind);
+
+    private sealed record FakeAgentRunResult(
+        string SessionId,
+        string WorkId,
+        string WorkType,
+        string Stage,
+        IReadOnlyList<string> EventTypes);
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record ProjectRef(string Id, string Path);

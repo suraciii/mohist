@@ -3,13 +3,18 @@ import { AgentSideConnection, ClientSideConnection, PROTOCOL_VERSION } from "@ag
 import type { Agent, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
 import { acpAgentAction, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../../src/actions/acp-agent.js"
 import { setPromptLoaderRegistryForTest } from "../../src/core/prompt.js"
-import type { ActionContext } from "../../src/core/types.js"
+import type { ActionContext, RenderedWorkItem } from "../../src/core/types.js"
 import { AcpSessionManager, type SharedAcpConnection } from "../../src/runtime/acp-connection.js"
+import { ActionRegistry } from "../../src/actions/registry.js"
+import { WorkExecutor } from "../../src/runtime/executor.js"
 import { ServerConnection } from "../../src/server/connection.js"
+import { verifyOnlyWorkspaceManager } from "../support/workspace-mock.js"
+import { setExecutorGitRunnerForTest } from "../../src/runtime/git-probe.js"
 
 afterEach(() => {
   setAcpProcessFactoryForTest(null)
   setPromptLoaderRegistryForTest(null)
+  setExecutorGitRunnerForTest(null)
 })
 
 function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
@@ -177,6 +182,7 @@ function createTranscriptAxisFixture(opts: { nextGenericSession?: { acpSessionId
     agent,
     serverConnection,
     acpSessionManager,
+    acpConnection,
     context(overrides: Partial<ActionContext> = {}): ActionContext {
       return {
         ...baseContext(overrides),
@@ -210,6 +216,61 @@ function runtimeEventsByType(serverConnection: FakeServerConnectionForTranscript
 }
 
 describe("generic (sessionId) transcript axis — issue-345 reproduction harness", () => {
+  it("ExecutorUsesPolledDispatchAgentSessionId_AsGenericRuntimeEventsTarget", async () => {
+    setExecutorGitRunnerForTest(async (_workDir, args) => {
+      const joined = args.join(" ")
+      return {
+        success: true,
+        stdout: joined === "rev-parse --abbrev-ref HEAD"
+          ? "main\n"
+          : joined === "rev-parse --is-inside-work-tree"
+            ? "true\n"
+            : "",
+        stderr: "",
+        exitCode: 0,
+        combinedOutput: "",
+      }
+    })
+    const fixture = createTranscriptAxisFixture()
+    const registry = new ActionRegistry()
+    registry.register("mohist/acp-agent", acpAgentAction)
+    const executor = new WorkExecutor(
+      registry,
+      verifyOnlyWorkspaceManager({ path: "/tmp/opencode/mohist-runner-transcript-axis", branch: null, changeDir: null }),
+      fixture.serverConnection as unknown as ServerConnection,
+      fixture.acpSessionManager,
+      fixture.acpConnection,
+      "/tmp/opencode/mohist-runner-transcript-axis",
+    )
+    const polledDispatch: RenderedWorkItem = {
+      workflowRunId: "",
+      workId: "agent-work-polled",
+      workType: "agent-job",
+      stage: "agent",
+      title: "Agent Job",
+      uses: "mohist/acp-agent",
+      with: { prompt: "do the work from a polled dispatch" },
+      variables: { workspace: { path: "/tmp/opencode/mohist-runner-transcript-axis", branch: null, changeDir: null } },
+      projectId: "project-1",
+      ownerKind: "agent-job",
+      agentJobId: "agent-job-polled",
+      agentSessionId: "session-from-polled-dispatch",
+    }
+
+    const result = await executor.execute(polledDispatch, new AbortController().signal)
+
+    expect(result.status, result.message ?? undefined).toBe("completed")
+    const genericEvents = fixture.serverConnection.calls.filter((entry) => entry.event === "agentSessionRuntimeEvents")
+    expect(genericEvents.length).toBeGreaterThan(0)
+    expect(genericEvents.every((entry) => entry.sessionId === "session-from-polled-dispatch")).toBe(true)
+    expect(runtimeEventsByType(fixture.serverConnection, "message.delta")).not.toHaveLength(0)
+    expect(runtimeEventsByType(fixture.serverConnection, "tool_call.started")).not.toHaveLength(0)
+    expect(runtimeEventsByType(fixture.serverConnection, "tool_call.completed")).not.toHaveLength(0)
+    expect(runtimeEventsByType(fixture.serverConnection, "usage.updated")).not.toHaveLength(0)
+    const trace = fixture.serverConnection.calls.map((entry) => entry.event)
+    expect(trace).not.toContain("workflowAgentSessionRuntimeEvents")
+  })
+
   it("MapsPolledDispatchAgentSessionIdToActionContext_AndGenericAxisEmitsAllTranscriptEvents", async () => {
     const fixture = createTranscriptAxisFixture()
 

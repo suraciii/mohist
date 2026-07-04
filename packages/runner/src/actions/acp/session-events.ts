@@ -70,16 +70,29 @@ export function sessionTargetFromContext(context: ActionContext): SessionTarget 
  * (each with its own context) get their own latch.
  */
 const unresolvedAgentJobTargetWarned = new WeakSet<ActionContext>()
+const missingServerConnectionWarned = new WeakSet<ActionContext>()
 
 export async function emitSessionEvent(context: ActionContext, type: string, payload: JsonObject) {
   const target = sessionTargetFromContext(context)
-  if (!target || !context.serverConnection) {
+  if (!target) {
     if (context.ownerKind === "agent-job" && !unresolvedAgentJobTargetWarned.has(context)) {
       unresolvedAgentJobTargetWarned.add(context)
       const agentJobId = context.agentJobId ?? "unknown"
       context.log?.write(
         "action:session-events",
         `unresolved generic session target — events dropped workId=${context.workId} agentJobId=${agentJobId} type=${type}`,
+      )
+    }
+    return
+  }
+
+  if (!context.serverConnection) {
+    if (context.ownerKind === "agent-job" && !missingServerConnectionWarned.has(context)) {
+      missingServerConnectionWarned.add(context)
+      const agentJobId = context.agentJobId ?? "unknown"
+      context.log?.write(
+        "action:session-events",
+        `missing server connection — session events dropped workId=${context.workId} agentJobId=${agentJobId} type=${type}`,
       )
     }
     return
