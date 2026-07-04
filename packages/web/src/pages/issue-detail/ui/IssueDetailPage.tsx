@@ -34,6 +34,7 @@ import { IssueDescriptionSection } from './sections/IssueDescriptionSection'
 import { IssueDiffFilesSection } from './sections/IssueDiffFilesSection'
 import { IssueCommitsSection } from './sections/IssueCommitsSection'
 import { IssueCommentsSection } from './sections/IssueCommentsSection'
+import { MobileActionBar } from './MobileActionBar'
 
 export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
@@ -155,7 +156,15 @@ export function IssueDetailPage() {
   return (
     <>
       <div className="flex-1 min-w-0 overflow-y-auto" data-testid="issue-detail-page-container">
-        <div className="max-w-4xl min-w-0 mx-auto px-4 sm:px-6 py-6">
+        <div
+          className={
+            isNarrowViewport && decision.primary
+              ? 'max-w-4xl min-w-0 mx-auto px-4 sm:px-6 pt-6 pb-[calc(8rem+env(safe-area-inset-bottom))]'
+              : 'max-w-4xl min-w-0 mx-auto px-4 sm:px-6 py-6'
+          }
+          data-testid="issue-detail-content-column"
+          data-bar-reserved={isNarrowViewport && decision.primary ? 'true' : 'false'}
+        >
           <div data-testid="status-header-tier" className="space-y-4">
             <StatusHeadline
               decision={decision}
@@ -262,21 +271,23 @@ export function IssueDetailPage() {
               </div>
             </div>
 
-            <div data-testid="runtime-decision-surface-frame">
-              <RuntimeDecisionSurface
-                decision={decision}
-                mutations={{
-                  approveMutation,
-                  sendBackMutation,
-                  retryMutation,
-                  resumeMutation,
-                  rerunMutation,
-                  forceStopMutation,
-                  stopMutation,
-                  startMutation,
-                }}
-              />
-            </div>
+            {!isNarrowViewport && (
+              <div data-testid="runtime-decision-surface-frame">
+                <RuntimeDecisionSurface
+                  decision={decision}
+                  mutations={{
+                    approveMutation,
+                    sendBackMutation,
+                    retryMutation,
+                    resumeMutation,
+                    rerunMutation,
+                    forceStopMutation,
+                    stopMutation,
+                    startMutation,
+                  }}
+                />
+              </div>
+            )}
           </div>
 
           <div className="mt-8 grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-8" data-testid="issue-detail-content-grid">
@@ -523,6 +534,22 @@ export function IssueDetailPage() {
           open={editOpen}
           onClose={() => setEditOpen(false)}
           issue={issue}
+        />
+      )}
+
+      {isNarrowViewport && decision.primary && (
+        <MobileActionBar
+          decision={decision}
+          mutations={{
+            approveMutation,
+            sendBackMutation,
+            retryMutation,
+            resumeMutation,
+            rerunMutation,
+            forceStopMutation,
+            stopMutation,
+            startMutation,
+          }}
         />
       )}
     </>
