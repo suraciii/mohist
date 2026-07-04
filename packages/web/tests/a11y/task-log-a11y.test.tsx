@@ -7,8 +7,10 @@ import { HubConnectionBuilder } from '@microsoft/signalr'
 import { axe } from 'vitest-axe'
 import { ProjectProvider } from '../../src/entities/project'
 import { getIssueWorkflowTaskLog } from '../../src/entities/issue'
+import { getWorkflowRunSessions } from '../../src/entities/coder-session/api/client'
 import { TaskLogPanel } from '../../src/widgets/issue-workflow/ui/TaskLogPanel'
 import type { TaskLogLine, TaskLogPage } from '../../src/entities/issue'
+import type { WorkflowRunSession } from '../../src/entities/coder-session/model/types'
 
 vi.mock('@microsoft/signalr', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@microsoft/signalr')>()
@@ -26,7 +28,52 @@ vi.mock('../../src/entities/issue/api/client', async (importOriginal) => {
   }
 })
 
+const sessionEventHandlers = new Map<string, ((detail: unknown) => void)[]>()
+
+vi.mock('../../src/entities/agent/@x/events', () => ({
+  onAgentEvent: vi.fn((name: string, handler: (detail: unknown) => void) => {
+    if (!sessionEventHandlers.has(name)) sessionEventHandlers.set(name, [])
+    sessionEventHandlers.get(name)!.push(handler)
+    return () => {
+      const handlers = sessionEventHandlers.get(name)
+      if (handlers) {
+        const idx = handlers.indexOf(handler)
+        if (idx !== -1) handlers.splice(idx, 1)
+      }
+    }
+  }),
+}))
+
+vi.mock('../../src/entities/coder-session/api/client', () => ({
+  getWorkflowRunSessions: vi.fn(),
+}))
+
 const mockedGetIssueWorkflowTaskLog = vi.mocked(getIssueWorkflowTaskLog)
+const mockedGetWorkflowRunSessions = vi.mocked(getWorkflowRunSessions)
+
+function agentSessionFixture(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
+  return {
+    id: 'session-id',
+    workflowRunId: 'wr-1',
+    sessionName: 'plan-issue-339',
+    acpSessionId: 'acp-1',
+    projectId: 'proj-a11y',
+    issueNumber: 339,
+    runnerId: null,
+    status: 'completed',
+    stage: null,
+    model: 'minimax/MiniMax-M3',
+    workDir: null,
+    processPid: null,
+    createdAt: '2026-07-03T08:00:00.000Z',
+    startedAt: '2026-07-03T08:00:01.000Z',
+    completedAt: '2026-07-03T08:01:00.000Z',
+    lastDataAt: null,
+    failureReason: null,
+    exitCode: null,
+    ...overrides,
+  }
+}
 
 type Listener = (...args: unknown[]) => void
 
@@ -129,8 +176,10 @@ describe('TaskLogPanel accessibility structural baseline', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     fakeConnections.length = 0
+    sessionEventHandlers.clear()
     mockConnectionBuilder()
     mockedGetIssueWorkflowTaskLog.mockResolvedValue({ lines: [], nextCursor: null, truncated: false })
+    mockedGetWorkflowRunSessions.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -268,5 +317,114 @@ describe('TaskLogPanel accessibility structural baseline', () => {
       await user.tab()
       expect(element).toHaveFocus()
     }
+  })
+})
+
+describe('TaskLogPanel accessibility — milestone rows (Phase 3b)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    fakeConnections.length = 0
+    sessionEventHandlers.clear()
+    mockConnectionBuilder()
+    mockedGetIssueWorkflowTaskLog.mockResolvedValue({ lines: [], nextCursor: null, truncated: false })
+    mockedGetWorkflowRunSessions.mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  function renderAgentPanelWithLines(lines: TaskLogLine[], sessions: WorkflowRunSession[]) {
+    const page = makePage(lines)
+    mockedGetIssueWorkflowTaskLog.mockImplementation(async () => page)
+    mockedGetWorkflowRunSessions.mockResolvedValue(sessions)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjects={projects} initialProjectId="proj-a11y">
+          <TaskLogPanel
+            issueNumber={339}
+            taskId="build-task-1"
+            workflowRunId="wr-1"
+            taskStatus="completed"
+            sessionName="plan-issue-339"
+            origin={{ uses: 'mohist/acp-agent' }}
+            classification="UserFacing"
+          />
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+  }
+
+  it('passes structural axe rules for the panel when a timeline contains both ops lines and milestone rows', async () => {
+    const { container } = renderAgentPanelWithLines(
+      [makeLine({ seq: 1, source: 'workspace-prep', text: 'Cloning repo' })],
+      [agentSessionFixture({ id: 'session-1', sessionName: 'plan-issue-339' })],
+    )
+
+    await screen.findByTestId('task-log-panel')
+    expect(await screen.findByTestId('task-log-milestone-model-bound')).toBeInTheDocument()
+
+    const results = await axe(container, {
+      runOnly: {
+        type: 'rule',
+        values: [
+          'aria-allowed-attr',
+          'aria-allowed-role',
+          'aria-command-name',
+          'aria-dialog-name',
+          'aria-hidden-body',
+          'aria-hidden-focus',
+          'aria-input-field-name',
+          'aria-required-attr',
+          'aria-required-children',
+          'aria-required-parent',
+          'aria-roles',
+          'aria-toggle-field-name',
+          'aria-valid-attr-value',
+          'aria-valid-attr',
+          'button-name',
+          'heading-order',
+          'label',
+          'tabindex',
+        ],
+      },
+    })
+
+    expect(results.violations).toEqual([])
+  })
+
+  it('conveys the milestone marker non-color-only: each marker carries an aria-label, a visible human label prefix, and a glyph', async () => {
+    renderAgentPanelWithLines(
+      [makeLine({ seq: 1, source: 'workspace-prep', text: 'pre' })],
+      [agentSessionFixture({ id: 'session-1', sessionName: 'plan-issue-339' })],
+    )
+
+    const markers = await screen.findAllByTestId('task-log-milestone-marker')
+    expect(markers.length).toBeGreaterThan(0)
+    for (const marker of markers) {
+      expect(marker.getAttribute('aria-label')).toBe('Session event')
+      expect(marker.tagName.toLowerCase()).toBe('svg')
+    }
+
+    expect(screen.getAllByText((_, el) => el?.textContent?.startsWith('Model bound') ?? false).length).toBeGreaterThan(0)
+    expect(screen.getAllByText((_, el) => el?.textContent?.startsWith('Session ended') ?? false).length).toBeGreaterThan(0)
+  })
+
+  it('does not introduce any new interactive element for the milestone variant (no new focusable targets)', async () => {
+    const { container } = renderAgentPanelWithLines(
+      [makeLine({ seq: 1, source: 'workspace-prep', text: 'pre' })],
+      [agentSessionFixture({ id: 'session-1', sessionName: 'plan-issue-339' })],
+    )
+
+    await screen.findByTestId('task-log-panel')
+
+    const interactiveInTimeline = Array.from(container.querySelectorAll<HTMLElement>(focusableSelector))
+      .filter((element) => {
+        const testId = element.getAttribute('data-testid') ?? ''
+        return testId.startsWith('task-log-milestone-')
+      })
+
+    expect(interactiveInTimeline).toEqual([])
   })
 })
