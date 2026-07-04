@@ -10,63 +10,51 @@
 
 - [ID: item-1]
   Severity: blocking
-  Scope: candidate snapshot
-  Evidence: The post-build candidate contains no product diff for issue 350. Before this review file was created, `git status --short`, `git diff --name-only`, `git diff --name-only origin/master...HEAD`, and `git diff --name-only origin/master..HEAD` all returned no changed files; `git rev-parse HEAD` and `git rev-parse origin/master` both returned `843102d1a51cfda25b3391366cf120221c5c625f`. Therefore none of the issue acceptance criteria are implemented in the reviewed snapshot: approval payload, failure payload, completion payload, per-type body rendering, start-notification default/off config, webhook address/secret/enabled-types config, delivery failure isolation, or Hermes documentation. [disallowed:reason] Repairing this would require implementing the product feature, public configuration surface, tests, and docs, which is outside the review repair policy.
-  SuggestedAction: Rebuild the candidate with actual product changes outside `openspec/changes/issue-350/`, then re-run review against that snapshot.
-  Verification: Re-run `git diff --name-only origin/master...HEAD` and confirm it includes the server/docs/test files that implement the issue.
+  Scope: `packages/server/src/Mohist.Server/Events/Subscriptions/HermesIssueNotificationHandler.cs`, event dispatch path
+  Evidence: Hermes delivery is awaited inline from the CloudEvent subscriber at `packages/server/src/Mohist.Server/Events/Subscriptions/HermesIssueNotificationHandler.cs:60`. The event bus awaits each matching subscription sequentially at `packages/server/src/Mohist.Server/Infrastructure/Events/InMemoryEventBus.cs:77` through `packages/server/src/Mohist.Server/Infrastructure/Events/InMemoryEventBus.cs:85`, and workflow persistence awaits bus publish before returning at `packages/server/src/Mohist.Server/Infrastructure/Data/Workflow/WorkflowRunStore.cs:63` through `packages/server/src/Mohist.Server/Infrastructure/Data/Workflow/WorkflowRunStore.cs:72`. Issue event publication also awaits the bus after append at `packages/server/src/Mohist.Server/Issue/Grains/IssueGrain.cs:637` through `packages/server/src/Mohist.Server/Issue/Grains/IssueGrain.cs:638`. `HermesWebhookClient` then awaits the external HTTP request and success status at `packages/server/src/Mohist.Server/Notifications/HermesWebhookClient.cs:43` through `packages/server/src/Mohist.Server/Notifications/HermesWebhookClient.cs:44`, with no configured short timeout in `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs:72` through `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs:74` or `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistSiloRegistration.cs:49` through `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistSiloRegistration.cs:51`. This violates the issue acceptance criterion that webhook errors/unreachability do not affect workflow/issue execution and explicitly do not block it: a slow or hung Hermes receiver can hold workflow save/issue save command completion until `HttpClient` finishes or times out. [disallowed:reason] Fixing this requires a product behavior decision about asynchronous dispatch, bounded timeout, background queue, or other execution semantics, which is outside the review repair policy.
+  SuggestedAction: Decouple outbound webhook delivery from the workflow/issue mutation path, or enforce a deliberately small bounded timeout and prove that event handling cannot stall workflow execution. Keep failures logged/swallowed and preserve the no-child-process boundary.
+  Verification: Add a regression spec with a fake delayed `IHermesWebhookClient` or HTTP handler that proves publishing an approval/failure/completion event returns without waiting for slow Hermes delivery, then run `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj -p:SkipWebBuild=true --filter FullyQualifiedName~HermesIssueNotificationSpecs` and `npm test`.
   Status: open
 
 - [ID: item-2]
-  Severity: blocking
-  Scope: `packages/server/src/Mohist.Server` outbound Hermes notification path
-  Evidence: The existing server only exposes event catalog and Web Inbox paths for the relevant operator events. `packages/server/src/Mohist.Server/Infrastructure/Events/EventCatalog.cs:91` through `packages/server/src/Mohist.Server/Infrastructure/Events/EventCatalog.cs:130` list workflow/issue event types, while `packages/server/src/Mohist.Server/Events/Subscriptions/InboxProjectionHandler.cs:63` through `packages/server/src/Mohist.Server/Events/Subscriptions/InboxProjectionHandler.cs:67` subscribe to failed, approval-requested, work-started, and completed events only for inbox projection. The handler writes `InboxItemDraft` at `packages/server/src/Mohist.Server/Events/Subscriptions/InboxProjectionHandler.cs:147` through `packages/server/src/Mohist.Server/Events/Subscriptions/InboxProjectionHandler.cs:156` and publishes only an inbox hint at `packages/server/src/Mohist.Server/Events/Subscriptions/InboxProjectionHandler.cs:162` through `packages/server/src/Mohist.Server/Events/Subscriptions/InboxProjectionHandler.cs:185`. Search for `Hermes|Webhook|webhook|Outbound|Notify|NotificationOptions|IssueNotification` under `packages/server/src/Mohist.Server` found no Hermes webhook client, notification renderer, signing logic, enabled-type configuration, or payload contract. [disallowed:reason] Implementing the missing outbound network callback is a product behavior and public contract change.
-  SuggestedAction: Add a server-side event subscriber for the issue key events that renders type-specific message bodies, builds the Hermes webhook payload with raw fields and pre-rendered body, signs/sends via configured webhook URL, and swallows/logs delivery failures.
-  Verification: Add and run server specs covering approval, failure, completion, optional start, disabled URL, enabled-type filtering, signature, and failed delivery behavior.
+  Severity: warning
+  Scope: `packages/server/src/Mohist.Server/Notifications/HermesIssueNotificationRenderer.cs` failure payload/body
+  Evidence: Failure notifications copy `WorkflowRunFailed.Message` directly into `failureReason` at `packages/server/src/Mohist.Server/Events/Subscriptions/HermesIssueNotificationHandler.cs:104` through `packages/server/src/Mohist.Server/Events/Subscriptions/HermesIssueNotificationHandler.cs:106`, then place it verbatim in the raw payload at `packages/server/src/Mohist.Server/Notifications/HermesIssueNotificationRenderer.cs:23` through `packages/server/src/Mohist.Server/Notifications/HermesIssueNotificationRenderer.cs:36` and in the chat body via `NormalizeReason` at `packages/server/src/Mohist.Server/Notifications/HermesIssueNotificationRenderer.cs:14` through `packages/server/src/Mohist.Server/Notifications/HermesIssueNotificationRenderer.cs:15` and `packages/server/src/Mohist.Server/Notifications/HermesIssueNotificationRenderer.cs:48` through `packages/server/src/Mohist.Server/Notifications/HermesIssueNotificationRenderer.cs:49`. The upstream message can be task/check failure text from `packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.Task.cs:55` through `packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.Task.cs:70` or `packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.Check.cs:75` through `packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.Check.cs:96`. The current test only verifies that a benign string, `check task failed`, does not contain the word `stack` at `packages/server/tests/Mohist.Server.Tests/Specs/Notifications/HermesIssueNotificationSpecs.cs:49` through `packages/server/tests/Mohist.Server.Tests/Specs/Notifications/HermesIssueNotificationSpecs.cs:64`; it does not prove stack-like multi-line failure text is stripped or summarized. This does not satisfy the product requirement that failure notifications do not include stack traces. [disallowed:reason] Deciding how to sanitize, truncate, or split raw failure fields versus rendered chat body changes payload semantics and security posture.
+  SuggestedAction: Define and implement a failure-reason rendering policy that excludes stack traces from the user-facing notification body and, if raw details must remain in payload fields, make that contract explicit and safe. Add tests with stack-like input including `at ...` frames and multi-line exception text.
+  Verification: Add renderer/handler specs asserting stack-like failure input is not present in `body` and that the intended `failureReason` contract is followed, then run the focused notification specs and full server tests.
   Status: open
 
 - [ID: item-3]
-  Severity: blocking
-  Scope: configuration contract
-  Evidence: The issue requires configurable webhook address, signing secret, enabled notification types, and a default-off `started` notification. The reviewed snapshot has no changed configuration files or option types. Existing searches surfaced no server option model such as `NotificationOptions` or Hermes webhook settings, and no changed CLI/docs/config contract explaining how users set these values. [disallowed:reason] Defining configuration keys and behavior is a public contract and architectural/product decision.
-  SuggestedAction: Introduce the minimal configuration surface for Hermes outbound notifications, document the keys, and ensure unset address disables delivery without side effects.
-  Verification: Add tests that default approval/failure/completion on, start off, configured start on, and unset URL prevents network calls.
-  Status: open
-
-- [ID: item-4]
-  Severity: blocking
-  Scope: Hermes template and subscription documentation
-  Evidence: The acceptance criteria require a checked-in Hermes-side message template and subscription guide with webhook platform enablement, subscription creation, and secret alignment steps. `docs/**/*hermes*` matched no files, and markdown search for `webhook|Webhook|Hermes|hermes` only found unrelated historical mentions in `design/architecture.md`, `docs/skills.md`, and archived OpenSpec changes. No product documentation was added in the candidate. [disallowed:reason] Writing the required guide is a product documentation deliverable, not a typo or formatting repair.
-  SuggestedAction: Add a user-facing doc under `docs/` that includes the Hermes webhook template, subscription setup flow, secret configuration, enabled notification types, and an example payload/body.
-  Verification: Re-run documentation search and manually check the guide against the issue's documentation acceptance criterion.
-  Status: open
-
-- [ID: item-5]
   Severity: test-gap
-  Scope: regression coverage
-  Evidence: The reviewed snapshot has no changed tests. Search under `packages/server/tests` for `Hermes|Webhook|webhook|Outbound|Notify|NotificationOptions|IssueNotification` found only unrelated outbound HTTP tracing, Hermes skill-install, and existing notification subscription tests. There is no coverage for payload shape, message rendering branches, failure non-blocking behavior, no-network-when-unconfigured behavior, or start-notification default-off behavior.
-  SuggestedAction: Add focused server specs with fake HTTP/message handler and fake configuration covering every acceptance criterion and the no-real-network test constraint.
-  Verification: Run `npm test` or the relevant server test command after adding coverage.
-  Status: open
-
-- [ID: item-6]
-  Severity: warning
-  Scope: `openspec/changes/issue-350/` workflow artifacts
-  Evidence: Before this review file was created, `openspec/changes/issue-350/` did not exist and globbing `openspec/changes/issue-350/**/*` returned no files. The requested dependencies included proposal, specs, design, and tasks; they were unavailable in the candidate snapshot, so traceability from issue acceptance criteria to implementation cannot be checked. This is not a product deliverable failure by itself, but it is a workflow evidence gap for this review.
-  SuggestedAction: Restore or generate the issue proposal, delta specs, design, tasks, and self-review artifacts before the next review so reviewers can compare intended and actual behavior.
-  Verification: Re-run `rg --files openspec/changes/issue-350` and confirm the expected artifacts are present.
+  Scope: `packages/server/tests/Mohist.Server.Tests/Specs/Notifications/HermesIssueNotificationSpecs.cs`
+  Evidence: The tests cover payload branches, default filtering, disabled URL, signing, and exception swallowing, but they do not cover the two riskiest acceptance edges: slow/unreachable delivery must not block workflow/issue execution, and failure notifications must not leak stack-like failure details. The current delivery-failure test at `packages/server/tests/Mohist.Server.Tests/Specs/Notifications/HermesIssueNotificationSpecs.cs:147` through `packages/server/tests/Mohist.Server.Tests/Specs/Notifications/HermesIssueNotificationSpecs.cs:159` only proves a thrown exception is swallowed after the send attempt is awaited; it does not detect blocking behavior. The failure body test at `packages/server/tests/Mohist.Server.Tests/Specs/Notifications/HermesIssueNotificationSpecs.cs:49` through `packages/server/tests/Mohist.Server.Tests/Specs/Notifications/HermesIssueNotificationSpecs.cs:64` uses only a benign one-line reason.
+  SuggestedAction: Add regression coverage for delayed Hermes delivery and stack-like failure messages. Prefer fake time/fake clients rather than real network or wall-clock assertions.
+  Verification: Run `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj -p:SkipWebBuild=true --filter FullyQualifiedName~HermesIssueNotificationSpecs` and `npm test` after adding the tests.
   Status: open
 
 ## Follow-up Items
 
-- None.
+- [ID: item-4]
+  Severity: follow-up
+  Scope: `packages/server/src/Mohist.Server/Events/Subscriptions/HermesIssueNotificationHandler.cs` and `packages/server/src/Mohist.Server/Events/Subscriptions/InboxProjectionHandler.cs`
+  Evidence: The Hermes handler duplicates most of the Inbox projection identity resolution logic for workflow-run annotations and issue-event extensions. The duplication is understandable for the MVP and keeps this change isolated, but future changes to event identity stamping could drift between Web Inbox and Hermes delivery.
+  SuggestedAction: After the Hermes behavior is fixed, consider extracting a small shared resolver for key issue notification event identity if another outbound path or another identity rule change appears.
+  Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-7]
+- [ID: item-5]
   Severity: info
-  Scope: existing Web Inbox projection
-  Evidence: Existing `InboxProjectionHandler` already projects failed, approval-requested, started, and completed events into Web Inbox items and logs/swallows projection exceptions. That behavior appears relevant context but is explicitly not a substitute for the Hermes outbound webhook feature requested by issue 350.
-  SuggestedAction: Keep the Web Inbox behavior unchanged while adding the separate Hermes outbound path.
+  Scope: verification
+  Evidence: `npm test` with a 120s tool timeout completed the .NET/server phase successfully (`3710` passed, `13` skipped) but timed out after entering the web Vitest phase. Standalone verification then passed: `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj -p:SkipWebBuild=true --filter FullyQualifiedName~HermesIssueNotificationSpecs` passed (`9` passed), `npm run test:ci -w packages/web` passed (`4077` passed, `1` skipped), and `npm run test:ci --workspaces --if-present` passed (`63` runner test files, `875` tests). The initial timeout is a review tooling limit, not a candidate failure.
+  SuggestedAction: None.
+  Status: out-of-scope
+
+- [ID: item-6]
+  Severity: info
+  Scope: acceptance criteria satisfied by current snapshot
+  Evidence: The candidate adds a server-side Hermes notification handler and HTTP client, binds `Mohist:Notifications:Hermes`, defaults enabled types to `approval_requested`, `workflow_failed`, and `issue_completed` while leaving `issue_started` off by default, includes rendered body and top-level raw fields in `HermesIssueNotificationPayload`, signs with `X-Mohist-Signature` when `Secret` is configured, and documents Hermes setup in `docs/hermes-notifications.md`. These parts are evidenced by `packages/server/src/Mohist.Server/Notifications/HermesNotificationOptions.cs:11` through `packages/server/src/Mohist.Server/Notifications/HermesNotificationOptions.cs:27`, `packages/server/src/Mohist.Server/Notifications/HermesWebhookClient.cs:24` through `packages/server/src/Mohist.Server/Notifications/HermesWebhookClient.cs:51`, `packages/server/src/Mohist.Server/Notifications/HermesIssueNotificationPayload.cs:3` through `packages/server/src/Mohist.Server/Notifications/HermesIssueNotificationPayload.cs:29`, and `docs/hermes-notifications.md:7` through `docs/hermes-notifications.md:95`.
+  SuggestedAction: Preserve these behaviors while fixing the blocking execution and failure-detail issues.
   Status: out-of-scope
 
 <promise>FAIL</promise>

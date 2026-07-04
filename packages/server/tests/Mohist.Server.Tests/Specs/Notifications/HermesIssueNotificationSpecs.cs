@@ -32,6 +32,7 @@ public sealed class HermesIssueNotificationSpecs
             EventCatalog.ReverseDns.StageApprovalRequested,
             "run_1",
             new StageApprovalRequested("plan")), CancellationToken.None);
+        await harness.Dispatcher.RunAllAsync();
 
         var payload = Assert.Single(harness.Client.Sent);
         Assert.Equal(NotificationKinds.ApprovalRequested, payload.NotificationType);
@@ -54,6 +55,7 @@ public sealed class HermesIssueNotificationSpecs
             EventCatalog.ReverseDns.WorkflowRunFailed,
             "run_1",
             new WorkflowRunFailed("check task failed")), CancellationToken.None);
+        await harness.Dispatcher.RunAllAsync();
 
         var payload = Assert.Single(harness.Client.Sent);
         Assert.Equal(NotificationKinds.WorkflowFailed, payload.NotificationType);
@@ -66,6 +68,30 @@ public sealed class HermesIssueNotificationSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
+    public async Task WorkflowFailed_OmitsStackTraceLinesFromFailurePayloadAndBody()
+    {
+        var harness = CreateHarness();
+        var failure = "System.InvalidOperationException: check task failed\n"
+            + "   at Mohist.Server.Workflow.Domain.Run.WorkflowRun.Fail() in WorkflowRun.cs:line 55\n"
+            + "   at Mohist.Server.Workflow.Domain.Run.WorkflowRun.Check() in WorkflowRun.Check.cs:line 75";
+
+        await harness.Handler.HandleAsync(WorkflowEvent(
+            EventCatalog.ReverseDns.WorkflowRunFailed,
+            "run_1",
+            new WorkflowRunFailed(failure)), CancellationToken.None);
+        await harness.Dispatcher.RunAllAsync();
+
+        var payload = Assert.Single(harness.Client.Sent);
+        Assert.Equal("System.InvalidOperationException: check task failed", payload.FailureReason);
+        Assert.Contains("Reason: System.InvalidOperationException: check task failed", payload.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("WorkflowRun.Fail", payload.FailureReason, StringComparison.Ordinal);
+        Assert.DoesNotContain("WorkflowRun.Fail", payload.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain(" at Mohist.Server", payload.Body, StringComparison.Ordinal);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
     public async Task IssueCompleted_SendsPayloadWithCompletionBody()
     {
         var harness = CreateHarness();
@@ -73,6 +99,7 @@ public sealed class HermesIssueNotificationSpecs
         await harness.Handler.HandleAsync(IssueEvent(
             EventCatalog.ReverseDns.IssueCompleted,
             new IssueCompleted("run_1")), CancellationToken.None);
+        await harness.Dispatcher.RunAllAsync();
 
         var payload = Assert.Single(harness.Client.Sent);
         Assert.Equal(NotificationKinds.IssueCompleted, payload.NotificationType);
@@ -90,6 +117,7 @@ public sealed class HermesIssueNotificationSpecs
         await defaultHarness.Handler.HandleAsync(IssueEvent(
             EventCatalog.ReverseDns.IssueWorkStarted,
             new IssueWorkStarted("run_1")), CancellationToken.None);
+        await defaultHarness.Dispatcher.RunAllAsync();
         Assert.Empty(defaultHarness.Client.Sent);
 
         var enabledHarness = CreateHarness(new HermesNotificationOptions
@@ -100,6 +128,7 @@ public sealed class HermesIssueNotificationSpecs
         await enabledHarness.Handler.HandleAsync(IssueEvent(
             EventCatalog.ReverseDns.IssueWorkStarted,
             new IssueWorkStarted("run_1")), CancellationToken.None);
+        await enabledHarness.Dispatcher.RunAllAsync();
 
         var payload = Assert.Single(enabledHarness.Client.Sent);
         Assert.Equal(NotificationKinds.IssueStarted, payload.NotificationType);
@@ -119,6 +148,7 @@ public sealed class HermesIssueNotificationSpecs
             new StageApprovalRequested("plan")), CancellationToken.None);
 
         Assert.Empty(harness.Client.Sent);
+        Assert.Equal(0, harness.Dispatcher.QueuedCount);
         Assert.Equal(0, harness.WorkflowRuns.LoadCount);
         Assert.Equal(0, harness.Issues.LoadCount);
     }
@@ -140,6 +170,7 @@ public sealed class HermesIssueNotificationSpecs
             new StageApprovalRequested("plan")), CancellationToken.None);
 
         Assert.Empty(harness.Client.Sent);
+        Assert.Equal(0, harness.Dispatcher.QueuedCount);
         Assert.Equal(0, harness.WorkflowRuns.LoadCount);
         Assert.Equal(0, harness.Issues.LoadCount);
     }
@@ -156,6 +187,32 @@ public sealed class HermesIssueNotificationSpecs
             EventCatalog.ReverseDns.StageApprovalRequested,
             "run_1",
             new StageApprovalRequested("plan")), CancellationToken.None);
+        await harness.Dispatcher.RunAllAsync();
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public async Task DeliveryWork_IsQueuedWithoutAwaitingSlowWebhookSend()
+    {
+        var harness = CreateHarness();
+        harness.Client.BlockSend = true;
+
+        await harness.Handler.HandleAsync(WorkflowEvent(
+            EventCatalog.ReverseDns.StageApprovalRequested,
+            "run_1",
+            new StageApprovalRequested("plan")), CancellationToken.None);
+
+        Assert.Equal(1, harness.Dispatcher.QueuedCount);
+        Assert.Empty(harness.Client.Sent);
+
+        var delivery = harness.Dispatcher.RunNextAsync();
+        await harness.Client.SendStarted.Task;
+
+        Assert.False(delivery.IsCompleted);
+        harness.Client.ReleaseSend();
+        await delivery;
+        Assert.Single(harness.Client.Sent);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -247,14 +304,16 @@ public sealed class HermesIssueNotificationSpecs
         services.AddSingleton<IWorkflowRunStore>(workflowRuns);
         var provider = services.BuildServiceProvider();
         var client = new RecordingHermesWebhookClient();
+        var dispatcher = new RecordingHermesIssueNotificationDispatcher();
         var handler = new HermesIssueNotificationHandler(
             provider.GetRequiredService<IServiceScopeFactory>(),
             new TestOptionsMonitor<HermesNotificationOptions>(options),
             new HermesIssueNotificationRenderer(),
             client,
+            dispatcher,
             NullLogger<HermesIssueNotificationHandler>.Instance);
 
-        return new Harness(handler, client, issues, workflowRuns, provider);
+        return new Harness(handler, client, dispatcher, issues, workflowRuns, provider);
     }
 
     private static CloudEvent WorkflowEvent<T>(string type, string workflowRunId, T data) where T : class =>
@@ -304,6 +363,7 @@ public sealed class HermesIssueNotificationSpecs
     private sealed record Harness(
         HermesIssueNotificationHandler Handler,
         RecordingHermesWebhookClient Client,
+        RecordingHermesIssueNotificationDispatcher Dispatcher,
         FakeIssueStore Issues,
         FakeWorkflowRunStore WorkflowRuns,
         ServiceProvider Provider) : IDisposable
@@ -315,15 +375,41 @@ public sealed class HermesIssueNotificationSpecs
     {
         public List<HermesIssueNotificationPayload> Sent { get; } = [];
         public bool ThrowOnSend { get; set; }
+        public bool BlockSend { get; set; }
+        public TaskCompletionSource SendStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseSend = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public Task SendAsync(HermesIssueNotificationPayload payload, CancellationToken ct)
+        public async Task SendAsync(HermesIssueNotificationPayload payload, CancellationToken ct)
         {
+            SendStarted.TrySetResult();
+
+            if (BlockSend)
+                await _releaseSend.Task.WaitAsync(ct).ConfigureAwait(false);
+
             if (ThrowOnSend)
                 throw new HttpRequestException("Hermes is unavailable");
 
             Sent.Add(payload);
-            return Task.CompletedTask;
         }
+
+        public void ReleaseSend() => _releaseSend.TrySetResult();
+    }
+
+    private sealed class RecordingHermesIssueNotificationDispatcher : IHermesIssueNotificationDispatcher
+    {
+        private readonly Queue<Func<CancellationToken, Task>> _works = new();
+
+        public int QueuedCount => _works.Count;
+
+        public void Dispatch(Func<CancellationToken, Task> work) => _works.Enqueue(work);
+
+        public async Task RunAllAsync(CancellationToken ct = default)
+        {
+            while (_works.Count > 0)
+                await RunNextAsync(ct).ConfigureAwait(false);
+        }
+
+        public Task RunNextAsync(CancellationToken ct = default) => _works.Dequeue()(ct);
     }
 
     private sealed class FakeIssueStore : IStateStore<DomainIssue>

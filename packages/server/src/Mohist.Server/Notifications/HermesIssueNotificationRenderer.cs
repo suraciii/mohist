@@ -7,12 +7,13 @@ public sealed class HermesIssueNotificationRenderer
     public HermesIssueNotificationPayload Render(HermesIssueNotificationDraft draft)
     {
         var action = SuggestedAction(draft.NotificationType, draft.IssueNumber);
+        var failureReason = NormalizeReason(draft.FailureReason);
         var body = draft.NotificationType switch
         {
             NotificationKinds.ApprovalRequested =>
                 $"Issue #{draft.IssueNumber} needs approval at stage {draft.Stage ?? "unknown"}: {draft.IssueTitle}\nNext: {action}",
             NotificationKinds.WorkflowFailed =>
-                $"Issue #{draft.IssueNumber} failed: {draft.IssueTitle}\nReason: {NormalizeReason(draft.FailureReason)}\nNext: {action}",
+                $"Issue #{draft.IssueNumber} failed: {draft.IssueTitle}\nReason: {failureReason}\nNext: {action}",
             NotificationKinds.IssueCompleted =>
                 $"Issue #{draft.IssueNumber} completed: {draft.IssueTitle}\nNext: {action}",
             NotificationKinds.IssueStarted =>
@@ -31,7 +32,7 @@ public sealed class HermesIssueNotificationRenderer
             draft.IssueTitle,
             draft.WorkflowRunId,
             draft.Stage,
-            draft.FailureReason,
+            draft.NotificationType == NotificationKinds.WorkflowFailed ? failureReason : draft.FailureReason,
             action,
             body);
     }
@@ -45,6 +46,32 @@ public sealed class HermesIssueNotificationRenderer
         _ => $"open issue {issueNumber}",
     };
 
-    private static string NormalizeReason(string? reason) =>
-        string.IsNullOrWhiteSpace(reason) ? "No failure reason was reported." : reason.Trim();
+    private static string NormalizeReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return "No failure reason was reported.";
+
+        var safeLines = new List<string>();
+        foreach (var line in reason.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0)
+                continue;
+
+            if (IsStackTraceLine(trimmed))
+                break;
+
+            safeLines.Add(trimmed);
+        }
+
+        return safeLines.Count == 0
+            ? "Failure details were omitted because they only contained stack trace output."
+            : string.Join(" ", safeLines);
+    }
+
+    private static bool IsStackTraceLine(string line) =>
+        line.StartsWith("at ", StringComparison.Ordinal)
+        || line.StartsWith("Stack trace:", StringComparison.OrdinalIgnoreCase)
+        || line.StartsWith("Traceback ", StringComparison.Ordinal)
+        || line.StartsWith("--- End of stack trace", StringComparison.Ordinal);
 }
