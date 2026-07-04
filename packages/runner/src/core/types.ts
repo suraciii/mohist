@@ -179,6 +179,7 @@ export interface ActionContext {
   projectId?: string | null
   issueNumber?: number | null
   ownerKind?: string | null
+  agentJobId?: string | null
   agentSessionId?: string | null
   acpSessionManager?: import("../runtime/acp-connection.js").AcpSessionManager | null
   acpConnection?: import("../runtime/acp-connection.js").SharedAcpConnection | null
