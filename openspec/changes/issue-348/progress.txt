@@ -30,3 +30,21 @@ API (AgentDefinitionApiSpecs.cs):
 - `Unarchive_ReversesArchiveAndAdvancesUpdatedAt` — end-to-end via DELETE → POST unarchive, asserts 200 with status=active + UpdatedAt > archive time + the agent re-appears in the default list (active-only).
 - `Unarchive_IsNoOpForActiveAgentAndReturnsNotFoundForUnknown` — covers the no-op deterministically + 404 on unknown id and 404 on cross-project id (project resolution filter rejects it before the grain).
 - `Unarchive_DoesNotAlterPatchSemanticsForStatusField` — regression guard: PATCH `status=archived` is silently ignored, agent stays active, UpdatedAt still advances (because PATCH description moved it).
+## T-002 Web Data Layer (unarchive + archived list visibility)
+
+### Codebase Patterns
+- `useAgents` consumers: `AgentListPage` (filters archived via `filter(a => a.status === 'archived')` for the section, expects archived agents to be in the data), `AgentSessionComposerPage` (the only consumer that must show launchable-only). No other page consumes `useAgents`. Filter applied at the consumer (single `['agents']` cache key).
+- `AgentDetailPage` reads its own agent via `useAgent(agentRef)` with query key `['agents', projectId, agentRef]`, so the detail-page row is already covered by the `['agents']` prefix invalidation in the unarchive mutation.
+- `useArchiveAgent` already invalidates both `['agents']` and `['agent-status']` — `useUnarchiveAgent` mirrors this (D7) so the runner re-evaluates the agent on the way back to active.
+- `AgentSelector` in `AgentSessionComposerPage.tsx` previously rendered an "Archived" badge inline; with the filter, the picker no longer contains archived rows. Two test cases were reshaped: the old "allows selecting archived agents but shows warning" was replaced by "excludes archived agents from the launcher picker" + "shows archived warning when ?agent= points at an archived agent even though it is not in the picker" (preserves the deep-link warning invariant).
+- `AgentListPage` already had a dormant `"Archived (n)"` UI; promoted the section wrappers to `data-testid="active-section"` / `data-testid="archived-section"` for cleaner component assertions without coupling to text content.
+- Test pattern for client functions (`unarchiveAgent` POST test) follows `entities/issue/api/client.test.ts`: stub `fetch` with a `vi.fn<typeof fetch>()` and assert path + method via `fetchMock.mock.calls[0]`.
+
+### Decisions Applied (T-002)
+- D4: `unarchiveAgent` issues `POST /api/projects/{ref}/agents/{id}/unarchive` and types the response as `AgentInfo` (matches `archiveAgent`'s contract).
+- D5: `useAgents` calls `listAgents(projectId!, { all: true })`; the session composer is the only consumer filtered to launchable. Single `['agents']` cache key, no `useAllAgents` split.
+- D7: `useUnarchiveAgent` invalidates `['agents']` and `['agent-status']`, shows `Agent restored` toast — mirrors `useArchiveAgent`.
+
+### Verification
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web` — 259 files / 4091 tests pass, 1 skipped (pre-existing); 4 newly-added unarchive tests, 4 newly-added Archived-section tests, 1 reshaped composer test, 1 reshaped archived-warning composer test.
