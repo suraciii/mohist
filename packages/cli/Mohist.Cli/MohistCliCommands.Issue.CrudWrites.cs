@@ -65,7 +65,7 @@ internal static partial class IssueCommands
 
             async Task<int> CreateAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
                 var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
                 if (draftState == MohistCliCommands.DraftFlagState.Conflicting)
@@ -272,7 +272,7 @@ internal static partial class IssueCommands
                     api.Error.WriteLine("--repository cannot be used with 'issue update' — repository ownership is immutable after creation");
                     return 1;
                 }
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
                 var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
                 if (draftState == MohistCliCommands.DraftFlagState.Conflicting)

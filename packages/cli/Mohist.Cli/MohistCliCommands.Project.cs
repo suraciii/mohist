@@ -29,13 +29,10 @@ internal static class ProjectCommands
         cmd.SetAction(ctx =>
         {
             var output = ctx.GetValue(outputOpt);
-            var validation = MohistCliApi.ValidateOutputMode(output);
-            if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-            {
-                api.Error.WriteLine(invalid.Message);
-                return Task.FromResult(1);
-            }
-            var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+            var (mode, exit) = api.ResolveOutputMode(output);
+
+            if (exit != 0) return Task.FromResult(exit);
+
             return api.PrintWithOutputAsync(
                 "/api/projects",
                 mode,
@@ -68,13 +65,10 @@ internal static class ProjectCommands
         {
             var identifier = ctx.GetValue(identifierArg);
             var output = ctx.GetValue(outputOpt);
-            var validation = MohistCliApi.ValidateOutputMode(output);
-            if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-            {
-                api.Error.WriteLine(invalid.Message);
-                return Task.FromResult(1);
-            }
-            var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+            var (mode, exit) = api.ResolveOutputMode(output);
+
+            if (exit != 0) return Task.FromResult(exit);
+
             return api.PrintWithOutputAsync(
                 $"/api/projects/{MohistCliCommands.Escape(identifier!)}",
                 mode,

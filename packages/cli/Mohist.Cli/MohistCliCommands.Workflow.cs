@@ -43,13 +43,13 @@ internal static class WorkflowCommands
                 {
                     if (hasProject && hasProjectId && !string.Equals(project, projectId, StringComparison.Ordinal))
                     {
-                        await api.ResolveProjectIdAsync(project, projectId);
-                        return 1;
+                        var (_, conflictExit) = await api.ResolveProject(project, projectId);
+                        return conflictExit != 0 ? conflictExit : 1;
                     }
 
-                    var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                    var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
 
-                    if (resolvedProjectId is null)
+                    if (resolveExit != 0)
                     {
                         api.Error.WriteLine("No project specified or active; showing all workflow profiles (degraded).");
                         return await api.PrintWorkflowProfilesDescribedAsync();
@@ -58,25 +58,21 @@ internal static class WorkflowCommands
                     return await api.PrintWorkflowProfilesDescribedAsync(resolvedProjectId);
                 }
 
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (mode, exit) = api.ResolveOutputMode(output);
+
+                if (exit != 0) return exit;
 
                 if (hasProject && hasProjectId && !string.Equals(project, projectId, StringComparison.Ordinal))
                 {
-                    await api.ResolveProjectIdAsync(project, projectId);
-                    return 1;
+                    var (_, conflictExit) = await api.ResolveProject(project, projectId);
+                    return conflictExit != 0 ? conflictExit : 1;
                 }
 
                 var plainResolvedProjectId = hasProject || hasProjectId
-                    ? await api.ResolveProjectIdAsync(project, projectId)
+                    ? (await api.ResolveProject(project, projectId)).ProjectId
                     : await api.TryReadActiveProjectIdAsync();
                 string path;
-                if (plainResolvedProjectId is null)
+                if (string.IsNullOrWhiteSpace(plainResolvedProjectId))
                 {
                     if (!string.Equals(mode, "json", StringComparison.OrdinalIgnoreCase))
                         api.Error.WriteLine("No project specified or active; showing all workflow profiles (degraded).");
