@@ -102,6 +102,36 @@ public class CliNotifySetupCommandSpecs : IDisposable
     }
 
     [Fact]
+    public async Task NotifySetup_InvalidHealthBase_UsesRealProbeAndAbortsWithoutStackTrace()
+    {
+        var fileSystem = new FakeFileSystem();
+        NotifyCommands.HealthProbeOverride = new NotifyCommands.HttpHealthProbe();
+
+        var (exitCode, stdout, stderr) = await RunAsync(
+            new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
+            fileSystem,
+            new FakeCommandExecutor(),
+            ["notify", "setup", "--health-base", "127.0.0.1:8644"]);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(stdout);
+        Assert.Contains("Hermes webhook platform is not started", stderr);
+        Assert.DoesNotContain("Unhandled exception", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("InvalidOperationException", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("at System.", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(fileSystem.Files);
+    }
+
+    [Fact]
+    public async Task ProbeHermesHealthAsync_NonAbsoluteHealthBase_ReturnsUnhealthy()
+    {
+        var result = await NotifyCommands.ProbeHermesHealthAsync("127.0.0.1:8644");
+
+        Assert.False(result.IsHealthy);
+        Assert.Equal("invalid url", result.FailureReason);
+    }
+
+    [Fact]
     public async Task NotifySetup_FreshConfig_WritesDerivedUrlAndSecretAndEnabledTypes()
     {
         var fileSystem = new FakeFileSystem();
@@ -158,6 +188,51 @@ public class CliNotifySetupCommandSpecs : IDisposable
 
         var hermes = ReadHermes(fileSystem.ReadAllText(_configPath));
         Assert.Equal("shared-secret-xyz", hermes["Secret"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData("telegram test")]
+    [InlineData("telegram; bad")]
+    public async Task NotifySetup_InvalidPlatform_RejectsWithoutWriting(string platform)
+    {
+        var fileSystem = new FakeFileSystem();
+        NotifyCommands.HealthProbeOverride = new StubProbe(success: true);
+        NotifyCommands.SecretGeneratorOverride = () => "should-not-be-written";
+
+        var (exitCode, stdout, stderr) = await RunAsync(
+            new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
+            fileSystem,
+            new FakeCommandExecutor(),
+            ["notify", "setup", "--platform", platform]);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(stdout);
+        Assert.Contains("--platform must contain only", stderr);
+        Assert.Empty(fileSystem.Files);
+    }
+
+    [Fact]
+    public async Task NotifySetup_MalformedConfig_AbortsWithoutWritingOrStackTrace()
+    {
+        const string malformed = "{ \"Mohist\": { \"Notifications\": ";
+        var fileSystem = new FakeFileSystem();
+        fileSystem.AddFile(_configPath, malformed);
+        NotifyCommands.HealthProbeOverride = new StubProbe(success: true);
+        NotifyCommands.SecretGeneratorOverride = () => "should-not-be-written";
+
+        var (exitCode, stdout, stderr) = await RunAsync(
+            new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
+            fileSystem,
+            new FakeCommandExecutor(),
+            ["notify", "setup"]);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(stdout);
+        Assert.Contains("Could not parse Mohist config file", stderr);
+        Assert.Contains(_configPath, stderr);
+        Assert.DoesNotContain("JsonException", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("at System.", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(malformed, fileSystem.ReadAllText(_configPath));
     }
 
     [Fact]

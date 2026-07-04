@@ -154,15 +154,22 @@ internal static class NotifyCommands
             return 1;
         }
 
-        secret ??= SecretGeneratorOverride();
-        var webhookUrl = string.IsNullOrWhiteSpace(webhookUrlOverride)
-            ? DeriveWebhookUrl(healthBase)
-            : webhookUrlOverride.Trim();
+        if (!TryValidatePlatform(platform, out var platformError))
+        {
+            await api.Error.WriteLineAsync(platformError).ConfigureAwait(false);
+            return 1;
+        }
 
         var configPath = ConfigPathOverride();
         var fileSystem = api.FileSystem;
+        var config = LoadHermesConfig(fileSystem, configPath);
+        if (!config.Success)
+        {
+            await api.Error.WriteLineAsync(config.ErrorMessage).ConfigureAwait(false);
+            return 1;
+        }
 
-        if (HermesSectionExists(fileSystem, configPath))
+        if (config.HermesSectionExists)
         {
             var overwrite = await PromptForOverwriteAsync(api, api.StandardInput).ConfigureAwait(false);
             if (!overwrite.ShouldContinue)
@@ -174,7 +181,12 @@ internal static class NotifyCommands
             }
         }
 
-        await WriteHermesConfigAsync(fileSystem, configPath, webhookUrl, secret).ConfigureAwait(false);
+        secret ??= SecretGeneratorOverride();
+        var webhookUrl = string.IsNullOrWhiteSpace(webhookUrlOverride)
+            ? DeriveWebhookUrl(healthBase)
+            : webhookUrlOverride.Trim();
+
+        await WriteHermesConfigAsync(fileSystem, configPath, config.Root!, webhookUrl, secret).ConfigureAwait(false);
 
         await api.Output.WriteLineAsync(
             $"Wrote Mohist:Notifications:Hermes to {configPath}").ConfigureAwait(false);
@@ -301,11 +313,17 @@ internal static class NotifyCommands
     public static async Task<HealthProbeResult> ProbeHermesHealthAsync(string healthBase)
     {
         var url = BuildHealthUrl(healthBase);
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return HealthProbeResult.Unhealthy("invalid url");
+        }
+
         using var client = new HttpClient
         {
             Timeout = HealthProbeTimeout,
         };
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         try
@@ -329,6 +347,10 @@ internal static class NotifyCommands
         {
             return HealthProbeResult.Unhealthy("invalid url");
         }
+        catch (InvalidOperationException)
+        {
+            return HealthProbeResult.Unhealthy("invalid url");
+        }
     }
 
     /// <summary>Builds the absolute health URL from a base, appending <c>/health</c>.</summary>
@@ -343,28 +365,25 @@ internal static class NotifyCommands
     /// exists and contains a non-empty <c>Mohist.Notifications.Hermes</c>
     /// subtree. Used to gate the overwrite confirmation.
     /// </summary>
-    public static bool HermesSectionExists(IFileSystem fileSystem, string configPath)
+    public static HermesConfigLoadResult LoadHermesConfig(IFileSystem fileSystem, string configPath)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         if (!fileSystem.Exists(configPath))
-            return false;
+            return HermesConfigLoadResult.Loaded(new JsonObject(), hermesSectionExists: false);
 
-        JsonNode? root;
         try
         {
             var text = fileSystem.ReadAllText(configPath);
-            root = JsonNode.Parse(StripJsoncComments(text));
+            var root = JsonNode.Parse(StripJsoncComments(text)) as JsonObject ?? new JsonObject();
+            var hermes = root["Mohist"]?["Notifications"]?["Hermes"];
+            var exists = hermes is JsonObject hermesObj && hermesObj.Count > 0;
+            return HermesConfigLoadResult.Loaded(root, exists);
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            return false;
+            return HermesConfigLoadResult.Failed(
+                $"Could not parse Mohist config file '{configPath}'. Fix the JSONC syntax and re-run 'mo notify setup'.");
         }
-
-        if (root is not JsonObject obj)
-            return false;
-
-        var hermes = obj["Mohist"]?["Notifications"]?["Hermes"];
-        return hermes is JsonObject hermesObj && hermesObj.Count > 0;
     }
 
     /// <summary>
@@ -378,25 +397,15 @@ internal static class NotifyCommands
     public static async Task WriteHermesConfigAsync(
         IFileSystem fileSystem,
         string configPath,
+        JsonObject root,
         string webhookUrl,
         string secret)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(root);
         ArgumentException.ThrowIfNullOrEmpty(configPath);
         ArgumentException.ThrowIfNullOrEmpty(webhookUrl);
         ArgumentException.ThrowIfNullOrEmpty(secret);
-
-        JsonObject root;
-        if (fileSystem.Exists(configPath))
-        {
-            var existing = fileSystem.ReadAllText(configPath);
-            var stripped = StripJsoncComments(existing);
-            root = JsonNode.Parse(stripped) as JsonObject ?? new JsonObject();
-        }
-        else
-        {
-            root = new JsonObject();
-        }
 
         SetSection(root, webhookUrl, secret);
 
@@ -484,6 +493,8 @@ internal static class NotifyCommands
         ArgumentNullException.ThrowIfNull(output);
         ArgumentException.ThrowIfNullOrEmpty(webhookUrl);
         ArgumentException.ThrowIfNullOrEmpty(secret);
+        if (!TryValidatePlatform(platform, out var platformError))
+            throw new ArgumentException(platformError, nameof(platform));
 
         await output.WriteLineAsync().ConfigureAwait(false);
         await output.WriteLineAsync("Run this in Hermes to subscribe to Mohist:").ConfigureAwait(false);
@@ -503,6 +514,28 @@ internal static class NotifyCommands
                 "Replace <platform> with the target delivery platform (e.g. telegram, weixin).")
                 .ConfigureAwait(false);
         }
+    }
+
+    public static bool TryValidatePlatform(string? platform, out string error)
+    {
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(platform))
+            return true;
+
+        var trimmed = platform.Trim();
+        if (trimmed.Length == 0)
+            return true;
+
+        foreach (var ch in trimmed)
+        {
+            if (char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' or '.')
+                continue;
+
+            error = "--platform must contain only letters, digits, underscore, hyphen, or dot.";
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -560,5 +593,27 @@ internal static class NotifyCommands
 
         public static HealthProbeResult Unhealthy(string reason) =>
             new(false, string.Empty, reason);
+    }
+
+    public sealed class HermesConfigLoadResult
+    {
+        public bool Success { get; }
+        public JsonObject? Root { get; }
+        public bool HermesSectionExists { get; }
+        public string? ErrorMessage { get; }
+
+        private HermesConfigLoadResult(bool success, JsonObject? root, bool hermesSectionExists, string? errorMessage)
+        {
+            Success = success;
+            Root = root;
+            HermesSectionExists = hermesSectionExists;
+            ErrorMessage = errorMessage;
+        }
+
+        public static HermesConfigLoadResult Loaded(JsonObject root, bool hermesSectionExists) =>
+            new(true, root, hermesSectionExists, null);
+
+        public static HermesConfigLoadResult Failed(string message) =>
+            new(false, null, false, message);
     }
 }
