@@ -89,16 +89,24 @@ internal static class NotifyCommands
                           "(e.g. telegram, weixin). When omitted, the printed subscribe command " +
                           "leaves --deliver out and prints placeholder guidance.",
         };
+        var deliverChatIdOpt = new Option<string?>("--deliver-chat-id")
+        {
+            Description = "Chat id passed to Hermes as --deliver-chat-id. Required for " +
+                          "platforms without a default home channel (e.g. weixin); optional " +
+                          "for platforms that have one (e.g. telegram).",
+        };
 
         cmd.Options.Add(healthBaseOpt);
         cmd.Options.Add(webhookUrlOpt);
         cmd.Options.Add(platformOpt);
+        cmd.Options.Add(deliverChatIdOpt);
         cmd.SetAction(ctx =>
         {
             var healthBase = ctx.GetValue(healthBaseOpt)!;
             var webhookUrlOverride = ctx.GetValue(webhookUrlOpt);
             var platform = ctx.GetValue(platformOpt);
-            return RunSetupAsync(api, healthBase, webhookUrlOverride, platform);
+            var deliverChatId = ctx.GetValue(deliverChatIdOpt);
+            return RunSetupAsync(api, healthBase, webhookUrlOverride, platform, deliverChatId);
         });
         return cmd;
     }
@@ -142,6 +150,7 @@ internal static class NotifyCommands
         string healthBase,
         string? webhookUrlOverride,
         string? platform,
+        string? deliverChatId,
         IHealthProbe? healthProbe = null,
         string? secret = null)
     {
@@ -191,7 +200,7 @@ internal static class NotifyCommands
         await api.Output.WriteLineAsync(
             $"Wrote Mohist:Notifications:Hermes to {configPath}").ConfigureAwait(false);
 
-        await PrintHermesSubscribeCommandAsync(api.Output, platform, webhookUrl, secret)
+        await PrintHermesSubscribeCommandAsync(api.Output, platform, deliverChatId, webhookUrl, secret)
             .ConfigureAwait(false);
 
         await api.Output.WriteLineAsync(
@@ -501,11 +510,17 @@ internal static class NotifyCommands
     /// carrying the same secret written to the config. When
     /// <paramref name="platform"/> is null/empty the command is emitted
     /// with placeholder guidance and the user is told to supply
-    /// <c>--deliver</c>.
+    /// <c>--deliver</c>. When a platform is set but
+    /// <paramref name="deliverChatId"/> is empty, a hint notes that some
+    /// platforms (e.g. weixin) require a chat id and points at how to
+    /// find it. The <c>--prompt</c> template uses <c>{body}</c>, which is
+    /// the field Mohist actually posts (a bespoke <c>{message}</c> would
+    /// render empty because no such field exists in the payload).
     /// </summary>
     public static async Task PrintHermesSubscribeCommandAsync(
         TextWriter output,
         string? platform,
+        string? deliverChatId,
         string webhookUrl,
         string secret)
     {
@@ -520,9 +535,12 @@ internal static class NotifyCommands
         await output.WriteLineAsync().ConfigureAwait(false);
 
         var deliver = string.IsNullOrWhiteSpace(platform) ? "<platform>" : platform!.Trim();
+        var chatIdSegment = !string.IsNullOrWhiteSpace(deliverChatId)
+            ? $" --deliver-chat-id {deliverChatId!.Trim()}"
+            : string.Empty;
         var command =
-            $"hermes webhook subscribe mohist --deliver {deliver} --deliver-only " +
-            $"--secret {secret} --prompt '{{message}}'";
+            $"hermes webhook subscribe mohist --deliver {deliver}{chatIdSegment} --deliver-only " +
+            $"--secret {secret} --prompt '{{body}}'";
 
         await output.WriteLineAsync(command).ConfigureAwait(false);
 
@@ -531,6 +549,18 @@ internal static class NotifyCommands
             await output.WriteLineAsync().ConfigureAwait(false);
             await output.WriteLineAsync(
                 "Replace <platform> with the target delivery platform (e.g. telegram, weixin).")
+                .ConfigureAwait(false);
+        }
+        else if (string.IsNullOrWhiteSpace(deliverChatId))
+        {
+            // Platforms without a default home channel (weixin and similar)
+            // reject delivery with "No chat_id" unless --deliver-chat-id is
+            // supplied. We don't auto-detect which platform needs it; we just
+            // point the user at how to find the id when they didn't give one.
+            await output.WriteLineAsync().ConfigureAwait(false);
+            await output.WriteLineAsync(
+                "Hint: some platforms (e.g. weixin) have no default home channel and need " +
+                "--deliver-chat-id. Find yours with: hermes send --list <platform>")
                 .ConfigureAwait(false);
         }
     }
