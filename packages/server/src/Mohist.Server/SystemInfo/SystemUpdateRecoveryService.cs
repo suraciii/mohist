@@ -13,8 +13,8 @@ namespace Mohist.Server.SystemInfo;
 ///
 /// A job whose <c>UpdatedAt</c> strictly precedes the injected process
 /// start time is transitioned to <c>failed</c> with the literal reason
-    /// <c>"interrupted by process restart"</c> after its lock is released
-    /// via <see cref="ISystemUpdateStore.ReleaseStaleLockAsync"/>. Fresh
+/// <c>"interrupted by process restart"</c> after its lock is released
+/// via <see cref="ISystemUpdateStore.ReleaseStaleLockAsync"/>. Fresh
 /// active jobs (<c>UpdatedAt &gt;=</c> process start) and all terminal
 /// jobs (<c>succeeded</c>/<c>failed</c>/<c>recovered</c>/<c>superseded</c>/<c>cancelled</c>)
 /// are never modified.
