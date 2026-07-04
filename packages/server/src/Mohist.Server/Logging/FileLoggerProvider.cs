@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Logging;
 
@@ -32,7 +31,7 @@ namespace Mohist.Server.Logging;
 /// endpoint emits to the Web client.
 /// </para>
 /// </remarks>
-public sealed class FileLoggerProvider : ILoggerProvider, ISingletonService
+public sealed class FileLoggerProvider : ILoggerProvider
 {
     public const string LogFileName = "server.log";
 

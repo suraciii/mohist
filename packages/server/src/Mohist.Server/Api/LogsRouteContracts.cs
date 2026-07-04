@@ -84,7 +84,7 @@ internal static class LogEntryProjection
         try
         {
             var record = JSON.Deserialize<LogRecord>(rawLine);
-            if (record is not null)
+            if (record is not null && IsValidRecord(record))
             {
                 return new LogEntry(
                     Level: record.Level,
@@ -106,4 +106,7 @@ internal static class LogEntryProjection
             Message: rawLine,
             Raw: rawLine);
     }
+
+    private static bool IsValidRecord(LogRecord record)
+        => record.Time != default && record.Message is not null;
 }

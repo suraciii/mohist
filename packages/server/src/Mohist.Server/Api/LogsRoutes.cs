@@ -12,6 +12,21 @@ public static class LogsRoutes
             int? maxBytes,
             ILogPathResolver pathResolver) =>
         {
+            if (cursor is < 0)
+            {
+                return ApiResults.BadRequest("cursor must be greater than or equal to 0", "invalid_cursor");
+            }
+
+            if (limit is <= 0)
+            {
+                return ApiResults.BadRequest("limit must be greater than 0", "invalid_limit");
+            }
+
+            if (maxBytes is <= 0)
+            {
+                return ApiResults.BadRequest("maxBytes must be greater than 0", "invalid_max_bytes");
+            }
+
             var logDir = pathResolver.Resolve();
             var expectedFile = Path.Combine(logDir, FileLoggerProvider.LogFileName);
 
@@ -50,9 +65,9 @@ public static class LogsRoutes
 
             // Both `cursor` and `nextCursor` carry the same byte offset:
             // the position the client should pass back to continue.
-            // They are null at EOF (no more bytes to read) and when
-            // the source is unavailable.
-            long? wireCursor = truncated ? nextCursor : null;
+            // `truncated` tells the client whether another immediate chunk
+            // is available; an EOF cursor is still required for auto-follow.
+            long? wireCursor = nextCursor;
             var reason = rotated
                 ? $"Log file '{sourceName}' was rotated or truncated since the previous read; view replaced."
                 : null;
@@ -65,7 +80,7 @@ public static class LogsRoutes
                 Truncated: truncated,
                 Reset: shouldReset,
                 Unavailable: false,
-                ExpectedLocation: expectedFile,
+                ExpectedLocation: null,
                 Reason: reason));
         });
 

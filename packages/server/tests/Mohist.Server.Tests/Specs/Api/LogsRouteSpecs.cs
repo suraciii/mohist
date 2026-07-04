@@ -56,6 +56,16 @@ public class LogsRouteSpecs
         return envelope.GetProperty("data");
     }
 
+    private static async Task AssertBadRequestAsync(HttpClient client, string query, string expectedCode)
+    {
+        using var response = await client.GetAsync($"/api/logs/tail{query}");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var envelope = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(envelope.GetProperty("success").GetBoolean());
+        Assert.Equal(expectedCode, envelope.GetProperty("code").GetString());
+    }
+
     private static LogEntry AssertEntry(JsonElement entry)
     {
         Assert.True(entry.TryGetProperty("raw", out var raw));
@@ -147,11 +157,14 @@ public class LogsRouteSpecs
         // it as the File: line.
         Assert.Equal(FileLoggerProvider.LogFileName, data.GetProperty("source").GetString());
 
-        // cursor/nextCursor are null at EOF (no cap was hit).
-        Assert.Equal(JsonValueKind.Null, data.GetProperty("cursor").ValueKind);
-        Assert.Equal(JsonValueKind.Null, data.GetProperty("nextCursor").ValueKind);
+        // cursor/nextCursor remain the EOF byte offset so auto-follow can
+        // poll from the end without replaying the file.
+        var eofCursor = data.GetProperty("cursor").GetInt64();
+        Assert.True(eofCursor > 0);
+        Assert.Equal(eofCursor, data.GetProperty("nextCursor").GetInt64());
 
-        // reason is null in the available path.
+        // expectedLocation/reason are null in the available path.
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("expectedLocation").ValueKind);
         Assert.Equal(JsonValueKind.Null, data.GetProperty("reason").ValueKind);
     }
 
@@ -190,14 +203,16 @@ public class LogsRouteSpecs
         var secondCursor = second.GetProperty("nextCursor").GetInt64();
         Assert.True(secondCursor > firstCursor);
 
-        // Final chunk reaches EOF — cursor/nextCursor null, truncated false.
+        // Final chunk reaches EOF, but still returns the byte offset for the
+        // next poll. `truncated=false` is the no-more-immediate-chunk signal.
         var third = await GetTailAsync(_fixture.Client, $"?cursor={secondCursor}&limit=2");
         var thirdLines = third.GetProperty("lines").EnumerateArray().ToList();
         Assert.Single(thirdLines);
         Assert.Equal("line 5", thirdLines[0].GetProperty("message").GetString());
         Assert.False(third.GetProperty("truncated").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, third.GetProperty("cursor").ValueKind);
-        Assert.Equal(JsonValueKind.Null, third.GetProperty("nextCursor").ValueKind);
+        var thirdCursor = third.GetProperty("nextCursor").GetInt64();
+        Assert.True(thirdCursor > secondCursor);
+        Assert.Equal(thirdCursor, third.GetProperty("cursor").GetInt64());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -249,14 +264,67 @@ public class LogsRouteSpecs
         var firstLines = first.GetProperty("lines").EnumerateArray().ToList();
         Assert.Equal(3, firstLines.Count);
 
-        // The next read at the current EOF must NOT report unavailable,
-        // even though there are zero new lines.
-        var fileLength = new FileInfo(LogFilePath).Length;
-        var second = await GetTailAsync(_fixture.Client, $"?cursor={fileLength}");
+        // The next read at the returned EOF cursor must NOT report unavailable
+        // or reset, even though there are zero new lines.
+        var eofCursor = first.GetProperty("nextCursor").GetInt64();
+        var second = await GetTailAsync(_fixture.Client, $"?cursor={eofCursor}");
         Assert.False(second.GetProperty("unavailable").GetBoolean());
+        Assert.False(second.GetProperty("reset").GetBoolean());
         Assert.Equal(0, second.GetProperty("lines").GetArrayLength());
-        Assert.Equal(JsonValueKind.Null, second.GetProperty("cursor").ValueKind);
-        Assert.Equal(JsonValueKind.Null, second.GetProperty("nextCursor").ValueKind);
+        Assert.Equal(eofCursor, second.GetProperty("cursor").GetInt64());
+        Assert.Equal(eofCursor, second.GetProperty("nextCursor").GetInt64());
+        Assert.Equal(JsonValueKind.Null, second.GetProperty("expectedLocation").ValueKind);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task Get_AutoFollowFromEof_DoesNotReplayAndReturnsOnlyAppendedLines()
+    {
+        ResetState();
+        var initialLine = """{"level":"INFO","time":"2026-06-30T12:00:01.0000000+00:00","service":"Mohist.Server","message":"initial"}""";
+        var appendedLine = """{"level":"WARN","time":"2026-06-30T12:00:02.0000000+00:00","service":"Mohist.Server","message":"appended"}""";
+        await SeedServerLogAsync(initialLine);
+
+        var first = await GetTailAsync(_fixture.Client, "?limit=10");
+        Assert.False(first.GetProperty("truncated").GetBoolean());
+        Assert.True(first.GetProperty("reset").GetBoolean());
+        var eofCursor = first.GetProperty("nextCursor").GetInt64();
+        Assert.True(eofCursor > 0);
+
+        var emptyPoll = await GetTailAsync(_fixture.Client, $"?cursor={eofCursor}&limit=10");
+        Assert.False(emptyPoll.GetProperty("reset").GetBoolean());
+        Assert.False(emptyPoll.GetProperty("truncated").GetBoolean());
+        Assert.Equal(0, emptyPoll.GetProperty("lines").GetArrayLength());
+        Assert.Equal(eofCursor, emptyPoll.GetProperty("nextCursor").GetInt64());
+
+        await File.AppendAllLinesAsync(
+            LogFilePath,
+            new[] { appendedLine },
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+        var afterAppend = await GetTailAsync(_fixture.Client, $"?cursor={eofCursor}&limit=10");
+        Assert.False(afterAppend.GetProperty("reset").GetBoolean());
+        var returnedLines = afterAppend.GetProperty("lines").EnumerateArray().ToList();
+        Assert.Single(returnedLines);
+        Assert.Equal("appended", returnedLines[0].GetProperty("message").GetString());
+        Assert.Equal("WARN", returnedLines[0].GetProperty("level").GetString());
+        Assert.True(afterAppend.GetProperty("nextCursor").GetInt64() > eofCursor);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Theory]
+    [InlineData("?cursor=-1", "invalid_cursor")]
+    [InlineData("?limit=0", "invalid_limit")]
+    [InlineData("?limit=-1", "invalid_limit")]
+    [InlineData("?maxBytes=0", "invalid_max_bytes")]
+    [InlineData("?maxBytes=-1", "invalid_max_bytes")]
+    public async Task Get_WhenQueryParametersAreInvalid_ReturnsBadRequest(string query, string expectedCode)
+    {
+        ResetState();
+
+        await AssertBadRequestAsync(_fixture.Client, query, expectedCode);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -277,6 +345,28 @@ public class LogsRouteSpecs
         Assert.Null(entry.Service);
         Assert.Equal("this is not json at all", entry.Message);
         Assert.Equal("this is not json at all", entry.Raw);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"raw\":\"x\"}")]
+    public async Task Get_ValidJsonThatDoesNotMatchLogRecord_DegradesToRawElement(string line)
+    {
+        ResetState();
+        await SeedServerLogAsync(line);
+
+        var data = await GetTailAsync(_fixture.Client);
+        var lines = data.GetProperty("lines").EnumerateArray().ToList();
+        Assert.Single(lines);
+        var entry = AssertEntry(lines[0]);
+
+        Assert.Null(entry.Level);
+        Assert.Null(entry.Time);
+        Assert.Null(entry.Service);
+        Assert.Equal(line, entry.Message);
+        Assert.Equal(line, entry.Raw);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

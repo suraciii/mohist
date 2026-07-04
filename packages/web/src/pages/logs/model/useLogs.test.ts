@@ -131,7 +131,8 @@ describe('useLogs: reset replace-vs-append', () => {
           lines: [makeEntry({ message: 'first-batch', raw: 'first-batch' })],
           reset: true,
           source: 'server.log',
-          nextCursor: null,
+          cursor: 100,
+          nextCursor: 100,
         }),
       )
       .mockResolvedValueOnce(
@@ -139,7 +140,8 @@ describe('useLogs: reset replace-vs-append', () => {
           lines: [makeEntry({ message: 'replacement', raw: 'replacement' })],
           reset: true,
           source: 'server.log',
-          nextCursor: null,
+          cursor: 200,
+          nextCursor: 200,
         }),
       )
 
@@ -150,14 +152,13 @@ describe('useLogs: reset replace-vs-append', () => {
     expect(result.current.entries).toHaveLength(1)
     expect(result.current.entries[0].message).toBe('first-batch')
 
-    // The cursor is null after the first read, so refresh re-fires without
-    // a cursor — server returns reset=true and the view is replaced.
     await act(async () => {
       await result.current.refresh()
     })
 
     expect(result.current.entries).toHaveLength(1)
     expect(result.current.entries[0].message).toBe('replacement')
+    expect(mocks.getLogTail.mock.calls[1][0]).toBe(100)
   })
 
   it('appends new entries when reset=false and trims to MAX_ENTRIES (2000)', async () => {
@@ -308,6 +309,68 @@ describe('useLogs: auto-follow polling', () => {
     const calls = mocks.getLogTail.mock.calls
     expect(calls[0][0]).toBeUndefined()
     expect(calls[1][0]).toBe(4242)
+  })
+
+  it('keeps polling from the EOF cursor and appends only lines added after EOF', async () => {
+    vi.useFakeTimers()
+    mocks.getLogTail
+      .mockResolvedValueOnce(
+        ok({
+          lines: [makeEntry({ message: 'initial', raw: 'initial' })],
+          reset: true,
+          truncated: false,
+          cursor: 64,
+          nextCursor: 64,
+          source: 'server.log',
+        }),
+      )
+      .mockResolvedValueOnce(
+        ok({
+          lines: [],
+          reset: false,
+          truncated: false,
+          cursor: 64,
+          nextCursor: 64,
+          source: 'server.log',
+        }),
+      )
+      .mockResolvedValueOnce(
+        ok({
+          lines: [makeEntry({ level: 'WARN', message: 'appended', raw: 'appended' })],
+          reset: false,
+          truncated: false,
+          cursor: 128,
+          nextCursor: 128,
+          source: 'server.log',
+        }),
+      )
+
+    const { result } = renderHook(() => useLogs())
+
+    await flushMicrotasks()
+    expect(result.current.entries.map((entry) => entry.message)).toEqual(['initial'])
+    expect(result.current.nextCursor).toBe(64)
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000)
+      await Promise.resolve()
+    })
+
+    expect(result.current.entries.map((entry) => entry.message)).toEqual(['initial'])
+    expect(result.current.nextCursor).toBe(64)
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000)
+      await Promise.resolve()
+    })
+
+    expect(result.current.entries.map((entry) => entry.message)).toEqual(['initial', 'appended'])
+    expect(result.current.nextCursor).toBe(128)
+
+    const calls = mocks.getLogTail.mock.calls
+    expect(calls[0][0]).toBeUndefined()
+    expect(calls[1][0]).toBe(64)
+    expect(calls[2][0]).toBe(64)
   })
 
   it('does not poll while the page is hidden (visibility-gated)', async () => {
