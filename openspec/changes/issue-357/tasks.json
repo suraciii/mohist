@@ -17,7 +17,7 @@
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Updated `packages/server/src/Mohist.Server/SystemInfo/ISystemUpdateStore.cs` and `FileSystemSystemUpdateStore.cs`, mirrored fake store behavior, and new/updated lock-release tests.",
+      "output": "Updated `packages/server/src/Mohist.Server/SystemInfo/FileSystemSystemUpdateStore.cs` (which declares both `ISystemUpdateStore` and `FileSystemSystemUpdateStore`), mirrored `ReleaseStaleLockAsync` on every test fake that implements `ISystemUpdateStore` (`InMemoryUpdateStore`, `OrderTrackingStore`), and new/updated lock-release tests.",
       "dependsOn": [],
       "passes": false,
       "notes": "Design decision D2. Reuse the existing `ReleaseLockFile(jobId)` helper (:174-189) which already does the content match; only bypass the in-memory ownership gate. Do NOT loosen `ReleaseLockAsync` — that would risk the SourceAudit test and conflate in-process ownership release with post-restart cleanup."
