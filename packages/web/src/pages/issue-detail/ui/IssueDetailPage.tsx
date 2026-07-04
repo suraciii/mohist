@@ -11,6 +11,7 @@ import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
 import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
 import { ActivityDialog } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
+import { useNarrowViewport } from '../../../shared/lib/use-narrow-viewport'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
@@ -28,6 +29,7 @@ import { IssueDriftCard } from './cards/IssueDriftCard'
 import { IssueConfigurationCard } from './cards/IssueConfigurationCard'
 import { IssuePrerequisitesCard } from './cards/IssuePrerequisitesCard'
 import { IssueReadinessCard } from './cards/IssueReadinessCard'
+import { CollapsibleRailCard } from './cards/CollapsibleRailCard'
 import { IssueDescriptionSection } from './sections/IssueDescriptionSection'
 import { IssueDiffFilesSection } from './sections/IssueDiffFilesSection'
 import { IssueCommitsSection } from './sections/IssueCommitsSection'
@@ -77,6 +79,7 @@ export function IssueDetailPage() {
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
   const { data: workflowTimeline } = useWorkflowTimeline(issueNumber, !!issue && issue.status !== IssueStatus.Backlog)
+  const isNarrowViewport = useNarrowViewport()
 
   const activeAgents = agentStatus?.activeAgents ?? []
   const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
@@ -393,49 +396,116 @@ export function IssueDetailPage() {
               />
             </div>
 
-            <div className="min-w-0 space-y-6" data-testid="reference-rail" data-tier-weight="reference-rail">
-              <IssueDetailsCard issue={issue} />
+            <div
+              className={isNarrowViewport ? 'min-w-0 space-y-4' : 'min-w-0 space-y-6 lg:col-span-1'}
+              data-testid="reference-rail"
+              data-tier-weight="reference-rail"
+              data-rail-mode={isNarrowViewport ? 'narrow' : 'desktop'}
+            >
+              <CollapsibleRailCard
+                testId="reference-rail-details"
+                title="Details"
+                forceCollapsed={isNarrowViewport}
+                summary={issue.status === IssueStatus.Backlog ? 'Backlog' : issue.status}
+              >
+                <IssueDetailsCard issue={issue} />
+              </CollapsibleRailCard>
 
-              <div data-testid="issue-workflow-profile-control-frame">
-                <WorkflowProfileControl issue={issue} />
-              </div>
+              <CollapsibleRailCard
+                testId="reference-rail-workflow-profile"
+                title="Workflow Profile"
+                forceCollapsed={isNarrowViewport}
+                summary={issue.workflowProfileId ?? 'default'}
+              >
+                <div data-testid="issue-workflow-profile-control-frame">
+                  <WorkflowProfileControl issue={issue} />
+                </div>
+              </CollapsibleRailCard>
 
               {issue.drift?.drifted && (
-                <IssueDriftCard drift={issue.drift} />
+                <CollapsibleRailCard
+                  testId="reference-rail-drift"
+                  title="Base Drift Detected"
+                  defaultCollapsed
+                  forceCollapsed={isNarrowViewport}
+                  summary={issue.drift.decision ?? 'drifted'}
+                >
+                  <IssueDriftCard drift={issue.drift} />
+                </CollapsibleRailCard>
               )}
 
               {(issue.health === IssueHealth.Blocked || issue.convergence) && (
-                <WorkflowConvergencePanel convergence={issue.convergence} />
+                <CollapsibleRailCard
+                  testId="reference-rail-convergence"
+                  title="Convergence"
+                  defaultCollapsed
+                  forceCollapsed={isNarrowViewport}
+                  summary={
+                    issue.convergence?.blockingItemCount
+                      ? `${issue.convergence.blockingItemCount} blocking`
+                      : (issue.health === IssueHealth.Blocked ? 'blocked' : 'none')
+                  }
+                >
+                  <WorkflowConvergencePanel convergence={issue.convergence} />
+                </CollapsibleRailCard>
               )}
 
-              <IssueConfigurationCard
-                issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prerequisites, isBacklog }}
-                mutations={{ addPrerequisiteMutation, removePrerequisiteMutation }}
-              />
+              <CollapsibleRailCard
+                testId="reference-rail-configuration"
+                title="Configuration"
+                forceCollapsed={isNarrowViewport}
+                summary={issue.model ?? 'default model'}
+              >
+                <IssueConfigurationCard
+                  issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prerequisites, isBacklog }}
+                  mutations={{ addPrerequisiteMutation, removePrerequisiteMutation }}
+                />
+              </CollapsibleRailCard>
 
-              <IssueActionsCard
-                issue={issue}
-                decision={decision}
-                agentStatus={agentStatus ?? null}
-                mutations={{
-                  approveMutation,
-                  sendBackMutation,
-                  startMutation,
-                  markReadyMutation,
-                  closeMutation,
-                  resumeMutation,
-                  retryMutation,
-                  rerunMutation,
-                }}
-                onAskAgent={() => navigate(toProjectPath('/agent-sessions/new?issue=' + encodeURIComponent(issueNumber)))}
-              />
+              <CollapsibleRailCard
+                testId="reference-rail-actions"
+                title="Actions"
+                forceCollapsed={isNarrowViewport}
+                summary={issue.isDraft ? 'draft' : (issue.archivedAt ? 'archived' : 'available')}
+              >
+                <IssueActionsCard
+                  issue={issue}
+                  decision={decision}
+                  agentStatus={agentStatus ?? null}
+                  mutations={{
+                    approveMutation,
+                    sendBackMutation,
+                    startMutation,
+                    markReadyMutation,
+                    closeMutation,
+                    resumeMutation,
+                    retryMutation,
+                    rerunMutation,
+                  }}
+                  onAskAgent={() => navigate(toProjectPath('/agent-sessions/new?issue=' + encodeURIComponent(issueNumber)))}
+                />
+              </CollapsibleRailCard>
 
               {issue.prerequisites && issue.prerequisites.length > 0 && (
-                <IssuePrerequisitesCard prerequisites={issue.prerequisites} />
+                <CollapsibleRailCard
+                  testId="reference-rail-prerequisites"
+                  title="Start Prerequisites"
+                  forceCollapsed={isNarrowViewport}
+                  summary={`${issue.prerequisites.length} item${issue.prerequisites.length === 1 ? '' : 's'}`}
+                >
+                  <IssuePrerequisitesCard prerequisites={issue.prerequisites} />
+                </CollapsibleRailCard>
               )}
 
               {isBacklog && (
-                <IssueReadinessCard issue={issue} />
+                <CollapsibleRailCard
+                  testId="reference-rail-readiness"
+                  title="Readiness"
+                  forceCollapsed={isNarrowViewport}
+                  summary={issue.canStart ? 'ready' : 'not ready'}
+                >
+                  <IssueReadinessCard issue={issue} />
+                </CollapsibleRailCard>
               )}
             </div>
           </div>

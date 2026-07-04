@@ -788,21 +788,17 @@ describe('IssueDetailPage reading-flow — decision surface and rail content exc
     expect(referenceRail.contains(prereqSection!)).toBe(true)
     expect(readingFlow.contains(prereqSection!)).toBe(false)
 
-    const driftHeading = screen.getByRole('heading', { name: /Base Drift Detected/ })
-    const driftSection = driftHeading.closest('section')
+    const driftToggle = screen.getByTestId('reference-rail-drift-toggle')
+    const driftSection = driftToggle.closest('section')
     expect(driftSection).toBeTruthy()
     expect(referenceRail.contains(driftSection!)).toBe(true)
     expect(readingFlow.contains(driftSection!)).toBe(false)
 
-    const convergencePanel = screen.getByText('Workflow Blocked').closest('div')
-    expect(convergencePanel).toBeTruthy()
-    let parent: Element | null = convergencePanel
-    while (parent && !referenceRail.contains(parent)) {
-      parent = parent.parentElement
-    }
-    expect(parent).toBeTruthy()
-    expect(referenceRail.contains(parent!)).toBe(true)
-    expect(readingFlow.contains(parent!)).toBe(false)
+    const convergenceToggle = screen.getByTestId('reference-rail-convergence-toggle')
+    const convergenceSection = convergenceToggle.closest('section')
+    expect(convergenceSection).toBeTruthy()
+    expect(referenceRail.contains(convergenceSection!)).toBe(true)
+    expect(readingFlow.contains(convergenceSection!)).toBe(false)
 
     const actionsHeading = screen.getByRole('heading', { name: /Actions/ })
     const actionsSection = actionsHeading.closest('section')

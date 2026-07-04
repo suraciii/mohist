@@ -107,3 +107,70 @@ T-002 progress notes
 - **Per-block chrome rule**: description/comments/commits → no card wrapper, just heading + content (content-forward). diff-summary-banner → flat block (no fill/border). diff-files section → flat block with always-visible scale line.
 - **Preview hint gating**: only show when stripped body length exceeds 320 chars. Avoids duplicate-text issues in jsdom-based tests and keeps the hint semantically a "long-content signal."
 - **Tier weight ordering**: numeric map {status-header: 3, reading-flow: 2, reference-rail: 1} is asserted via `data-tier-weight` and compared by ordering the three tier containers. This is more stable than asserting per-class chrome and survives future visual refinements.
+T-003 progress notes
+
+## Codebase Patterns
+
+- jsdom cannot lay out: viewport mode is asserted via `data-rail-mode="desktop|narrow"` (analogous to the `data-sticky="true"` pattern). A `useNarrowViewport` hook wraps `window.matchMedia('(max-width: 1023.98px)')` and exposes a boolean; the rail applies `lg:col-span-1` only on desktop and renders all items as collapsed sections on narrow.
+- `useNarrowViewport` initializes state lazily via `useState(() => window.matchMedia(...).matches)`; the `useEffect` listens for `change` events. In jsdom, `matchMedia` is undefined by default — the hook falls back to `false` (desktop) when missing. Tests that want narrow viewport stub `vi.stubGlobal('matchMedia', ...)` with `matches: true` in `beforeEach` so the lazy initializer sees the stub on first render.
+- The lazy initializer pattern matters: state is captured once per mount. Setting `matchMedia` AFTER the first render does NOT change the rail mode for the current mount.
+
+## Reference-Rail Refinement (D7) — T-003 Outcomes
+
+- **New `CollapsibleRailCard`** at `pages/issue-detail/ui/cards/CollapsibleRailCard.tsx`:
+  - Wraps any rail child with a collapsible header (chevron + title + optional summary chip) and a body div.
+  - Props: `title`, `testId`, `defaultCollapsed`, `forceCollapsed`, `summary`, `children`.
+  - State: a single `expanded` boolean. Both `defaultCollapsed` and `forceCollapsed` only seed the initial state (`!(defaultCollapsed || forceCollapsed)`); once the user clicks the toggle the local state takes over, so "forceCollapsed" can still be overridden by user action (matches the spec's "expand on demand").
+  - Outer section always carries `data-rail-card="collapsible"`, `data-collapsed="true|false"`, and a stable `data-testid`. The body div carries `data-testid="${testId}-body"` and `id="${testId}-body"` for `aria-controls`.
+  - Chrome: outer `rounded-lg border border-border bg-card/50` (the CardSection default tone). Inner body div is `p-0` so the inner CardSection's own `p-4` provides padding without doubling up.
+  - Visual: collapsed = compact one-row chip with chevron + summary. Expanded = full card with header divider + the inner content's chrome.
+- **Rail mode** (`data-rail-mode`) is set on the `reference-rail` div via `useNarrowViewport()`:
+  - Desktop: `lg:col-span-1` applied; rail items default-expanded (except drift + convergence).
+  - Narrow: `lg:col-span-1` REMOVED so the rail stacks as a single-column under the reading flow in the existing `grid-cols-1` fallback; ALL rail items render as collapsed sections via `forceCollapsed={true}` (user can still expand any item on demand).
+- **Default-collapse** (D7 low-frequency): drift and convergence use `defaultCollapsed` so they start collapsed on every viewport, including desktop. They stay reachable via the per-card toggle.
+- **Tier-weight marker** on the rail (`data-tier-weight="reference-rail"`) is unchanged from T-002.
+
+## Rail items wrapped by `CollapsibleRailCard`
+
+- `reference-rail-details` — wraps `IssueDetailsCard`.
+- `reference-rail-workflow-profile` — wraps `WorkflowProfileControl` (still tagged `issue-workflow-profile-control-frame`).
+- `reference-rail-drift` — wraps `IssueDriftCard`; defaultCollapsed.
+- `reference-rail-convergence` — wraps `WorkflowConvergencePanel`; defaultCollapsed.
+- `reference-rail-configuration` — wraps `IssueConfigurationCard`.
+- `reference-rail-actions` — wraps `IssueActionsCard` (non-runtime; mark-ready / close / ask-agent / archived-note).
+- `reference-rail-prerequisites` — wraps `IssuePrerequisitesCard` (only rendered when `issue.prerequisites.length > 0`).
+- `reference-rail-readiness` — wraps `IssueReadinessCard` (backlog only).
+
+Each gets a default summary chip on narrow (e.g. "Backlog" / "default model" / "draft" / "1 item" / "ready") so the collapsed row stays scannable.
+
+## New / Updated Tests
+
+- **New** `IssueDetailPage.reference-rail.test.tsx` — 14 tests across:
+  - metadata + configuration only (details / workflow-profile / IssueActionsCard live in the rail; runtime surface and 7 runtime actions are NOT in the rail)
+  - primary content exclusion (workflow progress/outputs, diff/commits/description/comments are NOT in the rail)
+  - desktop right column (rail `data-rail-mode="desktop"`, `lg:col-span-1`, narrower than the reading-flow `lg:col-span-2`)
+  - narrow-screen stacking (`data-rail-mode="narrow"`, NO `lg:col-span-1`, rail stacks beneath reading flow via `compareDocumentPosition`)
+  - narrow viewport forces ALL rail items collapsed (`data-collapsed="true"`, body absent)
+  - drift panel default-collapsed on desktop + narrow; body absent; expand only on deliberate click
+  - convergence panel default-collapsed on desktop; body absent; expand only on deliberate click
+  - lightest tier (`data-tier-weight` order: status-header=3 > reading-flow=2 > reference-rail=1; rail has no `sticky`, no `bg-{info,warning,danger,success}-subtle`)
+- **Updated** `IssueDetailPage.reading-flow.test.tsx` — the "excludes metadata, model, profile, prerequisites, drift, convergence from the flow" test now asserts drift + convergence via their toggle `data-testid` (`reference-rail-drift-toggle`, `reference-rail-convergence-toggle`) because the bodies are default-collapsed. The actions/details/profile/prerequisites/configuration assertions via heading role remain valid (those cards default-expanded on desktop). 12 reading-flow tests pass; the convergence "Workflow Blocked" text-based check is removed (the text only renders when the panel is expanded).
+
+## Test Setup Notes
+
+- `useNarrowViewport` test isolation: each narrow-viewport test calls `mockMatchMedia(true)` in `beforeEach` so the lazy `useState` initializer sees `matches: true` on the first render of the page. After each test, `vi.unstubAllGlobals()` resets the stub for the next test.
+- jsdom does NOT provide `window.matchMedia` by default. The hook falls back to desktop when `matchMedia` is undefined, which is the safe default for legacy tests (e.g. the existing reading-flow tests do not stub `matchMedia` and therefore exercise the desktop path).
+
+## Decisions Settled in T-003
+
+- **`forceCollapsed` is a one-time seed, not a permanent override.** A naive `collapsed = forceCollapsed || !expanded` would trap the user on narrow viewports. The actual implementation uses `useState(!(defaultCollapsed || forceCollapsed))` so once the user clicks, the local state takes over. This matches the spec ("expand on demand") without violating narrow-screen intent (initial render is collapsed; user opt-in to expand).
+- **Rail keeps `lg:grid-cols-3` + `lg:col-span-2/1` on desktop**; on narrow, the grid falls back to `grid-cols-1` (already established by T-001) and the rail loses `lg:col-span-1`, so both children stack in single column. This is the same grid math that the spec implies — no drawer, no separate mobile layout.
+- **CollapsibleRailCard uses muted tokens (`bg-card/50`) as its outer chrome** to match the CardSection substrate. The rail remains the lightest tier because the inner content (e.g. `IssueConfigurationCard`, `IssueActionsCard`) only uses muted defaults; the headline uses semantic `bg-{info,warning,danger,success}-subtle` + `sticky`, and the reading flow has no chrome at all on its primary content blocks.
+- **Each CollapsibleRailCard carries a stable `data-testid`** (`reference-rail-details`, etc.) plus `-toggle` and `-body` sub-anchors, mirroring the `data-testid` stability rule used by the status-header / reading-flow tests.
+- **No drawer/bottom-sheet** was implemented (explicitly out-of-scope per the next issue).
+
+## Outstanding Scope (deferred to T-004)
+
+- Cross-tier verification gate across every conditional path (archived, backlog readiness, draft, drift, convergence, interrupted health, PR delivery, capacity gating).
+- Mobile drawer/bottom-sheet for the rail (next issue, out of scope).
+- Inline primary action in the sticky headline (D4 alternative, deferred).
