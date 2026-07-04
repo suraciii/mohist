@@ -108,6 +108,7 @@ public static class EpicRoutes
         group.MapPost("/{id}/start", StartRouteAsync);
         group.MapPost("/{id}/pause", PauseRouteAsync);
         group.MapPost("/{id}/resume", ResumeRouteAsync);
+        group.MapPost("/{id}/reopen", ReopenRouteAsync);
 
         return app;
     }
@@ -222,6 +223,30 @@ public static class EpicRoutes
         catch (EpicAlreadyTerminalException ex)
         {
             return ApiResults.Conflict(ex.Message, "EPIC_ALREADY_TERMINAL", new { currentStatus = ex.CurrentStatus, requestedStatus = ex.RequestedStatus });
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
+        {
+            return ApiResults.NotFound(ex.Message);
+        }
+    }
+
+    private static async Task<IResult> ReopenRouteAsync(HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService)
+    {
+        var pid = context.GetResolvedProject().Id;
+        var resolved = int.TryParse(id, out var number)
+            ? await queryService.GetByNumberAsync(pid, number)
+            : await queryService.GetAsync(pid, id);
+        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+
+        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        try
+        {
+            var dto = await grain.ReopenAsync();
+            return ApiResults.Ok(dto);
+        }
+        catch (EpicNotTerminalException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "EPIC_NOT_TERMINAL", new { currentStatus = ex.CurrentStatus });
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
         {

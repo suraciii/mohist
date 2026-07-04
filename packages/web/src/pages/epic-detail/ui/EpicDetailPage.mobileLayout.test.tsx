@@ -311,6 +311,7 @@ describe('EpicDetailPage mobile layout structural contract', () => {
     expect(actionGroup.querySelector('[data-testid="resume-epic-trigger"]')).toBeNull()
     expect(actionGroup.querySelector('[data-testid="mark-epic-done"]')).toBeNull()
     expect(actionGroup.querySelector('[data-testid="close-epic-trigger"]')).toBeNull()
+    expect(actionGroup.querySelector('[data-testid="reopen-epic-trigger"]')).toBeTruthy()
   })
 
   it('omits Start/Pause/Resume lifecycle actions for a closed epic on mobile', () => {
@@ -326,6 +327,7 @@ describe('EpicDetailPage mobile layout structural contract', () => {
     expect(actionGroup.querySelector('[data-testid="resume-epic-trigger"]')).toBeNull()
     expect(actionGroup.querySelector('[data-testid="mark-epic-done"]')).toBeNull()
     expect(actionGroup.querySelector('[data-testid="close-epic-trigger"]')).toBeNull()
+    expect(actionGroup.querySelector('[data-testid="reopen-epic-trigger"]')).toBeTruthy()
   })
 
   it('uses flex-wrap on the LinkedIssueRow action container so Start/Remove can wrap at 320px', () => {

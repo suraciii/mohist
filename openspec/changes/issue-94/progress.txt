@@ -43,3 +43,43 @@
   matches the variant's CLR name (e.g. `EpicCreated`), not the union
   container name `EpicEvent`. The serializer unwraps via `Unwrap(payload)
   .GetType().Name` so the on-disk `Type` column matches the variant.
+
+## T-002 notes
+
+- Foundation: T-002 introduces the `Epic.Reopen(now)` domain transition
+  (Done/Closed → Idle) guarded by a new `EpicNotTerminalException`,
+  mirroring `Issue.Reopen` / `IssueReopened`. The variant
+  `EpicReopened` is now added to the `EpicEvent` union, the
+  `EpicEventSerializer.BusType` switch, and the `EventCatalog.All`
+  inventory (deferred from T-001 by design).
+- `EnsureNotTerminal` is left untouched — `Reopen` is the single, explicit
+  exit from terminal states. Start/Pause/Resume/Done/Close still throw
+  `EpicAlreadyTerminalException` from terminal epics (regression covered
+  by `EpicTransitionsSpecs.EnsureNotTerminal_StillBlocksOtherTransitionsAfterReopenAdded`
+  and `EpicReopenSpecs.ReopenAsync_EnsureNotTerminalStillBlocksOtherTransitionsAfter`).
+- Grain re-claim pattern: `EpicGrain.ReopenAsync` materializes the aggregate,
+  applies `domain.Reopen`, persists the EpicRow state change FIRST (one
+  `SaveChangesAsync`), then loops over the link rows and inserts
+  `EpicActiveIssueRow` per issue. Each insert is its own
+  `SaveChangesAsync` so a duplicate-key race (concurrent active-membership
+  claim) surfaces as a per-issue skip rather than rolling back the
+  re-claim. `GetActiveMembershipOwnerAsync` is the same precheck
+  `LinkIssueAsync` uses, so re-homed issues are silently skipped — the
+  link record stays, the issue is not re-claimed, and reopen does not
+  fail.
+- Web surface: `primaryLifecycleAction` now returns `{ kind: 'reopen-epic' }`
+  for `Done`/`Closed` (was `null`); the detail page renders a Reopen
+  control (`data-testid="reopen-epic-trigger"`) only for terminal epics;
+  `useReopenEpic` invalidates `['epics']`, the project-scoped detail key,
+  and `['issues']` (re-claimed issues surface via `EpicQuerier`).
+- HTTP route: `POST /api/projects/{projectRef}/epics/{id}/reopen` returns
+  200 on terminal epics, 409 `EPIC_NOT_TERMINAL` on non-terminal epics,
+  404 on missing — accepts internal id or number, consistent with the
+  other epic routes.
+- Tests cover: domain transition (`EpicTransitionsSpecs`), grain
+  re-claim incl. re-homed skip (`EpicReopenSpecs`), event publishing
+  (EpicReopened + EpicStatusChanged, fake TimeProvider preserved in
+  envelope time), serializer/catalog coverage of the new variant,
+  HTTP integration (`EpicLifecycleSpecs`), web primary action branch,
+  web Reopen control rendering + mutation, and the query invalidation
+  (`useReopenEpic`).

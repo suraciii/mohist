@@ -131,6 +131,18 @@ public sealed partial class Epic
         RecordEvent(new EpicClosed());
     }
 
+    public void Reopen(DateTime? now = null)
+    {
+        if (_status is not (EpicStatus.Done or EpicStatus.Closed))
+            throw new EpicNotTerminalException(Id, EpicStatusName.ToName(_status));
+        var oldStatus = _status;
+        _status = EpicStatus.Idle;
+        _pauseReason = null;
+        Touch(now);
+        RecordEvent(new EpicStatusChanged(EpicStatusName.ToName(oldStatus), EpicStatusName.ToName(_status)));
+        RecordEvent(new EpicReopened());
+    }
+
     public void LinkIssue(string issueId, int issueNumber, DateTime? now = null)
     {
         if (string.IsNullOrWhiteSpace(issueId))

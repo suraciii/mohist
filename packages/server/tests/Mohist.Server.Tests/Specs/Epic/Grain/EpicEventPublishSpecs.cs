@@ -309,6 +309,7 @@ public class EpicEventPublishSpecs
             (new EpicIssueUnlinked("issue_1", 1), EventCatalog.ReverseDns.EpicIssueUnlinked, nameof(EpicIssueUnlinked)),
             (new EpicStatusChanged("idle", "running"), EventCatalog.ReverseDns.EpicStatusChanged, nameof(EpicStatusChanged)),
             (new EpicClosed(), EventCatalog.ReverseDns.EpicClosed, nameof(EpicClosed)),
+            (new EpicReopened(), EventCatalog.ReverseDns.EpicReopened, nameof(EpicReopened)),
         };
 
         foreach (var (payload, expectedReverseDns, expectedStorageType) in variants)
@@ -348,6 +349,7 @@ public class EpicEventPublishSpecs
             EventCatalog.ReverseDns.EpicIssueUnlinked,
             EventCatalog.ReverseDns.EpicStatusChanged,
             EventCatalog.ReverseDns.EpicClosed,
+            EventCatalog.ReverseDns.EpicReopened,
         };
         foreach (var type in expected)
             Assert.Contains(type, EventCatalog.All);

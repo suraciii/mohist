@@ -300,6 +300,74 @@ public class EpicGrain : Grain, IEpicGrain
         return ToDto(row);
     }
 
+    public async Task<EpicDto> ReopenAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var parts = GrainKey.Split(':');
+        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+        var projectId = parts[0];
+
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+
+        var links = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .ToListAsync();
+        var domain = Materialize(row, links);
+        // Reopen only accepts terminal epics; non-terminal attempts raise
+        // EpicNotTerminalException so the HTTP layer can return 409
+        // EPIC_NOT_TERMINAL. EnsureNotTerminal remains in place for the
+        // other transitions (Start/Pause/Resume/Done/Close) — Reopen is
+        // the single, explicit exit from a terminal state.
+        var now = Now();
+        domain.Reopen(now.UtcDateTime);
+        MapToRow(domain, row, now);
+
+        // Commit the EpicRow state change first. After this, the epic
+        // is non-terminal in the DB so any subsequent link/unlink on
+        // the active-membership invariant will see us as a valid
+        // re-claim candidate.
+        var pending = DrainPendingEvents(domain);
+        await db.SaveChangesAsync();
+
+        // Re-establish active memberships for each linked issue. The
+        // invariant — at most one non-terminal epic actively owns an
+        // issue — is enforced by GetActiveMembershipOwnerAsync. A
+        // linked issue that was re-homed to another non-terminal epic
+        // during the terminal period is silently skipped: its link
+        // record stays, the issue is not re-claimed, and reopen does
+        // not fail. Each insert is its own save so a duplicate-key
+        // race against a concurrent claim surfaces as a per-issue
+        // skip rather than rolling back the rest of the re-claim.
+        foreach (var link in links)
+        {
+            var owner = await GetActiveMembershipOwnerAsync(db, projectId, link.IssueId, epicId);
+            if (owner is not null) continue;
+
+            db.EpicActiveIssues.Add(new EpicActiveIssueRow
+            {
+                ProjectId = projectId,
+                IssueId = link.IssueId,
+                EpicId = epicId,
+                IssueNumber = link.IssueNumber,
+            });
+            try
+            {
+                await db.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                // A concurrent claim won the race; drop the queued
+                // row and move on so the remaining issues still
+                // re-claim and the reopen call returns successfully.
+                db.ChangeTracker.Clear();
+            }
+        }
+
+        await PersistEpicEventsAsync(domain, pending, now);
+        return ToDto(row);
+    }
+
     public async Task<EpicDto?> UpdateAsync(string? title, string? description, string? priority)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();

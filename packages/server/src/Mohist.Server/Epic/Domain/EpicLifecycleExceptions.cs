@@ -13,6 +13,19 @@ public class EpicAlreadyTerminalException : InvalidOperationException
     }
 }
 
+public class EpicNotTerminalException : InvalidOperationException
+{
+    public string EpicId { get; }
+    public string CurrentStatus { get; }
+
+    public EpicNotTerminalException(string epicId, string currentStatus)
+        : base($"Epic {epicId} is {currentStatus}; reopen requires a terminal state (done or closed).")
+    {
+        EpicId = epicId;
+        CurrentStatus = currentStatus;
+    }
+}
+
 public class EpicNotReadyToMarkDoneException : InvalidOperationException
 {
     public string EpicId { get; }

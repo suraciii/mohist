@@ -3,10 +3,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { usePauseEpic, useResumeEpic, useStartEpic, useStartIssue } from './queries'
+import { usePauseEpic, useReopenEpic, useResumeEpic, useStartEpic, useStartIssue } from './queries'
 
 const mocks = vi.hoisted(() => ({
   pauseEpic: vi.fn(),
+  reopenEpic: vi.fn(),
   resumeEpic: vi.fn(),
   startEpic: vi.fn(),
   startIssue: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('./client', () => ({
   markEpicDone: vi.fn(),
   pauseEpic: mocks.pauseEpic,
   removeEpicIssue: vi.fn(),
+  reopenEpic: mocks.reopenEpic,
   resumeEpic: mocks.resumeEpic,
   startEpic: mocks.startEpic,
   updateEpic: vi.fn(),
@@ -54,6 +56,7 @@ describe('epic lifecycle query invalidation', () => {
     vi.clearAllMocks()
     mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
     mocks.pauseEpic.mockResolvedValue({ id: 'epic-1', status: 'paused' })
+    mocks.reopenEpic.mockResolvedValue({ id: 'epic-1', status: 'idle' })
     mocks.resumeEpic.mockResolvedValue({ id: 'epic-1', status: 'running' })
     mocks.startEpic.mockResolvedValue({ id: 'epic-1', status: 'running' })
     mocks.startIssue.mockResolvedValue({ issue: { number: 7 }, message: 'started' })
@@ -155,5 +158,30 @@ describe('epic lifecycle query invalidation', () => {
     result.current.mutate('epic-1')
 
     await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith('EPIC_NOT_RUNNING'))
+  })
+
+  it('calls reopenEpic(id, projectId) when useReopenEpic is mutated', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const { result } = renderHook(() => useReopenEpic(), { wrapper: wrapperFor(queryClient) })
+
+    result.current.mutate('epic-1')
+
+    await waitFor(() => expect(mocks.reopenEpic).toHaveBeenCalledWith('epic-1', 'proj-1'))
+  })
+
+  it('invalidates epic and issue caches after reopening an epic', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    const { result } = renderHook(() => useReopenEpic(), { wrapper: wrapperFor(queryClient) })
+
+    result.current.mutate('epic-1')
+
+    await waitFor(() => expect(mocks.reopenEpic).toHaveBeenCalledWith('epic-1', 'proj-1'))
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['epics'] })
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['epics', 'proj-1', 'epic-1'] })
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    })
+    expect(mocks.toast.success).toHaveBeenCalledWith('Epic reopened')
   })
 })
