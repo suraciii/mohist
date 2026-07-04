@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.SystemInfo;
@@ -10,6 +11,8 @@ namespace Mohist.Server.Tests.Specs.SystemSpecs;
 
 public class SystemUpdateServiceSpecs
 {
+    private static readonly TimeSpan AsyncWaitTimeout = TimeSpan.FromSeconds(5);
+
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
@@ -96,7 +99,7 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_WhenReady_RestartsRunnerBeforeReadyCompletion()
+    public async Task AdvanceActiveJobAsync_WhenReady_RestartsRunnerBeforeReadyCompletion()
     {
         var store = new InMemoryUpdateStore();
         var commands = new RecordingCommandRunner();
@@ -123,10 +126,12 @@ public class SystemUpdateServiceSpecs
             commands,
             new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
 
-        var status = await service.GetLatestStatusAsync();
+        await service.AdvanceActiveJobAsync();
 
-        Assert.Equal("succeeded", status!.Status);
-        Assert.Equal("Ready", status.Stage);
+        var latest = await store.GetLatestAsync();
+        Assert.Equal("succeeded", latest!.Status);
+        Assert.Equal("Ready", latest.Stage);
+        Assert.Equal(latest.CompletedAt, latest.UpdatedAt);
         Assert.Collection(commands.Requests, command =>
         {
             Assert.Equal("systemctl", command.FileName);
@@ -343,7 +348,7 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_DoesNotSucceedUntilReadinessAndHashMatch()
+    public async Task GetStatusEnvelopeAsync_DoesNotSucceedUntilReadinessAndHashMatch()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -372,21 +377,21 @@ public class SystemUpdateServiceSpecs
             CreateInfo(runningGitHash: "newhash", sourceHead: "newhash"));
         var service = CreateService(systemInfo, store, new RecordingCommandRunner(), readiness);
 
-        var first = await service.GetLatestStatusAsync();
-        var second = await service.GetLatestStatusAsync();
-        var third = await service.GetLatestStatusAsync();
+        var first = await service.GetStatusEnvelopeAsync();
+        var second = await service.GetStatusEnvelopeAsync();
+        var third = await service.GetStatusEnvelopeAsync();
 
-        Assert.Equal("waiting-for-reconnect", first!.Status);
-        Assert.Equal("waiting-for-reconnect", second!.Status);
-        Assert.Equal("succeeded", third!.Status);
-        Assert.Equal("Ready", third.Stage);
-        Assert.Contains(third.Logs, log => log.Stage == "Ready" && log.Message.Contains("asset /assets/app.js is ready"));
+        Assert.Equal("waiting-for-reconnect", first.Job!.Status);
+        Assert.Equal("waiting-for-reconnect", second.Job!.Status);
+        Assert.Equal("succeeded", third.Job!.Status);
+        Assert.Equal("Ready", third.Job.Stage);
+        Assert.Contains(third.Job.Logs, log => log.Stage == "Ready" && log.Message.Contains("asset /assets/app.js is ready"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_PersistsReadinessFailuresAcrossReconnectBoundary()
+    public async Task GetStatusEnvelopeAsync_PersistsReadinessFailuresAcrossReconnectBoundary()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -411,18 +416,55 @@ public class SystemUpdateServiceSpecs
             new(true, true, false, "/assets/app.js", "Bundled asset is not ready"));
         var service = CreateService(new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")), store, new RecordingCommandRunner(), readiness);
 
-        var first = await service.GetLatestStatusAsync();
-        var second = await service.GetLatestStatusAsync();
+        var first = await service.GetStatusEnvelopeAsync();
+        var second = await service.GetStatusEnvelopeAsync();
 
-        Assert.Equal("API health endpoint is not ready", first!.Reason);
-        Assert.Equal("Bundled asset is not ready", second!.Reason);
-        Assert.Contains(second.Logs, log => log.Stage == "Waiting for reconnect" && log.Message.Contains("Bundled asset is not ready"));
+        Assert.Equal("API health endpoint is not ready", first.Job!.Reason);
+        Assert.Equal("Bundled asset is not ready", second.Job!.Reason);
+        Assert.Contains(second.Job.Logs, log => log.Stage == "Waiting for reconnect" && log.Message.Contains("Bundled asset is not ready"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_BoundsPersistedLogEntries()
+    public async Task AdvanceActiveJobAsync_DoesNotPersistDuplicateReadinessFailure()
+    {
+        var store = new InMemoryUpdateStore();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            "newhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Still waiting",
+            [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Still waiting")],
+            now,
+            now,
+            null));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(false, false, false, null, "Still waiting")));
+
+        await service.AdvanceActiveJobAsync();
+
+        var latest = await store.GetLatestAsync();
+        Assert.Equal("waiting-for-reconnect", latest!.Status);
+        Assert.Single(latest.Logs);
+        Assert.Single(store.SavedStates);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task AdvanceActiveJobAsync_BoundsPersistedLogEntries()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -451,7 +493,7 @@ public class SystemUpdateServiceSpecs
             new RecordingCommandRunner(),
             new StubReadinessProbe(new(false, false, false, null, "Still waiting")));
 
-        await service.GetLatestStatusAsync();
+        await service.AdvanceActiveJobAsync();
 
         var latest = await store.GetLatestAsync();
         Assert.Equal(200, latest!.Logs.Count);
@@ -462,7 +504,7 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_StaleWaitingForReconnectIsSuperseded()
+    public async Task AdvanceActiveJobAsync_StaleWaitingForReconnectIsSuperseded()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -488,21 +530,19 @@ public class SystemUpdateServiceSpecs
             new RecordingCommandRunner(),
             new StubReadinessProbe(new(false, false, false, null, "ignored")));
 
-        var status = await service.GetLatestStatusAsync();
-
-        Assert.Equal("superseded", status!.Status);
-        Assert.Equal("Superseded", status.Stage);
-        Assert.Contains(status.Logs, log => log.Stage == "Superseded" && log.Message.Contains("currenthash"));
+        await service.AdvanceActiveJobAsync();
 
         var latest = await store.GetLatestAsync();
         Assert.Equal("superseded", latest!.Status);
+        Assert.Equal("Superseded", latest.Stage);
+        Assert.Contains(latest.Logs, log => log.Stage == "Superseded" && log.Message.Contains("currenthash"));
         Assert.Equal("currenthash", latest.RunningGitHash);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_ActiveWaitingForReconnectIsPreservedWhenHashMatches()
+    public async Task GetStatusEnvelopeAsync_ActiveWaitingForReconnectIsPreservedWhenHashMatches()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -528,9 +568,9 @@ public class SystemUpdateServiceSpecs
             new RecordingCommandRunner(),
             new StubReadinessProbe(new(false, false, false, null, "still waiting")));
 
-        var status = await service.GetLatestStatusAsync();
+        var envelope = await service.GetStatusEnvelopeAsync();
 
-        Assert.Equal("waiting-for-reconnect", status!.Status);
+        Assert.Equal("waiting-for-reconnect", envelope.Job!.Status);
         var latest = await store.GetLatestAsync();
         Assert.Equal("waiting-for-reconnect", latest!.Status);
     }
@@ -538,7 +578,7 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_EmptyRunningHashDoesNotSupersede()
+    public async Task AdvanceActiveJobAsync_EmptyRunningHashDoesNotSupersede()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -564,15 +604,16 @@ public class SystemUpdateServiceSpecs
             new RecordingCommandRunner(),
             new StubReadinessProbe(new(false, false, false, null, "waiting")));
 
-        var status = await service.GetLatestStatusAsync();
+        await service.AdvanceActiveJobAsync();
 
-        Assert.Equal("waiting-for-reconnect", status!.Status);
+        var latest = await store.GetLatestAsync();
+        Assert.Equal("waiting-for-reconnect", latest!.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_SupersededStatusDoesNotBlockNewUpdateStarts()
+    public async Task SupersededStatus_DoesNotBlockNewUpdateStarts()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -596,6 +637,139 @@ public class SystemUpdateServiceSpecs
         Assert.NotNull(persisted);
         Assert.False(SystemUpdateService.IsActive(persisted!));
         Assert.True(await store.TryAcquireLockAsync("job-2"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetLatestStatusAsync_DispatchesNoCommandsForActiveJob()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new RecordingCommandRunner();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            "oldhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Waiting for restart",
+            [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting for restart")],
+            now,
+            now,
+            null));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            commands,
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        var status = await service.GetLatestStatusAsync();
+
+        Assert.NotNull(status);
+        Assert.Equal("waiting-for-reconnect", status!.Status);
+        Assert.Empty(commands.Requests);
+
+        var latest = await store.GetLatestAsync();
+        Assert.NotNull(latest);
+        Assert.Single(latest!.Logs);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetLatestStatusAsync_DoesNotPersistStateFile()
+    {
+        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = CreateFileSystemStore(statePath);
+            var commands = new RecordingCommandRunner();
+            var now = DateTimeOffset.UtcNow;
+            var initial = new SystemUpdateJobState(
+                "job-1",
+                "waiting-for-reconnect",
+                "Waiting for reconnect",
+                true,
+                "oldhash",
+                "newhash",
+                "/repo",
+                "mohist.service",
+                "mohist-runner.service",
+                "Waiting for restart",
+                [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting for restart")],
+                now,
+                now,
+                null);
+            await store.SaveAsync(initial);
+
+            var beforeBytes = await File.ReadAllBytesAsync(statePath);
+
+            var service = CreateService(
+                new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+                store,
+                commands,
+                new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+            var status = await service.GetLatestStatusAsync();
+
+            Assert.NotNull(status);
+            Assert.Empty(commands.Requests);
+
+            var afterBytes = await File.ReadAllBytesAsync(statePath);
+            Assert.Equal(beforeBytes, afterBytes);
+        }
+        finally
+        {
+            if (File.Exists(statePath))
+                File.Delete(statePath);
+            if (File.Exists(statePath + ".lock"))
+                File.Delete(statePath + ".lock");
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetLatestStatusAsync_DoesNotReleaseLockAndStartStillRejected()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new RecordingCommandRunner();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            "oldhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Waiting for restart",
+            [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting for restart")],
+            now,
+            now,
+            null));
+
+        Assert.False(await store.TryAcquireLockAsync("job-2"));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            commands,
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        var status = await service.GetLatestStatusAsync();
+
+        Assert.NotNull(status);
+        Assert.Empty(commands.Requests);
+        Assert.False(await store.TryAcquireLockAsync("job-2"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -988,6 +1162,94 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
+    public async Task RunUpdateAsync_OnBuildException_RestoresRunnerWithoutPersistingFailedBeforeRecovery()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new ThrowingCommandRunner(
+            ("dotnet", () => throw new InvalidOperationException("build threw")),
+            ("systemctl", () => new SystemCommandResult(0, "runner restart ok")));
+        var service = CreateService(
+            systemInfo: CreateInfo(),
+            store: store,
+            commandRunner: commands,
+            readinessProbe: new StubReadinessProbe(new(false, false, false, null, "ignored")));
+
+        var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
+        await commands.WaitForCountAsync(2);
+        await store.WaitForStatusAsync("recovered");
+
+        var latest = await store.GetLatestAsync();
+        Assert.True(result.Started);
+        Assert.Equal("recovered", latest!.Status);
+        Assert.Equal("Recovered", latest.Stage);
+        Assert.Equal("recovered", latest.Outcome);
+        Assert.Null(latest.UnavailableCapability);
+        Assert.Contains(latest.Logs, log => log.Stage == "Building" && log.Message == "build threw");
+        Assert.Contains(latest.Logs, log => log.Stage == "Restoring runner");
+        Assert.Contains(latest.Logs, log => log.Stage == "Recovered" && log.Message.Contains("Runner restore succeeded"));
+
+        var restoringIndex = store.SavedStates.FindIndex(state => state.Stage == "Restoring runner");
+        Assert.True(restoringIndex >= 0);
+        Assert.DoesNotContain(store.SavedStates.Take(restoringIndex), state => state.Status == "failed");
+        Assert.DoesNotContain(store.SavedStates, state => state.Status == "failed");
+
+        Assert.Collection(commands.Requests,
+            command => Assert.Equal("dotnet", command.FileName),
+            command =>
+            {
+                Assert.Equal("systemctl", command.FileName);
+                Assert.Equal(["--user", "restart", "mohist-runner.service"], command.Arguments);
+            });
+
+        await store.WaitForUnlockAsync();
+        Assert.True(await store.TryAcquireLockAsync("job-next"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task RunUpdateAsync_OnBuildException_RunnerRestoreFails_MarksFailedAfterRestoreAttempt()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new ThrowingCommandRunner(
+            ("dotnet", () => throw new InvalidOperationException("build threw")),
+            ("systemctl", () => new SystemCommandResult(1, "runner restart failed")));
+        var service = CreateService(
+            systemInfo: CreateInfo(),
+            store: store,
+            commandRunner: commands,
+            readinessProbe: new StubReadinessProbe(new(false, false, false, null, "ignored")));
+
+        var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
+        await commands.WaitForCountAsync(2);
+        await WaitUntilAsync(async () =>
+        {
+            var current = await store.GetLatestAsync();
+            return current?.Status == "failed" && current.Stage == "Failed";
+        });
+
+        var latest = await store.GetLatestAsync();
+        Assert.True(result.Started);
+        Assert.Equal("failed", latest!.Status);
+        Assert.Equal("Failed", latest.Stage);
+        Assert.Equal("failed", latest.Outcome);
+        Assert.Equal("Runner", latest.UnavailableCapability);
+        Assert.Contains(latest.Logs, log => log.Stage == "Building" && log.Message == "build threw");
+        Assert.Contains(latest.Logs, log => log.Stage == "Failed" && log.Message.Contains("mo server start --runner"));
+
+        var restoringIndex = store.SavedStates.FindIndex(state => state.Stage == "Restoring runner");
+        var finalFailedIndex = store.SavedStates.FindLastIndex(state => state.Status == "failed" && state.Stage == "Failed");
+        Assert.True(restoringIndex >= 0);
+        Assert.True(finalFailedIndex > restoringIndex);
+        Assert.DoesNotContain(store.SavedStates.Take(restoringIndex), state => state.Status == "failed");
+
+        await store.WaitForUnlockAsync();
+        Assert.True(await store.TryAcquireLockAsync("job-next"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
     public async Task RunUpdateAsync_OnServerRestartFailure_RestoresRunnerAndMarksRecovered()
     {
         var store = new InMemoryUpdateStore();
@@ -1093,6 +1355,154 @@ public class SystemUpdateServiceSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task PersistTransitionAsync_ReleasesLockOnlyAfterSave()
+    {
+        var store = new OrderTrackingStore();
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        await service.RecordCliOutcomeAsync(new SystemUpdateOutcomeRequest(
+            JobId: "cli-job-1",
+            Status: "succeeded",
+            Stage: "Ready",
+            Outcome: "succeeded",
+            SourceHead: "newhash"));
+
+        var saveIndex = store.Events.IndexOf("Save");
+        var releaseIndex = store.Events.IndexOf("ReleaseLock");
+        Assert.True(saveIndex >= 0);
+        Assert.True(releaseIndex >= 0);
+        Assert.True(saveIndex < releaseIndex, "ReleaseLockAsync must run strictly after SaveAsync");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void SourceAudit_FailedStateIsDefinedOnlyInCreateFailedTransition()
+    {
+        var source = ReadSource();
+        var composerStart = source.IndexOf("private static (SystemUpdateJobState State, SystemUpdateLogEntry LogEntry) CreateFailedTransition", StringComparison.Ordinal);
+        Assert.True(composerStart >= 0, "CreateFailedTransition method not found");
+        var composerEnd = FindMethodEnd(source, composerStart);
+
+        var matches = Regex.Matches(source, @"state\s+with\s*\{[^}]*Status\s*=\s*""failed""", RegexOptions.Singleline);
+        Assert.Single(matches);
+        Assert.InRange(matches[0].Index, composerStart, composerEnd);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void SourceAudit_SaveAsyncOnlyInSharedHelpersAndStartAsync()
+    {
+        var source = ReadSource();
+        var persistStart = source.IndexOf("private async Task<SystemUpdateJobState> PersistTransitionAsync", StringComparison.Ordinal);
+        var persistEnd = FindMethodEnd(source, persistStart);
+        var startAsyncStart = source.IndexOf("public async Task<(bool Started, string? Error, string? Code, SystemUpdateStatusResponse? Status)> StartAsync", StringComparison.Ordinal);
+        var startAsyncEnd = FindMethodEnd(source, startAsyncStart);
+
+        var matches = Regex.Matches(source, @"await\s+_store\.SaveAsync\s*\(");
+        foreach (Match match in matches)
+        {
+            var inPersist = match.Index >= persistStart && match.Index <= persistEnd;
+            var inStartAsync = match.Index >= startAsyncStart && match.Index <= startAsyncEnd;
+            Assert.True(inPersist || inStartAsync,
+                $"_store.SaveAsync call at position {match.Index} is not inside PersistTransitionAsync or StartAsync");
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void SourceAudit_AppendLogInvocationsStayOnSharedHelperPath()
+    {
+        var source = ReadSource();
+        var applyLogStart = source.IndexOf("private static SystemUpdateJobState ApplyTransitionLog", StringComparison.Ordinal);
+        Assert.True(applyLogStart >= 0, "ApplyTransitionLog method not found");
+        var applyLogEnd = FindMethodEnd(source, applyLogStart);
+        var recordOutcomeStart = source.IndexOf("public async Task<SystemUpdateStatusResponse> RecordCliOutcomeAsync", StringComparison.Ordinal);
+        Assert.True(recordOutcomeStart >= 0, "RecordCliOutcomeAsync method not found");
+        var recordOutcomeEnd = FindMethodEnd(source, recordOutcomeStart);
+
+        var matches = Regex.Matches(source, @"(?<!IReadOnlyList<SystemUpdateLogEntry>\s)AppendLog\s*\(");
+        Assert.Equal(2, matches.Count);
+        foreach (Match match in matches)
+        {
+            var inApplyLog = match.Index >= applyLogStart && match.Index <= applyLogEnd;
+            var inRecordOutcome = match.Index >= recordOutcomeStart && match.Index <= recordOutcomeEnd;
+            Assert.True(inApplyLog || inRecordOutcome,
+                $"AppendLog invocation at position {match.Index} is not inside ApplyTransitionLog or CLI outcome log ingestion");
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void SourceAudit_SaveIfCurrentAsyncOnlyInPersistTransitionAsync()
+    {
+        var source = ReadSource();
+        var persistStart = source.IndexOf("private async Task<SystemUpdateJobState> PersistTransitionAsync", StringComparison.Ordinal);
+        var persistEnd = FindMethodEnd(source, persistStart);
+
+        var matches = Regex.Matches(source, @"await\s+_store\.SaveIfCurrentAsync\s*\(");
+        foreach (Match match in matches)
+        {
+            Assert.True(match.Index >= persistStart && match.Index <= persistEnd,
+                $"_store.SaveIfCurrentAsync call at position {match.Index} is not inside PersistTransitionAsync");
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void SourceAudit_ReleaseLockAsyncOnlyInSharedHelpersAndRunUpdateFinally()
+    {
+        var source = ReadSource();
+        var persistStart = source.IndexOf("private async Task<SystemUpdateJobState> PersistTransitionAsync", StringComparison.Ordinal);
+        var persistEnd = FindMethodEnd(source, persistStart);
+        var runUpdateStart = source.IndexOf("private async Task RunUpdateAsync", StringComparison.Ordinal);
+        var runUpdateEnd = FindMethodEnd(source, runUpdateStart);
+
+        var matches = Regex.Matches(source, @"await\s+_store\.ReleaseLockAsync\s*\(");
+        foreach (Match match in matches)
+        {
+            var inPersist = match.Index >= persistStart && match.Index <= persistEnd;
+            var inRunUpdate = match.Index >= runUpdateStart && match.Index <= runUpdateEnd;
+            Assert.True(inPersist || inRunUpdate,
+                $"_store.ReleaseLockAsync call at position {match.Index} is not inside PersistTransitionAsync or RunUpdateAsync");
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void SourceAudit_LogCapDefinedOnce()
+    {
+        var source = ReadSource();
+        Assert.Contains("private const int MaxLogEntries = 200;", source);
+        var capMatches = Regex.Matches(source, @"\b200\b");
+        Assert.Single(capMatches);
+    }
+
+    private static string SourcePath => Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory,
+        "..", "..", "..", "..", "..",
+        "src", "Mohist.Server", "SystemInfo", "SystemUpdateService.cs"));
+
+    private static string ReadSource() => File.ReadAllText(SourcePath);
+
+    private static int FindMethodEnd(string source, int methodStart)
+    {
+        var match = Regex.Match(source.Substring(methodStart), @"\n    (?:private|public|internal) ");
+        return match.Success ? methodStart + match.Index : source.Length;
+    }
+
     private static SystemUpdateService CreateService(
         SystemInfoResponse systemInfo,
         ISystemUpdateStore store,
@@ -1175,8 +1585,38 @@ public class SystemUpdateServiceSpecs
             NullLogger<SystemUpdateService>.Instance);
     }
 
+    private sealed class OrderTrackingStore : ISystemUpdateStore
+    {
+        public List<string> Events { get; } = [];
+
+        public Task<SystemUpdateJobState?> GetLatestAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<SystemUpdateJobState?>(null);
+
+        public Task<bool> TryAcquireLockAsync(string jobId, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+
+        public Task ReleaseLockAsync(string jobId, CancellationToken cancellationToken = default)
+        {
+            Events.Add("ReleaseLock");
+            return Task.CompletedTask;
+        }
+
+        public Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default)
+        {
+            Events.Add("Save");
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> SaveIfCurrentAsync(SystemUpdateJobState expected, SystemUpdateJobState next, CancellationToken cancellationToken = default)
+        {
+            Events.Add("Save");
+            return Task.FromResult(true);
+        }
+    }
+
     private sealed class InMemoryUpdateStore : ISystemUpdateStore
     {
+        private readonly object _gate = new();
         private readonly List<StatusWaiter> _statusWaiters = [];
         // Specs that assert the lock is free after a terminal status must wait
         // for unlock explicitly: the production RunUpdateAsync saves the
@@ -1194,26 +1634,39 @@ public class SystemUpdateServiceSpecs
             _acquireLock = acquireLock;
         }
 
+        public List<SystemUpdateJobState> SavedStates { get; } = [];
+
         public Task<SystemUpdateJobState?> GetLatestAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(_latest);
+        {
+            lock (_gate)
+            {
+                return Task.FromResult(_latest);
+            }
+        }
 
         public Task<bool> TryAcquireLockAsync(string jobId, CancellationToken cancellationToken = default)
         {
-            if (!_acquireLock || _locked || _latest?.Status is "running" or "waiting-for-reconnect")
-                return Task.FromResult(false);
+            lock (_gate)
+            {
+                if (!_acquireLock || _locked || _latest?.Status is "running" or "waiting-for-reconnect")
+                    return Task.FromResult(false);
 
-            _locked = true;
-            _lockOwnerJobId = jobId;
-            return Task.FromResult(true);
+                _locked = true;
+                _lockOwnerJobId = jobId;
+                return Task.FromResult(true);
+            }
         }
 
         public Task ReleaseLockAsync(string jobId, CancellationToken cancellationToken = default)
         {
-            if (_lockOwnerJobId == jobId)
+            lock (_gate)
             {
-                _locked = false;
-                _lockOwnerJobId = null;
-                CompleteUnlockWaiters();
+                if (_lockOwnerJobId == jobId)
+                {
+                    _locked = false;
+                    _lockOwnerJobId = null;
+                    CompleteUnlockWaiters();
+                }
             }
 
             return Task.CompletedTask;
@@ -1221,12 +1674,15 @@ public class SystemUpdateServiceSpecs
 
         public Task WaitForUnlockAsync()
         {
-            if (!_locked)
-                return Task.CompletedTask;
+            lock (_gate)
+            {
+                if (!_locked)
+                    return Task.CompletedTask;
 
-            var waiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _unlockWaiters.Add(waiter);
-            return waiter.Task;
+                var waiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _unlockWaiters.Add(waiter);
+                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+            }
         }
 
         private void CompleteUnlockWaiters()
@@ -1241,32 +1697,44 @@ public class SystemUpdateServiceSpecs
 
         public Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default)
         {
-            _latest = state;
-            CompleteStatusWaiters();
+            lock (_gate)
+            {
+                _latest = state;
+                SavedStates.Add(state);
+                CompleteStatusWaiters();
+            }
+
             return Task.CompletedTask;
         }
 
         public Task<bool> SaveIfCurrentAsync(SystemUpdateJobState expected, SystemUpdateJobState next, CancellationToken cancellationToken = default)
         {
-            if (_latest is null
-                || !string.Equals(_latest.JobId, expected.JobId, StringComparison.Ordinal)
-                || !string.Equals(_latest.Status, expected.Status, StringComparison.Ordinal))
+            lock (_gate)
             {
-                return Task.FromResult(false);
+                if (_latest is null
+                    || !string.Equals(_latest.JobId, expected.JobId, StringComparison.Ordinal)
+                    || !string.Equals(_latest.Status, expected.Status, StringComparison.Ordinal))
+                {
+                    return Task.FromResult(false);
+                }
+                _latest = next;
+                SavedStates.Add(next);
+                CompleteStatusWaiters();
+                return Task.FromResult(true);
             }
-            _latest = next;
-            CompleteStatusWaiters();
-            return Task.FromResult(true);
         }
 
         public Task WaitForStatusAsync(string status)
         {
-            if (string.Equals(_latest?.Status, status, StringComparison.Ordinal))
-                return Task.CompletedTask;
+            lock (_gate)
+            {
+                if (string.Equals(_latest?.Status, status, StringComparison.Ordinal))
+                    return Task.CompletedTask;
 
-            var waiter = new StatusWaiter(status);
-            _statusWaiters.Add(waiter);
-            return waiter.Task;
+                var waiter = new StatusWaiter(status);
+                _statusWaiters.Add(waiter);
+                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+            }
         }
 
         public Task WaitForStatusAndStageAsync(string status, string stage)
@@ -1298,25 +1766,32 @@ public class SystemUpdateServiceSpecs
 
     private sealed class RecordingCommandRunner : ISystemUpdateCommandRunner
     {
+        private readonly object _gate = new();
         private readonly List<CountWaiter> _waiters = [];
         public List<SystemCommandRequest> Requests { get; } = [];
 
         public Task<SystemCommandResult> RunAsync(SystemCommandRequest command, CancellationToken cancellationToken = default)
         {
-            Requests.Add(command);
-            CompleteSatisfiedWaiters();
+            lock (_gate)
+            {
+                Requests.Add(command);
+                CompleteSatisfiedWaiters();
+            }
 
             return Task.FromResult(new SystemCommandResult(0, $"ok:{command.Stage}"));
         }
 
         public Task WaitForCountAsync(int count)
         {
-            if (Requests.Count >= count)
-                return Task.CompletedTask;
+            lock (_gate)
+            {
+                if (Requests.Count >= count)
+                    return Task.CompletedTask;
 
-            var waiter = new CountWaiter(count);
-            _waiters.Add(waiter);
-            return waiter.Task;
+                var waiter = new CountWaiter(count);
+                _waiters.Add(waiter);
+                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+            }
         }
 
         private void CompleteSatisfiedWaiters()
@@ -1335,6 +1810,7 @@ public class SystemUpdateServiceSpecs
 
     private sealed class ScriptedCommandRunner : ISystemUpdateCommandRunner
     {
+        private readonly object _gate = new();
         private readonly (int Index, string FileName, SystemCommandResult Result)[] _script;
         private readonly List<CountWaiter> _waiters = [];
         public List<SystemCommandRequest> Requests { get; } = [];
@@ -1346,9 +1822,13 @@ public class SystemUpdateServiceSpecs
 
         public Task<SystemCommandResult> RunAsync(SystemCommandRequest command, CancellationToken cancellationToken = default)
         {
-            var index = Requests.Count;
-            Requests.Add(command);
-            CompleteSatisfiedWaiters();
+            int index;
+            lock (_gate)
+            {
+                index = Requests.Count;
+                Requests.Add(command);
+                CompleteSatisfiedWaiters();
+            }
 
             if (index >= _script.Length)
                 return Task.FromResult(new SystemCommandResult(0, "ok"));
@@ -1364,12 +1844,76 @@ public class SystemUpdateServiceSpecs
 
         public Task WaitForCountAsync(int count)
         {
-            if (Requests.Count >= count)
-                return Task.CompletedTask;
+            lock (_gate)
+            {
+                if (Requests.Count >= count)
+                    return Task.CompletedTask;
 
-            var waiter = new CountWaiter(count);
-            _waiters.Add(waiter);
-            return waiter.Task;
+                var waiter = new CountWaiter(count);
+                _waiters.Add(waiter);
+                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+            }
+        }
+
+        private void CompleteSatisfiedWaiters()
+        {
+            for (var i = _waiters.Count - 1; i >= 0; i--)
+            {
+                var waiter = _waiters[i];
+                if (Requests.Count < waiter.Count)
+                    continue;
+
+                _waiters.RemoveAt(i);
+                waiter.Complete();
+            }
+        }
+    }
+
+    private sealed class ThrowingCommandRunner : ISystemUpdateCommandRunner
+    {
+        private readonly object _gate = new();
+        private readonly (string FileName, Func<SystemCommandResult> Run)[] _script;
+        private readonly List<CountWaiter> _waiters = [];
+        public List<SystemCommandRequest> Requests { get; } = [];
+
+        public ThrowingCommandRunner(params (string FileName, Func<SystemCommandResult> Run)[] script)
+        {
+            _script = script;
+        }
+
+        public Task<SystemCommandResult> RunAsync(SystemCommandRequest command, CancellationToken cancellationToken = default)
+        {
+            int index;
+            lock (_gate)
+            {
+                index = Requests.Count;
+                Requests.Add(command);
+                CompleteSatisfiedWaiters();
+            }
+
+            if (index >= _script.Length)
+                return Task.FromResult(new SystemCommandResult(0, "ok"));
+
+            var entry = _script[index];
+            if (!string.Equals(entry.FileName, command.FileName, StringComparison.Ordinal))
+            {
+                return Task.FromResult(new SystemCommandResult(-1, $"unexpected command at index {index}: expected {entry.FileName} but got {command.FileName}"));
+            }
+
+            return Task.FromResult(entry.Run());
+        }
+
+        public Task WaitForCountAsync(int count)
+        {
+            lock (_gate)
+            {
+                if (Requests.Count >= count)
+                    return Task.CompletedTask;
+
+                var waiter = new CountWaiter(count);
+                _waiters.Add(waiter);
+                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+            }
         }
 
         private void CompleteSatisfiedWaiters()
