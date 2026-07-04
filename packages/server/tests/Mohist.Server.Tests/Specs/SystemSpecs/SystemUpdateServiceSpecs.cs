@@ -201,6 +201,82 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
+    public async Task StartAsync_DisabledByConfig_ReturnsUpdateDisabledWithoutSideEffects()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new RecordingCommandRunner();
+        var service = CreateService(
+            systemInfo: CreateInfo(),
+            store: store,
+            commandRunner: commands,
+            readinessProbe: new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
+            enabled: "false");
+
+        var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
+
+        Assert.False(result.Started);
+        Assert.Null(result.Status);
+        Assert.Equal("update_disabled", result.Code);
+        Assert.Equal("System update is disabled by configuration", result.Error);
+        Assert.Empty(commands.Requests);
+        Assert.Empty(store.SavedStates);
+        Assert.True(await store.TryAcquireLockAsync("job-next"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData("dirty-source", true, true)]
+    [InlineData("up-to-date", false, false)]
+    public async Task StartAsync_DisabledByConfig_TakesPrecedenceOverDirtySourceAndNoUpdateAvailable(
+        string updateStatus,
+        bool available,
+        bool sourceDirty)
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new RecordingCommandRunner();
+        var service = CreateService(
+            systemInfo: CreateInfo(updateStatus: updateStatus, available: available, sourceDirty: sourceDirty),
+            store: store,
+            commandRunner: commands,
+            readinessProbe: new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
+            enabled: "false");
+
+        var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
+
+        Assert.False(result.Started);
+        Assert.Null(result.Status);
+        Assert.Equal("update_disabled", result.Code);
+        Assert.Equal("System update is disabled by configuration", result.Error);
+        Assert.Empty(commands.Requests);
+        Assert.Empty(store.SavedStates);
+        Assert.True(await store.TryAcquireLockAsync("job-next"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task StartAsync_ExplicitTrueEnablesGate_ProceedsToOtherValidations()
+    {
+        var commands = new RecordingCommandRunner();
+        var store = new InMemoryUpdateStore(acquireLock: false);
+        var service = CreateService(
+            systemInfo: CreateInfo(updateStatus: "update_in_progress_lock_held_by_another", available: true),
+            store: store,
+            commandRunner: commands,
+            readinessProbe: new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
+            enabled: "true");
+
+        var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
+
+        Assert.False(result.Started);
+        Assert.NotEqual("update_disabled", result.Code);
+        Assert.Empty(commands.Requests);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
     public async Task StartAsync_WhenPersistedActiveJobExistsAfterRestart_ReturnsConflict()
     {
         var store = new InMemoryUpdateStore();
@@ -1588,6 +1664,27 @@ public class SystemUpdateServiceSpecs
         Assert.Single(capMatches);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void SourceAudit_IsUpdateEnabledUsesExplicitControlFlow()
+    {
+        var source = ReadSource();
+        var methodStart = source.IndexOf("private bool IsUpdateEnabled()", StringComparison.Ordinal);
+        Assert.True(methodStart >= 0, "IsUpdateEnabled method not found");
+        var methodEnd = FindMethodEnd(source, methodStart);
+        var body = source.Substring(methodStart, methodEnd - methodStart);
+
+        var singleLinePattern = new Regex(
+            @"return\s+string\.IsNullOrWhiteSpace\s*\([^)]*\)\s*\|\|\s*bool\.TryParse\s*\([^)]*\)\s*&&\s*",
+            RegexOptions.Singleline);
+        Assert.Empty(singleLinePattern.Matches(body));
+
+        Assert.Contains("if (!string.IsNullOrWhiteSpace(", body);
+        Assert.Contains("bool.TryParse(", body);
+        Assert.Matches(new Regex(@"return\s+true\s*;"), body);
+    }
+
     private static string SourcePath => Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory,
         "..", "..", "..", "..", "..",
@@ -1610,6 +1707,16 @@ public class SystemUpdateServiceSpecs
         return CreateService(new SequencedSystemInfo(systemInfo), store, commandRunner, readinessProbe);
     }
 
+    private static SystemUpdateService CreateService(
+        SystemInfoResponse systemInfo,
+        ISystemUpdateStore store,
+        ISystemUpdateCommandRunner commandRunner,
+        ISystemReadinessProbe readinessProbe,
+        string? enabled)
+    {
+        return CreateService(new SequencedSystemInfo(systemInfo), store, commandRunner, readinessProbe, enabled);
+    }
+
     private static FileSystemSystemUpdateStore CreateFileSystemStore(string statePath)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -1625,7 +1732,23 @@ public class SystemUpdateServiceSpecs
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe)
     {
-        return CreateService(systemInfo, store, commandRunner, readinessProbe, new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero))).Service;
+        return CreateService(systemInfo, store, commandRunner, readinessProbe, enabled: "true");
+    }
+
+    private static SystemUpdateService CreateService(
+        SequencedSystemInfo systemInfo,
+        ISystemUpdateStore store,
+        ISystemUpdateCommandRunner commandRunner,
+        ISystemReadinessProbe readinessProbe,
+        string? enabled)
+    {
+        return CreateService(
+            systemInfo,
+            store,
+            commandRunner,
+            readinessProbe,
+            new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
+            enabled).Service;
     }
 
     private static (SystemUpdateService Service, FakeTimeProvider Time) CreateService(
@@ -1633,12 +1756,14 @@ public class SystemUpdateServiceSpecs
         ISystemUpdateStore store,
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe,
-        FakeTimeProvider time)
+        FakeTimeProvider time,
+        string? enabled = "true")
     {
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        var settings = new Dictionary<string, string?>
         {
-            ["Mohist:SystemUpdate:Enabled"] = "true"
-        }).Build();
+            ["Mohist:SystemUpdate:Enabled"] = enabled
+        };
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
 
         var service = new SystemUpdateService(
             systemInfo.GetSystemInfoAsync,

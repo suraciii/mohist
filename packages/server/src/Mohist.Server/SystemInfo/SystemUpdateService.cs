@@ -608,7 +608,15 @@ public sealed class SystemUpdateService : ISingletonService
     private bool IsUpdateEnabled()
     {
         var configured = _configuration["Mohist:SystemUpdate:Enabled"];
-        return string.IsNullOrWhiteSpace(configured) || bool.TryParse(configured, out var enabled) && enabled;
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return bool.TryParse(configured, out var enabled) && enabled;
+        }
+
+        // Install mode and install completeness are enforced independently by
+        // ValidateStart (before and after this gate), so the unconfigured default
+        // remains enabled.
+        return true;
     }
 
     internal static bool IsActive(SystemUpdateJobState state)
