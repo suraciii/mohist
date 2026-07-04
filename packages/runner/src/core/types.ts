@@ -231,6 +231,34 @@ export interface RunnerOptions {
   // large value to effectively disable the periodic tick. Used by tests
   // to drive ticks deterministically.
   cleanupLoopIntervalMs?: number
+
+  /**
+   * Optional override for the incremental task-log flush interval in
+   * milliseconds. Defaults to {@link TASK_LOG_FLUSH_INTERVAL_MS}
+   * inside RunnerHost. The trigger fires on either an elapsed
+   * interval since the last fire or a reached line-count threshold;
+   * an empty drain short-circuits without a network round-trip
+   * (design D1).
+   */
+  taskLogFlushIntervalMs?: number
+
+  /**
+   * Optional override for the incremental task-log flush line-count
+   * threshold. Defaults to {@link TASK_LOG_FLUSH_LINE_THRESHOLD}
+   * inside RunnerHost. Crossing this on a captured line fires the
+   * trigger eagerly so a chatty command is not held back by the
+   * interval (design D1).
+   */
+  taskLogFlushLineThreshold?: number
+
+  /**
+   * Optional override for the incremental task-log upload timeout in
+   * milliseconds. Defaults to
+   * {@link TASK_LOG_INCREMENTAL_UPLOAD_TIMEOUT_MS} inside RunnerHost.
+   * Distinct from the terminal-batch timeout because incremental
+   * batches are smaller but the rail tolerates more slack (design D1).
+   */
+  taskLogIncrementalUploadTimeoutMs?: number
 }
 
 export interface RunnerRegistration {

@@ -38,6 +38,8 @@ interface FakeConnection {
   stop: () => Promise<void>
   invoke: (...args: unknown[]) => Promise<unknown>
   emit: (kind: 'reconnecting' | 'reconnected' | 'close') => void
+  handlers: Map<string, Listener>
+  invokes: Array<{ method: string; args: unknown[] }>
 }
 
 const fakeConnections: FakeConnection[] = []
@@ -46,6 +48,8 @@ function makeFakeConnection(): FakeConnection {
   let onReconnectingHandler: Listener | null = null
   let onReconnectedHandler: Listener | null = null
   let onCloseHandler: Listener | null = null
+  const handlers = new Map<string, Listener>()
+  const invokes: Array<{ method: string; args: unknown[] }> = []
   const conn: FakeConnection = {
     state: 0,
     onreconnecting(handler) {
@@ -60,14 +64,20 @@ function makeFakeConnection(): FakeConnection {
       if (handler === undefined) return onCloseHandler
       onCloseHandler = handler
     },
-    on: vi.fn(),
+    on: vi.fn((event: string, handler: Listener) => {
+      handlers.set(event, handler)
+    }),
     start: vi.fn(async () => {
       conn.state = 1
     }),
     stop: vi.fn(async () => {
       conn.state = 0
     }),
-    invoke: vi.fn(async () => undefined),
+    invoke: vi.fn(async (...callArgs: unknown[]) => {
+      const [method, ...args] = callArgs
+      invokes.push({ method: String(method), args })
+      return undefined
+    }),
     emit(kind) {
       if (kind === 'reconnecting') {
         onReconnectingHandler?.()
@@ -79,15 +89,27 @@ function makeFakeConnection(): FakeConnection {
         onCloseHandler?.()
       }
     },
+    handlers,
+    invokes,
   }
   fakeConnections.push(conn)
   return conn
 }
 
 function StateProbe({ projectId, onState }: { projectId: string | null; onState: (s: string) => void }) {
-  const state = useEventsConnection(projectId, () => {}, undefined)
+  const { status: state } = useEventsConnection(projectId, () => {}, undefined)
   onState(state)
   return <div data-testid="state-probe" data-state={state}>{state}</div>
+}
+
+function ChannelProbe({ projectId, onTranscript, onTaskLog }: { projectId: string; onTranscript?: (envelope: unknown) => void; onTaskLog?: (envelope: unknown) => void }) {
+  useEventsConnection(projectId, () => {}, onTranscript, onTaskLog)
+  return null
+}
+
+function TaskLogOnlyProbe({ projectId, onTaskLog }: { projectId: string; onTaskLog?: (envelope: unknown) => void }) {
+  useEventsConnection(projectId, () => {}, undefined, onTaskLog, { applyDefaultSubscriptions: false })
+  return null
 }
 
 function ToastProbe() {
@@ -188,6 +210,60 @@ describe('useEventsConnection state tracking', () => {
     await waitFor(() => {
       expect((screen.getByTestId('state-probe') as HTMLElement).dataset.state).toBe('disconnected')
     })
+  })
+
+  it('binds OnTaskLogDelta as a new optional callback, separate from OnEvent and OnTranscriptEvent', async () => {
+    const transcriptCalls: unknown[] = []
+    const taskLogCalls: unknown[] = []
+
+    renderWithHost(
+      <ChannelProbe
+        projectId="proj-1"
+        onTranscript={(envelope) => transcriptCalls.push(envelope)}
+        onTaskLog={(envelope) => taskLogCalls.push(envelope)}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(fakeConnections.length).toBeGreaterThan(0)
+    })
+
+    const conn = fakeConnections[fakeConnections.length - 1]
+    await waitFor(() => {
+      expect(conn.handlers.has('OnEvent')).toBe(true)
+    })
+
+    expect(conn.handlers.has('OnTranscriptEvent')).toBe(true)
+    expect(conn.handlers.has('OnTaskLogDelta')).toBe(true)
+
+    const transcriptHandler = conn.handlers.get('OnTranscriptEvent')!
+    const taskLogHandler = conn.handlers.get('OnTaskLogDelta')!
+
+    await act(async () => {
+      transcriptHandler({ type: 'message.delta', sessionId: 's-1', sequence: 1, createdAt: 't', payload: { text: 'x' } })
+    })
+    await act(async () => {
+      taskLogHandler({ ownerKind: 'workflow', ownerId: 'wr-1', workId: 'w-1', taskId: 't-1', entries: [], truncated: false })
+    })
+
+    expect(transcriptCalls).toHaveLength(1)
+    expect(taskLogCalls).toHaveLength(1)
+    expect(transcriptCalls[0]).not.toBe(taskLogCalls[0])
+  })
+
+  it('can open a task-log-only connection without default domain or transcript subscriptions', async () => {
+    renderWithHost(<TaskLogOnlyProbe projectId="proj-1" onTaskLog={() => {}} />)
+
+    await waitFor(() => {
+      expect(fakeConnections.length).toBeGreaterThan(0)
+    })
+
+    const conn = fakeConnections[fakeConnections.length - 1]
+    await waitFor(() => {
+      expect(conn.handlers.has('OnTaskLogDelta')).toBe(true)
+    })
+
+    expect(conn.invokes.some((invoke) => invoke.method === 'SetSubscriptionsAsync')).toBe(false)
   })
 })
 

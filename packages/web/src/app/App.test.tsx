@@ -124,7 +124,7 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
       isLoading: false,
     })
     epicMocks.useEpic.mockReturnValue({ data: undefined, isLoading: false })
-    eventMocks.useEventsConnection.mockReturnValue('disconnected')
+    eventMocks.useEventsConnection.mockReturnValue({ status: 'disconnected', connection: null })
     inboxMocks.useInbox.mockReturnValue({ data: [], isLoading: false })
     inboxMocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     inboxMocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
@@ -201,7 +201,7 @@ describe('App routing split for settings scopes', () => {
       isLoading: false,
     })
     epicMocks.useEpic.mockReturnValue({ data: undefined, isLoading: false })
-    eventMocks.useEventsConnection.mockReturnValue('disconnected')
+    eventMocks.useEventsConnection.mockReturnValue({ status: 'disconnected', connection: null })
     inboxMocks.useInbox.mockReturnValue({ data: [], isLoading: false })
     inboxMocks.useMarkInboxItemRead.mockReturnValue({ mutate: vi.fn(), isPending: false })
     inboxMocks.useMarkAllInboxRead.mockReturnValue({ mutate: vi.fn(), isPending: false })

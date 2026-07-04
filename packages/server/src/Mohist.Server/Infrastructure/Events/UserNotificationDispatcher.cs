@@ -63,6 +63,23 @@ public sealed class ConnectionSubscriptionRegistry : ISingletonService
     private readonly ConcurrentDictionary<string, string?> _byConnectionProjectId = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// connectionId → set of <c>(workflowRunId, taskId)</c> pairs the
+    /// connection has expanded in the Web and therefore wants
+    /// task-log deltas for. Mirrors the
+    /// <see cref="_byConnectionProjectId"/> affinity map's structure
+    /// and lifetime. Read on every task-log fan-out by
+    /// <see cref="SignalRTaskLogDeltaPublisher"/> to gate on-demand
+    /// distribution: an empty set means the connection has not
+    /// expanded any task, so the publisher silently drops any
+    /// delta for this connection. A task-log <c>Subscribe</c> /
+    /// <c>Unsubscribe</c> hub call updates this set together
+    /// with the per-task type-subscription. Transport-level state,
+    /// NOT durable — the Web is expected to re-assert the per-task
+    /// subscribe on SignalR reconnect (see design D5).
+    /// </summary>
+    private readonly ConcurrentDictionary<string, HashSet<TaskLogSubscriptionKey>> _byConnectionTaskLog = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Snapshot of all currently-tracked connection IDs. Read by
     /// <see cref="UserNotificationDispatcher"/> on every emit.
     /// </summary>
@@ -84,12 +101,14 @@ public sealed class ConnectionSubscriptionRegistry : ISingletonService
     {
         _byConnection.TryAdd(connectionId, new HashSet<string>(StringComparer.Ordinal));
         _byConnectionProjectId.TryAdd(connectionId, null);
+        _byConnectionTaskLog.TryAdd(connectionId, new HashSet<TaskLogSubscriptionKey>());
     }
 
     public void UnregisterConnection(string connectionId)
     {
         _byConnection.TryRemove(connectionId, out _);
         _byConnectionProjectId.TryRemove(connectionId, out _);
+        _byConnectionTaskLog.TryRemove(connectionId, out _);
     }
 
     public void SetSubscriptions(string connectionId, IReadOnlyCollection<string> eventTypes)
@@ -164,7 +183,99 @@ public sealed class ConnectionSubscriptionRegistry : ISingletonService
         projectId = null;
         return false;
     }
+
+    /// <summary>
+    /// Replace the connection's task-log scope with exactly
+    /// <paramref name="subscriptions"/>. Idempotent against
+    /// repeated invocations with the same set. The
+    /// <see cref="SignalRTaskLogDeltaPublisher"/> reads this set
+    /// on every fan-out to gate on-demand delivery: a connection
+    /// outside the set never receives a delta even when its
+    /// type-subscription contains the task-log marker.
+    /// </summary>
+    public void SetTaskLogSubscriptions(
+        string connectionId,
+        IReadOnlyCollection<(string WorkflowRunId, string TaskId)> subscriptions)
+    {
+        var set = new HashSet<TaskLogSubscriptionKey>();
+        if (subscriptions is not null)
+        {
+            foreach (var (runId, taskId) in subscriptions)
+            {
+                if (string.IsNullOrEmpty(runId) || string.IsNullOrEmpty(taskId)) continue;
+                set.Add(new TaskLogSubscriptionKey(runId, taskId));
+            }
+        }
+        _byConnectionTaskLog[connectionId] = set;
+    }
+
+    /// <summary>
+    /// Add a single <c>(workflowRunId, taskId)</c> pair to the
+    /// connection's task-log scope. Empty / whitespace pair
+    /// segments are ignored. Idempotent.
+    /// </summary>
+    public void SubscribeTaskLog(string connectionId, string workflowRunId, string taskId)
+    {
+        if (string.IsNullOrEmpty(workflowRunId) || string.IsNullOrEmpty(taskId)) return;
+        var set = _byConnectionTaskLog.GetOrAdd(
+            connectionId,
+            _ => new HashSet<TaskLogSubscriptionKey>());
+        var key = new TaskLogSubscriptionKey(workflowRunId, taskId);
+        lock (set) { set.Add(key); }
+    }
+
+    /// <summary>
+    /// Remove a single <c>(workflowRunId, taskId)</c> pair from
+    /// the connection's task-log scope. Empty / whitespace pair
+    /// segments are ignored. No-op when the pair was never
+    /// present or the connection is not registered.
+    /// </summary>
+    public void UnsubscribeTaskLog(string connectionId, string workflowRunId, string taskId)
+    {
+        if (string.IsNullOrEmpty(workflowRunId) || string.IsNullOrEmpty(taskId)) return;
+        if (_byConnectionTaskLog.TryGetValue(connectionId, out var set))
+        {
+            var key = new TaskLogSubscriptionKey(workflowRunId, taskId);
+            lock (set) { set.Remove(key); }
+        }
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the connection has BOTH:
+    /// <list type="bullet">
+    ///   <item>opted into the task-log realtime channel via its
+    ///         type-subscription set (<see cref="ShouldNotify"/>);
+    ///         AND</item>
+    ///   <item>declared interest in the given
+    ///         <c>(workflowRunId, taskId)</c> via its task-log
+    ///         scope set.</item>
+    /// </list>
+    /// A <c>null</c> or empty <paramref name="workflowRunId"/> /
+    /// <paramref name="taskId"/> means the task-log scope can
+    /// never match — the publisher treats that as "no fan-out".
+    /// </summary>
+    public bool ShouldNotifyTaskLog(string connectionId, string? workflowRunId, string? taskId)
+    {
+        if (!ShouldNotify(connectionId, TaskLogDeltaSubscription.TaskLogDeltaSubscriptionType))
+            return false;
+        if (string.IsNullOrEmpty(workflowRunId) || string.IsNullOrEmpty(taskId))
+            return false;
+        if (!_byConnectionTaskLog.TryGetValue(connectionId, out var set))
+            return false;
+        var key = new TaskLogSubscriptionKey(workflowRunId, taskId);
+        return set.Contains(key);
+    }
 }
+
+/// <summary>
+/// Composite key for the per-connection task-log scope set. The
+/// <c>(workflowRunId, taskId)</c> pair is the on-demand delivery
+/// dimension (see design D5): a client receives a delta for a
+/// task only when it has explicitly subscribed to that pair.
+/// </summary>
+public readonly record struct TaskLogSubscriptionKey(
+    string WorkflowRunId,
+    string TaskId);
 
 /// <summary>
 /// Default <see cref="IUserNotificationDispatcher"/> implementation:

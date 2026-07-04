@@ -286,3 +286,152 @@ describe("TaskLogger single sink", () => {
     expect(flushed.entries[0]!.text).not.toContain("runner-token-ABCDEF-1234567890")
   })
 })
+
+describe("TaskLogCollector incremental drain + sent-seq watermark (Phase 2 T-003)", () => {
+  let now: Date
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-07-01T00:00:00.000Z"))
+    now = new Date()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("DrainReturnsNothingBeforeAnyAppend", () => {
+    const collector = new TaskLogCollector()
+    expect(collector.drain()).toBeNull()
+    expect(collector.pendingSinceWatermark()).toBe(0)
+  })
+
+  it("DrainReturnsAllEntriesOnFirstCallAndAdvancesWatermark", () => {
+    const collector = new TaskLogCollector()
+    collector.append("a", "1")
+    collector.append("a", "2")
+    collector.append("a", "3")
+    const batch = collector.drain()
+    expect(batch).not.toBeNull()
+    expect(batch!.entries.map((e) => e.seq)).toEqual([1, 2, 3])
+    expect(collector.pendingSinceWatermark()).toBe(0)
+  })
+
+  it("SecondDrainExcludesLinesAlreadySent", () => {
+    const collector = new TaskLogCollector()
+    collector.append("a", "1")
+    collector.append("a", "2")
+    collector.append("a", "3")
+    const first = collector.drain()
+    expect(first!.entries.map((e) => e.seq)).toEqual([1, 2, 3])
+
+    collector.append("a", "4")
+    collector.append("a", "5")
+    const second = collector.drain()
+    expect(second!.entries.map((e) => e.seq)).toEqual([4, 5])
+    expect(second!.entries.map((e) => e.text)).toEqual(["4", "5"])
+  })
+
+  it("DrainReturnsNullWhenNoNewLinesSinceLastDrain", () => {
+    const collector = new TaskLogCollector()
+    collector.append("a", "1")
+    collector.append("a", "2")
+    const first = collector.drain()
+    expect(first!.entries).toHaveLength(2)
+
+    // No new lines appended between drains.
+    expect(collector.drain()).toBeNull()
+    expect(collector.pendingSinceWatermark()).toBe(0)
+  })
+
+  it("DrainReturnsDefensiveCopy_LaterAppendsDoNotMutateReturnedBatch", () => {
+    const collector = new TaskLogCollector()
+    collector.append("a", "1")
+    const first = collector.drain()
+    expect(first!.entries).toHaveLength(1)
+    collector.append("a", "2")
+    expect(first!.entries).toHaveLength(1)
+    expect(first!.entries[0]!.text).toBe("1")
+  })
+
+  it("WatermarkAdvancesPastHeadDroppedSeqs_AndDrainOnlyReturnsLiveEntries", () => {
+    const collector = new TaskLogCollector({ maxLines: 3 })
+    for (let i = 0; i < 5; i++) collector.append("a", `line ${i}`)
+    // Buffer keeps tail (seq 3, 4, 5); discarded seqs 1, 2 are gone.
+    const drained = collector.drain()
+    expect(drained!.entries.map((e) => e.seq)).toEqual([3, 4, 5])
+    expect(drained!.truncated).toBe(true)
+    // Subsequent appends must still respect the watermark: no seq
+    // 1 or 2 reappears.
+    collector.append("a", "line 5")
+    const second = collector.drain()
+    expect(second!.entries.map((e) => e.seq)).toEqual([6])
+  })
+
+  it("FlushAdvancesWatermarkSoFollowupDrainIsNull", () => {
+    const collector = new TaskLogCollector()
+    collector.append("a", "1")
+    collector.append("a", "2")
+    const terminal = collector.flush()
+    expect(terminal.entries.map((e) => e.seq)).toEqual([1, 2])
+    // After flush the watermark is past the tail — drain must be null.
+    expect(collector.drain()).toBeNull()
+    expect(collector.pendingSinceWatermark()).toBe(0)
+  })
+
+  it("FlushStillReturnsFullSnapshot_NotJustUnsentLines", () => {
+    // flush() is the terminal reconciliation batch and must return
+    // the COMPLETE snapshot, including lines already drained. This
+    // is the design D1 reconciliation contract.
+    const collector = new TaskLogCollector()
+    collector.append("a", "1")
+    collector.append("a", "2")
+    collector.append("a", "3")
+    const drained = collector.drain()
+    expect(drained!.entries.map((e) => e.seq)).toEqual([1, 2, 3])
+    collector.append("a", "4")
+    const terminal = collector.flush()
+    expect(terminal.entries.map((e) => e.seq)).toEqual([1, 2, 3, 4])
+  })
+
+  it("SetAppendListenerFiresSynchronouslyOnEachAppend_AndCanBeCleared", () => {
+    const collector = new TaskLogCollector()
+    const seen: number[] = []
+    const listener = (entry: { seq: number }) => {
+      seen.push(entry.seq)
+    }
+    collector.setAppendListener(listener)
+    collector.append("a", "1")
+    collector.append("a", "2")
+    expect(seen).toEqual([1, 2])
+    collector.setAppendListener(null)
+    collector.append("a", "3")
+    expect(seen).toEqual([1, 2])
+  })
+
+  it("PendingSinceWatermarkReflectsUnflushedLines", () => {
+    const collector = new TaskLogCollector()
+    expect(collector.pendingSinceWatermark()).toBe(0)
+    collector.append("a", "1")
+    collector.append("a", "2")
+    expect(collector.pendingSinceWatermark()).toBe(2)
+    collector.drain()
+    expect(collector.pendingSinceWatermark()).toBe(0)
+    collector.append("a", "3")
+    expect(collector.pendingSinceWatermark()).toBe(1)
+  })
+
+  it("AppendListenerSeesTheAssignedSeq_BeforeDrainObservedIt", () => {
+    const collector = new TaskLogCollector()
+    let seqAtFire: number | null = null
+    let drainCount = 0
+    collector.setAppendListener((entry) => {
+      seqAtFire = entry.seq
+      // At the moment of the append, the watermark is one less than
+      // the new entry's seq (this is the FIRST time pendingSinceWatermark
+      // would include the entry).
+      drainCount = collector.pendingSinceWatermark()
+    })
+    collector.append("a", "hello")
+    expect(seqAtFire).toBe(1)
+    expect(drainCount).toBe(1)
+  })
+})

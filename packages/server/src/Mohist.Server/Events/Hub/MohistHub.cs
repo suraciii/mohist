@@ -27,6 +27,27 @@ public interface IEventsClient
     /// the other.
     /// </summary>
     Task OnTranscriptEvent(TranscriptEnvelope envelope);
+
+    /// <summary>
+    /// Receive a task-log (non-domain runtime) delta from the
+    /// dedicated <see cref="ITaskLogDeltaPublisher"/> channel. Carries
+    /// a <see cref="TaskLogDeltaEnvelope"/> whose
+    /// <c>(ownerKind, ownerId, workId, taskId)</c> identify the
+    /// work item whose execution log has just been persisted, and
+    /// whose <c>entries</c> are the newly persisted lines
+    /// (deduplicated by <c>Seq</c> on the server before publish).
+    ///
+    /// <para>
+    /// Physically separate from both <see cref="OnEvent"/> (domain
+    /// events, CloudEventBus) and <see cref="OnTranscriptEvent"/>
+    /// (session-scoped runtime). A task-log delta never appears on
+    /// the transcript channel and a transcript envelope never
+    /// appears on this channel — the three channels are independent
+    /// SignalR methods each with its own publisher and its own
+    /// subscription filter.
+    /// </para>
+    /// </summary>
+    Task OnTaskLogDelta(TaskLogDeltaEnvelope envelope);
 }
 
 /// <summary>
@@ -41,16 +62,25 @@ public interface IEventsClient
 /// <see cref="IHubClients{T}.Client(string)"/>.
 ///
 /// <para>
-/// <b>Two channels, one hub</b>. The hub exposes both
+/// <b>Three channels, one hub</b>. The hub exposes
 /// <see cref="IEventsClient.OnEvent"/> (domain events, fanned out
-/// by <see cref="EventBridge"/> from the CloudEventBus) and
-/// <see cref="IEventsClient.OnTranscriptEvent"/> (non-domain
-/// runtime event data, fanned out by
+/// by <see cref="EventBridge"/> from the CloudEventBus),
+/// <see cref="IEventsClient.OnTranscriptEvent"/> (agent-session
+/// non-domain runtime event data, fanned out by
 /// <see cref="Mohist.Server.Infrastructure.Events.SignalRTranscriptEventPublisher"/>
-/// directly). Both are filtered by the same per-connection
-/// subscription set in <see cref="ConnectionSubscriptionRegistry"/>,
-/// so a client opts into a transcript type by including it in its
-/// <see cref="SetSubscriptionsAsync"/> list.
+/// directly) and
+/// <see cref="IEventsClient.OnTaskLogDelta"/> (ops task-log
+/// runtime deltas, fanned out by
+/// <see cref="Mohist.Server.Infrastructure.Events.SignalRTaskLogDeltaPublisher"/>
+/// directly). All three are filtered by the per-connection
+/// subscription set in <see cref="ConnectionSubscriptionRegistry"/>;
+/// a client opts into a transcript / task-log type by including
+/// it in its <see cref="SetSubscriptionsAsync"/> list. The task-log
+/// channel additionally gates on a per-task
+/// <c>(workflowRunId, taskId)</c> scope updated by
+/// <see cref="SubscribeTaskLogAsync"/> /
+/// <see cref="UnsubscribeTaskLogAsync"/>; the publisher skips
+/// push to connections outside the scope (on-demand fan-out).
 /// </para>
 ///
 /// <para>
@@ -214,5 +244,68 @@ public sealed class MohistHub : Hub<IEventsClient>
         _registry.Unsubscribe(Context.ConnectionId, eventType);
         var grain = _grains.GetGrain<IConnectionSubscriptionGrain>(Context.ConnectionId);
         await grain.UnsubscribeAsync(eventType);
+    }
+
+    /// <summary>
+    /// Subscribe this connection to live task-log fan-out for the
+    /// given <c>(workflowRunId, taskId)</c>. Updates the
+    /// process-local <see cref="ConnectionSubscriptionRegistry"/> (the
+    /// hot path <see cref="Mohist.Server.Infrastructure.Events.SignalRTaskLogDeltaPublisher"/>
+    /// reads on every publish) plus the connection's
+    /// <see cref="Mohist.Server.User.Grains.IConnectionSubscriptionGrain"/>
+    /// (durable replay source).
+    ///
+    /// <para>
+    /// The first call from a client also adds the canonical
+    /// <see cref="TaskLogDeltaSubscription.TaskLogDeltaSubscriptionType"/>
+    /// to the connection's type-subscription set so the publisher's
+    /// type filter passes. Subsequent calls are idempotent.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Reconnect</b>: the Web is expected to re-invoke this from
+    /// its SignalR <c>onreconnected</c> handler. The connection
+    /// starts with an empty scope on a fresh connection id, so a
+    /// re-subscribe is required to keep receiving deltas after a
+    /// reconnect that rotated the id. We deliberately do not store
+    /// task-log scope in the durable grain to avoid carrying new
+    /// grain state (see design Open Questions).
+    /// </para>
+    /// </summary>
+    public async Task SubscribeTaskLogAsync(string workflowRunId, string taskId)
+    {
+        if (string.IsNullOrWhiteSpace(workflowRunId) || string.IsNullOrWhiteSpace(taskId)) return;
+
+        _registry.SubscribeTaskLog(Context.ConnectionId, workflowRunId, taskId);
+        // Ensure the type filter also passes — a connection that
+        // declared interest in a task but never added the
+        // task-log.delta type would otherwise silently fail the
+        // ShouldNotifyTaskLog gate.
+        _registry.Subscribe(Context.ConnectionId, TaskLogDeltaSubscription.TaskLogDeltaSubscriptionType);
+
+        // Mirror the type-subscription on the durable grain so
+        // reconnect replay re-asserts the type. The task scope
+        // itself is not durable — the Web re-asserts it on reconnect.
+        var grain = _grains.GetGrain<IConnectionSubscriptionGrain>(Context.ConnectionId);
+        await grain.SubscribeAsync(TaskLogDeltaSubscription.TaskLogDeltaSubscriptionType);
+
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Unsubscribe this connection from live task-log fan-out for
+    /// the given <c>(workflowRunId, taskId)</c>. Removes the pair
+    /// from the registry's task scope set; the type-subscription
+    /// (added by <see cref="SubscribeTaskLogAsync"/>) is left in
+    /// place because removing it would interfere with any other
+    /// task the connection might still be watching.
+    /// </summary>
+    public Task UnsubscribeTaskLogAsync(string workflowRunId, string taskId)
+    {
+        if (string.IsNullOrWhiteSpace(workflowRunId) || string.IsNullOrWhiteSpace(taskId))
+            return Task.CompletedTask;
+
+        _registry.UnsubscribeTaskLog(Context.ConnectionId, workflowRunId, taskId);
+        return Task.CompletedTask;
     }
 }

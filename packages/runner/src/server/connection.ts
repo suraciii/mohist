@@ -183,6 +183,7 @@ export class ServerConnection {
     batch: TaskLogBatch,
     signal: AbortSignal,
     ownerKind: string = "workflow",
+    terminal = false,
   ): Promise<TaskLogUploadResult> {
     const body = {
       entries: batch.entries.map((entry) => ({
@@ -192,6 +193,7 @@ export class ServerConnection {
         text: entry.text,
       })),
       truncated: batch.truncated,
+      terminal,
     }
     const response = await fetch(this.taskLogUrl(ownerId, workId, ownerKind), {
       method: "POST",

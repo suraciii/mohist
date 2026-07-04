@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { HubConnectionBuilder } from '@microsoft/signalr'
+import { ProjectProvider } from '../../../entities/project'
 import { TaskProgressPanel } from './TaskProgressPanel'
 import {
   WorkflowStage,
@@ -16,8 +19,57 @@ vi.mock('../../../entities/issue', async (importOriginal) => ({
   useIssueWorkflowTaskLog: vi.fn(),
 }))
 
+vi.mock('@microsoft/signalr', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@microsoft/signalr')>()
+  return {
+    ...actual,
+    HubConnectionBuilder: vi.fn(),
+  }
+})
+
 const mockedUseWorkflowTimeline = vi.mocked(useWorkflowTimeline)
 const mockedUseIssueWorkflowTaskLog = vi.mocked(useIssueWorkflowTaskLog)
+
+const projects = [
+  {
+    id: 'proj-1',
+    name: 'Project 1',
+    path: '/tmp/p1',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    repositories: [],
+  },
+]
+
+const recordedInvokes: Array<{ method: string; args: unknown[] }> = []
+
+function mockConnectionBuilder() {
+  function FakeBuilder(this: unknown) {
+    return {
+      withUrl: () => ({
+        withAutomaticReconnect: () => ({
+          configureLogging: () => ({
+            build: () => ({
+              state: 0,
+              on: vi.fn(),
+              onreconnecting: vi.fn(),
+              onreconnected: vi.fn(),
+              onclose: vi.fn(),
+              start: vi.fn(async () => undefined),
+              stop: vi.fn(async () => undefined),
+              invoke: vi.fn(async (...callArgs: unknown[]) => {
+                const [method, ...args] = callArgs
+                recordedInvokes.push({ method: String(method), args })
+                return undefined
+              }),
+            }),
+          }),
+        }),
+      }),
+    }
+  }
+  vi.mocked(HubConnectionBuilder).mockImplementation(FakeBuilder as unknown as typeof HubConnectionBuilder)
+}
 
 function makeTimeline(): WorkflowTimeline {
   return {
@@ -67,6 +119,36 @@ function makeTimeline(): WorkflowTimeline {
   }
 }
 
+function makeRunningTimeline(): WorkflowTimeline {
+  const timeline = makeTimeline()
+  return {
+    ...timeline,
+    status: 'Running',
+    stages: [
+      {
+        ...timeline.stages[0],
+        status: 'running',
+        tasks: [
+          {
+            id: 'build-running-1',
+            title: 'Generate OpenSpec',
+            uses: 'mohist/openspec',
+            status: 'running',
+            startedAt: '2026-01-01T00:00:00.000Z',
+            completedAt: null,
+            durationMs: null,
+            attempts: 1,
+            message: null,
+            output: null,
+          },
+        ],
+        checks: [],
+        approval: null,
+      },
+    ],
+  }
+}
+
 function setLogPage(page: TaskLogPage | { isLoading: true } | { isError: true } | undefined) {
   if (page === undefined) {
     mockedUseIssueWorkflowTaskLog.mockReturnValue({ data: undefined, isLoading: false, isError: false } as never)
@@ -101,17 +183,49 @@ function makeLine(overrides: Partial<TaskLogLine>): TaskLogLine {
   }
 }
 
+function renderWithQueryClient(ui: React.ReactNode) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+}
+
+function renderWithQueryClientAndProject(ui: React.ReactNode) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
+        {ui}
+      </ProjectProvider>
+    </QueryClientProvider>,
+  )
+}
+
 describe('TaskProgressPanel — task execution log panel', () => {
   afterEach(() => {
     cleanup()
+    recordedInvokes.length = 0
     vi.clearAllMocks()
+  })
+
+  it('allows expanding a running task and subscribes its log panel for live updates', async () => {
+    mockConnectionBuilder()
+    mockedUseWorkflowTimeline.mockReturnValue({ data: makeRunningTimeline() } as never)
+    setLogPage({ lines: [], nextCursor: null, truncated: false })
+
+    renderWithQueryClientAndProject(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={true} />)
+
+    await expandFailedTask('Generate OpenSpec')
+
+    expect(await screen.findByTestId('task-log-panel')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(true)
+    })
   })
 
   it('renders the task log panel inside the expanded region of a failed task', async () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
     setLogPage( { lines: [], nextCursor: null, truncated: false })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
@@ -125,7 +239,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
     setLogPage( { lines: [], nextCursor: null, truncated: false })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
@@ -147,7 +261,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
       truncated: false,
     })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
@@ -174,7 +288,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
       truncated: false,
     })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
@@ -205,7 +319,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
         truncated: true,
       })
 
-      render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+      renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
       await expandFailedTask('Rebase onto master')
 
@@ -231,7 +345,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
       truncated: true,
     })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
@@ -248,7 +362,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
       truncated: false,
     })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
@@ -262,7 +376,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
     setLogPage( { lines: [], nextCursor: null, truncated: false })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
@@ -278,7 +392,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
       truncated: false,
     })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Build artifacts')
 
@@ -289,7 +403,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
     setLogPage( { lines: [], nextCursor: null, truncated: false })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
@@ -302,7 +416,7 @@ describe('TaskProgressPanel — task execution log panel', () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
     setLogPage( { lines: [], nextCursor: null, truncated: false })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
@@ -321,7 +435,7 @@ describe('TaskProgressPanel — log query degrades gracefully', () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
     setLogPage( undefined)
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
@@ -332,7 +446,7 @@ describe('TaskProgressPanel — log query degrades gracefully', () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
     setLogPage( { isError: true })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 
@@ -343,7 +457,7 @@ describe('TaskProgressPanel — log query degrades gracefully', () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as never)
     setLogPage( { isLoading: true })
 
-    render(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
+    renderWithQueryClient(<TaskProgressPanel issueNumber={161} currentStage={WorkflowStage.Build} isAgentRunning={false} />)
 
     await expandFailedTask('Rebase onto master')
 

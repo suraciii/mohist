@@ -77,6 +77,7 @@ public static class MohistServiceRegistration
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddSingleton<IUserNotificationDispatcher, UserNotificationDispatcher>();
         services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
+        services.AddSingleton<ITaskLogDeltaPublisher, SignalRTaskLogDeltaPublisher>();
         services.AddHostedService<AttachmentCleanupService>();
         services.AddHostedService<EpicReconciliationService>();
         services.AddOptions<StagePopulationSnapshotOptions>()

@@ -1,13 +1,31 @@
 import { useEffect, useRef } from 'react'
-import { useIssueWorkflowTaskLog } from '../../../entities/issue'
+import { useQueryClient } from '@tanstack/react-query'
+import type { HubConnection } from '@microsoft/signalr'
+import { useProject } from '../../../entities/project'
+import { useIssueWorkflowTaskLog, type TaskLogLine, type TaskLogPage } from '../../../entities/issue'
+import {
+  useEventsConnection,
+  subscribeTaskLog,
+  unsubscribeTaskLog,
+  type TaskLogDeltaEnvelopeWire,
+} from '../../../shared/api/events-hub'
+import type { StageTaskStatus } from '../../../entities/issue/model/stage-state'
 
 interface TaskLogPanelProps {
   issueNumber: number
   taskId: string
   workflowRunId?: string | null
+  taskStatus?: StageTaskStatus | null
 }
 
 const TASK_LOG_RETAINED_LIMIT = 5000
+const TASK_LOG_QUERY_KEY_NAMESPACE = 'workflow-task-log'
+
+const TERMINAL_TASK_STATUSES: ReadonlySet<StageTaskStatus> = new Set<StageTaskStatus>([
+  'completed',
+  'failed',
+  'skipped',
+])
 
 function formatTimestamp(iso: string): string {
   const parsed = new Date(iso)
@@ -19,15 +37,155 @@ function formatTimestamp(iso: string): string {
   return `${hh}:${mm}:${ss}.${ms}`
 }
 
-export function TaskLogPanel({ issueNumber, taskId, workflowRunId }: TaskLogPanelProps) {
-  const { data, isLoading, isError } = useIssueWorkflowTaskLog(issueNumber, taskId, { limit: TASK_LOG_RETAINED_LIMIT }, true, workflowRunId)
+function isTerminalStatus(status: StageTaskStatus | null | undefined): boolean {
+  return !!status && TERMINAL_TASK_STATUSES.has(status)
+}
+
+function buildTaskLogQueryKey(
+  issueNumber: number,
+  taskId: string,
+  projectId: string,
+  workflowRunId: string | null,
+  params: { limit: number },
+): unknown[] {
+  return [issueNumber, taskId, projectId, workflowRunId, TASK_LOG_QUERY_KEY_NAMESPACE, params]
+}
+
+function isTaskLogEnvelope(value: unknown): value is TaskLogDeltaEnvelopeWire {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<TaskLogDeltaEnvelopeWire>
+  return (
+    typeof candidate.ownerKind === 'string' &&
+    typeof candidate.ownerId === 'string' &&
+    typeof candidate.workId === 'string' &&
+    Array.isArray(candidate.entries) &&
+    typeof candidate.truncated === 'boolean'
+  )
+}
+
+export function mergeTaskLogDelta(
+  page: TaskLogPage | undefined,
+  delta: TaskLogDeltaEnvelopeWire,
+): TaskLogPage {
+  const lines: TaskLogLine[] = page ? [...page.lines] : []
+  const existingSeqs = new Set<number>(lines.map((line) => line.seq))
+  const incoming: TaskLogLine[] = []
+  for (const entry of delta.entries) {
+    if (existingSeqs.has(entry.seq)) continue
+    incoming.push({
+      seq: entry.seq,
+      timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : new Date().toISOString(),
+      source: entry.source,
+      text: entry.text,
+    })
+    existingSeqs.add(entry.seq)
+  }
+  const sorted = lines.concat(incoming).sort((a, b) => a.seq - b.seq)
+  const retained = sorted.length > TASK_LOG_RETAINED_LIMIT
+    ? sorted.slice(sorted.length - TASK_LOG_RETAINED_LIMIT)
+    : sorted
+  const truncated = !!(delta.truncated || page?.truncated || retained.length < sorted.length)
+  return {
+    lines: retained,
+    nextCursor: retained.length < sorted.length ? null : (page?.nextCursor ?? null),
+    truncated,
+  }
+}
+
+export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }: TaskLogPanelProps) {
+  const { projectId } = useProject()
+  const queryClient = useQueryClient()
+  const { data, isLoading, isError } = useIssueWorkflowTaskLog(
+    issueNumber,
+    taskId,
+    { limit: TASK_LOG_RETAINED_LIMIT },
+    true,
+    workflowRunId,
+  )
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const subscribedRef = useRef(false)
+  const subscribedConnectionRef = useRef<HubConnection | null>(null)
+  const subscribedReconnectVersionRef = useRef<number | null>(null)
+  const terminalNow = isTerminalStatus(taskStatus)
+
+  const onTaskLogDelta = (envelope: unknown) => {
+    if (!isTaskLogEnvelope(envelope)) return
+    const taskScope = envelope.taskId
+    if (taskScope == null) return
+    if (taskScope !== taskId) return
+    if (envelope.ownerKind !== 'workflow') return
+    if (envelope.ownerId !== workflowRunId) return
+    if (!projectId) return
+    const queryKey = buildTaskLogQueryKey(issueNumber, taskId, projectId, workflowRunId ?? null, { limit: TASK_LOG_RETAINED_LIMIT })
+    queryClient.setQueryData<TaskLogPage | undefined>(queryKey, (current) => mergeTaskLogDelta(current, envelope))
+  }
+
+  const { connection, reconnectVersion } = useEventsConnection(projectId, () => {}, undefined, onTaskLogDelta, {
+    applyDefaultSubscriptions: false,
+  })
 
   useEffect(() => {
     const node = scrollRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
   }, [data?.lines.length])
+
+  useEffect(() => {
+    if (!projectId || !workflowRunId) return
+
+    if (terminalNow) {
+      if (subscribedRef.current) {
+        subscribedRef.current = false
+        const conn = subscribedConnectionRef.current
+        subscribedConnectionRef.current = null
+        subscribedReconnectVersionRef.current = null
+        if (conn) {
+          void unsubscribeTaskLog(conn, { workflowRunId, taskId })
+        }
+      }
+      queryClient.invalidateQueries({
+        queryKey: [issueNumber, taskId, projectId, workflowRunId, TASK_LOG_QUERY_KEY_NAMESPACE],
+      })
+      return
+    }
+
+    if (taskStatus !== 'running') {
+      if (subscribedRef.current) {
+        subscribedRef.current = false
+        const conn = subscribedConnectionRef.current
+        subscribedConnectionRef.current = null
+        subscribedReconnectVersionRef.current = null
+        if (conn) {
+          void unsubscribeTaskLog(conn, { workflowRunId, taskId })
+        }
+      }
+      return
+    }
+
+    if (!connection) return
+    if (
+      subscribedRef.current &&
+      subscribedConnectionRef.current === connection &&
+      subscribedReconnectVersionRef.current === reconnectVersion
+    ) return
+    subscribedRef.current = true
+    subscribedConnectionRef.current = connection
+    subscribedReconnectVersionRef.current = reconnectVersion
+    void subscribeTaskLog(connection, { workflowRunId, taskId })
+  }, [connection, reconnectVersion, terminalNow, taskStatus, projectId, workflowRunId, issueNumber, taskId, queryClient])
+
+  useEffect(() => {
+    return () => {
+      const wasSubscribed = subscribedRef.current
+      const conn = subscribedConnectionRef.current
+      subscribedRef.current = false
+      subscribedConnectionRef.current = null
+      subscribedReconnectVersionRef.current = null
+      if (wasSubscribed && conn && workflowRunId) {
+        void unsubscribeTaskLog(conn, { workflowRunId, taskId })
+      }
+    }
+  }, [workflowRunId, taskId])
 
   const lines = data?.lines ?? []
   const truncated = data?.truncated ?? false

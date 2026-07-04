@@ -95,7 +95,7 @@ public static class TaskLogRoutes
         bool accepted;
         try
         {
-            accepted = await service.AppendAsync(runnerId, ownerKind, ownerId, workId, validation.Lines, body.Truncated, cancellationToken);
+            accepted = await service.AppendAsync(runnerId, ownerKind, ownerId, workId, validation.Lines, body.Truncated, body.Terminal, cancellationToken);
         }
         catch (ArgumentException ex)
         {
@@ -113,6 +113,7 @@ public static class TaskLogRoutes
             workId,
             accepted = entries.Count,
             truncated = body.Truncated,
+            terminal = body.Terminal,
         });
     }
 
@@ -177,6 +178,13 @@ public sealed class TaskLogUploadRequest
     /// earliest lines are not available.
     /// </summary>
     public bool Truncated { get; set; }
+
+    /// <summary>
+    /// True for the runner's final reconciliation snapshot. Terminal
+    /// batches are authoritative for the retained rows, so rows outside
+    /// this snapshot are pruned from the store.
+    /// </summary>
+    public bool Terminal { get; set; }
 }
 
 public sealed class TaskLogUploadEntry

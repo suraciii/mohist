@@ -44,7 +44,7 @@ function StageTaskStatusIcon({ status }: { status: StageTaskState['status'] }) {
 function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: StageTaskState; isRunning: boolean; issueNumber: number; workflowRunId?: string | null }) {
   const [expanded, setExpanded] = useState(false)
   const isFailed = task.status === 'failed'
-  const canExpand = typeof task.taskId === 'string' && task.taskId.length > 0 && (task.status === 'failed' || task.status === 'completed')
+  const canExpand = typeof task.taskId === 'string' && task.taskId.length > 0 && (task.status === 'failed' || task.status === 'completed' || task.status === 'running')
   const isInProgress = isRunning && task.status === 'running'
   const isDeliveryTask = isDeliveryFailureTask(task)
   const taskReason = typeof task.reason === 'string' ? task.reason : null
@@ -170,7 +170,7 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: Stage
             </p>
           )}
           {typeof task.taskId === 'string' && task.taskId.length > 0 && (
-            <TaskLogPanel issueNumber={issueNumber} taskId={task.taskId} workflowRunId={workflowRunId} />
+            <TaskLogPanel issueNumber={issueNumber} taskId={task.taskId} workflowRunId={workflowRunId} taskStatus={task.status} />
           )}
         </div>
       )}
