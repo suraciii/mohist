@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { HubConnection } from '@microsoft/signalr'
 import { useProject } from '../../../entities/project'
@@ -63,6 +63,11 @@ function isTaskLogEnvelope(value: unknown): value is TaskLogDeltaEnvelopeWire {
   )
 }
 
+function buildExportFilename(taskId: string): string {
+  const isoDate = new Date().toISOString().slice(0, 10)
+  return `task-logs-${taskId}-${isoDate}.txt`
+}
+
 export function mergeTaskLogDelta(
   page: TaskLogPage | undefined,
   delta: TaskLogDeltaEnvelopeWire,
@@ -108,6 +113,10 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
   const subscribedReconnectVersionRef = useRef<number | null>(null)
   const terminalNow = isTerminalStatus(taskStatus)
 
+  const [searchQuery, setSearchQuery] = useState('')
+  const [disabledSources, setDisabledSources] = useState<Set<string>>(new Set())
+  const [userPausedAutoFollow, setUserPausedAutoFollow] = useState(false)
+
   const onTaskLogDelta = (envelope: unknown) => {
     if (!isTaskLogEnvelope(envelope)) return
     const taskScope = envelope.taskId
@@ -124,11 +133,79 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
     applyDefaultSubscriptions: false,
   })
 
+  const lines = data?.lines ?? []
+  const truncated = data?.truncated ?? false
+
+  const sources = useMemo(
+    () => Array.from(new Set(lines.map((line) => line.source))).sort(),
+    [lines],
+  )
+
+  const filtered = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    return lines.filter((line) => {
+      if (disabledSources.has(line.source)) return false
+      if (!query) return true
+      const haystack = `${line.text} ${line.source}`.toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [lines, disabledSources, searchQuery])
+
+  const visibleLines = filtered.length
+
+  const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(event.target.value)
+  }, [])
+
+  const toggleSource = useCallback((source: string) => {
+    setDisabledSources((prev) => {
+      const next = new Set(prev)
+      if (next.has(source)) {
+        next.delete(source)
+      } else {
+        next.add(source)
+      }
+      return next
+    })
+  }, [])
+
+  const handleDownload = useCallback(() => {
+    if (filtered.length === 0) return
+    const text = filtered.map((line) => line.text).join('\n')
+    const blob = new Blob([text], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = buildExportFilename(taskId)
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+  }, [filtered, taskId])
+
   useEffect(() => {
     const node = scrollRef.current
     if (!node) return
+    if (userPausedAutoFollow) return
     node.scrollTop = node.scrollHeight
-  }, [data?.lines.length])
+  }, [visibleLines, userPausedAutoFollow])
+
+  useEffect(() => {
+    const node = scrollRef.current
+    if (!node) return
+    const handleScroll = () => {
+      const distFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight
+      if (distFromBottom > 10) {
+        setUserPausedAutoFollow(true)
+      } else {
+        setUserPausedAutoFollow(false)
+      }
+    }
+    node.addEventListener('scroll', handleScroll, { passive: true })
+    return () => {
+      node.removeEventListener('scroll', handleScroll)
+    }
+  }, [])
 
   useEffect(() => {
     if (!projectId || !workflowRunId) return
@@ -187,13 +264,52 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
     }
   }, [workflowRunId, taskId])
 
-  const lines = data?.lines ?? []
-  const truncated = data?.truncated ?? false
+  const renderScrollBody = () => {
+    if (isLoading) {
+      return <div className="text-slate-400">Loading execution log…</div>
+    }
+    if (isError) {
+      return <div className="text-slate-400">Execution log unavailable</div>
+    }
+    if (lines.length === 0) {
+      return (
+        <div className="text-slate-400" data-testid="task-log-empty">
+          No execution log captured for this task.
+        </div>
+      )
+    }
+    const trimmedQuery = searchQuery.trim()
+    if (filtered.length === 0) {
+      if (trimmedQuery) {
+        return (
+          <div className="text-slate-400" data-testid="task-log-no-search-match">
+            No lines match &lsquo;{trimmedQuery}&rsquo;
+          </div>
+        )
+      }
+      return (
+        <div className="text-slate-400" data-testid="task-log-no-source-match">
+          No lines match the active source filters
+        </div>
+      )
+    }
+    return (
+      <ol className="space-y-0.5" data-testid="task-log-lines">
+        {filtered.map((line) => (
+          <li key={line.seq} className="flex gap-2 whitespace-pre-wrap break-words">
+            <span className="text-slate-500 flex-shrink-0">{formatTimestamp(line.timestamp)}</span>
+            <span className="text-sky-300 flex-shrink-0">[{line.source}]</span>
+            <span className="flex-1 min-w-0">{line.text}</span>
+          </li>
+        ))}
+      </ol>
+    )
+  }
 
   return (
     <div className="rounded border border-slate-200 bg-white px-2 py-1.5 space-y-1" data-testid="task-log-panel">
-      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-slate-500">
-        <span>Execution log</span>
+      <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-slate-500">
+        <span className="shrink-0">Execution log</span>
         {truncated && (
           <span
             className="rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 font-mono normal-case tracking-normal"
@@ -202,31 +318,75 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
             Earlier lines truncated — showing retained tail
           </span>
         )}
+        <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 normal-case tracking-normal sm:flex-initial">
+          <div className="relative min-w-0 flex-1 basis-44 sm:flex-initial sm:basis-auto">
+            <svg
+              className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                fillRule="evenodd"
+                d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
+                clipRule="evenodd"
+              />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={handleSearchChange}
+              placeholder="Search log lines…"
+              aria-label="Search log lines"
+              data-testid="task-log-search-input"
+              className="w-full rounded-md border border-slate-300 bg-white pl-7 pr-3 py-1 text-[11px] text-slate-900 placeholder-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 focus:outline-none min-h-[28px] sm:w-48"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={visibleLines === 0}
+            aria-label="Download execution log"
+            data-testid="task-log-download-button"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors min-h-[28px]"
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
+              <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
+            </svg>
+            <span>Download</span>
+          </button>
+        </div>
       </div>
+      {sources.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap" data-testid="task-log-source-chips">
+          {sources.map((source) => {
+            const disabled = disabledSources.has(source)
+            return (
+              <button
+                key={source}
+                type="button"
+                onClick={() => toggleSource(source)}
+                aria-pressed={!disabled}
+                data-testid={`task-log-source-chip-${source}`}
+                className={
+                  disabled
+                    ? 'inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-semibold text-slate-400 line-through transition-colors'
+                    : 'inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-200 transition-colors'
+                }
+              >
+                {source}
+              </button>
+            )
+          })}
+        </div>
+      )}
       <div
         ref={scrollRef}
         className="max-h-64 overflow-y-auto rounded bg-slate-900 text-slate-100 font-mono text-[11px] leading-snug p-2"
         data-testid="task-log-scroll"
       >
-        {isLoading ? (
-          <div className="text-slate-400">Loading execution log…</div>
-        ) : isError ? (
-          <div className="text-slate-400">Execution log unavailable</div>
-        ) : lines.length === 0 ? (
-          <div className="text-slate-400" data-testid="task-log-empty">
-            No execution log captured for this task.
-          </div>
-        ) : (
-          <ol className="space-y-0.5" data-testid="task-log-lines">
-            {lines.map((line) => (
-              <li key={line.seq} className="flex gap-2 whitespace-pre-wrap break-words">
-                <span className="text-slate-500 flex-shrink-0">{formatTimestamp(line.timestamp)}</span>
-                <span className="text-sky-300 flex-shrink-0">[{line.source}]</span>
-                <span className="flex-1 min-w-0">{line.text}</span>
-              </li>
-            ))}
-          </ol>
-        )}
+        {renderScrollBody()}
       </div>
     </div>
   )
