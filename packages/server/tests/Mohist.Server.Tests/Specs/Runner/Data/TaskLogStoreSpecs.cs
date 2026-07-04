@@ -221,6 +221,40 @@ public class TaskLogStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AppendAsync_TerminalBatchPrunesRowsOutsideRetainedTail()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+
+        await _store.AppendAsync(ownerKind, ownerId, workId,
+            Enumerable.Range(1, 5000)
+                .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "incremental", $"line-{seq}"))
+                .ToList(),
+            truncated: false);
+        await _store.AppendAsync(ownerKind, ownerId, workId,
+            Enumerable.Range(5001, 1000)
+                .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "incremental", $"line-{seq}"))
+                .ToList(),
+            truncated: true);
+
+        await _store.AppendAsync(ownerKind, ownerId, workId,
+            Enumerable.Range(1001, 5000)
+                .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "terminal", $"line-{seq}"))
+                .ToList(),
+            truncated: true,
+            terminal: true);
+
+        var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 5000);
+
+        Assert.Equal(5000, page.Lines.Count);
+        Assert.Equal(1001, page.Lines[0].Seq);
+        Assert.Equal(6000, page.Lines[^1].Seq);
+        Assert.True(page.Truncated);
+        Assert.Null(page.NextCursor);
+    }
+
+    [Fact]
     public async Task AppendAsync_TerminalBatchRestoresLinesMissingFromFailedIncrement()
     {
         var ownerKind = "workflow";

@@ -174,10 +174,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     {
         // When the work item is owned by a workflow run, the
         // publisher's envelope must carry the resolved taskId
-        // (so the Web can route the delta to the expanded task)
-        // and the corresponding cache must produce a stable
-        // stamp on subsequent appends without re-loading the
-        // workflow-run state.
+        // so the Web can route the delta to the expanded task.
         await SeedOutstandingWorkAsync("runner-A", TaskLogOwnershipKinds.Workflow, "wf-1", "w-x");
         await SeedWorkflowRunAsync("wf-1", "task-X", "w-x");
 
@@ -194,6 +191,31 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         Assert.Equal(2, publisher.Published.Count);
         Assert.All(publisher.Published, e => Assert.Equal("task-X", e.TaskId));
         Assert.All(publisher.Published, e => Assert.Equal("proj-1", e.ProjectId));
+    }
+
+    [Fact]
+    public async Task AppendAsync_ResolvesTaskIdFromCurrentWorkflowRunState_WhenWorkMappingChanges()
+    {
+        await SeedOutstandingWorkAsync("runner-A", TaskLogOwnershipKinds.Workflow, "wf-remap", "w-reused");
+        await SeedWorkflowRunAsync("wf-remap", "task-old", "w-reused");
+
+        var publisher = new RecordingPublisher();
+        var service = NewService(publisher);
+
+        await service.AppendAsync(
+            "runner-A", TaskLogOwnershipKinds.Workflow, "wf-remap", "w-reused",
+            NewEntries(1, 1), truncated: false);
+
+        await SeedWorkflowRunAsync("wf-remap", "task-new", "w-reused");
+
+        await service.AppendAsync(
+            "runner-A", TaskLogOwnershipKinds.Workflow, "wf-remap", "w-reused",
+            NewEntries(2, 1), truncated: false);
+
+        Assert.Collection(
+            publisher.Published,
+            first => Assert.Equal("task-old", first.TaskId),
+            second => Assert.Equal("task-new", second.TaskId));
     }
 
     [Fact]
@@ -313,11 +335,19 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         };
 
         await using var db = new MohistDbContext(_options);
-        db.WorkflowRuns.Add(new WorkflowRunRow
+        var row = await db.WorkflowRuns.FirstOrDefaultAsync(r => r.WorkflowRunId == workflowRunId);
+        if (row is null)
         {
-            WorkflowRunId = workflowRunId,
-            State = JSON.Serialize(run),
-        });
+            db.WorkflowRuns.Add(new WorkflowRunRow
+            {
+                WorkflowRunId = workflowRunId,
+                State = JSON.Serialize(run),
+            });
+        }
+        else
+        {
+            row.State = JSON.Serialize(run);
+        }
         await db.SaveChangesAsync();
     }
 

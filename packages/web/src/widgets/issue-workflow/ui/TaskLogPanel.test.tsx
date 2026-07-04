@@ -227,6 +227,22 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     expect(subInvoke?.args).toEqual(['wr-1', 'build-task-1'])
   })
 
+  it('does not subscribe the task-log panel connection to domain or transcript event types', async () => {
+    const harness = buildHarness(makePage([]))
+
+    renderWithHarness(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
+      harness,
+    )
+
+    await flushAndGetLastConnection()
+
+    await waitFor(() => {
+      expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(true)
+    })
+    expect(recordedInvokes.some((inv) => inv.method === 'SetSubscriptionsAsync')).toBe(false)
+  })
+
   it('does not subscribe when the task is in a terminal state', async () => {
     const harness = buildHarness(makePage([]))
 
@@ -554,5 +570,38 @@ describe('mergeTaskLogDelta — pure merge', () => {
     const merged = mergeTaskLogDelta(page, delta)
     expect(merged.lines).toEqual(page.lines)
     expect(merged.truncated).toBe(page.truncated)
+  })
+
+  it('keeps only the retained tail when live deltas grow beyond the panel limit', () => {
+    const page = makePage(
+      Array.from({ length: 5000 }, (_, index) => makeLine({ seq: index + 1, text: `cached-${index + 1}` })),
+    )
+    const delta = makeEnvelope(
+      Array.from({ length: 5 }, (_, index) => ({ seq: 5001 + index, text: `live-${5001 + index}` })),
+    )
+
+    const merged = mergeTaskLogDelta(page, delta)
+
+    expect(merged.lines).toHaveLength(5000)
+    expect(merged.lines[0].seq).toBe(6)
+    expect(merged.lines[merged.lines.length - 1].seq).toBe(5005)
+    expect(merged.truncated).toBe(true)
+    expect(merged.nextCursor).toBeNull()
+  })
+
+  it('drops late low-seq deltas once the cache already contains a retained tail', () => {
+    const page = makePage(
+      Array.from({ length: 5000 }, (_, index) => makeLine({ seq: 1001 + index, text: `tail-${1001 + index}` })),
+      true,
+    )
+    const delta = makeEnvelope([{ seq: 999, text: 'old-head' }])
+
+    const merged = mergeTaskLogDelta(page, delta)
+
+    expect(merged.lines).toHaveLength(5000)
+    expect(merged.lines[0].seq).toBe(1001)
+    expect(merged.lines[merged.lines.length - 1].seq).toBe(6000)
+    expect(merged.lines.some((line) => line.seq === 999)).toBe(false)
+    expect(merged.truncated).toBe(true)
   })
 })

@@ -474,7 +474,7 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     await vi.advanceTimersByTimeAsync(120)
     collector.append("a", "2")
     await vi.advanceTimersByTimeAsync(120)
-    trigger.stop()
+    await trigger.stop()
 
     expect(flushCalls.length).toBeGreaterThanOrEqual(2)
     // Each incremental carries only the NEW lines since the last drain.
@@ -512,7 +512,7 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     await vi.advanceTimersByTimeAsync(80)
     collector.append("a", "5")
     await vi.advanceTimersByTimeAsync(80)
-    trigger.stop()
+    await trigger.stop()
 
     expect(drainedSeqs[0]).toEqual([1, 2])
     expect(drainedSeqs[1]).toEqual([3, 4])
@@ -535,7 +535,7 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 60, 1_000)
 
     await vi.advanceTimersByTimeAsync(300)
-    trigger.stop()
+    await trigger.stop()
 
     // The trigger fired multiple times, but the host-side upload
     // helper is invoked only when the drain returns non-null.
@@ -571,7 +571,7 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     expect(drainedSeqs[0]).toEqual([1, 2, 3])
 
     collector.setAppendListener(null)
-    trigger.stop()
+    await trigger.stop()
     vi.useRealTimers()
   })
 
@@ -618,11 +618,42 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     collector.append("a", "1")
     await vi.advanceTimersByTimeAsync(80)
     // Stop BEFORE the next tick — no further fires.
-    trigger.stop()
+    await trigger.stop()
     const beforeCount = drainedSeqs.length
     await vi.advanceTimersByTimeAsync(500)
     expect(drainedSeqs.length).toBe(beforeCount)
     vi.useRealTimers()
+  })
+
+  it("IncrementalFlushesAreSerialized_WhenTriggerFiresDuringInFlightUpload", async () => {
+    const resolvers: Array<() => void> = []
+    let active = 0
+    let maxActive = 0
+    const flushIncremental = vi.fn(() => new Promise<void>((resolve) => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      resolvers.push(() => {
+        active -= 1
+        resolve()
+      })
+    }))
+
+    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 10_000, 1)
+
+    trigger.noteAppend()
+    trigger.noteAppend()
+    trigger.noteAppend()
+
+    expect(flushIncremental).toHaveBeenCalledTimes(1)
+    expect(maxActive).toBe(1)
+
+    resolvers.shift()?.()
+    await vi.waitFor(() => expect(flushIncremental).toHaveBeenCalledTimes(2))
+    expect(maxActive).toBe(1)
+
+    resolvers.shift()?.()
+    await trigger.stop()
+    expect(active).toBe(0)
   })
 
   it("FlushTriggerTimingIsDrivenByFakeTimers_NoWallClock", async () => {
@@ -643,7 +674,7 @@ describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () =>
     collector.append("a", "1")
     await vi.advanceTimersByTimeAsync(110)
     expect(drainCount).toBe(1)
-    trigger.stop()
+    await trigger.stop()
     vi.useRealTimers()
   })
 })

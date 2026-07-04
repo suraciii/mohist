@@ -81,10 +81,13 @@ export function mergeTaskLogDelta(
     existingSeqs.add(entry.seq)
   }
   const sorted = lines.concat(incoming).sort((a, b) => a.seq - b.seq)
-  const truncated = !!(delta.truncated || page?.truncated)
+  const retained = sorted.length > TASK_LOG_RETAINED_LIMIT
+    ? sorted.slice(sorted.length - TASK_LOG_RETAINED_LIMIT)
+    : sorted
+  const truncated = !!(delta.truncated || page?.truncated || retained.length < sorted.length)
   return {
-    lines: sorted,
-    nextCursor: page?.nextCursor ?? null,
+    lines: retained,
+    nextCursor: retained.length < sorted.length ? null : (page?.nextCursor ?? null),
     truncated,
   }
 }
@@ -117,7 +120,9 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
     queryClient.setQueryData<TaskLogPage | undefined>(queryKey, (current) => mergeTaskLogDelta(current, envelope))
   }
 
-  const { connection, reconnectVersion } = useEventsConnection(projectId, () => {}, undefined, onTaskLogDelta)
+  const { connection, reconnectVersion } = useEventsConnection(projectId, () => {}, undefined, onTaskLogDelta, {
+    applyDefaultSubscriptions: false,
+  })
 
   useEffect(() => {
     const node = scrollRef.current

@@ -4,136 +4,58 @@
 
 ## Repaired Items
 
-- None.
+None.
 
 ## Blocking Items
 
 - [ID: item-1]
   Severity: blocking
-  Scope: packages/server/src/Mohist.Server/Infrastructure/Data/Runner/TaskLogStore.cs
-  Evidence: The issue requires incremental appends to be non-destructive and terminal batches to dedup by seq. The current store still loads all existing entries for the same owner/work at lines 56-58, removes them at lines 59-62, and inserts every incoming row at lines 83-96. The old regression test still locks in replacement behavior in packages/server/tests/Mohist.Server.Tests/Specs/Runner/Data/TaskLogStoreSpecs.cs lines 161-187. This means a second incremental upload erases earlier persisted rows until a terminal upload succeeds; if the terminal upload fails, the authoritative store is incomplete. [disallowed:product-behavior/data-safety]
-  SuggestedAction: Change TaskLogStore.AppendAsync to query existing seqs in the transaction, insert only missing seqs, and update batch metadata without deleting existing entries. Replace the old replacement spec with union/dedup specs for incremental append and terminal reconciliation.
-  Verification: Add tests for append seq 1-2 then seq 3-4 yielding 1-4, and append seq 1-10 then terminal seq 1-15 yielding exactly one row per seq with no unique-index failure. Rerun `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --no-restore --filter "FullyQualifiedName~TaskLogStoreSpecs|FullyQualifiedName~TaskLogServicePersistThenPublishSpecs"`.
+  Scope: packages/server/src/Mohist.Server/Infrastructure/Data/Runner/TaskLogStore.cs; packages/runner/src/runtime/task-log.ts
+  Evidence: Incremental uploads make the authoritative store retain head lines that the terminal collector has already discarded. The runner buffer is capped at 5000 lines and drops the head on overflow (`MAX_TASK_LOG_LINES` at `packages/runner/src/runtime/task-log.ts:36`, overflow drop at `packages/runner/src/runtime/task-log.ts:274`), while incremental `drain()` sends lines before the terminal snapshot (`packages/runner/src/runtime/task-log.ts:348`). The terminal `flush()` later returns only the currently retained tail (`packages/runner/src/runtime/task-log.ts:372`). On the server, `AppendAsync` now only queries existing seqs and inserts missing rows (`packages/server/src/Mohist.Server/Infrastructure/Data/Runner/TaskLogStore.cs:56`, `packages/server/src/Mohist.Server/Infrastructure/Data/Runner/TaskLogStore.cs:82`) and never deletes rows that are absent from the terminal reconciliation batch. `QueryAsync` then returns all stored rows in ascending seq order (`packages/server/src/Mohist.Server/Infrastructure/Data/Runner/TaskLogStore.cs:137`). A long task that incrementally uploads seq 1..6000 and whose final runner buffer retains only seq 1001..6000 will still have seq 1..6000 in the authoritative store; the final Web query can show old head lines instead of the retained tail. This violates the issue's capacity constraint (drop head, keep tail), the terminal authoritative reconciliation contract, and the acceptance criterion that terminal Web display match the authoritative terminal query. [disallowed:product-behavior-change]
+  SuggestedAction: Make terminal reconciliation authoritative for retained rows. For example, distinguish terminal batches from incremental batches and, on terminal, remove persisted rows for the work item that are outside the terminal retained seq set before committing the final batch/truncated flag. Add a server spec that appends early incremental rows, appends a truncated terminal tail, and asserts the store/query contain only the tail.
+  Verification: `npm test` passed, `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~TaskLogStoreSpecs|FullyQualifiedName~TaskLogServicePersistThenPublishSpecs|FullyQualifiedName~SignalRTaskLogDeltaPublisherSpecs|FullyQualifiedName~ConnectionSubscriptionRegistryTaskLogScopeSpecs"` passed; neither suite covers this over-capacity incremental-plus-terminal scenario.
   Status: open
 
 - [ID: item-2]
   Severity: blocking
-  Scope: packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.tsx
-  Evidence: The acceptance criterion says users can expand a running task and see logs refresh during execution. The actual task list only sets `canExpand` for failed or completed tasks at line 47, and the TaskLogPanel is mounted only when `expanded && canExpand` at line 95. A running task therefore cannot mount TaskLogPanel and cannot call SubscribeTaskLogAsync, so the live-view product path is unreachable. [disallowed:product-behavior]
-  SuggestedAction: Allow expansion for running tasks with a taskId, and ensure the panel receives the running status so it subscribes while the task is active.
-  Verification: Add a TaskProgressPanel test rendering a running task, click/expand it, and assert TaskLogPanel is mounted and SubscribeTaskLogAsync is invoked. Rerun `npm run test:run -w packages/web`.
+  Scope: packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx
+  Evidence: The live Web cache is unbounded even though the panel uses a retained-log limit of 5000. `TASK_LOG_RETAINED_LIMIT` is 5000 (`packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:21`), but each delta is merged by concatenating all unseen entries and sorting (`packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:70`, `packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:83`) without trimming to the retained tail or updating pagination. `setQueryData` applies this on every live delta (`packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:116`). A long-running task can grow the browser cache and DOM far past the retained limit during execution, and late low-seq deltas can reintroduce old head lines that the terminal query would not retain. This violates the capacity constraint for the real-time path and can make the live display diverge from the final authoritative tail until terminal refetch. [disallowed:product-behavior-change]
+  SuggestedAction: Enforce the retained-tail limit in `mergeTaskLogDelta` after merging, preserving the highest seq entries and setting `truncated` when older entries are dropped. Add component/unit tests for live appending more than 5000 lines and for late low-seq deltas after the cache already contains a newer retained tail.
+  Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed. Existing `TaskLogPanel` tests cover dedup/sort and terminal invalidation but not retained-tail enforcement.
   Status: open
 
 - [ID: item-3]
-  Severity: blocking
-  Scope: packages/runner/src/runtime/host.ts
-  Evidence: RunnerHost can run multiple work items concurrently through runWorkerPool at lines 264-300, but incremental flushing uses a single host-wide `collectorRef` field at line 60. Each task's flush trigger captures its own owner/work upload endpoint but drains `this.collectorRef` at line 472. When two work items overlap, work A's timer can drain work B's collector and upload those lines to work A's endpoint, advancing B's watermark and causing B to miss those lines in its own incremental stream. [disallowed:product-behavior/data-safety]
-  SuggestedAction: Keep the collector in the executeAndReport closure passed to that work item's trigger, or track collectors by owner/work key so timers cannot cross-drain unrelated work.
-  Verification: Add a RunnerHost spec with two concurrent long-running work items, distinct log lines, fake timers, and assertions that every incremental upload's owner/work id matches the log source for that work. Rerun `npm test -w packages/runner`.
+  Severity: warning
+  Scope: packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx; packages/web/src/shared/api/events-hub.ts; packages/server/src/Mohist.Server/Infrastructure/Events/SignalRTranscriptEventPublisher.cs
+  Evidence: Each expanded `TaskLogPanel` creates its own SignalR connection (`packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx:120`). `useEventsConnection` always invokes `SetSubscriptionsAsync` with the full `EVENT_TYPES` set (`packages/web/src/shared/api/events-hub.ts:62`), and `EVENT_TYPES` includes transcript event types (`packages/web/src/shared/lib/canonical-event-types.ts:47`, `packages/web/src/shared/lib/canonical-event-types.ts:82`). The transcript publisher sends every transcript envelope to every connection subscribed to that transcript type (`packages/server/src/Mohist.Server/Infrastructure/Events/SignalRTranscriptEventPublisher.cs:47`). As a result, opening a task log panel creates an extra no-op connection that is also subscribed to unrelated domain and transcript traffic. That means task-log viewing increases agent-session transcript fan-out and does not leave the existing agent-session real-time channel unaffected as required. [disallowed:architectural-judgment]
+  SuggestedAction: Reuse the existing app-level events connection via context, or add a task-log-only connection/subscription mode that does not call `SetSubscriptionsAsync([...EVENT_TYPES])`. Add a test proving task-log subscription does not cause `SignalRTranscriptEventPublisher` to send to the task-log panel connection.
+  Verification: `npm run test:run -w packages/web -- TaskLogPanel.test.tsx TaskProgressPanel.test.tsx events-hub.test.tsx` passed, but the tests mock the connection and do not assert transcript fan-out isolation for panel-created connections.
   Status: open
 
 - [ID: item-4]
-  Severity: blocking
-  Scope: packages/server/src/Mohist.Server/Infrastructure/Events/SignalRTaskLogDeltaPublisher.cs
-  Evidence: The new task-log publisher bypasses the existing project isolation gate and checks only type + `(workflowRunId, taskId)` via ShouldNotifyTaskLog at lines 61-68. MohistHub stores per-connection project affinity from the query string at packages/server/src/Mohist.Server/Events/Hub/MohistHub.cs lines 167-179, and UserNotificationDispatcher applies that gate for CloudEvents at packages/server/src/Mohist.Server/Infrastructure/Events/UserNotificationDispatcher.cs lines 371-380, but TaskLogDeltaEnvelope has no project id at lines 34-40 and the task-log publisher cannot reject a connection from another project if it subscribes to a known workflowRunId/taskId pair. [disallowed:security/public-contract]
-  SuggestedAction: Stamp projectId on the task-log envelope or validate SubscribeTaskLogAsync against the connection's project affinity, then gate publisher delivery by project before sending OnTaskLogDelta.
-  Verification: Add a publisher/hub test with project-A and project-B affinitized connections both subscribed to task-log.delta, publish a project-A delta, and assert only project-A receives it.
-  Status: open
-
-- [ID: item-5]
-  Severity: warning
-  Scope: packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx
-  Evidence: onTaskLogDelta filters only by `taskId` at lines 111-113, then writes into the cache key for the current `workflowRunId` at line 115. If a rerun reuses a task id, a delta for ownerId/workflowRunId `wr-1` can pollute the visible cache for `wr-2`. [disallowed:product-behavior]
-  SuggestedAction: Also require envelope.ownerKind/workflow owner and envelope.ownerId to match the current workflowRunId before merging into the query cache.
-  Verification: Add a TaskLogPanel test rendered with workflowRunId `wr-2`, emit a delta with the same taskId but ownerId `wr-1`, and assert no line is appended.
-  Status: open
-
-- [ID: item-6]
-  Severity: warning
-  Scope: packages/web/src/shared/api/events-hub.ts and packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx
-  Evidence: MohistHub documents that task-log scope is not durable and the Web must re-invoke SubscribeTaskLogAsync on reconnect at packages/server/src/Mohist.Server/Events/Hub/MohistHub.cs lines 266-272. events-hub.ts onreconnected only reapplies the generic event subscription at lines 127-131. TaskLogPanel suppresses another SubscribeTaskLogAsync while `subscribedRef.current` remains true at lines 145-149, so a reconnect with a cleared server-side task scope can silently stop live log delivery. [disallowed:product-behavior]
-  SuggestedAction: Expose reconnect generation/status from useEventsConnection or provide a task-log resubscribe hook so active TaskLogPanel subscriptions are reasserted after reconnect.
-  Verification: Simulate reconnect while a TaskLogPanel is subscribed and assert SubscribeTaskLogAsync is invoked again for the active workflowRunId/taskId.
-  Status: open
-
-- [ID: item-7]
-  Severity: warning
-  Scope: packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx
-  Evidence: TaskLogPanel subscribes for any non-terminal status because line 130 only excludes terminal states before subscribing at lines 145-149. Pending or missing taskStatus therefore creates a live subscription even though the requirement is on-demand for expanded running tasks. This can produce unnecessary scope entries and invalid fan-out interest. [disallowed:product-behavior]
-  SuggestedAction: Subscribe only when `taskStatus === 'running'`; still allow terminal/non-running panels to read the authoritative query without live subscription.
-  Verification: Add tests for `taskStatus="pending"` and undefined taskStatus asserting SubscribeTaskLogAsync is not called, and a running status asserting it is called.
-  Status: open
-
-- [ID: item-8]
-  Severity: warning
-  Scope: packages/runner/src/runtime/host.ts
-  Evidence: The fallback executor path used when the shared ACP executor is unavailable calls `executeWithLog(work, signal, null)` at line 443 and only performs terminal `flushTaskLog` at line 445. The normal path pre-creates a collector and starts the incremental trigger at lines 471-485. Long-running fallback executions therefore do not stream during execution, contrary to the runner acceptance criterion. [disallowed:product-behavior]
-  SuggestedAction: Create and wire a TaskLogCollector plus startTaskLogFlushTrigger in the fallback path as well, or document and test that fallback is intentionally outside the feature scope.
-  Verification: Simulate shared ACP initialization failure, run a long fallback task that emits logs before resolving, advance fake timers, and assert an incremental upload occurs before report.
-  Status: open
-
-- [ID: item-9]
   Severity: warning
   Scope: packages/server/src/Mohist.Server/Runner/Services/TaskLogService.cs
-  Evidence: ResolveTaskIdAsync caches failed lookups as `string.Empty` at lines 231 and 248, and later returns any cached value directly at lines 220-222. Subsequent publishes then stamp an empty taskId, and ShouldNotifyTaskLog rejects empty task ids at packages/server/src/Mohist.Server/Infrastructure/Events/UserNotificationDispatcher.cs lines 257-262. If the workflow-run task mapping appears after the first append in the same process, that work item can permanently stop fanning out live deltas. [disallowed:product-behavior]
-  SuggestedAction: Do not cache negative workId-to-taskId lookups, or expire/retry them when publishing later batches for the same work item.
-  Verification: Add a TaskLogService test where the first append happens before the workflow-run mapping exists, then the mapping is persisted and the next append publishes with the real taskId.
-  Status: open
-
-- [ID: item-10]
-  Severity: minor
-  Scope: packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx
-  Evidence: mergeTaskLogDelta drops any unseen entry with `seq <= maxCachedSeq` at lines 71-77. This is intentional per the design for out-of-order late deltas, but it means a live seq 2 arriving after seq 3 is hidden until terminal reconciliation even though it is not a duplicate. The test at packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.test.tsx lines 449-462 asserts this behavior, but the issue asks for continuous refresh during execution and does not require dropping all out-of-order unseen entries. [disallowed:ambiguous-tradeoff]
-  SuggestedAction: Decide whether live merge should accept unseen lower seqs and sort, or keep the current drop-until-terminal behavior and document the user-visible delay explicitly.
-  Verification: Add a test for cached seq [1,3] plus delta seq [2] matching the chosen behavior.
-  Status: open
-
-- [ID: item-11]
-  Severity: test-gap
-  Scope: packages/runner/tests/runner-host-task-log.spec.ts
-  Evidence: The Phase 2 runner tests at lines 287-498 mostly instantiate TaskLogCollector and startTaskLogFlushTrigger directly. They validate primitives but do not cover the actual RunnerHost incremental wiring for upload-before-completion, concurrent in-flight routing, owner/work scoping, or fallback path behavior.
-  SuggestedAction: Add host-level specs using deferred actions and fake timers to assert incremental upload before action completion/report, correct owner/work routing under concurrency, and fallback path streaming.
-  Verification: Rerun `npm test -w packages/runner` and confirm the new tests fail before the implementation fix and pass after.
-  Status: open
-
-- [ID: item-12]
-  Severity: test-gap
-  Scope: packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.test.tsx and packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.test.tsx
-  Evidence: TaskProgressPanel tests only expand failed/completed tasks; there is no running-task expansion test. TaskLogPanel tests cover taskId matching and append/reconcile behavior, but not workflowRunId/ownerId mismatch, reconnect resubscribe, or non-running subscription suppression.
-  SuggestedAction: Add web tests for running task expansion, ownerId mismatch ignored, reconnect resubscribe, and pending/undefined status no-subscribe.
-  Verification: Rerun `npm run test:run -w packages/web`.
-  Status: open
-
-- [ID: item-13]
-  Severity: cleanup
-  Scope: packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.test.tsx
-  Evidence: The test name at line 471 says it "returns the original page reference", but mergeTaskLogDelta copies the lines array at packages/web/src/widgets/issue-workflow/ui/TaskLogPanel.tsx line 70 and returns a new object at lines 87-91. The assertions at lines 477-478 check equality, not reference identity. [disallowed:cleanup-not-worth-changing-with-blockers]
-  SuggestedAction: Rename the test or change the implementation/assertion if identity is actually intended.
-  Verification: Rerun `npm run test:run -w packages/web -- TaskLogPanel.test.tsx`.
+  Evidence: `TaskLogService` uses a static process-wide `workId -> taskId` cache keyed by owner id and work id (`packages/server/src/Mohist.Server/Runner/Services/TaskLogService.cs:51`). The code comment explicitly states a stale entry can leak a delta to a previous task's subscribers (`packages/server/src/Mohist.Server/Runner/Services/TaskLogService.cs:43`). That is a cross-task data-safety risk in the real-time rail: a stale scope stamp can send log lines to the wrong expanded task even though the authoritative store remains correct. [disallowed:data-safety]
+  SuggestedAction: Avoid a static unbounded cache for publish scope, or key it with a run/task state version that cannot collide across restage/retry semantics. If caching is retained, clear it on terminal or when the workflow run/task mapping changes, and add a regression test for reused work ids or restaged task mappings.
+  Verification: `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~TaskLogServicePersistThenPublishSpecs"` passed, but the tests only prove cache reuse and retry after missing mapping; they do not cover stale remapping/leakage.
   Status: open
 
 ## Follow-up Items
 
-- None.
+- [ID: item-5]
+  Severity: follow-up
+  Scope: packages/runner/src/runtime/host.ts
+  Evidence: Incremental flush uploads can overlap because `startTaskLogFlushTrigger` calls `void flush()` on every interval/threshold fire (`packages/runner/src/runtime/host.ts:609`) without tracking an in-flight upload. The current watermark design makes this mostly correct for uniqueness, and the terminal batch is still authoritative, but slow uploads can create concurrent HTTP requests for the same work item.
+  SuggestedAction: Consider serializing incremental uploads per collector or documenting that overlapping uploads are accepted. If serialized, keep terminal flush ordering explicit.
+  Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-14]
+- [ID: item-6]
   Severity: info
-  Scope: dependency audit output
-  Evidence: During the targeted server test run, npm audit output reported 9 vulnerabilities (3 moderate, 3 high, 3 critical). package.json/package-lock changes are not part of this candidate range, so this is not attributed to issue 337.
-  SuggestedAction: Triage dependency audit separately from this feature review.
+  Scope: verification
+  Evidence: Full verification passed despite the blockers: `npm test` passed; `npm test -w packages/runner` passed; `npm run test:run -w packages/web` passed; `npm run typecheck -w packages/runner` passed; `npm run typecheck -w packages/web` passed; `git diff --check master...HEAD` passed. The failures above are uncovered product/edge-case gaps, not red test output.
+  SuggestedAction: Add the missing over-capacity reconciliation, live-retention, and channel-isolation tests before re-review.
   Status: out-of-scope
-
-## Verification
-
-- `mo issue show 337 --project-id proj_f6c141d63b6243bfbb481737b2243b87` read before review.
-- Read openspec proposal, design, tasks, self-review, and delta specs under openspec/changes/issue-337/.
-- Inspected candidate range `master...HEAD` and changed runner/server/web files plus adjacent TaskLogStore persistence path.
-- `npm run typecheck -w packages/runner` passed.
-- `npm test -w packages/runner` passed: 63 files, 893 tests.
-- `npm run typecheck -w packages/web` passed.
-- `npm run test:run -w packages/web` passed: 260 files, 4093 passed, 1 skipped.
-- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --no-restore --filter "FullyQualifiedName~TaskLogStoreSpecs|FullyQualifiedName~TaskLogServicePersistThenPublishSpecs|FullyQualifiedName~SignalRTaskLogDeltaPublisherSpecs|FullyQualifiedName~ConnectionSubscriptionRegistryTaskLogScopeSpecs"` passed: 41 tests.
 
 <promise>FAIL</promise>

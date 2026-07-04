@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Runner;
@@ -33,22 +32,6 @@ public sealed class TaskLogService : IScopedService
     private readonly WorkflowRunQuerier _runQuerier;
     private readonly ITaskLogDeltaPublisher _publisher;
     private readonly ILogger<TaskLogService> _log;
-
-    /// <summary>
-    /// Per-process cache of <c>workId → taskId</c> resolutions,
-    /// keyed by the owner-id (which is a <c>workflowRunId</c> for
-    /// workflow-owned work items). Avoids reloading the entire
-    /// <see cref="WorkflowRunQuerier.LoadAsync"/> JSON state for
-    /// every uploaded batch on a long-running task. The cache is
-    /// process-local and intentionally not durable — a stale
-    /// entry (a run re-staged with the same <c>workId</c>) is
-    /// harmless: the resolved <c>taskId</c> is used only for
-    /// fan-out stamping, and stale stamps at worst leak a delta
-    /// to the previous task's subscribers (who unsubscribe on
-    /// terminal anyway). The authoritative log is in
-    /// <see cref="TaskLogStore"/>, not in this map.
-    /// </summary>
-    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, TaskLogPublishScope>> _workIdToScopeByOwner = new(StringComparer.Ordinal);
 
     public TaskLogService(
         TaskLogStore store,
@@ -89,6 +72,7 @@ public sealed class TaskLogService : IScopedService
         string workId,
         IReadOnlyList<TaskLogLine> entries,
         bool truncated,
+        bool terminal = false,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(runnerId))
@@ -102,7 +86,7 @@ public sealed class TaskLogService : IScopedService
 
         // 1. Persist FIRST. Authoritative; throw propagates (the
         //    upload route handles the validation/storing errors).
-        await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated, ct);
+        await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated, terminal, ct);
 
         // 2. Best-effort fan-out, AFTER persistence has succeeded.
         //    A publisher throw, no-subscribers state, or per-send
@@ -199,13 +183,6 @@ public sealed class TaskLogService : IScopedService
     /// <see cref="ConnectionSubscriptionRegistry.ShouldNotifyTaskLog"/>
     /// gate short-circuits to false).
     ///
-    /// <para>
-    /// Lookups are cached per <c>(ownerId, workId)</c>. The cache
-    /// is wiped only by process restart; this is intentional —
-    /// a long-running task reuses one mapping across all its
-    /// flushes, and the stale-on-recovery risk is bounded (see
-    /// the cache field doc).
-    /// </para>
     /// </summary>
     private async Task<TaskLogPublishScope?> ResolvePublishScopeAsync(
         string ownerKind,
@@ -217,10 +194,6 @@ public sealed class TaskLogService : IScopedService
             return null;
         if (string.IsNullOrWhiteSpace(ownerId) || string.IsNullOrWhiteSpace(workId))
             return null;
-
-        var byWork = _workIdToScopeByOwner.GetOrAdd(ownerId, _ => new ConcurrentDictionary<string, TaskLogPublishScope>(StringComparer.Ordinal));
-        if (byWork.TryGetValue(workId, out var cached))
-            return cached;
 
         var run = await _runQuerier.LoadAsync(ownerId, ct);
         if (run is null)
@@ -237,9 +210,7 @@ public sealed class TaskLogService : IScopedService
                 if (string.Equals(task.WorkId, workId, StringComparison.Ordinal)
                     && !string.IsNullOrEmpty(task.Id))
                 {
-                    var scope = new TaskLogPublishScope(task.Id, projectId);
-                    byWork.TryAdd(workId, scope);
-                    return scope;
+                    return new TaskLogPublishScope(task.Id, projectId);
                 }
             }
         }

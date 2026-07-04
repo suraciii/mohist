@@ -27,9 +27,10 @@ public class TaskLogStore
     /// <paramref name="workId"/> directly to the dedicated store.
     /// Writes the batch metadata (truncation flag) in the same
     /// transaction so the upload is atomic. Existing entry rows are
-    /// kept; incoming rows whose <c>Seq</c> is already present are
-    /// skipped so incremental batches and terminal reconciliation
-    /// batches merge idempotently by sequence.
+    /// kept for incremental batches; terminal reconciliation batches
+    /// first remove persisted rows that are no longer in the runner's
+    /// retained snapshot. Incoming rows whose <c>Seq</c> is already
+    /// present are skipped so batches merge idempotently by sequence.
     /// </summary>
     public async Task AppendAsync(
         string ownerKind,
@@ -37,6 +38,7 @@ public class TaskLogStore
         string workId,
         IReadOnlyList<TaskLogLine> entries,
         bool truncated,
+        bool terminal = false,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(ownerKind))
@@ -52,6 +54,16 @@ public class TaskLogStore
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        if (terminal)
+        {
+            var retainedSeqs = entries.Select(e => e.Seq).ToHashSet();
+            var staleRows = await db.TaskLogEntries
+                .Where(e => e.OwnerKind == ownerKind && e.OwnerId == ownerId && e.WorkId == workId)
+                .Where(e => !retainedSeqs.Contains(e.Seq))
+                .ToListAsync(ct);
+            db.TaskLogEntries.RemoveRange(staleRows);
+        }
 
         var existingSeqs = await db.TaskLogEntries
             .Where(e => e.OwnerKind == ownerKind && e.OwnerId == ownerId && e.WorkId == workId)

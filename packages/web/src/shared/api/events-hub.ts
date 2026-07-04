@@ -86,12 +86,18 @@ export interface EventsConnection {
   reconnectVersion: number
 }
 
+export interface EventsConnectionOptions {
+  applyDefaultSubscriptions?: boolean
+}
+
 export function useEventsConnection(
   projectId: string | null,
   onEvent: EventCallback,
   onTranscriptEvent?: TranscriptCallback,
   onTaskLogDelta?: TaskLogDeltaCallback,
+  options: EventsConnectionOptions = {},
 ): EventsConnection {
+  const applyDefaultSubscriptions = options.applyDefaultSubscriptions ?? true
   const callbackRef = useRef(onEvent)
   callbackRef.current = onEvent
   const transcriptCallbackRef = useRef(onTranscriptEvent)
@@ -131,7 +137,7 @@ export function useEventsConnection(
     conn.onreconnected(() => {
       handleState('connected')
       setReconnectVersion((version) => version + 1)
-      void applySubscription(conn)
+      if (applyDefaultSubscriptions) void applySubscription(conn)
     })
     conn.onclose(() => {
       handleState('disconnected')
@@ -145,7 +151,7 @@ export function useEventsConnection(
       .then(() => {
         handleState('connected')
         setConnection(conn)
-        void applySubscription(conn)
+        if (applyDefaultSubscriptions) void applySubscription(conn)
       })
       .catch((err: unknown) => {
         handleState('disconnected')
@@ -159,7 +165,7 @@ export function useEventsConnection(
       conn.onclose(() => {})
       conn.stop().catch(() => {})
     }
-  }, [projectId])
+  }, [projectId, applyDefaultSubscriptions])
 
   return { status, connection, reconnectVersion }
 }

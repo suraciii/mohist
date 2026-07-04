@@ -39,6 +39,7 @@ interface FakeConnection {
   invoke: (...args: unknown[]) => Promise<unknown>
   emit: (kind: 'reconnecting' | 'reconnected' | 'close') => void
   handlers: Map<string, Listener>
+  invokes: Array<{ method: string; args: unknown[] }>
 }
 
 const fakeConnections: FakeConnection[] = []
@@ -48,6 +49,7 @@ function makeFakeConnection(): FakeConnection {
   let onReconnectedHandler: Listener | null = null
   let onCloseHandler: Listener | null = null
   const handlers = new Map<string, Listener>()
+  const invokes: Array<{ method: string; args: unknown[] }> = []
   const conn: FakeConnection = {
     state: 0,
     onreconnecting(handler) {
@@ -71,7 +73,11 @@ function makeFakeConnection(): FakeConnection {
     stop: vi.fn(async () => {
       conn.state = 0
     }),
-    invoke: vi.fn(async () => undefined),
+    invoke: vi.fn(async (...callArgs: unknown[]) => {
+      const [method, ...args] = callArgs
+      invokes.push({ method: String(method), args })
+      return undefined
+    }),
     emit(kind) {
       if (kind === 'reconnecting') {
         onReconnectingHandler?.()
@@ -84,6 +90,7 @@ function makeFakeConnection(): FakeConnection {
       }
     },
     handlers,
+    invokes,
   }
   fakeConnections.push(conn)
   return conn
@@ -97,6 +104,11 @@ function StateProbe({ projectId, onState }: { projectId: string | null; onState:
 
 function ChannelProbe({ projectId, onTranscript, onTaskLog }: { projectId: string; onTranscript?: (envelope: unknown) => void; onTaskLog?: (envelope: unknown) => void }) {
   useEventsConnection(projectId, () => {}, onTranscript, onTaskLog)
+  return null
+}
+
+function TaskLogOnlyProbe({ projectId, onTaskLog }: { projectId: string; onTaskLog?: (envelope: unknown) => void }) {
+  useEventsConnection(projectId, () => {}, undefined, onTaskLog, { applyDefaultSubscriptions: false })
   return null
 }
 
@@ -237,6 +249,21 @@ describe('useEventsConnection state tracking', () => {
     expect(transcriptCalls).toHaveLength(1)
     expect(taskLogCalls).toHaveLength(1)
     expect(transcriptCalls[0]).not.toBe(taskLogCalls[0])
+  })
+
+  it('can open a task-log-only connection without default domain or transcript subscriptions', async () => {
+    renderWithHost(<TaskLogOnlyProbe projectId="proj-1" onTaskLog={() => {}} />)
+
+    await waitFor(() => {
+      expect(fakeConnections.length).toBeGreaterThan(0)
+    })
+
+    const conn = fakeConnections[fakeConnections.length - 1]
+    await waitFor(() => {
+      expect(conn.handlers.has('OnTaskLogDelta')).toBe(true)
+    })
+
+    expect(conn.invokes.some((invoke) => invoke.method === 'SetSubscriptionsAsync')).toBe(false)
   })
 })
 

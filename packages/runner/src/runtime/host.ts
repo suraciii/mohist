@@ -359,6 +359,7 @@ export class RunnerHost {
             batch,
             uploadController.signal,
             ownerKind,
+            label === "terminal",
           ),
           new Promise<never>((_resolve, reject) => {
             timeout = setTimeout(() => {
@@ -441,12 +442,12 @@ export class RunnerHost {
           const execution = await executor.executeWithLog(work, signal, collector)
           lastResult = execution.result
           execution.collector.setAppendListener(null)
-          flushTrigger.stop()
+          await flushTrigger.stop()
           await flushTaskLog(execution.collector)
           await this.connection.report(work, lastResult, signal)
         } finally {
           collector.setAppendListener(null)
-          flushTrigger.stop()
+          await flushTrigger.stop()
           await fallback.shutdown()
         }
       } catch (error) {
@@ -484,9 +485,10 @@ export class RunnerHost {
       // tick can never re-fire against a collector that the executor
       // has handed back to us for terminal flushing.
       execution.collector.setAppendListener(null)
-      // Stop the trigger before the terminal flush so the trigger
-      // cannot fire after flush() has already snapshotted the buffer.
-      flushTrigger.stop()
+      // Stop the trigger before the terminal flush and wait for any
+      // in-flight incremental upload to settle so terminal
+      // reconciliation cannot overlap it.
+      await flushTrigger.stop()
       if (signal.aborted) return
       // Flush BEFORE the report so the report carries the verdict while
       // the (best-effort) upload runs in parallel with the verdict
@@ -495,7 +497,7 @@ export class RunnerHost {
       await flushTaskLog(execution.collector)
       await this.connection.report(work, lastResult, signal)
     } catch (error) {
-      flushTrigger.stop()
+      await flushTrigger.stop()
       lastError = error
       if (signal.aborted) return
       console.error("executor failed for work", work.workId, error)
@@ -504,7 +506,7 @@ export class RunnerHost {
       })
     } finally {
       collector.setAppendListener(null)
-      flushTrigger.stop()
+      await flushTrigger.stop()
     }
   }
 
@@ -567,10 +569,11 @@ const TASK_LOG_FLUSH_LINE_THRESHOLD = 200
 
 /**
  * Create an incremental flush trigger. The returned handle exposes
- * `stop()` to clear the interval and a `noteAppend()` method to
- * register a newly-captured line against the line-count threshold.
- * Callers MUST invoke `stop()` before the terminal flush so a final
- * drain cannot race the terminal snapshot.
+ * `stop()` to clear the interval and wait for any in-flight flush,
+ * plus a `noteAppend()` method to register a newly-captured line
+ * against the line-count threshold. Callers MUST await `stop()` before
+ * the terminal flush so a final drain/upload cannot race the terminal
+ * snapshot.
  *
  * `setInterval` is used (rather than a custom timer abstraction) so
  * the trigger is driven by the global JS timer clock and is therefore
@@ -587,7 +590,10 @@ const TASK_LOG_FLUSH_LINE_THRESHOLD = 200
  *
  * `flush` is the single short-circuit point that skips the network
  * round-trip when the collector's `drain` is empty — the trigger
- * itself always invokes `flush` on a fire.
+ * itself always invokes `flush` on a fire. Flushes are serialized per
+ * trigger: if a timer/threshold fire happens while an upload is still
+ * in flight, one follow-up flush is queued and run after the current
+ * one settles.
  *
  * Exported (not just module-private) so the test suite can drive the
  * exact same code path without reimplementing the `setInterval`
@@ -598,7 +604,7 @@ export function startTaskLogFlushTrigger(
   flush: () => Promise<void> | void,
   intervalMs: number,
   lineThreshold: number,
-): { stop: () => void; noteAppend: () => void } {
+): { stop: () => Promise<void>; noteAppend: () => void } {
   // Defensive: a zero/negative interval would create a tight loop.
   // Clamp to a minimum positive value to keep the trigger harmless
   // under accidental misconfiguration. Tests that need finer control
@@ -606,14 +612,51 @@ export function startTaskLogFlushTrigger(
   const safeInterval = Math.max(50, Math.floor(intervalMs))
   const safeThreshold = Math.max(1, Math.floor(lineThreshold))
   let pending = 0
+  let inFlight: Promise<void> | null = null
+  let rerunAfterInFlight = false
+
+  const runFlush = (): Promise<void> => {
+    if (inFlight) {
+      rerunAfterInFlight = true
+      return inFlight
+    }
+
+    try {
+      const result = flush()
+      inFlight = Promise.resolve(result)
+        .catch((error) => {
+          console.error("task-log incremental flush failed", error)
+        })
+        .finally(() => {
+          inFlight = null
+          if (rerunAfterInFlight) {
+            rerunAfterInFlight = false
+            void runFlush()
+          }
+        })
+    } catch (error) {
+      console.error("task-log incremental flush failed", error)
+      inFlight = null
+    }
+
+    return inFlight ?? Promise.resolve()
+  }
+
+  const waitForIdle = async () => {
+    while (inFlight) await inFlight
+  }
+
   const tick = () => {
     pending = 0
-    void flush()
+    void runFlush()
   }
   const handle = setInterval(tick, safeInterval)
   handle.unref?.()
   return {
-    stop: () => clearInterval(handle),
+    stop: async () => {
+      clearInterval(handle)
+      await waitForIdle()
+    },
     noteAppend: () => {
       pending += 1
       if (pending >= safeThreshold) tick()
