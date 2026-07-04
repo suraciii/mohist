@@ -170,7 +170,7 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: Stage
             </p>
           )}
           {typeof task.taskId === 'string' && task.taskId.length > 0 && (
-            <TaskLogPanel issueNumber={issueNumber} taskId={task.taskId} workflowRunId={workflowRunId} />
+            <TaskLogPanel issueNumber={issueNumber} taskId={task.taskId} workflowRunId={workflowRunId} taskStatus={task.status} />
           )}
         </div>
       )}

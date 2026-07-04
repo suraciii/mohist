@@ -5,8 +5,32 @@ import { EVENT_TYPES } from '../lib/canonical-event-types'
 const HUB_URL = '/hubs/events'
 const SUBSCRIBE_METHOD = 'SetSubscriptionsAsync'
 const TRANSCRIPT_EVENT = 'OnTranscriptEvent'
+const TASK_LOG_DELTA_EVENT = 'OnTaskLogDelta'
+const SUBSCRIBE_TASK_LOG_METHOD = 'SubscribeTaskLogAsync'
+const UNSUBSCRIBE_TASK_LOG_METHOD = 'UnsubscribeTaskLogAsync'
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
+
+export interface TaskLogDeltaEntryWire {
+  seq: number
+  timestamp: string
+  source: string
+  text: string
+}
+
+export interface TaskLogDeltaEnvelopeWire {
+  ownerKind: string
+  ownerId: string
+  workId: string
+  taskId: string | null
+  entries: TaskLogDeltaEntryWire[]
+  truncated: boolean
+}
+
+export interface TaskLogSubscription {
+  workflowRunId: string
+  taskId: string
+}
 
 export function createEventsConnection(projectId: string): HubConnection {
   return new HubConnectionBuilder()
@@ -53,64 +77,121 @@ export type TranscriptEnvelope = unknown
 
 export type TranscriptCallback = (envelope: TranscriptEnvelope) => void
 
+export type TaskLogDeltaCallback = (envelope: TaskLogDeltaEnvelopeWire) => void
+
+export interface EventsConnection {
+  status: ConnectionStatus
+  connection: HubConnection | null
+}
+
 export function useEventsConnection(
   projectId: string | null,
   onEvent: EventCallback,
   onTranscriptEvent?: TranscriptCallback,
-): ConnectionStatus {
+  onTaskLogDelta?: TaskLogDeltaCallback,
+): EventsConnection {
   const callbackRef = useRef(onEvent)
   callbackRef.current = onEvent
   const transcriptCallbackRef = useRef(onTranscriptEvent)
   transcriptCallbackRef.current = onTranscriptEvent
+  const taskLogDeltaCallbackRef = useRef(onTaskLogDelta)
+  taskLogDeltaCallbackRef.current = onTaskLogDelta
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
+  const [connection, setConnection] = useState<HubConnection | null>(null)
 
   useEffect(() => {
     if (!projectId) {
       setStatus('disconnected')
+      setConnection(null)
       return
     }
 
-    const connection = createEventsConnection(projectId)
+    const conn = createEventsConnection(projectId)
 
     const handleState = (next: ConnectionStatus) => {
       setStatus(next)
     }
 
-    connection.on('OnEvent', (eventName: string, data: unknown) => {
+    conn.on('OnEvent', (eventName: string, data: unknown) => {
       callbackRef.current(eventName, data)
     })
-    connection.on(TRANSCRIPT_EVENT, (envelope: TranscriptEnvelope) => {
+    conn.on(TRANSCRIPT_EVENT, (envelope: TranscriptEnvelope) => {
       const handler = transcriptCallbackRef.current
       if (handler) handler(envelope)
     })
-
-    connection.onreconnecting(() => handleState('reconnecting'))
-    connection.onreconnected(() => {
-      handleState('connected')
-      void applySubscription(connection)
+    conn.on(TASK_LOG_DELTA_EVENT, (envelope: TaskLogDeltaEnvelopeWire) => {
+      const handler = taskLogDeltaCallbackRef.current
+      if (handler) handler(envelope)
     })
-    connection.onclose(() => handleState('disconnected'))
 
-    handleState(mapHubState(connection.state))
+    conn.onreconnecting(() => handleState('reconnecting'))
+    conn.onreconnected(() => {
+      handleState('connected')
+      void applySubscription(conn)
+    })
+    conn.onclose(() => {
+      handleState('disconnected')
+      setConnection(null)
+    })
 
-    connection
+    handleState(mapHubState(conn.state))
+
+    conn
       .start()
       .then(() => {
         handleState('connected')
-        void applySubscription(connection)
+        setConnection(conn)
+        void applySubscription(conn)
       })
       .catch((err: unknown) => {
         handleState('disconnected')
+        setConnection(null)
         console.error('[EventsHub] Connection failed:', err)
       })
 
     return () => {
-      connection.onreconnecting(() => {})
-      connection.onreconnected(() => {})
-      connection.onclose(() => {})
-      connection.stop().catch(() => {})
+      conn.onreconnecting(() => {})
+      conn.onreconnected(() => {})
+      conn.onclose(() => {})
+      conn.stop().catch(() => {})
     }
   }, [projectId])
 
-  return status
+  return { status, connection }
+}
+
+export async function subscribeTaskLog(
+  connection: HubConnection,
+  subscription: TaskLogSubscription,
+): Promise<void> {
+  try {
+    await connection.invoke(
+      SUBSCRIBE_TASK_LOG_METHOD,
+      subscription.workflowRunId,
+      subscription.taskId,
+    )
+  } catch (err) {
+    console.warn(
+      `[EventsHub] ${SUBSCRIBE_TASK_LOG_METHOD} invoke failed (will not break connection):`,
+      err,
+    )
+  }
+}
+
+export async function unsubscribeTaskLog(
+  connection: HubConnection,
+  subscription: TaskLogSubscription,
+): Promise<void> {
+  try {
+    await connection.invoke(
+      UNSUBSCRIBE_TASK_LOG_METHOD,
+      subscription.workflowRunId,
+      subscription.taskId,
+    )
+  } catch (err) {
+    console.warn(
+      `[EventsHub] ${UNSUBSCRIBE_TASK_LOG_METHOD} invoke failed (will not break connection):`,
+      err,
+    )
+  }
 }
