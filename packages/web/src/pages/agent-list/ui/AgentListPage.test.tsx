@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { AgentInfo } from '../../../entities/agent'
 import { AgentListPage } from './AgentListPage'
@@ -30,9 +30,14 @@ vi.mock('../../../shared/lib/useDocumentTitle', () => ({
 }))
 
 vi.mock('../../../widgets/agent-profile-editor/ui/AgentProfileEditor', () => ({
-  AgentProfileEditor: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="agent-profile-editor" /> : null,
+  AgentProfileEditor: ({ agent, open }: { agent?: AgentInfo | null; open: boolean }) =>
+    open ? <div data-testid="agent-profile-editor" data-mode={agent === null ? 'create' : 'edit'} /> : null,
 }))
+
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="current-path">{location.pathname}</div>
+}
 
 function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -49,6 +54,7 @@ function renderPage() {
       }]}>
         <MemoryRouter initialEntries={['/agents']}>
           <AgentListPage />
+          <LocationProbe />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -154,13 +160,15 @@ describe('AgentListPage', () => {
       mocks.agents = [makeAgent({ id: 'a1', name: 'Alpha' })]
       renderPage()
       fireEvent.click(screen.getByTestId('agent-list-create'))
-      expect(screen.getByTestId('agent-profile-editor')).toBeInTheDocument()
+      expect(screen.getByTestId('agent-profile-editor')).toHaveAttribute('data-mode', 'create')
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/agents')
     })
 
     it('opens the profile editor in create mode when the empty-state "Create Agent" button is clicked (no route change)', () => {
       renderPage()
       fireEvent.click(screen.getByTestId('agents-empty-create'))
-      expect(screen.getByTestId('agent-profile-editor')).toBeInTheDocument()
+      expect(screen.getByTestId('agent-profile-editor')).toHaveAttribute('data-mode', 'create')
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/agents')
     })
   })
 })
