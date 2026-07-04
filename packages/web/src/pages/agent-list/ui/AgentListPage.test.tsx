@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -169,6 +169,55 @@ describe('AgentListPage', () => {
       fireEvent.click(screen.getByTestId('agents-empty-create'))
       expect(screen.getByTestId('agent-profile-editor')).toHaveAttribute('data-mode', 'create')
       expect(screen.getByTestId('current-path')).toHaveTextContent('/agents')
+    })
+  })
+
+  describe('Archived section (agent-archive spec)', () => {
+    it('lists archived agents under an "Archived (n)" section whose count matches', () => {
+      mocks.agents = [
+        makeAgent({ id: 'a-active', name: 'Active One', status: 'active' }),
+        makeAgent({ id: 'a-archived', name: 'Archived One', status: 'archived' }),
+        makeAgent({ id: 'b-archived', name: 'Archived Two', status: 'archived' }),
+      ]
+      renderPage()
+      const section = screen.getByTestId('archived-section')
+      expect(section).toBeInTheDocument()
+      expect(section).toHaveTextContent('Archived (2)')
+      expect(within(section).getByTestId('agent-row-a-archived')).toBeInTheDocument()
+      expect(within(section).getByTestId('agent-row-b-archived')).toBeInTheDocument()
+    })
+
+    it('renders archived rows with reduced opacity (visually distinct) and an Archived badge', () => {
+      mocks.agents = [
+        makeAgent({ id: 'a-active', name: 'Active One', status: 'active' }),
+        makeAgent({ id: 'a-archived', name: 'Archived One', status: 'archived' }),
+      ]
+      renderPage()
+      const archivedRow = screen.getByTestId('agent-row-a-archived')
+      const activeRow = screen.getByTestId('agent-row-a-active')
+      expect(archivedRow.className).toMatch(/opacity-60/)
+      expect(activeRow.className).not.toMatch(/opacity-60/)
+      const archivedLabels = within(archivedRow).getAllByText('Archived')
+      expect(archivedLabels.length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('archived rows navigate into the detail page like active rows', () => {
+      mocks.agents = [
+        makeAgent({ id: 'a-active', name: 'Active One', status: 'active' }),
+        makeAgent({ id: 'a-archived', name: 'Archived One', status: 'archived' }),
+      ]
+      renderPage()
+      fireEvent.click(screen.getByTestId('agent-row-a-archived'))
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/agents/a-archived')
+    })
+
+    it('omits the Archived section when no archived agents exist', () => {
+      mocks.agents = [
+        makeAgent({ id: 'a1', name: 'Active One', status: 'active' }),
+        makeAgent({ id: 'a2', name: 'Active Two', status: 'active' }),
+      ]
+      renderPage()
+      expect(screen.queryByTestId('archived-section')).not.toBeInTheDocument()
     })
   })
 })

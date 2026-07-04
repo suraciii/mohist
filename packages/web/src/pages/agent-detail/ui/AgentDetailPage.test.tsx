@@ -14,6 +14,10 @@ const mocks = vi.hoisted(() => ({
   sessions: [] as AgentSessionListItemDto[],
   sessionsLoading: false,
   routeParams: { agentId: 'agent-1' },
+  archiveMutateCalls: [] as Array<{ id: string; options: { onSuccess?: () => void } | undefined }>,
+  unarchiveMutateCalls: [] as Array<string>,
+  archivePending: false,
+  unarchivePending: false,
 }))
 
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -33,6 +37,19 @@ vi.mock('../../../entities/agent', () => ({
   useAgentSessions: () => ({
     data: mocks.sessions,
     isLoading: mocks.sessionsLoading,
+  }),
+  useArchiveAgent: () => ({
+    mutate: (id: string, options?: { onSuccess?: () => void }) => {
+      mocks.archiveMutateCalls.push({ id, options: options ?? undefined })
+      options?.onSuccess?.()
+    },
+    isPending: mocks.archivePending,
+  }),
+  useUnarchiveAgent: () => ({
+    mutate: (id: string) => {
+      mocks.unarchiveMutateCalls.push(id)
+    },
+    isPending: mocks.unarchivePending,
   }),
   readAgentModelAndVariant: (agent: any) => {
     if (!agent?.agentConfig) return { model: null, variant: null }
@@ -112,6 +129,10 @@ describe('AgentDetailPage', () => {
     mocks.sessions = []
     mocks.sessionsLoading = false
     mocks.routeParams = { agentId: 'agent-1' }
+    mocks.archiveMutateCalls.length = 0
+    mocks.unarchiveMutateCalls.length = 0
+    mocks.archivePending = false
+    mocks.unarchivePending = false
   })
 
   afterEach(() => {
@@ -206,6 +227,72 @@ describe('AgentDetailPage', () => {
       const editBtn = screen.getByTestId('agent-detail-edit')
       fireEvent.click(editBtn)
       expect(screen.getByTestId('agent-profile-editor')).toBeInTheDocument()
+    })
+  })
+
+  describe('Actions card (agent-archive + agent-unarchive specs)', () => {
+    it('for an active agent, the Archive button does not open the Edit dialog on click', () => {
+      mocks.agent = makeAgent({ status: 'active' })
+      renderPage()
+      const archiveBtn = screen.getByTestId('agent-detail-archive-btn')
+      fireEvent.click(archiveBtn)
+      expect(screen.queryByTestId('agent-profile-editor')).not.toBeInTheDocument()
+    })
+
+    it('for an active agent, clicking the Archive button opens a confirm dialog (not a direct archive)', () => {
+      mocks.agent = makeAgent({ status: 'active' })
+      renderPage()
+      fireEvent.click(screen.getByTestId('agent-detail-archive-btn'))
+      expect(screen.getByTestId('agent-detail-archive-confirm-dialog')).toBeInTheDocument()
+      expect(screen.getByTestId('agent-detail-archive-confirm')).toBeInTheDocument()
+      expect(screen.getByTestId('agent-detail-archive-cancel')).toBeInTheDocument()
+    })
+
+    it('cancelling the archive confirm does NOT archive', () => {
+      mocks.agent = makeAgent({ status: 'active' })
+      renderPage()
+      fireEvent.click(screen.getByTestId('agent-detail-archive-btn'))
+      fireEvent.click(screen.getByTestId('agent-detail-archive-cancel'))
+      expect(screen.queryByTestId('agent-detail-archive-confirm-dialog')).not.toBeInTheDocument()
+      expect(mocks.archiveMutateCalls).toHaveLength(0)
+    })
+
+    it('confirming the archive invokes useArchiveAgent.mutate with the agent id and closes the confirm dialog', () => {
+      mocks.agent = makeAgent({ status: 'active' })
+      renderPage()
+      fireEvent.click(screen.getByTestId('agent-detail-archive-btn'))
+      fireEvent.click(screen.getByTestId('agent-detail-archive-confirm'))
+      expect(mocks.archiveMutateCalls).toHaveLength(1)
+      expect(mocks.archiveMutateCalls[0].id).toBe('agent-1')
+      expect(screen.queryByTestId('agent-detail-archive-confirm-dialog')).not.toBeInTheDocument()
+    })
+
+    it('for an archived agent, the static archived notice is replaced by an Unarchive control', () => {
+      mocks.agent = makeAgent({ status: 'archived' })
+      renderPage()
+      expect(screen.queryByText(/this agent is archived and cannot be launched/i)).not.toBeInTheDocument()
+      expect(screen.getByTestId('agent-detail-unarchive-btn')).toBeInTheDocument()
+      expect(screen.queryByTestId('agent-detail-archive-btn')).not.toBeInTheDocument()
+    })
+
+    it('for an archived agent, clicking the Unarchive control invokes useUnarchiveAgent with the agent id', () => {
+      mocks.agent = makeAgent({ status: 'archived' })
+      renderPage()
+      fireEvent.click(screen.getByTestId('agent-detail-unarchive-btn'))
+      expect(mocks.unarchiveMutateCalls).toEqual(['agent-1'])
+    })
+
+    it('for an active agent, the Unarchive control is NOT rendered (no mismatch)', () => {
+      mocks.agent = makeAgent({ status: 'active' })
+      renderPage()
+      expect(screen.queryByTestId('agent-detail-unarchive-btn')).not.toBeInTheDocument()
+    })
+
+    it('for an archived agent, the New Session control remains disabled (archived-cannot-launch invariant)', () => {
+      mocks.agent = makeAgent({ status: 'archived' })
+      renderPage()
+      const newSessionBtn = screen.getByTestId('agent-detail-new-session')
+      expect(newSessionBtn).toBeDisabled()
     })
   })
 })

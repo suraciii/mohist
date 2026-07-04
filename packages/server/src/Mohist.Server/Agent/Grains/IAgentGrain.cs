@@ -9,6 +9,7 @@ public interface IAgentGrain : IGrainWithStringKey
     Task<AgentInfo?> ShowAsync();
     Task<AgentInfo?> UpdateAsync(AgentUpdateData data);
     Task<AgentInfo?> ArchiveAsync();
+    Task<AgentInfo?> UnarchiveAsync();
 }
 
 [GenerateSerializer]

@@ -161,6 +161,11 @@ export function AgentSessionComposerPage() {
   const { data: agents, isLoading: agentsLoading } = useAgents()
   const launchMutation = useLaunchAgentSession()
 
+  const launchableAgents = useMemo(
+    () => agents?.filter((a) => a.status !== 'archived') ?? [],
+    [agents],
+  )
+
   const [selectedAgentRef, setSelectedAgentRef] = useState(() => searchParams.get('agent') || '')
   const [contextRefs, setContextRefs] = useState<ContextRef[]>(() => {
     const refs: ContextRef[] = []
@@ -258,7 +263,7 @@ export function AgentSessionComposerPage() {
         <div className="space-y-1.5">
           <Label htmlFor="agent-select">Agent</Label>
           <AgentSelector
-            agents={agents}
+            agents={launchableAgents}
             selectedRef={selectedAgentRef}
             onChange={setSelectedAgentRef}
             isLoading={agentsLoading}

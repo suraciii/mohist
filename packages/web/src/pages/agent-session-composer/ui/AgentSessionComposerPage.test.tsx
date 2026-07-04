@@ -291,12 +291,23 @@ describe('AgentSessionComposerPage', () => {
     expect(button).toBeDisabled()
   })
 
-  it('allows selecting archived agents but shows warning', () => {
-    mocks.agents = [makeAgent('agent-1', { status: 'archived' }), makeAgent('agent-2')]
+  it('excludes archived agents from the launcher picker', () => {
+    mocks.agents = [
+      makeAgent('agent-archived', { name: 'Archived One', status: 'archived' }),
+      makeAgent('agent-active', { name: 'Active One', status: 'active' }),
+    ]
     renderPage()
     fireEvent.click(screen.getByTestId('agent-selector-trigger'))
-    fireEvent.click(screen.getByTestId('agent-option-agent-1'))
+    expect(screen.queryByTestId('agent-option-agent-archived')).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-option-agent-active')).toBeInTheDocument()
+  })
+
+  it('shows the archived warning when ?agent= points at an archived agent even though it is not in the picker', () => {
+    mocks.agents = [makeAgent('agent-1', { status: 'archived' })]
+    mocks.searchParams = new URLSearchParams('agent=agent-1')
+    renderPage(['/agent-sessions/new?agent=agent-1'])
     expect(screen.getByTestId('archived-warning')).toBeInTheDocument()
+    expect(screen.getByTestId('launch-button')).toBeDisabled()
   })
 
   /* ── Error states ─────────────────────────────────────── */

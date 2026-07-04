@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useAgent, useAgentSessions, useAgents, useArchiveAgent, useCreateAgent, useUpdateAgent } from './queries'
+import { useAgent, useAgentSessions, useAgents, useArchiveAgent, useCreateAgent, useUnarchiveAgent, useUpdateAgent } from './queries'
 
 const useQueryMock = vi.fn()
 const useMutationMock = vi.fn()
@@ -10,6 +10,7 @@ const getAgentMock = vi.fn()
 const createAgentMock = vi.fn()
 const updateAgentMock = vi.fn()
 const archiveAgentMock = vi.fn()
+const unarchiveAgentMock = vi.fn()
 const getAgentScopedSessionsMock = vi.fn()
 const invalidateQueriesMock = vi.fn()
 const toastSuccessMock = vi.fn()
@@ -35,6 +36,7 @@ vi.mock('./client', async (importOriginal) => {
     createAgent: (...args: unknown[]) => createAgentMock(...args),
     updateAgent: (...args: unknown[]) => updateAgentMock(...args),
     archiveAgent: (...args: unknown[]) => archiveAgentMock(...args),
+    unarchiveAgent: (...args: unknown[]) => unarchiveAgentMock(...args),
   }
 })
 
@@ -59,6 +61,7 @@ beforeEach(() => {
   createAgentMock.mockReset()
   updateAgentMock.mockReset()
   archiveAgentMock.mockReset()
+  unarchiveAgentMock.mockReset()
   getAgentScopedSessionsMock.mockReset()
   invalidateQueriesMock.mockReset()
   toastSuccessMock.mockReset()
@@ -105,12 +108,12 @@ describe('useAgents', () => {
     expect(getLastQueryOptions().enabled).toBe(false)
   })
 
-  it('calls listAgents(projectId) as the query function', async () => {
-    listAgentsMock.mockResolvedValue([{ id: 'a1' }])
+  it('calls listAgents(projectId, { all: true }) so archived agents are included', async () => {
+    listAgentsMock.mockResolvedValue([{ id: 'a1' }, { id: 'a2', status: 'archived' }])
     useAgents()
     const opts = getLastQueryOptions()
     await opts.queryFn()
-    expect(listAgentsMock).toHaveBeenCalledWith('proj-1')
+    expect(listAgentsMock).toHaveBeenCalledWith('proj-1', { all: true })
   })
 
   it('returns typed AgentInfo[]', () => {
@@ -281,5 +284,39 @@ describe('useArchiveAgent', () => {
     useArchiveAgent()
     getLastMutationOptions().onError(new Error('ALREADY_ARCHIVED'))
     expect(toastErrorMock).toHaveBeenCalledWith('ALREADY_ARCHIVED')
+  })
+})
+
+/* ── useUnarchiveAgent ──────────────────────────────────── */
+describe('useUnarchiveAgent', () => {
+  beforeEach(() => {
+    useMutationMock.mockImplementation((options: unknown) => ({ mutate: vi.fn(), options }))
+  })
+
+  it('calls unarchiveAgent(projectId, agentRef) in mutationFn', () => {
+    useUnarchiveAgent()
+    const opts = getLastMutationOptions()
+    unarchiveAgentMock.mockResolvedValue({ id: 'a1', status: 'active' })
+    void opts.mutationFn('agent-zeta')
+    expect(unarchiveAgentMock).toHaveBeenCalledWith('proj-1', 'agent-zeta')
+  })
+
+  it('invalidates ["agents"] and ["agent-status"] on success (mirroring useArchiveAgent)', () => {
+    useUnarchiveAgent()
+    getLastMutationOptions().onSuccess()
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
+  })
+
+  it('shows success toast on success', () => {
+    useUnarchiveAgent()
+    getLastMutationOptions().onSuccess()
+    expect(toastSuccessMock).toHaveBeenCalledWith('Agent restored')
+  })
+
+  it('shows error toast on failure', () => {
+    useUnarchiveAgent()
+    getLastMutationOptions().onError(new Error('NOT_FOUND'))
+    expect(toastErrorMock).toHaveBeenCalledWith('NOT_FOUND')
   })
 })

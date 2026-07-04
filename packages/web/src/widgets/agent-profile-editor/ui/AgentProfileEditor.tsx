@@ -253,8 +253,9 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved }: Props) {
           <DialogHeader>
             <DialogTitle>Archive Agent</DialogTitle>
             <DialogDescription>
-              This agent will be marked as archived. It will remain visible but
-              cannot be used to start new sessions. This action can be reversed.
+              This agent will be marked as archived. It will leave the Active
+              group and cannot be used to start new sessions. You can restore
+              it from the agent detail page.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2 pt-2">

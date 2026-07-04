@@ -10,6 +10,7 @@ import {
   getAgentSessions as getGlobalAgentSessions,
   getAgentStatus,
   listAgents,
+  unarchiveAgent,
   updateAgent,
 } from './client'
 import type {
@@ -55,7 +56,7 @@ export function useAgents() {
   const { projectId } = useProject()
   return useQuery<AgentInfo[]>({
     queryKey: ['agents', projectId],
-    queryFn: () => listAgents(projectId!),
+    queryFn: () => listAgents(projectId!, { all: true }),
     enabled: !!projectId,
   })
 }
@@ -108,6 +109,22 @@ export function useArchiveAgent() {
       queryClient.invalidateQueries({ queryKey: ['agents'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       toast.success('Agent archived')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useUnarchiveAgent() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<AgentInfo, Error, string>({
+    mutationFn: (agentRef) => unarchiveAgent(projectId!, agentRef),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      toast.success('Agent restored')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')

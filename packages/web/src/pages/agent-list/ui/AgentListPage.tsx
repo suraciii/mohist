@@ -153,7 +153,7 @@ export function AgentListPage() {
         ) : (
           <div className="rounded-lg border border-border bg-card overflow-hidden" data-testid="agent-list">
             {activeAgents.length > 0 && (
-              <div>
+              <div data-testid="active-section">
                 <div className="px-4 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 border-b border-border">
                   Active ({activeAgents.length})
                 </div>
@@ -163,7 +163,7 @@ export function AgentListPage() {
               </div>
             )}
             {archivedAgents.length > 0 && (
-              <div>
+              <div data-testid="archived-section">
                 <div className="px-4 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted/50 border-b border-border">
                   Archived ({archivedAgents.length})
                 </div>

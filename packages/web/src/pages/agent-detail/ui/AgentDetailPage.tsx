@@ -9,13 +9,22 @@ import {
   XCircleIcon,
   CheckCircleIcon,
   AlertCircleIcon,
+  Loader2Icon,
+  RotateCcwIcon,
 } from 'lucide-react'
-import { useAgent, useAgentSessions, readAgentModelAndVariant } from '../../../entities/agent'
+import {
+  useAgent,
+  useAgentSessions,
+  useArchiveAgent,
+  useUnarchiveAgent,
+  readAgentModelAndVariant,
+} from '../../../entities/agent'
 import type { AgentSessionListItemDto } from '../../../entities/agent'
 import { useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { Button } from '@/shared/ui/components/button'
 import { Badge } from '@/shared/ui/components/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/shared/ui/components/dialog'
 import { AgentProfileEditor } from '../../../widgets/agent-profile-editor/ui/AgentProfileEditor'
 
 function formatTime(iso: string | null | undefined): string {
@@ -89,7 +98,10 @@ export function AgentDetailPage() {
   const toProjectPath = useProjectPath()
   const { data: agent, isLoading, isError } = useAgent(agentId ?? '')
   const { data: allSessions = [], isLoading: sessionsLoading } = useAgentSessions({ agentRef: agentId ?? '' })
+  const archiveAgent = useArchiveAgent()
+  const unarchiveAgent = useUnarchiveAgent()
   const [editorOpen, setEditorOpen] = useState(false)
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
 
   useDocumentTitle(agent ? `${agent.name} — Mohist` : 'Agent — Mohist')
 
@@ -127,6 +139,20 @@ export function AgentDetailPage() {
         .slice(0, 5),
     [allSessions],
   )
+
+  function handleArchive() {
+    if (!agent) return
+    archiveAgent.mutate(agent.id, {
+      onSuccess: () => {
+        setArchiveConfirmOpen(false)
+      },
+    })
+  }
+
+  function handleUnarchive() {
+    if (!agent) return
+    unarchiveAgent.mutate(agent.id)
+  }
 
   if (isLoading) {
     return (
@@ -285,17 +311,30 @@ export function AgentDetailPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setEditorOpen(true)}
-                    className="w-full justify-start"
+                    onClick={() => setArchiveConfirmOpen(true)}
+                    className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
                     data-testid="agent-detail-archive-btn"
+                    disabled={archiveAgent.isPending}
                   >
                     <ArchiveIcon />
                     Archive
                   </Button>
                 ) : (
-                  <div className="text-xs text-muted-foreground italic px-1">
-                    This agent is archived and cannot be launched.
-                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleUnarchive}
+                    className="w-full justify-start"
+                    data-testid="agent-detail-unarchive-btn"
+                    disabled={unarchiveAgent.isPending}
+                  >
+                    {unarchiveAgent.isPending ? (
+                      <Loader2Icon className="size-4 animate-spin" />
+                    ) : (
+                      <RotateCcwIcon />
+                    )}
+                    Unarchive
+                  </Button>
                 )}
               </div>
             </div>
@@ -313,6 +352,37 @@ export function AgentDetailPage() {
           }}
         />
       )}
+
+      <Dialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
+        <DialogContent className="sm:max-w-sm" data-testid="agent-detail-archive-confirm-dialog">
+          <DialogHeader>
+            <DialogTitle>Archive Agent</DialogTitle>
+            <DialogDescription>
+              This agent will leave the Active group and will not be launchable for new sessions.
+              It remains visible in the Archived group and can be restored from this page.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setArchiveConfirmOpen(false)}
+              disabled={archiveAgent.isPending}
+              data-testid="agent-detail-archive-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleArchive}
+              disabled={archiveAgent.isPending}
+              data-testid="agent-detail-archive-confirm"
+            >
+              {archiveAgent.isPending && <Loader2Icon className="size-4 animate-spin" />}
+              Archive
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

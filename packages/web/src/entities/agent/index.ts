@@ -7,6 +7,7 @@ export {
   useCreateAgent,
   useUpdateAgent,
   useArchiveAgent,
+  useUnarchiveAgent,
   useAgentSessions,
 } from './api/queries'
 export { costRollupQueryKey, fetchCostRollup, useCostRollup } from './api/cost-rollup'
@@ -26,6 +27,7 @@ export {
   getAgentStatus,
   listAgents,
   readAgentModelAndVariant,
+  unarchiveAgent,
   updateAgent,
   writeAgentModelAndVariant,
 } from './api/client'
