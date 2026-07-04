@@ -65,6 +65,9 @@ using (var scope = app.Services.CreateScope())
 // 同时拦截主端口上的 /otel/v1/ 路径，避免 SPA fallback 把它们误当成
 // 静态资源。详见 OtelPortIsolationMiddleware。
 app.UseOtelPortIsolation();
+// HttpLogging 中间件：在路由前注册，对每个请求产出聚合日志。
+// /otel 自遥测路径由 OtelHttpLogSuppressorInterceptor 跳过。
+app.UseHttpLogging();
 
 app.MapMohistApi();
 app.MapMohistWeb(builder.Configuration);
@@ -128,6 +131,7 @@ static WebApplication BuildAlternateApp(string[] args)
         db.Database.Migrate();
     }
     alt.UseOtelPortIsolation();
+    alt.UseHttpLogging();
     alt.MapMohistApi();
     alt.MapMohistWeb(alt.Configuration);
     return alt;
