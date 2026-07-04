@@ -48,7 +48,7 @@ A line SHALL be visible only if it satisfies BOTH the current search term AND th
 - **WHEN** the search term is `error` and only the `action:rebase` chip is enabled
 - **THEN** only lines whose `source` is `action:rebase` AND whose `text` or `source` contains `error` SHALL be visible
 
-### Requirement: Whole-log download exports the current view as a text file
+### Requirement: Download exports the currently filtered view as a text file
 
 The panel SHALL provide a download button that exports the currently filtered lines (the result of the active search and source filtering) as a `.txt` file via a client-side `Blob` and a temporary `<a download>` click, with no server round-trip. The exported content SHALL include one entry per visible log line in seq order, preserving each line's `text`. The filename SHALL match `task-logs-<taskId>-YYYY-MM-DD.txt`.
 
