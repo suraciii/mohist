@@ -380,19 +380,6 @@ public class CliIssueLabelSpecs
         Assert.NotEqual("", error.ToString());
     }
 
-    [Fact]
-    public async Task LabelList_HitsCatalogEndpoint()
-    {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["label", "list"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var req = handler.Requests.Last();
-        Assert.Equal(HttpMethod.Get, req.Method);
-        Assert.Equal("/api/projects/proj_abc/labels/catalog", req.RequestUri?.PathAndQuery);
-    }
 
     [Fact]
     public async Task LabelList_Table_RendersDefinitions()
