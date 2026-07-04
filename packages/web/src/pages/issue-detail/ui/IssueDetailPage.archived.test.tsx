@@ -520,7 +520,7 @@ describe('IssueDetailPage archived Done issue — no active-workflow controls', 
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('issue-detail-right-rail')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('reference-rail')).toBeTruthy())
     expect(screen.queryByTestId('runtime-action-start')).toBeNull()
     expect(screen.queryByTestId('mark-ready-button')).toBeNull()
     expect(screen.queryByTestId('start-readiness')).toBeNull()
@@ -556,7 +556,7 @@ describe('IssueDetailPage archived Done issue — no active-workflow controls', 
 
     const { container } = renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('issue-detail-right-rail')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('reference-rail')).toBeTruthy())
     expect(screen.queryByTestId('archived-actions-note')).toBeNull()
     expect(container.querySelector('[data-testid="runtime-action-start"]')).toBeNull()
     expect(container.querySelector('[data-testid="mark-ready-button"]')).toBeNull()

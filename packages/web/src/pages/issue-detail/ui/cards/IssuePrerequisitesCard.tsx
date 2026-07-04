@@ -3,12 +3,12 @@ import type { IssuePrerequisiteSummary } from '../../../../entities/issue'
 
 export interface IssuePrerequisitesCardProps {
   prerequisites: IssuePrerequisiteSummary[]
+  unframed?: boolean
 }
 
-export function IssuePrerequisitesCard({ prerequisites }: IssuePrerequisitesCardProps) {
-  return (
-    <CardSection title="Start Prerequisites" tone="amber">
-      <div className="space-y-2">
+export function IssuePrerequisitesCard({ prerequisites, unframed = false }: IssuePrerequisitesCardProps) {
+  const content = (
+    <div className="space-y-2">
         {prerequisites.map((prereq) => (
           <div key={prereq.number} className="flex items-center justify-between text-sm gap-2">
             <span className="text-warning truncate">
@@ -25,7 +25,8 @@ export function IssuePrerequisitesCard({ prerequisites }: IssuePrerequisitesCard
             )}
           </div>
         ))}
-      </div>
-    </CardSection>
+    </div>
   )
+  if (unframed) return content
+  return <CardSection title="Start Prerequisites" tone="amber">{content}</CardSection>
 }

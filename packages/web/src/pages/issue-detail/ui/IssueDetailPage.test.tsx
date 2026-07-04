@@ -340,7 +340,7 @@ describe('IssueDetailPage runtime decision surface', () => {
     const stopButtons = screen.getAllByRole('button', { name: 'Stop' })
     expect(stopButtons).toHaveLength(1)
     expect(stopButtons[0]).toBe(screen.getByTestId('runtime-action-stop'))
-    expect(screen.getByTestId('issue-detail-right-rail').querySelector('[data-testid="runtime-action-stop"]')).toBeNull()
+    expect(screen.getByTestId('reference-rail').querySelector('[data-testid="runtime-action-stop"]')).toBeNull()
   })
 
   it('keeps the sessions panel reachable as supporting evidence beneath the surface', async () => {
@@ -412,7 +412,7 @@ describe('IssueDetailPage repository metadata containment', () => {
     expect(screen.getByTestId('issue-detail-page-container')).toHaveClass('min-w-0')
     expect(screen.getByTestId('issue-detail-page-container')).not.toHaveClass('overflow-x-hidden')
     expect(screen.getByTestId('issue-detail-content-grid')).toHaveClass('min-w-0')
-    expect(screen.getByTestId('issue-detail-right-rail')).toHaveClass('min-w-0')
+    expect(screen.getByTestId('reference-rail')).toHaveClass('min-w-0')
     expect(screen.getByTestId('issue-detail-details-metadata')).toHaveClass('min-w-0')
     expect(screen.getByTestId('repository-metadata-row')).toHaveClass('min-w-0')
     expect(screen.getByTestId('repository-metadata-value')).toHaveClass('min-w-0')
@@ -866,7 +866,7 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
 
     renderPage()
 
-    const rightRail = await waitFor(() => screen.getByTestId('issue-detail-right-rail'))
+    const rightRail = await waitFor(() => screen.getByTestId('reference-rail'))
     expectUsesUnifiedSpacingScale(rightRail)
     expect(rightRail.className).toContain('space-y-6')
     expect(rightRail.className).not.toContain('space-y-4')
@@ -889,14 +889,15 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
 
     renderPage()
 
-    const surfaceFrame = await waitFor(() => screen.getByTestId('runtime-decision-surface-frame'))
-    expect(surfaceFrame.className).toContain('mb-8')
-
-    const surface = screen.getByTestId('runtime-decision-surface')
+    const surface = await waitFor(() => screen.getByTestId('runtime-decision-surface'))
     expect(surface).toBeTruthy()
+
+    const headerTier = screen.getByTestId('status-header-tier')
+    expect(headerTier.contains(surface)).toBe(true)
+    expect(headerTier.className).toMatch(/space-y-/)
   })
 
-  it('lets the header bottom margin match the page group rhythm (mb-8) so the next section is not flush', async () => {
+  it('lets the header sit inside the spaced status-header tier so the next region is not flush', async () => {
     mockUseIssue.mockReturnValue({
       data: makeIssue({ id: 'issue-14', number: 14 }),
       isLoading: false,
@@ -906,7 +907,9 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
     renderPage()
 
     const header = await waitFor(() => screen.getByTestId('issue-detail-header'))
-    expect(header.className).toContain('mb-8')
+    const headerTier = screen.getByTestId('status-header-tier')
+    expect(headerTier.contains(header)).toBe(true)
+    expect(headerTier.className).toMatch(/space-y-/)
   })
 
   it('keeps the data-testid of every major section stable for downstream density regression checks', async () => {
@@ -919,11 +922,13 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
     const { container } = renderPage()
 
     await waitFor(() => expect(screen.getByTestId('issue-detail-header')).toBeTruthy())
+    expect(screen.getByTestId('status-header-tier')).toBeTruthy()
+    expect(screen.getByTestId('reading-flow')).toBeTruthy()
+    expect(screen.getByTestId('reference-rail')).toBeTruthy()
     expect(screen.getByTestId('runtime-decision-surface-frame')).toBeTruthy()
     expect(screen.getByTestId('workflow-view-frame')).toBeTruthy()
     expect(screen.getByTestId('workflow-profile-editor-frame')).toBeTruthy()
     expect(screen.getByTestId('issue-detail-content-grid')).toBeTruthy()
-    expect(screen.getByTestId('issue-detail-right-rail')).toBeTruthy()
     expect(screen.getByTestId('description-section')).toBeTruthy()
     expect(screen.getByTestId('comments-section')).toBeTruthy()
     expect(screen.getByTestId('activity-entry')).toBeTruthy()
@@ -966,14 +971,13 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
     expect(within(branchFrame).getByText('Rebase onto master')).toBeTruthy()
 
     const workflowFrame = screen.getByTestId('workflow-view-frame')
-    const contentGrid = screen.getByTestId('issue-detail-content-grid')
+    const readingFlow = screen.getByTestId('reading-flow')
     expect(
       (branchFrame.compareDocumentPosition(workflowFrame) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
     ).toBe(true)
-    expect(
-      (branchFrame.compareDocumentPosition(contentGrid) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
-    ).toBe(true)
-    expect(container.querySelector('[data-testid="issue-detail-content-grid"] [data-testid="branch-bar"]')).toBeNull()
+    expect(readingFlow.contains(branchFrame)).toBe(true)
+    expect(readingFlow.contains(workflowFrame)).toBe(true)
+    expect(container.querySelector('[data-testid="reference-rail"] [data-testid="branch-bar"]')).toBeNull()
   })
 
   it('does not render an empty PR delivery summary frame when the workflow has no PR delivery metadata', async () => {

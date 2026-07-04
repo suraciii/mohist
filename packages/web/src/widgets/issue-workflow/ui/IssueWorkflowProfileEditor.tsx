@@ -10,6 +10,7 @@ import type { IssueWorkflowProfileYamlResponse } from '../../../entities/issue'
 
 interface IssueWorkflowProfileEditorProps {
   issueNumber: number
+  embedded?: boolean
 }
 
 interface ValidationError {
@@ -25,7 +26,7 @@ const templateSourceLabel: Record<'system' | 'project' | 'custom', string> = {
   custom: 'Custom',
 }
 
-export function IssueWorkflowProfileEditor({ issueNumber }: IssueWorkflowProfileEditorProps) {
+export function IssueWorkflowProfileEditor({ issueNumber, embedded = false }: IssueWorkflowProfileEditorProps) {
   const [draftYaml, setDraftYaml] = useState('')
   const [serverYaml, setServerYaml] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
@@ -112,11 +113,11 @@ export function IssueWorkflowProfileEditor({ issueNumber }: IssueWorkflowProfile
   }, [deleteMutation, issueNumber])
 
   if (isLoading) {
-    return <LoadingCard />
+    return <LoadingCard embedded={embedded} />
   }
 
   if (fetchError) {
-    return <ErrorCard message={(fetchError as Error).message} onRetry={() => refetch()} />
+    return <ErrorCard embedded={embedded} message={(fetchError as Error).message} onRetry={() => refetch()} />
   }
 
   if (!data) {
@@ -130,6 +131,7 @@ export function IssueWorkflowProfileEditor({ issueNumber }: IssueWorkflowProfile
     return (
       <ReferenceSummaryCard
         data={data}
+        embedded={embedded}
         onCustomize={() => {
           setMode('editing')
           setRevertError(null)
@@ -141,6 +143,7 @@ export function IssueWorkflowProfileEditor({ issueNumber }: IssueWorkflowProfile
   return (
     <CustomEditorCard
       data={data}
+      embedded={embedded}
       draftYaml={draftYaml}
       serverYaml={serverYaml}
       isDirty={isDirty}
@@ -156,11 +159,11 @@ export function IssueWorkflowProfileEditor({ issueNumber }: IssueWorkflowProfile
   )
 }
 
-function LoadingCard() {
+function LoadingCard({ embedded = false }: { embedded?: boolean }) {
   return (
     <div
       data-testid="workflow-profile-loading"
-      className="rounded-lg border border-border bg-card p-4 space-y-2"
+      className={embedded ? 'space-y-2' : 'rounded-lg border border-border bg-card p-4 space-y-2'}
     >
       <div className="h-3 w-32 bg-muted rounded animate-pulse" />
       <div className="h-3 w-48 bg-muted rounded animate-pulse" />
@@ -169,11 +172,11 @@ function LoadingCard() {
   )
 }
 
-function ErrorCard({ message, onRetry }: { message: string; onRetry: () => void }) {
+function ErrorCard({ embedded = false, message, onRetry }: { embedded?: boolean; message: string; onRetry: () => void }) {
   return (
     <div
       data-testid="workflow-profile-error"
-      className="rounded-lg border border-danger-border bg-danger-subtle p-4 space-y-2"
+      className={embedded ? 'space-y-2 text-danger' : 'rounded-lg border border-danger-border bg-danger-subtle p-4 space-y-2'}
     >
       <p className="text-xs text-danger">Failed to load workflow profile: {message}</p>
       <div>
@@ -187,18 +190,20 @@ function ErrorCard({ message, onRetry }: { message: string; onRetry: () => void 
 
 function ReferenceSummaryCard({
   data,
+  embedded = false,
   onCustomize,
 }: {
   data: IssueWorkflowProfileYamlResponse
+  embedded?: boolean
   onCustomize: () => void
 }) {
   const source = data.templateSource ?? 'system'
   return (
     <div
       data-testid="workflow-profile-reference"
-      className="rounded-lg border border-border bg-card p-4 space-y-3"
+      className={embedded ? 'space-y-3' : 'rounded-lg border border-border bg-card p-4 space-y-3'}
     >
-      <h3 className="text-sm font-semibold text-card-foreground">Workflow Profile</h3>
+      {!embedded && <h3 className="text-sm font-semibold text-card-foreground">Workflow Profile</h3>}
       <dl className="text-xs space-y-1.5">
         <div className="flex justify-between gap-3">
           <dt className="text-muted-foreground">Profile</dt>
@@ -231,6 +236,7 @@ function ReferenceSummaryCard({
 
 function CustomEditorCard({
   data,
+  embedded = false,
   draftYaml,
   isDirty,
   saveSuccess,
@@ -243,6 +249,7 @@ function CustomEditorCard({
   onRevert,
 }: {
   data: IssueWorkflowProfileYamlResponse
+  embedded?: boolean
   draftYaml: string
   serverYaml: string | null
   isDirty: boolean
@@ -258,10 +265,10 @@ function CustomEditorCard({
   return (
     <div
       data-testid="workflow-profile-custom"
-      className="rounded-lg border border-border bg-card p-4"
+      className={embedded ? '' : 'rounded-lg border border-border bg-card p-4'}
     >
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-card-foreground">Workflow Profile</h3>
+        {!embedded && <h3 className="text-sm font-semibold text-card-foreground">Workflow Profile</h3>}
         {data.workflowRunId && (
           <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
             Active run: {data.workflowRunId.slice(0, 8)}

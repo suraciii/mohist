@@ -453,6 +453,8 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
     && (issue.convergence.unresolvedItemIds?.length ?? 0) > 0
   if (
     health === IssueHealth.Blocked
+    || health === IssueHealth.Interrupted
+    || status === 'interrupted'
     || recovery?.latestAttemptState === 'interrupted'
     || hasUnresolvedConvergence
   ) {
@@ -556,7 +558,11 @@ function buildRationale(
     const blocked = input.issue?.blockedReason
     if (blocked) return blocked
     if (input.issue?.convergence?.blockedReason) return input.issue.convergence.blockedReason
-    if (input.issue?.recovery?.latestAttemptState === 'interrupted') {
+    if (
+      input.issue?.health === IssueHealth.Interrupted
+      || input.issue?.workflowStatus?.toLowerCase() === 'interrupted'
+      || input.issue?.recovery?.latestAttemptState === 'interrupted'
+    ) {
       return 'The workflow was interrupted. Resume or rerun to continue.'
     }
     return 'The workflow is blocked and needs an action to continue.'
@@ -636,8 +642,13 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInput): RuntimeDecis
   const rationale = buildRationale(summary, input, waitReason)
   const nextAction = buildNextAction(summary, actions, currentTask, waitReason)
   const driftNote = buildDriftNote(input)
+  const interruptedReason = issue?.health === IssueHealth.Interrupted
+    || issue?.workflowStatus?.toLowerCase() === 'interrupted'
+    || issue?.recovery?.latestAttemptState === 'interrupted'
+    ? 'The workflow was interrupted. Resume or rerun to continue.'
+    : null
   const blockedReason = summary === 'failed' || summary === 'blocked'
-    ? (issue?.blockedReason ?? null)
+    ? (issue?.blockedReason ?? issue?.convergence?.blockedReason ?? interruptedReason)
     : null
   const approvalStage = summary === 'approval-required'
     ? (issue?.approvalState?.stage ?? issue?.workflowStage ?? null)

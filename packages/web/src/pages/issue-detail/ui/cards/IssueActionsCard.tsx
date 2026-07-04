@@ -3,12 +3,10 @@ import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import type { AgentStatus } from '../../../../entities/agent'
 import type { Issue } from '../../../../entities/issue'
-import type { RuntimeDecision } from '../../../../widgets/issue-workflow/model/derive-runtime-decision'
 import type { IssueDetailMutations } from '../../model/useIssueDetailMutations'
 
 export interface IssueActionsCardProps {
   issue: Issue
-  decision: RuntimeDecision
   agentStatus: AgentStatus | null | undefined
   mutations: Pick<
     IssueDetailMutations,
@@ -22,14 +20,15 @@ export interface IssueActionsCardProps {
     | 'rerunMutation'
   >
   onAskAgent: () => void
+  unframed?: boolean
 }
 
 export function IssueActionsCard({
   issue,
-  decision,
   agentStatus,
   mutations,
   onAskAgent,
+  unframed = false,
 }: IssueActionsCardProps) {
   const activeAgents = agentStatus?.activeAgents ?? []
   const isAgentRunningOnThis = activeAgents.some((agent) => agent.issueNumber === issue.number)
@@ -37,82 +36,70 @@ export function IssueActionsCard({
   const showOtherAgents = !isAgentRunningOnThis && otherAgentsCount > 0 && issue.status !== 'backlog'
   const showClose = issue.health === 'active' && !isAgentRunningOnThis
 
-  return (
-    <CardSection title="Actions">
-      <div className="space-y-2">
-        {issue.archivedAt && (
-          <div
-            data-testid="archived-actions-note"
-            className="rounded-md bg-muted border border-border px-3 py-2 text-xs text-muted-foreground"
-          >
-            This issue is archived. Start, stop, retry, rerun, resume controls are unavailable because the workflow is no longer running. The execution history is preserved above.
-          </div>
-        )}
+  const content = (
+    <div className="space-y-2" data-testid="issue-actions-card-body">
+      {issue.archivedAt && (
+        <div
+          data-testid="archived-actions-note"
+          className="rounded-md bg-muted border border-border px-3 py-2 text-xs text-muted-foreground"
+        >
+          This issue is archived. Start, stop, retry, rerun, resume controls are unavailable because the workflow is no longer running. The execution history is preserved above.
+        </div>
+      )}
 
-        {issue.isDraft && (
-          <div
-            data-testid="start-readiness"
-            data-blocker="draft"
-            className="rounded-md bg-muted border border-border px-3 py-2 text-sm text-muted-foreground"
-          >
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground">
-              Still a draft
-            </div>
-            <p className="text-xs">
-              This issue has not been marked ready yet. Mark it ready to enable Start.
-            </p>
-            <Button
-              data-testid="mark-ready-button"
-              onClick={() => mutations.markReadyMutation.mutate()}
-              disabled={mutations.markReadyMutation.isPending}
-              className="w-full mt-2"
-            >
-              {mutations.markReadyMutation.isPending ? 'Marking ready...' : 'Mark ready'}
-            </Button>
+      {issue.isDraft && (
+        <div
+          data-testid="start-readiness"
+          data-blocker="draft"
+          className="rounded-md bg-muted border border-border px-3 py-2 text-sm text-muted-foreground"
+        >
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-foreground">
+            Still a draft
           </div>
-        )}
-
-        {decision.currentTask && (
-          <div className="rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-            Current: {decision.currentTask.kind} - {decision.currentTask.title}
-          </div>
-        )}
-
-        {decision.blockedReason && (
-          <div className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-sm text-danger">
-            {decision.blockedReason}
-          </div>
-        )}
-
-        {showClose && (
+          <p className="text-xs">
+            This issue has not been marked ready yet. Mark it ready to enable Start.
+          </p>
           <Button
-            variant="outline"
-            onClick={() => mutations.closeMutation.mutate()}
-            disabled={mutations.closeMutation.isPending}
-            className="w-full"
+            data-testid="mark-ready-button"
+            onClick={() => mutations.markReadyMutation.mutate()}
+            disabled={mutations.markReadyMutation.isPending}
+            className="w-full mt-2"
           >
-            {mutations.closeMutation.isPending ? 'Closing...' : 'Close'}
-          </Button>
-        )}
-
-        {showOtherAgents && (
-          <div className="text-xs text-muted-foreground text-center">
-            {otherAgentsCount} agent{otherAgentsCount > 1 ? 's' : ''} running on other issues
-          </div>
-        )}
-
-        <div className="border-t border-border/60 pt-2">
-          <Button
-            variant="outline"
-            onClick={onAskAgent}
-            className="w-full"
-            data-testid="ask-agent-issue"
-          >
-            <BotIcon className="size-4 mr-2" />
-            Ask Agent
+            {mutations.markReadyMutation.isPending ? 'Marking ready...' : 'Mark ready'}
           </Button>
         </div>
+      )}
+
+      {showClose && (
+        <Button
+          variant="outline"
+          onClick={() => mutations.closeMutation.mutate()}
+          disabled={mutations.closeMutation.isPending}
+          className="w-full"
+        >
+          {mutations.closeMutation.isPending ? 'Closing...' : 'Close'}
+        </Button>
+      )}
+
+      {showOtherAgents && (
+        <div className="text-xs text-muted-foreground text-center">
+          {otherAgentsCount} agent{otherAgentsCount > 1 ? 's' : ''} running on other issues
+        </div>
+      )}
+
+      <div className="border-t border-border/60 pt-2">
+        <Button
+          variant="outline"
+          onClick={onAskAgent}
+          className="w-full"
+          data-testid="ask-agent-issue"
+        >
+          <BotIcon className="size-4 mr-2" />
+          Ask Agent
+        </Button>
       </div>
-    </CardSection>
+    </div>
   )
+  if (unframed) return content
+  return <CardSection title="Actions">{content}</CardSection>
 }

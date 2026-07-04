@@ -10,9 +10,13 @@ export interface IssueCommitsSectionProps {
 export function IssueCommitsSection({ commitsData, onViewAllCommits }: IssueCommitsSectionProps) {
   if (commitsData?.available !== true) return null
   return (
-    <div className="rounded-lg bg-card p-4" data-testid="commits-section">
+    <section
+      data-testid="commits-section"
+      data-tier-weight="reading-flow"
+      aria-label="Commits"
+    >
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-card-foreground">
+        <h2 className="text-sm font-semibold text-foreground">
           Commits ({commitsData.summary.commits})
         </h2>
         <Button
@@ -35,13 +39,13 @@ export function IssueCommitsSection({ commitsData, onViewAllCommits }: IssueComm
             >
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <code className="text-xs text-muted-foreground font-mono shrink-0">{commit.shortHash}</code>
-                <span className="text-card-foreground truncate">{commit.message}</span>
+                <span className="text-foreground truncate">{commit.message}</span>
               </div>
               <span className="text-xs text-muted-foreground ml-3 shrink-0">{formatRelativeTime(commit.date)}</span>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </section>
   )
 }

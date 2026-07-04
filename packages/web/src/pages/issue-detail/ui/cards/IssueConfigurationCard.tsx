@@ -19,9 +19,10 @@ export interface IssueConfigurationCardProps {
     IssueDetailMutations,
     'addPrerequisiteMutation' | 'removePrerequisiteMutation'
   >
+  unframed?: boolean
 }
 
-export function IssueConfigurationCard({ issue, mutations }: IssueConfigurationCardProps) {
+export function IssueConfigurationCard({ issue, mutations, unframed = false }: IssueConfigurationCardProps) {
   const { addPrerequisiteMutation, removePrerequisiteMutation } = mutations
   const [prereqInput, setPrereqInput] = useState('')
   const [prereqError, setPrereqError] = useState<string | null>(null)
@@ -37,9 +38,8 @@ export function IssueConfigurationCard({ issue, mutations }: IssueConfigurationC
     setPrereqInput('')
   }
 
-  return (
-    <CardSection title="Configuration">
-      <div className="space-y-4">
+  const content = (
+    <div className="space-y-4">
         <IssueModelSelector issueNumber={issue.number} currentModel={issue.model} currentStageModels={issue.stageModels} />
 
         {issue.isBacklog && (
@@ -94,7 +94,8 @@ export function IssueConfigurationCard({ issue, mutations }: IssueConfigurationC
             )}
           </div>
         )}
-      </div>
-    </CardSection>
+    </div>
   )
+  if (unframed) return content
+  return <CardSection title="Configuration">{content}</CardSection>
 }

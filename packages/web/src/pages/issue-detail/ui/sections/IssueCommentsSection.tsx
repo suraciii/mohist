@@ -36,21 +36,25 @@ export function IssueCommentsSection({
   const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null)
 
   return (
-    <div className="rounded-lg bg-card p-4" data-testid="comments-section">
-      <h2 className="text-sm font-semibold text-card-foreground mb-3">
+    <section
+      data-testid="comments-section"
+      data-tier-weight="reading-flow"
+      aria-label="Issue comments"
+    >
+      <h2 className="text-sm font-semibold text-foreground mb-3">
         Comments ({comments.length})
       </h2>
       {comments.length === 0 ? (
         <p className="text-sm text-muted-foreground">No comments yet.</p>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {comments.map((comment) => (
             <div
               key={comment.id}
-              className="border-b border-border/60 pb-3 last:border-0 last:pb-0"
+              className="border-b border-border/40 pb-3 last:border-0 last:pb-0"
             >
               <div className="flex items-start justify-between gap-2">
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div className="text-xs text-muted-foreground mb-1">
                     {formatTime(comment.createdAt)}
                   </div>
@@ -89,7 +93,7 @@ export function IssueCommentsSection({
         </div>
       )}
 
-      <div className="mt-4 pt-3 border-t border-border/60">
+      <div className="mt-5 pt-3 border-t border-border/40">
         <AttachmentComposer
           projectId={issueProjectId}
           value={commentText}
@@ -136,6 +140,6 @@ export function IssueCommentsSection({
         }}
         data-testid="comment-delete-alert"
       />
-    </div>
+    </section>
   )
 }
