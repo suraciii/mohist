@@ -8,6 +8,116 @@ using Microsoft.Data.Sqlite;
 namespace Mohist.Cli;
 
 /// <summary>
+/// Result of a <c>mo otel query</c> execution: the column names plus the
+/// materialized rows. Kept framework-agnostic so tests can supply a fake
+/// executor without touching <see cref="SqliteConnection"/>.
+/// </summary>
+internal sealed record OtelQueryResult(string[] Columns, IReadOnlyList<object?[]> Rows);
+
+/// <summary>
+/// Executes a SQL statement against the OTel SQLite database. The default
+/// production implementation (<see cref="SqliteOtelQueryExecutor"/>) opens a
+/// read-only <see cref="SqliteConnection"/>; tests inject a fake so they never
+/// touch a real SQLite file (design/testing.md hard-constraint 1).
+/// </summary>
+internal interface IOtelQueryExecutor
+{
+    /// <summary>
+    /// Runs <paramref name="sql"/> against <paramref name="databasePath"/>.
+    /// Returns the column names and rows on success; throws
+    /// <see cref="OtelQueryException"/> for SQL/SQLite errors so the caller can
+    /// surface a uniform diagnostic.
+    /// </summary>
+    Task<OtelQueryResult> ExecuteAsync(string databasePath, string sql, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Wraps a <see cref="SqliteException"/> (or other SQLite-engine failure) so the
+/// command layer can distinguish SQLite errors from other failures when deciding
+/// which diagnostic to print.
+/// </summary>
+internal sealed class OtelQueryException : Exception
+{
+    public bool IsReadOnlyViolation { get; }
+
+    public OtelQueryException(string message, bool isReadOnlyViolation = false)
+        : base(message)
+    {
+        IsReadOnlyViolation = isReadOnlyViolation;
+    }
+
+    public OtelQueryException(string message, Exception inner, bool isReadOnlyViolation = false)
+        : base(message, inner)
+    {
+        IsReadOnlyViolation = isReadOnlyViolation;
+    }
+}
+
+/// <summary>
+/// Production <see cref="IOtelQueryExecutor"/>: opens a read-only
+/// <see cref="SqliteConnection"/> against <paramref name="databasePath"/>,
+/// materializes the result set, and translates SQLite errors into
+/// <see cref="OtelQueryException"/>.
+/// </summary>
+internal sealed class SqliteOtelQueryExecutor : IOtelQueryExecutor
+{
+    /// <summary>Wall-clock timeout for a single query.</summary>
+    private static readonly TimeSpan QueryCommandTimeout = TimeSpan.FromSeconds(30);
+
+    public async Task<OtelQueryResult> ExecuteAsync(string databasePath, string sql, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var connection = OpenReadOnlyConnection(databasePath);
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.CommandTimeout = (int)QueryCommandTimeout.TotalSeconds;
+
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            var fieldCount = reader.FieldCount;
+            var columnNames = new string[fieldCount];
+            for (var i = 0; i < fieldCount; i++)
+            {
+                columnNames[i] = reader.GetName(i);
+            }
+
+            var rows = new List<object?[]>();
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var row = new object?[fieldCount];
+                for (var i = 0; i < fieldCount; i++)
+                {
+                    row[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                }
+                rows.Add(row);
+            }
+
+            return new OtelQueryResult(columnNames, rows);
+        }
+        catch (SqliteException ex)
+        {
+            // SQLite error 8 ("attempt to write a readonly database") surfaces as
+            // the "readonly" message users see for write attempts against otel.db.
+            var isReadOnly = ex.Message.Contains("readonly", StringComparison.OrdinalIgnoreCase);
+            throw new OtelQueryException($"SQLite error: {ex.Message}", isReadOnly);
+        }
+    }
+
+    private static SqliteConnection OpenReadOnlyConnection(string databasePath)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadOnly,
+        };
+        var connection = new SqliteConnection(builder.ToString());
+        connection.Open();
+        return connection;
+    }
+}
+
+/// <summary>
 /// <c>mo otel</c> command group. Provides <c>query</c> (direct
 /// read-only SQLite against <c>otel.db</c>) and <c>status</c> (HTTP
 /// probe of <c>GET /otel/api/status</c>). See
@@ -25,13 +135,10 @@ internal static class OtelCommands
 
     private const string StatusPath = "/otel/api/status";
 
-    /// <summary>Wall-clock timeout for a single <c>mo otel query</c>.</summary>
-    private static readonly TimeSpan QueryCommandTimeout = TimeSpan.FromSeconds(30);
-
-    public static Command Build(MohistCliApi api, IEnvironmentVariableProvider environment)
+    public static Command Build(MohistCliApi api, IEnvironmentVariableProvider environment, IOtelQueryExecutor queryExecutor)
     {
         var otel = new Command("otel", "OpenTelemetry trace collection and query commands");
-        otel.Subcommands.Add(BuildQuery(api, environment));
+        otel.Subcommands.Add(BuildQuery(api, environment, queryExecutor));
         otel.Subcommands.Add(BuildStatus(api));
         return otel;
     }
@@ -67,7 +174,7 @@ internal static class OtelCommands
         return Path.Combine(home, DataDirectoryName);
     }
 
-    private static Command BuildQuery(MohistCliApi api, IEnvironmentVariableProvider environment)
+    private static Command BuildQuery(MohistCliApi api, IEnvironmentVariableProvider environment, IOtelQueryExecutor queryExecutor)
     {
         var cmd = new Command("query", "Run a SQL query against otel.db directly (does not require the server)");
         var sqlArg = new Argument<string?>("sql")
@@ -85,7 +192,7 @@ internal static class OtelCommands
         {
             var sql = ctx.GetValue(sqlArg);
             var dbPath = ctx.GetValue(dbOpt);
-            return RunQueryAsync(api, environment, sql, dbPath);
+            return RunQueryAsync(api, environment, queryExecutor, sql, dbPath);
         });
         return cmd;
     }
@@ -97,7 +204,7 @@ internal static class OtelCommands
         return cmd;
     }
 
-    private static async Task<int> RunQueryAsync(MohistCliApi api, IEnvironmentVariableProvider environment, string? sql, string? dbPath)
+    private static async Task<int> RunQueryAsync(MohistCliApi api, IEnvironmentVariableProvider environment, IOtelQueryExecutor queryExecutor, string? sql, string? dbPath)
     {
         if (string.IsNullOrWhiteSpace(sql))
         {
@@ -118,41 +225,18 @@ internal static class OtelCommands
 
         try
         {
-            await using var connection = OpenReadOnlyConnection(resolvedPath);
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = sql;
-            cmd.CommandTimeout = (int)QueryCommandTimeout.TotalSeconds;
+            var result = await queryExecutor.ExecuteAsync(resolvedPath, sql).ConfigureAwait(false);
 
-            await using var reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
-
-            var fieldCount = reader.FieldCount;
-            var columnNames = new string[fieldCount];
-            for (var i = 0; i < fieldCount; i++)
-            {
-                columnNames[i] = reader.GetName(i);
-            }
-
-            var rows = new List<object?[]>();
-            while (await reader.ReadAsync().ConfigureAwait(false))
-            {
-                var row = new object?[fieldCount];
-                for (var i = 0; i < fieldCount; i++)
-                {
-                    row[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                }
-                rows.Add(row);
-            }
-
-            await RenderTableAsync(api.Output, columnNames, rows).ConfigureAwait(false);
-            if (rows.Count == 0)
+            await RenderTableAsync(api.Output, result.Columns, result.Rows).ConfigureAwait(false);
+            if (result.Rows.Count == 0)
             {
                 await api.Output.WriteLineAsync("(0 rows)").ConfigureAwait(false);
             }
             return 0;
         }
-        catch (SqliteException ex)
+        catch (OtelQueryException ex)
         {
-            await api.Error.WriteLineAsync($"SQLite error: {ex.Message}").ConfigureAwait(false);
+            await api.Error.WriteLineAsync(ex.Message).ConfigureAwait(false);
             return 1;
         }
         catch (Exception ex)
@@ -204,18 +288,6 @@ internal static class OtelCommands
             await api.Error.WriteLineAsync(MohistCliApi.ServerUnavailableMessage).ConfigureAwait(false);
             return 1;
         }
-    }
-
-    private static SqliteConnection OpenReadOnlyConnection(string databasePath)
-    {
-        var builder = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadOnly,
-        };
-        var connection = new SqliteConnection(builder.ToString());
-        connection.Open();
-        return connection;
     }
 
     private static async Task RenderTableAsync(TextWriter output, string[] columns, IReadOnlyList<object?[]> rows)

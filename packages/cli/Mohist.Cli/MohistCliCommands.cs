@@ -31,7 +31,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(OpencodeCommands.Build(api));
         root.Subcommands.Add(ConfigProvidersCommands.BuildConfig(api));
         root.Subcommands.Add(NotifyCommands.Build(api));
-        root.Subcommands.Add(OtelCommands.Build(api, provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance));
+        root.Subcommands.Add(OtelCommands.Build(api, provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance, provider.GetService<IOtelQueryExecutor>() ?? new SqliteOtelQueryExecutor()));
 
         return root;
     }
@@ -124,7 +124,7 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null)
+    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null)
     {
         environment ??= SystemEnvironmentVariableProvider.Instance;
         var api = new MohistCliApi(http, output, error, fileSystem, commandExecutor, standardInput);
@@ -136,6 +136,11 @@ internal static class MohistCliCommands
         services.AddSingleton<ICommandExecutor>(commandExecutor);
         services.AddSingleton<IEnvironmentVariableProvider>(environment);
         services.AddSingleton(http);
+        // Production callers leave queryExecutor null and the default
+        // SqliteOtelQueryExecutor is used; tests inject a fake so otel query
+        // specs never touch a real SQLite file (design/testing.md constraint 1).
+        if (queryExecutor is not null)
+            services.AddSingleton(queryExecutor);
         services.AddSingleton<IServiceInstaller>(sp => OperatingSystem.IsWindows() ? new WindowsScheduledTaskInstaller(output, error, fileSystem, commandExecutor) : new SystemdServiceInstaller(output, error, fileSystem, commandExecutor));
         services.AddSingleton(sp => new UpdateOperations(output, error, sp.GetRequiredService<IServiceInstaller>(), commandExecutor, fileSystem, environment));
         services.AddSingleton(new RuntimeConsistencyValidator(http, commandExecutor, fileSystem, environment, output));
