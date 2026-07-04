@@ -3,6 +3,10 @@ import type { DisplayTurn } from '../../../widgets/session-transcript/model/sess
 
 export type StatusKind = SessionStatusKind
 
+export interface SessionCancelOptions {
+  onSettled?: () => void
+}
+
 export interface SessionDataSourceResult {
   isLoading: boolean
   isError: boolean
@@ -21,7 +25,7 @@ export interface SessionDataSourceResult {
   sendFollowup: (text: string) => void
 
   cancel: {
-    mutate: () => void
+    mutate: (options?: SessionCancelOptions) => void
     isPending: boolean
   } | null
 

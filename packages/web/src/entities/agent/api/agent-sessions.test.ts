@@ -209,15 +209,18 @@ describe('useGenericSessionSummary', () => {
     expect(interval).toBe(5000)
   })
 
-  it('stops polling when session is terminal', () => {
-    useQueryMock.mockReturnValue({ data: { status: 'completed' } })
-    useGenericSessionSummary('sess-abc')
-    const opts = getLastQueryOptions()
-    const interval = typeof opts.refetchInterval === 'function'
-      ? opts.refetchInterval({ state: { data: { status: 'completed' } } })
-      : opts.refetchInterval
-    expect(interval).toBe(false)
-  })
+  it.each(['completed', 'failed', 'stopped', 'cancelled'])(
+    'stops polling when session is terminal (%s)',
+    (status) => {
+      useQueryMock.mockReturnValue({ data: { status } })
+      useGenericSessionSummary('sess-abc')
+      const opts = getLastQueryOptions()
+      const interval = typeof opts.refetchInterval === 'function'
+        ? opts.refetchInterval({ state: { data: { status } } })
+        : opts.refetchInterval
+      expect(interval).toBe(false)
+    },
+  )
 })
 
 /* ── useGenericSessionTranscript ────────────────────────── */

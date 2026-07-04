@@ -6,7 +6,7 @@ import { useGenericSessionSummary, useGenericSessionTranscript, useGenericFollow
 import type { SessionTurn, SessionMetadata } from '../../../entities/coder-session'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
 import { buildGenericSessionMetadata } from './buildGenericSessionMetadata'
-import type { SessionDataSourceResult, StatusKind } from './SessionDataSource'
+import type { SessionCancelOptions, SessionDataSourceResult, StatusKind } from './SessionDataSource'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
 function getSessionStatusKind(
@@ -111,9 +111,12 @@ export function useGenericSessionDataSource(): SessionDataSourceResult {
     genericFollowup.mutate({ sessionId, text })
   }, [genericFollowup, sessionId])
 
-  const cancelSession = useCallback(() => {
-    cancelGeneric.mutate({ sessionId })
-  }, [cancelGeneric, sessionId])
+  const cancelSession = useCallback((options?: SessionCancelOptions) => {
+    cancelGeneric.mutate(
+      { sessionId, agentRef: summary?.agentId },
+      { onSettled: options?.onSettled },
+    )
+  }, [cancelGeneric, sessionId, summary?.agentId])
 
   const cancel = useMemo(
     () => ({ mutate: cancelSession, isPending: cancelGeneric.isPending }),

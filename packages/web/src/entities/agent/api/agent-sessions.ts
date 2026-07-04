@@ -127,7 +127,7 @@ export function useGenericSessionSummary(sessionId: string) {
     refetchInterval: (query) => {
       const data = query.state.data as GenericAgentSessionSummaryDto | undefined
       if (!data) return 5000
-      const terminal = data.status === 'completed' || data.status === 'failed' || data.status === 'stopped'
+      const terminal = data.status === 'completed' || data.status === 'failed' || data.status === 'stopped' || data.status === 'cancelled'
       return terminal ? false : 5000
     },
   })

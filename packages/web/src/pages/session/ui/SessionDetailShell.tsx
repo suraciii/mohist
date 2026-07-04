@@ -545,7 +545,7 @@ function SessionHeader({
           tone="destructive"
           loading={cancel.isPending}
           onConfirm={() => {
-            cancel.mutate()
+            cancel.mutate({ onSettled: () => setCancelDialogOpen(false) })
           }}
           data-testid="session-cancel-alert"
         />
