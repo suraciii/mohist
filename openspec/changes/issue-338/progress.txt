@@ -46,4 +46,3 @@
   - `expect(...).toHaveAccessibleName(...)` from jest-dom checks the accessible name; chips pass because their text content is their accessible name.
   - For "AND composition" test: ensure the only **enabled** source is the one whose match we want. Disabling the wrong chip leaves its line still visible (which would still pass search).
 - Phase 1/2 non-regression: existing 21 TaskLogPanel tests still pass without modification. Render, subscription, merge, terminal-state cache invalidation all unchanged.
-
