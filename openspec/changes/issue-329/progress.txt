@@ -1,0 +1,23 @@
+## Codebase Patterns
+
+- `ConfigService` exposes a JSON-flavored schema (key -> (type, defaultValue)). All writes go through `SetAsync` which validates against the schema via `_schema.ContainsKey`. Removing a schema key immediately closes that write path; existing on-disk `Mohist:Config:<key>` entries still load via `ReadConfigFile` + `GetConfigValue` — schema membership is a write-time guard, not a read-time one.
+- Tests seed config by either `SetAsync(key, value)` (preferred, goes through validation) or by writing `_configPath` JSON directly with `"""{ "Mohist": { "Config": { ... } } }"""`. Use the latter when the key is intentionally not in schema (e.g. simulating legacy `model`-only configs after the schema removal).
+- `JsonElement`-backed dictionary values: after `JSON.Deserialize<Dictionary<string, object?>>`, scalar fields come back as `JsonElement`, not `string`. `Assert.Equal("gpt-4o", dict["model"])` will say "Values differ" with identical strings — cast via `.ToString()` first or assert against the JSON path.
+- `Validate` is `(type, value)` driven off `_schema`; legacy keys removed from the schema also drop their type-driven validation, but `Validate` is not the surface under test for this task.
+- Server tests use xUnit `[Trait]` decorators `Traits.Speed.Unit` + `Traits.Sut.System` for the ConfigService specs — keep them on new tests.
+
+## Task T-001 Notes (Remove legacy `model` fallback from ConfigService)
+
+- `Mohist.sln` build with `TreatWarningsAsErrors` succeeds at 0 warnings after the schema/doc changes (no XML doc warnings introduced).
+- `dotnet test` on `Mohist.Server.Tests` shows 3771 passed / 0 failed (was 3765 before T-001; +6 new specs covering the new contract).
+- `npm test` (server entry point = `dotnet test Mohist.sln -p:SkipWebBuild=true`) passes the server half. The subsequent workspace `vitest run` for `packages/{web,runner}` fails with `vitest: not found` — that's a pre-existing missing `node_modules` setup, not a T-001 regression (T-001 is server-only).
+- New `ConfigServiceSpecs` added:
+  - `GetAgentConfig_OnlyModelSet_ReturnsNull` — seeds raw `{ "Mohist": { "Config": { "model": ... } } }` config and asserts `GetAgentConfigAsync()` returns null (spec scenario "model-only config no longer synthesizes an agent configuration").
+  - `GetAgentConfig_AgentConfigured_ReturnsConfiguredObjectVerbatim` — verifies the unified `agent` object round-trip is preserved.
+  - `GetAgentConfig_NeitherAgentNorModel_ReturnsNull` — covers the "neither" scenario from the spec.
+  - `SetAgentModel_WritesModelUnderAgentObject` — verifies `SetAgentModelAsync` writes under `agent.model`, and that `GetConfigAsync` no longer surfaces a top-level `model` key.
+  - `SetAgentModel_NullModel_ClearsAgentKeyWhenNoRemainingKeys` — verifies the empty-result clears `agent` and never resurrects `model`.
+  - `SetAgentModel_PreservesSiblingAgentKeysWhenOnlyClearingModel` — verifies only `model` is removed from the agent object, sibling keys are kept, and the `agent` key still exists in `GetConfigAsync`.
+- Replaced `GetVariables_OnlyLegacyModelSet_SynthesizesAgentObject` with `GetVariables_OnlyModelSet_ReturnsEmptyBundle` — same fixture approach (raw JSON file write), asserts `Vars == null && Stages == null`.
+- Swapped the `GetAll_MasksSecrets` probe key from `model` (gone from schema, would throw `Unknown config key: model`) to `logLevel` (existing non-sensitive schema key). The asserted behavior ("set value, GetAllAsync reads it back") is unchanged.
+- No call site change anywhere in the codebase: `ConfigService.GetAgentConfigAsync`/`SetAgentModelAsync` were already the only surfaces, and they already read from the unified `agent` object. Existing tests in `IssueWorkflowProfileManagerSpecs`, `WorkflowProfileManagerSpecs`, `VariableBundleSpecs` etc. all continue to pass unchanged.

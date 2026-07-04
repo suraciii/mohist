@@ -72,9 +72,9 @@ public class ConfigServiceSpecs : IAsyncLifetime
     [Fact]
     public async Task GetAll_MasksSecrets()
     {
-        await _svc.SetAsync("model", "anthropic/claude");
+        await _svc.SetAsync("logLevel", "DEBUG");
         var all = await _svc.GetAllAsync();
-        Assert.Equal("anthropic/claude", all["model"]);
+        Assert.Equal("DEBUG", all["logLevel"]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -101,17 +101,105 @@ public class ConfigServiceSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetVariables_OnlyLegacyModelSet_SynthesizesAgentObject()
+    public async Task GetVariables_OnlyModelSet_ReturnsEmptyBundle()
     {
-        await _svc.SetAsync("model", "anthropic/claude");
+        await File.WriteAllTextAsync(_configPath, """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""");
 
         var bundle = await _svc.GetVariables();
 
-        Assert.NotNull(bundle.Vars);
-        using var doc = JsonDocument.Parse(bundle.Vars.Value.GetRawText());
-        var agent = doc.RootElement.GetProperty("agent");
+        Assert.Null(bundle.Vars);
+        Assert.Null(bundle.Stages);
+    }
 
-        Assert.Equal("anthropic/claude", agent.GetProperty("model").GetString());
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetAgentConfig_OnlyModelSet_ReturnsNull()
+    {
+        await File.WriteAllTextAsync(_configPath, """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""");
+
+        var agent = await _svc.GetAgentConfigAsync();
+
+        Assert.Null(agent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetAgentConfig_AgentConfigured_ReturnsConfiguredObjectVerbatim()
+    {
+        await _svc.SetAsync("agent", new Dictionary<string, object?>
+        {
+            ["model"] = "gpt-4o",
+            ["type"] = "opencode",
+        });
+
+        var agent = await _svc.GetAgentConfigAsync();
+
+        Assert.NotNull(agent);
+        Assert.Equal("gpt-4o", agent!["model"]!.ToString());
+        Assert.Equal("opencode", agent["type"]!.ToString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetAgentConfig_NeitherAgentNorModel_ReturnsNull()
+    {
+        var agent = await _svc.GetAgentConfigAsync();
+
+        Assert.Null(agent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task SetAgentModel_WritesModelUnderAgentObject()
+    {
+        await _svc.SetAgentModelAsync("anthropic/claude");
+
+        var agent = await _svc.GetAgentConfigAsync();
+        Assert.NotNull(agent);
+        Assert.Equal("anthropic/claude", agent!["model"]!.ToString());
+
+        var cfg = await _svc.GetConfigAsync();
+        Assert.False(cfg.ContainsKey("model"));
+        Assert.True(cfg.ContainsKey("agent"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task SetAgentModel_NullModel_ClearsAgentKeyWhenNoRemainingKeys()
+    {
+        await _svc.SetAgentModelAsync("anthropic/claude");
+        await _svc.SetAgentModelAsync(null);
+
+        var cfg = await _svc.GetConfigAsync();
+        Assert.False(cfg.ContainsKey("agent"));
+        Assert.False(cfg.ContainsKey("model"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task SetAgentModel_PreservesSiblingAgentKeysWhenOnlyClearingModel()
+    {
+        await _svc.SetAsync("agent", new Dictionary<string, object?>
+        {
+            ["model"] = "anthropic/claude",
+            ["type"] = "opencode",
+        });
+        await _svc.SetAgentModelAsync(null);
+
+        var agent = await _svc.GetAgentConfigAsync();
+        Assert.NotNull(agent);
+        Assert.False(agent!.ContainsKey("model"));
+        Assert.Equal("opencode", agent["type"]!.ToString());
+
+        var cfg = await _svc.GetConfigAsync();
+        Assert.True(cfg.ContainsKey("agent"));
+        Assert.False(cfg.ContainsKey("model"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
