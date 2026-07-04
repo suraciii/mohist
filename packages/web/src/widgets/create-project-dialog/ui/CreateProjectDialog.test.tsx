@@ -9,11 +9,11 @@ import {
   it,
 } from 'vitest'
 import { useState } from 'react'
-import { fireEvent, render, screen, waitFor, within } from './test-utils'
+import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { CreateProjectDialog } from '../src/widgets/create-project-dialog'
-import { useProject } from '../src/entities/project'
+import { CreateProjectDialog } from '..'
+import { useProject } from '../../../entities/project'
 
 const createRequests: { method: string; url: string; body: unknown }[] = []
 

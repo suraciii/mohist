@@ -6,7 +6,7 @@ import {
   getLogLevel,
   setLogLevel,
   updateAgentRuntime,
-} from '../src/entities/settings/api/client'
+} from './client'
 
 afterEach(() => {
   vi.unstubAllGlobals()

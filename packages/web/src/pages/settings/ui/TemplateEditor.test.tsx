@@ -9,12 +9,12 @@ import {
   it,
   vi,
 } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from './test-utils'
+import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import {
   TemplateEditor,
   type TemplateEditorTarget,
-} from '../src/pages/settings/ui/TemplateEditor'
-import type { ProjectTemplate } from '../src/entities/template'
+} from './TemplateEditor'
+import type { ProjectTemplate } from '../../../entities/template'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 

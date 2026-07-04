@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import type { ReactNode } from 'react'
-import { useProjectTemplates } from '../../../src/entities/template'
+import { useProjectTemplates } from '..'
 
 const PROJECT_ID = 'test-project'
 const OTHER_PROJECT_ID = 'other-project'

@@ -5,14 +5,32 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import type { ReactNode } from 'react'
-import { useDeleteProjectTemplateOverride } from '../../../src/entities/template'
+import {
+  useUpsertProjectTemplateOverride,
+  type ProjectTemplateOverridePayload,
+} from '..'
 
 const PROJECT_ID = 'test-project'
 const KEY = 'proposal'
 
+const PAYLOAD: ProjectTemplateOverridePayload = {
+  displayName: 'Updated Proposal',
+  description: 'Updated description',
+  tags: ['plan', 'openspec'],
+  stage: 'plan',
+  body: 'updated body content',
+}
+
+const STORED_ROW = {
+  projectId: PROJECT_ID,
+  key: KEY,
+  ...PAYLOAD,
+  updatedAt: '2024-01-01T00:00:00.000Z',
+}
+
 const defaultHandlers = [
-  http.delete(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, () =>
-    HttpResponse.json({ success: true, data: { message: `Override ${KEY} removed` } }),
+  http.put(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, () =>
+    HttpResponse.json({ success: true, data: STORED_ROW }),
   ),
 ]
 
@@ -31,12 +49,12 @@ function createQueryClient() {
   return qc
 }
 
-function renderUseDelete(projectId: string | undefined) {
+function renderUseUpsert(projectId: string | undefined) {
   const queryClient = createQueryClient()
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   )
-  const result = renderHook(() => useDeleteProjectTemplateOverride(projectId), { wrapper })
+  const result = renderHook(() => useUpsertProjectTemplateOverride(projectId), { wrapper })
   return { queryClient, result, wrapper }
 }
 
@@ -55,65 +73,54 @@ afterAll(() => {
   vi.restoreAllMocks()
 })
 
-describe('useDeleteProjectTemplateOverride hook', () => {
-  it('issues DELETE /api/projects/{id}/templates/{key}/override with no body', async () => {
-    const deleteRequests: { method: string; url: string; body: unknown }[] = []
+describe('useUpsertProjectTemplateOverride hook', () => {
+  it('issues PUT /api/projects/{id}/templates/{key}/override with the payload', async () => {
+    const putRequests: { method: string; url: string; body: unknown }[] = []
     server.resetHandlers(
-      http.delete(
+      http.put(
         `/api/projects/${PROJECT_ID}/templates/${KEY}/override`,
         async ({ request }) => {
-          let body: unknown = null
-          const text = await request.text()
-          if (text) {
-            try {
-              body = JSON.parse(text)
-            } catch {
-              body = text
-            }
-          }
-          deleteRequests.push({ method: request.method, url: request.url, body })
-          return HttpResponse.json({
-            success: true,
-            data: { message: `Override ${KEY} removed` },
-          })
+          const body = await request.json()
+          putRequests.push({ method: request.method, url: request.url, body })
+          return HttpResponse.json({ success: true, data: STORED_ROW })
         },
       ),
     )
 
-    const { result } = renderUseDelete(PROJECT_ID)
+    const { result } = renderUseUpsert(PROJECT_ID)
 
     await act(async () => {
-      result.result.current.mutate({ key: KEY })
+      result.result.current.mutate({ key: KEY, payload: PAYLOAD })
     })
 
     await waitFor(() => {
       expect(result.result.current.isSuccess).toBe(true)
     })
 
-    expect(deleteRequests).toHaveLength(1)
-    expect(deleteRequests[0].method).toBe('DELETE')
-    expect(deleteRequests[0].url).toContain(
+    expect(putRequests).toHaveLength(1)
+    expect(putRequests[0].method).toBe('PUT')
+    expect(putRequests[0].url).toContain(
       `/api/projects/${PROJECT_ID}/templates/${KEY}/override`,
     )
-    expect(deleteRequests[0].body).toBeNull()
+    expect(putRequests[0].body).toEqual(PAYLOAD)
   })
 
-  it('returns the success envelope on success', async () => {
-    const { result } = renderUseDelete(PROJECT_ID)
+  it('returns the stored row on success', async () => {
+    const { result } = renderUseUpsert(PROJECT_ID)
 
     await act(async () => {
-      result.result.current.mutate({ key: KEY })
+      result.result.current.mutate({ key: KEY, payload: PAYLOAD })
     })
 
     await waitFor(() => {
       expect(result.result.current.isSuccess).toBe(true)
     })
 
-    expect(result.result.current.data).toEqual({ message: `Override ${KEY} removed` })
+    expect(result.result.current.data).toEqual(STORED_ROW)
   })
 
-  it('invalidates the project-templates list on success', async () => {
-    const { queryClient, result } = renderUseDelete(PROJECT_ID)
+  it('invalidates the project-templates list and the project-template entry on success', async () => {
+    const { queryClient, result } = renderUseUpsert(PROJECT_ID)
 
     queryClient.setQueryData(['project-templates', PROJECT_ID], [])
     queryClient.setQueryData(['project-template', PROJECT_ID, KEY], null)
@@ -122,7 +129,7 @@ describe('useDeleteProjectTemplateOverride hook', () => {
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
     await act(async () => {
-      result.result.current.mutate({ key: KEY })
+      result.result.current.mutate({ key: KEY, payload: PAYLOAD })
     })
 
     await waitFor(() => {
@@ -133,23 +140,31 @@ describe('useDeleteProjectTemplateOverride hook', () => {
     const hasList = calls.some(
       (k) => Array.isArray(k) && k[0] === 'project-templates' && k[1] === PROJECT_ID,
     )
+    const hasEntry = calls.some(
+      (k) =>
+        Array.isArray(k) &&
+        k[0] === 'project-template' &&
+        k[1] === PROJECT_ID &&
+        k[2] === KEY,
+    )
     expect(hasList).toBe(true)
+    expect(hasEntry).toBe(true)
   })
 
-  it('surfaces API errors from the DELETE response', async () => {
+  it('surfaces API errors from the PUT response', async () => {
     server.resetHandlers(
-      http.delete(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, () =>
+      http.put(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, () =>
         HttpResponse.json(
-          { success: false, error: 'Server error', code: 'server_error' },
-          { status: 500 },
+          { success: false, error: 'Body is required', code: 'bad_request' },
+          { status: 400 },
         ),
       ),
     )
 
-    const { result } = renderUseDelete(PROJECT_ID)
+    const { result } = renderUseUpsert(PROJECT_ID)
 
     await act(async () => {
-      result.result.current.mutate({ key: KEY })
+      result.result.current.mutate({ key: KEY, payload: PAYLOAD })
     })
 
     await waitFor(() => {
@@ -157,6 +172,6 @@ describe('useDeleteProjectTemplateOverride hook', () => {
     })
 
     expect(result.result.current.error).toBeInstanceOf(Error)
-    expect((result.result.current.error as Error).message).toBe('Server error')
+    expect((result.result.current.error as Error).message).toBe('Body is required')
   })
 })

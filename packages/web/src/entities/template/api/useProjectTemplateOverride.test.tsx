@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import type { ReactNode } from 'react'
-import { useProjectTemplateOverride } from '../../../src/entities/template'
+import { useProjectTemplateOverride } from '..'
 
 const PROJECT_ID = 'test-project'
 const KEY = 'proposal'

@@ -8,8 +8,8 @@ import {
   expect,
   it,
 } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from './test-utils'
-import { TemplatesSection } from '../src/pages/settings/ui/TemplatesSection'
+import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
+import { TemplatesSection } from './TemplatesSection'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 
@@ -563,8 +563,8 @@ describe('TemplatesSection', () => {
 
   describe('No-project state (T-006)', () => {
     it('renders the no-project CTA (Select project + Create Project) when no project is selected', async () => {
-      const { baseRender: renderRaw } = await import('./test-utils')
-      const { ProjectProvider } = await import('../src/entities/project/model/ProjectContext')
+      const { baseRender: renderRaw } = await import('../../../../tests/test-utils')
+      const { ProjectProvider } = await import('../../../entities/project/model/ProjectContext')
       const { MemoryRouter } = await import('react-router-dom')
       const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query')
 

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from './test-utils'
-import type { IssueDiffResponse, IssueCommitsResponse } from '../src/entities/issue'
+import { render, screen } from '../../../../tests/test-utils'
+import type { IssueDiffResponse, IssueCommitsResponse } from '../../../entities/issue'
 
-vi.mock('../src/entities/issue/api/queries', async () => {
+vi.mock('../../../entities/issue/api/queries', async () => {
   return {
     useCommitDiff: vi.fn(() => ({
       data: undefined,
@@ -12,11 +12,11 @@ vi.mock('../src/entities/issue/api/queries', async () => {
   }
 })
 
-vi.mock('../src/shared/lib/format-time', async () => ({
+vi.mock('../../../shared/lib/format-time', async () => ({
   formatTimeAgo: vi.fn((date: Date) => date.toISOString()),
 }))
 
-import { ChangesPanel } from '../src/widgets/changes-panel/ui/ChangesPanel'
+import { ChangesPanel } from './ChangesPanel'
 
 function makeDiffResponse(overrides: Partial<IssueDiffResponse> = {}): IssueDiffResponse {
   return {

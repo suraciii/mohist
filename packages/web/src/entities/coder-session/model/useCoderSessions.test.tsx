@@ -1,23 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { TEST_PROJECT, waitFor } from './test-utils'
+import { TEST_PROJECT, waitFor } from '../../../../tests/test-utils'
 import { renderHook } from '@testing-library/react'
-import { useCoderSessions } from '../src/entities/coder-session/model/useCoderSessions'
+import { useCoderSessions } from './useCoderSessions'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
+import { ProjectProvider } from '../../project/model/ProjectContext'
 import type { ReactNode } from 'react'
-import type { CoderSessionItem } from '../src/entities/coder-session'
+import type { CoderSessionItem } from '..'
 
 const apiMocks = vi.hoisted(() => ({
   getCoderSessions: vi.fn(),
 }))
 
-vi.mock('../src/entities/coder-session/api/client', () => ({
+vi.mock('../api/client', () => ({
   getCoderSessions: (...args: any[]) => apiMocks.getCoderSessions(...args),
 }))
 
 const eventHandlers = new Map<string, ((detail: unknown) => void)[]>()
 
-vi.mock('../src/entities/agent/@x/events', () => ({
+vi.mock('../../agent/@x/events', () => ({
   onAgentEvent: vi.fn((name: string, handler: (detail: unknown) => void) => {
     if (!eventHandlers.has(name)) eventHandlers.set(name, [])
     eventHandlers.get(name)!.push(handler)

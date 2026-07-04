@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from './test-utils'
-import { IssueWorkflowProfileEditor } from '../src/widgets/issue-workflow/ui/IssueWorkflowProfileEditor'
-import type { IssueWorkflowProfileYamlResponse } from '../src/entities/issue'
+import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
+import { IssueWorkflowProfileEditor } from './IssueWorkflowProfileEditor'
+import type { IssueWorkflowProfileYamlResponse } from '../../../entities/issue'
 
 const refetch = vi.fn()
 
@@ -43,7 +43,7 @@ const state = {
   deletePending: false,
 }
 
-vi.mock('../src/entities/issue', () => {
+vi.mock('../../../entities/issue', () => {
   return {
     useIssueWorkflowProfileYaml: () => ({
       data: state.data,

@@ -5,7 +5,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { useWorkflowProfile } from '../../../src/entities/settings/api/queries'
+import { useWorkflowProfile } from './queries'
 
 interface CapturedRequest {
   method: string

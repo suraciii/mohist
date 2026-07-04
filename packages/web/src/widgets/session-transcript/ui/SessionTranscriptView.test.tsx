@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { screen, fireEvent, waitFor } from './test-utils'
-import { SessionTranscriptView } from '../src/widgets/session-transcript/ui/SessionTranscriptView'
-import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, AgentSessionMetadata } from '../src/entities/coder-session'
-import { renderWithQueryClient, makeTurn, queryClients, originalScrollTo } from './session-page-test-utils'
+import { screen, fireEvent, waitFor } from '../../../../tests/test-utils'
+import { SessionTranscriptView } from './SessionTranscriptView'
+import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, AgentSessionMetadata } from '../../../entities/coder-session'
+import { renderWithQueryClient, makeTurn, queryClients, originalScrollTo } from '../../../../tests/session-page-test-utils'
 
 const sessionPageMocks = vi.hoisted(() => ({
   sessions: [] as any[],
@@ -30,23 +30,23 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
-vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
+vi.mock('../../../entities/coder-session/model/useCoderSessions', () => ({
   useCoderSessions: () => ({ sessions: sessionPageMocks.sessions, isLoading: sessionPageMocks.sessionsLoading }),
 }))
 
-vi.mock('../src/entities/coder-session/model/useWorkflowRunSessions', () => ({
+vi.mock('../../../entities/coder-session/model/useWorkflowRunSessions', () => ({
   useWorkflowRunSessions: () => ({
     isLoading: false,
     sessions: sessionPageMocks.workflowRunSessions,
   }),
 }))
 
-vi.mock('../src/entities/issue/api/queries', () => ({
+vi.mock('../../../entities/issue/api/queries', () => ({
   useIssue: () => ({ data: sessionPageMocks.issue }),
 }))
 
-vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/entities/coder-session/api/client')>()),
+vi.mock('../../../entities/coder-session/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../entities/coder-session/api/client')>()),
   getAgentSessionMetadata: vi.fn(() => {
     if (sessionPageMocks.detailPending) return new Promise(() => {})
     if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { deriveRunnerSummary } from '../src/entities/runner/api/queries'
-import type { RunnerStatusRow } from '../src/entities/runner/model/types'
+import { deriveRunnerSummary } from './queries'
+import type { RunnerStatusRow } from '../model/types'
 
 function makeRow(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
   return {

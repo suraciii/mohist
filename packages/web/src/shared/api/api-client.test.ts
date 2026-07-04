@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, projectApiPath, request } from '../src/shared/api/client'
+import { ApiError, projectApiPath, request } from './client'
 
 afterEach(() => {
   vi.unstubAllGlobals()

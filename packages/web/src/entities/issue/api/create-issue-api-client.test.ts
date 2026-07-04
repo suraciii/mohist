@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createIssue } from '../src/entities/issue/api/client'
+import { createIssue } from './client'
 
 afterEach(() => {
   vi.unstubAllGlobals()
