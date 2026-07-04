@@ -500,10 +500,9 @@ public static class RunnerRoutes
     /// reads the same on the wire as it does in the bound options. The
     /// override is scoped to <c>GET /api/runner/{id}/config</c> only.
     /// </summary>
-    internal static readonly System.Text.Json.JsonSerializerOptions RunnerConfigJsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web)
+    internal static readonly System.Text.Json.JsonSerializerOptions RunnerConfigJsonOptions = new(JSON.Options)
     {
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never,
-        PropertyNameCaseInsensitive = true,
     };
 }
 

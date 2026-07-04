@@ -5,8 +5,13 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
+using Orleans;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Runner.Api;
@@ -291,36 +296,74 @@ public class RunnerConfigApiSpecs
         // (no compatibility shim). When /poll returns a dispatchable
         // work envelope, the body must NOT contain a cleanupPolicy
         // property — that field's home is now /config exclusively.
-        //
-        // Seeding a dispatchable workflow run end-to-end requires
-        // touching several grain paths that are exercised elsewhere
-        // (see AgentJobRoutesSpecs.HttpReportEndpoint_*). For this
-        // contract assertion we only need a registered runner and a
-        // dispatchable state; if the system happens to be idle at
-        // poll-time, the test falls back to asserting the 204
-        // body-omission (which is the other half of the "no
-        // cleanupPolicy on /poll" guarantee).
+        // Seed dispatchable work through the public agent-job validation
+        // route, then observe the real HTTP /poll dispatch body. This is
+        // the meaningful wire guard: an idle 204 cannot prove the shape of
+        // WorkDispatchResponse.
         var policy = new CleanupPolicyOptions { RetentionDays = 9 };
         await using var harness = await ConfigHarness.CreateAsync(policy);
-        var runnerId = await harness.RegisterRunnerAsync();
+        var projectId = $"runner-config-poll-project-{Guid.NewGuid():N}";
+        var runnerId = await harness.RegisterRunnerAsync(projectId, maxWorkflowSlots: 1);
+        var jobKey = $"agent-job-runner-config-poll-{Guid.NewGuid():N}";
+
+        var validation = harness.Client.PostAsJsonAsync(
+            AgentJobController.ValidatePath,
+            new
+            {
+                prompt = "poll body should omit cleanup policy",
+                model = "openai/gpt-test",
+                jobId = jobKey,
+                workspace = new { path = "/tmp/runner-config-poll", projectId },
+            });
+
+        var job = harness.Grains.GetGrain<IAgentJobGrain>(jobKey);
+        await WaitForAgentJobStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(8));
+        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
 
         using var response = await harness.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-
-        if (response.StatusCode == HttpStatusCode.NoContent)
-        {
-            // Idle system: /poll returns 204 with no body at all, so
-            // the absence of cleanupPolicy is implicit. Combined with
-            // the dispatch case below, this is the full invariant.
-            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-            return;
-        }
-
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(string.Empty, body.GetProperty("workflowRunId").GetString());
+        Assert.Equal(workId, body.GetProperty("workId").GetString());
+        Assert.Equal("mohist/acp-agent", body.GetProperty("uses").GetString());
+        Assert.Equal("agent-job", body.GetProperty("workType").GetString());
+        Assert.Equal("agent", body.GetProperty("stage").GetString());
+        Assert.Equal("Agent Job", body.GetProperty("title").GetString());
+        Assert.Equal(projectId, body.GetProperty("projectId").GetString());
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, body.GetProperty("ownerKind").GetString());
+        Assert.Equal(jobKey, body.GetProperty("agentJobId").GetString());
+        Assert.Equal(JsonValueKind.String, body.GetProperty("with").ValueKind);
+        Assert.Equal(JsonValueKind.String, body.GetProperty("variables").ValueKind);
         Assert.False(
             body.TryGetProperty("cleanupPolicy", out _),
             "/poll dispatch body must not contain a cleanupPolicy property after issue-359 T-002 — the field's home is /config");
+
+        using var report = await harness.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
+        {
+            workId,
+            status = "completed",
+            ownerKind = WorkDispatchOwnerKinds.AgentJob,
+            agentJobId = jobKey,
+            message = "ok",
+        });
+        Assert.Equal(HttpStatusCode.OK, report.StatusCode);
+        harness.WakeAgentJobValidationAwaiter();
+
+        using var validationResponse = await validation;
+        Assert.Equal(HttpStatusCode.OK, validationResponse.StatusCode);
     }
+
+    private static async Task WaitForAgentJobStatusAsync(
+        IAgentJobGrain job,
+        AgentJobStatus expected,
+        TimeSpan timeout)
+        => await TestWait.ForAsync(
+            () => job.GetStatusAsync(),
+            s => s == expected,
+            timeout,
+            TimeSpan.FromMilliseconds(25),
+            $"Agent job to reach {expected}",
+            () => job.CheckTimeoutsAsync());
 
     /// <summary>
     /// Per-test harness that stands up an independent
@@ -334,21 +377,25 @@ public class RunnerConfigApiSpecs
         private readonly string _runnerRoot;
         private readonly string _systemUpdateStatePath;
         private readonly MohistWebApplicationFactory _factory;
+        private readonly FakeTimeProvider _timeProvider;
         private readonly List<string> _registeredRunnerIds = [];
 
         private ConfigHarness(
             SqliteConnection keeper,
             MohistWebApplicationFactory factory,
             string runnerRoot,
-            string systemUpdateStatePath)
+            string systemUpdateStatePath,
+            FakeTimeProvider timeProvider)
         {
             _keeper = keeper;
             _factory = factory;
             _runnerRoot = runnerRoot;
             _systemUpdateStatePath = systemUpdateStatePath;
+            _timeProvider = timeProvider;
         }
 
         public HttpClient Client => _factory.CreateClient();
+        public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
 
         public static async Task<ConfigHarness> CreateAsync(CleanupPolicyOptions policy)
         {
@@ -359,17 +406,18 @@ public class RunnerConfigApiSpecs
             var runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-config-{Guid.NewGuid():N}");
             Directory.CreateDirectory(runnerRoot);
             var systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-config-{Guid.NewGuid():N}.json");
+            var timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
             var factory = new ConfigWebApplicationFactory(
-                connectionString, runnerRoot, systemUpdateStatePath, policy);
+                connectionString, runnerRoot, systemUpdateStatePath, policy, timeProvider);
             // Force host startup so the silo and routes are live
             // before we hand the client out; this matches
             // MohistIntegrationFixture's pattern.
             _ = factory.CreateClient();
             await factory.EnsureSchemaAsync();
-            return new ConfigHarness(keeper, factory, runnerRoot, systemUpdateStatePath);
+            return new ConfigHarness(keeper, factory, runnerRoot, systemUpdateStatePath, timeProvider);
         }
 
-        public async Task<string> RegisterRunnerAsync(string? projectId = null)
+        public async Task<string> RegisterRunnerAsync(string? projectId = null, int? maxWorkflowSlots = null)
         {
             var runnerId = $"runner-config-{Guid.NewGuid():N}";
             using var response = await Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
@@ -379,9 +427,23 @@ public class RunnerConfigApiSpecs
                 projectId,
             });
             response.EnsureSuccessStatusCode();
+            if (maxWorkflowSlots is not null)
+            {
+                await Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = maxWorkflowSlots.Value });
+            }
+            var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+            await TestWait.ForAsync(
+                () => runner.GetRuntimeStateAsync(),
+                s => s.Status == RunnerStatus.Online,
+                TimeSpan.FromSeconds(5),
+                TimeSpan.FromMilliseconds(25),
+                $"Runner '{runnerId}' to reach Online");
             _registeredRunnerIds.Add(runnerId);
             return runnerId;
         }
+
+        public void WakeAgentJobValidationAwaiter() =>
+            _timeProvider.Advance(TimeSpan.FromMilliseconds(100));
 
         public async ValueTask DisposeAsync()
         {
@@ -415,8 +477,9 @@ public class RunnerConfigApiSpecs
             string connectionString,
             string runnerRoot,
             string systemUpdateStatePath,
-            CleanupPolicyOptions policy)
-            : base(connectionString, runnerRoot, systemUpdateStatePath)
+            CleanupPolicyOptions policy,
+            FakeTimeProvider timeProvider)
+            : base(connectionString, runnerRoot, systemUpdateStatePath, timeProvider)
         {
             _policy = policy;
         }

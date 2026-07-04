@@ -33,6 +33,8 @@ interface CleanupTestState {
   stubRunOnceResult: CleanupLoopResult
 }
 
+const CLEANUP_INTERVAL_FLOOR_MS = 1000
+
 const mocks = vi.hoisted(() => {
   const state: CleanupTestState = {
     cleanupCalls: [],
@@ -179,8 +181,9 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
       pollIntervalMs: 60_000,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
-      // Short interval so the test can drive ticks deterministically.
-      cleanupLoopIntervalMs: 50,
+      // Uses the production interval floor while fake timers keep the
+      // tests deterministic and fast.
+      cleanupLoopIntervalMs: CLEANUP_INTERVAL_FLOOR_MS,
     }
   }
 
@@ -204,13 +207,13 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
     // Wait for startup connect + first poll cycle.
     await vi.waitFor(() => expect(mocks.connect).toHaveBeenCalled(), { timeout: 5_000 })
 
-    // Advance in 50ms slices and flush microtasks between ticks so the
+    // Advance one production-floor interval per tick and flush microtasks so the
     // fire-and-forget runCleanupOnce promises settle before the next
     // timer fires. With `void this.runCleanupOnce(signal)` the host
     // discards the promise, so vi.advanceTimersByTimeAsync alone
     // does not await it.
     for (let i = 0; i < 5; i += 1) {
-      await vi.advanceTimersByTimeAsync(50)
+      await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
       await flushMicrotasks()
     }
     await vi.waitFor(() => expect(mocks.state.cleanupCalls.length).toBeGreaterThanOrEqual(3), { timeout: 5_000 })
@@ -251,7 +254,7 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
 
     await vi.waitFor(() => expect(mocks.connect).toHaveBeenCalled(), { timeout: 5_000 })
     for (let i = 0; i < 5; i += 1) {
-      await vi.advanceTimersByTimeAsync(50)
+      await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
       await flushMicrotasks()
     }
     await vi.waitFor(() => expect(mocks.state.cleanupCalls.length).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
@@ -298,7 +301,7 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
 
     await vi.waitFor(() => expect(mocks.connect).toHaveBeenCalled(), { timeout: 5_000 })
     for (let i = 0; i < 5; i += 1) {
-      await vi.advanceTimersByTimeAsync(50)
+      await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
       await flushMicrotasks()
     }
     await vi.waitFor(() => expect(mocks.state.fetchConfigCalls.length).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
@@ -336,7 +339,7 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
 
     await vi.waitFor(() => expect(mocks.connect).toHaveBeenCalled(), { timeout: 5_000 })
     for (let i = 0; i < 12; i += 1) {
-      await vi.advanceTimersByTimeAsync(50)
+      await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
       await flushMicrotasks()
     }
     await vi.waitFor(() => expect(mocks.state.fetchConfigCalls.length).toBeGreaterThanOrEqual(5), { timeout: 5_000 })
@@ -354,5 +357,21 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
 
     controller.abort()
     await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
+  })
+
+  it("HostIntervals_ClampSubSecondCleanupAndConvergenceConfigurationToOneSecond", async () => {
+    const RunnerHost = await importHost()
+    const host = new RunnerHost({
+      ...defaultOptions(),
+      cleanupLoopIntervalMs: 1,
+      cleanupConvergenceIntervalMs: 1,
+    })
+    const resolved = host as unknown as {
+      cleanupLoopIntervalMs: number
+      cleanupConvergenceIntervalMs: number
+    }
+
+    expect(resolved.cleanupLoopIntervalMs).toBe(CLEANUP_INTERVAL_FLOOR_MS)
+    expect(resolved.cleanupConvergenceIntervalMs).toBe(CLEANUP_INTERVAL_FLOOR_MS)
   })
 })
