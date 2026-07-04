@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -27,6 +27,11 @@ vi.mock('../../../entities/agent', () => ({
 
 vi.mock('../../../shared/lib/useDocumentTitle', () => ({
   useDocumentTitle: () => {},
+}))
+
+vi.mock('../../../widgets/agent-profile-editor/ui/AgentProfileEditor', () => ({
+  AgentProfileEditor: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="agent-profile-editor" /> : null,
 }))
 
 function createQueryClient() {
@@ -135,6 +140,27 @@ describe('AgentListPage', () => {
       const archivedStatuses = screen.getAllByText('Archived')
       expect(activeStatuses.length).toBeGreaterThanOrEqual(1)
       expect(archivedStatuses.length).toBeGreaterThanOrEqual(1)
+    })
+  })
+
+  describe('create entry points', () => {
+    it('does not render the editor before any entry point is clicked', () => {
+      mocks.agents = [makeAgent({ id: 'a1', name: 'Alpha' })]
+      renderPage()
+      expect(screen.queryByTestId('agent-profile-editor')).not.toBeInTheDocument()
+    })
+
+    it('opens the profile editor in create mode when the header "New Agent" button is clicked (no route change)', () => {
+      mocks.agents = [makeAgent({ id: 'a1', name: 'Alpha' })]
+      renderPage()
+      fireEvent.click(screen.getByTestId('agent-list-create'))
+      expect(screen.getByTestId('agent-profile-editor')).toBeInTheDocument()
+    })
+
+    it('opens the profile editor in create mode when the empty-state "Create Agent" button is clicked (no route change)', () => {
+      renderPage()
+      fireEvent.click(screen.getByTestId('agents-empty-create'))
+      expect(screen.getByTestId('agent-profile-editor')).toBeInTheDocument()
     })
   })
 })
