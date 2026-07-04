@@ -301,6 +301,9 @@ describe('IssueDetailPage runtime decision surface', () => {
     expect(surface.dataset.summary).toBe('approval-required')
     expect(surface.querySelector('[data-testid="runtime-action-approve"]')).toBeTruthy()
     expect(surface.querySelector('[data-testid="runtime-action-send-back"]')).toBeTruthy()
+    const workflowFrame = screen.getByTestId('workflow-view-frame')
+    expect(workflowFrame.querySelector('[data-testid="approve-button"]')).toBeNull()
+    expect(workflowFrame.querySelector('[data-testid="request-changes-button"]')).toBeNull()
   })
 
   it('renders one Stop control on the page and it belongs to the runtime decision surface', async () => {

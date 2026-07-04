@@ -15,7 +15,7 @@ const invalidateQueriesMock = vi.fn()
 const apiMocks = {
   startIssue: vi.fn(),
   approveIssue: vi.fn(),
-  rejectIssue: vi.fn(),
+  requestChangesIssue: vi.fn(),
   updateIssue: vi.fn(),
   closeIssue: vi.fn(),
   reopenIssue: vi.fn(),
@@ -49,7 +49,7 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     extractAttachmentIds: (...args: unknown[]) => apiMocks.extractAttachmentIds(...args),
     forceStopIssue: (...args: unknown[]) => apiMocks.forceStopIssue(...args),
     removePrerequisite: (...args: unknown[]) => apiMocks.removePrerequisite(...args),
-    rejectIssue: (...args: unknown[]) => apiMocks.rejectIssue(...args),
+    requestChangesIssue: (...args: unknown[]) => apiMocks.requestChangesIssue(...args),
     reopenIssue: (...args: unknown[]) => apiMocks.reopenIssue(...args),
     rerunIssue: (...args: unknown[]) => apiMocks.rerunIssue(...args),
     resumeIssue: (...args: unknown[]) => apiMocks.resumeIssue(...args),
@@ -159,8 +159,15 @@ describe('useIssueDetailMutations', () => {
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
 
-    const sendBack = findMutationByApiCall(apiMocks.rejectIssue)
-    expect(apiMocks.rejectIssue).toHaveBeenCalledWith(7, {}, 'proj-x')
+    const sendBack = findMutationByApiCallWithArg(apiMocks.requestChangesIssue, {
+      stage: 'check',
+      body: 'Please update the implementation.',
+    })
+    expect(apiMocks.requestChangesIssue).toHaveBeenCalledWith(
+      7,
+      { stage: 'check', body: 'Please update the implementation.' },
+      'proj-x',
+    )
 
     invalidateQueriesMock.mockClear()
     sendBack.onSuccess?.()

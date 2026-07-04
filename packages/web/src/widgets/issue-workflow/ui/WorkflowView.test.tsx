@@ -281,6 +281,27 @@ describe('WorkflowView', () => {
   })
 
   describe('InlineApproval - awaiting approval', () => {
+    it('does not render or initialize approval controls when mounted read-only', () => {
+      mockedUseWorkflowTimeline.mockReturnValue(({
+        data: makeAwaitingApprovalTimeline(),
+      } as unknown) as ReturnType<typeof useWorkflowTimeline>)
+
+      render(<WorkflowView issue={makeIssue({
+        workflowStage: WorkflowStage.Plan,
+        health: 'attention' as IssueHealth,
+        approvalState: {
+          status: 'awaiting',
+          stage: WorkflowStage.Plan,
+          requestedAt: '2026-01-01T00:01:00.000Z',
+        },
+      })} readOnly />)
+
+      expect(screen.queryByText('Approval Required')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('approve-button')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('request-changes-button')).not.toBeInTheDocument()
+      expect(mockedUseRequestChangesIssue).not.toHaveBeenCalled()
+    })
+
     it('renders Approve and Request changes actions; no Reject or Send back labels', () => {
       mockRequestChangesMutation()
       mockedUseWorkflowTimeline.mockReturnValue(({

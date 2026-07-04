@@ -44,6 +44,7 @@ export interface RuntimeDecision {
   waitReason: string | null
   driftNote: string | null
   blockedReason: string | null
+  approvalStage: string | null
 }
 
 export interface RuntimeDecisionInput {
@@ -209,6 +210,11 @@ function buildActions(
 ): RuntimeAvailableAction[] {
   const allowed = buildAllowedActions(input)
   const actions: RuntimeAvailableAction[] = []
+  const waitReason = buildWaitReason(input)
+  const startOffered = actionEnabled(allowed, 'start') || (isBacklog && input.issue?.canStart === true)
+  const startEnabled = !isClosed && startOffered && !waitReason
+  const startReason = waitReason
+    ?? (startOffered ? undefined : 'Start is not currently offered by the backend projection.')
 
   if (summary === 'approval-required') {
     actions.push({
@@ -277,12 +283,21 @@ function buildActions(
     actions.push({
       kind: 'inspect',
       label: 'View transcript',
-      enabled: actionEnabled(allowed, 'inspect'),
+      enabled: false,
+      reason: 'Transcript navigation is not available from this surface yet.',
     })
     return actions
   }
 
   if (summary === 'queued') {
+    if (isBacklog) {
+      actions.push({
+        kind: 'start',
+        label: 'Start',
+        enabled: startEnabled,
+        reason: startReason,
+      })
+    }
     return actions
   }
 
@@ -298,7 +313,8 @@ function buildActions(
     actions.push({
       kind: 'inspect',
       label: 'View transcript',
-      enabled: actionEnabled(allowed, 'inspect'),
+      enabled: false,
+      reason: 'Transcript navigation is not available from this surface yet.',
     })
     return actions
   }
@@ -307,7 +323,8 @@ function buildActions(
     actions.push({
       kind: 'inspect',
       label: 'View transcript',
-      enabled: actionEnabled(allowed, 'inspect'),
+      enabled: false,
+      reason: 'Transcript navigation is not available from this surface yet.',
     })
     return actions
   }
@@ -316,10 +333,8 @@ function buildActions(
     actions.push({
       kind: 'start',
       label: 'Start',
-      enabled: !isClosed && actionEnabled(allowed, 'start'),
-      reason: actionEnabled(allowed, 'start')
-        ? undefined
-        : 'Start is not currently offered by the backend projection.',
+      enabled: startEnabled,
+      reason: startReason,
     })
   }
 
@@ -456,6 +471,10 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
     return 'queued'
   }
 
+  if (isBacklog) {
+    return 'queued'
+  }
+
   if (recovery?.latestAttemptState === 'running' || input.hasActiveAgent) {
     return 'running'
   }
@@ -561,6 +580,8 @@ function buildNextAction(
   }
 
   if (summary === 'queued') {
+    const start = actions.find((a) => a.kind === 'start' && a.enabled)
+    if (start) return 'Start the workflow.'
     return waitReason ?? 'Wait for prerequisites or runner capacity.'
   }
 
@@ -618,6 +639,9 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInput): RuntimeDecis
   const blockedReason = summary === 'failed' || summary === 'blocked'
     ? (issue?.blockedReason ?? null)
     : null
+  const approvalStage = summary === 'approval-required'
+    ? (issue?.approvalState?.stage ?? issue?.workflowStage ?? null)
+    : null
 
   return {
     summary,
@@ -631,6 +655,7 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInput): RuntimeDecis
     waitReason,
     driftNote,
     blockedReason,
+    approvalStage,
   }
 }
 

@@ -231,6 +231,30 @@ describe('deriveRuntimeDecision', () => {
     expect(decision.summary).toBe('queued')
   })
 
+  it('returns queued with Start as the primary action for a ready backlog issue', () => {
+    const decision = deriveRuntimeDecision({
+      issue: baseIssue({
+        status: IssueStatus.Backlog,
+        workflowStage: null,
+        workflowStatus: null,
+        health: IssueHealth.Active,
+        canStart: true,
+        blocker: null,
+      }),
+      agentStatus: {
+        runnerAvailable: true,
+        capacity: { active: 0, max: 2 },
+        activeAgents: [],
+      },
+    })
+
+    expect(decision.summary).toBe('queued')
+    expect(decision.primary?.kind).toBe('start')
+    expect(decision.primary?.enabled).toBe(true)
+    expect(decision.actions.some((a) => a.kind === 'stop')).toBe(false)
+    expect(decision.nextAction).toBe('Start the workflow.')
+  })
+
   it('falls back to running (not queued) when no explicit queue/wait signal is present', () => {
     const decision = deriveRuntimeDecision({
       issue: baseIssue({

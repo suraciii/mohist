@@ -521,7 +521,7 @@ describe('IssueDetailPage archived Done issue — no active-workflow controls', 
     renderPage()
 
     await waitFor(() => expect(screen.getByTestId('issue-detail-right-rail')).toBeTruthy())
-    expect(screen.queryByTestId('start-button')).toBeNull()
+    expect(screen.queryByTestId('runtime-action-start')).toBeNull()
     expect(screen.queryByTestId('mark-ready-button')).toBeNull()
     expect(screen.queryByTestId('start-readiness')).toBeNull()
     expect(screen.queryByText(/^Force Stop$/i)).toBeNull()
@@ -558,7 +558,7 @@ describe('IssueDetailPage archived Done issue — no active-workflow controls', 
 
     await waitFor(() => expect(screen.getByTestId('issue-detail-right-rail')).toBeTruthy())
     expect(screen.queryByTestId('archived-actions-note')).toBeNull()
-    expect(container.querySelector('[data-testid="start-button"]')).toBeNull()
+    expect(container.querySelector('[data-testid="runtime-action-start"]')).toBeNull()
     expect(container.querySelector('[data-testid="mark-ready-button"]')).toBeNull()
   })
 })

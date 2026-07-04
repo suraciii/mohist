@@ -10,7 +10,7 @@ import {
   invalidateApprovalWait,
   removePrerequisite,
   reopenIssue,
-  rejectIssue,
+  requestChangesIssue,
   rerunIssue,
   resumeIssue,
   retryIssue,
@@ -32,7 +32,7 @@ export interface UseIssueDetailMutationsOptions {
 export interface IssueDetailMutations {
   startMutation: UseMutationResult<{ issue: unknown; message: string }, Error, void, unknown>
   approveMutation: UseMutationResult<{ issue: unknown; context?: unknown; message: string }, Error, void, unknown>
-  sendBackMutation: UseMutationResult<{ issue: unknown; message: string }, Error, void, unknown>
+  sendBackMutation: UseMutationResult<unknown, Error, { stage: string; body: string }, unknown>
   markReadyMutation: UseMutationResult<unknown, Error, void, unknown>
   addPrerequisiteMutation: UseMutationResult<{ issue: unknown; message: string }, Error, number, unknown>
   removePrerequisiteMutation: UseMutationResult<{ issue: unknown; message: string }, Error, number, unknown>
@@ -89,7 +89,7 @@ export function useIssueDetailMutations({
   })
 
   const sendBackMutation = useMutation({
-    mutationFn: () => rejectIssue(issueNumber, {}, projectId),
+    mutationFn: ({ stage, body }: { stage: string; body: string }) => requestChangesIssue(issueNumber, { stage, body }, projectId),
     onSuccess: invalidateApprovalQueries,
   })
 

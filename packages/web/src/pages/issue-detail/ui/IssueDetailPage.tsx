@@ -270,7 +270,7 @@ export function IssueDetailPage() {
           />
 
           <div className="mb-8" data-testid="workflow-view-frame">
-            <WorkflowView issue={issue} />
+            <WorkflowView issue={issue} readOnly />
           </div>
 
           {prDeliveryMetadata && (

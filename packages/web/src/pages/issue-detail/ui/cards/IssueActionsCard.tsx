@@ -36,14 +36,6 @@ export function IssueActionsCard({
   const otherAgentsCount = activeAgents.filter((agent) => agent.issueNumber !== issue.number).length
   const showOtherAgents = !isAgentRunningOnThis && otherAgentsCount > 0 && issue.status !== 'backlog'
   const showClose = issue.health === 'active' && !isAgentRunningOnThis
-  const actionError = mutations.approveMutation.error
-    || mutations.sendBackMutation.error
-    || mutations.startMutation.error
-    || mutations.markReadyMutation.error
-    || mutations.closeMutation.error
-    || mutations.resumeMutation.error
-    || mutations.retryMutation.error
-    || mutations.rerunMutation.error
 
   return (
     <CardSection title="Actions">
@@ -53,7 +45,7 @@ export function IssueActionsCard({
             data-testid="archived-actions-note"
             className="rounded-md bg-muted border border-border px-3 py-2 text-xs text-muted-foreground"
           >
-            This issue is archived. Active workflow controls are unavailable because the workflow is no longer running. The execution history is preserved above.
+            This issue is archived. Start, stop, retry, rerun, resume controls are unavailable because the workflow is no longer running. The execution history is preserved above.
           </div>
         )}
 
@@ -101,12 +93,6 @@ export function IssueActionsCard({
           >
             {mutations.closeMutation.isPending ? 'Closing...' : 'Close'}
           </Button>
-        )}
-
-        {actionError && (
-          <div className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger">
-            {actionError.message}
-          </div>
         )}
 
         {showOtherAgents && (

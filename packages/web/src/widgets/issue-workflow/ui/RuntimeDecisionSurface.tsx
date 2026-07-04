@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { UseMutationResult } from '@tanstack/react-query'
 import { ActivityIcon, AlertCircleIcon, CheckCircle2Icon, ClockIcon, PauseCircleIcon, XCircleIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
+import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
 import {
   type RuntimeAvailableAction,
@@ -9,15 +10,15 @@ import {
   type RuntimeSummary,
 } from '../model/derive-runtime-decision'
 
-interface RuntimeActionMutation {
-  mutate: UseMutationResult<unknown, Error, void, unknown>['mutate']
+interface RuntimeActionMutation<TVariables = void> {
+  mutate: UseMutationResult<unknown, Error, TVariables, unknown>['mutate']
   isPending: boolean
   error: Error | null
 }
 
 export interface RuntimeDecisionSurfaceMutations {
   approveMutation: RuntimeActionMutation
-  sendBackMutation: RuntimeActionMutation
+  sendBackMutation: RuntimeActionMutation<{ stage: string; body: string }>
   retryMutation: RuntimeActionMutation
   resumeMutation: RuntimeActionMutation
   rerunMutation: RuntimeActionMutation
@@ -164,6 +165,9 @@ function SurfaceActionButton({
     : action.kind === 'send-back' || (primary && action.kind === 'stop')
       ? 'destructive'
       : 'outline'
+  const disabledReason = action.kind === 'inspect'
+    ? (action.reason ?? 'Transcript navigation is not available from this surface yet.')
+    : action.reason
 
   let onClick: () => void = () => undefined
   let busyLabel = ''
@@ -197,8 +201,8 @@ function SurfaceActionButton({
       variant={variant}
       size="sm"
       onClick={onClick}
-      disabled={!action.enabled || isPending}
-      title={action.reason ?? undefined}
+      disabled={!action.enabled || isPending || action.kind === 'inspect'}
+      title={disabledReason ?? undefined}
       className="min-w-[7rem]"
     >
       {isPending ? busyLabel : action.label}
@@ -211,6 +215,8 @@ export function RuntimeDecisionSurface({
   mutations,
 }: RuntimeDecisionSurfaceProps) {
   const [stopConfirming, setStopConfirming] = useState(false)
+  const [sendBackOpen, setSendBackOpen] = useState(false)
+  const [sendBackText, setSendBackText] = useState('')
   const {
     approveMutation,
     sendBackMutation,
@@ -257,6 +263,22 @@ export function RuntimeDecisionSurface({
     } else {
       stopMutation.mutate()
     }
+  }
+  const openSendBack = () => {
+    setSendBackOpen(true)
+  }
+  const submitSendBack = () => {
+    const body = sendBackText.trim()
+    if (!body || !decision.approvalStage) return
+    sendBackMutation.mutate(
+      { stage: decision.approvalStage, body },
+      {
+        onSuccess: () => {
+          setSendBackOpen(false)
+          setSendBackText('')
+        },
+      },
+    )
   }
 
   return (
@@ -347,7 +369,7 @@ export function RuntimeDecisionSurface({
               key={action.kind}
               action={action}
               onApprove={() => approveMutation.mutate()}
-              onSendBack={() => sendBackMutation.mutate()}
+              onSendBack={openSendBack}
               onRetry={() => retryMutation.mutate()}
               onResume={() => resumeMutation.mutate()}
               onRerun={() => rerunMutation.mutate()}
@@ -357,6 +379,52 @@ export function RuntimeDecisionSurface({
               primary={action.kind === decision.primary?.kind}
             />
           ))}
+        </div>
+      )}
+
+      {sendBackOpen && (
+        <div
+          data-testid="runtime-send-back-form"
+          className="mt-3 rounded-md border border-border bg-muted p-3"
+        >
+          <label
+            htmlFor="runtime-send-back-body"
+            className="text-xs font-medium text-card-foreground"
+          >
+            What should the agent change?
+          </label>
+          <Textarea
+            id="runtime-send-back-body"
+            data-testid="runtime-send-back-textarea"
+            value={sendBackText}
+            onChange={(event) => setSendBackText(event.target.value)}
+            rows={3}
+            className="mt-2 resize-none bg-card"
+            placeholder="Describe the changes you want before the workflow continues..."
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={sendBackMutation.isPending}
+              onClick={() => {
+                setSendBackOpen(false)
+                setSendBackText('')
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              data-testid="runtime-submit-send-back"
+              disabled={!sendBackText.trim() || !decision.approvalStage || sendBackMutation.isPending}
+              onClick={submitSendBack}
+            >
+              {sendBackMutation.isPending ? 'Sending back...' : 'Submit feedback'}
+            </Button>
+          </div>
         </div>
       )}
 

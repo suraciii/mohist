@@ -147,7 +147,7 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('start-button')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('runtime-action-start')).toBeInTheDocument())
     expect(screen.queryByTestId('draft-pill')).not.toBeInTheDocument()
   })
 
@@ -182,12 +182,12 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('start-readiness')).toBeInTheDocument())
-    const readiness = screen.getByTestId('start-readiness')
-    expect(readiness).toHaveAttribute('data-blocker', 'waiting-for')
-    expect(readiness).toHaveAttribute('data-waiting-for', '200')
-    const startButton = screen.getByTestId('start-button')
+    await waitFor(() => expect(screen.getByTestId('runtime-action-start')).toBeInTheDocument())
+    const readiness = screen.getByTestId('readiness-panel')
+    expect(screen.getByTestId('readiness-blocker')).toHaveAttribute('data-blocker-kind', 'waiting-for')
+    const startButton = screen.getByTestId('runtime-action-start')
     expect(startButton).toBeDisabled()
+    expect(startButton.getAttribute('title')).toMatch(/waiting for #200/i)
     expect(readiness.textContent).toMatch(/waiting for #200/i)
   })
 
@@ -200,8 +200,8 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('start-button')).toBeInTheDocument())
-    const startButton = screen.getByTestId('start-button')
+    await waitFor(() => expect(screen.getByTestId('runtime-action-start')).toBeInTheDocument())
+    const startButton = screen.getByTestId('runtime-action-start')
     expect(startButton).not.toBeDisabled()
     expect(startButton).toHaveTextContent(/^Start$/)
   })
@@ -331,7 +331,7 @@ describe('IssueDetailPage - no legacy startEligibility fields rendered', () => {
 
     const { container } = renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('start-readiness')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('readiness-panel')).toBeInTheDocument())
     const html = container.innerHTML
     expect(html).not.toMatch(/startEligibility/i)
     expect(html).not.toMatch(/waitingForDelivery/i)

@@ -4,19 +4,19 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { RuntimeDecisionSurface, type RuntimeDecisionSurfaceMutations } from './RuntimeDecisionSurface'
 import type { RuntimeDecision } from '../model/derive-runtime-decision'
 
-function mutation(overrides: Partial<RuntimeDecisionSurfaceMutations['startMutation']> = {}) {
+function mutation<TMutation extends { mutate: unknown; isPending: boolean; error: Error | null } = RuntimeDecisionSurfaceMutations['startMutation']>(overrides: Partial<TMutation> = {}): TMutation {
   return {
-    mutate: vi.fn() as unknown as RuntimeDecisionSurfaceMutations['startMutation']['mutate'],
+    mutate: vi.fn() as TMutation['mutate'],
     isPending: false,
     error: null,
     ...overrides,
-  }
+  } as TMutation
 }
 
 function mutations(overrides: Partial<RuntimeDecisionSurfaceMutations> = {}): RuntimeDecisionSurfaceMutations {
   return {
     approveMutation: mutation(),
-    sendBackMutation: mutation(),
+    sendBackMutation: mutation<RuntimeDecisionSurfaceMutations['sendBackMutation']>(),
     retryMutation: mutation(),
     resumeMutation: mutation(),
     rerunMutation: mutation(),
@@ -41,6 +41,7 @@ function decision(overrides: Partial<RuntimeDecision> = {}): RuntimeDecision {
     waitReason: null,
     driftNote: null,
     blockedReason: null,
+    approvalStage: null,
     ...overrides,
   }
 }
@@ -69,7 +70,7 @@ describe('RuntimeDecisionSurface', () => {
     render(
       <RuntimeDecisionSurface
         decision={decision()}
-        mutations={mutations({ forceStopMutation: mutation({ isPending: true }) })}
+        mutations={mutations({ forceStopMutation: mutation<RuntimeDecisionSurfaceMutations['forceStopMutation']>({ isPending: true }) })}
       />,
     )
 
@@ -135,5 +136,49 @@ describe('RuntimeDecisionSurface', () => {
     fireEvent.click(screen.getByTestId('runtime-action-stop'))
 
     expect(screen.getByTestId('runtime-stop-confirmation-copy')).toHaveTextContent('preserve progress')
+  })
+
+  it('renders inspect as disabled even if a decision accidentally marks it enabled', () => {
+    const inspect = { kind: 'inspect' as const, label: 'View transcript', enabled: true }
+    render(
+      <RuntimeDecisionSurface
+        decision={decision({ primary: null, actions: [inspect] })}
+        mutations={mutations()}
+      />,
+    )
+
+    const inspectButton = screen.getByTestId('runtime-action-inspect')
+    expect(inspectButton).toBeDisabled()
+    expect(inspectButton.getAttribute('title')).toMatch(/transcript navigation/i)
+  })
+
+  it('collects feedback text before sending back an approval', () => {
+    const sendBackMutation = mutation<RuntimeDecisionSurfaceMutations['sendBackMutation']>()
+    const sendBack = { kind: 'send-back' as const, label: 'Send back', enabled: true }
+    render(
+      <RuntimeDecisionSurface
+        decision={decision({
+          summary: 'approval-required',
+          primary: sendBack,
+          actions: [sendBack],
+          approvalStage: 'check',
+        })}
+        mutations={mutations({ sendBackMutation })}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('runtime-action-send-back'))
+
+    expect(screen.getByTestId('runtime-send-back-form')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-submit-send-back')).toBeDisabled()
+    fireEvent.change(screen.getByTestId('runtime-send-back-textarea'), {
+      target: { value: 'Please address the verification failure.' },
+    })
+    fireEvent.click(screen.getByTestId('runtime-submit-send-back'))
+
+    expect(sendBackMutation.mutate).toHaveBeenCalledWith(
+      { stage: 'check', body: 'Please address the verification failure.' },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    )
   })
 })
