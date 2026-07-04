@@ -4,7 +4,7 @@
 
 ### Requirement: Metadata and Low-Frequency Configuration Only
 
-The reference rail SHALL hold only issue metadata and low-frequency configuration — details, model, workflow-profile control, and prerequisites — plus the low-frequency drift and convergence panels. It SHALL NOT contain the runtime decision/action surface, the workflow progress/outputs, or the changes/diff, commits, description, or comments blocks.
+The reference rail SHALL hold only issue metadata, low-frequency configuration, and non-runtime issue actions — details, model, workflow-profile control, prerequisites, the non-runtime IssueActionsCard (Mark ready / Close / Ask Agent / archived note / draft readiness), and the low-frequency drift and convergence panels. It SHALL NOT contain the runtime decision/action surface, the workflow progress/outputs, or the changes/diff, commits, description, or comments blocks.
 
 #### Scenario: Rail holds metadata and configuration
 
@@ -16,6 +16,12 @@ The reference rail SHALL hold only issue metadata and low-frequency configuratio
 - **WHEN** the reference rail renders
 - **THEN** the runtime decision/action surface is not in the rail
 - **AND** the workflow stage progress, outputs, changes/diff, commits, description, and comments are not in the rail
+
+#### Scenario: Non-runtime issue actions live in the rail
+
+- **WHEN** the reference rail renders
+- **THEN** the IssueActionsCard (Mark ready, Close, Ask Agent) appears in the rail
+- **AND** it does not duplicate the seven runtime actions anchored in the status-header tier
 
 ### Requirement: Desktop Right Column
 
