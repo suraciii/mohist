@@ -1,0 +1,27 @@
+# Issue #342 — Detail-page mobile adaptation — progress
+
+## Codebase Patterns
+
+- **Widgets layout**: `packages/web/src/widgets/issue-workflow/` keeps pure decision/state modules under `model/` (e.g. `derive-runtime-decision.ts`) and presentational React under `ui/`. Cross-cutting pure helpers can live at the widget root next to the model.
+- **Barrel exports**: `widgets/issue-workflow/index.ts` re-exports every public surface, type, and (where stable) helper. New helpers should be exported from there.
+- **Mutation wiring shape**: `RuntimeDecisionSurfaceMutations` defines the eight runtime mutations as `{ mutate, isPending, error }`. Any helper that drives them must accept this shape and not introduce a new abstraction layer (no wrapper hook, no separate facade).
+- **Test discipline**: existing `RuntimeDecisionSurface.test.tsx` uses `vi.fn()` + a `mutation()`/`mutations()`/`decision()` helper trio. New unit tests for the pure handlers should mirror that style and avoid rendering React (the handlers are not React components).
+- **Typecheck = lint for web**: `tsc -b` under `packages/web` is the lint step (no `lint` script). Treat any type error as a hard failure.
+
+## T-001 — Extract shared action wiring (done)
+
+- Added `packages/web/src/widgets/issue-workflow/runtime-action-handlers.ts` exporting:
+  - `getStopConsequenceCopy(stopRecoverable: boolean | null): { title, body }` — single source of recoverable/irreversible stop wording. Title is structured for the future narrow drawer; body preserves the original desktop inline sentence ("Stop will preserve progress..." / "Stop is irreversible...") so existing desktop tests pass unchanged.
+  - `invokeAction(kind, params)` — `kind → mutation.mutate(...)` map for every runtime action kind. `stopRecoverable ? forceStop : stop` split lives here; `send-back` reads `{ stage: decision.approvalStage, body }` from `decision` and `params.sendBackBody` and forwards an optional `onSendBackSuccess` callback so the desktop form's local state reset still happens.
+- Refactored `RuntimeDecisionSurface.tsx` to consume both helpers. The eight mutation wiring sites now route through `invokeAction` (with stop keeping its two-click confirm UX and send-back keeping its inline form). The inline consequence-copy block reads its text from `getStopConsequenceCopy(...).body`. No user-visible behavior change.
+- New `runtime-action-handlers.test.ts` covers every `RuntimeActionKind`: approve, send-back (incl. trim, missing stage, empty body, `onSendBackSuccess` wiring), retry/resume/rerun/start (no-payload), stop (recoverable → forceStop, irreversible → stop, null → stop), inspect (no-op). Existing `RuntimeDecisionSurface.test.tsx` scenarios pass unchanged.
+- Exports added to `widgets/issue-workflow/index.ts` (helpers + types).
+- `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` are green (4156 tests, 22 in the two changed files).
+
+## Decisions / gotchas
+
+- **Body vs. title**: `getStopConsequenceCopy` returns both. The desktop surface renders `body` (preserves test assertions like `'preserve progress'` / `'irreversible'`). The narrow drawer (T-002) will use `title` as a section header and `body` as the consequence sentence.
+- **`invokeAction('inspect', ...)` is a no-op**: matches the existing desktop behavior where inspect is rendered disabled with a `title` reason and never wired to a mutation. Future surface can decide whether to mount it at all.
+- **Two-step confirm stays in `RuntimeDecisionSurface`**: only the second click (the actual mutation call) routes through `invokeAction('stop', ...)`. The first click still toggles `stopConfirming` locally — that gating is UX, not action wiring.
+- **Send-back success callback is passed via `callbacks.onSendBackSuccess`**, not by returning the mutate promise from `invokeAction`. Keeps `invokeAction` a `void` and the desktop form's local state reset (close form + clear text) where it belongs.
+- **No narrow-viewport rendering introduced** — desktop surface stays anchored in the header tier per design D1. T-002 will do the page-level conditional split.

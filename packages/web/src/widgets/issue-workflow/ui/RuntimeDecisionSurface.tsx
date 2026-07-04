@@ -8,6 +8,7 @@ import {
   type RuntimeDecision,
   type RuntimeSummary,
 } from '../model/derive-runtime-decision'
+import { getStopConsequenceCopy, invokeAction } from '../runtime-action-handlers'
 
 interface RuntimeActionMutation<TVariables = void> {
   mutate: UseMutationResult<unknown, Error, TVariables, unknown>['mutate']
@@ -75,24 +76,12 @@ const toneEdgeClass: Record<SummaryPresentation['tone'], string> = {
 
 function SurfaceActionButton({
   action,
-  onApprove,
-  onSendBack,
-  onRetry,
-  onResume,
-  onRerun,
-  onStop,
-  onStart,
+  onClick,
   pendingKind,
   primary,
 }: {
   action: RuntimeAvailableAction
-  onApprove: () => void
-  onSendBack: () => void
-  onRetry: () => void
-  onResume: () => void
-  onRerun: () => void
-  onStop: () => void
-  onStart: () => void
+  onClick: () => void
   pendingKind: RuntimeAvailableAction['kind'] | null
   primary: boolean
 }) {
@@ -106,30 +95,15 @@ function SurfaceActionButton({
     ? (action.reason ?? 'Transcript navigation is not available from this surface yet.')
     : action.reason
 
-  let onClick: () => void = () => undefined
-  let busyLabel = ''
-  if (action.kind === 'approve') {
-    onClick = onApprove
-    busyLabel = 'Approving...'
-  } else if (action.kind === 'send-back') {
-    onClick = onSendBack
-    busyLabel = 'Sending back...'
-  } else if (action.kind === 'retry') {
-    onClick = onRetry
-    busyLabel = 'Retrying...'
-  } else if (action.kind === 'resume') {
-    onClick = onResume
-    busyLabel = 'Resuming...'
-  } else if (action.kind === 'rerun') {
-    onClick = onRerun
-    busyLabel = 'Rerunning...'
-  } else if (action.kind === 'stop') {
-    onClick = onStop
-    busyLabel = 'Stopping...'
-  } else if (action.kind === 'start') {
-    onClick = onStart
-    busyLabel = 'Starting...'
-  }
+  const busyLabel = ({
+    approve: 'Approving...',
+    'send-back': 'Sending back...',
+    retry: 'Retrying...',
+    resume: 'Resuming...',
+    rerun: 'Rerunning...',
+    stop: 'Stopping...',
+    start: 'Starting...',
+  } as const)[action.kind as 'approve' | 'send-back' | 'retry' | 'resume' | 'rerun' | 'stop' | 'start']
 
   return (
     <Button
@@ -194,27 +168,23 @@ export function RuntimeDecisionSurface({
       setStopConfirming(true)
       return
     }
-    if (decision.stopRecoverable) {
-      forceStopMutation.mutate()
-    } else {
-      stopMutation.mutate()
-    }
+    invokeAction('stop', { decision, mutations })
   }
   const openSendBack = () => {
     setSendBackOpen(true)
   }
   const submitSendBack = () => {
-    const body = sendBackText.trim()
-    if (!body || !decision.approvalStage) return
-    sendBackMutation.mutate(
-      { stage: decision.approvalStage, body },
-      {
-        onSuccess: () => {
+    invokeAction('send-back', {
+      decision,
+      mutations,
+      sendBackBody: sendBackText,
+      callbacks: {
+        onSendBackSuccess: () => {
           setSendBackOpen(false)
           setSendBackText('')
         },
       },
-    )
+    })
   }
 
   return (
@@ -278,13 +248,17 @@ export function RuntimeDecisionSurface({
             <SurfaceActionButton
               key={action.kind}
               action={action}
-              onApprove={() => approveMutation.mutate()}
-              onSendBack={openSendBack}
-              onRetry={() => retryMutation.mutate()}
-              onResume={() => resumeMutation.mutate()}
-              onRerun={() => rerunMutation.mutate()}
-              onStop={runStop}
-              onStart={() => startMutation.mutate()}
+              onClick={() => {
+                if (action.kind === 'stop') {
+                  runStop()
+                  return
+                }
+                if (action.kind === 'send-back') {
+                  openSendBack()
+                  return
+                }
+                invokeAction(action.kind, { decision, mutations })
+              }}
               pendingKind={pendingKind}
               primary={action.kind === decision.primary?.kind}
             />
@@ -343,9 +317,7 @@ export function RuntimeDecisionSurface({
           data-testid="runtime-stop-confirmation-copy"
           className="mt-3 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
         >
-          {decision.stopRecoverable
-            ? 'Stop will preserve progress so this workflow can be resumed later.'
-            : 'Stop is irreversible for this workflow run; progress cannot be resumed.'}
+          {getStopConsequenceCopy(decision.stopRecoverable).body}
         </div>
       )}
 
