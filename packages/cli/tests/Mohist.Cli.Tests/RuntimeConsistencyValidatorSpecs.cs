@@ -34,6 +34,26 @@ public class RuntimeConsistencyValidatorSpecs
             runnerIdentityPollInterval);
     }
 
+    private static async Task AssertRequestCountAsync(RecordingHttpHandler handler, int expected)
+    {
+        for (var attempts = 0; attempts < 10 && handler.Requests.Count < expected; attempts++)
+        {
+            await Task.Yield();
+        }
+
+        Assert.Equal(expected, handler.Requests.Count);
+    }
+
+    private static async Task AssertCompletedAsync<T>(Task<T> task)
+    {
+        for (var attempts = 0; attempts < 10 && !task.IsCompleted; attempts++)
+        {
+            await Task.Yield();
+        }
+
+        Assert.True(task.IsCompleted, "Expected task to complete without waiting on real time.");
+    }
+
     [Fact]
     public async Task CheckCliBinaryAsync_VersionReported_ReportsPass()
     {
@@ -358,19 +378,10 @@ public class RuntimeConsistencyValidatorSpecs
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         const int readyOnAttempt = 3;
         var probeCount = 0;
-        var probeStartedSignals = new List<TaskCompletionSource>();
         var handler = new RecordingHttpHandler((req, _) =>
         {
             Assert.Equal("/api/runner/identity", req.RequestUri!.AbsolutePath);
             var attempt = Interlocked.Increment(ref probeCount);
-            lock (probeStartedSignals)
-            {
-                while (probeStartedSignals.Count < attempt)
-                {
-                    probeStartedSignals.Add(new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
-                }
-                probeStartedSignals[attempt - 1].TrySetResult();
-            }
             if (attempt < readyOnAttempt)
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
@@ -396,11 +407,11 @@ public class RuntimeConsistencyValidatorSpecs
 
         for (var i = 0; i < readyOnAttempt - 1; i++)
         {
-            await probeStartedSignals[i].Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await AssertRequestCountAsync(handler, i + 1);
             time.Advance(pollInterval);
         }
 
-        await probeStartedSignals[readyOnAttempt - 1].Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await AssertRequestCountAsync(handler, readyOnAttempt);
         var result = await checkTask;
 
         Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
@@ -441,6 +452,79 @@ public class RuntimeConsistencyValidatorSpecs
         Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
         Assert.Contains("did not respond", result.Message);
         Assert.NotEmpty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task CheckRunnerIdentityAsync_TimeoutShorterThanPollInterval_ReportsWarnAtTimeout()
+    {
+        var startedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var time = new FakeTimeProvider(startedAt);
+        var handler = new RecordingHttpHandler((req, _) =>
+        {
+            Assert.Equal("/api/runner/identity", req.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
+
+        var timeout = TimeSpan.FromSeconds(2);
+        var validator = BuildValidator(
+            http,
+            timeProvider: time,
+            runnerIdentityTimeout: timeout,
+            runnerIdentityPollInterval: TimeSpan.FromSeconds(5));
+        var context = BuildContext(repoRoot: "/repo");
+        context.SourceHead = "abc123";
+
+        var checkTask = validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+        await AssertRequestCountAsync(handler, 1);
+
+        time.Advance(timeout);
+        await AssertCompletedAsync(checkTask);
+        var result = await checkTask;
+
+        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Contains("did not respond", result.Message);
+        Assert.Equal(timeout, time.GetUtcNow() - startedAt);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task CheckRunnerIdentityAsync_NonDivisibleTimeoutReportsWarnAtTimeout()
+    {
+        var startedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var time = new FakeTimeProvider(startedAt);
+        var handler = new RecordingHttpHandler((req, _) =>
+        {
+            Assert.Equal("/api/runner/identity", req.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
+
+        var timeout = TimeSpan.FromMilliseconds(750);
+        var pollInterval = TimeSpan.FromMilliseconds(500);
+        var validator = BuildValidator(
+            http,
+            timeProvider: time,
+            runnerIdentityTimeout: timeout,
+            runnerIdentityPollInterval: pollInterval);
+        var context = BuildContext(repoRoot: "/repo");
+        context.SourceHead = "abc123";
+
+        var checkTask = validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+        await AssertRequestCountAsync(handler, 1);
+
+        time.Advance(pollInterval);
+        await AssertRequestCountAsync(handler, 2);
+        Assert.False(checkTask.IsCompleted);
+
+        time.Advance(timeout - pollInterval);
+        await AssertCompletedAsync(checkTask);
+        var result = await checkTask;
+
+        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Contains("did not respond", result.Message);
+        Assert.Equal(timeout, time.GetUtcNow() - startedAt);
+        Assert.Equal(3, handler.Requests.Count);
     }
 
     [Fact]

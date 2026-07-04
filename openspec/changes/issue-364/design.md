@@ -9,7 +9,7 @@ Stakeholders: anyone running `mo update` (every full update currently surfaces t
 ## Goals / Non-Goals
 
 **Goals:**
-- Make `CheckRunnerIdentityAsync` tolerate the systemd-active ↔ identity-registered lag by polling `/api/runner/identity` until a non-null identity with a non-empty `buildGitHash` is returned, or a bounded timeout elapses.
+- Make `CheckRunnerIdentityAsync` tolerate the systemd-active ↔ identity-registered lag by polling `/api/runner/identity` until a non-null identity snapshot is returned, or a bounded timeout elapses. A present snapshot with an empty `buildGitHash` remains the existing Warn outcome.
 - Reuse the existing `TryGetRunnerIdentityAsync` private helper as the per-attempt probe — no duplicated HTTP/deserialization logic.
 - Make timeout, poll interval, and `TimeProvider` injectable (constructor params with defaults matching `RunnerRefreshVerifier`: 30s / 500ms / `TimeProvider.System`), following the `ServiceReadinessProbe` convention.
 - Preserve all non-timing outcomes: empty `buildGitHash` → Warn (short-circuit, no further polling); mismatched `buildGitHash` → Warn (short-circuit); unresolvable source HEAD → skip Warn (zero probes).
@@ -39,11 +39,11 @@ Stakeholders: anyone running `mo update` (every full update currently surfaces t
 
 **Rationale:** Duplicating the fetch logic would be a direct spec violation ("per-attempt probe MUST reuse the existing identity-fetching helper") and would drift over time. The helper's "swallow exceptions → null" behavior is exactly what a poll probe wants.
 
-### Decision 3: "Ready" = non-null identity AND non-empty `buildGitHash`
+### Decision 3: "Ready" = non-null identity snapshot
 
-**Choice:** The loop continues while the probe returns `null` OR a snapshot whose `BuildGitHash` is null/whitespace. Only when a non-empty `buildGitHash` arrives does the loop exit and proceed to comparison.
+**Choice:** The loop continues while the probe returns `null`. When any non-null snapshot arrives, the loop exits and the existing comparison block evaluates it.
 
-**Rationale:** The spec's "Identity becomes available after several polls" scenario explicitly treats null/empty payloads as "still reconnecting". But once a *non-empty, non-matching* hash arrives, that's a real signal about the deployed artifact — there's no point polling further, so the mismatch Warn short-circuits out of the loop. This preserves the present-but-unusable semantics from the spec ("Identity buildGitHash differs from source HEAD → Warn, without continuing to poll further").
+**Rationale:** The spec's "Identity becomes available after several polls" scenario treats null or missing identity payloads as "still reconnecting". Once a snapshot arrives, its content is a real signal about the deployed artifact, so there is no point polling further. This preserves the present-but-unusable semantics from the spec: empty hash and mismatched hash both Warn without continuing to poll.
 
 **Subtle point:** an empty `buildGitHash` on a *non-null* snapshot is ambiguous — could be a transient mid-registration state or a genuinely broken runner. Per the spec's "Identity reports an empty buildGitHash → Warn, without continuing to poll further", a non-null snapshot with empty hash must **not** poll. Resolution: the loop treats `null` snapshot as "poll again", but a non-null snapshot (regardless of hash content) exits the loop and is then evaluated by the existing comparison block. The comparison block already produces the correct Warn for empty/mismatched hashes. This is the smallest change that satisfies both the "poll for readiness" requirement and the "don't poll past a present-but-unusable identity" requirement.
 

@@ -1,6 +1,6 @@
 ### Requirement: Runner identity verification polls for registration readiness
 
-After resolving the source HEAD, `RuntimeConsistencyValidator.CheckRunnerIdentityAsync` (the `VerifyRuntime` stage of `mo update`) MUST poll `GET /api/runner/identity` until a non-null identity carrying a non-empty `buildGitHash` is returned, or until a bounded timeout elapses. This tolerates the registration lag between systemd reporting the runner process `active` and the server actually serving a populated `/api/runner/identity` payload. The per-attempt probe MUST reuse the existing identity-fetching helper rather than duplicating the HTTP/deserialization logic.
+After resolving the source HEAD, `RuntimeConsistencyValidator.CheckRunnerIdentityAsync` (the `VerifyRuntime` stage of `mo update`) MUST poll `GET /api/runner/identity` until a non-null identity snapshot is returned, or until a bounded timeout elapses. This tolerates the registration lag between systemd reporting the runner process `active` and the server actually serving a `/api/runner/identity` payload. A present snapshot whose `buildGitHash` is empty or whitespace is not treated as still registering; it follows the unchanged Warn path below. The per-attempt probe MUST reuse the existing identity-fetching helper rather than duplicating the HTTP/deserialization logic.
 
 #### Scenario: Identity already registered on the first probe
 
@@ -9,12 +9,12 @@ After resolving the source HEAD, `RuntimeConsistencyValidator.CheckRunnerIdentit
 
 #### Scenario: Identity becomes available after several polls
 
-- **WHEN** `/api/runner/identity` returns a null/empty payload for the first N probes (the runner is still reconnecting) and then returns an identity whose `buildGitHash` matches the source HEAD before the timeout elapses
+- **WHEN** `/api/runner/identity` returns a null or missing identity payload for the first N probes (the runner is still reconnecting) and then returns an identity whose `buildGitHash` matches the source HEAD before the timeout elapses
 - **THEN** `CheckRunnerIdentityAsync` returns `Pass`, having issued N-1 bounded poll delays between probes
 
 #### Scenario: Identity never registers within the bounded window
 
-- **WHEN** `/api/runner/identity` keeps returning a null/empty payload throughout the entire bounded window
+- **WHEN** `/api/runner/identity` keeps returning a null or missing identity payload throughout the entire bounded window
 - **THEN** `CheckRunnerIdentityAsync` returns `Warn` with the "did not respond" message, so a genuinely broken runner is still surfaced rather than masked by an infinite wait
 
 ### Requirement: Bounded window with injectable timeout, poll interval, and time source

@@ -228,10 +228,15 @@ internal sealed class RuntimeConsistencyValidator
             if (identity is not null)
                 return identity;
 
-            if (_timeProvider.GetUtcNow() >= deadline)
+            var now = _timeProvider.GetUtcNow();
+            if (now >= deadline)
                 return null;
 
-            await Task.Delay(_runnerIdentityPollInterval, _timeProvider, token);
+            var remaining = deadline - now;
+            var delay = remaining < _runnerIdentityPollInterval
+                ? remaining
+                : _runnerIdentityPollInterval;
+            await Task.Delay(delay, _timeProvider, token);
         }
     }
 
