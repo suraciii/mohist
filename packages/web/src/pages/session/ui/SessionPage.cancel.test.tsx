@@ -1,0 +1,267 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { ProjectProvider } from '../../../entities/project'
+import { SessionPage } from './SessionPage'
+import type { AgentSessionMetadata } from '../../../entities/coder-session'
+
+const mocks = vi.hoisted(() => ({
+  useIssueData: undefined as any,
+  useCoderSessionsReturn: {
+    sessions: [] as any[],
+    isLoading: false,
+  },
+  siblingReturn: {
+    previous: null,
+    next: null,
+    sessions: [] as any[],
+  },
+  transcriptReturn: {
+    turns: [] as any[],
+    transcriptVersion: 0,
+    scrollToBottom: vi.fn(),
+    newContentAvailable: false,
+    setIsNearBottom: vi.fn(),
+    isFinalizing: false,
+    isThinking: false,
+    isStreaming: false,
+  },
+  routeParams: {
+    number: '123',
+    sessionName: 'session-1',
+  },
+  metadataOverride: null as AgentSessionMetadata | null,
+}))
+
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return {
+    ...actual,
+    useParams: () => mocks.routeParams,
+  }
+})
+
+vi.mock('../../../entities/issue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/issue')>()
+  return {
+    ...actual,
+    useIssue: () => ({ data: mocks.useIssueData }),
+  }
+})
+
+vi.mock('../../../entities/coder-session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/coder-session')>()
+  return {
+    ...actual,
+    useCoderSessions: () => mocks.useCoderSessionsReturn,
+    getAgentSessionMetadata: vi.fn().mockImplementation(async () => mocks.metadataOverride),
+    getAgentSessionTranscript: vi.fn().mockResolvedValue({
+      turns: [
+        { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' }, parts: [] },
+        { id: 'turn-2', index: 1, kind: 'response', role: 'assistant', content: { text: 'Done' }, parts: [] },
+      ],
+      lastActivityAt: '2026-06-15T10:29:55.000Z',
+    }),
+  }
+})
+
+vi.mock('../../../widgets/issue-workflow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../widgets/issue-workflow')>()
+  return {
+    ...actual,
+    useSiblingSessions: () => mocks.siblingReturn,
+  }
+})
+
+vi.mock('../../../widgets/session-transcript', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../widgets/session-transcript')>()
+  return {
+    ...actual,
+    useSessionTranscript: () => mocks.transcriptReturn,
+    projectTurn: (turn: any) => turn,
+    SessionTranscriptLayout: ({ turns }: { turns: any[] }) => (
+      <div data-testid="session-transcript-layout">{turns.length} turns</div>
+    ),
+  }
+})
+
+vi.mock('../../../widgets/coder-session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../widgets/coder-session')>()
+  return {
+    ...actual,
+    SessionRecoveryActions: ({ bare }: { bare?: boolean }) => (
+      <div data-testid="session-recovery-actions" data-bare={bare ? 'true' : 'false'} />
+    ),
+    SessionFollowupComposer: ({ disabled }: { disabled: boolean }) => (
+      <div data-testid="session-followup-composer" data-disabled={disabled ? 'true' : 'false'} />
+    ),
+  }
+})
+
+vi.mock('../../../widgets/session-health', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../widgets/session-health')>()
+  return {
+    ...actual,
+    ContextHealthBar: () => <div data-testid="context-health-bar" />,
+    CompactionLineageLink: () => <div data-testid="compaction-lineage-link" />,
+  }
+})
+
+vi.mock('../../../shared/lib/useDocumentTitle', () => ({
+  useDocumentTitle: () => {},
+}))
+
+function createQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
+}
+
+function setupRunningIssueMocks() {
+  mocks.useIssueData = {
+    id: '123',
+    number: 123,
+    title: 'Test issue',
+    body: 'Body',
+    status: 'in_progress',
+    stage: 'build',
+    labels: {},
+    createdAt: '2026-06-15T10:00:00.000Z',
+    updatedAt: '2026-06-15T10:30:00.000Z',
+    projectId: 'proj-1',
+    workflowRunId: 'wr-1',
+  }
+  mocks.useCoderSessionsReturn = {
+    sessions: [
+      {
+        id: 'session-1',
+        sessionName: 'session-1',
+        workflowRunId: 'wr-1',
+        acpSessionId: 'acp-1',
+        projectId: 'proj-1',
+        issueNumber: 123,
+        runnerId: 'runner-1',
+        status: 'active',
+        stage: 'build',
+        model: 'minimax/MiniMax-M3',
+        workDir: null,
+        processPid: null,
+        createdAt: '2026-06-15T10:00:00.000Z',
+        startedAt: '2026-06-15T10:00:05.000Z',
+        completedAt: null,
+        lastDataAt: '2026-06-15T10:00:30.000Z',
+        failureReason: null,
+        exitCode: 0,
+      },
+    ],
+    isLoading: false,
+  }
+  mocks.siblingReturn = { previous: null, next: null, sessions: [] }
+  mocks.transcriptReturn = {
+    turns: [
+      { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' } },
+      { id: 'turn-2', index: 1, kind: 'response', role: 'assistant', content: { text: 'Done' } },
+    ],
+    transcriptVersion: 0,
+    scrollToBottom: vi.fn(),
+    newContentAvailable: false,
+    setIsNearBottom: vi.fn(),
+    isFinalizing: false,
+    isThinking: false,
+    isStreaming: false,
+  }
+  mocks.routeParams = { number: '123', sessionName: 'session-1' }
+}
+
+async function renderIssueSessionPage() {
+  const queryClient = createQueryClient()
+  const result = render(
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
+        id: 'proj-1',
+        name: 'Test',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        repositories: [],
+      }]}>
+        <MemoryRouter initialEntries={['/issues/123/workflow/sessions/session-1']}>
+          <Routes>
+            <Route
+              path="/issues/:number/workflow/sessions/:sessionName"
+              element={<SessionPage />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </ProjectProvider>
+    </QueryClientProvider>,
+  )
+  await waitFor(() => {
+    if (!result.container.querySelector('[data-testid="session-transcript-scroll-container"]')) {
+      throw new Error('not ready yet')
+    }
+  })
+  return result
+}
+
+function baseRunningMetadata(overrides: Partial<AgentSessionMetadata> = {}): AgentSessionMetadata {
+  return {
+    id: 'agent-session-1',
+    sessionName: 'session-1',
+    acpSessionId: 'acp-1',
+    title: 'Test session',
+    status: 'active',
+    statusKind: 'live',
+    stage: 'build',
+    model: 'minimax/MiniMax-M3',
+    createdAt: '2026-06-15T10:00:00.000Z',
+    completedAt: null,
+    lastActivityAt: '2026-06-15T10:00:30.000Z',
+    lastDataAt: '2026-06-15T10:00:30.000Z',
+    changedFiles: [],
+    metadata: { partCount: 2, toolCount: 1 },
+    usage: {
+      inputTokens: 1000,
+      outputTokens: 500,
+      totalTokens: 1500,
+      costAmount: 0.01,
+      costCurrency: 'USD',
+      contextWindowUsed: 12000,
+      contextWindowSize: 32000,
+      contextUsagePercent: 37.5,
+    },
+    eventSummary: {
+      resolvedModel: 'minimax/MiniMax-M3',
+      toolCallCount: 1,
+      toolErrorCount: 0,
+    },
+    ...overrides,
+  }
+}
+
+describe('SessionPage cancel control absence (issue-349 T-002 regression)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setupRunningIssueMocks()
+    mocks.metadataOverride = baseRunningMetadata()
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders no cancel trigger in the header even when the issue/workflow session is running', async () => {
+    const { container } = await renderIssueSessionPage()
+
+    expect(container.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()
+    expect(container.querySelector('[data-testid="session-cancel-alert"]')).toBeNull()
+  })
+
+  it('renders no cancel/stop control inside the followup composer', async () => {
+    const { container } = await renderIssueSessionPage()
+
+    const composer = container.querySelector('[data-testid="session-followup-composer"]')
+    expect(composer).not.toBeNull()
+    expect(composer!.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()
+    expect(composer!.querySelector('[data-testid="session-cancel-alert"]')).toBeNull()
+  })
+})

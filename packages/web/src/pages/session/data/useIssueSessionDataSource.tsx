@@ -256,6 +256,7 @@ export function useIssueSessionDataSource(): SessionDataSourceResult {
     isRunning,
     followupIsPending: false,
     sendFollowup: () => {},
+    cancel: null,
     contextWindowUsed: detail?.metadata?.usage?.contextWindowUsed ?? null,
     contextWindowSize: detail?.metadata?.usage?.contextWindowSize ?? null,
     contextUsagePercent: detail?.metadata?.usage?.contextUsagePercent ?? null,
