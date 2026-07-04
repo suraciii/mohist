@@ -499,6 +499,12 @@ public class AgentSessionLaunchRoutesSpecs
         for (var i = 0; i < attempts; i++)
         {
             using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+            if (poll.StatusCode == HttpStatusCode.NoContent)
+            {
+                await Task.Yield();
+                continue;
+            }
+
             Assert.Equal(HttpStatusCode.OK, poll.StatusCode);
             var raw = await poll.Content.ReadAsStringAsync();
             if (string.IsNullOrWhiteSpace(raw)) continue;
