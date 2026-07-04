@@ -14,6 +14,7 @@ public sealed class SystemUpdateService : ISingletonService
     private readonly IConfiguration _configuration;
     private readonly IEnvironmentVariableProvider _environment;
     private readonly ILogger<SystemUpdateService> _logger;
+    private readonly TimeProvider _time;
 
     public SystemUpdateService(
         SystemInfoService systemInfoService,
@@ -23,7 +24,7 @@ public sealed class SystemUpdateService : ISingletonService
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
         ILogger<SystemUpdateService> logger)
-        : this(_ => systemInfoService.GetSystemInfoAsync(), store, commandRunner, readinessProbe, configuration, environment, logger)
+        : this(_ => systemInfoService.GetSystemInfoAsync(), store, commandRunner, readinessProbe, configuration, environment, logger, TimeProvider.System)
     {
     }
 
@@ -34,7 +35,8 @@ public sealed class SystemUpdateService : ISingletonService
         ISystemReadinessProbe readinessProbe,
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
-        ILogger<SystemUpdateService> logger)
+        ILogger<SystemUpdateService> logger,
+        TimeProvider time)
     {
         _getSystemInfo = getSystemInfo;
         _store = store;
@@ -43,6 +45,7 @@ public sealed class SystemUpdateService : ISingletonService
         _configuration = configuration;
         _environment = environment;
         _logger = logger;
+        _time = time;
     }
 
     public async Task<(bool Started, string? Error, string? Code, SystemUpdateStatusResponse? Status)> StartAsync(SystemUpdateRequest request, CancellationToken cancellationToken = default)
@@ -62,7 +65,7 @@ public sealed class SystemUpdateService : ISingletonService
         SystemUpdateJobState? startedState = null;
         try
         {
-            var now = DateTimeOffset.UtcNow;
+            var now = _time.GetUtcNow();
             startedState = new SystemUpdateJobState(
                 jobId,
                 "running",
@@ -121,7 +124,7 @@ public sealed class SystemUpdateService : ISingletonService
             && !string.IsNullOrWhiteSpace(latest.SourceHead)
             && !string.Equals(runningHash, latest.SourceHead, StringComparison.Ordinal))
         {
-            var supersededAt = DateTimeOffset.UtcNow;
+            var supersededAt = _time.GetUtcNow();
             await PersistTransitionAsync(
                 latest with
                 {
@@ -144,7 +147,7 @@ public sealed class SystemUpdateService : ISingletonService
             var shouldPersistWaiting = latest.Stage != "Waiting for reconnect" || latest.Reason != failureReason;
             if (shouldPersistWaiting)
             {
-                var waitingAt = DateTimeOffset.UtcNow;
+                var waitingAt = _time.GetUtcNow();
                 await PersistTransitionAsync(
                     latest with
                     {
@@ -161,7 +164,7 @@ public sealed class SystemUpdateService : ISingletonService
         if (string.IsNullOrWhiteSpace(runningHash) || runningHash != latest.SourceHead)
             return;
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
         latest = await PersistTransitionAsync(
             latest with
             {
@@ -179,7 +182,7 @@ public sealed class SystemUpdateService : ISingletonService
                 return;
         }
 
-        var completedAt = DateTimeOffset.UtcNow;
+        var completedAt = _time.GetUtcNow();
         await PersistTransitionAsync(
             latest with
             {
@@ -206,7 +209,7 @@ public sealed class SystemUpdateService : ISingletonService
             throw new ArgumentNullException(nameof(request));
 
         var info = await _getSystemInfo(cancellationToken);
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
 
         var latest = await _store.GetLatestAsync(cancellationToken);
         var jobId = string.IsNullOrWhiteSpace(request.JobId) ? Guid.NewGuid().ToString("N") : request.JobId!;
@@ -294,7 +297,7 @@ public sealed class SystemUpdateService : ISingletonService
             || string.Equals(existing.SourceHead, cliState.SourceHead, StringComparison.Ordinal))
             return;
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
         await PersistTransitionAsync(
             existing with
             {
@@ -491,7 +494,7 @@ public sealed class SystemUpdateService : ISingletonService
                 return;
             }
 
-            var waitingAt = DateTimeOffset.UtcNow;
+            var waitingAt = _time.GetUtcNow();
             state = await PersistTransitionAsync(
                 state with
                 {
@@ -555,7 +558,7 @@ public sealed class SystemUpdateService : ISingletonService
 
         if (restored.Status != "failed")
         {
-            var recoveredAt = DateTimeOffset.UtcNow;
+            var recoveredAt = _time.GetUtcNow();
             var failureReason = state.Reason;
             return await PersistTransitionAsync(
                 restored with
@@ -636,14 +639,14 @@ public sealed class SystemUpdateService : ISingletonService
         IReadOnlyList<string> args,
         CancellationToken cancellationToken)
     {
-        var startedAt = DateTimeOffset.UtcNow;
+        var startedAt = _time.GetUtcNow();
         state = await PersistTransitionAsync(
             state with { Stage = stage },
             cancellationToken,
             new SystemUpdateLogEntry(startedAt, stage, $"Running {fileName} {string.Join(' ', args)}"));
 
         var result = await _commandRunner.RunAsync(new SystemCommandRequest(fileName, args, workingDirectory, stage), cancellationToken);
-        var finishedAt = DateTimeOffset.UtcNow;
+        var finishedAt = _time.GetUtcNow();
         var message = string.IsNullOrWhiteSpace(result.Output)
             ? $"{fileName} exited with code {result.ExitCode}"
             : result.Output;
@@ -696,7 +699,7 @@ public sealed class SystemUpdateService : ISingletonService
             releaseLock: releaseLock);
     }
 
-    private static (SystemUpdateJobState State, SystemUpdateLogEntry LogEntry) CreateFailedTransition(
+    private (SystemUpdateJobState State, SystemUpdateLogEntry LogEntry) CreateFailedTransition(
         SystemUpdateJobState state,
         string reason,
         string? stage = null,
@@ -705,7 +708,7 @@ public sealed class SystemUpdateService : ISingletonService
         string? logStage = null,
         string? logMessage = null)
     {
-        var failedAt = DateTimeOffset.UtcNow;
+        var failedAt = _time.GetUtcNow();
         var next = state with
         {
             Status = "failed",
@@ -718,10 +721,10 @@ public sealed class SystemUpdateService : ISingletonService
         return (next, new SystemUpdateLogEntry(failedAt, logStage ?? stage ?? state.Stage, logMessage ?? reason));
     }
 
-    private static SystemUpdateJobState ApplyTransitionLog(SystemUpdateJobState next, SystemUpdateLogEntry? logEntry, DateTimeOffset? timestamp = null)
+    private SystemUpdateJobState ApplyTransitionLog(SystemUpdateJobState next, SystemUpdateLogEntry? logEntry, DateTimeOffset? timestamp = null)
     {
         var logs = logEntry is not null ? AppendLog(next.Logs, logEntry) : next.Logs;
-        timestamp ??= logEntry?.At ?? DateTimeOffset.UtcNow;
+        timestamp ??= logEntry?.At ?? _time.GetUtcNow();
         return next with
         {
             Logs = logs,

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -464,6 +465,50 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
+    public async Task AdvanceActiveJobAsync_WaitingForReconnectTransition_RecordsAdvancedClockAsUpdatedAt()
+    {
+        var store = new InMemoryUpdateStore();
+        var baseline = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            "newhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Initial wait",
+            [new SystemUpdateLogEntry(baseline, "Waiting for reconnect", "Initial wait")],
+            baseline,
+            baseline,
+            null));
+
+        var (service, time) = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(false, false, false, null, "API health endpoint is not ready")),
+            new FakeTimeProvider(baseline));
+
+        var advanced = baseline.AddMinutes(3);
+        time.Advance(advanced - baseline);
+
+        await service.AdvanceActiveJobAsync();
+
+        var latest = await store.GetLatestAsync();
+        Assert.NotNull(latest);
+        Assert.Equal("waiting-for-reconnect", latest!.Status);
+        Assert.Equal("Waiting for reconnect", latest.Stage);
+        Assert.Equal(advanced, latest.UpdatedAt);
+        var waitingLog = Assert.Single(latest.Logs, entry => entry.Stage == "Waiting for reconnect" && entry.Message == "API health endpoint is not ready");
+        Assert.Equal(advanced, waitingLog.At);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
     public async Task AdvanceActiveJobAsync_BoundsPersistedLogEntries()
     {
         var store = new InMemoryUpdateStore();
@@ -537,6 +582,51 @@ public class SystemUpdateServiceSpecs
         Assert.Equal("Superseded", latest.Stage);
         Assert.Contains(latest.Logs, log => log.Stage == "Superseded" && log.Message.Contains("currenthash"));
         Assert.Equal("currenthash", latest.RunningGitHash);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task AdvanceActiveJobAsync_SupersededOnHashDrift_RecordsAdvancedClockAsCompletedAt()
+    {
+        var store = new InMemoryUpdateStore();
+        var baseline = new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero);
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            "oldhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Waiting",
+            [new SystemUpdateLogEntry(baseline, "Waiting for reconnect", "Waiting")],
+            baseline,
+            baseline,
+            null));
+
+        var (service, time) = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "currenthash", sourceHead: "currenthash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(false, false, false, null, "ignored")),
+            new FakeTimeProvider(baseline));
+
+        var advanced = baseline.AddMinutes(7);
+        time.SetUtcNow(advanced);
+
+        await service.AdvanceActiveJobAsync();
+
+        var latest = await store.GetLatestAsync();
+        Assert.NotNull(latest);
+        Assert.Equal("superseded", latest!.Status);
+        Assert.Equal("Superseded", latest.Stage);
+        Assert.Equal(advanced, latest.CompletedAt);
+        Assert.Equal(advanced, latest.UpdatedAt);
+        var log = Assert.Single(latest.Logs, entry => entry.Stage == "Superseded");
+        Assert.Equal(advanced, log.At);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -1387,7 +1477,11 @@ public class SystemUpdateServiceSpecs
     public void SourceAudit_FailedStateIsDefinedOnlyInCreateFailedTransition()
     {
         var source = ReadSource();
-        var composerStart = source.IndexOf("private static (SystemUpdateJobState State, SystemUpdateLogEntry LogEntry) CreateFailedTransition", StringComparison.Ordinal);
+        var composerStart = source.IndexOf("private (SystemUpdateJobState State, SystemUpdateLogEntry LogEntry) CreateFailedTransition", StringComparison.Ordinal);
+        if (composerStart < 0)
+        {
+            composerStart = source.IndexOf("private static (SystemUpdateJobState State, SystemUpdateLogEntry LogEntry) CreateFailedTransition", StringComparison.Ordinal);
+        }
         Assert.True(composerStart >= 0, "CreateFailedTransition method not found");
         var composerEnd = FindMethodEnd(source, composerStart);
 
@@ -1423,7 +1517,11 @@ public class SystemUpdateServiceSpecs
     public void SourceAudit_AppendLogInvocationsStayOnSharedHelperPath()
     {
         var source = ReadSource();
-        var applyLogStart = source.IndexOf("private static SystemUpdateJobState ApplyTransitionLog", StringComparison.Ordinal);
+        var applyLogStart = source.IndexOf("private SystemUpdateJobState ApplyTransitionLog", StringComparison.Ordinal);
+        if (applyLogStart < 0)
+        {
+            applyLogStart = source.IndexOf("private static SystemUpdateJobState ApplyTransitionLog", StringComparison.Ordinal);
+        }
         Assert.True(applyLogStart >= 0, "ApplyTransitionLog method not found");
         var applyLogEnd = FindMethodEnd(source, applyLogStart);
         var recordOutcomeStart = source.IndexOf("public async Task<SystemUpdateStatusResponse> RecordCliOutcomeAsync", StringComparison.Ordinal);
@@ -1527,19 +1625,31 @@ public class SystemUpdateServiceSpecs
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe)
     {
+        return CreateService(systemInfo, store, commandRunner, readinessProbe, new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero))).Service;
+    }
+
+    private static (SystemUpdateService Service, FakeTimeProvider Time) CreateService(
+        SequencedSystemInfo systemInfo,
+        ISystemUpdateStore store,
+        ISystemUpdateCommandRunner commandRunner,
+        ISystemReadinessProbe readinessProbe,
+        FakeTimeProvider time)
+    {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Mohist:SystemUpdate:Enabled"] = "true"
         }).Build();
 
-        return new SystemUpdateService(
+        var service = new SystemUpdateService(
             systemInfo.GetSystemInfoAsync,
             store,
             commandRunner,
             readinessProbe,
             configuration,
             new MockEnvironmentVariableProvider(),
-            NullLogger<SystemUpdateService>.Instance);
+            NullLogger<SystemUpdateService>.Instance,
+            time);
+        return (service, time);
     }
 
     private static SystemInfoResponse CreateInfo(
@@ -1569,20 +1679,33 @@ public class SystemUpdateServiceSpecs
         ISystemReadinessProbe readinessProbe,
         string managedAssetsPath)
     {
+        return CreateConsistencyService(systemInfo, store, commandRunner, readinessProbe, managedAssetsPath, new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero))).Service;
+    }
+
+    private static (SystemUpdateService Service, FakeTimeProvider Time) CreateConsistencyService(
+        SequencedSystemInfo systemInfo,
+        ISystemUpdateStore store,
+        ISystemUpdateCommandRunner commandRunner,
+        ISystemReadinessProbe readinessProbe,
+        string managedAssetsPath,
+        FakeTimeProvider time)
+    {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Mohist:SystemUpdate:Enabled"] = "true",
             ["Mohist:CliSkillDataPath"] = managedAssetsPath
         }).Build();
 
-        return new SystemUpdateService(
+        var service = new SystemUpdateService(
             systemInfo.GetSystemInfoAsync,
             store,
             commandRunner,
             readinessProbe,
             configuration,
             new MockEnvironmentVariableProvider(),
-            NullLogger<SystemUpdateService>.Instance);
+            NullLogger<SystemUpdateService>.Instance,
+            time);
+        return (service, time);
     }
 
     private sealed class OrderTrackingStore : ISystemUpdateStore
