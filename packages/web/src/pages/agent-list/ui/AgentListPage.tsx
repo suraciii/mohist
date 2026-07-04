@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PlusIcon, BotIcon, ArchiveIcon, CircleIcon } from 'lucide-react'
 import { useAgents, readAgentModelAndVariant } from '../../../entities/agent'
@@ -7,6 +7,7 @@ import { useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { Button } from '@/shared/ui/components/button'
 import { Badge } from '@/shared/ui/components/badge'
+import { AgentProfileEditor } from '../../../widgets/agent-profile-editor/ui/AgentProfileEditor'
 
 function getAgentType(agent: AgentInfo): string {
   const config = agent.agentConfig
@@ -109,8 +110,7 @@ function AgentEmptyState({ onCreateClick }: { onCreateClick: () => void }) {
 export function AgentListPage() {
   useDocumentTitle('Agents — Mohist')
   const { data: agents, isLoading } = useAgents()
-  const navigate = useNavigate()
-  const toProjectPath = useProjectPath()
+  const [editorOpen, setEditorOpen] = useState(false)
 
   if (isLoading) {
     return (
@@ -138,7 +138,7 @@ export function AgentListPage() {
             </p>
           </div>
           <Button
-            onClick={() => navigate(toProjectPath('/agents/new'))}
+            onClick={() => setEditorOpen(true)}
             data-testid="agent-list-create"
           >
             <PlusIcon />
@@ -148,7 +148,7 @@ export function AgentListPage() {
 
         {!hasAgents ? (
           <AgentEmptyState
-            onCreateClick={() => navigate(toProjectPath('/agents/new'))}
+            onCreateClick={() => setEditorOpen(true)}
           />
         ) : (
           <div className="rounded-lg border border-border bg-card overflow-hidden" data-testid="agent-list">
@@ -175,6 +175,14 @@ export function AgentListPage() {
           </div>
         )}
       </div>
+
+      {editorOpen && (
+        <AgentProfileEditor
+          agent={null}
+          open={editorOpen}
+          onClose={() => setEditorOpen(false)}
+        />
+      )}
     </div>
   )
 }
