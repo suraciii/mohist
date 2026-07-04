@@ -41,42 +41,42 @@ function FeedbackCycle({
       <span
         className={`absolute left-1.5 top-1.5 h-3 w-3 rounded-full border-2 ${
           isResolved
-            ? 'bg-green-500 border-green-600'
-            : 'bg-amber-400 border-amber-500 animate-pulse'
+            ? 'bg-success border-success'
+            : 'bg-warning border-warning animate-pulse'
         }`}
         aria-hidden="true"
       />
       {!isLast && (
         <span
-          className="absolute left-[18px] top-5 bottom-0 w-px bg-gray-200"
+          className="absolute left-[18px] top-5 bottom-0 w-px bg-border"
           aria-hidden="true"
         />
       )}
 
-      <div className="rounded-md border border-gray-200 bg-white p-3 space-y-2">
+      <div className="rounded-md border border-border bg-card p-3 space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="text-xs font-semibold text-gray-700">{cycleLabel}</div>
+          <div className="text-xs font-semibold text-card-foreground">{cycleLabel}</div>
           <span
             className={`text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5 ${
               isResolved
-                ? 'bg-green-50 text-green-700'
-                : 'bg-amber-50 text-amber-700'
+                ? 'bg-success-subtle text-success'
+                : 'bg-warning-subtle text-warning'
             }`}
           >
             {isResolved ? 'Resolved' : 'Awaiting application'}
           </span>
         </div>
 
-        <ol className="space-y-2 text-xs text-gray-700">
+        <ol className="space-y-2 text-xs text-muted-foreground">
           <li className="flex items-start gap-2">
             <span
-              className="mt-1 h-1.5 w-1.5 rounded-full bg-blue-400 flex-shrink-0"
+              className="mt-1 h-1.5 w-1.5 rounded-full bg-info flex-shrink-0"
               aria-hidden="true"
             />
             <div>
-              <span className="font-medium text-gray-800">Feedback requested</span>
-              <span className="text-gray-500"> · {formatTime(feedback.createdAt)}</span>
-              <div className="mt-1 rounded bg-gray-50 border border-gray-200 px-2 py-1.5 whitespace-pre-wrap break-words">
+              <span className="font-medium text-card-foreground">Feedback requested</span>
+              <span className="text-muted-foreground"> · {formatTime(feedback.createdAt)}</span>
+              <div className="mt-1 rounded bg-muted border border-border px-2 py-1.5 whitespace-pre-wrap break-words">
                 {feedback.body}
               </div>
             </div>
@@ -85,14 +85,14 @@ function FeedbackCycle({
           {isResolved && feedback.resolution?.resolvedAt && (
             <li className="flex items-start gap-2">
               <span
-                className="mt-1 h-1.5 w-1.5 rounded-full bg-purple-400 flex-shrink-0"
+                className="mt-1 h-1.5 w-1.5 rounded-full bg-info/70 flex-shrink-0"
                 aria-hidden="true"
               />
               <div>
-                <span className="font-medium text-gray-800">Feedback task applied</span>
-                <span className="text-gray-500"> · {formatTime(feedback.resolution.resolvedAt)}</span>
+                <span className="font-medium text-card-foreground">Feedback task applied</span>
+                <span className="text-muted-foreground"> · {formatTime(feedback.resolution.resolvedAt)}</span>
                 {feedback.resolution.resolutionTaskId && (
-                  <span className="ml-2 text-[10px] text-gray-400 font-mono">
+                  <span className="ml-2 text-[10px] text-muted-foreground/70 font-mono">
                     {feedback.resolution.resolutionTaskId}
                   </span>
                 )}
@@ -103,17 +103,17 @@ function FeedbackCycle({
           {isResolved && (
             <li className="flex items-start gap-2">
               <span
-                className="mt-1 h-1.5 w-1.5 rounded-full bg-green-500 flex-shrink-0"
+                className="mt-1 h-1.5 w-1.5 rounded-full bg-success flex-shrink-0"
                 aria-hidden="true"
               />
               <div>
-                <span className="font-medium text-gray-800">Resolution summary</span>
+                <span className="font-medium text-card-foreground">Resolution summary</span>
                 {feedback.resolution?.resolutionSummary ? (
-                  <div className="mt-1 rounded bg-green-50 border border-green-200 px-2 py-1.5 whitespace-pre-wrap break-words text-gray-700">
+                  <div className="mt-1 rounded bg-success-subtle border border-success-border px-2 py-1.5 whitespace-pre-wrap break-words text-success">
                     {feedback.resolution.resolutionSummary}
                   </div>
                 ) : (
-                  <div className="mt-1 text-gray-500 italic">No summary provided</div>
+                  <div className="mt-1 text-muted-foreground italic">No summary provided</div>
                 )}
               </div>
             </li>
@@ -122,12 +122,12 @@ function FeedbackCycle({
           {isOpen && (
             <li className="flex items-start gap-2">
               <span
-                className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-400 flex-shrink-0 animate-pulse"
+                className="mt-1 h-1.5 w-1.5 rounded-full bg-warning flex-shrink-0 animate-pulse"
                 aria-hidden="true"
               />
               <div>
-                <span className="font-medium text-gray-800">Awaiting application</span>
-                <span className="text-gray-500">
+                <span className="font-medium text-card-foreground">Awaiting application</span>
+                <span className="text-muted-foreground">
                   {' '}
                   · The apply-feedback task is pending
                 </span>
@@ -138,11 +138,11 @@ function FeedbackCycle({
           {hasNext && isResolved && (
             <li className="flex items-start gap-2">
               <span
-                className="mt-1 h-1.5 w-1.5 rounded-full bg-blue-300 flex-shrink-0"
+                className="mt-1 h-1.5 w-1.5 rounded-full bg-info/60 flex-shrink-0"
                 aria-hidden="true"
               />
               <div>
-                <span className="font-medium text-gray-800">
+                <span className="font-medium text-card-foreground">
                   Next approval requested
                 </span>
               </div>
@@ -175,24 +175,24 @@ export function FeedbackHistory({
   const allResolved = sortedFeedback.every((f) => f.status === 'resolved')
 
   return (
-    <div className="rounded-md border border-gray-200 bg-gray-50 p-3 space-y-2">
+    <div className="rounded-md border border-border bg-muted p-3 space-y-2">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+        <h4 className="text-xs font-semibold text-card-foreground uppercase tracking-wide">
           Feedback history
         </h4>
-        <span className="text-[10px] text-gray-500" data-feedback-count={sortedFeedback.length}>
+        <span className="text-[10px] text-muted-foreground" data-feedback-count={sortedFeedback.length}>
           {sortedFeedback.length} cycle{sortedFeedback.length !== 1 ? 's' : ''}
         </span>
       </div>
 
       {approvalRequestedAt && (
-        <div className="text-[11px] text-gray-500">
+        <div className="text-[11px] text-muted-foreground">
           First approval requested at {formatTime(approvalRequestedAt)}
         </div>
       )}
 
       {checks && checks.length > 0 && allResolved && (
-        <div className="text-[11px] text-gray-500">
+        <div className="text-[11px] text-muted-foreground">
           Latest check rerun: {checks.map((c) => `${c.checkName} (${c.status})`).join(', ')}
         </div>
       )}
@@ -210,7 +210,7 @@ export function FeedbackHistory({
       </ol>
 
       {lastFeedback && lastFeedback.status === 'open' && (
-        <div className="rounded bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] text-amber-700">
+        <div className="rounded bg-warning-subtle border border-warning-border px-2 py-1.5 text-[11px] text-warning">
           The agent is applying your feedback. The stage will return to approval
           once checks rerun.
         </div>

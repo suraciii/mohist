@@ -78,6 +78,9 @@ describe('deriveRuntimeDecision', () => {
     expect(decision.currentTask?.title).toBe('Implement RuntimeDecisionSurface')
     expect(decision.headline).toContain('Implement RuntimeDecisionSurface')
     expect(decision.actions.some((a) => a.kind === 'stop' && a.enabled)).toBe(true)
+    expect(decision.primary?.kind).toBe('stop')
+    expect(decision.primary?.label).toBe('Stop')
+    expect(decision.stopRecoverable).toBe(true)
   })
 
   it('returns done when the workflow stage is Done', () => {
@@ -136,6 +139,8 @@ describe('deriveRuntimeDecision', () => {
     expect(decision.summary).toBe('approval-required')
     expect(decision.actions.find((a) => a.kind === 'approve')?.enabled).toBe(true)
     expect(decision.actions.find((a) => a.kind === 'send-back')?.enabled).toBe(true)
+    expect(decision.primary?.kind).toBe('approve')
+    expect(decision.stopRecoverable).toBeNull()
   })
 
   it('returns failed (not approval-required) when a Check stage has a failed script/health verification even when approval is awaiting', () => {
@@ -224,6 +229,30 @@ describe('deriveRuntimeDecision', () => {
     })
 
     expect(decision.summary).toBe('queued')
+  })
+
+  it('returns queued with Start as the primary action for a ready backlog issue', () => {
+    const decision = deriveRuntimeDecision({
+      issue: baseIssue({
+        status: IssueStatus.Backlog,
+        workflowStage: null,
+        workflowStatus: null,
+        health: IssueHealth.Active,
+        canStart: true,
+        blocker: null,
+      }),
+      agentStatus: {
+        runnerAvailable: true,
+        capacity: { active: 0, max: 2 },
+        activeAgents: [],
+      },
+    })
+
+    expect(decision.summary).toBe('queued')
+    expect(decision.primary?.kind).toBe('start')
+    expect(decision.primary?.enabled).toBe(true)
+    expect(decision.actions.some((a) => a.kind === 'stop')).toBe(false)
+    expect(decision.nextAction).toBe('Start the workflow.')
   })
 
   it('falls back to running (not queued) when no explicit queue/wait signal is present', () => {
@@ -488,6 +517,7 @@ describe('deriveRuntimeDecision', () => {
 
       expect(decision.summary).toBe('blocked')
       expect(decision.actions.find((a) => a.kind === 'resume')?.enabled).toBe(true)
+      expect(decision.primary?.kind).toBe('resume')
       expect(decision.actions.find((a) => a.kind === 'retry')?.enabled).toBe(false)
       expect(decision.actions.find((a) => a.kind === 'rerun')?.enabled).toBe(false)
       expect(decision.actions.find((a) => a.kind === 'stop')?.enabled).toBe(false)
@@ -605,7 +635,61 @@ describe('deriveRuntimeDecision', () => {
       expect(decision.summary).toBe('failed')
       expect(decision.actions.find((a) => a.kind === 'start')?.enabled).toBe(true)
       expect(decision.actions.some((a) => a.kind === 'stop')).toBe(false)
+      expect(decision.primary?.kind).toBe('start')
+      expect(decision.stopRecoverable).toBeNull()
       expect(decision.nextAction).toBe('Start a new workflow run, discarding the failed one.')
+    })
+
+    it('marks stop as terminal when only the workflow timeline exposes stop even with an active agent', () => {
+      const decision = deriveRuntimeDecision({
+        issue: baseIssue({
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Active,
+          recovery: {
+            currentWorkItem: null,
+            latestAttemptState: null,
+            workflowSummaryState: 'running',
+            allowedActions: [],
+          },
+        }),
+        timeline: {
+          currentStage: WorkflowStage.Build,
+          status: 'Running',
+          stages: [],
+          pendingWork: null,
+          availableActions: [{ name: 'stop', label: 'Stop', target: null }],
+        },
+        hasActiveAgent: true,
+      })
+
+      expect(decision.primary?.kind).toBe('stop')
+      expect(decision.primary?.label).toBe('Stop')
+      expect(decision.stopRecoverable).toBe(false)
+    })
+
+    it('chooses the first enabled non-inspect action as the single primary action', () => {
+      const decision = deriveRuntimeDecision({
+        issue: baseIssue({
+          workflowStage: WorkflowStage.Build,
+          health: IssueHealth.Interrupted,
+          recovery: {
+            currentWorkItem: null,
+            latestAttemptState: 'interrupted',
+            workflowSummaryState: 'waiting-for-recovery',
+            allowedActions: ['rerun'],
+          },
+        }),
+        timeline: {
+          currentStage: WorkflowStage.Build,
+          status: 'Failed',
+          stages: [],
+          pendingWork: null,
+          availableActions: [{ name: 'rerun', label: 'Rerun', target: null }],
+        },
+      })
+
+      expect(decision.actions.find((a) => a.kind === 'retry')?.enabled).toBe(false)
+      expect(decision.primary?.kind).toBe('rerun')
     })
   })
 

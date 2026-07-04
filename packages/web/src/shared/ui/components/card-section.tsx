@@ -20,20 +20,20 @@ interface CardSectionProps extends ComponentPropsWithoutRef<'section'> {
 
 const toneWrapper: Record<CardSectionTone, string> = {
   default: 'bg-card/50 border-border',
-  amber: 'bg-amber-50 border-amber-200',
-  red: 'bg-red-50 border-red-200',
-  orange: 'bg-orange-50 border-orange-200',
-  blue: 'bg-blue-50 border-blue-200',
-  green: 'bg-green-50 border-green-200',
+  amber: 'bg-warning-subtle border-warning-border',
+  red: 'bg-danger-subtle border-danger-border',
+  orange: 'bg-warning-subtle border-warning-border',
+  blue: 'bg-info-subtle border-info-border',
+  green: 'bg-success-subtle border-success-border',
 }
 
 const toneTitle: Record<CardSectionTone, string> = {
   default: 'text-muted-foreground',
-  amber: 'text-amber-800',
-  red: 'text-red-800',
-  orange: 'text-orange-800',
-  blue: 'text-blue-800',
-  green: 'text-green-800',
+  amber: 'text-warning',
+  red: 'text-danger',
+  orange: 'text-warning',
+  blue: 'text-info',
+  green: 'text-success',
 }
 
 export function CardSection({

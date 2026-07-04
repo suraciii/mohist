@@ -29,9 +29,9 @@ function ArtifactItem({
       data-testid="latest-artifact-item"
     >
       {isDirectoryArtifact(artifact) ? (
-        <FolderIcon className="h-4 w-4 flex-shrink-0 text-amber-500 mr-2" />
+        <FolderIcon className="h-4 w-4 flex-shrink-0 text-warning mr-2" />
       ) : (
-        <FileIcon className="h-4 w-4 flex-shrink-0 text-blue-500 mr-2" />
+        <FileIcon className="h-4 w-4 flex-shrink-0 text-info mr-2" />
       )}
       <span className="flex-1 truncate text-sm">{displayName}</span>
       {isDirectoryArtifact(artifact) && (
@@ -57,7 +57,7 @@ export function LatestArtifactsPanel({ issueNumber, workflowRunId }: LatestArtif
       </div>
 
       {error && (
-        <div className="text-xs text-red-600 bg-red-50 rounded-md px-3 py-2">
+        <div className="text-xs text-danger bg-danger-subtle border border-danger-border rounded-md px-3 py-2">
           Failed to load artifacts
         </div>
       )}

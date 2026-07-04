@@ -12,7 +12,7 @@ export function IssueDriftCard({ drift }: IssueDriftCardProps) {
         {drift.decision && (
           <div className="flex justify-between">
             <span className="text-muted-foreground">Rebase decision:</span>
-            <span className={`font-medium ${drift.decision === 'needs-attention' ? 'text-red-600' : drift.decision === 'defer' ? 'text-orange-600' : 'text-amber-700'}`}>
+            <span className={`font-medium ${drift.decision === 'needs-attention' ? 'text-danger' : drift.decision === 'defer' ? 'text-warning' : 'text-warning'}`}>
               {drift.decision === 'needs-attention' ? 'Needs Attention' :
                drift.decision === 'defer' ? 'Deferred' :
                drift.decision === 'suggest' ? 'Suggested' :
@@ -23,7 +23,7 @@ export function IssueDriftCard({ drift }: IssueDriftCardProps) {
         {drift.deferReason && (
           <div className="flex justify-between">
             <span className="text-muted-foreground">Defer reason:</span>
-            <span className="text-orange-600 text-right">
+            <span className="text-warning text-right">
               {drift.deferReason === 'agent-running' ? 'Agent running' :
                drift.deferReason === 'task-running' ? 'Task running' :
                drift.deferReason === 'waiting-for-task-boundary' ? 'Waiting for task boundary' :
@@ -35,7 +35,7 @@ export function IssueDriftCard({ drift }: IssueDriftCardProps) {
         {drift.safeWindow !== null && (
           <div className="flex justify-between">
             <span className="text-muted-foreground">Safe window:</span>
-            <span className={drift.safeWindow ? 'text-green-600' : 'text-foreground/80'}>
+            <span className={drift.safeWindow ? 'text-success' : 'text-foreground/80'}>
               {drift.safeWindow ? 'Yes' : 'No'}
             </span>
           </div>
@@ -49,15 +49,15 @@ export function IssueDriftCard({ drift }: IssueDriftCardProps) {
           </div>
         )}
         {drift.nextAction && (
-          <div className="mt-2 pt-2 border-t border-amber-200 text-amber-800">
+          <div className="mt-2 pt-2 border-t border-warning-border text-warning">
             {drift.nextAction}
           </div>
         )}
         {drift.conflicts && drift.conflicts.length > 0 && (
-          <div className="mt-2 pt-2 border-t border-red-200">
-            <span className="font-medium text-red-800">Conflicts: </span>
+          <div className="mt-2 pt-2 border-t border-danger-border">
+            <span className="font-medium text-danger">Conflicts: </span>
             {drift.conflicts.map((f) => (
-              <span key={f} className="font-mono text-red-700 ml-1">{f}</span>
+              <span key={f} className="font-mono text-danger ml-1">{f}</span>
             ))}
           </div>
         )}

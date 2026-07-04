@@ -64,10 +64,10 @@ export function IssueConfigurationCard({ issue, mutations }: IssueConfigurationC
               </Button>
             </div>
             {prereqError && (
-              <p className="mt-1 text-xs text-red-600">{prereqError}</p>
+              <p className="mt-1 text-xs text-danger">{prereqError}</p>
             )}
             {addPrerequisiteMutation.error && (
-              <p className="mt-1 text-xs text-red-600">
+              <p className="mt-1 text-xs text-danger">
                 {(addPrerequisiteMutation.error as Error).message?.includes('circular')
                   ? 'Circular prerequisite: this would create a cycle'
                   : (addPrerequisiteMutation.error as Error).message}

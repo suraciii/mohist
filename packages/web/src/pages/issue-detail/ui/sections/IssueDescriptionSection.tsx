@@ -10,8 +10,8 @@ export interface IssueDescriptionSectionProps {
 export function IssueDescriptionSection({ issue, resolveIssueAttachment }: IssueDescriptionSectionProps) {
   if (!issue.body) return null
   return (
-    <div className="rounded-lg bg-white p-4" data-testid="description-section">
-      <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
+    <div className="rounded-lg bg-card p-4" data-testid="description-section">
+      <h2 className="text-sm font-semibold text-card-foreground mb-2">Description</h2>
       <MarkdownReader
         content={issue.body}
         mode="collapsible"

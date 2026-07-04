@@ -125,9 +125,9 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
 
     renderPage()
 
-    const startButton = await waitFor(() => screen.getByTestId('start-button'))
+    const startButton = await waitFor(() => screen.getByTestId('runtime-action-start'))
     expect(startButton).toBeDisabled()
-    expect(startButton).toHaveTextContent(/Capacity full/i)
+    expect(startButton.getAttribute('title')).toMatch(/capacity is full/i)
   })
 
   it('enables Start when capacity.active < capacity.max even if activeAgents is empty', async () => {
@@ -146,7 +146,7 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
 
     renderPage()
 
-    const startButton = await waitFor(() => screen.getByTestId('start-button'))
+    const startButton = await waitFor(() => screen.getByTestId('runtime-action-start'))
     expect(startButton).not.toBeDisabled()
     expect(startButton).toHaveTextContent(/^Start$/)
   })
@@ -171,7 +171,7 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
 
     renderPage()
 
-    const startButton = await waitFor(() => screen.getByTestId('start-button'))
+    const startButton = await waitFor(() => screen.getByTestId('runtime-action-start'))
     expect(startButton).not.toBeDisabled()
     expect(startButton).toHaveTextContent(/^Start$/)
   })
@@ -192,9 +192,9 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
 
     renderPage()
 
-    const startButton = await waitFor(() => screen.getByTestId('start-button'))
+    const startButton = await waitFor(() => screen.getByTestId('runtime-action-start'))
     expect(startButton).toBeDisabled()
-    expect(startButton).toHaveTextContent(/Capacity full/i)
+    expect(startButton.getAttribute('title')).toMatch(/capacity is full/i)
   })
 
   it('treats capacity.max === 0 as not-full (does not disable Start on a zero-max placeholder)', async () => {
@@ -213,7 +213,7 @@ describe('IssueDetailPage - capacity-full gating uses server capacity.active/cap
 
     renderPage()
 
-    const startButton = await waitFor(() => screen.getByTestId('start-button'))
+    const startButton = await waitFor(() => screen.getByTestId('runtime-action-start'))
     expect(startButton).not.toBeDisabled()
     expect(startButton).toHaveTextContent(/^Start$/)
   })
