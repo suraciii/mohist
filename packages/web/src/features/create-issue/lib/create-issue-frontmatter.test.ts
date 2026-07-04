@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseIssueFrontmatter } from '../src/features/create-issue/lib/frontmatter'
+import { parseIssueFrontmatter } from './frontmatter'
 
 describe('parseIssueFrontmatter', () => {
   it('returns none when body has no frontmatter', () => {

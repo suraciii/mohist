@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { baseRender, fireEvent, render, screen, waitFor, within } from './test-utils'
+import { baseRender, fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import type { AgentRuntimeConfig, GeneralConfig } from '../src/entities/settings'
+import type { AgentRuntimeConfig, GeneralConfig } from '../../../entities/settings'
 
 const toast = vi.hoisted(() => ({
   info: vi.fn(),
@@ -19,8 +19,8 @@ const runtimeClient = vi.hoisted(() => ({
   updateAgentRuntime: vi.fn(),
 }))
 
-vi.mock('../src/entities/settings/api/client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/settings/api/client')>()
+vi.mock('../../../entities/settings/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/settings/api/client')>()
   return {
     ...actual,
     getAgentRuntime: runtimeClient.getAgentRuntime,
@@ -30,7 +30,7 @@ vi.mock('../src/entities/settings/api/client', async (importOriginal) => {
 })
 
 const { AgentSettingsSection } = await import(
-  '../src/pages/settings/ui/AgentSettingsSection'
+  './AgentSettingsSection'
 )
 
 const RUNTIME: AgentRuntimeConfig = {

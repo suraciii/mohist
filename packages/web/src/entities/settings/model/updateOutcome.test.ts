@@ -12,9 +12,9 @@ import {
   isSystemUpdateStage,
   isTerminalUpdateStatus,
   OUTCOME_LABELS,
-} from '../../../src/entities/settings/model/updateOutcome'
-import { SYSTEM_UPDATE_STAGES } from '../../../src/entities/settings/model/types'
-import type { SystemUpdateStatus } from '../../../src/entities/settings/model/types'
+} from './updateOutcome'
+import { SYSTEM_UPDATE_STAGES } from './types'
+import type { SystemUpdateStatus } from './types'
 
 function makeStatus(overrides: Partial<SystemUpdateStatus> = {}): SystemUpdateStatus {
   return {

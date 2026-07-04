@@ -8,8 +8,8 @@ import {
   expect,
   it,
 } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from './test-utils'
-import { WorkflowProfilesSection, WORKFLOW_DESCRIPTORS } from '../src/pages/settings/ui/WorkflowProfilesSection'
+import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
+import { WorkflowProfilesSection, WORKFLOW_DESCRIPTORS } from './WorkflowProfilesSection'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 

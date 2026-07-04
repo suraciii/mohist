@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { FileChangeSummary } from '../src/entities/coder-session'
+import type { FileChangeSummary } from '../../../entities/coder-session'
 import {
   getDisplayType,
   getToolLabel,
@@ -11,8 +11,8 @@ import {
   inferToolName,
   normalizeToolName,
   type EditInput,
-} from '../src/widgets/session-transcript/model/transcript-tool-utils'
-import { getToolRegistryEntry, getToolTitle, getToolBadges } from '../src/widgets/session-transcript/ui/tool-registry'
+} from '../model/transcript-tool-utils'
+import { getToolRegistryEntry, getToolTitle, getToolBadges } from './tool-registry'
 
 describe('shared tool semantics: display type', () => {
   const terminalTools = ['bash']

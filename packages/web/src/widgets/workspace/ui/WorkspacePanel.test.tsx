@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from './test-utils'
+import { render, screen } from '../../../../tests/test-utils'
 
 type WorkspaceStatus = {
   exists: boolean
@@ -12,23 +12,23 @@ type WorkspaceStatus = {
   rebaseInProgress?: boolean
 }
 
-vi.mock('../src/entities/issue/api/queries', async () => {
+vi.mock('../../../entities/issue/api/queries', async () => {
   return {
     useWorkspaceStatus: vi.fn(),
   }
 })
 
-vi.mock('../src/entities/issue/model/rebase-events', async () => ({
+vi.mock('../../../entities/issue/model/rebase-events', async () => ({
   onRebaseEvent: vi.fn(() => () => {}),
 }))
 
-vi.mock('../src/entities/issue/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/entities/issue/api/client')>()),
+vi.mock('../../../entities/issue/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../entities/issue/api/client')>()),
   rebaseIssue: vi.fn(),
 }))
 
-vi.mock('../src/shared/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/shared/api/client')>()),
+vi.mock('../../../shared/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../shared/api/client')>()),
   ApiError: class ApiError extends Error {
     data: unknown
     constructor(message: string, data: unknown) {
@@ -38,8 +38,8 @@ vi.mock('../src/shared/api/client', async (importOriginal) => ({
   },
 }))
 
-import { useWorkspaceStatus } from '../src/entities/issue/api/queries'
-import { WorkspacePanel } from '../src/widgets/workspace/ui/WorkspacePanel'
+import { useWorkspaceStatus } from '../../../entities/issue/api/queries'
+import { WorkspacePanel } from './WorkspacePanel'
 
 const mockedUseWorkspaceStatus = vi.mocked(useWorkspaceStatus)
 

@@ -4,17 +4,17 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, cleanup, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import React from 'react'
-import type { Project } from '../src/entities/project'
-import { ProjectProvider } from '../src/entities/project'
-import type { RunnerStatusRow, RunnerStatusSummary } from '../src/entities/runner/model/types'
-import { RunnerSummary } from '../src/widgets/runner-status/ui/RunnerSummary'
-import { RunnerList, RunnerListCard } from '../src/widgets/runner-status/ui/RunnerList'
+import type { Project } from '../../../entities/project'
+import { ProjectProvider } from '../../../entities/project'
+import type { RunnerStatusRow, RunnerStatusSummary } from '../../../entities/runner/model/types'
+import { RunnerSummary } from './RunnerSummary'
+import { RunnerList, RunnerListCard } from './RunnerList'
 
-vi.mock('../src/entities/runner', () => ({
+vi.mock('../../../entities/runner', () => ({
   useRunners: vi.fn(),
 }))
 
-const { useRunners } = await import('../src/entities/runner')
+const { useRunners } = await import('../../../entities/runner')
 
 const TEST_PROJECT: Project = {
   id: 'proj-1',

@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { AGENT_DETAIL_EVENTS } from '../src/entities/agent'
-import type { EventName } from '../src/entities/issue'
+import { AGENT_DETAIL_EVENTS } from '../../entities/agent'
+import type { EventName } from '../../entities/issue'
 import {
   EVENT_TYPES,
   LEGACY_AGENT_DETAIL_EVENT_TYPES,
   TRANSCRIPT_EVENT_TYPES,
   REVERSE_DNS_EVENT_TYPES,
   CanonicalEventType,
-} from '../src/shared/lib/canonical-event-types'
+} from './canonical-event-types'
 
 describe('canonical event types', () => {
   it('EVENT_TYPES is a non-empty list', () => {

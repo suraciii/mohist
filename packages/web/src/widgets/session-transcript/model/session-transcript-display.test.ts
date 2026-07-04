@@ -3,8 +3,8 @@ import {
   projectTurn,
   projectSessionToDisplayTurns,
   extractTurnChangedFiles,
-} from '../src/widgets/session-transcript/model/session-transcript-display'
-import type { CoderSessionDetail, SessionTurn, TextPart, ReasoningPart, FileChangeSummary, ToolPart, ErrorPart, SessionPart } from '../src/entities/coder-session'
+} from './session-transcript-display'
+import type { CoderSessionDetail, SessionTurn, TextPart, ReasoningPart, FileChangeSummary, ToolPart, ErrorPart, SessionPart } from '../../../entities/coder-session'
 
 function makeTextPart(id: string, text: string, startedAt = '2024-01-01T00:00:00Z'): TextPart {
   return { id, type: 'text', text, startedAt, completedAt: null }

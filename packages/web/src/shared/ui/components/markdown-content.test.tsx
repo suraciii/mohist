@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { MarkdownContent } from '../src/shared/ui/components/markdown-content'
+import { MarkdownContent } from './markdown-content'
 
 describe('MarkdownContent', () => {
   it('renders headings, lists, and code blocks from markdown source', () => {
