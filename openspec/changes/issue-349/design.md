@@ -132,9 +132,10 @@ destructive confirmations.
 - Local component state (`useState<boolean>`) holds the dialog's `open` flag.
 - The header `Button` only opens the dialog; it does **not** call `cancel.mutate`.
 - `AlertDialog.onConfirm` calls `cancel.mutate()`. The dialog's `loading` prop
-  is bound to `cancel.isPending` so the confirm button shows "Cancelling..." and
+  is bound to `cancel.isPending` so the confirm button shows "Working..." and
   disables dismiss while the request is in flight (matching the `AlertDialog`
-  component's `loading` guard at `alert-dialog.tsx:40-47`).
+  component's `loading` guard at `alert-dialog.tsx:39-47` and its loading text
+  at `:82`).
 - On dismiss (`onOpenChange(false)` without confirm), no request is sent and the
   session keeps running.
 
