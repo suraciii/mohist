@@ -58,8 +58,8 @@ export class RunnerHost {
   private workExecutor: WorkExecutor | null = null
 
   constructor(private readonly options: RunnerOptions) {
-    this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
-    this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
+    this.cleanupConvergenceIntervalMs = Math.max(50, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
+    this.cleanupLoopIntervalMs = Math.max(50, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
     const build = loadBuildInfo()
     this.buildGitHash = build.gitHash
     this.connection = new ServerConnection(options, this.buildGitHash)

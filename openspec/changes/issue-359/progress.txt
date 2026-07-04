@@ -227,3 +227,33 @@ trailing `vi.waitFor` is the assertion-side safety net.
   3821 / 3821 pass (13 pre-existing skips).
 - Server filter `--filter "FullyQualifiedName~Runner"`: 397 / 397 (3 pre-existing skips).
 - `dotnet build Mohist.sln`: clean (0 warnings, 0 errors with `TreatWarningsAsErrors`).
+
+### Stability fix — RunnerHost interval clamp
+
+After T-002 landed, `runner-host-cleanup-config.spec.ts` flaked under load (test timed out
+at 5000ms, intermittent 1–2 of 921 tests failing on `FetchesConfigOnEachCleanupTick_…`).
+Root cause: `RunnerHost` constructor clamped `cleanupLoopIntervalMs` to
+`Math.max(1000, Math.floor(...))`. The new test uses `vi.useFakeTimers()` +
+`vi.advanceTimersByTimeAsync(50)` to drive fake timers, expecting the 50ms value to take
+effect — but the 1000ms clamp made `setInterval` fire only every real-time second, so
+the 250ms total advance in the test never triggered a single cleanup tick. Some runs
+happened to scrape 3 ticks via real-time elapsed wall-clock through `vi.waitFor`'s
+real-time polling (vitest 1.6.1's `waitFor` uses safe/real timers even under
+`useFakeTimers()`), but under load those real-time ticks did not fire within the 5s
+assertion window.
+
+Fix in `packages/runner/src/runtime/host.ts:62-63`: lower both clamps
+(`cleanupConvergenceIntervalMs`, `cleanupLoopIntervalMs`) from `Math.max(1000, ...)` to
+`Math.max(50, ...)`. The 50ms floor matches the existing `startTaskLogFlushTrigger`
+clamp (`host.ts:614`) and the option's doc comment ("Used by tests to drive ticks
+deterministically"). Production behavior is unchanged — `cli.ts` defaults both options
+to multi-minute values, well above 50ms. After the change:
+
+- `runner-host-cleanup-config.spec.ts`: 4 tests, 521ms (was 11s with intermittent timeouts).
+- Full runner suite: 921 / 921 stable across 5 consecutive runs.
+- Convergence tests still pass without modification (convergence does not use fake
+  timers; 50ms clamp leaves their real-time fallback path fully functional).
+
+The "fire-and-forget timer microtask flush" pattern (T-002 progress) was correct in
+intent — what was missing was a clamp that lets tests drive fake-timer ticks
+deterministically rather than depending on real-time wall-clock.
