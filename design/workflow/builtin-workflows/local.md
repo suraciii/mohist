@@ -17,6 +17,23 @@ style: ["极简，只给目标态。"]
     - design
     - tasks
     - self-review
+  checks:
+    - name: plan-artifacts
+      title: Plan artifacts complete
+      uses: mohist/openspec-artifacts
+      with:
+        changeDir: ${{ openspecChangeDir }}
+    - name: self-review-passed
+      title: Self review passed
+      uses: core/marker
+      with:
+        path: ${{ openspecChangeDir }}/self-review.md
+        expect: <promise>PASS</promise>
+    - name: health
+      title: Health
+      uses: core/script
+      with:
+        run: git diff --check
   requiresApproval: true
 
 - stage: build
