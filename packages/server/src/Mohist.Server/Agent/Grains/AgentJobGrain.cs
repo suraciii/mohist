@@ -118,14 +118,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             && string.Equals(_workId, workId, StringComparison.Ordinal));
     }
 
-    public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result)
+    public async Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result)
     {
         if (_status == AgentJobStatus.Completed || _status == AgentJobStatus.Failed)
         {
             _log.LogDebug(
                 "AgentJob {Id} rejecting report from {Runner} for {Work}: already in terminal {Status}",
                 Key, runnerId, workId, _status);
-            return Task.FromResult(new AgentJobReportResult(false, "already-terminal"));
+            return new AgentJobReportResult(false, "already-terminal");
         }
 
         if (_status != AgentJobStatus.Running)
@@ -133,7 +133,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             _log.LogWarning(
                 "AgentJob {Id} rejecting report from {Runner} for {Work}: unexpected status {Status}",
                 Key, runnerId, workId, _status);
-            return Task.FromResult(new AgentJobReportResult(false, "not-running"));
+            return new AgentJobReportResult(false, "not-running");
         }
 
         if (!string.Equals(_runnerId, runnerId, StringComparison.Ordinal)
@@ -142,7 +142,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             _log.LogWarning(
                 "AgentJob {Id} rejecting report from {Runner} for {Work}: expected {ExpectedRunner}/{ExpectedWork}",
                 Key, runnerId, workId, _runnerId, _workId);
-            return Task.FromResult(new AgentJobReportResult(false, "runner-or-work-mismatch"));
+            return new AgentJobReportResult(false, "runner-or-work-mismatch");
         }
 
         var isSuccess = string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
@@ -171,7 +171,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             "AgentJob {Id} terminal: {Status} ({Reason})",
             Key, _status, _failureReason ?? "ok");
 
-        return Task.FromResult(new AgentJobReportResult(true));
+        if (isSuccess)
+            await CloseGenericSessionAsync("completed", result.ExitCode ?? 0, null, null, null);
+        else
+            await CloseGenericSessionAsync("failed", result.ExitCode ?? 1, _failureReason, result.Status, _failureReason);
+
+        return new AgentJobReportResult(true);
     }
 
     public Task FailAsync(string reason)
@@ -454,6 +459,19 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     }
 
     private async Task CloseGenericSessionOnFailureAsync(string reason)
+        => await CloseGenericSessionAsync(
+            "failed",
+            null,
+            $"agent-job-{reason} ({Key})",
+            reason,
+            reason);
+
+    private async Task CloseGenericSessionAsync(
+        string status,
+        int? exitCode,
+        string? failureReason,
+        string? failureCategory,
+        string? reason)
     {
         var sessionId = _input?.AgentSessionId;
         if (string.IsNullOrWhiteSpace(sessionId))
@@ -464,10 +482,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             var grain = GrainFactory.GetGrain<IAgentSessionGrain>(sessionId);
             var payload = JSON.Serialize(new Dictionary<string, object?>
             {
-                ["status"] = "failed",
-                ["exitCode"] = (int?)null,
-                ["failureCategory"] = reason,
-                ["reason"] = $"agent-job-{reason} ({Key})",
+                ["status"] = status,
+                ["exitCode"] = exitCode,
+                ["failureReason"] = failureReason,
+                ["failureCategory"] = failureCategory,
+                ["reason"] = reason,
                 ["recordedAt"] = _timeProvider.GetUtcNow().ToString("o"),
             });
             await grain.AppendRuntimeEventsAsync(
@@ -477,8 +496,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         catch (Exception ex)
         {
             _log.LogError(ex,
-                "AgentJob {Id} failed to close generic session {SessionId} after failure",
-                Key, sessionId);
+                "AgentJob {Id} failed to close generic session {SessionId} with status {Status}",
+                Key, sessionId, status);
         }
     }
 

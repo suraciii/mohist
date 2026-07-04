@@ -1,9 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -321,6 +323,108 @@ public class AgentSessionLaunchRoutesSpecs
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
+    public async Task Launch_PolledDispatch_CarriesMintedAgentSessionIdVerbatimWithNoWorkflowRunId()
+    {
+        var projectId = await CreateProjectAsync("launch-dispatch-contract");
+        var runnerId = $"launch-dispatch-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "dispatch-contract-agent");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+
+        try
+        {
+            using var launch = await _fixture.Client.PostAsJsonAsync(
+                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+                new { prompt = "dispatch contract guard" });
+            Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
+            var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+            var mintedSessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            Assert.False(string.IsNullOrWhiteSpace(mintedSessionId));
+
+            var polled = await PollDispatchForSessionAsync(runnerId, mintedSessionId);
+
+            // Launch-route regression guard: the dispatch envelope the
+            // runner picks up must carry the minted AgentSessionId verbatim
+            // as a non-null AgentSessionId with no workflowRunId. A
+            // null-dispatch regression would fail this assertion.
+            Assert.Equal(string.Empty, polled.WorkflowRunId);
+            Assert.Equal(mintedSessionId, polled.AgentSessionId);
+            Assert.False(string.IsNullOrWhiteSpace(polled.AgentSessionId));
+            Assert.False(string.IsNullOrWhiteSpace(polled.WorkId));
+            Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled.OwnerKind);
+            Assert.Equal(projectId, polled.ProjectId);
+            Assert.False(string.IsNullOrWhiteSpace(polled.AgentJobId));
+        }
+        finally
+        {
+            await DrainDispatchAsync(runnerId);
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Launch_CompletedAgentJob_RecordsSessionClosedCompleted_AndResolvesCompletedStatus()
+    {
+        var projectId = await CreateProjectAsync("launch-completed-terminal");
+        var runnerId = $"launch-completed-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "completed-terminal-agent");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+
+        try
+        {
+            using var launch = await _fixture.Client.PostAsJsonAsync(
+                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+                new { prompt = "complete the generic session" });
+            Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
+            var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+            var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+
+            var polled = await PollDispatchForSessionAsync(runnerId, sessionId);
+            Assert.False(string.IsNullOrWhiteSpace(polled.AgentJobId));
+
+            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(polled.AgentJobId!);
+            var report = await jobGrain.ReportResultAsync(
+                runnerId,
+                polled.WorkId,
+                new WorkResult(
+                    Status: "completed",
+                    Message: "generic job completed",
+                    Output: "{}",
+                    ArtifactUploadIds: null,
+                    ExitCode: 0));
+            Assert.True(report.Accepted, "AgentJob rejected completed report");
+
+            var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            await dbFactory.WaitForTranscriptPartsAsync(sessionId, 1, _fixture.Grains);
+            var closePayload = Assert.Single(await LoadSessionClosedPayloadsAsync(dbFactory, sessionId));
+            Assert.Equal("completed", closePayload.GetProperty("status").GetString());
+            Assert.Equal(0, closePayload.GetProperty("exitCode").GetInt32());
+
+            using var summary = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agent-sessions/{sessionId}");
+            Assert.Equal(HttpStatusCode.OK, summary.StatusCode);
+            var summaryPayload = await summary.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("completed", summaryPayload.GetProperty("data").GetProperty("status").GetString());
+
+            using var list = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/{agent.Id}/sessions");
+            Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+            var listPayload = await list.Content.ReadFromJsonAsync<JsonElement>();
+            var item = listPayload.GetProperty("data").EnumerateArray()
+                .Single(entry => entry.GetProperty("sessionId").GetString() == sessionId);
+            Assert.Equal("completed", item.GetProperty("status").GetString());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
     public async Task Launch_AgentJobTimeout_TransitionsGenericSessionToTerminalFailedState()
     {
         var projectId = await CreateProjectAsync("launch-timeout");
@@ -388,6 +492,111 @@ public class AgentSessionLaunchRoutesSpecs
             TimeSpan.FromMilliseconds(200),
             $"Agent job to reach {expected}",
             advance);
+
+    private async Task<PollSnapshot> PollDispatchForSessionAsync(string runnerId, string expectedSessionId)
+    {
+        var attempts = 50;
+        for (var i = 0; i < attempts; i++)
+        {
+            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+            if (poll.StatusCode == HttpStatusCode.NoContent)
+            {
+                await Task.Yield();
+                continue;
+            }
+
+            Assert.Equal(HttpStatusCode.OK, poll.StatusCode);
+            var raw = await poll.Content.ReadAsStringAsync();
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            using var doc = JsonDocument.Parse(raw);
+            var data = doc.RootElement;
+            var polledSessionId = data.TryGetProperty("agentSessionId", out var sessionIdElement)
+                && sessionIdElement.ValueKind != JsonValueKind.Null
+                ? sessionIdElement.GetString()
+                : null;
+            if (polledSessionId == expectedSessionId)
+            {
+                var workId = data.GetProperty("workId").GetString() ?? string.Empty;
+                var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement)
+                    && agentJobIdElement.ValueKind != JsonValueKind.Null
+                    ? agentJobIdElement.GetString()
+                    : null;
+                var projectId = data.TryGetProperty("projectId", out var projectIdElement)
+                    && projectIdElement.ValueKind != JsonValueKind.Null
+                    ? projectIdElement.GetString()
+                    : null;
+                var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement)
+                    && ownerKindElement.ValueKind != JsonValueKind.Null
+                    ? ownerKindElement.GetString()
+                    : null;
+                return new PollSnapshot(
+                    WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
+                    WorkId: workId,
+                    AgentJobId: agentJobId,
+                    ProjectId: projectId,
+                    AgentSessionId: polledSessionId,
+                    OwnerKind: ownerKind);
+            }
+
+            await DrainDispatchAsync(runnerId, raw);
+        }
+
+        throw new InvalidOperationException($"No polled dispatch carrying AgentSessionId='{expectedSessionId}' after {attempts} attempts");
+    }
+
+    private async Task DrainDispatchAsync(string runnerId, string? raw = null)
+    {
+        if (raw is null)
+        {
+            for (var i = 0; i < 30; i++)
+            {
+                using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+                if (poll.StatusCode != HttpStatusCode.OK) return;
+                var body = await poll.Content.ReadAsStringAsync();
+                if (string.IsNullOrWhiteSpace(body)) return;
+                await DrainDispatchAsync(runnerId, body);
+            }
+            return;
+        }
+
+        using var doc = JsonDocument.Parse(raw);
+        var data = doc.RootElement;
+        var workId = data.GetProperty("workId").GetString();
+        var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement)
+            && ownerKindElement.ValueKind != JsonValueKind.Null
+            ? ownerKindElement.GetString()
+            : null;
+
+        if (!string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
+            return;
+
+        var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement)
+            && agentJobIdElement.ValueKind != JsonValueKind.Null
+            ? agentJobIdElement.GetString()
+            : null;
+        if (string.IsNullOrWhiteSpace(agentJobId) || string.IsNullOrWhiteSpace(workId))
+            return;
+
+        var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId!);
+        var report = await jobGrain.ReportResultAsync(
+            runnerId,
+            workId!,
+            new WorkResult(
+                Status: "completed",
+                Message: "drained",
+                Output: "{}",
+                ArtifactUploadIds: null,
+                ExitCode: 0));
+        Assert.True(report.Accepted, "AgentJob rejected drain report");
+    }
+
+    private sealed record PollSnapshot(
+        string WorkflowRunId,
+        string WorkId,
+        string? AgentJobId,
+        string? ProjectId,
+        string? AgentSessionId,
+        string? OwnerKind);
 
     private async Task<string> CreateProjectAsync(string prefix)
     {
@@ -457,6 +666,25 @@ public class AgentSessionLaunchRoutesSpecs
                 [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
             });
         return records.Count;
+    }
+
+    private static async Task<IReadOnlyList<JsonElement>> LoadSessionClosedPayloadsAsync(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        string sessionId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var turnIds = await db.AgentSessionTranscriptTurns
+            .AsNoTracking()
+            .Where(t => t.SessionId == sessionId)
+            .Select(t => t.Id)
+            .ToArrayAsync();
+        var payloads = await db.AgentSessionTranscriptParts
+            .AsNoTracking()
+            .Where(p => turnIds.Contains(p.TurnId) && p.Type == TranscriptPartTypes.SessionClosed)
+            .OrderBy(p => p.Sequence)
+            .Select(p => p.PayloadJson)
+            .ToArrayAsync();
+        return payloads.Select(payload => JsonSerializer.Deserialize<JsonElement>(payload)).ToArray();
     }
 
     private async Task<AgentSessionQuery> GetAgentSessionQueryAsync()
