@@ -116,6 +116,33 @@ public static class RunnerRoutes
                 Recovery: work.Recovery));
         });
 
+        // Dedicated runner config channel. Separate from /poll so runner-side
+        // configuration (e.g. cleanupPolicy) is reachable even when the
+        // system is idle and /poll returns 204 No Content. Plain periodic
+        // GET — no ETag, no version negotiation, no request body. The
+        // cleanupPolicy is a pure projection of the server's bound
+        // CleanupPolicyOptions through ToCleanupPolicyDto; the server
+        // remains the single source of truth (the runner never reads
+        // config.jsonc directly).
+        //
+        // Serialization uses a local JsonSerializerOptions that overrides
+        // the global WhenWritingNull policy so that unconfigured
+        // cleanupPolicy fields are emitted as explicit `null` rather than
+        // omitted. The "null means unlimited / disabled" contract is only
+        // meaningful end-to-end if the wire shape always carries every
+        // field — the runner's CleanupPolicy TS type tolerates either
+        // present-null or absent, but the spec (issue-359
+        // runner-config-endpoint) requires the present-null form so the
+        // response is self-describing. The override is local to this
+        // handler so /poll's WorkDispatchResponse.CleanupPolicy
+        // serialization is untouched (T-001 is purely additive).
+        group.MapGet("/config", (Microsoft.Extensions.Options.IOptions<CleanupPolicyOptions> cleanupPolicyOptions) =>
+        {
+            return Results.Json(
+                new RunnerConfigResponse(ToCleanupPolicyDto(cleanupPolicyOptions.Value)),
+                RunnerConfigJsonOptions);
+        });
+
         group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains) =>
         {
             var ownerKind = string.IsNullOrWhiteSpace(req.OwnerKind)
@@ -459,6 +486,28 @@ public static class RunnerRoutes
         var watermark = options.StorageTargetWatermarkBytes is > 0 ? options.StorageTargetWatermarkBytes : null;
         return new CleanupPolicyDto(retention, budget, watermark);
     }
+
+    /// <summary>
+    /// Per-endpoint JSON options for the runner config channel. Mirrors
+    /// <see cref="Mohist.Server.Infrastructure.JSON.Options"/> but flips
+    /// <c>DefaultIgnoreCondition</c> to <c>Never</c> so that
+    /// <c>cleanupPolicy</c> fields are always emitted, even when null.
+    /// The runner's <c>CleanupPolicy</c> TS type tolerates either
+    /// present-null or absent, but the spec (issue-359
+    /// runner-config-endpoint) requires the present-null form so the
+    /// response is self-describing: "null means unlimited / disabled"
+    /// reads the same on the wire as it does in the bound options. The
+    /// override is scoped to <c>GET /api/runner/{id}/config</c> only;
+    /// <c>POST /poll</c> still uses the global options and its
+    /// <c>WorkDispatchResponse.CleanupPolicy</c> serialization is
+    /// untouched (T-001 is purely additive; the field is removed
+    /// outright in T-002).
+    /// </summary>
+    internal static readonly System.Text.Json.JsonSerializerOptions RunnerConfigJsonOptions = new(System.Text.Json.JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never,
+        PropertyNameCaseInsensitive = true,
+    };
 }
 
 public record RunnerRegisterRequest(
@@ -567,6 +616,18 @@ public record CleanupPolicyDto(
     int? RetentionDays = null,
     long? StorageBudgetBytes = null,
     long? StorageTargetWatermarkBytes = null);
+
+/// <summary>
+/// Body for <c>GET /api/runner/{runnerId}/config</c> — the dedicated
+/// runner config channel. Always returns <c>200 OK</c> with this body
+/// (never 204), independent of whether <c>POST /poll</c> currently has
+/// work to dispatch; the runner is expected to poll this endpoint on
+/// its own cadence and treat a missing body / 204 as "policy
+/// unavailable". The wrapper (rather than returning
+/// <see cref="CleanupPolicyDto"/> bare) leaves room for additional
+/// runner-facing config fields to be added additively.
+/// </summary>
+public record RunnerConfigResponse(CleanupPolicyDto? CleanupPolicy);
 
 /// <summary>
 /// Body for <c>POST /api/runner/{runnerId}/workflow-runs/status</c>. The

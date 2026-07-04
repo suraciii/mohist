@@ -1,0 +1,80 @@
+# Issue-359 progress
+
+## Codebase Patterns
+
+- `RunnerConfigResponse` wrapper around `CleanupPolicyDto?` is intentional (design D5) — future
+  runner-facing config fields can be added additively without another breaking rename.
+- The shared `CleanupPolicyDto` type is used both by `/poll` (T-001 still does this; T-002 removes)
+  and `/config`. The runner's `CleanupPolicy` TS type (`types.ts:104`) is `?: T | null` so it
+  tolerates either `present-null` or `absent` on the wire — but the spec locks the wire shape to
+  `present-null` so the response is self-describing.
+- `MohistIntegrationFixture` already sets up `CleanupPolicyOptions` from
+  `Mohist:WorkspaceCleanup` config; spec harness uses `Configure<CleanupPolicyOptions>` to layer
+  per-test values on top of that binding.
+
+## T-001 (server `/config` endpoint) — done
+
+### What landed
+
+- `GET /api/runner/{runnerId}/config` route added in `RunnerRoutes.cs`, inside the existing route
+  group so the same auth/gate as `/poll` applies.
+- `public record RunnerConfigResponse(CleanupPolicyDto? CleanupPolicy)` record added next to
+  `WorkDispatchResponse` in `RunnerRoutes.cs`.
+- Handler injects `IOptions<CleanupPolicyOptions>` (same binding `/poll` uses) and projects via
+  the existing `ToCleanupPolicyDto`.
+- Returns 200 OK unconditionally — including when the system is idle and when the policy is fully
+  unconfigured.
+
+### Wire-shape decision (present-null, not absent)
+
+The acceptance criteria explicitly require null fields to be emitted as `null` on the wire, not
+omitted. The global `JSON.Options` sets `DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull`
+which would omit them. To keep T-001 surgical and NOT touch `/poll`'s
+`WorkDispatchResponse.CleanupPolicy` shape (T-001 is "purely additive"), the `/config` handler
+serializes via a per-endpoint `RunnerConfigJsonOptions` that mirrors the global options but
+flips `DefaultIgnoreCondition` to `Never`. `CleanupPolicyDto` itself is unchanged — T-002 will
+remove the field from `WorkDispatchResponse` outright and the global options will continue to
+govern any remaining emissions.
+
+### Tests (RunnerConfigApiSpecs.cs)
+
+8 specs in `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Api/RunnerConfigApiSpecs.cs`:
+
+1. `Config_ConfiguredPolicy_ProjectsAllFields` — full positive values round-trip
+2. `Config_NonPositiveFields_AreEmittedAsNullSentinels` — non-positive / unset fields are
+   present and `null` (JsonValueKind.Null)
+3. `Config_PartiallyConfiguredPolicy_EmitsConfiguredValueAndNullsForUnsetFields` — mixed case
+4. `Config_FullyUnconfiguredPolicy_Returns200WithAllNullFields` — default options ⇒ all three
+   fields present and null
+5. `Config_IdleSystem_Returns200WithBody_IndependentOfPollState` — `/poll` 204 + `/config` 200
+6. `Config_IsPlainGet_NoRequestBodyNoETagNegotiation` — plain GET, no ETag
+7. `Config_ResponseShape_IsIdenticalToCleanupPolicyDto` — same key set as `CleanupPolicyDto`
+8. `Poll_IsUnchangedByConfigEndpoint_StillReturns204WhenIdle` — regression guard for the
+   /poll anti-pattern
+
+A per-test `ConfigHarness` owns its own `MohistWebApplicationFactory` and a
+`ConfigWebApplicationFactory` subclass that layers `Configure<CleanupPolicyOptions>` on top of
+the production binding — same pattern as the existing `RunnerCleanupPolicyAndStatusApiSpecs` /
+`CleanupPolicyOptionsSpecs` but isolated per case so policy values cannot leak.
+
+### Verification
+
+- Server: `dotnet build` clean (0 warnings, 0 errors with TreatWarningsAsErrors).
+- `dotnet test --filter "FullyQualifiedName~Runner"`: 396 passed, 3 skipped (pre-existing).
+- `npm test` (full repo): 908 tests across 65 test files, all pass.
+- `WorkDispatchResponse.CleanupPolicy` shape on `/poll` is unchanged (the per-endpoint options
+  override applies only to the `/config` route).
+
+### Gotchas for downstream tasks
+
+- T-002 will remove `CleanupPolicy` from `WorkDispatchResponse`. After T-002 lands, the
+  `RunnerConfigJsonOptions` override is the only path that emits `cleanupPolicy` — but T-002
+  removes the field from `/poll` outright so the global options still govern whatever other
+  fields remain.
+- The runner side (T-002) adds `ServerConnection.fetchConfig(signal)` and removes
+  `lastCleanupPolicy` / `getLastCleanupPolicy()`. The `cleanupPolicy` field in the runner's
+  `WorkDispatchResponse` TS type should be removed atomically with the server-side removal
+  (migration plan step 3 in design.md).
+- Runner host test mocks (`runner-host.spec.ts`, `runner-host-task-log.spec.ts`,
+  `runner-host-convergence.spec.ts`) need `getLastCleanupPolicy = () => null` swapped for
+  `fetchConfig = async () => null` — T-002 task.
