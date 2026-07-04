@@ -12,7 +12,7 @@ include:
 exclude:
   - "实现细节（grain 内部循环、EF mapping、SQL 细节）。"
   - "各 handler 的具体反应逻辑；见 design/workflow/issue-coordination.md。"
-status: "核心已收敛（极简可靠通知器方向）。带「(开放)」的条目未定稿。"
+status: "目标态，未交付。设计已收敛，运行时仍是 InMemoryEventBus（best-effort，静默吞异常）。落地跟踪：epic #36。带「(开放)」的条目未定稿。"
 ---
 
 # Event Bus v2（目标态）

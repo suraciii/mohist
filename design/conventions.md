@@ -38,7 +38,9 @@ Rules:
 
 | Suffix | Use For | Example |
 |--------|---------|---------|
-| `Querier` | Read-only projection/query boundary | `IssueQuerier` |
+| `Querier` | Read-only projection/query boundary（单域读模型） | `IssueQuerier` |
+| `Assembler` | 跨域只读报告组装（AgentOps：join 多域读模型） | `AgentActivityFeedAssembler` |
+| `Reporter` | 跨域只读报告/指标计算（AgentOps：聚合多域数据出指标） | `AgentUsageReporter` |
 | `Resolver` | Translate aliases or external keys to canonical identity | `IssueIdentityResolver` |
 | `Manager` | Owns configuration or lifecycle policy | `WorkflowProfileManager` |
 | `Store` | Persistence boundary for one state shape | `WorkflowRunStore` |
@@ -46,7 +48,8 @@ Rules:
 Rules:
 
 - Do not introduce new `*QueryService` names.
-- Use `Querier` when the caller asks for read models or projections.
+- Use `Querier` when the caller asks for read models or projections（单域，叶子安全）。
+- Use `Assembler` / `Reporter` when the caller joins read models **across domains**——这些角色属 AgentOps，允许依赖全部业务域；不要把它们放进单域（尤其 Session 叶子），否则破坏叶子不变量。
 - Use `Resolver` when the caller asks "what is the canonical id for this route/display key?"
 - Keep resolvers narrow. They should not enrich DTOs or compute workflow state.
 

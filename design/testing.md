@@ -134,7 +134,7 @@ flaky 的常见来源，逐一排除：
 
 ### server（C#）
 
-- 时间：`Microsoft.Extensions.TimeProvider.Testing.FakeTimeProvider`，注册进 `GrainTestConfig` / `MohistIntegrationFixture`。**目前 `MohistIntegrationFixture` 未注册 fake time，是新代码的硬伤起点。**
+- 时间：`Microsoft.Extensions.TimeProvider.Testing.FakeTimeProvider`，注册进 `GrainTestConfig` / `MohistIntegrationFixture`（`MohistIntegrationFixture` 已注入 fake time，默认起点 `2026-06-30`）。
 - HTTP：`WebApplicationFactory<Program>` + `TestServer`，客户端走 `HttpClient`，不经真网络。
 - Grain：`InProcessTestCluster`（`WorkflowGrainFixture` 等），`ControllableReminderTable` 做确定性 reminder 控制。
 - DB：in-memory shared-cache SQLite + keeper 连接。`MohistDbFixture` 用于 DI + EF，`MohistIntegrationFixture` 用于全栈。

@@ -153,7 +153,12 @@ interpret in workflow context
 advance state or wait
 ```
 
-事件原则：事件用于观察，不用于执行控制。UI 可以用事件更新视图，但系统不能依赖 UI 消费事件来推进 workflow。
+事件通道分两层，SLA 不同，不可混用：
+
+- **Domain reaction（durable）**：聚合状态转移所发出的领域事件，经持久化分发器至少一次投递给订阅者，驱动跨聚合状态推进（如 `WorkflowRunCompleted` → `CompleteIssue`）。这是必须发生的领域反应，不是观察。
+- **UI 观察（best-effort）**：SignalR 实时推送等，供 UI 增量更新视图。系统不依赖 UI 消费这类事件来推进 workflow——UI 断线重连后自己对账。
+
+事件真相（领域事件行）由产生它的聚合在状态保存的同一事务内追加；投递进度逐行标记。分发器是唯一通知者，生产者只追加事件、不触发 handler。详见 [`eventbus-v2.md`](eventbus-v2.md)。
 
 ## Execution Plane
 
@@ -246,5 +251,6 @@ Runner 不可以说：
 - Action execution 不放进 Server；所有 shell、agent、merge、OpenSpec side effect 都归 Runner。
 - Explore 不放进 Server；探索通过外部 agent skill 完成。
 - 当前假设单机 daemon；actor runtime 主要作为 state model，而不是优先服务分布式部署。
-- 可以先接受单进程事件总线，但不能因此把执行逻辑塞回 server。
+- 可以先接受单进程事件总线，但不能因此把执行逻辑塞回 server。durable 事件分发器是 server 内的通知机制（投递已发生事件给订阅者），不属于"执行逻辑"——它不执行 task/check，不调用 runner/agent。
 - OpenSpec spec 不作为架构文档来源；架构边界以 `design/` 下的人工维护文档为准。
+- 持有 authoritative state 的 grain 不应 `[Reentrant]`。事件分发离开发布栈后（见 [`eventbus-v2.md`](eventbus-v2.md)），grain 不再需要为"同步栈内分发回调发布 grain"而开 reentrancy；turn 串行化是 grain 状态安全的来源，reentrancy 是无理由的偶然复杂性。
