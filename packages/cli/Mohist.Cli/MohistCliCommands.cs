@@ -30,6 +30,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(LabelCommands.Build(api));
         root.Subcommands.Add(OpencodeCommands.Build(api));
         root.Subcommands.Add(ConfigProvidersCommands.BuildConfig(api));
+        root.Subcommands.Add(NotifyCommands.Build(api));
         root.Subcommands.Add(OtelCommands.Build(api, provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance));
 
         return root;
