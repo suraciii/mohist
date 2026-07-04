@@ -90,3 +90,31 @@
   `packages/server/src/Mohist.Server/SystemInfo/SystemUpdateService.cs`;
   sibling files in `SystemInfo/` are untouched, and the four new files are
   untracked additions.
+
+## T-001 re-scheduled (this run)
+
+- The runner re-scheduled T-001 even though it had already landed
+  (commit `6d237876`). Verified the current tree still satisfies every T-001
+  acceptance criterion without re-running the full server suite:
+  - `SystemUpdateJobState.cs`, `FileSystemSystemUpdateStore.cs`,
+    `ProcessSystemUpdateCommandRunner.cs`, `HttpSystemReadinessProbe.cs`
+    all exist under `packages/server/src/Mohist.Server/SystemInfo/`,
+    declare the same types/members, and keep the `Mohist.Server.SystemInfo`
+    namespace.
+  - `FileSystemSystemUpdateStore` owns the file-lock acquisition, the
+    atomic temp-file rename (`File.Move(tempPath, _statePath, overwrite: true)`),
+    and `SaveIfCurrentAsync`.
+  - `HttpSystemReadinessProbe` owns the health/root/bundled-asset HTML
+    parsing (health → root → asset regex → asset probe).
+  - `SystemUpdateService.IsActive` stays as `internal static bool IsActive`
+    on the orchestrator (the store references it at
+    `FileSystemSystemUpdateStore.cs:68`), per the relocation note.
+  - `git diff 6d237876^ -- .../RuntimeBuildInfo.cs .../ServiceStatusChecker.cs
+    .../GitSourceInspector.cs .../PhysicalFileSystem.cs
+    .../SystemdInstallDetector.cs .../SystemdUnitParser.cs
+    .../SystemInfoService.cs .../MohistServiceRegistration.cs` returns
+    empty — siblings and DI wiring unchanged.
+  - `dotnet build Mohist.sln` succeeds with 0 warnings / 0 errors against
+    the current tree (which now also includes T-002 consolidation).
+- No new commits produced for this re-run; the tree is clean on
+  `mohist/run-wr_17865cb3816543c5a9f58589a2b76a2d`.
