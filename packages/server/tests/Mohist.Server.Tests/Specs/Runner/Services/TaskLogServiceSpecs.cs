@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -29,7 +31,9 @@ public class TaskLogServiceSpecs : IAsyncLifetime
         _service = new TaskLogService(
             new TaskLogStore(factory, _timeProvider),
             new RunnerWorkStore(factory),
-            new WorkflowRunQuerier(factory));
+            new WorkflowRunQuerier(factory),
+            new NoopTaskLogDeltaPublisher(),
+            NullLogger<TaskLogService>.Instance);
 
         using var db = new MohistDbContext(_options);
         db.Database.EnsureCreated();
@@ -84,5 +88,10 @@ public class TaskLogServiceSpecs : IAsyncLifetime
         public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
 
         public MohistDbContext CreateDbContext() => new(_options);
+    }
+
+    private sealed class NoopTaskLogDeltaPublisher : ITaskLogDeltaPublisher
+    {
+        public Task PublishAsync(TaskLogDeltaEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

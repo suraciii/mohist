@@ -1,6 +1,9 @@
+using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Runner.Services;
@@ -12,25 +15,73 @@ namespace Mohist.Server.Runner.Services;
 /// API → Infrastructure.Data). TaskLog is review evidence associated
 /// with a work item — independent of status adjudication by design D1,
 /// so this service performs no grain calls.
+///
+/// <para>
+/// <b>Persistence vs. fan-out</b>. Each batch is persisted to the
+/// authoritative store <i>before</i> any real-time fan-out is
+/// attempted. The fan-out is best-effort: a publish throw (no
+/// subscribers, per-connection send error, network drop) is logged
+/// and swallowed, never blocking persistence or task execution.
+/// This is the concrete form of the
+/// "落库权威 + 实时分发 best-effort" invariant (design D3).
+/// </para>
 /// </summary>
 public sealed class TaskLogService : IScopedService
 {
     private readonly TaskLogStore _store;
     private readonly RunnerWorkStore _runnerWorks;
     private readonly WorkflowRunQuerier _runQuerier;
+    private readonly ITaskLogDeltaPublisher _publisher;
+    private readonly ILogger<TaskLogService> _log;
 
-    public TaskLogService(TaskLogStore store, RunnerWorkStore runnerWorks, WorkflowRunQuerier runQuerier)
+    /// <summary>
+    /// Per-process cache of <c>workId → taskId</c> resolutions,
+    /// keyed by the owner-id (which is a <c>workflowRunId</c> for
+    /// workflow-owned work items). Avoids reloading the entire
+    /// <see cref="WorkflowRunQuerier.LoadAsync"/> JSON state for
+    /// every uploaded batch on a long-running task. The cache is
+    /// process-local and intentionally not durable — a stale
+    /// entry (a run re-staged with the same <c>workId</c>) is
+    /// harmless: the resolved <c>taskId</c> is used only for
+    /// fan-out stamping, and stale stamps at worst leak a delta
+    /// to the previous task's subscribers (who unsubscribe on
+    /// terminal anyway). The authoritative log is in
+    /// <see cref="TaskLogStore"/>, not in this map.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _workIdToTaskIdByOwner = new(StringComparer.Ordinal);
+
+    public TaskLogService(
+        TaskLogStore store,
+        RunnerWorkStore runnerWorks,
+        WorkflowRunQuerier runQuerier,
+        ITaskLogDeltaPublisher publisher,
+        ILogger<TaskLogService> log)
     {
         _store = store;
         _runnerWorks = runnerWorks;
         _runQuerier = runQuerier;
+        _publisher = publisher;
+        _log = log;
     }
 
     /// <summary>
-    /// Persists the runner's terminal-batch upload. <paramref name="truncated"/>
-    /// reports whether head lines were dropped so the web client can
-    /// surface that to users.
+    /// Persists a runner upload (incremental or terminal) and, on
+    /// successful persistence, best-effort fans out the delta to
+    /// subscribed SignalR connections via
+    /// <see cref="ITaskLogDeltaPublisher"/>. Persistence is the
+    /// authoritative step; fan-out failure (publisher throws, no
+    /// subscribers, per-send error) is logged and swallowed so it
+    /// never blocks the upload or the task's execution.
+    /// <paramref name="truncated"/> reports whether head lines were
+    /// dropped so the web client can surface that to users.
     /// </summary>
+    /// <returns>
+    /// <c>true</c> when the work item is recognised as
+    /// <c>Outstanding</c> and the batch is persisted; <c>false</c>
+    /// when the work item is unknown or no longer outstanding (the
+    /// caller surfaces that as a 4xx without touching real-time
+    /// fan-out).
+    /// </returns>
     public async Task<bool> AppendAsync(
         string runnerId,
         string ownerKind,
@@ -49,7 +100,43 @@ public sealed class TaskLogService : IScopedService
         if (work is null || work.Status != RunnerWorkStatus.Outstanding)
             return false;
 
+        // 1. Persist FIRST. Authoritative; throw propagates (the
+        //    upload route handles the validation/storing errors).
         await _store.AppendAsync(ownerKind, ownerId, workId, entries, truncated, ct);
+
+        // 2. Best-effort fan-out, AFTER persistence has succeeded.
+        //    A publisher throw, no-subscribers state, or per-send
+        //    failure is logged and swallowed. This is the design D3
+        //    "persistence-before-distribution" invariant made
+        //    concrete; the authoritative log is already on disk so
+        //    any dropped delta is recoverable by the terminal
+        //    reconciliation batch.
+        try
+        {
+            var taskId = await ResolveTaskIdAsync(ownerKind, ownerId, workId, ct);
+            var envelope = new TaskLogDeltaEnvelope(
+                OwnerKind: ownerKind,
+                OwnerId: ownerId,
+                WorkId: workId,
+                TaskId: taskId,
+                Entries: entries
+                    .Select(e => new TaskLogDeltaEntry(e.Seq, e.Timestamp, e.Source, e.Text))
+                    .ToList(),
+                Truncated: truncated);
+
+            await _publisher.PublishAsync(envelope, ct);
+        }
+        catch (Exception ex)
+        {
+            // Never let distribution failure break persistence or
+            // the calling upload route. The authoritative log has
+            // already been committed; dropping the realtime push
+            // is the correct best-effort behaviour per design D3.
+            _log.LogWarning(ex,
+                "Task-log realtime fan-out failed for {OwnerKind}/{OwnerId}/{WorkId}; persistence unaffected",
+                ownerKind, ownerId, workId);
+        }
+
         return true;
     }
 
@@ -98,6 +185,67 @@ public sealed class TaskLogService : IScopedService
             }
         }
 
+        return null;
+    }
+
+    /// <summary>
+    /// Resolve <paramref name="workId"/> → <c>taskId</c> for the
+    /// publish-time envelope stamp. Returns <c>null</c> when the
+    /// work item isn't owned by a workflow run (e.g. an agent-job
+    /// owner kind with no task mapping) or the workflow-run
+    /// state can't be loaded; the publisher treats a null
+    /// <c>taskId</c> as "no scope can match, no fan-out" (its
+    /// <see cref="ConnectionSubscriptionRegistry.ShouldNotifyTaskLog"/>
+    /// gate short-circuits to false).
+    ///
+    /// <para>
+    /// Lookups are cached per <c>(ownerId, workId)</c>. The cache
+    /// is wiped only by process restart; this is intentional —
+    /// a long-running task reuses one mapping across all its
+    /// flushes, and the stale-on-recovery risk is bounded (see
+    /// the cache field doc).
+    /// </para>
+    /// </summary>
+    private async Task<string?> ResolveTaskIdAsync(
+        string ownerKind,
+        string ownerId,
+        string workId,
+        CancellationToken ct)
+    {
+        if (!string.Equals(ownerKind, TaskLogOwnershipKinds.Workflow, StringComparison.Ordinal))
+            return null;
+        if (string.IsNullOrWhiteSpace(ownerId) || string.IsNullOrWhiteSpace(workId))
+            return null;
+
+        var byWork = _workIdToTaskIdByOwner.GetOrAdd(ownerId, _ => new ConcurrentDictionary<string, string>(StringComparer.Ordinal));
+        if (byWork.TryGetValue(workId, out var cached))
+            return cached;
+
+        var run = await _runQuerier.LoadAsync(ownerId, ct);
+        if (run is null)
+        {
+            // Negative-result cache: avoid retrying for every batch.
+            // Storing null through the dictionary's TryAdd lets us
+            // distinguish "looked up and not found" from "not yet
+            // looked up" cheaply on the hot path.
+            byWork.TryAdd(workId, string.Empty);
+            return null;
+        }
+
+        foreach (var stage in run.Stages)
+        {
+            foreach (var task in stage.Tasks)
+            {
+                if (string.Equals(task.WorkId, workId, StringComparison.Ordinal)
+                    && !string.IsNullOrEmpty(task.Id))
+                {
+                    byWork.TryAdd(workId, task.Id);
+                    return task.Id;
+                }
+            }
+        }
+
+        byWork.TryAdd(workId, string.Empty);
         return null;
     }
 
