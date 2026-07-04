@@ -109,6 +109,7 @@ export function StatusHeadline({ decision, stageProgress }: StatusHeadlineProps)
       data-testid="status-headline"
       data-summary={decision.summary}
       data-sticky="true"
+      data-tier-weight="status-header"
       aria-label="Issue status headline"
       className={cn(
         'sticky top-0 z-20 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-b px-4 py-3 shadow-sm',

@@ -269,7 +269,7 @@ export function IssueDetailPage() {
           </div>
 
           <div className="mt-8 grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-8" data-testid="issue-detail-content-grid">
-            <div className="min-w-0 lg:col-span-2 space-y-8" data-testid="reading-flow">
+            <div className="min-w-0 lg:col-span-2 space-y-8" data-testid="reading-flow" data-tier-weight="reading-flow">
               <BranchBar
                 issueNumber={issueNumber}
                 stage={workflowStage}
@@ -314,28 +314,32 @@ export function IssueDetailPage() {
               )}
 
               {diffData?.available === true && (
-                <div className="min-w-0 rounded-lg bg-card p-4 border-l-2 border-border" data-testid="diff-summary-banner">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                <div
+                  className="min-w-0 px-4 py-3 text-sm"
+                  data-testid="diff-summary-banner"
+                  data-tier-weight="reading-flow"
+                >
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
                     <span className="min-w-0 text-muted-foreground break-words">
-                      <span className="font-medium text-card-foreground break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
+                      <span className="font-medium text-foreground break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
                       {' wants to merge into '}
-                      <span className="font-medium text-card-foreground break-all" title={diffData.base} data-testid="diff-summary-base">{diffData.base}</span>
+                      <span className="font-medium text-foreground break-all" title={diffData.base} data-testid="diff-summary-base">{diffData.base}</span>
                     </span>
                     <span className="text-muted-foreground/40">·</span>
                     <span className="text-muted-foreground">
-                      <span className="font-medium text-card-foreground">{diffData.ahead}</span> ahead
+                      <span className="font-medium text-foreground">{diffData.ahead}</span> ahead
                     </span>
                     {diffData.behind > 0 && (
                       <>
                         <span className="text-muted-foreground/40">·</span>
                         <span className="text-muted-foreground">
-                          <span className="font-medium text-card-foreground">{diffData.behind}</span> behind
+                          <span className="font-medium text-foreground">{diffData.behind}</span> behind
                         </span>
                       </>
                     )}
                     <span className="text-muted-foreground/40">·</span>
                     <span className="text-muted-foreground">
-                      <span className="font-medium text-card-foreground">{diffData.summary.filesChanged}</span> files changed
+                      <span className="font-medium text-foreground">{diffData.summary.filesChanged}</span> files changed
                     </span>
                     <span className="text-muted-foreground/40">·</span>
                     <span className="text-success">+{diffData.summary.additions}</span>
@@ -360,8 +364,8 @@ export function IssueDetailPage() {
               />
 
               {(diffData?.available === false || commitsData?.available === false) && (
-                <div className="rounded-lg bg-card p-4">
-                  <p className="text-sm text-muted-foreground">
+                <div className="text-sm text-muted-foreground" data-tier-weight="reading-flow">
+                  <p>
                     {diffData?.available === false && diffData.message}
                     {diffData?.available === false && commitsData?.available === false && ' / '}
                     {commitsData?.available === false && commitsData.message}
@@ -389,7 +393,7 @@ export function IssueDetailPage() {
               />
             </div>
 
-            <div className="min-w-0 space-y-6" data-testid="reference-rail">
+            <div className="min-w-0 space-y-6" data-testid="reference-rail" data-tier-weight="reference-rail">
               <IssueDetailsCard issue={issue} />
 
               <div data-testid="issue-workflow-profile-control-frame">

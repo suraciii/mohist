@@ -60,3 +60,50 @@ T-001 progress notes
 - Inline-primary-action in sticky headline (D4 alternative, deferred to keep first cut simple).
 - Narrow-screen collapse for reference rail (T-003).
 - Cross-tier verification gate (T-004).
+
+T-002 progress notes
+
+## Chrome Reduction (D6) — T-002 Outcomes
+
+- **IssueDescriptionSection**: dropped `rounded-lg bg-card p-4` wrapper; now a plain `<section>` with `data-tier-weight="reading-flow"` and a heading + content. Added a leading-text "preview hint" (`description-preview-hint`, `data-collapsed-hint="true"`) above the `MarkdownReader` for long bodies (>320 chars stripped); short bodies omit the hint to avoid duplicating text already rendered by the markdown body (preserves `tests/IssueDetailPage.test.tsx` "renders blockquotes in description" and similar uniqueness assertions).
+- **IssueCommentsSection**: dropped `rounded-lg bg-card p-4`; now a plain `<section>` with heading + content. Comment list keeps the inter-comment divider (`border-b border-border/40`) but loses the card fill, satisfying "purely-content blocks present content directly without heavy bordered/filled card wrappers."
+- **IssueCommitsSection**: same treatment — no card chrome, just heading + list.
+- **IssueDiffFilesSection**: replaced `bg-card` fill with no wrapper fill; added `data-collapsed="true"` (the section is effectively a one-line summary — collapsed by default). Added `data-testid="diff-files-summary"` and `data-testid="diff-files-scale"` so the scale signal (file count, additions, deletions, "No files changed yet" zero-state) is always addressable in tests, satisfying the spec's "collapsed change/diff list still shows the file, addition, and deletion counts."
+- **diff-summary-banner** (in `IssueDetailPage.tsx`): dropped `rounded-lg bg-card p-4 border-l-2 border-border`; now a flat `px-4 py-3 text-sm` block with no fill or border. Carries `data-tier-weight="reading-flow"`.
+- **diff/commits fallback message** (when both are unavailable): dropped `rounded-lg bg-card p-4`; now a flat text block.
+
+## Tier-weight Markers
+
+- `StatusHeadline` carries `data-tier-weight="status-header"` (the heaviest: sticky + semantic fill + icon + border).
+- `reading-flow` carries `data-tier-weight="reading-flow"` (medium weight).
+- `reference-rail` carries `data-tier-weight="reference-rail"` (lightest: CardSection substrate + muted tokens).
+- All flow-block sections (description, comments, commits, diff-files) carry `data-tier-weight="reading-flow"` for cross-block consistency.
+- The spec assertion "reading-flow is visually lighter than the status headline and heavier than the reference rail" is tested by mapping the three `data-tier-weight` values to a numeric order (3 / 2 / 1) and asserting the inequality chain.
+
+## Collapsible Key-Signal Behavior
+
+- Description: presence (heading "Description") + leading-text hint (`description-preview-hint`) above the markdown body. The hint is gated on stripped body length > 320 chars so the body content and the hint do not visually duplicate when content is short.
+- Diff-files: scale line (`diff-files-scale`) with file count, additions, and deletions is always rendered. Zero-state shows "No files changed yet" so the absence of changes is also signal, not a vanished block.
+
+## New Spec Tests (T-002)
+
+- `IssueDetailPage.reading-flow.test.tsx` — 12 tests across:
+  - attention ordering (`compareDocumentPosition` chain: workflowFrame < diffSummary < diffFiles < commits < description < comments)
+  - workflow-precedes-description-comments even when diff/commits are absent
+  - reading-flow column width (`lg:col-span-2` of `lg:grid-cols-3`, wider than rail)
+  - lightest chrome — description/comments/commits/diff-files do NOT carry `rounded-lg`, `bg-card`, or `border-l-2`; reference-rail details card still uses CardSection's `rounded-lg` so the rail is heavier than the flow in terms of having chrome, but the rail's chrome is the lightest CardSection substrate (no tone accent).
+  - medium visual-weight tier — `data-tier-weight` chain (status-header=3 > reading-flow=2 > reference-rail=1); no sticky elements in flow or rail
+  - collapsible key-signal — description preview hint, markdown-reader mode=collapsible, diff-files-scale always renders file/additions/deletions, zero-state shows "No files changed yet"
+  - decision surface and rail content excluded — surface not in reading flow; details/configuration/prerequisites/drift/convergence/actions all live in the reference rail and are absent from the reading flow.
+
+## Notes for T-003 / T-004
+
+- T-003 owns narrow-screen collapse for the reference rail and default-collapse for drift + convergence. The rail's `data-tier-weight="reference-rail"` and `space-y-6` are unchanged from T-002.
+- T-004 cross-tier verification: every conditional path must continue to render all reading-flow blocks (description / comments / commits / diff-files / diff-summary-banner / workflow-view-frame) inside the `reading-flow` tier anchor, and all rail blocks (details / model / prerequisites / drift / convergence / actions / workflow-profile-control) inside the `reference-rail` anchor. The new `data-tier-weight` markers provide a single attribute for that audit.
+- The `IssueDiffFilesSection`'s `data-collapsed="true"` reflects that the section is always a summary (counts + "View files"); a future iteration could introduce a true expand/collapse toggle but is out of scope for T-002.
+
+## Decisions Settled in T-002
+
+- **Per-block chrome rule**: description/comments/commits → no card wrapper, just heading + content (content-forward). diff-summary-banner → flat block (no fill/border). diff-files section → flat block with always-visible scale line.
+- **Preview hint gating**: only show when stripped body length exceeds 320 chars. Avoids duplicate-text issues in jsdom-based tests and keeps the hint semantically a "long-content signal."
+- **Tier weight ordering**: numeric map {status-header: 3, reading-flow: 2, reference-rail: 1} is asserted via `data-tier-weight` and compared by ordering the three tier containers. This is more stable than asserting per-class chrome and survives future visual refinements.
