@@ -193,6 +193,29 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
 
         Assert.Equal(2, publisher.Published.Count);
         Assert.All(publisher.Published, e => Assert.Equal("task-X", e.TaskId));
+        Assert.All(publisher.Published, e => Assert.Equal("proj-1", e.ProjectId));
+    }
+
+    [Fact]
+    public async Task AppendAsync_RetriesTaskIdResolution_WhenInitialWorkflowMappingIsMissing()
+    {
+        await SeedOutstandingWorkAsync("runner-A", TaskLogOwnershipKinds.Workflow, "wf-missing-first", "w-late");
+        var publisher = new RecordingPublisher();
+        var service = NewService(publisher);
+
+        await service.AppendAsync(
+            "runner-A", TaskLogOwnershipKinds.Workflow, "wf-missing-first", "w-late",
+            NewEntries(1, 1), truncated: false);
+
+        await SeedWorkflowRunAsync("wf-missing-first", "task-late", "w-late");
+
+        await service.AppendAsync(
+            "runner-A", TaskLogOwnershipKinds.Workflow, "wf-missing-first", "w-late",
+            NewEntries(2, 1), truncated: false);
+
+        Assert.Equal(2, publisher.Published.Count);
+        Assert.Null(publisher.Published[0].TaskId);
+        Assert.Equal("task-late", publisher.Published[1].TaskId);
     }
 
     [Fact]
@@ -260,7 +283,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         var run = new WorkflowRun
         {
             Id = workflowRunId,
-            Metadata = new WorkflowRunMetadata(Name: null, CreatedAt: now),
+            Metadata = new WorkflowRunMetadata(Name: null, CreatedAt: now, Annotations: new Dictionary<string, string> { ["projectId"] = "proj-1" }),
             Status = WorkflowRunStatus.Running,
             CurrentStageId = "stage-1",
             Stages = new List<StageRun>

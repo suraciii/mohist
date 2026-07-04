@@ -21,6 +21,7 @@ public class SignalRTaskLogDeltaPublisherSpecs
         registry.RegisterConnection("conn-A");
         registry.Subscribe("conn-A", TaskLogType);
         registry.SubscribeTaskLog("conn-A", "wf-1", "task-1");
+        registry.SetProjectId("conn-A", "proj-A");
 
         var hub = new RecordingHubContext();
         var publisher = new SignalRTaskLogDeltaPublisher(hub, registry, NullLogger<SignalRTaskLogDeltaPublisher>.Instance);
@@ -43,6 +44,7 @@ public class SignalRTaskLogDeltaPublisherSpecs
         registry.RegisterConnection("conn-A");
         registry.Subscribe("conn-A", TaskLogType);
         registry.SubscribeTaskLog("conn-A", "wf-1", "task-2");
+        registry.SetProjectId("conn-A", "proj-A");
 
         var hub = new RecordingHubContext();
         var publisher = new SignalRTaskLogDeltaPublisher(hub, registry, NullLogger<SignalRTaskLogDeltaPublisher>.Instance);
@@ -67,6 +69,9 @@ public class SignalRTaskLogDeltaPublisherSpecs
         registry.Subscribe("conn-A", TaskLogType);
         registry.Subscribe("conn-B", TaskLogType);
         registry.Subscribe("conn-C", TaskLogType);
+        registry.SetProjectId("conn-A", "proj-A");
+        registry.SetProjectId("conn-B", "proj-A");
+        registry.SetProjectId("conn-C", "proj-A");
 
         registry.SubscribeTaskLog("conn-A", "wf-1", "task-1");
         registry.SubscribeTaskLog("conn-B", "wf-1", "task-1");
@@ -90,6 +95,7 @@ public class SignalRTaskLogDeltaPublisherSpecs
     {
         var registry = new ConnectionSubscriptionRegistry();
         registry.RegisterConnection("conn-A");
+        registry.SetProjectId("conn-A", "proj-A");
         // Connection is registered but neither subscribed to the
         // task-log type nor declared interest in any task.
 
@@ -112,6 +118,7 @@ public class SignalRTaskLogDeltaPublisherSpecs
         var registry = new ConnectionSubscriptionRegistry();
         registry.RegisterConnection("conn-A");
         registry.SubscribeTaskLog("conn-A", "wf-1", "task-1");
+        registry.SetProjectId("conn-A", "proj-A");
         // No type-subscription registered — the type filter
         // rejects the connection before the scope filter is
         // even consulted.
@@ -137,6 +144,8 @@ public class SignalRTaskLogDeltaPublisherSpecs
         registry.RegisterConnection("conn-B");
         registry.Subscribe("conn-A", TaskLogType);
         registry.Subscribe("conn-B", TaskLogType);
+        registry.SetProjectId("conn-A", "proj-A");
+        registry.SetProjectId("conn-B", "proj-A");
         registry.SubscribeTaskLog("conn-A", "wf-1", "task-1");
         registry.SubscribeTaskLog("conn-B", "wf-1", "task-1");
 
@@ -179,6 +188,7 @@ public class SignalRTaskLogDeltaPublisherSpecs
         registry.RegisterConnection("conn-A");
         registry.Subscribe("conn-A", TaskLogType);
         registry.SubscribeTaskLog("conn-A", "wf-1", "task-1");
+        registry.SetProjectId("conn-A", "proj-A");
 
         var hub = new RecordingHubContext();
         var publisher = new SignalRTaskLogDeltaPublisher(hub, registry, NullLogger<SignalRTaskLogDeltaPublisher>.Instance);
@@ -186,6 +196,7 @@ public class SignalRTaskLogDeltaPublisherSpecs
         var envelope = new TaskLogDeltaEnvelope(
             OwnerKind: "workflow",
             OwnerId: "wf-1",
+            ProjectId: "proj-A",
             WorkId: "w-1",
             TaskId: null,
             Entries: Array.Empty<TaskLogDeltaEntry>(),
@@ -201,6 +212,7 @@ public class SignalRTaskLogDeltaPublisherSpecs
         return new TaskLogDeltaEnvelope(
             OwnerKind: "workflow",
             OwnerId: workflowRunId,
+            ProjectId: "proj-A",
             WorkId: workId,
             TaskId: taskId,
             Entries: new[]
@@ -208,6 +220,30 @@ public class SignalRTaskLogDeltaPublisherSpecs
                 new TaskLogDeltaEntry(Seq: 1, Timestamp: now, Source: "stdout", Text: "hello"),
             },
             Truncated: false);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task PublishAsync_ProjectScopedDelta_DeliversOnlyToMatchingProjectConnection()
+    {
+        var registry = new ConnectionSubscriptionRegistry();
+        registry.RegisterConnection("conn-A");
+        registry.RegisterConnection("conn-B");
+        registry.Subscribe("conn-A", TaskLogType);
+        registry.Subscribe("conn-B", TaskLogType);
+        registry.SubscribeTaskLog("conn-A", "wf-1", "task-1");
+        registry.SubscribeTaskLog("conn-B", "wf-1", "task-1");
+        registry.SetProjectId("conn-A", "proj-A");
+        registry.SetProjectId("conn-B", "proj-B");
+
+        var hub = new RecordingHubContext();
+        var publisher = new SignalRTaskLogDeltaPublisher(hub, registry, NullLogger<SignalRTaskLogDeltaPublisher>.Instance);
+
+        await publisher.PublishAsync(NewEnvelope("wf-1", "task-1", "w-1"));
+
+        var message = Assert.Single(hub.TaskLogDeltaMessages);
+        Assert.Equal("conn-A", message.ConnectionId);
     }
 
     private sealed class RecordingHubContext : IHubContext<MohistHub, IEventsClient>

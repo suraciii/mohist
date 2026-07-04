@@ -48,17 +48,6 @@ export class RunnerHost {
   // immediate heartbeat it triggers.
   private activeSignal: AbortSignal | null = null
 
-  /**
-   * Per-work collector reference for the incremental flush trigger.
-   * Set when `executeWithLog` returns the collector, cleared in the
-   * `finally` so a subsequent work item cannot see a stale collector
-   * after the trigger has been stopped (design D1). The field lives on
-   * the host (not the closure) because the trigger's `setInterval`
-   * callback runs after `executeAndReport` has yielded its synchronous
-   * portion and the closure would otherwise be out of scope.
-   */
-  private collectorRef: import("./task-log.js").TaskLogCollector | null = null
-
   // Step 10 of design/eventbus.md: AcpSessionManager and
   // SharedAcpConnection are created once per host (not per work item).
   // The previous design recreated them for every executeAndReport call,
@@ -421,6 +410,16 @@ export class RunnerHost {
       )
     }
 
+    const startIncrementalFlushForCollector = (collector: import("./task-log.js").TaskLogCollector) => {
+      const flushTrigger = startTaskLogFlushTrigger(
+        () => flushIncrementalTaskLog(collector),
+        this.options.taskLogFlushIntervalMs ?? TASK_LOG_FLUSH_INTERVAL_MS,
+        this.options.taskLogFlushLineThreshold ?? TASK_LOG_FLUSH_LINE_THRESHOLD,
+      )
+      collector.setAppendListener(() => flushTrigger.noteAppend())
+      return flushTrigger
+    }
+
     if (this.workExecutor === null) {
       // ACP connection failed to initialize at startup; fall back to the
       // per-work-item ephemeral path so the work still attempts to run.
@@ -436,15 +435,18 @@ export class RunnerHost {
         const workspacePath = typeof work.variables?.workspace === "object" && work.variables.workspace !== null ? (work.variables.workspace as Record<string, unknown>).path : undefined
         const fallback = await createSharedAcpConnection(typeof workspacePath === "string" ? workspacePath : process.cwd())
         executor.updateAcpConnection(fallback)
+        const collector = new TaskLogCollector()
+        const flushTrigger = startIncrementalFlushForCollector(collector)
         try {
-          // Ephemeral executor is created after the work item has been
-          // dispatched; there is no collector to flush incrementally,
-          // so we go straight to the terminal reconciliation batch.
-          const execution = await executor.executeWithLog(work, signal, null)
+          const execution = await executor.executeWithLog(work, signal, collector)
           lastResult = execution.result
+          execution.collector.setAppendListener(null)
+          flushTrigger.stop()
           await flushTaskLog(execution.collector)
           await this.connection.report(work, lastResult, signal)
         } finally {
+          collector.setAppendListener(null)
+          flushTrigger.stop()
           await fallback.shutdown()
         }
       } catch (error) {
@@ -468,21 +470,13 @@ export class RunnerHost {
     // calls synchronously from inside `append`. `flushIncrementalTaskLog`
     // short-circuits an empty drain so no upload is issued when there
     // is nothing new.
-    const flushTrigger = startTaskLogFlushTrigger(
-      () => flushIncrementalTaskLog(this.collectorRef),
-      this.options.taskLogFlushIntervalMs ?? TASK_LOG_FLUSH_INTERVAL_MS,
-      this.options.taskLogFlushLineThreshold ?? TASK_LOG_FLUSH_LINE_THRESHOLD,
-    )
     // Pre-create the collector so the trigger can be wired into its
     // `appendListener` BEFORE the executor starts emitting appends.
     // Passing `null` to `executeWithLog` would let the executor mint a
     // new collector without our listener — defeats the eager line-count
     // firing and leaves the trigger with no append notifications.
     const collector = new TaskLogCollector()
-    collector.setAppendListener(() => flushTrigger.noteAppend())
-    // Set `collectorRef` BEFORE calling `executeWithLog` so a trigger
-    // tick that fires during execution has a live collector to drain.
-    this.collectorRef = collector
+    const flushTrigger = startIncrementalFlushForCollector(collector)
     try {
       const execution = await this.workExecutor.executeWithLog(work, signal, collector)
       lastResult = execution.result
@@ -509,9 +503,8 @@ export class RunnerHost {
         await reportDrain("failed", String(error))
       })
     } finally {
-      // Always clear the ref so a subsequent work item does not see
-      // a stale collector after the flush trigger has been stopped.
-      this.collectorRef = null
+      collector.setAppendListener(null)
+      flushTrigger.stop()
     }
   }
 

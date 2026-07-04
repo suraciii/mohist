@@ -48,7 +48,7 @@ public sealed class TaskLogService : IScopedService
     /// terminal anyway). The authoritative log is in
     /// <see cref="TaskLogStore"/>, not in this map.
     /// </summary>
-    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _workIdToTaskIdByOwner = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, TaskLogPublishScope>> _workIdToScopeByOwner = new(StringComparer.Ordinal);
 
     public TaskLogService(
         TaskLogStore store,
@@ -113,12 +113,13 @@ public sealed class TaskLogService : IScopedService
         //    reconciliation batch.
         try
         {
-            var taskId = await ResolveTaskIdAsync(ownerKind, ownerId, workId, ct);
+            var scope = await ResolvePublishScopeAsync(ownerKind, ownerId, workId, ct);
             var envelope = new TaskLogDeltaEnvelope(
                 OwnerKind: ownerKind,
                 OwnerId: ownerId,
+                ProjectId: scope?.ProjectId,
                 WorkId: workId,
-                TaskId: taskId,
+                TaskId: scope?.TaskId,
                 Entries: entries
                     .Select(e => new TaskLogDeltaEntry(e.Seq, e.Timestamp, e.Source, e.Text))
                     .ToList(),
@@ -206,7 +207,7 @@ public sealed class TaskLogService : IScopedService
     /// the cache field doc).
     /// </para>
     /// </summary>
-    private async Task<string?> ResolveTaskIdAsync(
+    private async Task<TaskLogPublishScope?> ResolvePublishScopeAsync(
         string ownerKind,
         string ownerId,
         string workId,
@@ -217,20 +218,17 @@ public sealed class TaskLogService : IScopedService
         if (string.IsNullOrWhiteSpace(ownerId) || string.IsNullOrWhiteSpace(workId))
             return null;
 
-        var byWork = _workIdToTaskIdByOwner.GetOrAdd(ownerId, _ => new ConcurrentDictionary<string, string>(StringComparer.Ordinal));
+        var byWork = _workIdToScopeByOwner.GetOrAdd(ownerId, _ => new ConcurrentDictionary<string, TaskLogPublishScope>(StringComparer.Ordinal));
         if (byWork.TryGetValue(workId, out var cached))
             return cached;
 
         var run = await _runQuerier.LoadAsync(ownerId, ct);
         if (run is null)
         {
-            // Negative-result cache: avoid retrying for every batch.
-            // Storing null through the dictionary's TryAdd lets us
-            // distinguish "looked up and not found" from "not yet
-            // looked up" cheaply on the hot path.
-            byWork.TryAdd(workId, string.Empty);
             return null;
         }
+
+        var projectId = run.Metadata.Annotations?.GetValueOrDefault("projectId");
 
         foreach (var stage in run.Stages)
         {
@@ -239,13 +237,13 @@ public sealed class TaskLogService : IScopedService
                 if (string.Equals(task.WorkId, workId, StringComparison.Ordinal)
                     && !string.IsNullOrEmpty(task.Id))
                 {
-                    byWork.TryAdd(workId, task.Id);
-                    return task.Id;
+                    var scope = new TaskLogPublishScope(task.Id, projectId);
+                    byWork.TryAdd(workId, scope);
+                    return scope;
                 }
             }
         }
 
-        byWork.TryAdd(workId, string.Empty);
         return null;
     }
 
@@ -264,6 +262,8 @@ public sealed class TaskLogService : IScopedService
         }
     }
 }
+
+internal sealed record TaskLogPublishScope(string TaskId, string? ProjectId);
 
 /// <summary>
 /// Owner-kind constants shared between the route layer and the

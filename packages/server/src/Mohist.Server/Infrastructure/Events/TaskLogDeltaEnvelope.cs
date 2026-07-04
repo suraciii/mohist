@@ -34,6 +34,7 @@ namespace Mohist.Server.Infrastructure.Events;
 public sealed record TaskLogDeltaEnvelope(
     [property: JsonPropertyName("ownerKind")] string OwnerKind,
     [property: JsonPropertyName("ownerId")] string OwnerId,
+    [property: JsonPropertyName("projectId")] string? ProjectId,
     [property: JsonPropertyName("workId")] string WorkId,
     [property: JsonPropertyName("taskId")] string? TaskId,
     [property: JsonPropertyName("entries")] IReadOnlyList<TaskLogDeltaEntry> Entries,

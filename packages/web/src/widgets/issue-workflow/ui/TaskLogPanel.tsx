@@ -69,11 +69,9 @@ export function mergeTaskLogDelta(
 ): TaskLogPage {
   const lines: TaskLogLine[] = page ? [...page.lines] : []
   const existingSeqs = new Set<number>(lines.map((line) => line.seq))
-  const maxCachedSeq = lines.reduce((max, line) => (line.seq > max ? line.seq : max), 0)
   const incoming: TaskLogLine[] = []
   for (const entry of delta.entries) {
     if (existingSeqs.has(entry.seq)) continue
-    if (entry.seq <= maxCachedSeq) continue
     incoming.push({
       seq: entry.seq,
       timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : new Date().toISOString(),
@@ -104,6 +102,7 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const subscribedRef = useRef(false)
   const subscribedConnectionRef = useRef<HubConnection | null>(null)
+  const subscribedReconnectVersionRef = useRef<number | null>(null)
   const terminalNow = isTerminalStatus(taskStatus)
 
   const onTaskLogDelta = (envelope: unknown) => {
@@ -111,12 +110,14 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
     const taskScope = envelope.taskId
     if (taskScope == null) return
     if (taskScope !== taskId) return
+    if (envelope.ownerKind !== 'workflow') return
+    if (envelope.ownerId !== workflowRunId) return
     if (!projectId) return
     const queryKey = buildTaskLogQueryKey(issueNumber, taskId, projectId, workflowRunId ?? null, { limit: TASK_LOG_RETAINED_LIMIT })
     queryClient.setQueryData<TaskLogPage | undefined>(queryKey, (current) => mergeTaskLogDelta(current, envelope))
   }
 
-  const { connection } = useEventsConnection(projectId, () => {}, undefined, onTaskLogDelta)
+  const { connection, reconnectVersion } = useEventsConnection(projectId, () => {}, undefined, onTaskLogDelta)
 
   useEffect(() => {
     const node = scrollRef.current
@@ -132,6 +133,7 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
         subscribedRef.current = false
         const conn = subscribedConnectionRef.current
         subscribedConnectionRef.current = null
+        subscribedReconnectVersionRef.current = null
         if (conn) {
           void unsubscribeTaskLog(conn, { workflowRunId, taskId })
         }
@@ -142,12 +144,30 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
       return
     }
 
+    if (taskStatus !== 'running') {
+      if (subscribedRef.current) {
+        subscribedRef.current = false
+        const conn = subscribedConnectionRef.current
+        subscribedConnectionRef.current = null
+        subscribedReconnectVersionRef.current = null
+        if (conn) {
+          void unsubscribeTaskLog(conn, { workflowRunId, taskId })
+        }
+      }
+      return
+    }
+
     if (!connection) return
-    if (subscribedRef.current) return
+    if (
+      subscribedRef.current &&
+      subscribedConnectionRef.current === connection &&
+      subscribedReconnectVersionRef.current === reconnectVersion
+    ) return
     subscribedRef.current = true
     subscribedConnectionRef.current = connection
+    subscribedReconnectVersionRef.current = reconnectVersion
     void subscribeTaskLog(connection, { workflowRunId, taskId })
-  }, [connection, terminalNow, projectId, workflowRunId, issueNumber, taskId, queryClient])
+  }, [connection, reconnectVersion, terminalNow, taskStatus, projectId, workflowRunId, issueNumber, taskId, queryClient])
 
   useEffect(() => {
     return () => {
@@ -155,6 +175,7 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
       const conn = subscribedConnectionRef.current
       subscribedRef.current = false
       subscribedConnectionRef.current = null
+      subscribedReconnectVersionRef.current = null
       if (wasSubscribed && conn && workflowRunId) {
         void unsubscribeTaskLog(conn, { workflowRunId, taskId })
       }

@@ -40,6 +40,7 @@ interface FakeConnection {
   invoke: (...args: unknown[]) => Promise<unknown>
   handlers: Map<string, Listener>
   invokes: Array<{ method: string; args: unknown[] }>
+  reconnectHandler: Listener | null
 }
 
 const fakeConnections: FakeConnection[] = []
@@ -50,10 +51,12 @@ function makeFakeConnection(): FakeConnection {
   const invokes: Array<{ method: string; args: unknown[] }> = []
   const conn: FakeConnection = {
     state: 0,
+    reconnectHandler: null,
     onreconnecting(handler) {
       if (handler === undefined) return undefined
     },
     onreconnected(handler) {
+      conn.reconnectHandler = handler ?? null
       if (handler === undefined) return undefined
     },
     onclose(handler) {
@@ -308,7 +311,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     await act(async () => {
       handler!(makeEnvelope([
         { seq: 6, text: 'should-be-dropped-already-cached' },
-        { seq: 3, text: 'should-be-dropped-out-of-order' },
+        { seq: 3, text: 'should-append-out-of-order' },
         { seq: 7, text: 'should-append' },
       ]))
     })
@@ -317,7 +320,30 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
       expect(screen.getByText('should-append')).toBeInTheDocument()
     })
     expect(screen.queryByText('should-be-dropped-already-cached')).not.toBeInTheDocument()
-    expect(screen.queryByText('should-be-dropped-out-of-order')).not.toBeInTheDocument()
+    expect(screen.getByText('should-append-out-of-order')).toBeInTheDocument()
+  })
+
+  it('ignores deltas from a different workflowRunId even when taskId matches', async () => {
+    const harness = buildHarness(makePage([]))
+
+    renderWithHarness(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-2" taskStatus="running" />,
+      harness,
+    )
+
+    const conn = await flushAndGetLastConnection()
+    const handler = conn.handlers.get('OnTaskLogDelta')
+    expect(handler).toBeDefined()
+
+    await act(async () => {
+      handler!(makeEnvelope([{ seq: 1, text: 'wrong-run' }], { ownerId: 'wr-1' }))
+    })
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(screen.queryByText('wrong-run')).not.toBeInTheDocument()
   })
 
   it('ignores deltas scoped to a different taskId', async () => {
@@ -401,6 +427,58 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     expect(recordedInvokes.some((inv) => inv.method === 'UnsubscribeTaskLogAsync')).toBe(true)
   })
 
+  it('re-subscribes the active task-log scope after SignalR reconnect', async () => {
+    const harness = buildHarness(makePage([]))
+
+    renderWithHarness(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
+      harness,
+    )
+
+    const conn = await flushAndGetLastConnection()
+    await waitFor(() => {
+      expect(recordedInvokes.filter((inv) => inv.method === 'SubscribeTaskLogAsync')).toHaveLength(1)
+    })
+
+    await act(async () => {
+      conn.reconnectHandler?.()
+    })
+
+    await waitFor(() => {
+      expect(recordedInvokes.filter((inv) => inv.method === 'SubscribeTaskLogAsync')).toHaveLength(2)
+    })
+  })
+
+  it('does not subscribe for pending or missing task status', async () => {
+    const pendingHarness = buildHarness(makePage([]))
+    const { unmount } = renderWithHarness(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="pending" />,
+      pendingHarness,
+    )
+
+    await flushAndGetLastConnection()
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(false)
+
+    unmount()
+    fakeConnections.length = 0
+    recordedInvokes.length = 0
+
+    const missingHarness = buildHarness(makePage([]))
+    renderWithHarness(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" />,
+      missingHarness,
+    )
+
+    await flushAndGetLastConnection()
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(recordedInvokes.some((inv) => inv.method === 'SubscribeTaskLogAsync')).toBe(false)
+  })
+
   it('preserves the truncation indicator from cached data (Phase 1 rendering non-regression)', async () => {
     const harness = buildHarness(makePage([
       makeLine({ seq: 4999, text: 'CONFLICT' }),
@@ -446,7 +524,7 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
 })
 
 describe('mergeTaskLogDelta — pure merge', () => {
-  it('appends entries with seq > maxCachedSeq and dedups by seq', () => {
+  it('appends unseen entries and sorts by seq while deduping existing seqs', () => {
     const page = makePage([
       makeLine({ seq: 5, text: 'a' }),
       makeLine({ seq: 6, text: 'b' }),
@@ -457,8 +535,8 @@ describe('mergeTaskLogDelta — pure merge', () => {
       { seq: 7, text: 'c' },
     ])
     const merged = mergeTaskLogDelta(page, delta)
-    expect(merged.lines.map((l) => l.seq)).toEqual([5, 6, 7])
-    expect(merged.lines.map((l) => l.text)).toEqual(['a', 'b', 'c'])
+    expect(merged.lines.map((l) => l.seq)).toEqual([3, 5, 6, 7])
+    expect(merged.lines.map((l) => l.text)).toEqual(['out-of-order', 'a', 'b', 'c'])
   })
 
   it('keeps the truncated flag if either side is truncated', () => {
@@ -468,7 +546,7 @@ describe('mergeTaskLogDelta — pure merge', () => {
     expect(merged.truncated).toBe(true)
   })
 
-  it('returns the original page reference if nothing changes (no incoming entries, no truncate change)', () => {
+  it('keeps equivalent page contents if nothing changes (no incoming entries, no truncate change)', () => {
     const page = makePage([
       makeLine({ seq: 1, text: 'a' }),
     ])

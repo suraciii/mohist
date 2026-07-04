@@ -21,6 +21,7 @@ export interface TaskLogDeltaEntryWire {
 export interface TaskLogDeltaEnvelopeWire {
   ownerKind: string
   ownerId: string
+  projectId?: string | null
   workId: string
   taskId: string | null
   entries: TaskLogDeltaEntryWire[]
@@ -82,6 +83,7 @@ export type TaskLogDeltaCallback = (envelope: TaskLogDeltaEnvelopeWire) => void
 export interface EventsConnection {
   status: ConnectionStatus
   connection: HubConnection | null
+  reconnectVersion: number
 }
 
 export function useEventsConnection(
@@ -98,6 +100,7 @@ export function useEventsConnection(
   taskLogDeltaCallbackRef.current = onTaskLogDelta
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [connection, setConnection] = useState<HubConnection | null>(null)
+  const [reconnectVersion, setReconnectVersion] = useState(0)
 
   useEffect(() => {
     if (!projectId) {
@@ -127,6 +130,7 @@ export function useEventsConnection(
     conn.onreconnecting(() => handleState('reconnecting'))
     conn.onreconnected(() => {
       handleState('connected')
+      setReconnectVersion((version) => version + 1)
       void applySubscription(conn)
     })
     conn.onclose(() => {
@@ -157,7 +161,7 @@ export function useEventsConnection(
     }
   }, [projectId])
 
-  return { status, connection }
+  return { status, connection, reconnectVersion }
 }
 
 export async function subscribeTaskLog(

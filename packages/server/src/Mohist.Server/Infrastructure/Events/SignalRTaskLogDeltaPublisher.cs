@@ -66,6 +66,8 @@ public sealed class SignalRTaskLogDeltaPublisher : ITaskLogDeltaPublisher
             // Either missing ⇒ connection not interested; skip.
             if (!_registry.ShouldNotifyTaskLog(connectionId, envelope.OwnerId, envelope.TaskId))
                 continue;
+            if (!ShouldNotifyProject(connectionId, envelope.ProjectId))
+                continue;
 
             try
             {
@@ -89,5 +91,13 @@ public sealed class SignalRTaskLogDeltaPublisher : ITaskLogDeltaPublisher
                 "TaskLogDeltaPublisher dropped task-log delta for {OwnerKind}/{OwnerId}/{WorkId} (no subscribers)",
                 envelope.OwnerKind, envelope.OwnerId, envelope.WorkId);
         }
+    }
+
+    private bool ShouldNotifyProject(string connectionId, string? projectId)
+    {
+        if (string.IsNullOrWhiteSpace(projectId)) return true;
+        return !_registry.TryGetProjectId(connectionId, out var connectionProjectId)
+            || string.IsNullOrEmpty(connectionProjectId)
+            || StringComparer.Ordinal.Equals(connectionProjectId, projectId);
     }
 }

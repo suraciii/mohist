@@ -125,6 +125,16 @@ function buildHost() {
   })
 }
 
+function deferred() {
+  let resolve!: () => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 function workWith(overrides: Partial<{ workflowRunId: string; workId: string; uses: string; ownerKind: string; agentJobId: string }> = {}) {
   return {
     workflowRunId: "wf-336",
@@ -139,6 +149,154 @@ function workWith(overrides: Partial<{ workflowRunId: string; workId: string; us
 }
 
 describe("RunnerHost task-log best-effort flush (T-003)", () => {
+  it("UploadsIncrementalLogBeforeWorkCompletes", async () => {
+    vi.clearAllMocks()
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    uploadTaskLog.mockResolvedValue({ accepted: 1, truncated: false })
+    report.mockResolvedValue({})
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    poll.mockResolvedValueOnce(workWith({ workId: "work-live", agentJobId: "aj-live" })).mockImplementation(async () => null)
+    const release = deferred()
+    blockingAction.mockImplementationOnce(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
+      log?.write("action:test", "line before completion")
+      await release.promise
+      return { status: "success", message: "ok" }
+    })
+
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-host-task-log-live",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+      taskLogFlushLineThreshold: 1,
+      taskLogFlushIntervalMs: 60_000,
+    })
+    const run = host.run(controller.signal)
+
+    await vi.waitFor(() => expect(uploadTaskLog).toHaveBeenCalled(), { timeout: 5_000 })
+    expect(report).not.toHaveBeenCalled()
+
+    release.resolve()
+    await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+  })
+
+  it("RoutesConcurrentIncrementalUploadsToEachWorkItemCollector", async () => {
+    vi.clearAllMocks()
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    uploadTaskLog.mockResolvedValue({ accepted: 1, truncated: false })
+    report.mockResolvedValue({})
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    poll
+      .mockResolvedValueOnce(workWith({ workId: "work-A", agentJobId: "aj-A" }))
+      .mockResolvedValueOnce(workWith({ workId: "work-B", agentJobId: "aj-B" }))
+      .mockImplementation(async () => null)
+    const releases = new Map<string, ReturnType<typeof deferred>>()
+    blockingAction.mockImplementation(async ({ workId, log }: { workId: string; log?: { write: (source: string, text: string) => void } }) => {
+      const release = deferred()
+      releases.set(workId, release)
+      log?.write("action:test", `line for ${workId}`)
+      await release.promise
+      return { status: "success", message: "ok" }
+    })
+
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-host-task-log-concurrent",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+      taskLogFlushLineThreshold: 1,
+      taskLogFlushIntervalMs: 60_000,
+    })
+    const run = host.run(controller.signal)
+
+    await vi.waitFor(() => expect(uploadTaskLog.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
+
+    for (const call of uploadTaskLog.mock.calls) {
+      const [, workId, batch] = call as [string, string, { entries: Array<{ text: string }> }]
+      const workLines = batch.entries.filter((entry) => entry.text.startsWith("line for "))
+      for (const entry of workLines) {
+        expect(entry.text).toBe(`line for ${workId}`)
+      }
+    }
+
+    releases.get("work-A")?.resolve()
+    releases.get("work-B")?.resolve()
+    await vi.waitFor(() => expect(report).toHaveBeenCalledTimes(2), { timeout: 5_000 })
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+  })
+
+  it("FallbackExecutorPathStreamsIncrementalLogsBeforeReport", async () => {
+    vi.clearAllMocks()
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    uploadTaskLog.mockResolvedValue({ accepted: 1, truncated: false })
+    report.mockResolvedValue({})
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    poll.mockResolvedValueOnce(workWith({ workId: "work-fallback", agentJobId: "aj-fallback" })).mockImplementation(async () => null)
+    const release = deferred()
+    createSharedAcpConnection
+      .mockRejectedValueOnce(new Error("shared ACP unavailable"))
+      .mockResolvedValueOnce({
+        connection: {
+          prompt: vi.fn(),
+          cancel: vi.fn(),
+          newSession: vi.fn(),
+          resumeSession: vi.fn(),
+          setSessionConfigOption: vi.fn(),
+          closeSession: vi.fn(),
+        },
+        processPid: 99999,
+        setSessionHandlers: vi.fn(),
+        clearSessionHandlers: vi.fn(),
+        shutdown: shutdownSharedAcpConnection,
+      })
+    blockingAction.mockImplementationOnce(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
+      log?.write("action:test", "fallback live line")
+      await release.promise
+      return { status: "success", message: "ok" }
+    })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-host-task-log-fallback",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+      taskLogFlushLineThreshold: 1,
+      taskLogFlushIntervalMs: 60_000,
+    })
+    const run = host.run(controller.signal)
+
+    await vi.waitFor(() => expect(uploadTaskLog).toHaveBeenCalled(), { timeout: 5_000 })
+    expect(report).not.toHaveBeenCalled()
+
+    release.resolve()
+    await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+    errorSpy.mockRestore()
+  })
+
   it("FlushesCapturedLogViaUploadTaskLogBeforeReport", async () => {
     vi.clearAllMocks()
     getConnectionId.mockReturnValue("conn-1")
