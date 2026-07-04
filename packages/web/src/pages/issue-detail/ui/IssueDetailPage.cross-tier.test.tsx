@@ -411,24 +411,13 @@ describe('T-004: cross-tier verification — interrupted health path', () => {
     vi.unstubAllGlobals()
   })
 
-  it('reports a blocked situation via the headline (no standalone card); convergence card is the rail surface for interrupted health', async () => {
+  it('reports an interrupted-health projection as blocked via the header without a standalone card', async () => {
     mockUseIssue.mockReturnValue({
       data: baseIssue({
         workflowStatus: 'interrupted',
-        health: 'blocked',
-        blockedReason: 'Agent session was interrupted before stage completion.',
-        convergence: {
-          blockingItemCount: 1,
-          directlyRepairedCount: 0,
-          reactionAttempts: 2,
-          attemptedItemIds: ['cb-1'],
-          resolvedItemIds: [],
-          unresolvedItemIds: ['cb-1'],
-          newBlockingItemIds: [],
-          nonBlockingItemIds: [],
-          blockedReason: 'Agent session was interrupted before stage completion.',
-        },
-        recovery: baseRecovery(),
+        health: 'interrupted',
+        recovery: null,
+        convergence: null,
       }),
       isLoading: false,
       isError: false,
@@ -437,13 +426,11 @@ describe('T-004: cross-tier verification — interrupted health path', () => {
     renderPage()
 
     const headline = await waitFor(() => screen.getByTestId('status-headline'))
-    expect(['blocked', 'failed']).toContain(headline.dataset.summary)
-    expect(headline.textContent ?? '').toMatch(/Blocked|Failed/i)
-    expect(headline.textContent ?? '').toMatch(/Blocked|Failed|Running/i)
+    expect(headline.dataset.summary).toBe('blocked')
+    expect(headline.textContent ?? '').toMatch(/Blocked/i)
+    expect(screen.getByTestId('runtime-rationale').textContent ?? '').toContain('The workflow was interrupted. Resume or rerun to continue.')
 
-    const referenceRail = screen.getByTestId('reference-rail')
-    expect(referenceRail.contains(screen.getByTestId('reference-rail-convergence'))).toBe(true)
-
+    expect(screen.queryByTestId('reference-rail-convergence')).toBeNull()
     expect(screen.queryByTestId('workflow-interrupted-card')).toBeNull()
 
     const readingFlow = screen.getByTestId('reading-flow')
@@ -741,20 +728,9 @@ describe('T-004: cross-tier verification — three-tier weight hierarchy holds o
       name: 'blocked interrupted',
       overrides: {
         workflowStatus: 'interrupted',
-        health: 'blocked',
-        blockedReason: 'Interrupted mid-stage.',
-        convergence: {
-          blockingItemCount: 1,
-          directlyRepairedCount: 0,
-          reactionAttempts: 1,
-          attemptedItemIds: ['cb-1'],
-          resolvedItemIds: [],
-          unresolvedItemIds: ['cb-1'],
-          newBlockingItemIds: [],
-          nonBlockingItemIds: [],
-          blockedReason: 'Interrupted mid-stage.',
-        },
-        recovery: baseRecovery(),
+        health: 'interrupted',
+        recovery: null,
+        convergence: null,
       },
     },
     {

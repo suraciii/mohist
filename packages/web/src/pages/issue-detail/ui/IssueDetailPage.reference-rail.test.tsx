@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -89,11 +89,19 @@ const projects: Project[] = [
 ]
 
 function mockMatchMedia(narrow: boolean) {
+  let matches = narrow
+  const listeners = new Set<(event: MediaQueryListEvent) => void>()
   const mql = {
-    matches: narrow,
+    get matches() {
+      return matches
+    },
     media: '(max-width: 1023.98px)',
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
+    addEventListener: vi.fn((_event: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.add(listener)
+    }),
+    removeEventListener: vi.fn((_event: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.delete(listener)
+    }),
     addListener: vi.fn(),
     removeListener: vi.fn(),
     dispatchEvent: vi.fn(),
@@ -101,6 +109,14 @@ function mockMatchMedia(narrow: boolean) {
   }
   vi.stubGlobal('matchMedia', vi.fn(() => mql))
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: narrow ? 375 : 1280 })
+  return {
+    setNarrow(next: boolean) {
+      matches = next
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: next ? 375 : 1280 })
+      const event = { matches, media: mql.media } as MediaQueryListEvent
+      for (const listener of listeners) listener(event)
+    },
+  }
 }
 
 function renderPage() {
@@ -198,6 +214,7 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
 
     expect(referenceRail.contains(screen.getByTestId('issue-detail-details-metadata'))).toBe(true)
     expect(referenceRail.contains(screen.getByTestId('issue-workflow-profile-control-frame'))).toBe(true)
+    expect(referenceRail.contains(screen.getByTestId('workflow-profile-editor-frame'))).toBe(true)
 
     const detailsToggle = screen.getByTestId('reference-rail-details-toggle')
     const profileToggle = screen.getByTestId('reference-rail-workflow-profile-toggle')
@@ -209,7 +226,15 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
 
   it('exposes the non-runtime IssueActionsCard in the rail and excludes the runtime decision surface', async () => {
     mockUseIssue.mockReturnValue({
-      data: makeIssue({ recovery: DEFAULT_RECOVERY }),
+      data: makeIssue({
+        health: 'blocked',
+        blockedReason: 'Blocked by runtime execution.',
+        recovery: {
+          ...DEFAULT_RECOVERY,
+          latestAttemptState: 'interrupted',
+          allowedActions: ['stop', 'retry', 'resume', 'rerun'],
+        },
+      }),
       isLoading: false,
       isError: false,
     })
@@ -221,6 +246,9 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
     expect(referenceRail.contains(actionsToggle)).toBe(true)
 
     expect(referenceRail.querySelector('[data-testid="runtime-decision-surface"]')).toBeNull()
+    expect(referenceRail.textContent ?? '').not.toContain('Current:')
+    expect(referenceRail.textContent ?? '').not.toContain('Build decision surface')
+    expect(referenceRail.textContent ?? '').not.toContain('Blocked by runtime execution.')
 
     for (const kind of ['approve', 'send-back', 'retry', 'resume', 'rerun', 'stop', 'start']) {
       const action = referenceRail.querySelector(`[data-testid="runtime-action-${kind}"]`)
@@ -286,6 +314,23 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
     expect(referenceRail.querySelector('[data-testid="commits-section"]')).toBeNull()
     expect(referenceRail.querySelector('[data-testid="description-section"]')).toBeNull()
     expect(referenceRail.querySelector('[data-testid="comments-section"]')).toBeNull()
+  })
+
+  it('does not render the workflow profile editor in the reading flow', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({ recovery: DEFAULT_RECOVERY }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const readingFlow = await waitFor(() => screen.getByTestId('reading-flow'))
+    const referenceRail = screen.getByTestId('reference-rail')
+    const editorFrame = screen.getByTestId('workflow-profile-editor-frame')
+
+    expect(referenceRail.contains(editorFrame)).toBe(true)
+    expect(readingFlow.contains(editorFrame)).toBe(false)
   })
 })
 
@@ -428,6 +473,63 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
     }
   })
 
+  it('collapses expanded rail cards when the viewport changes from desktop to narrow', async () => {
+    const viewport = mockMatchMedia(false)
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+        recovery: DEFAULT_RECOVERY,
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
+    expect(referenceRail.dataset.railMode).toBe('desktop')
+    expect(screen.getByTestId('reference-rail-details').dataset.collapsed).toBe('false')
+    expect(screen.getByTestId('reference-rail-actions').dataset.collapsed).toBe('false')
+
+    act(() => {
+      viewport.setNarrow(true)
+    })
+
+    await waitFor(() => {
+      expect(referenceRail.dataset.railMode).toBe('narrow')
+    })
+
+    for (const testId of [
+      'reference-rail-details',
+      'reference-rail-workflow-profile',
+      'reference-rail-drift',
+      'reference-rail-convergence',
+      'reference-rail-configuration',
+      'reference-rail-actions',
+      'reference-rail-prerequisites',
+    ]) {
+      expect(screen.getByTestId(testId).dataset.collapsed).toBe('true')
+    }
+  })
+
   it('stacks rail items beneath the reading flow on a narrow viewport', async () => {
     mockUseIssue.mockReturnValue({
       data: makeIssue({ recovery: DEFAULT_RECOVERY }),
@@ -501,7 +603,7 @@ describe('IssueDetailPage reference-rail — low-frequency items collapsed by de
       expect(driftCard.dataset.collapsed).toBe('false')
     })
     expect(driftCard.querySelector('[data-testid="reference-rail-drift-body"]')).not.toBeNull()
-    expect(within(driftCard).getByRole('heading', { name: /Base Drift Detected/ })).toBeTruthy()
+    expect(within(driftCard).getByText('Needs Attention')).toBeTruthy()
   })
 
   it('keeps the convergence panel collapsed by default with its body absent', async () => {
@@ -531,6 +633,25 @@ describe('IssueDetailPage reference-rail — low-frequency items collapsed by de
     expect(convergenceCard.dataset.collapsed).toBe('true')
     expect(convergenceCard.querySelector('[data-testid="reference-rail-convergence-body"]')).toBeNull()
     expect(screen.queryByText('Workflow Blocked')).toBeNull()
+  })
+
+  it('does not render an empty convergence rail card for blocked issues without convergence content', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        health: 'blocked',
+        blockedReason: 'Runtime blocked without convergence payload.',
+        recovery: DEFAULT_RECOVERY,
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const headline = await waitFor(() => screen.getByTestId('status-headline'))
+    expect(headline.dataset.summary).toBe('blocked')
+    expect(screen.getByTestId('runtime-rationale').textContent ?? '').toContain('Runtime blocked without convergence payload.')
+    expect(screen.queryByTestId('reference-rail-convergence')).toBeNull()
   })
 
   it('expands the convergence panel only on a deliberate click', async () => {
@@ -643,5 +764,38 @@ describe('IssueDetailPage reference-rail — lightest visual weight', () => {
     expect(referenceRail.querySelector('[data-sticky="true"]')).toBeNull()
     expect(referenceRail.className).not.toMatch(/bg-(info|warning|danger|success)-subtle/)
     expect(referenceRail.className).not.toMatch(/\bsticky\b/)
+  })
+
+  it('does not nest same-name CardSection chrome inside expanded rail cards', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        recovery: DEFAULT_RECOVERY,
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
+    const railCards = Array.from(referenceRail.querySelectorAll('[data-rail-card="collapsible"]'))
+    expect(railCards.length).toBeGreaterThan(0)
+
+    for (const card of railCards) {
+      const body = card.querySelector('[data-testid$="-body"]')
+      if (!body) continue
+      const nestedSections = body.querySelectorAll('section.rounded-lg.border')
+      expect(nestedSections).toHaveLength(0)
+    }
+
+    expect(within(screen.getByTestId('reference-rail-details')).queryByRole('heading', { name: 'Details' })).toBeNull()
+    expect(within(screen.getByTestId('reference-rail-workflow-profile')).queryAllByText('Workflow Profile')).toHaveLength(1)
+    expect(within(screen.getByTestId('reference-rail-actions')).queryByRole('heading', { name: 'Actions' })).toBeNull()
   })
 })

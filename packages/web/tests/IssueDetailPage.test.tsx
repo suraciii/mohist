@@ -868,17 +868,14 @@ describe('IssueDetailPage workflow profile integration', () => {
   })
 
   function findDetailsCard() {
-    return findCardByHeading('Details')
+    return screen.getByTestId('reference-rail-details')
   }
 
-  function findCardByHeading(name: string) {
-    const heading = screen.getByText(name, { selector: 'h2' })
-    let current: HTMLElement | null = heading
-    while (current && !(current.tagName === 'SECTION')) {
-      current = current.parentElement
-    }
-    if (!current) throw new Error(`${name} CardSection not found`)
-    return current
+  function findRailCard(name: 'Configuration' | 'Actions') {
+    const testId = name === 'Configuration'
+      ? 'reference-rail-configuration'
+      : 'reference-rail-actions'
+    return screen.getByTestId(testId)
   }
 
   it('does not render a duplicate Workflow Profile row in the DETAILS sidebar', async () => {
@@ -962,28 +959,28 @@ describe('IssueDetailPage workflow profile integration', () => {
     renderWithQueryClient(<IssueDetailPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('Details', { selector: 'h2' })).toBeInTheDocument()
-      expect(screen.getByText('Configuration', { selector: 'h2' })).toBeInTheDocument()
-      expect(screen.getByText('Actions', { selector: 'h2' })).toBeInTheDocument()
+      expect(screen.getByTestId('reference-rail-details-toggle')).toBeInTheDocument()
+      expect(screen.getByTestId('reference-rail-configuration-toggle')).toBeInTheDocument()
+      expect(screen.getByTestId('reference-rail-actions-toggle')).toBeInTheDocument()
       expect(screen.getByText('Latest Artifacts', { selector: 'h3' })).toBeInTheDocument()
     })
 
     const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
     const readingFlow = await waitFor(() => screen.getByTestId('reading-flow'))
 
-    expect(referenceRail.contains(screen.getByText('Details', { selector: 'h2' }))).toBe(true)
-    expect(referenceRail.contains(screen.getByText('Configuration', { selector: 'h2' }))).toBe(true)
-    expect(referenceRail.contains(screen.getByText('Actions', { selector: 'h2' }))).toBe(true)
+    expect(referenceRail.contains(screen.getByTestId('reference-rail-details'))).toBe(true)
+    expect(referenceRail.contains(screen.getByTestId('reference-rail-configuration'))).toBe(true)
+    expect(referenceRail.contains(screen.getByTestId('reference-rail-actions'))).toBe(true)
     expect(readingFlow.contains(screen.getByText('Latest Artifacts', { selector: 'h3' }))).toBe(true)
     expect(readingFlow.contains(screen.getByText('Task Progress'))).toBe(true)
     expect(readingFlow.contains(screen.getByText('Sessions'))).toBe(true)
     expect(referenceRail.contains(screen.queryByText('Latest Artifacts', { selector: 'h3' })!)).toBe(false)
 
-    const configurationCard = findCardByHeading('Configuration')
+    const configurationCard = findRailCard('Configuration')
     expect(within(configurationCard).getByText('Coder Model')).toBeInTheDocument()
     expect(within(configurationCard).getByText('Per-stage overrides')).toBeInTheDocument()
 
-    const actionsCard = findCardByHeading('Actions')
+    const actionsCard = findRailCard('Actions')
     expect(within(actionsCard).queryByText('Coder Model')).not.toBeInTheDocument()
     expect(within(actionsCard).queryByText('Per-stage overrides')).not.toBeInTheDocument()
   })
@@ -1002,10 +999,10 @@ describe('IssueDetailPage workflow profile integration', () => {
     renderWithQueryClient(<IssueDetailPage />)
 
     await waitFor(() => {
-      expect(screen.getByText('Configuration', { selector: 'h2' })).toBeInTheDocument()
+      expect(screen.getByTestId('reference-rail-configuration')).toBeInTheDocument()
     })
 
-    const configurationCard = findCardByHeading('Configuration')
+    const configurationCard = findRailCard('Configuration')
     expect(within(configurationCard).getByTestId('prerequisite-configuration-controls')).toBeInTheDocument()
     expect(within(configurationCard).getByText('Prerequisites')).toBeInTheDocument()
     expect(screen.queryByText('Add Prerequisite', { selector: 'h2' })).not.toBeInTheDocument()

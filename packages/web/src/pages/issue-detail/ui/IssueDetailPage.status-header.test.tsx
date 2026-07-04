@@ -193,10 +193,15 @@ describe('IssueDetailPage status-header — stickiness of StatusHeadline', () =>
     expect(headline.className).toContain('top-0')
 
     const scrollContainer = screen.getByTestId('issue-detail-page-container')
-    const firstChild = scrollContainer.firstElementChild
-    expect(firstChild).toBeTruthy()
-    const firstInteractive = firstChild?.querySelector('[data-testid="status-headline"]')
-    expect(firstInteractive).toBe(headline)
+    const maxWidthShell = scrollContainer.firstElementChild
+    expect(maxWidthShell).toBeTruthy()
+    const headerTier = screen.getByTestId('status-header-tier')
+    expect(maxWidthShell?.firstElementChild).toBe(headerTier)
+    expect(headerTier.firstElementChild).toBe(headline)
+
+    const backButton = screen.getByTestId('back-to-board')
+    const headlinePosition = headline.compareDocumentPosition(backButton)
+    expect(headlinePosition & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
 
     const stickyElements = Array.from(scrollContainer.querySelectorAll('[data-sticky="true"]'))
     expect(stickyElements).toHaveLength(1)

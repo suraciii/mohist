@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
-import { IssueStatus, IssueHealth } from '../../../entities/issue'
+import { IssueStatus } from '../../../entities/issue'
 import { issueAttachmentContentPath } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
@@ -137,6 +137,14 @@ export function IssueDetailPage() {
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
+  const convergence = issue.convergence ?? null
+  const hasConvergenceContent = !!convergence
+    && (!!convergence.failedCheck || convergence.blockingItemCount > 0 || convergence.reactionAttempts > 0)
+  const convergenceSummary = convergence?.blockingItemCount
+    ? `${convergence.blockingItemCount} blocking`
+    : convergence?.reactionAttempts
+      ? `${convergence.reactionAttempts} attempt${convergence.reactionAttempts === 1 ? '' : 's'}`
+      : 'convergence'
   const issueProjectId = projectId ?? issue.projectId
   const resolveIssueAttachment = (id: string) => attachmentFromMetadata(
     id,
@@ -148,21 +156,21 @@ export function IssueDetailPage() {
     <>
       <div className="flex-1 min-w-0 overflow-y-auto" data-testid="issue-detail-page-container">
         <div className="max-w-4xl min-w-0 mx-auto px-4 sm:px-6 py-6">
-          <button
-            type="button"
-            onClick={() => navigate(isArchived ? toProjectPath('/archived') : toProjectPath())}
-            data-testid={isArchived ? 'back-to-archived' : 'back-to-board'}
-            className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeftIcon className="size-3.5" />
-            <span>{isArchived ? 'Back to archived' : 'Back to board'}</span>
-          </button>
-
           <div data-testid="status-header-tier" className="space-y-4">
             <StatusHeadline
               decision={decision}
               stageProgress={issue.workflowStageProgress ?? null}
             />
+
+            <button
+              type="button"
+              onClick={() => navigate(isArchived ? toProjectPath('/archived') : toProjectPath())}
+              data-testid={isArchived ? 'back-to-archived' : 'back-to-board'}
+              className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeftIcon className="size-3.5" />
+              <span>{isArchived ? 'Back to archived' : 'Back to board'}</span>
+            </button>
 
             <div data-testid="issue-detail-header">
               <div className="flex flex-wrap items-center gap-3 mb-2">
@@ -293,10 +301,6 @@ export function IssueDetailPage() {
 
               <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
 
-              <div data-testid="workflow-profile-editor-frame">
-                <IssueWorkflowProfileEditor issueNumber={issueNumber} />
-              </div>
-
               {(!isBacklog || issue.workflowRunId) && (
                 <div data-testid="runtime-evidence-frame" className="space-y-4">
                   {!isBacklog && workflowStage && (
@@ -408,7 +412,7 @@ export function IssueDetailPage() {
                 forceCollapsed={isNarrowViewport}
                 summary={issue.status === IssueStatus.Backlog ? 'Backlog' : issue.status}
               >
-                <IssueDetailsCard issue={issue} />
+                <IssueDetailsCard issue={issue} unframed />
               </CollapsibleRailCard>
 
               <CollapsibleRailCard
@@ -417,8 +421,13 @@ export function IssueDetailPage() {
                 forceCollapsed={isNarrowViewport}
                 summary={issue.workflowProfileId ?? 'default'}
               >
-                <div data-testid="issue-workflow-profile-control-frame">
-                  <WorkflowProfileControl issue={issue} />
+                <div className="space-y-4">
+                  <div data-testid="issue-workflow-profile-control-frame">
+                    <WorkflowProfileControl issue={issue} embedded />
+                  </div>
+                  <div data-testid="workflow-profile-editor-frame">
+                    <IssueWorkflowProfileEditor issueNumber={issueNumber} embedded />
+                  </div>
                 </div>
               </CollapsibleRailCard>
 
@@ -430,23 +439,19 @@ export function IssueDetailPage() {
                   forceCollapsed={isNarrowViewport}
                   summary={issue.drift.decision ?? 'drifted'}
                 >
-                  <IssueDriftCard drift={issue.drift} />
+                  <IssueDriftCard drift={issue.drift} unframed />
                 </CollapsibleRailCard>
               )}
 
-              {(issue.health === IssueHealth.Blocked || issue.convergence) && (
+              {hasConvergenceContent && (
                 <CollapsibleRailCard
                   testId="reference-rail-convergence"
                   title="Convergence"
                   defaultCollapsed
                   forceCollapsed={isNarrowViewport}
-                  summary={
-                    issue.convergence?.blockingItemCount
-                      ? `${issue.convergence.blockingItemCount} blocking`
-                      : (issue.health === IssueHealth.Blocked ? 'blocked' : 'none')
-                  }
+                  summary={convergenceSummary}
                 >
-                  <WorkflowConvergencePanel convergence={issue.convergence} />
+                  <WorkflowConvergencePanel convergence={convergence} />
                 </CollapsibleRailCard>
               )}
 
@@ -459,6 +464,7 @@ export function IssueDetailPage() {
                 <IssueConfigurationCard
                   issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prerequisites, isBacklog }}
                   mutations={{ addPrerequisiteMutation, removePrerequisiteMutation }}
+                  unframed
                 />
               </CollapsibleRailCard>
 
@@ -470,7 +476,6 @@ export function IssueDetailPage() {
               >
                 <IssueActionsCard
                   issue={issue}
-                  decision={decision}
                   agentStatus={agentStatus ?? null}
                   mutations={{
                     approveMutation,
@@ -483,6 +488,7 @@ export function IssueDetailPage() {
                     rerunMutation,
                   }}
                   onAskAgent={() => navigate(toProjectPath('/agent-sessions/new?issue=' + encodeURIComponent(issueNumber)))}
+                  unframed
                 />
               </CollapsibleRailCard>
 
@@ -493,7 +499,7 @@ export function IssueDetailPage() {
                   forceCollapsed={isNarrowViewport}
                   summary={`${issue.prerequisites.length} item${issue.prerequisites.length === 1 ? '' : 's'}`}
                 >
-                  <IssuePrerequisitesCard prerequisites={issue.prerequisites} />
+                  <IssuePrerequisitesCard prerequisites={issue.prerequisites} unframed />
                 </CollapsibleRailCard>
               )}
 
@@ -504,7 +510,7 @@ export function IssueDetailPage() {
                   forceCollapsed={isNarrowViewport}
                   summary={issue.canStart ? 'ready' : 'not ready'}
                 >
-                  <IssueReadinessCard issue={issue} />
+                  <IssueReadinessCard issue={issue} unframed />
                 </CollapsibleRailCard>
               )}
             </div>

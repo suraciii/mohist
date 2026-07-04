@@ -8,15 +8,12 @@ export type IssueReadinessCardIssue = Pick<
 
 export interface IssueReadinessCardProps {
   issue: IssueReadinessCardIssue
+  unframed?: boolean
 }
 
-export function IssueReadinessCard({ issue }: IssueReadinessCardProps) {
-  return (
-    <CardSection
-      title="Readiness"
-      tone={issue.isDraft ? 'default' : issue.canStart ? 'green' : 'amber'}
-    >
-      <div className="space-y-2 text-sm" data-testid="readiness-panel">
+export function IssueReadinessCard({ issue, unframed = false }: IssueReadinessCardProps) {
+  const content = (
+    <div className="space-y-2 text-sm" data-testid="readiness-panel">
         <div className="flex items-center justify-between gap-2">
           <span className="text-muted-foreground">Draft</span>
           <span data-testid="readiness-is-draft">
@@ -43,7 +40,15 @@ export function IssueReadinessCard({ issue }: IssueReadinessCardProps) {
                 : 'None'}
           </span>
         </div>
-      </div>
+    </div>
+  )
+  if (unframed) return content
+  return (
+    <CardSection
+      title="Readiness"
+      tone={issue.isDraft ? 'default' : issue.canStart ? 'green' : 'amber'}
+    >
+      {content}
     </CardSection>
   )
 }

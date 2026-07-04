@@ -1,5 +1,5 @@
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { cn } from '@/shared/lib/utils'
 
 export interface CollapsibleRailCardProps {
@@ -20,6 +20,13 @@ export function CollapsibleRailCard({
   children,
 }: CollapsibleRailCardProps) {
   const [expanded, setExpanded] = useState<boolean>(!(defaultCollapsed || forceCollapsed))
+
+  useEffect(() => {
+    if (forceCollapsed) {
+      setExpanded(false)
+    }
+  }, [forceCollapsed])
+
   const collapsed = !expanded
 
   return (
@@ -63,7 +70,7 @@ export function CollapsibleRailCard({
         <div
           id={`${testId}-body`}
           data-testid={`${testId}-body`}
-          className="p-0"
+          className="p-4"
         >
           {children}
         </div>

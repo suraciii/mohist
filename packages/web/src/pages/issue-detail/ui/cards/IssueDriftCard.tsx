@@ -3,12 +3,12 @@ import type { BaseDriftInfo } from '../../../../entities/issue'
 
 export interface IssueDriftCardProps {
   drift: BaseDriftInfo
+  unframed?: boolean
 }
 
-export function IssueDriftCard({ drift }: IssueDriftCardProps) {
-  return (
-    <CardSection title="Base Drift Detected" tone="amber">
-      <div className="space-y-1.5 text-xs">
+export function IssueDriftCard({ drift, unframed = false }: IssueDriftCardProps) {
+  const content = (
+    <div className="space-y-1.5 text-xs">
         {drift.decision && (
           <div className="flex justify-between">
             <span className="text-muted-foreground">Rebase decision:</span>
@@ -61,7 +61,8 @@ export function IssueDriftCard({ drift }: IssueDriftCardProps) {
             ))}
           </div>
         )}
-      </div>
-    </CardSection>
+    </div>
   )
+  if (unframed) return content
+  return <CardSection title="Base Drift Detected" tone="amber">{content}</CardSection>
 }

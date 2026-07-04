@@ -303,6 +303,22 @@ describe('deriveRuntimeDecision', () => {
     expect(decision.actions.find((a) => a.kind === 'resume')?.enabled).toBe(true)
   })
 
+  it('returns blocked when issue health is Interrupted without recovery or convergence payloads', () => {
+    const decision = deriveRuntimeDecision({
+      issue: baseIssue({
+        health: IssueHealth.Interrupted,
+        workflowStatus: 'interrupted',
+        workflowStage: WorkflowStage.Build,
+        recovery: null,
+        convergence: null,
+      }),
+    })
+
+    expect(decision.summary).toBe('blocked')
+    expect(decision.rationale).toBe('The workflow was interrupted. Resume or rerun to continue.')
+    expect(decision.blockedReason).toBe('The workflow was interrupted. Resume or rerun to continue.')
+  })
+
   it('returns blocked when convergence has unresolved items', () => {
     const decision = deriveRuntimeDecision({
       issue: baseIssue({

@@ -10,6 +10,7 @@ import type { Issue } from '../../../entities/issue'
 
 interface WorkflowProfileControlProps {
   issue: Issue
+  embedded?: boolean
 }
 
 const SYSTEM_DEFAULT_ID = 'mohist/local'
@@ -18,7 +19,7 @@ function isStartedIssue(issue: Issue): boolean {
   return issue.status !== IssueStatus.Backlog || !!issue.workflowRunId
 }
 
-export function WorkflowProfileControl({ issue }: WorkflowProfileControlProps) {
+export function WorkflowProfileControl({ issue, embedded = false }: WorkflowProfileControlProps) {
   const { data: workflowProfiles } = useWorkflowProfiles()
   const { data: workflowProfileYaml } = useIssueWorkflowProfileYaml(issue.number, true)
   const updateMutation = useUpdateIssueWorkflowProfile()
@@ -73,13 +74,13 @@ export function WorkflowProfileControl({ issue }: WorkflowProfileControlProps) {
       data-testid="issue-workflow-profile-control"
       data-effective-profile={effectiveProfileId}
       data-default-profile={defaultProfileId}
-      className="rounded-lg border border-border bg-card p-4 space-y-2"
+      className={embedded ? 'space-y-2' : 'rounded-lg border border-border bg-card p-4 space-y-2'}
     >
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-card-foreground">Workflow Profile</h3>
+        {!embedded && <h3 className="text-sm font-semibold text-card-foreground">Workflow Profile</h3>}
         <span
           data-testid="issue-workflow-profile-value"
-          className="text-xs font-mono text-muted-foreground"
+          className={embedded ? 'text-xs font-mono text-foreground' : 'text-xs font-mono text-muted-foreground'}
         >
           {effectiveProfileId}
         </span>
