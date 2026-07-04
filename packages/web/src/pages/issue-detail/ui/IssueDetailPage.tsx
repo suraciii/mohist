@@ -301,6 +301,10 @@ export function IssueDetailPage() {
 
               <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
 
+              {issue.workflowRunId && (
+                <WorkflowYamlDialog workflowRunId={issue.workflowRunId} isArchived={isArchived} />
+              )}
+
               {(!isBacklog || issue.workflowRunId) && (
                 <div data-testid="runtime-evidence-frame" className="space-y-4">
                   {!isBacklog && workflowStage && (
@@ -381,10 +385,6 @@ export function IssueDetailPage() {
               )}
 
               <IssueDescriptionSection issue={issue} resolveIssueAttachment={resolveIssueAttachment} />
-
-              {issue.workflowRunId && (
-                <WorkflowYamlDialog workflowRunId={issue.workflowRunId} isArchived={isArchived} />
-              )}
 
               <IssueCommentsSection
                 comments={comments}
