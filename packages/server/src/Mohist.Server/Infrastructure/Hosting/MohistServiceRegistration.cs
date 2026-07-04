@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Events.Hosting;
@@ -57,26 +56,6 @@ public static class MohistServiceRegistration
         var connectionString = ResolveSqliteConnectionString(configuration);
 
         services.AddMohistOpenTelemetry(configuration);
-
-        // 启用 HttpLogging 中间件，并注册 interceptor 在 /otel 自遥测路径上
-        // 跳过请求日志（exporter 每 5 秒 POST 自己的 /otel/v1/traces，会
-        // 刷屏）。interceptor 对其它路径不影响，业务请求日志保留。
-        // 注意：中间件本身只控制它产出的日志；hosting diagnostics 默认
-        // 的 Request starting/finished 由 config.jsonc 的 Logging:LogLevel
-        // 压到 Warning，请求日志改由本中间件统一聚合产出。
-        services.AddHttpLogging(options =>
-        {
-            // 聚合产出一条请求摘要（含方法/路径/状态码/耗时）。
-            options.CombineLogs = true;
-            // 不缓冲 request/response body。HttpLogging 默认会缓冲整个 body
-            // 以便记录，但 /otel/v1/traces 的 protobuf body 是一次性 forward
-            // stream，被中间件缓冲后路由端拿到的是截断 body，导致 protobuf
-            // 解析失败。业务请求也无必要默认记录 body（需要时可临时放开）。
-            options.LoggingFields = HttpLoggingFields.All
-                & ~HttpLoggingFields.RequestBody
-                & ~HttpLoggingFields.ResponseBody;
-        });
-        services.AddHttpLoggingInterceptor<OtelHttpLogSuppressorInterceptor>();
 
         services.AddDbContextFactory<MohistDbContext>(options =>
             options.UseSqlite(connectionString));
