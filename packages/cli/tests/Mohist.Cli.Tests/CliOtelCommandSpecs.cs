@@ -1,39 +1,11 @@
 using System.Net;
-using System.Text;
-using Microsoft.Data.Sqlite;
 using Mohist.Cli.Tests.Support;
 using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class CliOtelCommandSpecs : IDisposable
+public class CliOtelCommandSpecs
 {
-    private readonly List<string> _tempFiles = [];
-
-    public void Dispose()
-    {
-        foreach (var path in _tempFiles)
-        {
-            try
-            {
-                if (File.Exists(path))
-                    File.Delete(path);
-                var wal = path + "-wal";
-                if (File.Exists(wal))
-                    File.Delete(wal);
-                var shm = path + "-shm";
-                if (File.Exists(shm))
-                    File.Delete(shm);
-                var journal = path + "-journal";
-                if (File.Exists(journal))
-                    File.Delete(journal);
-            }
-            catch
-            {
-            }
-        }
-    }
-
     [Fact]
     public void OtelRoot_Help_ListsSubcommands()
     {
@@ -75,7 +47,12 @@ public class CliOtelCommandSpecs : IDisposable
     [Fact]
     public async Task OtelQuery_CustomDbPath_RunsAgainstExplicitPath()
     {
-        var dbPath = CreateTempOtelDb(out var fileSystem);
+        var dbPath = "/tmp/otel-custom.db";
+        var fileSystem = new FakeFileSystem();
+        fileSystem.AddFile(dbPath, "");
+        var executor = FakeOtelQueryExecutor.ReturningColumns(
+            new[] { "total" },
+            new[] { new object?[] { 1L } });
 
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
         var output = new StringWriter();
@@ -86,7 +63,8 @@ public class CliOtelCommandSpecs : IDisposable
             ["otel", "query", "SELECT COUNT(*) AS total FROM traces", "-d", dbPath],
             output,
             error,
-            fileSystem: fileSystem);
+            fileSystem: fileSystem,
+            queryExecutor: executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("total", output.ToString());
@@ -97,7 +75,12 @@ public class CliOtelCommandSpecs : IDisposable
     [Fact]
     public async Task OtelQuery_DoesNotRequireServer()
     {
-        var dbPath = CreateTempOtelDb(out var fileSystem);
+        var dbPath = "/tmp/otel-no-server.db";
+        var fileSystem = new FakeFileSystem();
+        fileSystem.AddFile(dbPath, "");
+        var executor = FakeOtelQueryExecutor.ReturningColumns(
+            new[] { "total" },
+            new[] { new object?[] { 1L } });
         var handler = new ThrowingHttpHandler();
 
         var output = new StringWriter();
@@ -108,7 +91,8 @@ public class CliOtelCommandSpecs : IDisposable
             ["otel", "query", "SELECT COUNT(*) AS total FROM traces", "-d", dbPath],
             output,
             error,
-            fileSystem: fileSystem);
+            fileSystem: fileSystem,
+            queryExecutor: executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("total", output.ToString());
@@ -119,9 +103,8 @@ public class CliOtelCommandSpecs : IDisposable
     [Fact]
     public async Task OtelQuery_DbMissing_FailsWithClearError()
     {
-        var dbPath = Path.Combine(Path.GetTempPath(), "mohist-nonexistent-" + Guid.NewGuid().ToString("N") + ".db");
-        if (File.Exists(dbPath))
-            File.Delete(dbPath);
+        var dbPath = "/tmp/otel-does-not-exist-" + Guid.NewGuid().ToString("N") + ".db";
+        var fileSystem = new FakeFileSystem();
 
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
         var output = new StringWriter();
@@ -131,7 +114,9 @@ public class CliOtelCommandSpecs : IDisposable
             handler,
             ["otel", "query", "SELECT 1", "-d", dbPath],
             output,
-            error);
+            error,
+            fileSystem: fileSystem,
+            queryExecutor: FakeOtelQueryExecutor.ReturningEmpty());
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("otel.db not found", error.ToString());
@@ -142,7 +127,11 @@ public class CliOtelCommandSpecs : IDisposable
     [Fact]
     public async Task OtelQuery_SqlReferencesMissingTable_FailsWithSqliteError()
     {
-        var dbPath = CreateTempOtelDb(out var fileSystem);
+        var dbPath = "/tmp/otel-missing-table.db";
+        var fileSystem = new FakeFileSystem();
+        fileSystem.AddFile(dbPath, "");
+        var executor = FakeOtelQueryExecutor.Throwing("SQLite error: no such table: nonexistent");
+
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
         var output = new StringWriter();
         var error = new StringWriter();
@@ -152,7 +141,8 @@ public class CliOtelCommandSpecs : IDisposable
             ["otel", "query", "SELECT * FROM nonexistent", "-d", dbPath],
             output,
             error,
-            fileSystem: fileSystem);
+            fileSystem: fileSystem,
+            queryExecutor: executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("SQLite error", error.ToString());
@@ -162,7 +152,12 @@ public class CliOtelCommandSpecs : IDisposable
     [Fact]
     public async Task OtelQuery_OpensConnectionReadOnly_RejectsWrites()
     {
-        var dbPath = CreateTempOtelDb(out var fileSystem);
+        var dbPath = "/tmp/otel-readonly.db";
+        var fileSystem = new FakeFileSystem();
+        fileSystem.AddFile(dbPath, "");
+        var executor = FakeOtelQueryExecutor.Throwing(
+            "SQLite error: attempt to write a readonly database",
+            isReadOnlyViolation: true);
 
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
         var output = new StringWriter();
@@ -170,10 +165,11 @@ public class CliOtelCommandSpecs : IDisposable
 
         var exitCode = await RunAsync(
             handler,
-            ["otel", "query", "INSERT INTO traces (trace_id, service_name, start_time, end_time, span_count) VALUES ('abc', 'svc', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 0)", "-d", dbPath],
+            ["otel", "query", "INSERT INTO traces (trace_id) VALUES ('abc')", "-d", dbPath],
             output,
             error,
-            fileSystem: fileSystem);
+            fileSystem: fileSystem,
+            queryExecutor: executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("SQLite error", error.ToString());
@@ -183,7 +179,10 @@ public class CliOtelCommandSpecs : IDisposable
     [Fact]
     public async Task OtelQuery_SqlSyntaxError_FailsWithSqliteError()
     {
-        var dbPath = CreateTempOtelDb(out var fileSystem);
+        var dbPath = "/tmp/otel-syntax.db";
+        var fileSystem = new FakeFileSystem();
+        fileSystem.AddFile(dbPath, "");
+        var executor = FakeOtelQueryExecutor.Throwing("SQLite error: near \"FROM\": syntax error");
 
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
         var output = new StringWriter();
@@ -194,7 +193,8 @@ public class CliOtelCommandSpecs : IDisposable
             ["otel", "query", "SELECT FROM WHERE", "-d", dbPath],
             output,
             error,
-            fileSystem: fileSystem);
+            fileSystem: fileSystem,
+            queryExecutor: executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("SQLite error", error.ToString());
@@ -203,20 +203,27 @@ public class CliOtelCommandSpecs : IDisposable
     [Fact]
     public async Task OtelQuery_EmptyResultSet_RendersHeaderAndZeroRowsMessage()
     {
-        var dbPath = CreateEmptyTempOtelDb(out var fileSystem);
+        var dbPath = "/tmp/otel-empty.db";
+        var fileSystem = new FakeFileSystem();
+        fileSystem.AddFile(dbPath, "");
+        // The traces table schema is what the production otel.db exposes; the
+        // column names drive the rendered header. An empty result (WHERE 1=0)
+        // triggers the "(0 rows)" sentinel.
+        var executor = FakeOtelQueryExecutor.ReturningColumns(
+            new[] { "trace_id", "service_name", "start_time", "end_time", "span_count" },
+            Array.Empty<object?[]>());
 
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
         var output = new StringWriter();
         var error = new StringWriter();
 
-        // A SELECT that returns 0 result rows (e.g. WHERE 1=0) triggers
-        // the "(0 rows)" sentinel in the renderer.
         var exitCode = await RunAsync(
             handler,
             ["otel", "query", "SELECT * FROM traces WHERE 1=0", "-d", dbPath],
             output,
             error,
-            fileSystem: fileSystem);
+            fileSystem: fileSystem,
+            queryExecutor: executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
@@ -358,7 +365,8 @@ public class CliOtelCommandSpecs : IDisposable
             output,
             error,
             new FakeFileSystem(),
-            new FakeCommandExecutor()).GetAwaiter().GetResult();
+            new FakeCommandExecutor(),
+            queryExecutor: FakeOtelQueryExecutor.ReturningEmpty()).GetAwaiter().GetResult();
     }
 
     private static async Task<int> RunAsync(
@@ -366,7 +374,8 @@ public class CliOtelCommandSpecs : IDisposable
         string[] args,
         StringWriter output,
         StringWriter error,
-        FakeFileSystem? fileSystem = null)
+        FakeFileSystem? fileSystem = null,
+        IOtelQueryExecutor? queryExecutor = null)
     {
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
         return await MohistCliCommands.RunAsync(
@@ -375,83 +384,8 @@ public class CliOtelCommandSpecs : IDisposable
             output,
             error,
             fileSystem ?? new FakeFileSystem(),
-            new FakeCommandExecutor());
-    }
-
-    private string CreateTempOtelDb(out FakeFileSystem fileSystem)
-    {
-        fileSystem = new FakeFileSystem();
-        var path = CreateSchemaInNewFile(insertTrace: true);
-        fileSystem.AddFile(path, "");
-        return path;
-    }
-
-    private string CreateEmptyTempOtelDb(out FakeFileSystem fileSystem)
-    {
-        fileSystem = new FakeFileSystem();
-        var path = CreateSchemaInNewFile(insertTrace: false);
-        fileSystem.AddFile(path, "");
-        return path;
-    }
-
-    private string CreateSchemaInNewFile(bool insertTrace)
-    {
-        var path = Path.Combine(
-            Path.GetTempPath(),
-            "mohist-otel-" + Guid.NewGuid().ToString("N") + ".db");
-        _tempFiles.Add(path);
-
-        var builder = new SqliteConnectionStringBuilder
-        {
-            DataSource = path,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-        };
-        using (var connection = new SqliteConnection(builder.ToString()))
-        {
-            connection.Open();
-            ExecuteNonQuery(connection, "PRAGMA journal_mode=WAL;");
-            ExecuteNonQuery(connection, """
-                CREATE TABLE IF NOT EXISTS traces (
-                    trace_id    TEXT PRIMARY KEY,
-                    service_name TEXT NOT NULL,
-                    start_time  TEXT NOT NULL,
-                    end_time    TEXT NOT NULL,
-                    span_count  INTEGER NOT NULL DEFAULT 0
-                );
-                """);
-            ExecuteNonQuery(connection, """
-                CREATE TABLE IF NOT EXISTS spans (
-                    trace_id           TEXT NOT NULL,
-                    span_id            TEXT NOT NULL,
-                    parent_span_id     TEXT,
-                    name               TEXT NOT NULL,
-                    kind               INTEGER NOT NULL,
-                    start_time         TEXT NOT NULL,
-                    end_time           TEXT NOT NULL,
-                    attributes         TEXT,
-                    status_code        INTEGER NOT NULL DEFAULT 0,
-                    status_message     TEXT,
-                    resource_attributes TEXT,
-                    PRIMARY KEY (trace_id, span_id)
-                );
-                """);
-            if (insertTrace)
-            {
-                ExecuteNonQuery(connection, """
-                    INSERT INTO traces (trace_id, service_name, start_time, end_time, span_count)
-                    VALUES ('trace_001', 'test-service', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 3);
-                    """);
-            }
-        }
-
-        return path;
-    }
-
-    private static void ExecuteNonQuery(SqliteConnection connection, string sql)
-    {
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
+            new FakeCommandExecutor(),
+            queryExecutor: queryExecutor);
     }
 
     private sealed class ThrowingHttpHandler : HttpMessageHandler
