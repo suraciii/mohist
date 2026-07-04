@@ -30,6 +30,47 @@ export function removeEpicIssue(epicId: string, issueId: string, projectId?: str
   })
 }
 
+export interface BatchMembershipOutcome {
+  identifier: string
+  status: 'linked' | 'already-linked' | 'conflict' | 'not-found' | 'unlinked' | 'was-not-a-member'
+  issueId?: string | null
+  issueNumber?: number | null
+  owningEpicId?: string | null
+  owningEpicTitle?: string | null
+}
+
+export interface BatchMembershipResponse {
+  results: BatchMembershipOutcome[]
+}
+
+export function batchAddEpicIssues(
+  epicId: string,
+  issueIds: string[],
+  projectId?: string | null,
+) {
+  return request<BatchMembershipResponse>(
+    projectApiPath(projectId, `/epics/${encodeURIComponent(epicId)}/issues:batch`),
+    {
+      method: 'POST',
+      body: JSON.stringify({ issueIds }),
+    },
+  )
+}
+
+export function batchRemoveEpicIssues(
+  epicId: string,
+  issueIds: string[],
+  projectId?: string | null,
+) {
+  return request<BatchMembershipResponse>(
+    projectApiPath(projectId, `/epics/${encodeURIComponent(epicId)}/issues:batch-unlink`),
+    {
+      method: 'POST',
+      body: JSON.stringify({ issueIds }),
+    },
+  )
+}
+
 export function markEpicDone(id: string, projectId?: string | null) {
   return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/done`), { method: 'POST' })
 }

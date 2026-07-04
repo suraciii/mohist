@@ -133,6 +133,128 @@ public class EpicGrain : Grain, IEpicGrain
         await PersistEpicEventsAsync(domain, pending, now);
     }
 
+    public async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
+        IReadOnlyList<BatchMembershipRequestItem> issues,
+        string projectId)
+    {
+        if (issues.Count == 0)
+            return Array.Empty<BatchMembershipOutcome>();
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var parts = GrainKey.Split(':');
+        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+        var targetIsTerminal = IsTerminalEpicStatus(row.Status);
+
+        // De-duplicate the input by canonical internal issue id while
+        // preserving the first occurrence's caller-supplied identifier so
+        // the per-identifier response matches the request one-to-one.
+        // Per the spec, a duplicate identifier is "linked at most once,
+        // not treated as an error" — hence the dedup key is the internal
+        // id, not the identifier string.
+        var dedupByIssueId = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
+        foreach (var item in issues)
+        {
+            if (string.IsNullOrWhiteSpace(item.IssueId)) continue;
+            dedupByIssueId.TryAdd(item.IssueId, item);
+        }
+        if (dedupByIssueId.Count == 0)
+            return Array.Empty<BatchMembershipOutcome>();
+
+        // Snapshot the existing link set ONCE — every successful link
+        // mutates the in-memory aggregate only, persisting per-issue (so a
+        // single failure does not roll back later successes). Replaying
+        // the snapshot on each iteration keeps the per-issue invariant
+        // check consistent with what is currently in the DB.
+        var existingLinks = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .Select(link => link.IssueId)
+            .ToHashSetAsync(StringComparer.Ordinal);
+
+        var outcomes = new List<BatchMembershipOutcome>(dedupByIssueId.Count);
+        foreach (var item in dedupByIssueId.Values)
+        {
+            // Already a member of this epic — idempotent, no duplicate.
+            if (existingLinks.Contains(item.IssueId))
+            {
+                outcomes.Add(BatchMembershipOutcome.AlreadyLinked(item.Identifier, item.IssueId, item.IssueNumber));
+                continue;
+            }
+
+            // Cross-aggregate uniqueness invariant: an issue may belong to
+            // at most one non-terminal epic. Terminal target epics do not
+            // consume the active slot, so a target-terminal link ignores
+            // the existing-membership ownership check (a conflict on a
+            // terminal-target link would be data corruption — the original
+            // single-link throws on the same condition; the batch surface
+            // mirrors that as a conflict outcome and skips.
+            if (!targetIsTerminal
+                && await GetActiveMembershipOwnerAsync(db, projectId, item.IssueId, epicId) is { } conflict)
+            {
+                outcomes.Add(BatchMembershipOutcome.Conflict(
+                    item.Identifier, item.IssueId, item.IssueNumber, conflict.EpicId, conflict.Title));
+                continue;
+            }
+
+            var newLinks = await db.EpicIssues.AsNoTracking()
+                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+                .ToListAsync();
+            var domain = Materialize(row, newLinks);
+            var now = Now();
+            domain.LinkIssue(item.IssueId, item.IssueNumber, now.UtcDateTime);
+
+            db.EpicIssues.Add(new EpicIssueRow
+            {
+                EpicId = epicId,
+                ProjectId = projectId,
+                IssueId = item.IssueId,
+                IssueNumber = item.IssueNumber,
+            });
+            if (!targetIsTerminal)
+            {
+                db.EpicActiveIssues.Add(new EpicActiveIssueRow
+                {
+                    ProjectId = projectId,
+                    IssueId = item.IssueId,
+                    EpicId = epicId,
+                    IssueNumber = item.IssueNumber,
+                });
+            }
+            MapToRow(domain, row, now);
+            var pending = DrainPendingEvents(domain);
+            try
+            {
+                await db.SaveChangesAsync();
+            }
+            catch (DbUpdateException) when (!targetIsTerminal)
+            {
+                // Concurrent claim won the race — surface as conflict and
+                // continue with the remaining batch items so the rest of
+                // the request still processes.
+                db.ChangeTracker.Clear();
+                var owner = await GetActiveMembershipOwnerAsync(projectId, item.IssueId, epicId);
+                if (owner is not null)
+                {
+                    outcomes.Add(BatchMembershipOutcome.Conflict(
+                        item.Identifier, item.IssueId, item.IssueNumber, owner.EpicId, owner.Title));
+                    await PersistEpicEventsAsync(domain, pending, now);
+                    continue;
+                }
+                outcomes.Add(BatchMembershipOutcome.Conflict(
+                    item.Identifier, item.IssueId, item.IssueNumber, epicId, row.Title));
+                continue;
+            }
+
+            existingLinks.Add(item.IssueId);
+            outcomes.Add(BatchMembershipOutcome.Linked(item.Identifier, item.IssueId, item.IssueNumber));
+            await PersistEpicEventsAsync(domain, pending, now);
+        }
+
+        return outcomes;
+    }
+
     public async Task UnlinkIssueAsync(string issueId, string projectId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -157,6 +279,68 @@ public class EpicGrain : Grain, IEpicGrain
         var pending = DrainPendingEvents(domain);
         await db.SaveChangesAsync();
         await PersistEpicEventsAsync(domain, pending, now);
+    }
+
+    public async Task<IReadOnlyList<BatchMembershipOutcome>> UnlinkIssuesAsync(
+        IReadOnlyList<BatchMembershipRequestItem> issues,
+        string projectId)
+    {
+        if (issues.Count == 0)
+            return Array.Empty<BatchMembershipOutcome>();
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var parts = GrainKey.Split(':');
+        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+
+        // De-duplicate by canonical internal issue id; preserve first
+        // identifier for the response.
+        var dedupByIssueId = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
+        foreach (var item in issues)
+        {
+            if (string.IsNullOrWhiteSpace(item.IssueId)) continue;
+            dedupByIssueId.TryAdd(item.IssueId, item);
+        }
+        if (dedupByIssueId.Count == 0)
+            return Array.Empty<BatchMembershipOutcome>();
+
+        var existingLinks = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .Select(link => link.IssueId)
+            .ToHashSetAsync(StringComparer.Ordinal);
+
+        var outcomes = new List<BatchMembershipOutcome>(dedupByIssueId.Count);
+        foreach (var item in dedupByIssueId.Values)
+        {
+            if (!existingLinks.Contains(item.IssueId))
+            {
+                // Idempotent: not-a-member is a non-error outcome.
+                outcomes.Add(BatchMembershipOutcome.WasNotAMember(item.Identifier, item.IssueId, item.IssueNumber));
+                continue;
+            }
+
+            var links = await db.EpicIssues.AsNoTracking()
+                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+                .ToListAsync();
+            var domain = Materialize(row, links);
+            var now = Now();
+            domain.UnlinkIssue(item.IssueId, now.UtcDateTime);
+
+            var link = await db.EpicIssues.FirstOrDefaultAsync(
+                l => l.ProjectId == projectId && l.EpicId == epicId && l.IssueId == item.IssueId);
+            if (link is not null) db.EpicIssues.Remove(link);
+            await ReleaseActiveMembershipAsync(db, projectId, epicId, item.IssueId);
+            MapToRow(domain, row, now);
+            var pending = DrainPendingEvents(domain);
+            await db.SaveChangesAsync();
+            existingLinks.Remove(item.IssueId);
+            outcomes.Add(BatchMembershipOutcome.Unlinked(item.Identifier, item.IssueId, item.IssueNumber));
+            await PersistEpicEventsAsync(domain, pending, now);
+        }
+
+        return outcomes;
     }
 
     public async Task<EpicDto> PauseAsync(string? reason)

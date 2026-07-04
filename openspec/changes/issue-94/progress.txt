@@ -83,3 +83,53 @@
   HTTP integration (`EpicLifecycleSpecs`), web primary action branch,
   web Reopen control rendering + mutation, and the query invalidation
   (`useReopenEpic`).
+
+## T-003 notes
+
+- Batch link/unlink introduces a typed `BatchMembershipOutcome`
+  (`linked` | `already-linked` | `conflict(owningEpicId,title)` |
+  `not-found` | `unlinked` | `was-not-a-member`) — Orleans-serializable
+  via `[GenerateSerializer]`, returned in the HTTP body wrapped as
+  `{ results: [...] }`.
+- Grain entry points `IEpicGrain.LinkIssuesAsync` /
+  `UnlinkIssuesAsync` take a resolved list
+  (`BatchMembershipRequestItem = { Identifier, IssueId, IssueNumber }`).
+  The HTTP route resolves each identifier by exact internal-id match
+  or by issue-number string match (the same pattern the single-issue
+  link/unlink endpoints use today) **before** calling the grain, so
+  the grain never receives an unresolvable identifier and the cross-
+  aggregate invariant operates on the canonical internal id.
+- Two layers of de-dup, by design:
+  - HTTP layer dedupes identical *identifier strings* (the
+    caller-supplied token) so a request like `["5", "5"]` produces
+    one outcome. Two distinct identifier strings that resolve to the
+    same issue (`["5", "issue_xxx"]`) produce two outcomes (one per
+    requested identifier).
+  - Grain dedupes by canonical `IssueId` so the issue is linked at
+    most once. The second identifier-string variant
+    (`["5", "issue_xxx"]`) still produces a second outcome against
+    the same linked row — surfaced as `linked` for the first and
+    `already-linked` for the second, which is the natural
+    per-identifier read.
+- Partial-failure semantics: each issue is its own SaveChanges
+  scope. A conflicting issue does not roll back the link of
+  preceding issues; the dual-write race in `LinkIssueAsync` (caught
+  `DbUpdateException` on duplicate active-membership) is mirrored in
+  `LinkIssuesAsync` — the concurrent winner is reported as `conflict`
+  on that single identifier and processing continues with the
+  remaining items.
+- Event persistence: `PersistEpicEventsAsync` is called per-issue so
+  every successful `EpicIssueLinked` / `EpicIssueUnlinked` envelope
+  is written to `EpicEvents` via `IEventStore`. The `time` field is
+  the injected `TimeProvider` `Now()` at the moment the grain
+  started processing the issue, matching the single-issue path.
+- Routes are POST because both endpoints accept a JSON body and
+  produce side effects — verbs match the existing
+  `/{id}/issues` and `/{id}/issues:batch` style. The `:batch` /
+  `:batch-unlink` literal suffices avoid colliding with the existing
+  collection route (`POST /{id}/issues`) and the verb-style
+  sub-resources (`/done`, `/close`, `/start`) already in use.
+- Web surface: `addEpicIssue` / `removeEpicIssue` plus the new
+  `batchAddEpicIssues` / `batchRemoveEpicIssues` client methods.
+  Reaction mutations stay untouched; the batch client methods are
+  pure additions for a future bulk-picker UI.

@@ -101,6 +101,9 @@ public static class EpicRoutes
             return ApiResults.Ok(new { epicId = resolved.Id, issueId = resolvedIssueId });
         });
 
+        group.MapPost("/{id}/issues:batch", BatchLinkRouteAsync);
+        group.MapPost("/{id}/issues:batch-unlink", BatchUnlinkRouteAsync);
+
         group.MapPost("/{id}/done", async (HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService) =>
             await SetStatusRouteAsync(context, id, "done", grains, queryService));
         group.MapPost("/{id}/close", async (HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService) =>
@@ -254,6 +257,184 @@ public static class EpicRoutes
         }
     }
 
+    private static async Task<IResult> BatchLinkRouteAsync(
+        HttpContext context,
+        string id,
+        IGrainFactory grains,
+        EpicQuerier queryService,
+        IssueQuerier issuesQuery)
+    {
+        var pid = context.GetResolvedProject().Id;
+        var resolved = int.TryParse(id, out var number)
+            ? await queryService.GetByNumberAsync(pid, number)
+            : await queryService.GetAsync(pid, id);
+        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+
+        var req = await ReadBatchRequestAsync(context);
+        if (req is null) return ApiResults.BadRequest("body must be a JSON object with an issueIds[] array");
+        if (req.IssueIds is null || req.IssueIds.Count == 0)
+            return ApiResults.Ok(new BatchMembershipResponse(Array.Empty<BatchMembershipOutcome>()));
+
+        var issues = await issuesQuery.ListAsync(pid, all: true);
+        // Resolve each unique identifier exactly the way the single-issue
+        // route does today: by exact internal-id match, or by issue-number
+        // string match. Unresolved identifiers flow through as not-found
+        // outcomes. The response carries one outcome per unique requested
+        // identifier (duplicate identifier strings in the request are
+        // de-duplicated — the issue is linked at most once and the
+        // duplicate is not an error).
+        var resolvedItems = new List<BatchMembershipRequestItem>(req.IssueIds.Count);
+        var perIdentifier = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
+        var seenIdentifiers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var identifier in req.IssueIds)
+        {
+            if (string.IsNullOrWhiteSpace(identifier)) continue;
+            if (!seenIdentifiers.Add(identifier)) continue;
+            var match = issues.FirstOrDefault(i =>
+                i.Id == identifier || i.Number.ToString() == identifier);
+            if (match is null)
+            {
+                perIdentifier[identifier] = new BatchMembershipRequestItem(
+                    Identifier: identifier, IssueId: "", IssueNumber: 0);
+                continue;
+            }
+            var item = new BatchMembershipRequestItem(
+                Identifier: identifier, IssueId: match.Id, IssueNumber: match.Number);
+            perIdentifier[identifier] = item;
+            resolvedItems.Add(item);
+        }
+
+        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        IReadOnlyList<BatchMembershipOutcome> grainOutcomes;
+        try
+        {
+            grainOutcomes = await grain.LinkIssuesAsync(resolvedItems, pid);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
+        {
+            return ApiResults.NotFound(ex.Message);
+        }
+
+        var outcomes = MergeBatchOutcomes(req.IssueIds, perIdentifier, grainOutcomes);
+        return ApiResults.Ok(new BatchMembershipResponse(outcomes));
+    }
+
+    private static async Task<IResult> BatchUnlinkRouteAsync(
+        HttpContext context,
+        string id,
+        IGrainFactory grains,
+        EpicQuerier queryService,
+        IssueQuerier issuesQuery)
+    {
+        var pid = context.GetResolvedProject().Id;
+        var resolved = int.TryParse(id, out var number)
+            ? await queryService.GetByNumberAsync(pid, number)
+            : await queryService.GetAsync(pid, id);
+        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+
+        var req = await ReadBatchRequestAsync(context);
+        if (req is null) return ApiResults.BadRequest("body must be a JSON object with an issueIds[] array");
+        if (req.IssueIds is null || req.IssueIds.Count == 0)
+            return ApiResults.Ok(new BatchMembershipResponse(Array.Empty<BatchMembershipOutcome>()));
+
+        var issues = await issuesQuery.ListAsync(pid, all: true);
+        var resolvedItems = new List<BatchMembershipRequestItem>(req.IssueIds.Count);
+        var perIdentifier = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
+        var seenIdentifiers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var identifier in req.IssueIds)
+        {
+            if (string.IsNullOrWhiteSpace(identifier)) continue;
+            if (!seenIdentifiers.Add(identifier)) continue;
+            var match = issues.FirstOrDefault(i =>
+                i.Id == identifier || i.Number.ToString() == identifier);
+            if (match is null)
+            {
+                perIdentifier[identifier] = new BatchMembershipRequestItem(
+                    Identifier: identifier, IssueId: "", IssueNumber: 0);
+                continue;
+            }
+            var item = new BatchMembershipRequestItem(
+                Identifier: identifier, IssueId: match.Id, IssueNumber: match.Number);
+            perIdentifier[identifier] = item;
+            resolvedItems.Add(item);
+        }
+
+        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        IReadOnlyList<BatchMembershipOutcome> grainOutcomes;
+        try
+        {
+            grainOutcomes = await grain.UnlinkIssuesAsync(resolvedItems, pid);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
+        {
+            return ApiResults.NotFound(ex.Message);
+        }
+
+        var outcomes = MergeBatchOutcomes(req.IssueIds, perIdentifier, grainOutcomes);
+        return ApiResults.Ok(new BatchMembershipResponse(outcomes));
+    }
+
+    private static IReadOnlyList<BatchMembershipOutcome> MergeBatchOutcomes(
+        IReadOnlyList<string> requestedIdentifiers,
+        IReadOnlyDictionary<string, BatchMembershipRequestItem> resolvedItems,
+        IReadOnlyList<BatchMembershipOutcome> grainOutcomes)
+    {
+        var byIssueId = grainOutcomes
+            .Where(o => !string.IsNullOrEmpty(o.IssueId))
+            .GroupBy(o => o.IssueId ?? string.Empty, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var notFoundByIdentifier = grainOutcomes
+            .Where(o => o.Status == "not-found" && string.IsNullOrEmpty(o.IssueId))
+            .GroupBy(o => o.Identifier, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        var seenIdentifiers = new HashSet<string>(StringComparer.Ordinal);
+        var results = new List<BatchMembershipOutcome>(requestedIdentifiers.Count);
+        foreach (var identifier in requestedIdentifiers)
+        {
+            if (string.IsNullOrWhiteSpace(identifier)) continue;
+            if (!seenIdentifiers.Add(identifier)) continue;
+            // Unresolved identifier: surface as not-found.
+            if (!resolvedItems.TryGetValue(identifier, out var item) || string.IsNullOrEmpty(item.IssueId))
+            {
+                if (notFoundByIdentifier.TryGetValue(identifier, out var nfe))
+                {
+                    results.Add(nfe);
+                }
+                else
+                {
+                    results.Add(BatchMembershipOutcome.NotFound(identifier));
+                }
+                continue;
+            }
+
+            if (byIssueId.TryGetValue(item.IssueId, out var outcome))
+            {
+                results.Add(outcome);
+            }
+            else
+            {
+                // Resolved issue that the grain dropped (only possible if
+                // the grain returned no entry for it — defensive fallback).
+                results.Add(BatchMembershipOutcome.NotFound(identifier));
+            }
+        }
+
+        return results;
+    }
+
+    private static async Task<BatchMembershipRequest?> ReadBatchRequestAsync(HttpContext context)
+    {
+        try
+        {
+            return await context.Request.ReadFromJsonAsync<BatchMembershipRequest>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static async Task<PauseEpicRequest?> ReadPauseRequestAsync(HttpContext context)
     {
         try
@@ -280,3 +461,5 @@ public record EpicCreateRequest(string Title, string? Description, string? Prior
 public record EpicIssueRequest(string IssueId);
 public record UpdateEpicRequest(string? Title = null, string? Description = null, string? Priority = null);
 public record PauseEpicRequest(string? Reason = null);
+public record BatchMembershipRequest(IReadOnlyList<string>? IssueIds);
+public sealed record BatchMembershipResponse(IReadOnlyList<BatchMembershipOutcome> Results);
