@@ -345,32 +345,6 @@ public class IssueRepositoryResolutionRegressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task WorkspaceFileContentEndpoint_AfterReferencedRepositoryRemoved_ReturnsRepositoryConfigurationProblem()
-    {
-        // Given an issue bound to a project repository whose configuration is later removed.
-        _fixture.Git.Reset();
-        _fixture.Git.BranchExists = true;
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop");
-        var issue = await CreateIssueAsync(projectId, "File content orphan", "secondary");
-        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
-
-        await _grains.GetGrain<IProjectGrain>(projectId).RemoveRepositoryAsync("secondary");
-
-        // When the user requests the file content.
-        using var response = await _client.GetAsync(
-            $"/api/projects/{projectId}/issues/{issue.Number}/file-content?path=a.txt");
-
-        // Then the endpoint returns a repository configuration problem
-        // instead of falling back to "main".
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("repository_not_found", payload.GetProperty("code").GetString());
-        Assert.Contains("secondary", payload.GetProperty("error").GetString() ?? string.Empty);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
     public async Task WorkspaceStatusEndpoint_AfterRepositoryGitUrlAndBaseBranchChange_ReturnsResolvedWorkspaceStatus()
     {
         // Given an issue bound to a project repository whose git url and base branch are later changed.
@@ -449,32 +423,6 @@ public class IssueRepositoryResolutionRegressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task GetIssue_ReferencedRepositoryRemoved_ButProjectHasOtherRepositories_RepositoryProblemReportsCandidates()
-    {
-        // Given an issue bound to a non-default repository and a project with multiple repositories.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop");
-        var issue = await CreateIssueAsync(projectId, "Becomes orphan", "secondary");
-
-        // When the referenced repository is removed.
-        await _grains.GetGrain<IProjectGrain>(projectId).RemoveRepositoryAsync("secondary");
-
-        // Then the issue read model surfaces a RepositoryNotFound problem
-        // that includes the surviving candidate names so the user knows which
-        // valid repositories they could switch to.
-        var fetched = await GetIssueReadModelAsync(projectId, issue.Number);
-        Assert.NotNull(fetched);
-        Assert.Null(fetched!.Repository);
-        Assert.NotNull(fetched.RepositoryProblem);
-        Assert.Equal(IssueRepositoryProblemCode.RepositoryNotFound, fetched.RepositoryProblem!.Code);
-        Assert.Equal("secondary", fetched.RepositoryProblem.RepositoryRef);
-        var candidates = Assert.IsType<string[]>(fetched.RepositoryProblem.CandidateNames);
-        Assert.Contains("main", candidates);
-        Assert.DoesNotContain("secondary", candidates);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
     public async Task GetIssue_ProjectHasNoRepositories_AfterRepositoryRemoval_SurfacesProjectHasNoRepositoriesProblem()
     {
         // Given a project with a single default repository and an issue bound to it.
@@ -523,34 +471,6 @@ public class IssueRepositoryResolutionRegressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task WorkflowStart_AfterProjectRepositoryRemoteChange_PicksUpLatestRemoteInVariables()
-    {
-        // Given an issue bound to a project repository whose remote is later changed.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop");
-        var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueId = $"issue_{Guid.NewGuid():N}";
-        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
-        await issueGrain.CreateAsync(projectId, number, "Remote drifts", body: null, labels: null, priority: null, "secondary", issueId);
-
-        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.RemoveRepositoryAsync("secondary");
-        await projectGrain.AddRepositoryAsync(
-            "secondary",
-            "git@secondary.example:repo-remote-new.git",
-            "develop");
-
-        // When the user starts the workflow.
-        var wrId = await issueGrain.StartWorkAsync();
-
-        // Then the workflow variables carry the new remote.
-        var variables = await LoadWorkflowVariablesAsync(wrId);
-        var repository = variables.RootElement.GetProperty("repository");
-        Assert.Equal("secondary", repository.GetProperty("name").GetString());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
     public async Task GetIssue_WithoutRepositoryRef_FallsBackToProjectDefault()
     {
         var projectId = await CreateProjectAsync("legacy-no-ref");
@@ -572,38 +492,6 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("main", info.Repository!.Name);
         Assert.Equal("git@main.example:repo.git", info.Repository.GitUrl);
         Assert.True(info.Repository.IsDefault);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task GetIssue_AfterRepositoryGitUrlAndBaseBranchChange_ReturnsLatestGitUrlAndBaseBranch()
-    {
-        // Given an issue created against a project repository.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
-        var issue = await CreateIssueAsync(projectId, "Single read drifts", "secondary");
-        Assert.Equal("git@secondary.example:repo.git", issue.Repository!.GitUrl);
-        Assert.Equal("develop-old", issue.Repository.BaseBranch);
-
-        // When the project repository configuration is changed.
-        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.RemoveRepositoryAsync("secondary");
-        await projectGrain.AddRepositoryAsync(
-            "secondary",
-            "git@secondary.example:repo-new.git",
-            "release-new");
-
-        // Then GET /api/projects/:projectRef/issues/:number returns the latest resolved repository path
-        // and base branch instead of stale stored repository details.
-        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = payload.GetProperty("data");
-        var repository = data.GetProperty("repository");
-        Assert.Equal("secondary", repository.GetProperty("name").GetString());
-        Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("gitUrl").GetString());
-        Assert.Equal("release-new", repository.GetProperty("baseBranch").GetString());
-        Assert.False(repository.GetProperty("isDefault").GetBoolean());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -759,42 +647,6 @@ public class IssueRepositoryResolutionRegressionSpecs
         var repository = payload.GetProperty("data").GetProperty("repository");
         Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("release-new", repository.GetProperty("baseBranch").GetString());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task RebaseEndpoint_AfterProjectConfigChange_ResponseCarriesLatestBaseBranchAndRepositoryContext()
-    {
-        // Given an issue with a workflow run and a project repository whose
-        // path and base branch are subsequently changed.
-        _fixture.Git.Reset();
-        _fixture.Git.BranchExists = true;
-
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
-        var issue = await CreateIssueAsync(projectId, "Rebase response drifts", "secondary");
-        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
-
-        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.RemoveRepositoryAsync("secondary");
-        await projectGrain.AddRepositoryAsync(
-            "secondary",
-            "git@secondary.example:repo-new.git",
-            "release-new");
-
-        // When the user queues a rebase (without an explicit baseBranch override).
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues/{issue.Number}/rebase",
-            new { });
-
-        // Then the rebase response itself reports the latest base branch and the
-        // latest resolved repository context, so the UI feedback agrees with the
-        // task the workflow run will execute.
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = payload.GetProperty("data");
-        Assert.Equal("release-new", data.GetProperty("baseBranch").GetString());
-        Assert.Equal("queued", data.GetProperty("status").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

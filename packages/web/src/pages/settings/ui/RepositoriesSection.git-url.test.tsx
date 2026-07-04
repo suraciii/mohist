@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from './test-utils'
+import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { RepositoriesSection } from '../src/pages/settings/ui/RepositoriesSection'
+import { RepositoriesSection } from './RepositoriesSection'
 
 const addRepositoryRequests: { method: string; url: string; body: unknown }[] = []
 const setDefaultRequests: { method: string; url: string; body: unknown }[] = []
