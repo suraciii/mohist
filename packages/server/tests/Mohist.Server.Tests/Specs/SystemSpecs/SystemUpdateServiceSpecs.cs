@@ -220,6 +220,7 @@ public class SystemUpdateServiceSpecs
         Assert.Equal("System update is disabled by configuration", result.Error);
         Assert.Empty(commands.Requests);
         Assert.Empty(store.SavedStates);
+        Assert.Equal(0, store.AcquireAttempts);
         Assert.True(await store.TryAcquireLockAsync("job-next"));
     }
 
@@ -250,6 +251,7 @@ public class SystemUpdateServiceSpecs
         Assert.Equal("System update is disabled by configuration", result.Error);
         Assert.Empty(commands.Requests);
         Assert.Empty(store.SavedStates);
+        Assert.Equal(0, store.AcquireAttempts);
         Assert.True(await store.TryAcquireLockAsync("job-next"));
     }
 
@@ -1932,6 +1934,8 @@ public class SystemUpdateServiceSpecs
 
         public List<SystemUpdateJobState> SavedStates { get; } = [];
 
+        public int AcquireAttempts { get; private set; }
+
         public Task<SystemUpdateJobState?> GetLatestAsync(CancellationToken cancellationToken = default)
         {
             lock (_gate)
@@ -1944,6 +1948,7 @@ public class SystemUpdateServiceSpecs
         {
             lock (_gate)
             {
+                AcquireAttempts++;
                 if (!_acquireLock || _locked || _latest?.Status is "running" or "waiting-for-reconnect")
                     return Task.FromResult(false);
 

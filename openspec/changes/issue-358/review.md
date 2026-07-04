@@ -1,40 +1,49 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
 
 ## Repaired Items
 
-None.
+- [ID: item-1]
+  Severity: info
+  Scope: test coverage
+  Evidence: The new disabled-start specs asserted that `TryAcquireLockAsync("job-next")` succeeded after `StartAsync`, which proved the fake lock was free after the call but did not strictly prove the disabled path made zero lock acquisition attempts. Added `InMemoryUpdateStore.AcquireAttempts` and `Assert.Equal(0, store.AcquireAttempts)` to both disabled-path specs before the intentional post-call lock probe (`packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs:222`, `:253`, `:1805`, `:1819`).
+  Verification: `dotnet test Mohist.sln -p:SkipWebBuild=true --filter FullyQualifiedName~SystemUpdateServiceSpecs` passed: Failed 0, Passed 54, Skipped 0, Total 54.
+  Status: resolved
 
 ## Blocking Items
 
-- [ID: item-1]
-  Severity: test-gap
-  Scope: packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs
-  Evidence: The issue requires preserving the unconfigured `Mohist:SystemUpdate:Enabled` default behavior, and the delta spec requires unset, null, empty, and whitespace values to avoid `update_disabled` (`openspec/changes/issue-358/specs/system-update-start-gate/spec.md:25`). The candidate implementation does return the preserved default (`packages/server/src/Mohist.Server/SystemInfo/SystemUpdateService.cs:607` through `:616`), but the new start-path specs only cover explicit `"false"` and explicit `"true"` (`SystemUpdateServiceSpecs.cs:203`, `:230`, `:258`). Existing `CreateService` calls still inject explicit `"true"` by default (`SystemUpdateServiceSpecs.cs:1631` through `:1638`), and the new configurable overload always adds the `Mohist:SystemUpdate:Enabled` key with the supplied value (`SystemUpdateServiceSpecs.cs:1647` through `:1651`). A grep of `SystemUpdateServiceSpecs.cs` finds no `enabled: null`, empty-string, whitespace, or omitted-key start-path spec. This leaves the AC "Do not change Enabled unconfigured default behavior" and the spec scenarios at `spec.md:29` and `:34` unprotected. [disallowed:review repair would add new behavioral coverage beyond small formatting/expectation cleanup]
-  SuggestedAction: Add focused `SystemUpdateServiceSpecs` coverage for missing key, null, empty string, and whitespace `Enabled` values. The assertions should show `StartAsync` does not return `Code = "update_disabled"`; for an otherwise startable local-source install, it should reach the same command execution/start decision as the current default-enabled path. The factory should be able to omit the key entirely, not only set it to null.
-  Verification: Run `dotnet test Mohist.sln -p:SkipWebBuild=true --filter FullyQualifiedName~SystemUpdateServiceSpecs` and then `npm test`.
-  Status: open
+None.
+
+Acceptance evidence reviewed:
+
+- `SystemUpdateService.IsUpdateEnabled` is explicit control flow with a non-blank presence check, `bool.TryParse(...) && enabled`, and separate `return true` default (`packages/server/src/Mohist.Server/SystemInfo/SystemUpdateService.cs:605-616`).
+- `ValidateStart` ordering is unchanged: install mode, enable gate, install completeness, dirty source, update availability (`packages/server/src/Mohist.Server/SystemInfo/SystemUpdateService.cs:585-600`).
+- `Enabled="false"` start path returns `update_disabled`, no status, expected error text, no commands, no saved states, and no lock acquisition attempts (`packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs:203-223`).
+- Disabled gate precedence over dirty-source and no-update-available is covered (`packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs:228-254`).
+- Explicit `true` does not reject at the enable gate (`packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs:257-275`).
+- Unconfigured, null, empty, and whitespace `Enabled` preserve the default-enabled start path and still run the existing fixed update commands (`packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs:278-319`).
+- Source audit guards against the old precedence-dependent single-line expression and requires the explicit structure (`packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs:1615-1633`).
+- Display-path parity evidence remains present for unconfigured, explicit false, and explicit true (`packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemInfoServiceSpecs.cs:47-76`, `:81-110`, `:316-344`).
+- Product diff is limited to `SystemUpdateService.cs` and `SystemUpdateServiceSpecs.cs`; no public contract, storage, migration, Web, Runner, or CLI behavior changes were introduced.
+
+Verification:
+
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --filter FullyQualifiedName~SystemUpdateServiceSpecs` passed: Failed 0, Passed 54, Skipped 0, Total 54.
+- `npm test` post-repair completed server and web successfully: server Failed 0, Passed 3774, Skipped 13, Total 3787; web Test Files 263 passed, Tests 4141 passed and 1 skipped.
+- `npm test` post-repair did not complete green because of the out-of-scope runner timeout recorded below.
 
 ## Follow-up Items
 
-- [ID: item-2]
-  Severity: follow-up
-  Scope: openspec/changes/issue-358/tasks.json
-  Evidence: `tasks.json` line 25 reports `packages/server/src/MohistServer/SystemInfo/SystemUpdateService.cs`, but the real path is `packages/server/src/Mohist.Server/SystemInfo/SystemUpdateService.cs`. This does not affect the product deliverable or merge safety because the actual committed file is correct, but it weakens artifact traceability for later readers.
-  SuggestedAction: Correct the path in the workflow artifact during a future artifact cleanup pass.
-  Status: follow-up
+None.
 
 ## Pre-existing or Out-of-scope Items
 
-None.
+- [ID: item-2]
+  Severity: warning
+  Scope: packages/runner/tests/runner-host-task-log.spec.ts
+  Evidence: The post-repair `npm test` run timed out in `RunnerHost task-log best-effort flush (T-003) > RoutesConcurrentIncrementalUploadsToEachWorkItemCollector` after server and web had already passed. The same full `npm test` command passed before the local server-spec repair, the candidate diff does not touch runner files, and isolated reruns passed: `npm test -w packages/runner -- tests/runner-host-task-log.spec.ts -t RoutesConcurrentIncrementalUploadsToEachWorkItemCollector` passed 1 test, and `npm test -w packages/runner -- tests/runner-host-task-log.spec.ts` passed 15 tests.
+  SuggestedAction: Track separately as runner test flakiness if it recurs under full-suite load.
+  Status: out-of-scope
 
-## Verification
-
-- Read current issue 358 via `mo issue show 358 --project-id proj_f6c141d63b6243bfbb481737b2243b87`.
-- Read proposal, design, tasks, delta spec, self-review, and all changed product files.
-- Inspected committed diff against `master`: only workflow artifacts, `SystemUpdateService.cs`, and `SystemUpdateServiceSpecs.cs` changed.
-- Ran `git diff --check master...HEAD`: no whitespace errors.
-- Ran `npm test`: `dotnet test` passed with `3770` passed, `13` skipped; workspace tests passed with `65` files and `908` tests.
-
-<promise>FAIL</promise>
+<promise>PASS</promise>
