@@ -18,7 +18,7 @@ export function getIssue(number: number, projectId?: string | null) {
   return request<Issue>(projectApiPath(projectId, `/issues/${number}`))
 }
 
-export function createIssue(data: { title: string; body?: string; attachmentIds?: string[]; labels?: Record<string, string>; model?: string; modelVariant?: string; agentConfig?: Record<string, unknown>; priority?: string; risk?: string | null; workflowProfileId?: string | null; projectId?: string; repositoryName?: string }) {
+export function createIssue(data: { title: string; body?: string; attachmentIds?: string[]; labels?: Record<string, string>; model?: string; modelVariant?: string; agentConfig?: Record<string, unknown>; priority?: string; risk?: string | null; workflowProfileId?: string | null; projectId?: string; repositoryName?: string; prerequisiteNumbers?: number[] }) {
   const { projectId, ...body } = data
   return request<Issue>(projectApiPath(projectId, '/issues'), {
     method: 'POST',

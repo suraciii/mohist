@@ -39,4 +39,22 @@
 
 ### Verification
 - `npm run typecheck -w packages/web` → clean.
-- `npm run test:run -w packages/web` → 270/270 test files pass, 4315 tests pass, 1 preexisting skip. IssuePrerequisitePicker contributes 16 tests across 5 describe blocks: candidate search (4), exclusions (3), chips (4), incomplete/start-eligibility messaging (3), mode seam (1), plus rendering tests.
+  - `npm run test:run -w packages/web` → 270/270 test files pass, 4315 tests pass, 1 preexisting skip. IssuePrerequisitePicker contributes 16 tests across 5 describe blocks: candidate search (4), exclusions (3), chips (4), incomplete/start-eligibility messaging (3), mode seam (1), plus rendering tests.
+
+## T-003 (2026-07-04) — Web: New Issue dialog prerequisite selection + createIssue client
+
+### Codebase Patterns
+- `entities/issue/api/client.ts` `createIssue` already destructures `{ projectId, ...body }` and stringifies the rest of `data`. Adding `prerequisiteNumbers?: number[]` to the parameter type is purely additive — the `{ ...body }` spread already forwards it under the camelCase key the server DTO binds.
+- `IssuePrerequisitePicker` exposes `data-mode` only on the chips container (`prerequisite-picker-chips`), and that container only renders when `selected.length > 0`. Tests that want to assert the mode must therefore select at least one candidate first.
+- The dialog wires `prerequisiteNumbers` to the request body **only when non-empty** via `...(prerequisiteNumbers.length > 0 ? { prerequisiteNumbers } : {})`. The omission preserves byte-identical no-prereq wire traffic with pre-change builds.
+- `resetAndClose` resets every other field — the prerequisite buffer (`setPrerequisiteNumbers([])`) slots in next to `setSelectedTemplateId(null)` to preserve that pattern. The mutation's `onSuccess` still reads `data.number` off the bare Issue read model.
+
+### Gotchas
+- `useIssues` is enabled when `projectId` is truthy. The dialog test's existing `useProject` mock returns `projectId: 'proj_create'`, so the picker's internal query is enabled — the new prerequisite tests must mock `useIssues` with a project-aware `mockImplementation` (returning empty for any other project) to keep cross-project scoping structurally honest, matching the picker test pattern.
+- `vi.fn<...>(...)` rejects signatures whose declared arity is narrower than the runtime call site. The dialog's existing `vi.hoisted` mocks use `<() => T>` shapes; the new `useIssues` mock needs an explicit `(params?) => T` because the picker passes `{ projectId }`. Without the param, tsc complains `Expected 1 or more, but got 0`.
+- The picker's candidate option button's `data-issue-number` lives only on the `<button data-testid="prerequisite-picker-option">`, not on its descendants. Tests find options via `getAllByTestId(...)` + `.find(o => Number(o.getAttribute('data-issue-number')) === N)`, mirroring the picker test file's pattern.
+- Popover renders into a portal; `findAllByTestId` is required (not `getAllByTestId`) for the option list after opening, just like in the picker tests.
+
+### Verification
+- `npm run typecheck -w packages/web` → clean.
+- `npm run test:run -w packages/web` → 270/270 test files pass, 4320 tests pass, 1 preexisting skip (5 new prerequisite tests in `CreateIssueDialog.test.tsx`).
