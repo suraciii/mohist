@@ -84,6 +84,12 @@ export function archiveAgent(projectId: string, id: string) {
   })
 }
 
+export function unarchiveAgent(projectId: string, id: string) {
+  return request<AgentInfo>(projectApiPath(projectId, `/agents/${encodeURIComponent(id)}/unarchive`), {
+    method: 'POST',
+  })
+}
+
 export function readAgentModelAndVariant(agent: Pick<AgentInfo, 'agentConfig'> | null | undefined): { model: string | null; variant: string | null } {
   const config = agent?.agentConfig
   if (!config || typeof config !== 'object') return { model: null, variant: null }

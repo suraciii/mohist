@@ -1,5 +1,59 @@
-import { describe, expect, it } from 'vitest'
-import { readAgentModelAndVariant, writeAgentModelAndVariant } from './client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readAgentModelAndVariant, unarchiveAgent, writeAgentModelAndVariant } from './client'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
+function mockJsonResponse(payload: unknown, status: number = 200): Response {
+  return new Response(JSON.stringify({ success: true, data: payload }), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+describe('unarchiveAgent', () => {
+  it('POSTs /api/projects/{ref}/agents/{id}/unarchive and returns the agent payload', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(
+      mockJsonResponse({
+        id: 'agent-1',
+        projectId: 'proj-1',
+        name: 'Agent 1',
+        status: 'active',
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await unarchiveAgent('proj-1', 'agent-1')
+
+    expect(result).toMatchObject({ id: 'agent-1', status: 'active' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [calledPath, calledInit] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/agents/agent-1/unarchive')
+    expect(calledInit?.method).toBe('POST')
+  })
+
+  it('encodes agent ids that need URL escaping', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(
+      mockJsonResponse({
+        id: 'a/b',
+        projectId: 'proj-1',
+        name: 'A/B',
+        status: 'active',
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await unarchiveAgent('proj-1', 'a/b')
+
+    const [calledPath, calledInit] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/agents/a%2Fb/unarchive')
+    expect(calledInit?.method).toBe('POST')
+  })
+})
 
 describe('readAgentModelAndVariant', () => {
   it('returns null model and variant when agent config is missing', () => {

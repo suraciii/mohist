@@ -183,6 +183,74 @@ public class AgentDefinitionApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Unarchive_ReversesArchiveAndAdvancesUpdatedAt()
+    {
+        var project = await CreateProjectAsync("agent-unarchive-a");
+        var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("restore-me"));
+        await DeleteDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}");
+        var archivedShown = await _client.GetDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}");
+        var archivedAt = DateTimeOffset.Parse(archivedShown.UpdatedAt);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
+        var unarchived = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}/unarchive");
+
+        Assert.Equal(created.Id, unarchived.Id);
+        Assert.Equal("active", unarchived.Status);
+        Assert.True(DateTimeOffset.Parse(unarchived.UpdatedAt) > archivedAt);
+
+        var reShown = await _client.GetDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}");
+        Assert.Equal("active", reShown.Status);
+
+        var defaultList = await _client.GetDataAsync<AgentDto[]>($"/api/projects/{project.Id}/agents");
+        Assert.Contains(defaultList, agent => agent.Id == created.Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Unarchive_IsNoOpForActiveAgentAndReturnsNotFoundForUnknown()
+    {
+        var project = await CreateProjectAsync("agent-unarchive-b");
+        var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("already-active"));
+        var before = DateTimeOffset.Parse(created.UpdatedAt);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
+        var result = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}/unarchive");
+
+        Assert.Equal("active", result.Status);
+        Assert.Equal(before, DateTimeOffset.Parse(result.UpdatedAt));
+
+        using var unknown = await _client.PostAsync($"/api/projects/{project.Id}/agents/agent_{Guid.NewGuid():N}/unarchive", null);
+        using var crossProject = await _client.PostAsync($"/api/projects/{Guid.NewGuid():N}/agents/{created.Id}/unarchive", null);
+
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, crossProject.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Unarchive_DoesNotAlterPatchSemanticsForStatusField()
+    {
+        var project = await CreateProjectAsync("agent-unarchive-c");
+        var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("status-ignored"));
+        var before = DateTimeOffset.Parse(created.UpdatedAt);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
+        var patched = await _client.PatchDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}", new
+        {
+            status = "archived",
+            description = "still active",
+        });
+
+        Assert.Equal("active", patched.Status);
+        Assert.Equal("still active", patched.Description);
+        Assert.True(DateTimeOffset.Parse(patched.UpdatedAt) > before);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync(string prefix) =>
         await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"{prefix}-{Guid.NewGuid():N}" });
 

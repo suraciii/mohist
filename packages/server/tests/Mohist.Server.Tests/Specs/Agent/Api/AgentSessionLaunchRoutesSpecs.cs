@@ -265,6 +265,43 @@ public class AgentSessionLaunchRoutesSpecs
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
+    public async Task Launch_ArchivedAgent_Returns409_WithoutCreatingSessionOrJob()
+    {
+        var projectId = await CreateProjectAsync("launch-archived");
+        var runnerId = $"launch-archived-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "archived-launch-agent");
+        using var archive = await _fixture.Client.DeleteAsync($"/api/projects/{projectId}/agents/{agent.Id}");
+        archive.EnsureSuccessStatusCode();
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+
+        try
+        {
+            var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
+
+            using var response = await _fixture.Client.PostAsJsonAsync(
+                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+                new { prompt = "should not launch" });
+
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.False(payload.GetProperty("success").GetBoolean());
+            Assert.Equal("agent_archived", payload.GetProperty("code").GetString());
+
+            var sessionCountAfter = await CountAgentLaunchSessionsAsync(projectId);
+            Assert.Equal(sessionCountBefore, sessionCountAfter);
+            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+            Assert.Equal(HttpStatusCode.NoContent, poll.StatusCode);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
     public async Task Launch_ResolvesAgentByName_WhenAgentRefIsFriendlyName()
     {
         var projectId = await CreateProjectAsync("launch-name");

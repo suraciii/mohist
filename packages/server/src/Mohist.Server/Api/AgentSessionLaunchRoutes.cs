@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Sessions.Grains;
@@ -63,6 +64,10 @@ public static class AgentSessionLaunchRoutes
             if (agent is null)
             {
                 return ApiResults.NotFound($"Agent '{agentRef}' not found");
+            }
+            if (string.Equals(agent.Status, AgentStatus.Archived, StringComparison.Ordinal))
+            {
+                return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
             }
 
             var sessionId = sessions.NewSessionId();

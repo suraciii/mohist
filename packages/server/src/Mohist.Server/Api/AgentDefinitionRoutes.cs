@@ -94,6 +94,17 @@ public static class AgentDefinitionRoutes
             return archived is null ? ApiResults.NotFound($"Agent {id} not found") : ApiResults.Ok(archived);
         });
 
+        group.MapPost("/{id}/unarchive", async (HttpContext context, string id, IGrainFactory grains, AgentQuerier query) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var existing = await query.GetByIdAsync(projectId, id);
+            if (existing is null) return ApiResults.NotFound($"Agent {id} not found");
+
+            var grain = grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, id));
+            var unarchived = await grain.UnarchiveAsync();
+            return unarchived is null ? ApiResults.NotFound($"Agent {id} not found") : ApiResults.Ok(unarchived);
+        });
+
         return app;
     }
 
