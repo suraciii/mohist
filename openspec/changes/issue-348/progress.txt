@@ -1,0 +1,32 @@
+## Codebase Patterns
+
+- Grain tests use `new AgentGrain(new AgentStore(factory), new AgentQuerier(factory), new FakeTimeProvider(...)) { GrainKeyForTest = GrainKey.Agent(projectId, agentId) }` (AgentGrainSpecs.cs). The fixed-time `FakeTimeProvider` makes time-related assertions awkward — `CreateGrain` was refactored to expose an overload that accepts the FakeTimeProvider so tests can `Advance` between operations and verify `UpdatedAt` progression. The original signature (fixed time, just projectId + agentId) is preserved for the other tests.
+- `AgentStore` serializes the `Domain.Agent` to a single `State` JSON column (Infrastructure/Data/Agent/AgentStore.cs:24-43); `Deserialize(state)` is `public static` and reads it back, perfect for asserting the persisted row matches the in-memory view in tests.
+- `AgentDefinitionRoutes` uses `IGrainFactory grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, id))` then awaits the grain method, mapping `null` to `NotFound` via the `result is null ? NotFound : Ok(result)` shape. The new `POST /{id}/unarchive` mirrors the DELETE archive route's exact shape (AgentDefinitionRoutes.cs:86-95 → 97-104), satisfying D1+D4 (mirror Issue precedent path, return 200 with data).
+- `ApiTestClient.PostDataAsync<T>(path)` accepts a null body and issues POST with no body — used by the unarchive route since the request carries no payload.
+- `MohistIntegrationFixture` exposes `TimeProvider` (FakeTimeProvider) which API spec tests can `Advance` to assert `UpdatedAt` progression deterministically (no wall clock).
+
+## Decisions Applied
+
+- D2: `IAgentGrain.UnarchiveAsync` returns `Task<AgentInfo?>`, matching `ArchiveAsync` (null = not-found) instead of the Issue domain's throw shape. Reuses the existing `result is null ? NotFound : Ok(result)` route plumbing.
+- D3: `AgentGrain.UnarchiveAsync` short-circuits when `_agent.Status == Active` — returns `AgentQuerier.ToInfo(_agent)` without bumping `UpdatedAt` and without calling `_agentStore.SaveAsync`. No write occurs; the persisted row's `UpdatedAt` is unchanged. Archive does NOT short-circuit (it re-writes & bumps), preserving the asymmetry that motivated D3.
+- D1/D4: route verb is `POST /api/projects/{projectRef}/agents/{id}/unarchive`, response body is the unarchived `AgentInfo` (200), DELETE stays archive, PATCH stays unchanged.
+- The new route pre-checks via `AgentQuerier.GetByIdAsync` to avoid the round trip when the agent id is unknown in the project (consistent with DELETE archive and PATCH). The grain itself still returns null as a defense-in-depth; the route covers both layers.
+
+## Verification
+
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` — 0 warnings, 0 errors (TreatWarningsAsErrors).
+- Targeted: `dotnet test --filter "FullyQualifiedName~AgentGrainSpecs|FullyQualifiedName~AgentDefinitionApiSpecs"` — 18 passed (11 pre-existing + 3 grain specs + 4 API specs).
+- Full suite: `dotnet test Mohist.sln` — 3758 passed, 0 failed, 13 skipped (skipped entries are pre-existing Architecture/Issue-Profile work, unrelated to issue-348).
+
+## Test Coverage
+
+Grain (AgentGrainSpecs.cs):
+- `Archive_then_unarchive_round_trips_agent_to_active_and_advances_updated_at` — verify round-trip + UpdatedAt progression + persisted row reflects active.
+- `Unarchive_of_already_active_agent_is_a_no_op_without_advancing_updated_at_or_persisting` — verify no-op (UpdatedAt unchanged, persisted row unchanged).
+- `Unarchive_of_unknown_agent_returns_null_and_creates_no_row` — verify not-found contract + no row created.
+
+API (AgentDefinitionApiSpecs.cs):
+- `Unarchive_ReversesArchiveAndAdvancesUpdatedAt` — end-to-end via DELETE → POST unarchive, asserts 200 with status=active + UpdatedAt > archive time + the agent re-appears in the default list (active-only).
+- `Unarchive_IsNoOpForActiveAgentAndReturnsNotFoundForUnknown` — covers the no-op deterministically + 404 on unknown id and 404 on cross-project id (project resolution filter rejects it before the grain).
+- `Unarchive_DoesNotAlterPatchSemanticsForStatusField` — regression guard: PATCH `status=archived` is silently ignored, agent stays active, UpdatedAt still advances (because PATCH description moved it).

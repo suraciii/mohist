@@ -150,12 +150,101 @@ public class AgentGrainSpecs
         Assert.True(await TableExistsAsync(context, "Issues"));
     }
 
+    [Fact]
+    public async Task Archive_then_unarchive_round_trips_agent_to_active_and_advances_updated_at()
+    {
+        var database = CreateDatabase();
+        await using (database)
+        {
+            await using var context = database.CreateDbContext();
+            await context.Database.EnsureCreatedAsync();
+            var factory = database.Factory;
+            var timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+            var grain = CreateGrain(factory, timeProvider, "project_1", "agent_1");
+
+            await grain.CreateAsync(NewCreate("project_1", "reviewer"));
+            timeProvider.Advance(TimeSpan.FromSeconds(1));
+            var archived = await grain.ArchiveAsync();
+            Assert.NotNull(archived);
+            Assert.Equal(AgentStatus.Archived, archived.Status);
+            var archivedAt = DateTimeOffset.Parse(archived.UpdatedAt);
+
+            timeProvider.Advance(TimeSpan.FromSeconds(1));
+            var unarchived = await grain.UnarchiveAsync();
+            Assert.NotNull(unarchived);
+            Assert.Equal(AgentStatus.Active, unarchived.Status);
+            var unarchivedAt = DateTimeOffset.Parse(unarchived.UpdatedAt);
+            Assert.True(unarchivedAt > archivedAt, "Unarchive should advance UpdatedAt past the archive time");
+
+            var stored = await factory.CreateDbContext().Agents.FindAsync(GrainKey.Agent("project_1", "agent_1"));
+            Assert.NotNull(stored);
+            var deserialized = AgentStore.Deserialize(stored.State);
+            Assert.NotNull(deserialized);
+            Assert.Equal(AgentStatus.Active, deserialized!.Status);
+            Assert.Equal(unarchivedAt, deserialized.UpdatedAt);
+        }
+    }
+
+    [Fact]
+    public async Task Unarchive_of_already_active_agent_is_a_no_op_without_advancing_updated_at_or_persisting()
+    {
+        var database = CreateDatabase();
+        await using (database)
+        {
+            await using var context = database.CreateDbContext();
+            await context.Database.EnsureCreatedAsync();
+            var factory = database.Factory;
+            var timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+            var grain = CreateGrain(factory, timeProvider, "project_1", "agent_1");
+
+            var created = await grain.CreateAsync(NewCreate("project_1", "reviewer"));
+            var originalUpdatedAt = DateTimeOffset.Parse(created.UpdatedAt);
+
+            timeProvider.Advance(TimeSpan.FromSeconds(1));
+            var result = await grain.UnarchiveAsync();
+            Assert.NotNull(result);
+            Assert.Equal(AgentStatus.Active, result.Status);
+            Assert.Equal(created.Id, result.Id);
+            Assert.Equal(originalUpdatedAt, DateTimeOffset.Parse(result.UpdatedAt));
+
+            var stored = await factory.CreateDbContext().Agents.FindAsync(GrainKey.Agent("project_1", "agent_1"));
+            Assert.NotNull(stored);
+            var deserialized = AgentStore.Deserialize(stored.State);
+            Assert.NotNull(deserialized);
+            Assert.Equal(originalUpdatedAt, deserialized!.UpdatedAt);
+        }
+    }
+
+    [Fact]
+    public async Task Unarchive_of_unknown_agent_returns_null_and_creates_no_row()
+    {
+        var database = CreateDatabase();
+        await using (database)
+        {
+            await using var context = database.CreateDbContext();
+            await context.Database.EnsureCreatedAsync();
+            var factory = database.Factory;
+            var timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+            var grain = CreateGrain(factory, timeProvider, "project_1", "agent_missing");
+
+            var result = await grain.UnarchiveAsync();
+
+            Assert.Null(result);
+            Assert.Null(await factory.CreateDbContext().Agents.FindAsync(GrainKey.Agent("project_1", "agent_missing")));
+        }
+    }
+
     private static AgentGrain CreateGrain(TestDbContextFactory factory, string projectId, string agentId)
+    {
+        return CreateGrain(factory, new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)), projectId, agentId);
+    }
+
+    private static AgentGrain CreateGrain(TestDbContextFactory factory, FakeTimeProvider timeProvider, string projectId, string agentId)
     {
         var grain = new AgentGrain(
             new AgentStore(factory),
             new AgentQuerier(factory),
-            new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)))
+            timeProvider)
         {
             GrainKeyForTest = GrainKey.Agent(projectId, agentId),
         };

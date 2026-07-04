@@ -86,6 +86,16 @@ public class AgentGrain : Grain, IAgentGrain
         return AgentQuerier.ToInfo(_agent);
     }
 
+    public async Task<AgentInfo?> UnarchiveAsync()
+    {
+        if (_agent is null) return null;
+        if (_agent.Status == AgentStatus.Active) return AgentQuerier.ToInfo(_agent);
+        _agent.Status = AgentStatus.Active;
+        _agent.UpdatedAt = _timeProvider.GetUtcNow();
+        await _agentStore.SaveAsync(CurrentKey(), _agent);
+        return AgentQuerier.ToInfo(_agent);
+    }
+
     private async Task EnsureNameAvailableAsync(string projectId, string name, string? exceptAgentId)
     {
         var existing = await _querier.GetByNameAsync(projectId, name);
