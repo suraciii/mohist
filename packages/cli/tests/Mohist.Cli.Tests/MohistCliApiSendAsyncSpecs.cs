@@ -130,6 +130,49 @@ public class MohistCliApiSendAsyncSpecs
     }
 
     [Fact]
+    public async Task GetDataOrPrintErrorAsync_ServerUnreachable_WritesServerUnavailableMessageAndExitsOne()
+    {
+        var (api, _) = CreateApi(ThrowingOffline);
+
+        var (exit, data) = await api.GetDataOrPrintErrorAsync("/api/anything");
+
+        Assert.Equal(1, exit);
+        Assert.Null(data);
+        Assert.Contains(MohistCliApi.ServerUnavailableMessage, api.Error.ToString());
+    }
+
+    [Fact]
+    public async Task GetDataAsync_ServerUnreachable_PreservesThrowingReaderContract()
+    {
+        var (api, _) = CreateApi(ThrowingOffline);
+
+        await Assert.ThrowsAsync<HttpRequestException>(async () => await api.GetDataAsync("/api/anything"));
+
+        Assert.DoesNotContain(MohistCliApi.ServerUnavailableMessage, api.Error.ToString());
+    }
+
+    [Fact]
+    public async Task PostDataAsync_ServerUnreachable_PreservesThrowingReaderContract()
+    {
+        var (api, _) = CreateApi(ThrowingOffline);
+
+        await Assert.ThrowsAsync<HttpRequestException>(async () => await api.PostDataAsync("/api/anything", new { }));
+
+        Assert.DoesNotContain(MohistCliApi.ServerUnavailableMessage, api.Error.ToString());
+    }
+
+    [Fact]
+    public async Task UseProjectAsync_ServerUnreachable_WritesServerUnavailableMessageAndExitsOne()
+    {
+        var (api, _) = CreateApi(ThrowingOffline);
+
+        var exit = await api.UseProjectAsync("proj_abc");
+
+        Assert.Equal(1, exit);
+        Assert.Contains(MohistCliApi.ServerUnavailableMessage, api.Error.ToString());
+    }
+
+    [Fact]
     public async Task PrintGetAsync_ServerReachable_ExitsZeroOnSuccessEnvelope()
     {
         var (api, _) = CreateApi((_, _) =>

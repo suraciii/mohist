@@ -189,7 +189,7 @@ public class MohistCliApiEnvelopeSpecs
     {
         var (api, handler) = CreateApi();
         handler.SetResponder((_, _) =>
-            Task.FromResult(EmptyResponse(HttpStatusCode.NoContent)));
+            Task.FromResult(EmptyResponse(HttpStatusCode.NoContent, "No Content")));
 
         var exit = await api.PrintGetAsync("/api/anything");
 
@@ -301,5 +301,57 @@ public class MohistCliApiEnvelopeSpecs
 
         var ex = await Assert.ThrowsAnyAsync<Exception>(async () => await api.GetDataAsync("/api/anything"));
         Assert.Equal("Missing", ex.Message);
+    }
+
+    [Fact]
+    public async Task GetData_EmptyBodyOnSuccess_ThrowsWithReasonPhrase()
+    {
+        var (api, handler) = CreateApi();
+        handler.SetResponder((_, _) =>
+            Task.FromResult(EmptyResponse(HttpStatusCode.NoContent)));
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(async () => await api.GetDataAsync("/api/anything"));
+
+        Assert.Equal("No Content", ex.Message);
+    }
+
+    [Fact]
+    public async Task GetDataOrPrintError_EmptyBodyOnSuccess_PrintsReasonPhraseAndExitsOne()
+    {
+        var (api, handler) = CreateApi();
+        handler.SetResponder((_, _) =>
+            Task.FromResult(EmptyResponse(HttpStatusCode.NoContent, "No Content")));
+
+        var (exitCode, data) = await api.GetDataOrPrintErrorAsync("/api/anything");
+
+        Assert.Equal(1, exitCode);
+        Assert.Null(data);
+        Assert.Contains("No Content", api.Error.ToString());
+    }
+
+    [Fact]
+    public async Task GetDataOrPrintError_EmptyBodyOnFailure_PrintsReasonPhraseAndExitsOne()
+    {
+        var (api, handler) = CreateApi();
+        handler.SetResponder((_, _) =>
+            Task.FromResult(EmptyResponse(HttpStatusCode.BadRequest, "Bad Request")));
+
+        var (exitCode, data) = await api.GetDataOrPrintErrorAsync("/api/anything");
+
+        Assert.Equal(1, exitCode);
+        Assert.Null(data);
+        Assert.Contains("Bad Request", api.Error.ToString());
+    }
+
+    [Fact]
+    public async Task PostData_EmptyBodyOnSuccess_ThrowsWithReasonPhrase()
+    {
+        var (api, handler) = CreateApi();
+        handler.SetResponder((_, _) =>
+            Task.FromResult(EmptyResponse(HttpStatusCode.NoContent, "No Content")));
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(async () => await api.PostDataAsync("/api/anything", new { }));
+
+        Assert.Equal("No Content", ex.Message);
     }
 }

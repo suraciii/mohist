@@ -54,7 +54,10 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintProjectListAsync()
     {
-        using var response = await _http.GetAsync("/api/projects");
+        using var response = await SendAsync(HttpMethod.Get, "/api/projects", body: null);
+        if (response is null)
+            return 1;
+
         await using var stream = await response.Content.ReadAsStreamAsync();
         JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
 
@@ -103,8 +106,8 @@ internal sealed class MohistCliApi
 
     public async Task<PostResult> PostAndReadAsync(string path, object body)
     {
-        var response = await _http.PostAsJsonAsync(path, body, JsonOptions);
-        return await ReadPostResultAsync(response);
+        using var response = await SendAsync(HttpMethod.Post, path, body, printServerUnavailable: false);
+        return await ReadPostResultAsync(response!);
     }
 
     public async Task<int> PrintPutAsync(string path, object body)
@@ -171,8 +174,8 @@ internal sealed class MohistCliApi
 
     public async Task<JsonNode?> GetDataAsync(string path)
     {
-        using var response = await _http.GetAsync(path);
-        return await ReadSuccessDataAsync(response);
+        using var response = await SendAsync(HttpMethod.Get, path, body: null, printServerUnavailable: false);
+        return await ReadSuccessDataAsync(response!);
     }
 
     public async Task<(int ExitCode, JsonNode? Data)> GetDataOrPrintErrorAsync(string path)
@@ -292,16 +295,9 @@ internal sealed class MohistCliApi
 
         var path = $"/api/projects/{Uri.EscapeDataString(projectId)}/runners/{runnerIdEncoded}";
 
-        HttpResponseMessage response;
-        try
-        {
-            response = await _http.GetAsync(path);
-        }
-        catch (HttpRequestException)
-        {
-            _err.WriteLine(ServerUnavailableMessage);
+        using var response = await SendAsync(HttpMethod.Get, path, body: null);
+        if (response is null)
             return 1;
-        }
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -830,8 +826,8 @@ internal sealed class MohistCliApi
 
     public async Task<JsonNode?> PostDataAsync(string path, object body)
     {
-        using var response = await _http.PostAsJsonAsync(path, body, JsonOptions);
-        return await ReadSuccessDataAsync(response);
+        using var response = await SendAsync(HttpMethod.Post, path, body, printServerUnavailable: false);
+        return await ReadSuccessDataAsync(response!);
     }
 
     public async Task<int> PrintWorkflowProfilesDescribedAsync(string? projectId = null)
@@ -901,6 +897,11 @@ internal sealed class MohistCliApi
         {
             _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
             return FailureExitCode(ex.StatusCode);
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
         }
     }
 
@@ -983,6 +984,9 @@ internal sealed class MohistCliApi
     {
         await using var stream = await response.Content.ReadAsStreamAsync();
         JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+
+        if (node is null)
+            throw new ApiResponseException(response.StatusCode, response.ReasonPhrase ?? "Request failed");
 
         var envelope = ExtractEnvelope(node, response);
         if (envelope.Success)
@@ -1106,7 +1110,11 @@ internal sealed class MohistCliApi
     internal static int FailureExitCode(HttpStatusCode statusCode) =>
         statusCode == HttpStatusCode.NotFound ? 4 : 1;
 
-    private async Task<HttpResponseMessage?> SendAsync(HttpMethod method, string path, object? body)
+    internal async Task<HttpResponseMessage?> SendAsync(
+        HttpMethod method,
+        string path,
+        object? body,
+        bool printServerUnavailable = true)
     {
         try
         {
@@ -1115,7 +1123,7 @@ internal sealed class MohistCliApi
                 request.Content = JsonContent.Create(body, options: JsonOptions);
             return await _http.SendAsync(request);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException) when (printServerUnavailable)
         {
             _err.WriteLine(ServerUnavailableMessage);
             return null;

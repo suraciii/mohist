@@ -166,7 +166,10 @@ internal static class OtelCommands
     {
         try
         {
-            using var response = await api.Http.GetAsync(StatusPath).ConfigureAwait(false);
+            using var response = await api.SendAsync(HttpMethod.Get, StatusPath, body: null).ConfigureAwait(false);
+            if (response is null)
+                return 1;
+
             await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
             JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream).ConfigureAwait(false);
 

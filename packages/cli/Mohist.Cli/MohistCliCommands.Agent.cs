@@ -1,7 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Net;
-using System.Net.Http.Json;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -797,7 +796,10 @@ internal static class AgentCommands
     {
         try
         {
-            using var response = await api.Http.PostAsJsonAsync(path, body, JsonOptions);
+            using var response = await api.SendAsync(HttpMethod.Post, path, body);
+            if (response is null)
+                return 1;
+
             var data = await ReadDataOrPrintErrorAsync(api, response);
             if (data is null)
                 return MohistCliApi.FailureExitCode(response);
@@ -816,7 +818,10 @@ internal static class AgentCommands
     {
         try
         {
-            using var response = await api.Http.DeleteAsync(path);
+            using var response = await api.SendAsync(HttpMethod.Delete, path, body: null);
+            if (response is null)
+                return null;
+
             var data = await ReadDataOrPrintErrorAsync(api, response);
             return AgentRef.From(data);
         }
