@@ -2,7 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { useGenericSessionSummary, useGenericSessionTranscript, useGenericFollowup } from '../../../entities/agent'
+import { useGenericSessionSummary, useGenericSessionTranscript, useGenericFollowup, useCancelGenericSession } from '../../../entities/agent'
 import type { SessionTurn, SessionMetadata } from '../../../entities/coder-session'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
 import { buildGenericSessionMetadata } from './buildGenericSessionMetadata'
@@ -40,6 +40,7 @@ export function useGenericSessionDataSource(): SessionDataSourceResult {
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useGenericSessionSummary(sessionId)
   const { data: transcriptResponse } = useGenericSessionTranscript(sessionId)
   const genericFollowup = useGenericFollowup()
+  const cancelGeneric = useCancelGenericSession()
 
   const initialTurns = useMemo<SessionTurn[]>(() => transcriptResponse?.turns ?? [], [transcriptResponse])
 
@@ -110,6 +111,15 @@ export function useGenericSessionDataSource(): SessionDataSourceResult {
     genericFollowup.mutate({ sessionId, text })
   }, [genericFollowup, sessionId])
 
+  const cancelSession = useCallback(() => {
+    cancelGeneric.mutate({ sessionId })
+  }, [cancelGeneric, sessionId])
+
+  const cancel = useMemo(
+    () => ({ mutate: cancelSession, isPending: cancelGeneric.isPending }),
+    [cancelSession, cancelGeneric.isPending],
+  )
+
   return {
     isLoading: summaryLoading,
     isError: summaryError,
@@ -123,6 +133,7 @@ export function useGenericSessionDataSource(): SessionDataSourceResult {
     isRunning,
     followupIsPending: genericFollowup.isPending,
     sendFollowup,
+    cancel,
     contextWindowUsed: meta?.usage?.contextWindowUsed ?? null,
     contextWindowSize: meta?.usage?.contextWindowSize ?? null,
     contextUsagePercent: meta?.usage?.contextUsagePercent ?? null,

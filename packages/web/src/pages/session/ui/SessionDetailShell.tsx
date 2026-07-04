@@ -1,10 +1,11 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeftIcon } from 'lucide-react'
+import { ChevronLeftIcon, CircleStopIcon } from 'lucide-react'
 import { SessionTranscriptLayout } from '../../../widgets/session-transcript'
 import { SessionFollowupComposer, SessionRecoveryActions } from '../../../widgets/coder-session'
 import { ContextHealthBar, CompactionLineageLink } from '../../../widgets/session-health'
 import { Button } from '@/shared/ui/components/button'
+import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
@@ -45,6 +46,7 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
     buildLineageTargetPath,
     handleRecoverySuccess,
     issueNumber,
+    cancel,
   } = data
 
   // ── All hooks must be before any early return ──
@@ -197,6 +199,8 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
       turnCount={displayTurnCount}
       recoveryBar={recoveryBarContent}
       siblingNav={siblingNav}
+      isRunning={isRunning}
+      cancel={cancel}
     />
   )
 
@@ -209,6 +213,8 @@ export function SessionDetailShell({ data }: { data: SessionDataSourceResult }) 
       statusKind={displayStatusKind}
       turnCount={displayTurnCount}
       siblingNav={siblingNav}
+      isRunning={isRunning}
+      cancel={cancel}
     />
   )
 
@@ -381,6 +387,8 @@ function SessionHeader({
   turnCount,
   recoveryBar,
   siblingNav,
+  isRunning,
+  cancel,
 }: {
   backPath: string
   backLabel: string
@@ -390,8 +398,12 @@ function SessionHeader({
   turnCount: number
   recoveryBar?: React.ReactNode
   siblingNav?: React.ReactNode
+  isRunning: boolean
+  cancel: SessionDataSourceResult['cancel']
 }) {
   const isTerminal = statusKind === 'completed' || statusKind === 'failed'
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
+  const showCancelControl = cancel != null && isRunning
   const createdAt = meta?.createdAt ?? new Date().toISOString()
   const completedAt = meta?.completedAt ?? null
   const duration = isTerminal && completedAt
@@ -503,8 +515,41 @@ function SessionHeader({
               <span className="font-mono text-gray-400 text-xs">{meta.sessionId.slice(0, 8)}</span>
             </>
           )}
+          {showCancelControl && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setCancelDialogOpen(true)}
+              data-testid="session-cancel-trigger"
+              aria-label="Cancel session"
+              type="button"
+            >
+              <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              Cancel session
+            </Button>
+          )}
         </div>
       </div>
+
+      {showCancelControl && cancel && (
+        <AlertDialog
+          open={cancelDialogOpen}
+          onOpenChange={(open) => {
+            if (cancel.isPending) return
+            setCancelDialogOpen(open)
+          }}
+          title="Cancel this session?"
+          description="The agent will be asked to stop. The session may still take a moment to wind down."
+          confirmLabel="Cancel session"
+          cancelLabel="Keep running"
+          tone="destructive"
+          loading={cancel.isPending}
+          onConfirm={() => {
+            cancel.mutate()
+          }}
+          data-testid="session-cancel-alert"
+        />
+      )}
 
       {(hasUsage || usage?.costAmount != null || usage?.contextWindowUsed != null || eventSummary?.failureCategory || eventSummary?.toolCallCount != null) && (
         <div className="flex items-center gap-3 mt-2 text-xs text-gray-500 flex-wrap">

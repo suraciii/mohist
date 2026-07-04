@@ -20,6 +20,11 @@ export interface SessionDataSourceResult {
   followupIsPending: boolean
   sendFollowup: (text: string) => void
 
+  cancel: {
+    mutate: () => void
+    isPending: boolean
+  } | null
+
   contextWindowUsed: number | null
   contextWindowSize: number | null
   contextUsagePercent: number | null
