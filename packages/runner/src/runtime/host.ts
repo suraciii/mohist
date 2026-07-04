@@ -8,6 +8,7 @@ import { WorkspaceRegistry } from "./workspace-registry.js"
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
+import { TaskLogCollector } from "./task-log.js"
 import { discoverOpencodeModels } from "./opencode-models.js"
 import { AcpSessionManager, createSharedAcpConnection, type SessionTarget, type SharedAcpConnection } from "./acp-connection.js"
 import { loadBuildInfo } from "./build-info.js"
@@ -46,6 +47,17 @@ export class RunnerHost {
   // outside the run loop, so we capture the signal here to bound the
   // immediate heartbeat it triggers.
   private activeSignal: AbortSignal | null = null
+
+  /**
+   * Per-work collector reference for the incremental flush trigger.
+   * Set when `executeWithLog` returns the collector, cleared in the
+   * `finally` so a subsequent work item cannot see a stale collector
+   * after the trigger has been stopped (design D1). The field lives on
+   * the host (not the closure) because the trigger's `setInterval`
+   * callback runs after `executeAndReport` has yielded its synchronous
+   * portion and the closure would otherwise be out of scope.
+   */
+  private collectorRef: import("./task-log.js").TaskLogCollector | null = null
 
   // Step 10 of design/eventbus.md: AcpSessionManager and
   // SharedAcpConnection are created once per host (not per work item).
@@ -325,26 +337,29 @@ export class RunnerHost {
       }
     }
 
+    // Owner-id mirrors `artifact-side-effects.ts:107`: agent-job
+    // dispatches upload under `work.agentJobId`, workflow dispatches
+    // under `work.workflowRunId`. Routing through a single uploadTaskLog
+    // call keeps the task-log channel symmetric with artifact uploads
+    // (design D7).
+    const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
+    const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
+
     /**
-     * Flush the per-work task-log collector as a terminal batch via the
-     * independent task-log channel. Best-effort: a failed upload is
-     * logged and swallowed; the report (which carries the verdict) is
-     * NEVER blocked or failed by a flush failure (design D6). The
-     * collector is empty when the work failed before any phase ran,
-     * and even an empty batch is allowed to flow through (T-001
-     * spec: "A task with no captured lines returns { lines: [] } and
-     * never an error").
+     * Upload a pre-built task-log batch via the independent task-log
+     * channel. Best-effort: a failed upload is logged and swallowed; the
+     * report (which carries the verdict) is NEVER blocked or failed by
+     * a flush failure (design D6 / D1).
+     *
+     * The terminal batch always uploads; incremental batches skip the
+     * network round-trip when there is nothing to send (drain returned
+     * `null`).
      */
-    const flushTaskLog = async (collector: import("./task-log.js").TaskLogCollector | null) => {
-      if (!collector) return
-      const batch = collector.flush()
-      // Owner-id mirrors `artifact-side-effects.ts:107`: agent-job
-      // dispatches upload under `work.agentJobId`, workflow dispatches
-      // under `work.workflowRunId`. Routing through a single
-      // uploadTaskLog call keeps the task-log channel symmetric with
-      // artifact uploads (design D7).
-      const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
-      const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
+    const uploadTaskLogBatch = async (
+      batch: import("./task-log.js").TaskLogBatch,
+      timeoutMs: number,
+      label: "terminal" | "incremental",
+    ) => {
       const uploadController = new AbortController()
       let timeout: ReturnType<typeof setTimeout> | null = null
       try {
@@ -359,16 +374,51 @@ export class RunnerHost {
           new Promise<never>((_resolve, reject) => {
             timeout = setTimeout(() => {
               uploadController.abort()
-              reject(new Error(`task-log upload timed out after ${TASK_LOG_UPLOAD_TIMEOUT_MS}ms`))
-            }, TASK_LOG_UPLOAD_TIMEOUT_MS)
+              reject(new Error(`task-log ${label} upload timed out after ${timeoutMs}ms`))
+            }, timeoutMs)
             timeout.unref?.()
           }),
         ])
       } catch (flushError) {
-        console.error("task-log upload failed for work", work.workId, flushError)
+        console.error(`task-log ${label} upload failed for work`, work.workId, flushError)
       } finally {
         if (timeout) clearTimeout(timeout)
       }
+    }
+
+    /**
+     * Terminal reconciliation batch. Phase 1 retained behaviour: the
+     * full snapshot is uploaded via the terminal-timeout constant and
+     * the server dedups by `seq` so a failed incremental upload is
+     * recovered (design D1 / spec
+     * `a-failed-incremental-upload-is-reconciled-by-the-terminal-batch`).
+     * The collector may be `null` when work failed before any phase
+     * ran; even an empty batch is allowed to flow through (T-001
+     * spec: "A task with no captured lines returns { lines: [] } and
+     * never an error").
+     */
+    const flushTaskLog = async (collector: import("./task-log.js").TaskLogCollector | null) => {
+      if (!collector) return
+      const batch = collector.flush()
+      await uploadTaskLogBatch(batch, TASK_LOG_UPLOAD_TIMEOUT_MS, "terminal")
+    }
+
+    /**
+     * Incremental batch primitive. Drains the collector (entries with
+     * `seq > watermark`), and when there is something new, uploads it
+     * under the larger incremental-timeout constant. An empty drain
+     * short-circuits — no network round-trip is issued (design D1 /
+     * spec `an-empty-increment-produces-no-upload`).
+     */
+    const flushIncrementalTaskLog = async (collector: import("./task-log.js").TaskLogCollector | null) => {
+      if (!collector) return
+      const batch = collector.drain()
+      if (batch === null) return
+      await uploadTaskLogBatch(
+        batch,
+        this.options.taskLogIncrementalUploadTimeoutMs ?? TASK_LOG_INCREMENTAL_UPLOAD_TIMEOUT_MS,
+        "incremental",
+      )
     }
 
     if (this.workExecutor === null) {
@@ -387,6 +437,9 @@ export class RunnerHost {
         const fallback = await createSharedAcpConnection(typeof workspacePath === "string" ? workspacePath : process.cwd())
         executor.updateAcpConnection(fallback)
         try {
+          // Ephemeral executor is created after the work item has been
+          // dispatched; there is no collector to flush incrementally,
+          // so we go straight to the terminal reconciliation batch.
           const execution = await executor.executeWithLog(work, signal, null)
           lastResult = execution.result
           await flushTaskLog(execution.collector)
@@ -405,9 +458,41 @@ export class RunnerHost {
       return
     }
 
+    // Start the incremental flush trigger alongside executeWithLog and
+    // stop it BEFORE the terminal flush so a final drain cannot race
+    // the terminal batch (design D1 / spec
+    // `executeAndReport-starts-stops-the-trigger-around-the-work-lifecycle`).
+    // The trigger fires on either an elapsed interval since the last
+    // fire or a reached line-count threshold of NEW (un-drained) lines
+    // — the latter is checked via `noteAppend`, which the collector
+    // calls synchronously from inside `append`. `flushIncrementalTaskLog`
+    // short-circuits an empty drain so no upload is issued when there
+    // is nothing new.
+    const flushTrigger = startTaskLogFlushTrigger(
+      () => flushIncrementalTaskLog(this.collectorRef),
+      this.options.taskLogFlushIntervalMs ?? TASK_LOG_FLUSH_INTERVAL_MS,
+      this.options.taskLogFlushLineThreshold ?? TASK_LOG_FLUSH_LINE_THRESHOLD,
+    )
+    // Pre-create the collector so the trigger can be wired into its
+    // `appendListener` BEFORE the executor starts emitting appends.
+    // Passing `null` to `executeWithLog` would let the executor mint a
+    // new collector without our listener — defeats the eager line-count
+    // firing and leaves the trigger with no append notifications.
+    const collector = new TaskLogCollector()
+    collector.setAppendListener(() => flushTrigger.noteAppend())
+    // Set `collectorRef` BEFORE calling `executeWithLog` so a trigger
+    // tick that fires during execution has a live collector to drain.
+    this.collectorRef = collector
     try {
-      const execution = await this.workExecutor.executeWithLog(work, signal, null)
+      const execution = await this.workExecutor.executeWithLog(work, signal, collector)
       lastResult = execution.result
+      // Detach the listener before stopping the timer so a stale
+      // tick can never re-fire against a collector that the executor
+      // has handed back to us for terminal flushing.
+      execution.collector.setAppendListener(null)
+      // Stop the trigger before the terminal flush so the trigger
+      // cannot fire after flush() has already snapshotted the buffer.
+      flushTrigger.stop()
       if (signal.aborted) return
       // Flush BEFORE the report so the report carries the verdict while
       // the (best-effort) upload runs in parallel with the verdict
@@ -416,12 +501,17 @@ export class RunnerHost {
       await flushTaskLog(execution.collector)
       await this.connection.report(work, lastResult, signal)
     } catch (error) {
+      flushTrigger.stop()
       lastError = error
       if (signal.aborted) return
       console.error("executor failed for work", work.workId, error)
       await this.connection.report(work, { status: "failed", message: String(error) }, signal).catch(async () => {
         await reportDrain("failed", String(error))
       })
+    } finally {
+      // Always clear the ref so a subsequent work item does not see
+      // a stale collector after the flush trigger has been stopped.
+      this.collectorRef = null
     }
   }
 
@@ -457,6 +547,86 @@ export class RunnerHost {
 }
 
 const TASK_LOG_UPLOAD_TIMEOUT_MS = 250
+
+/**
+ * Maximum time an incremental task-log upload is allowed to take.
+ * Distinct from the terminal-batch timeout because incremental batches
+ * are smaller but the rail tolerates more slack (design D1). Larger
+ * than the terminal timeout because we accept second-level latency for
+ * the live channel.
+ */
+const TASK_LOG_INCREMENTAL_UPLOAD_TIMEOUT_MS = 5_000
+
+/**
+ * Wall-clock interval between incremental flush trigger fires. The
+ * trigger fires regardless of whether new lines have arrived — an
+ * empty drain then short-circuits without an upload (design D1).
+ */
+const TASK_LOG_FLUSH_INTERVAL_MS = 1_500
+
+/**
+ * Threshold on the count of new (un-drained) lines buffered past the
+ * sent-seq watermark. Crossing this threshold on a write fires the
+ * trigger eagerly, so a chatty command does not have to wait for the
+ * interval to see its tail in the web view (design D1).
+ */
+const TASK_LOG_FLUSH_LINE_THRESHOLD = 200
+
+/**
+ * Create an incremental flush trigger. The returned handle exposes
+ * `stop()` to clear the interval and a `noteAppend()` method to
+ * register a newly-captured line against the line-count threshold.
+ * Callers MUST invoke `stop()` before the terminal flush so a final
+ * drain cannot race the terminal snapshot.
+ *
+ * `setInterval` is used (rather than a custom timer abstraction) so
+ * the trigger is driven by the global JS timer clock and is therefore
+ * deterministically controllable by `vi.useFakeTimers` (no real
+ * wall-clock, per the project's testing convention).
+ *
+ * The trigger fires on EITHER:
+ *   - an elapsed interval since the last fire (regardless of new
+ *     lines — `flush` short-circuits an empty drain), OR
+ *   - the line-count threshold being reached between two interval
+ *     ticks. `noteAppend` is called once per captured line; when the
+ *     running count since the last fire meets or exceeds the threshold,
+ *     the trigger fires eagerly.
+ *
+ * `flush` is the single short-circuit point that skips the network
+ * round-trip when the collector's `drain` is empty — the trigger
+ * itself always invokes `flush` on a fire.
+ *
+ * Exported (not just module-private) so the test suite can drive the
+ * exact same code path without reimplementing the `setInterval`
+ * dance; the host keeps the trigger implementation here as the
+ * single source of truth.
+ */
+export function startTaskLogFlushTrigger(
+  flush: () => Promise<void> | void,
+  intervalMs: number,
+  lineThreshold: number,
+): { stop: () => void; noteAppend: () => void } {
+  // Defensive: a zero/negative interval would create a tight loop.
+  // Clamp to a minimum positive value to keep the trigger harmless
+  // under accidental misconfiguration. Tests that need finer control
+  // can pass an explicit positive `intervalMs`.
+  const safeInterval = Math.max(50, Math.floor(intervalMs))
+  const safeThreshold = Math.max(1, Math.floor(lineThreshold))
+  let pending = 0
+  const tick = () => {
+    pending = 0
+    void flush()
+  }
+  const handle = setInterval(tick, safeInterval)
+  handle.unref?.()
+  return {
+    stop: () => clearInterval(handle),
+    noteAppend: () => {
+      pending += 1
+      if (pending >= safeThreshold) tick()
+    },
+  }
+}
 
 async function delay(ms: number, signal: AbortSignal) {
   if (signal.aborted) throw signal.reason
