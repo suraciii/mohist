@@ -270,19 +270,36 @@ public class ArchitectureRules
         });
     }
 
+    // Domain namespaces participating in the cross-domain dependency check.
+    // Epic is NOT listed as its own domain: per design/domain-analysis.md, Epic is
+    // the "organization facet" of the Issue subdomain (same problem class, two
+    // granularities), so Mohist.Server.Epic.* is measured as part of Issue, not as
+    // a separate domain. Measuring it cross-domain would mis-flag subdomain-internal
+    // coupling (Epic→IssueQuerier, IIssueGrain) as violations.
+    // AgentOps is not yet listed — it has no code landing point today (its classes
+    // still live under Sessions). Add it once issue #372 relocates them to
+    // Mohist.Server.AgentOps.* and defines its allowed-direction set.
     private static readonly string[] DomainNamespaces =
-        ["Agent", "Issue", "Workflow", "Epic", "Project", "Runner", "Sessions"];
+        ["Agent", "Issue", "Workflow", "Project", "Runner", "Sessions"];
 
     private static readonly (string from, string to)[] AllowedDomainDependencies =
     [
         ("Agent", "Runner"),
         ("Agent", "Sessions"),
         ("Issue", "Workflow"),
-        ("Issue", "Epic"),
         ("Issue", "Project"),
         ("Runner", "Sessions"),
         ("Runner", "Workflow"),
         ("Workflow", "Sessions"),
+        // KNOWN DEBT — Project→Workflow is a config-data placement issue, not an
+        // engine dependency: ProjectGrain/ProjectQuerier reference only the
+        // ProjectWorkflowProfile config type (template selection + variables),
+        // which design/workflow/boundaries/issue.md assigns to Issue/Project's own
+        // config data but which currently lives under Workflow/Services. Long-term
+        // fix: relocate the config type to Project. Tracked by that boundary doc's
+        // "可选后续". Allowed here so the directional tightening (issue #368) is
+        // not blocked on the relocation.
+        ("Project", "Workflow"),
     ];
 
     [Fact]

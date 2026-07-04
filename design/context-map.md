@@ -53,6 +53,8 @@
 
 补充：Web 同时**只读消费** Workflow 的 artifact 与 Session 的读模型（各自 OHS 暴露，Web 遵奉），是 #8 的细化，非新上下文。**跨域报告组装**（活动 feed、成本等 join 多域读模型）归 AgentOps，不归 Session——把它塞进 Session 会破坏叶子不变量。
 
+**AgentOps 尚无代码落点**：当前 `AgentActivityFeedAssembler` / `AgentUsageReporter` 仍在 `Sessions/Services/` 命名空间下（ArchUnit 把它们当 Sessions 域的类）。AgentOps 作为独立域纳入 ArchUnit 守护，待 issue #372 把这些类迁到 `Mohist.Server.AgentOps.*` 后生效。
+
 **Prompts 属于 Project Space 上下文**（project-scoped，唯一可配置层；内置 .prompt 只是 loader fallback；详见 [`prompt-management.md`](prompt-management.md)）。两点架构约束：
 - **Workflow 只用 key 引用 prompt**（`WorkflowDefinition` 里的字符串），不依赖 prompt 解析——零耦合。
 - **prompt 文本由执行方（runner）在执行那一刻按需解析**（lazy、只取一条、扛大 prompt），契合"执行事实与状态裁判分离"。
