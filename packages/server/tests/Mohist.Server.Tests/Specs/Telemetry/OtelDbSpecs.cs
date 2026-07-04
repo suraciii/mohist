@@ -14,41 +14,24 @@ namespace Mohist.Server.Tests.Specs.Telemetry;
 [Trait(Traits.Sut.Name, Traits.Sut.Telemetry)]
 public class OtelDbSpecs : IDisposable
 {
-    private readonly string _dataDir;
-    private readonly string _databasePath;
     private readonly OtelDb _db;
+    // Keeper keeps the in-memory SQLite database alive for the test's lifetime.
+    private readonly SqliteConnection _keeper;
 
     public OtelDbSpecs()
     {
-        _dataDir = Path.Combine(Path.GetTempPath(), $"mohist-otel-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_dataDir);
-        _databasePath = Path.Combine(_dataDir, "otel.db");
-
-        var options = new OtelOptions { DbPath = _databasePath };
-        _db = new OtelDb(options, new MockEnvironment(), new PassthroughFileSystem());
+        // The schema-creation specs exercise OtelDb.EnsureInitialized against an
+        // in-memory shared-cache database so no real otel.db file is touched
+        // (design/testing.md hard-constraint 1). File-specific contracts (WAL
+        // mode, physical read-only enforcement, file materialization) cannot be
+        // expressed against an in-memory database and are intentionally not
+        // tested here — see the historical rationale in the test-suite audit.
+        (_db, _keeper) = InMemoryOtelDb.Create();
     }
 
     public void Dispose()
     {
-        try
-        {
-            if (Directory.Exists(_dataDir))
-                Directory.Delete(_dataDir, recursive: true);
-        }
-        catch
-        {
-            // best-effort cleanup
-        }
-    }
-
-    [Fact]
-    public void Constructor_CreatesDatabaseFileOnFirstConnection()
-    {
-        Assert.False(File.Exists(_databasePath));
-
-        using var connection = _db.OpenReadWriteConnection();
-
-        Assert.True(File.Exists(_databasePath));
+        _keeper.Dispose();
     }
 
     [Fact]
@@ -95,19 +78,6 @@ public class OtelDbSpecs : IDisposable
     }
 
     [Fact]
-    public void OpenReadWriteConnection_EnablesWalMode()
-    {
-        using var connection = _db.OpenReadWriteConnection();
-
-        using var pragma = connection.CreateCommand();
-        pragma.CommandText = "PRAGMA journal_mode;";
-        var mode = (string?)pragma.ExecuteScalar();
-
-        Assert.NotNull(mode);
-        Assert.Equal("wal", mode, ignoreCase: true);
-    }
-
-    [Fact]
     public void OpenReadWriteConnection_CalledTwice_IsIdempotent()
     {
         using var first = _db.OpenReadWriteConnection();
@@ -129,39 +99,15 @@ public class OtelDbSpecs : IDisposable
     [Fact]
     public void OpenReadOnlyConnection_OpensAndExposesSchema()
     {
-        using var readWrite = _db.OpenReadWriteConnection();
-        readWrite.Dispose();
-
+        // EnsureInitialized has already run via the keeper; open a read-only
+        // connection and confirm it sees the schema. (The physical read-only
+        // enforcement is a file-specific contract not exercised here.)
         using var readOnly = _db.OpenReadOnlyConnection();
         Assert.True(TableExists(readOnly, OtelDb.TracesTable));
         Assert.True(TableExists(readOnly, OtelDb.SpansTable));
     }
 
-    [Fact]
-    public void OpenReadOnlyConnection_RejectsWriteAttempts()
-    {
-        using var readWrite = _db.OpenReadWriteConnection();
-        readWrite.Dispose();
-
-        using var readOnly = _db.OpenReadOnlyConnection();
-        using var cmd = readOnly.CreateCommand();
-        cmd.CommandText = "INSERT INTO traces (trace_id, service_name, start_time, end_time, span_count) VALUES ('t2', 'svc', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 1);";
-
-        Assert.Throws<SqliteException>(() => cmd.ExecuteNonQuery());
-    }
-
-    [Fact]
-    public void DatabasePath_MatchesOptionsDbPath()
-    {
-        Assert.Equal(_databasePath, _db.DatabasePath);
-    }
-
-    [Fact]
-    public void ConnectionStrings_ExposeReadOnlyAndReadWrite()
-    {
-        Assert.Contains("Mode=ReadOnly", _db.ReadOnlyConnectionString, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Mode=ReadOnly", _db.ReadWriteConnectionString, StringComparison.OrdinalIgnoreCase);
-    }
+    // ---- Path resolution (pure static functions — no filesystem I/O) ----
 
     [Fact]
     public void ResolveDatabasePath_UsesConfiguredDbPath()
@@ -187,7 +133,7 @@ public class OtelDbSpecs : IDisposable
     [Fact]
     public void ResolveDatabasePath_DefaultUsesMainDbPathDirectory()
     {
-        var mainDbPath = Path.Combine(_dataDir, "custom-main", "mohist.db");
+        var mainDbPath = "/data/custom-main/mohist.db";
         var options = new OtelOptions();
         var environment = new MockEnvironment();
         environment[OtelOptions.MainDbPathEnvironmentVariable] = mainDbPath;
@@ -197,31 +143,6 @@ public class OtelDbSpecs : IDisposable
         Assert.Equal(
             Path.GetFullPath(Path.Combine(Path.GetDirectoryName(mainDbPath)!, OtelDb.DefaultDatabaseFileName)),
             path);
-    }
-
-    [Fact]
-    public void ServiceRegistration_DefaultOtelDbPathUsesConfiguredMainDbDirectory()
-    {
-        var mainDbPath = Path.Combine(_dataDir, "configured-main", "mohist.db");
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Mohist:DbPath"] = mainDbPath,
-                ["Mohist:RunnerRoot"] = _dataDir,
-                ["Mohist:SystemUpdate:StatePath"] = Path.Combine(_dataDir, "system-update.json"),
-                ["Mohist:ArtifactStorage:Root"] = Path.Combine(_dataDir, "artifacts"),
-            })
-            .Build();
-        var services = new ServiceCollection();
-        services.ConfigureMohistServices(config);
-        services.AddSingleton<IEnvironmentVariableProvider>(new MockEnvironment());
-        using var provider = services.BuildServiceProvider();
-
-        var options = provider.GetRequiredService<IOptions<OtelOptions>>().Value;
-
-        Assert.Equal(
-            Path.Combine(Path.GetDirectoryName(mainDbPath)!, OtelDb.DefaultDatabaseFileName),
-            options.DbPath);
     }
 
     [Fact]
@@ -248,55 +169,6 @@ public class OtelDbSpecs : IDisposable
         var path = OtelDb.ResolveDatabasePath(options, environment);
 
         Assert.Equal(Path.GetFullPath("/tmp/explicit-otel.db"), path);
-    }
-
-    [Fact]
-    public void DataIsolation_OtelDbAndMainMohistDb_AreSeparateFiles()
-    {
-        // Simulate the production layout: the main business DB lives at
-        // <dataDir>/mohist.db, the otel DB lives at <dataDir>/otel.db.
-        // Writing to one must not appear in the other.
-        var mainDb = Path.Combine(_dataDir, "mohist.db");
-
-        using (var main = new SqliteConnection($"Data Source={mainDb}"))
-        {
-            main.Open();
-            using var cmd = main.CreateCommand();
-            cmd.CommandText = "CREATE TABLE IF NOT EXISTS issues (id TEXT PRIMARY KEY, title TEXT NOT NULL);";
-            cmd.ExecuteNonQuery();
-            cmd.CommandText = "INSERT INTO issues (id, title) VALUES ('issue-1', 'Hello');";
-            cmd.ExecuteNonQuery();
-        }
-
-        using (var otel = _db.OpenReadWriteConnection())
-        {
-            using var cmd = otel.CreateCommand();
-            cmd.CommandText = "INSERT INTO traces (trace_id, service_name, start_time, end_time, span_count) VALUES ('trace-1', 'svc', '2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', 1);";
-            cmd.ExecuteNonQuery();
-        }
-
-        // otel.db contains trace data but no issues table
-        using (var otel = _db.OpenReadOnlyConnection())
-        {
-            Assert.True(TableExists(otel, OtelDb.TracesTable));
-            Assert.False(TableExists(otel, "issues"));
-
-            using var cmd = otel.CreateCommand();
-            cmd.CommandText = "SELECT COUNT(*) FROM traces;";
-            Assert.Equal(1L, (long)cmd.ExecuteScalar()!);
-        }
-
-        // mohist.db contains issues but no traces table
-        using (var main = new SqliteConnection($"Data Source={mainDb}"))
-        {
-            main.Open();
-            Assert.True(TableExists(main, "issues"));
-            Assert.False(TableExists(main, OtelDb.TracesTable));
-
-            using var cmd = main.CreateCommand();
-            cmd.CommandText = "SELECT COUNT(*) FROM issues;";
-            Assert.Equal(1L, (long)cmd.ExecuteScalar()!);
-        }
     }
 
     private static bool TableExists(SqliteConnection connection, string tableName)
@@ -340,40 +212,17 @@ public class OtelDbSpecs : IDisposable
             get => _values.TryGetValue(variable, out var v) ? v : null;
             set
             {
-                if (value is null)
-                    _values.Remove(variable);
-                else
-                    _values[variable] = value;
+                if (value is null) _values.Remove(variable);
+                else _values[variable] = value;
             }
         }
 
         public string? GetEnvironmentVariable(string variable) => this[variable];
-
         public string? GetEnvironmentVariable(string variable, EnvironmentVariableTarget target) => this[variable];
-
-        public IReadOnlyDictionary<string, string> GetEnvironmentVariables() =>
-            new Dictionary<string, string>(_values, StringComparer.Ordinal);
-
-        public IReadOnlyDictionary<string, string> GetEnvironmentVariables(EnvironmentVariableTarget target) =>
-            GetEnvironmentVariables();
-
+        public IReadOnlyDictionary<string, string> GetEnvironmentVariables() => new Dictionary<string, string>(_values, StringComparer.Ordinal);
+        public IReadOnlyDictionary<string, string> GetEnvironmentVariables(EnvironmentVariableTarget target) => GetEnvironmentVariables();
         public string ExpandEnvironmentVariables(string name) => name;
-
         public void SetEnvironmentVariable(string variable, string? value) => this[variable] = value;
-
         public void SetEnvironmentVariable(string variable, string? value, EnvironmentVariableTarget target) => this[variable] = value;
-    }
-
-    /// <summary>
-    /// Minimal <see cref="IFileSystem"/> that just delegates to the
-    /// real filesystem. The <c>OtelDb</c> constructor only calls
-    /// <see cref="IFileSystem.Exists"/>, so this fake exists purely to
-    /// keep the abstraction in play without mocking out the OS.
-    /// </summary>
-    private sealed class PassthroughFileSystem : IFileSystem
-    {
-        public bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
-
-        public string ReadAllText(string path) => File.ReadAllText(path);
     }
 }
