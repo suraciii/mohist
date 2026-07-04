@@ -59,6 +59,39 @@ public class EventStore : IEventStore
             return;
         }
 
+        if (source.StartsWith(EpicEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        {
+            var nextId = await NextEpicIdAsync(source, ct);
+            db.EpicEvents.Add(new EpicEventRow
+            {
+                Id = nextId,
+                Source = source,
+                EventId = envelope.Id,
+                Type = envelope.Type,
+                Time = envelope.Time,
+                SpecVersion = envelope.SpecVersion,
+                Subject = envelope.Subject,
+                DataContentType = envelope.DataContentType ?? "application/json",
+                Data = envelope.Data ?? JsonDocument.Parse("null").RootElement,
+                ExtensionsJson = SerializeExtensions(envelope.Extensions),
+            });
+            try
+            {
+                var saved = await db.SaveChangesAsync(ct);
+                _log.LogInformation(
+                    "[event-store] AppendAsync: persisted source={Source} type={Type} id={Id} eventId={EventId} rows={Rows}",
+                    source, envelope.Type, nextId, envelope.Id, saved);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "[event-store] AppendAsync: FAILED source={Source} type={Type} eventId={EventId} at id={Id}",
+                    source, envelope.Type, envelope.Id, nextId);
+                throw;
+            }
+            return;
+        }
+
         var workflowNextId = await NextWorkflowIdAsync(source, ct);
         db.WorkflowRunEvents.Add(new WorkflowRunEventRow
         {
@@ -117,6 +150,20 @@ public class EventStore : IEventStore
         return rows.Select(ToIssueStored).ToList();
     }
 
+    public async Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default)
+    {
+        var source = EpicEventPersistence.EpicSource(epicId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.EpicEvents.AsNoTracking()
+            .Where(e => e.Source == source)
+            .OrderByDescending(e => e.Id)
+            .Take(limit)
+            .OrderBy(e => e.Id)
+            .ToListAsync(ct);
+
+        return rows.Select(ToEpicStored).ToList();
+    }
+
     private static StoredCloudEvent ToStored(WorkflowRunEventRow row) =>
         new(row.Id, new CloudEvent(
             id: row.EventId,
@@ -130,6 +177,18 @@ public class EventStore : IEventStore
             extensions: DeserializeExtensions(row.ExtensionsJson)));
 
     private static StoredCloudEvent ToIssueStored(IssueEventRow row) =>
+        new(row.Id, new CloudEvent(
+            id: row.EventId,
+            source: new Uri(row.Source, UriKind.RelativeOrAbsolute),
+            type: row.Type,
+            time: row.Time,
+            data: row.Data,
+            dataContentType: row.DataContentType,
+            subject: row.Subject,
+            specVersion: row.SpecVersion,
+            extensions: DeserializeExtensions(row.ExtensionsJson)));
+
+    private static StoredCloudEvent ToEpicStored(EpicEventRow row) =>
         new(row.Id, new CloudEvent(
             id: row.EventId,
             source: new Uri(row.Source, UriKind.RelativeOrAbsolute),
@@ -161,6 +220,15 @@ public class EventStore : IEventStore
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return (await db.IssueEvents
+            .Where(e => e.Source == source)
+            .Select(e => (long?)e.Id)
+            .MaxAsync(ct) ?? 0) + 1;
+    }
+
+    private async Task<long> NextEpicIdAsync(string source, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return (await db.EpicEvents
             .Where(e => e.Source == source)
             .Select(e => (long?)e.Id)
             .MaxAsync(ct) ?? 0) + 1;

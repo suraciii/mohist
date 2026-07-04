@@ -1,0 +1,45 @@
+## Codebase Patterns
+
+- Event-store per-context-table convention: each bounded context gets its own
+  CloudEvent envelope table (WorkflowRunEvents / IssueEvents / EpicEvents)
+  sharing the same column set keyed by (Source, Id) with an
+  IX_{Table}_Type_Source_Id secondary index. The unified Events table was
+  tried and reverted in migration `20260610130306_DropEventsTable`.
+- C# 14 `public union` types (e.g. `EpicEvent`) compile to a wrapping class.
+  `someUnion.GetType().Name` returns the union name, not the inner variant
+  name. Always unwrap via the typed switch in the serializer (`Unwrap`).
+- `EpicGrain` already injects `TimeProvider`; epic event envelopes source
+  `time` from `Now()` (a deliberate divergence from `IssueGrain` which uses
+  `DateTimeOffset.UtcNow`). The spec is `fake TimeProvider` → fixed instant
+  preserved in the persisted envelope.
+- The `EpicGrain` post-mutation flow is capture pending events → save
+  `EpicRow` → post-commit best-effort append through `IEventStore`,
+  mirroring `IssueGrain.PublishIssueEventsAsync`. `ApplyPendingEvents` is
+  gone; the helper `DrainPendingEvents` only returns the snapshot to the
+  grain which then forwards to `PersistEpicEventsAsync`.
+- Test support: `RecordingEventStore` and `NoopEventStore` are the standard
+  fakes; the `RecordingEventStore` source filter keys on `/mohist/epics/{id}`
+  for `ListEpicEventsAsync`.
+- The grain's `GrainKeyForTest` lets tests pin the epic id (e.g.
+  `"project_1:epic_1"`), but `CreateAsync` still generates a fresh
+  `epic_{guid}` id internally — the recorded CloudEvent source is the
+  generated id, not the test key. Tests that exercise `CreateAsync` must
+  read the id from the returned `EpicDto`.
+
+## T-001 notes
+
+- Foundation: T-002 (EpicReopened + reopen recording), T-003 (batch
+  link/unlink recording), and T-005 (timeline read path) all build on the
+  store + persistence wired here.
+- T-001 only registers the 7 existing `EpicEvent` variants in
+  `EventCatalog` / `EpicEventSerializer`; `EpicReopened` is intentionally
+  deferred to T-002 to avoid dead serializer code paths.
+- Tests seed an open (backlog) linked issue before Start / Pause / Resume
+  sequences so the post-Resume `ReconcileAfterTerminalInternalAsync` path
+  does not auto-mark the epic done before the next mutation under test
+  (that would emit an unexpected extra `EpicStatusChanged` and break
+  ordering / set-status-as-closed assumptions).
+- The `EpicEventSerializer` test asserts the storage `Type` surface
+  matches the variant's CLR name (e.g. `EpicCreated`), not the union
+  container name `EpicEvent`. The serializer unwraps via `Unwrap(payload)
+  .GetType().Name` so the on-disk `Type` column matches the variant.

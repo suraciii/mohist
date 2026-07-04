@@ -1,9 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Epic.Domain;
+using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
+using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
@@ -19,17 +22,20 @@ public class EpicGrain : Grain, IEpicGrain
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IGrainFactory _grains;
     private readonly TimeProvider _timeProvider;
+    private readonly IEventStore _eventStore;
     private readonly ILogger<EpicGrain> _log;
 
     public EpicGrain(
         IDbContextFactory<MohistDbContext> dbFactory,
         IGrainFactory grains,
         TimeProvider timeProvider,
+        IEventStore eventStore,
         ILogger<EpicGrain> log)
     {
         _dbFactory = dbFactory;
         _grains = grains;
         _timeProvider = timeProvider;
+        _eventStore = eventStore;
         _log = log;
     }
 
@@ -55,8 +61,9 @@ public class EpicGrain : Grain, IEpicGrain
             now: now.UtcDateTime);
         var row = MapToRow(epic, now);
         db.Epics.Add(row);
+        var pending = DrainPendingEvents(epic);
         await db.SaveChangesAsync();
-        epic.ClearPendingEvents();
+        await PersistEpicEventsAsync(epic, pending, now);
         return ToDto(row);
     }
 
@@ -108,7 +115,7 @@ public class EpicGrain : Grain, IEpicGrain
             });
         }
         MapToRow(domain, row, now);
-        ApplyPendingEvents(domain);
+        var pending = DrainPendingEvents(domain);
         try
         {
             await db.SaveChangesAsync();
@@ -123,6 +130,7 @@ public class EpicGrain : Grain, IEpicGrain
             }
             throw;
         }
+        await PersistEpicEventsAsync(domain, pending, now);
     }
 
     public async Task UnlinkIssueAsync(string issueId, string projectId)
@@ -146,8 +154,9 @@ public class EpicGrain : Grain, IEpicGrain
         if (link is not null) db.EpicIssues.Remove(link);
         await ReleaseActiveMembershipAsync(db, projectId, epicId, issueId);
         MapToRow(domain, row, now);
-        ApplyPendingEvents(domain);
+        var pending = DrainPendingEvents(domain);
         await db.SaveChangesAsync();
+        await PersistEpicEventsAsync(domain, pending, now);
     }
 
     public async Task<EpicDto> PauseAsync(string? reason)
@@ -175,8 +184,9 @@ public class EpicGrain : Grain, IEpicGrain
         MapToRow(domain, row, now);
         if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
             await ReleaseActiveMembershipsAsync(db, projectId, epicId);
-        ApplyPendingEvents(domain);
+        var pending = DrainPendingEvents(domain);
         await db.SaveChangesAsync();
+        await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
 
@@ -204,8 +214,9 @@ public class EpicGrain : Grain, IEpicGrain
         var wasAlreadyRunning = row.Status == EpicStatusName.Running;
         domain.Start(now.UtcDateTime);
         MapToRow(domain, row, now);
-        ApplyPendingEvents(domain);
+        var pending = DrainPendingEvents(domain);
         await db.SaveChangesAsync();
+        await PersistEpicEventsAsync(domain, pending, now);
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
@@ -238,8 +249,9 @@ public class EpicGrain : Grain, IEpicGrain
         var wasAlreadyRunning = row.Status == EpicStatusName.Running;
         domain.Resume(now.UtcDateTime);
         MapToRow(domain, row, now);
-        ApplyPendingEvents(domain);
+        var pending = DrainPendingEvents(domain);
         await db.SaveChangesAsync();
+        await PersistEpicEventsAsync(domain, pending, now);
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
@@ -282,8 +294,9 @@ public class EpicGrain : Grain, IEpicGrain
         MapToRow(domain, row, now);
         if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
             await ReleaseActiveMembershipsAsync(db, projectId, epicId);
-        ApplyPendingEvents(domain);
+        var pending = DrainPendingEvents(domain);
         await db.SaveChangesAsync();
+        await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
 
@@ -304,8 +317,9 @@ public class EpicGrain : Grain, IEpicGrain
         var now = Now();
         domain.Update(title, description, priority, now.UtcDateTime);
         MapToRow(domain, row, now);
-        ApplyPendingEvents(domain);
+        var pending = DrainPendingEvents(domain);
         await db.SaveChangesAsync();
+        await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
 
@@ -368,8 +382,9 @@ public class EpicGrain : Grain, IEpicGrain
             domain.MarkDone(open, now.UtcDateTime);
             MapToRow(domain, row, now);
             await ReleaseActiveMembershipsAsync(db, projectId, epicId);
-            ApplyPendingEvents(domain);
+            var pending = DrainPendingEvents(domain);
             await db.SaveChangesAsync();
+            await PersistEpicEventsAsync(domain, pending, now);
             return ToDto(row);
         }
 
@@ -452,8 +467,9 @@ public class EpicGrain : Grain, IEpicGrain
         domain.MarkDone(open, now.UtcDateTime);
         MapToRow(domain, row, now);
         await ReleaseActiveMembershipsAsync(db, projectId, epicId);
-        ApplyPendingEvents(domain);
+        var pending = DrainPendingEvents(domain);
         await db.SaveChangesAsync();
+        await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }
 
@@ -598,15 +614,62 @@ public class EpicGrain : Grain, IEpicGrain
 
     private sealed record ActiveMembershipOwner(string EpicId, string Title);
 
-    private static void ApplyPendingEvents(EpicAggregate epic)
+    private static IReadOnlyList<Epic.Domain.Events.EpicEvent> DrainPendingEvents(EpicAggregate epic)
     {
-        // No-op drain: close, done, link/unlink, and other domain
-        // events are recorded on the aggregate for audit / projection,
-        // and the corresponding EpicIssueRow mutations are applied
-        // inline by the caller (LinkIssueAsync / UnlinkIssueAsync).
-        // Closing an epic is now non-destructive: it does NOT remove
-        // any EpicIssueRow. See issue-179 / design D1.
+        var pending = epic.PendingEvents.ToList();
         epic.ClearPendingEvents();
+        return pending;
+    }
+
+    /// <summary>
+    /// Post-commit, best-effort persistence of every domain event the
+    /// aggregate recorded since the last drain. Mirrors
+    /// <c>IssueGrain.PublishIssueEventsAsync</c>: append each envelope
+    /// through <see cref="IEventStore"/> wrapped in try/catch with
+    /// <c>_log.LogError</c> on failure (a crash or store error between
+    /// state commit and event append loses that mutation's events —
+    /// accepted as the timeline is informational and the authoritative
+    /// state lives in <c>EpicRow</c>).
+    /// </summary>
+    private async Task PersistEpicEventsAsync(
+        EpicAggregate epic,
+        IReadOnlyList<Epic.Domain.Events.EpicEvent> events,
+        DateTimeOffset now)
+    {
+        if (events.Count == 0) return;
+        var source = EpicEventPersistence.EpicSource(epic.Id);
+        var subject = epic.Number.ToString();
+        var extensions = new Dictionary<string, string>
+        {
+            ["projectid"] = epic.ProjectId,
+            ["epicid"] = epic.Id,
+            ["epicno"] = subject,
+        };
+
+        try
+        {
+            foreach (var evt in events)
+            {
+                var type = EpicEventSerializer.BusType(evt);
+                var dataJson = EpicEventSerializer.ToData(evt);
+                var envelope = new CloudEvent(
+                    id: Guid.NewGuid().ToString(),
+                    source: new Uri(source, UriKind.Relative),
+                    type: type,
+                    time: now,
+                    data: dataJson,
+                    subject: subject,
+                    extensions: extensions);
+
+                await _eventStore.AppendAsync(envelope, CancellationToken.None);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Post-commit epic event persistence failed for epic {EpicId} ({ProjectId})",
+                epic.Id, epic.ProjectId);
+        }
     }
 
     private static EpicDto ToDto(EpicRow epic) =>

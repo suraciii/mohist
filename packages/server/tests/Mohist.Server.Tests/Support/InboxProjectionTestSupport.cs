@@ -261,6 +261,8 @@ internal static class InboxProjectionTestSupport
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
         public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
+        public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
     }
 
     public sealed class NoopEventPublisher : IEventPublisher
