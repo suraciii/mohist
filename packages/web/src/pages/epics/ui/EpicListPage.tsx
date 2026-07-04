@@ -348,11 +348,53 @@ function EpicSection({
   )
 }
 
+type EpicSortField = 'priority' | 'updated' | 'created'
+type EpicSortDir = 'asc' | 'desc'
+
+const EPIC_SORT_OPTIONS: { value: EpicSortField; label: string }[] = [
+  { value: 'priority', label: 'Priority' },
+  { value: 'updated', label: 'Updated' },
+  { value: 'created', label: 'Created' },
+]
+
+const EPIC_DIR_OPTIONS: { value: EpicSortDir; label: string }[] = [
+  { value: 'asc', label: 'Ascending' },
+  { value: 'desc', label: 'Descending' },
+]
+
+function normalizeSort(value: string | null | undefined): EpicSortField | null {
+  if (!value) return null
+  const lower = value.toLowerCase()
+  return EPIC_SORT_OPTIONS.some((option) => option.value === lower) ? (lower as EpicSortField) : null
+}
+
+function normalizeDir(value: string | null | undefined): EpicSortDir | null {
+  if (!value) return null
+  const lower = value.toLowerCase()
+  return EPIC_DIR_OPTIONS.some((option) => option.value === lower) ? (lower as EpicSortDir) : null
+}
+
 export function EpicListPage() {
-  const { data: epics, isLoading } = useEpics()
+  const [searchInput, setSearchInput] = useState('')
+  const [sortField, setSortField] = useState<EpicSortField | null>(null)
+  const [sortDir, setSortDir] = useState<EpicSortDir | null>(null)
+  const trimmedSearch = searchInput.trim()
+  const { data: epics, isLoading } = useEpics({
+    search: trimmedSearch || undefined,
+    sort: sortField ?? undefined,
+    dir: sortDir ?? undefined,
+  })
   const startIssue = useStartIssue()
   const [pendingStartIssueNumber, setPendingStartIssueNumber] = useState<number | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+
+  function handleSortFieldChange(next: string) {
+    setSortField(normalizeSort(next))
+  }
+
+  function handleSortDirChange(next: string) {
+    setSortDir(normalizeDir(next))
+  }
 
   const activeEpics = epics?.filter(e => e.status === EpicStatus.Idle || e.status === EpicStatus.Running) ?? []
   const pausedEpics = epics?.filter(e => e.status === EpicStatus.Paused) ?? []
@@ -387,6 +429,74 @@ export function EpicListPage() {
           </svg>
           New Epic
         </Button>
+      </div>
+
+      <div
+        className="flex flex-wrap items-end gap-3 mb-6"
+        data-testid="epic-list-toolbar"
+      >
+        <div className="flex flex-col gap-1 grow min-w-[12rem]">
+          <label
+            htmlFor="epic-search"
+            className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+          >
+            Search
+          </label>
+          <input
+            id="epic-search"
+            type="search"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Filter epics by title"
+            aria-label="Search epics by title"
+            data-testid="epic-search-input"
+            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="epic-sort-field"
+            className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+          >
+            Sort by
+          </label>
+          <select
+            id="epic-sort-field"
+            value={sortField ?? ''}
+            onChange={(event) => handleSortFieldChange(event.target.value)}
+            data-testid="epic-sort-field"
+            className="rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">Default</option>
+            {EPIC_SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="epic-sort-dir"
+            className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+          >
+            Direction
+          </label>
+          <select
+            id="epic-sort-dir"
+            value={sortDir ?? ''}
+            onChange={(event) => handleSortDirChange(event.target.value)}
+            data-testid="epic-sort-dir"
+            className="rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">Default</option>
+            {EPIC_DIR_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {isLoading ? (

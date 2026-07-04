@@ -1,8 +1,18 @@
 import { request, projectApiPath } from '../../../shared/api/client'
 import type { Epic, EpicDetail, EpicWithProgress } from '../model/types'
 
-export function getEpics(params?: { projectId?: string }) {
-  return request<EpicWithProgress[]>(projectApiPath(params?.projectId, '/epics'))
+export function getEpics(params?: { projectId?: string; search?: string; sort?: string; dir?: string }) {
+  const query = buildEpicListQuery(params)
+  return request<EpicWithProgress[]>(projectApiPath(params?.projectId, '/epics') + query)
+}
+
+function buildEpicListQuery(params?: { search?: string; sort?: string; dir?: string }) {
+  const query = new URLSearchParams()
+  if (params?.search) query.set('search', params.search)
+  if (params?.sort) query.set('sort', params.sort)
+  if (params?.dir) query.set('dir', params.dir)
+  const qs = query.toString()
+  return qs.length === 0 ? '' : `?${qs}`
 }
 
 export function getEpic(id: string, params?: { projectId?: string }) {

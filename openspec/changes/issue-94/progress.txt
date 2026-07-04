@@ -133,3 +133,55 @@
   `batchAddEpicIssues` / `batchRemoveEpicIssues` client methods.
   Reaction mutations stay untouched; the batch client methods are
   pure additions for a future bulk-picker UI.
+
+## T-004 notes
+
+- List query is a **pure addition** — no contract change for
+  existing callers. `EpicQuerier.ListAsync` gains `search`, `sortBy`,
+  `sortDir` (all optional, default `null`); the route forwards
+  `?search=&sort=&dir=` query strings; the route accepts unknown
+  values without a 4xx (falls back to the default ordering).
+- The ORDER BY clause is selected from a closed map
+  `(field, dir)` → fragment string so the sort selector is never
+  interpolated into the SQL. Map keys: `priority`/`updated`/`created`
+  × `asc`/`desc`. Default fragment preserved byte-for-byte from the
+  legacy query (`e."Priority" ASC, e."UpdatedAt" DESC, li."CreatedAt"`)
+  — the regression test `ListAsync_OrdersByPriorityThenUpdatedAt`
+  still passes unchanged.
+- Search uses a bound parameter (`@search`) so the LIKE fragment is
+  injection-safe: `LOWER(e."Title") LIKE LOWER('%' || @search || '%')`.
+  When the normalized search is null/empty the WHERE clause omits the
+  search fragment entirely so the no-params path stays
+  byte-identical to the legacy query.
+- Sort-field normalization rejects anything that isn't letters/digits
+  (`NormalizeSortToken` returns `null` on bad input → fallback to
+  default). This guards against query-string `sort=priority'); DROP
+  TABLE Epics;--` style payloads. The same is true for the dir value.
+- `useEpics({ search?, sort?, dir? })` includes the params in its
+  query key (`['epics', projectId, { search, sort, dir }]`) so a
+  param change re-fetches without `manual` invalidation. The same
+  params are forwarded to the `getEpics` client, which builds a
+  `URLSearchParams` to keep the URL minimal (no dangling `?` when no
+  params are present).
+- Page controls are vanilla HTML `input` + two `select`s in a
+  toolbar (`data-testid="epic-list-toolbar"`); the search input
+  trims whitespace before forwarding. Status grouping
+  (`groupActiveEpics`) operates on the returned (filtered, sorted)
+  set — unchanged behavior on top of the new query.
+- Tests: `EpicQuerierListAsyncQuerySpecs` (11 unit specs) cover
+  byte-identical-no-params SQL, bound-vs-interpolated search,
+  sort-by priorities, sort-by updated, search+sort composition,
+  unknown-sort fallback, and sort-token sanitization. The
+  command-counting helper shares a single in-memory SQLite
+  connection between a migration context and a counting logger
+  context — same pattern as the existing EpicQuerierListAsyncSpecs.
+  `EpicListQueryApiSpecs` (7 integration specs) cover the route
+  contract (search filter, sort ordering, default-fallback,
+  composition, empty-string fallback). Web tests:
+  `EpicListPage.test.tsx` "search and sort controls" describe block
+  (11 specs) covers input rendering, search/sort wiring into
+  `useEpics`, trimming, fallback on unknown sort values, and
+  grouping preservation. `client.test.ts` (6 specs) covers
+  query-string serialization (no `?` when no params, search
+  forward, sort forward, composition).
+

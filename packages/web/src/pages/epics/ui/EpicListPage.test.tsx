@@ -899,3 +899,145 @@ describe('EpicListPage mobile no-overflow invariants', () => {
     expect(heading.className).toContain('break-words')
   })
 })
+
+describe('EpicListPage search and sort controls', () => {
+  const createMutate = vi.fn()
+  const startMutate = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockNavigate.mockClear()
+    mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders a search input bound to the toolbar', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    const input = screen.getByTestId('epic-search-input') as HTMLInputElement
+    expect(input).toBeTruthy()
+    expect(input.type).toBe('search')
+    expect(input.value).toBe('')
+    expect(input.placeholder).toBe('Filter epics by title')
+  })
+
+  it('forwards the typed search term into useEpics as the search param', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    const input = screen.getByTestId('epic-search-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'Auth' } })
+    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: 'Auth', sort: undefined, dir: undefined })
+  })
+
+  it('trims whitespace before forwarding the search param', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    const input = screen.getByTestId('epic-search-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '  Auth  ' } })
+    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: 'Auth', sort: undefined, dir: undefined })
+  })
+
+  it('clearing the search input omits the search param from useEpics', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    const input = screen.getByTestId('epic-search-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'Auth' } })
+    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: 'Auth', sort: undefined, dir: undefined })
+    fireEvent.change(input, { target: { value: '' } })
+    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: undefined, dir: undefined })
+  })
+
+  it('renders sort field and direction selectors with default = no override', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    const sortField = screen.getByTestId('epic-sort-field') as HTMLSelectElement
+    const sortDir = screen.getByTestId('epic-sort-dir') as HTMLSelectElement
+    expect(sortField).toBeTruthy()
+    expect(sortDir).toBeTruthy()
+    expect(sortField.value).toBe('')
+    expect(sortDir.value).toBe('')
+  })
+
+  it('forwards sort=priority and dir=asc to useEpics when selected', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    fireEvent.change(screen.getByTestId('epic-sort-field'), { target: { value: 'priority' } })
+    fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'asc' } })
+    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: 'priority', dir: 'asc' })
+  })
+
+  it('forwards sort=updated and dir=desc to useEpics when selected', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    fireEvent.change(screen.getByTestId('epic-sort-field'), { target: { value: 'updated' } })
+    fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'desc' } })
+    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: 'updated', dir: 'desc' })
+  })
+
+  it('rejects unknown sort field values by falling back to default ordering', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    fireEvent.change(screen.getByTestId('epic-sort-field'), { target: { value: 'garbage-payload' } })
+    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: undefined, dir: undefined })
+  })
+
+  it('rejects unknown dir values by falling back to default ordering', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'sideways' } })
+    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: undefined, dir: undefined })
+  })
+
+  it('combines search with sort and direction into a single useEpics call', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    fireEvent.change(screen.getByTestId('epic-search-input'), { target: { value: 'auth' } })
+    fireEvent.change(screen.getByTestId('epic-sort-field'), { target: { value: 'priority' } })
+    fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'desc' } })
+    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: 'auth', sort: 'priority', dir: 'desc' })
+  })
+
+  it('groups the data the server returned under the requested sort + filter', () => {
+    // After sort change, the page re-fetches and re-renders the
+    // status-grouped presentation on top of the new ordering. We assert
+    // the ordering is whatever the server returned and grouping still
+    // works.
+    const authReady = makeEpic({
+      id: 'epic-auth-ready',
+      title: 'Auth ready',
+      progress: {
+        deliveredCount: 1,
+        totalIssueCount: 3,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: { id: 'issue-auth-next', number: 9, title: 'Next auth work' },
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+    })
+    const authRunning = makeEpic({
+      id: 'epic-auth-running',
+      title: 'Auth running',
+      progress: {
+        deliveredCount: 1,
+        totalIssueCount: 3,
+        blockedIssues: [],
+        activeIssues: [{ id: 'issue-auth-active', number: 4, title: 'Active auth work', health: 'active' }],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+    })
+    mocks.useEpics.mockReturnValue({ data: [authReady, authRunning], isLoading: false })
+    renderPage()
+
+    // running still sits above ready-to-start regardless of search/sort.
+    const running = screen.getByText('Auth running')
+    const ready = screen.getByText('Auth ready')
+    expect(running.compareDocumentPosition(ready) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})

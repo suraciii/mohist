@@ -5,11 +5,18 @@ import { useProject } from '../../project/@x/project-context'
 import { startIssue } from '../../issue'
 import { addEpicIssue, closeEpic, createEpic, getEpic, getEpics, markEpicDone, pauseEpic, removeEpicIssue, reopenEpic, resumeEpic, startEpic, updateEpic, type UpdateEpicInput } from './client'
 
-export function useEpics() {
+export interface UseEpicsParams {
+  search?: string
+  sort?: string
+  dir?: string
+}
+
+export function useEpics(params: UseEpicsParams = {}) {
   const { projectId } = useProject()
+  const { search, sort, dir } = params
   return useQuery<EpicWithProgress[]>({
-    queryKey: ['epics', projectId],
-    queryFn: () => getEpics({ projectId: projectId ?? undefined }),
+    queryKey: ['epics', projectId, { search: search ?? null, sort: sort ?? null, dir: dir ?? null }],
+    queryFn: () => getEpics({ projectId: projectId ?? undefined, search, sort, dir }),
     enabled: !!projectId,
   })
 }

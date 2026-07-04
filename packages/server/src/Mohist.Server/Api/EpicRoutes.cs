@@ -14,10 +14,10 @@ public static class EpicRoutes
         var group = app.MapGroup("/api/projects/{projectRef}/epics")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        group.MapGet("/", async (HttpContext context, EpicQuerier queryService) =>
+        group.MapGet("/", async (HttpContext context, string? search, string? sort, string? dir, EpicQuerier queryService) =>
         {
             var pid = context.GetResolvedProject().Id;
-            return ApiResults.Ok(await queryService.ListAsync(pid));
+            return ApiResults.Ok(await queryService.ListAsync(pid, search, sort, dir));
         });
 
         group.MapPost("/", async (HttpContext context, EpicCreateRequest req, IGrainFactory grains) =>
