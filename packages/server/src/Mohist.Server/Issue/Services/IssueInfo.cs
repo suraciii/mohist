@@ -55,6 +55,7 @@ public class IssuePrerequisiteSummary
     [Id(3)] public bool Completed { get; set; }
     [Id(4)] public string Stage { get; set; } = null!;
     [Id(5)] public string Status { get; set; } = null!;
+    [Id(6)] public string Health { get; set; } = null!;
 
     public static IssuePrerequisiteSummary FromDomain(Domain.Issue issue) => new()
     {
@@ -63,7 +64,8 @@ public class IssuePrerequisiteSummary
         Title = issue.Title,
         Completed = issue.Status == IssueStatus.Done,
         Stage = MohistDefaultWorkflowProjection.IssueStatusName(issue.Status),
-        Status = MohistDefaultWorkflowProjection.Health(issue.Status),
+        Status = MohistDefaultWorkflowProjection.IssueStatusName(issue.Status),
+        Health = MohistDefaultWorkflowProjection.Health(issue.Status),
     };
 
     public static IssuePrerequisiteSummary FromReadModel(IssueReadModel issue) => new()
@@ -73,7 +75,8 @@ public class IssuePrerequisiteSummary
         Title = issue.Title,
         Completed = issue.Status == "done" || issue.Health is "done" or "completed",
         Stage = issue.Status,
-        Status = issue.Health,
+        Status = issue.Status,
+        Health = issue.Health,
     };
 }
 

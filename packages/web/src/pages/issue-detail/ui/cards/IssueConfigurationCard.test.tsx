@@ -59,21 +59,23 @@ interface MutationStubs {
   removePrerequisite: ReturnType<typeof vi.fn>
   addError?: Error | null
   removeError?: Error | null
+  addPending?: boolean
+  removePending?: boolean
 }
 
-function buildMutations({ addPrerequisite, removePrerequisite, addError = null, removeError = null }: MutationStubs): Pick<IssueDetailMutations, 'addPrerequisiteMutation' | 'removePrerequisiteMutation'> {
+function buildMutations({ addPrerequisite, removePrerequisite, addError = null, removeError = null, addPending = false, removePending = false }: MutationStubs): Pick<IssueDetailMutations, 'addPrerequisiteMutation' | 'removePrerequisiteMutation'> {
   return {
     addPrerequisiteMutation: {
       mutate: addPrerequisite,
       mutateAsync: addPrerequisite,
-      isPending: false,
+      isPending: addPending,
       isError: !!addError,
       error: addError,
     } as unknown as IssueDetailMutations['addPrerequisiteMutation'],
     removePrerequisiteMutation: {
       mutate: removePrerequisite,
       mutateAsync: removePrerequisite,
-      isPending: false,
+      isPending: removePending,
       isError: !!removeError,
       error: removeError,
     } as unknown as IssueDetailMutations['removePrerequisiteMutation'],
@@ -197,6 +199,19 @@ describe('IssueConfigurationCard', () => {
       const numbers = options.map((o) => Number(o.getAttribute('data-issue-number')))
       expect(numbers).not.toContain(5)
       expect(numbers).toEqual(expect.arrayContaining([7, 12]))
+    })
+
+    it('disables the picker while add or remove mutations are pending', () => {
+      setIssues(CANDIDATE_ISSUES)
+      renderCard({
+        mutations: buildMutations({
+          addPrerequisite: vi.fn(),
+          removePrerequisite: vi.fn(),
+          addPending: true,
+        }),
+      })
+
+      expect(screen.getByTestId('prerequisite-picker-trigger')).toBeDisabled()
     })
   })
 

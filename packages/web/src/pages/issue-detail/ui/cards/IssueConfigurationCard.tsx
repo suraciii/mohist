@@ -41,6 +41,7 @@ export function IssueConfigurationCard({ issue, projectId, mutations, unframed =
             excludeNumbers={[issue.number, ...prerequisiteNumbers]}
             canStart={issue.canStart}
             blocker={blocker}
+            disabled={addPrerequisiteMutation.isPending || removePrerequisiteMutation.isPending}
             onAdd={(n) => addPrerequisiteMutation.mutateAsync(n).then(() => undefined)}
             onRemove={(n) => removePrerequisiteMutation.mutateAsync(n).then(() => undefined)}
             errorMessage={

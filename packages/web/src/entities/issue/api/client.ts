@@ -6,10 +6,12 @@ export interface IssueWorkflowVariables {
   stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null
 }
 
-export function getIssues(params?: { stage?: string; label?: string; projectId?: string }) {
+export function getIssues(params?: { stage?: string; label?: string; projectId?: string; archived?: boolean; all?: boolean }) {
   const search = new URLSearchParams()
   if (params?.stage) search.set('stage', params.stage)
   if (params?.label) search.set('label', params.label)
+  if (params?.archived !== undefined) search.set('archived', String(params.archived))
+  if (params?.all !== undefined) search.set('all', String(params.all))
   const qs = search.toString()
   return request<Issue[]>(projectApiPath(params?.projectId, `/issues${qs ? `?${qs}` : ''}`))
 }

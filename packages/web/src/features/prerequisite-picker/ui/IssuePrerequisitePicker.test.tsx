@@ -34,6 +34,7 @@ const TEST_ISSUES: Issue[] = [
   buildIssue({ number: 42, title: 'Audit auth tokens', status: IssueStatus.Backlog, health: IssueHealth.Active }),
   buildIssue({ number: 50, title: 'Fix auth timeout', status: IssueStatus.InProgress, health: IssueHealth.Active }),
   buildIssue({ number: 70, title: 'Ship refactor', status: IssueStatus.Done, health: IssueHealth.Done }),
+  buildIssue({ number: 88, title: 'Archived completed dependency', status: IssueStatus.Done, health: IssueHealth.Done, archivedAt: '2026-01-02T00:00:00Z' }),
 ]
 
 const mocks = vi.hoisted(() => ({
@@ -153,7 +154,20 @@ describe('IssuePrerequisitePicker', () => {
 
       fireEvent.change(search, { target: { value: 'done' } })
       options = await screen.findAllByTestId('prerequisite-picker-option')
-      expect(options.map((opt) => Number(opt.getAttribute('data-issue-number')))).toEqual([70])
+      expect(options.map((opt) => Number(opt.getAttribute('data-issue-number')))).toEqual([70, 88])
+    })
+
+    it('requests all project issues so archived completed issues remain valid choices', async () => {
+      setIssues(TEST_ISSUES)
+      renderPicker()
+
+      openPicker()
+      const options = await screen.findAllByTestId('prerequisite-picker-option')
+      const numbers = options.map((opt) => Number(opt.getAttribute('data-issue-number')))
+
+      expect(mocks.useIssues).toHaveBeenCalledWith({ projectId: PROJECT_ID, all: true })
+      expect(numbers).toContain(88)
+      expect(options.find((opt) => opt.getAttribute('data-issue-number') === '88')).toHaveTextContent('Archived completed dependency')
     })
 
     it('shows no-match when the search term matches nothing', async () => {
@@ -224,7 +238,20 @@ describe('IssuePrerequisitePicker', () => {
         expect(numbers).not.toContain(issue.number)
       }
       expect(numbers).toEqual([99])
-      expect(mocks.useIssues).toHaveBeenCalledWith({ projectId: 'proj_other' })
+      expect(mocks.useIssues).toHaveBeenCalledWith({ projectId: 'proj_other', all: true })
+    })
+  })
+
+  describe('popover sizing', () => {
+    it('uses the Base UI anchor width variable for trigger-aligned popup width', async () => {
+      setIssues(TEST_ISSUES)
+      renderPicker()
+
+      openPicker()
+      const listbox = await screen.findByTestId('prerequisite-picker-listbox')
+      const content = listbox.closest('[data-slot="popover-content"]')
+
+      expect(content).toHaveClass('w-[var(--anchor-width)]')
     })
   })
 
@@ -312,6 +339,52 @@ describe('IssuePrerequisitePicker', () => {
       fireEvent.click(option42!)
 
       await waitFor(() => expect(onAdd).toHaveBeenCalledWith(42))
+    })
+
+    it('ignores duplicate live-mode candidate clicks while add is pending', async () => {
+      setIssues(TEST_ISSUES)
+      let resolveAdd!: () => void
+      const onAdd = vi.fn(() => new Promise<void>((resolve) => { resolveAdd = resolve }))
+      const onRemove = vi.fn()
+      renderPicker({ mode: 'live', selected: [], excludeNumbers: [], onAdd, onRemove })
+
+      openPicker()
+      const options = await screen.findAllByTestId('prerequisite-picker-option')
+      const option42 = options.find(
+        (opt) => opt.getAttribute('data-issue-number') === '42',
+      )
+      expect(option42).toBeDefined()
+      fireEvent.click(option42!)
+      fireEvent.click(option42!)
+
+      expect(onAdd).toHaveBeenCalledTimes(1)
+      expect(onAdd).toHaveBeenCalledWith(42)
+      resolveAdd()
+      await waitFor(() => expect(option42!).not.toBeDisabled())
+    })
+
+    it('ignores duplicate live-mode chip removals while remove is pending', async () => {
+      setIssues(TEST_ISSUES)
+      let resolveRemove!: () => void
+      const onRemove = vi.fn(() => new Promise<void>((resolve) => { resolveRemove = resolve }))
+      const onAdd = vi.fn()
+      renderPicker({
+        mode: 'live',
+        selected: [42],
+        excludeNumbers: [42],
+        onAdd,
+        onRemove,
+      })
+
+      const chip = screen.getByTestId('prerequisite-picker-chip')
+      const remove = within(chip).getByTestId('prerequisite-picker-chip-remove')
+      fireEvent.click(remove)
+      fireEvent.click(remove)
+
+      expect(onRemove).toHaveBeenCalledTimes(1)
+      expect(onRemove).toHaveBeenCalledWith(42)
+      resolveRemove()
+      await waitFor(() => expect(remove).not.toBeDisabled())
     })
   })
 

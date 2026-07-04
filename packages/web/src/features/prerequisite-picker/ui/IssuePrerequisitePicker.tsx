@@ -103,7 +103,7 @@ export function IssuePrerequisitePicker({
   errorMessage,
   selectedIssueSummaries = [],
 }: IssuePrerequisitePickerProps) {
-  const issuesQuery = useIssues({ projectId })
+  const issuesQuery = useIssues({ projectId, all: true })
   const allIssues: Issue[] = issuesQuery.data ?? []
 
   const excludeSet = useMemo(() => new Set(excludeNumbers), [excludeNumbers])
@@ -124,6 +124,18 @@ export function IssuePrerequisitePicker({
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [pendingError, setPendingError] = useState<string | null>(null)
+  const [pendingNumbers, setPendingNumbers] = useState<number[]>([])
+  const pendingNumbersRef = useRef(new Set<number>())
+
+  function markPending(number: number) {
+    pendingNumbersRef.current.add(number)
+    setPendingNumbers(Array.from(pendingNumbersRef.current))
+  }
+
+  function clearPending(number: number) {
+    pendingNumbersRef.current.delete(number)
+    setPendingNumbers(Array.from(pendingNumbersRef.current))
+  }
 
   const candidatePool = useMemo(() => {
     return allIssues.filter(issue => !excludeSet.has(issue.number))
@@ -140,23 +152,33 @@ export function IssuePrerequisitePicker({
     })
   }, [candidatePool, search])
 
+  const pendingSet = useMemo(() => new Set(pendingNumbers), [pendingNumbers])
+
   async function handleSelect(issue: Issue) {
     if (selectedSet.has(issue.number)) return
+    if (pendingNumbersRef.current.has(issue.number)) return
     setPendingError(null)
+    markPending(issue.number)
     try {
       await onAdd(issue.number)
       setSearch('')
     } catch (err) {
       setPendingError((err as Error).message ?? 'Failed to add prerequisite')
+    } finally {
+      clearPending(issue.number)
     }
   }
 
   async function handleRemoveChip(number: number) {
+    if (pendingNumbersRef.current.has(number)) return
     setPendingError(null)
+    markPending(number)
     try {
       await onRemove(number)
     } catch (err) {
       setPendingError((err as Error).message ?? 'Failed to remove prerequisite')
+    } finally {
+      clearPending(number)
     }
   }
 
@@ -195,7 +217,7 @@ export function IssuePrerequisitePicker({
             <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
           </svg>
         </PopoverTrigger>
-        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        <PopoverContent className="w-[var(--anchor-width)] p-0" align="start">
           <div className="p-2">
             <div className="relative">
               <div className="absolute left-3 top-1/2 -translate-y-1/2">
@@ -240,8 +262,9 @@ export function IssuePrerequisitePicker({
                   aria-selected={selectedSet.has(issue.number)}
                   data-testid="prerequisite-picker-option"
                   data-issue-number={issue.number}
+                  disabled={disabled || pendingSet.has(issue.number)}
                   onClick={() => handleSelect(issue)}
-                  className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
+                  className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">
@@ -305,6 +328,7 @@ export function IssuePrerequisitePicker({
                   size="icon-xs"
                   aria-label={`Remove prerequisite #${number}`}
                   data-testid="prerequisite-picker-chip-remove"
+                  disabled={disabled || pendingSet.has(number)}
                   onClick={() => handleRemoveChip(number)}
                   className="-mr-1 h-4 w-4 p-0 text-current hover:bg-transparent"
                 >

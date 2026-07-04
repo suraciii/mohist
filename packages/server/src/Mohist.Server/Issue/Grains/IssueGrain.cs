@@ -544,6 +544,8 @@ public class IssueGrain : Grain, IIssueGrain
                         throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
                     if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
                         throw PrerequisiteValidationException.NotFound(prerequisiteNumber);
+                    if (await WouldCreatePrerequisiteCycleAsync(prerequisiteNumber))
+                        throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
                     _issue!.AddPrerequisite(prerequisiteNumber);
                 }
             }
@@ -567,6 +569,8 @@ public class IssueGrain : Grain, IIssueGrain
             return IssuePrerequisiteResult.Circular();
         if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
             return IssuePrerequisiteResult.PrerequisiteNotFound(prerequisiteNumber);
+        if (await WouldCreatePrerequisiteCycleAsync(prerequisiteNumber))
+            return IssuePrerequisiteResult.Circular("Circular prerequisite: this would create a cycle");
 
         _issue.AddPrerequisite(prerequisiteNumber);
         await SaveIssueAsync();
@@ -692,6 +696,42 @@ public class IssueGrain : Grain, IIssueGrain
             if (issueId is null) return null;
             var issue = await _issueStore.LoadAsync(issueId);
             return issue is null ? null : IssuePrerequisiteSummary.FromDomain(issue);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<bool> WouldCreatePrerequisiteCycleAsync(int prerequisiteNumber)
+    {
+        if (_issue is null) return false;
+        var visited = new HashSet<int>();
+        var pending = new Stack<int>();
+        pending.Push(prerequisiteNumber);
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            if (!visited.Add(current)) continue;
+            if (current == _issue.Number) return true;
+
+            var currentIssue = await LoadIssueByNumberAsync(current);
+            if (currentIssue is null) continue;
+            foreach (var next in currentIssue.PrerequisiteNumbers)
+                pending.Push(next);
+        }
+
+        return false;
+    }
+
+    private async Task<Domain.Issue?> LoadIssueByNumberAsync(int issueNumber)
+    {
+        if (_issue is null) return null;
+        try
+        {
+            var issueId = await _identityResolver.GetIdAsync(_issue.ProjectId, issueNumber);
+            return issueId is null ? null : await _issueStore.LoadAsync(issueId);
         }
         catch (InvalidOperationException)
         {
