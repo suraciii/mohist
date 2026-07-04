@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Inbox;
+using Mohist.Server.Notifications;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Orleans.Hosting;
@@ -45,6 +46,9 @@ public static class MohistSiloRegistration
         silo.Services.AddScoped<InboxStore>();
         silo.Services.AddScoped<IStateStore<DomainIssue>, IssueStore>();
         silo.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
+        silo.Services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
+        silo.Services.AddSingleton<HermesIssueNotificationRenderer>();
+        silo.Services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
         silo.Services.AddCloudEventHandlersFromAssembly(typeof(MohistSiloRegistration).Assembly);
         silo.Services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
         silo.Services.TryAddSingleton(TimeProvider.System);

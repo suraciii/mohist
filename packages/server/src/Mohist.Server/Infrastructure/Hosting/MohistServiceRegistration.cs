@@ -26,6 +26,7 @@ using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Label.Services;
 using Mohist.Server.Otel;
 using Mohist.Server.Infrastructure.Data.Runner;
+using Mohist.Server.Notifications;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -68,6 +69,9 @@ public static class MohistServiceRegistration
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddScoped<IEventStore, EventStore>();
+        services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
+        services.AddSingleton<HermesIssueNotificationRenderer>();
+        services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddSingleton<IUserNotificationDispatcher, UserNotificationDispatcher>();
