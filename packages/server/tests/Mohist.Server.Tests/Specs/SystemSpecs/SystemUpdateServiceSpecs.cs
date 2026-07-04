@@ -11,6 +11,8 @@ namespace Mohist.Server.Tests.Specs.SystemSpecs;
 
 public class SystemUpdateServiceSpecs
 {
+    private static readonly TimeSpan AsyncWaitTimeout = TimeSpan.FromSeconds(5);
+
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
@@ -129,6 +131,7 @@ public class SystemUpdateServiceSpecs
         var latest = await store.GetLatestAsync();
         Assert.Equal("succeeded", latest!.Status);
         Assert.Equal("Ready", latest.Stage);
+        Assert.Equal(latest.CompletedAt, latest.UpdatedAt);
         Assert.Collection(commands.Requests, command =>
         {
             Assert.Equal("systemctl", command.FileName);
@@ -419,6 +422,43 @@ public class SystemUpdateServiceSpecs
         Assert.Equal("API health endpoint is not ready", first.Job!.Reason);
         Assert.Equal("Bundled asset is not ready", second.Job!.Reason);
         Assert.Contains(second.Job.Logs, log => log.Stage == "Waiting for reconnect" && log.Message.Contains("Bundled asset is not ready"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task AdvanceActiveJobAsync_DoesNotPersistDuplicateReadinessFailure()
+    {
+        var store = new InMemoryUpdateStore();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            "newhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Still waiting",
+            [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Still waiting")],
+            now,
+            now,
+            null));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(false, false, false, null, "Still waiting")));
+
+        await service.AdvanceActiveJobAsync();
+
+        var latest = await store.GetLatestAsync();
+        Assert.Equal("waiting-for-reconnect", latest!.Status);
+        Assert.Single(latest.Logs);
+        Assert.Single(store.SavedStates);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -1380,17 +1420,24 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public void SourceAudit_AppendLogSaveAsyncSequenceOnlyInSharedHelper()
+    public void SourceAudit_AppendLogInvocationsStayOnSharedHelperPath()
     {
         var source = ReadSource();
-        var persistStart = source.IndexOf("private async Task<SystemUpdateJobState> PersistTransitionAsync", StringComparison.Ordinal);
-        var persistEnd = FindMethodEnd(source, persistStart);
+        var applyLogStart = source.IndexOf("private static SystemUpdateJobState ApplyTransitionLog", StringComparison.Ordinal);
+        Assert.True(applyLogStart >= 0, "ApplyTransitionLog method not found");
+        var applyLogEnd = FindMethodEnd(source, applyLogStart);
+        var recordOutcomeStart = source.IndexOf("public async Task<SystemUpdateStatusResponse> RecordCliOutcomeAsync", StringComparison.Ordinal);
+        Assert.True(recordOutcomeStart >= 0, "RecordCliOutcomeAsync method not found");
+        var recordOutcomeEnd = FindMethodEnd(source, recordOutcomeStart);
 
-        var matches = Regex.Matches(source, @"AppendLog\s*\([^;]+\)[^;]*;\s*await\s+_store\.SaveAsync\s*\(", RegexOptions.Singleline);
+        var matches = Regex.Matches(source, @"(?<!IReadOnlyList<SystemUpdateLogEntry>\s)AppendLog\s*\(");
+        Assert.Equal(2, matches.Count);
         foreach (Match match in matches)
         {
-            Assert.True(match.Index >= persistStart && match.Index <= persistEnd,
-                $"Inline AppendLog + SaveAsync sequence at position {match.Index} is not inside PersistTransitionAsync");
+            var inApplyLog = match.Index >= applyLogStart && match.Index <= applyLogEnd;
+            var inRecordOutcome = match.Index >= recordOutcomeStart && match.Index <= recordOutcomeEnd;
+            Assert.True(inApplyLog || inRecordOutcome,
+                $"AppendLog invocation at position {match.Index} is not inside ApplyTransitionLog or CLI outcome log ingestion");
         }
     }
 
@@ -1569,6 +1616,7 @@ public class SystemUpdateServiceSpecs
 
     private sealed class InMemoryUpdateStore : ISystemUpdateStore
     {
+        private readonly object _gate = new();
         private readonly List<StatusWaiter> _statusWaiters = [];
         // Specs that assert the lock is free after a terminal status must wait
         // for unlock explicitly: the production RunUpdateAsync saves the
@@ -1589,25 +1637,36 @@ public class SystemUpdateServiceSpecs
         public List<SystemUpdateJobState> SavedStates { get; } = [];
 
         public Task<SystemUpdateJobState?> GetLatestAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(_latest);
+        {
+            lock (_gate)
+            {
+                return Task.FromResult(_latest);
+            }
+        }
 
         public Task<bool> TryAcquireLockAsync(string jobId, CancellationToken cancellationToken = default)
         {
-            if (!_acquireLock || _locked || _latest?.Status is "running" or "waiting-for-reconnect")
-                return Task.FromResult(false);
+            lock (_gate)
+            {
+                if (!_acquireLock || _locked || _latest?.Status is "running" or "waiting-for-reconnect")
+                    return Task.FromResult(false);
 
-            _locked = true;
-            _lockOwnerJobId = jobId;
-            return Task.FromResult(true);
+                _locked = true;
+                _lockOwnerJobId = jobId;
+                return Task.FromResult(true);
+            }
         }
 
         public Task ReleaseLockAsync(string jobId, CancellationToken cancellationToken = default)
         {
-            if (_lockOwnerJobId == jobId)
+            lock (_gate)
             {
-                _locked = false;
-                _lockOwnerJobId = null;
-                CompleteUnlockWaiters();
+                if (_lockOwnerJobId == jobId)
+                {
+                    _locked = false;
+                    _lockOwnerJobId = null;
+                    CompleteUnlockWaiters();
+                }
             }
 
             return Task.CompletedTask;
@@ -1615,12 +1674,15 @@ public class SystemUpdateServiceSpecs
 
         public Task WaitForUnlockAsync()
         {
-            if (!_locked)
-                return Task.CompletedTask;
+            lock (_gate)
+            {
+                if (!_locked)
+                    return Task.CompletedTask;
 
-            var waiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _unlockWaiters.Add(waiter);
-            return waiter.Task;
+                var waiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _unlockWaiters.Add(waiter);
+                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+            }
         }
 
         private void CompleteUnlockWaiters()
@@ -1635,34 +1697,44 @@ public class SystemUpdateServiceSpecs
 
         public Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default)
         {
-            _latest = state;
-            SavedStates.Add(state);
-            CompleteStatusWaiters();
+            lock (_gate)
+            {
+                _latest = state;
+                SavedStates.Add(state);
+                CompleteStatusWaiters();
+            }
+
             return Task.CompletedTask;
         }
 
         public Task<bool> SaveIfCurrentAsync(SystemUpdateJobState expected, SystemUpdateJobState next, CancellationToken cancellationToken = default)
         {
-            if (_latest is null
-                || !string.Equals(_latest.JobId, expected.JobId, StringComparison.Ordinal)
-                || !string.Equals(_latest.Status, expected.Status, StringComparison.Ordinal))
+            lock (_gate)
             {
-                return Task.FromResult(false);
+                if (_latest is null
+                    || !string.Equals(_latest.JobId, expected.JobId, StringComparison.Ordinal)
+                    || !string.Equals(_latest.Status, expected.Status, StringComparison.Ordinal))
+                {
+                    return Task.FromResult(false);
+                }
+                _latest = next;
+                SavedStates.Add(next);
+                CompleteStatusWaiters();
+                return Task.FromResult(true);
             }
-            _latest = next;
-            SavedStates.Add(next);
-            CompleteStatusWaiters();
-            return Task.FromResult(true);
         }
 
         public Task WaitForStatusAsync(string status)
         {
-            if (string.Equals(_latest?.Status, status, StringComparison.Ordinal))
-                return Task.CompletedTask;
+            lock (_gate)
+            {
+                if (string.Equals(_latest?.Status, status, StringComparison.Ordinal))
+                    return Task.CompletedTask;
 
-            var waiter = new StatusWaiter(status);
-            _statusWaiters.Add(waiter);
-            return waiter.Task;
+                var waiter = new StatusWaiter(status);
+                _statusWaiters.Add(waiter);
+                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+            }
         }
 
         public Task WaitForStatusAndStageAsync(string status, string stage)
@@ -1694,25 +1766,32 @@ public class SystemUpdateServiceSpecs
 
     private sealed class RecordingCommandRunner : ISystemUpdateCommandRunner
     {
+        private readonly object _gate = new();
         private readonly List<CountWaiter> _waiters = [];
         public List<SystemCommandRequest> Requests { get; } = [];
 
         public Task<SystemCommandResult> RunAsync(SystemCommandRequest command, CancellationToken cancellationToken = default)
         {
-            Requests.Add(command);
-            CompleteSatisfiedWaiters();
+            lock (_gate)
+            {
+                Requests.Add(command);
+                CompleteSatisfiedWaiters();
+            }
 
             return Task.FromResult(new SystemCommandResult(0, $"ok:{command.Stage}"));
         }
 
         public Task WaitForCountAsync(int count)
         {
-            if (Requests.Count >= count)
-                return Task.CompletedTask;
+            lock (_gate)
+            {
+                if (Requests.Count >= count)
+                    return Task.CompletedTask;
 
-            var waiter = new CountWaiter(count);
-            _waiters.Add(waiter);
-            return waiter.Task;
+                var waiter = new CountWaiter(count);
+                _waiters.Add(waiter);
+                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+            }
         }
 
         private void CompleteSatisfiedWaiters()
@@ -1731,6 +1810,7 @@ public class SystemUpdateServiceSpecs
 
     private sealed class ScriptedCommandRunner : ISystemUpdateCommandRunner
     {
+        private readonly object _gate = new();
         private readonly (int Index, string FileName, SystemCommandResult Result)[] _script;
         private readonly List<CountWaiter> _waiters = [];
         public List<SystemCommandRequest> Requests { get; } = [];
@@ -1742,9 +1822,13 @@ public class SystemUpdateServiceSpecs
 
         public Task<SystemCommandResult> RunAsync(SystemCommandRequest command, CancellationToken cancellationToken = default)
         {
-            var index = Requests.Count;
-            Requests.Add(command);
-            CompleteSatisfiedWaiters();
+            int index;
+            lock (_gate)
+            {
+                index = Requests.Count;
+                Requests.Add(command);
+                CompleteSatisfiedWaiters();
+            }
 
             if (index >= _script.Length)
                 return Task.FromResult(new SystemCommandResult(0, "ok"));
@@ -1760,12 +1844,15 @@ public class SystemUpdateServiceSpecs
 
         public Task WaitForCountAsync(int count)
         {
-            if (Requests.Count >= count)
-                return Task.CompletedTask;
+            lock (_gate)
+            {
+                if (Requests.Count >= count)
+                    return Task.CompletedTask;
 
-            var waiter = new CountWaiter(count);
-            _waiters.Add(waiter);
-            return waiter.Task;
+                var waiter = new CountWaiter(count);
+                _waiters.Add(waiter);
+                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+            }
         }
 
         private void CompleteSatisfiedWaiters()
@@ -1784,6 +1871,7 @@ public class SystemUpdateServiceSpecs
 
     private sealed class ThrowingCommandRunner : ISystemUpdateCommandRunner
     {
+        private readonly object _gate = new();
         private readonly (string FileName, Func<SystemCommandResult> Run)[] _script;
         private readonly List<CountWaiter> _waiters = [];
         public List<SystemCommandRequest> Requests { get; } = [];
@@ -1795,9 +1883,13 @@ public class SystemUpdateServiceSpecs
 
         public Task<SystemCommandResult> RunAsync(SystemCommandRequest command, CancellationToken cancellationToken = default)
         {
-            var index = Requests.Count;
-            Requests.Add(command);
-            CompleteSatisfiedWaiters();
+            int index;
+            lock (_gate)
+            {
+                index = Requests.Count;
+                Requests.Add(command);
+                CompleteSatisfiedWaiters();
+            }
 
             if (index >= _script.Length)
                 return Task.FromResult(new SystemCommandResult(0, "ok"));
@@ -1813,12 +1905,15 @@ public class SystemUpdateServiceSpecs
 
         public Task WaitForCountAsync(int count)
         {
-            if (Requests.Count >= count)
-                return Task.CompletedTask;
+            lock (_gate)
+            {
+                if (Requests.Count >= count)
+                    return Task.CompletedTask;
 
-            var waiter = new CountWaiter(count);
-            _waiters.Add(waiter);
-            return waiter.Task;
+                var waiter = new CountWaiter(count);
+                _waiters.Add(waiter);
+                return waiter.Task.WaitAsync(AsyncWaitTimeout);
+            }
         }
 
         private void CompleteSatisfiedWaiters()

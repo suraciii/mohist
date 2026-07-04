@@ -189,7 +189,8 @@ public sealed class SystemUpdateService : ISingletonService
                 CompletedAt = completedAt
             },
             cancellationToken,
-            releaseLock: true);
+            releaseLock: true,
+            timestamp: completedAt);
     }
 
     public async Task<SystemUpdateStatusEnvelope> GetStatusEnvelopeAsync(CancellationToken cancellationToken = default)
@@ -663,9 +664,10 @@ public sealed class SystemUpdateService : ISingletonService
         CancellationToken cancellationToken,
         SystemUpdateLogEntry? logEntry = null,
         bool releaseLock = false,
-        SystemUpdateJobState? expected = null)
+        SystemUpdateJobState? expected = null,
+        DateTimeOffset? timestamp = null)
     {
-        next = ApplyTransitionLog(next, logEntry);
+        next = ApplyTransitionLog(next, logEntry, timestamp);
         if (expected is not null)
             await _store.SaveIfCurrentAsync(expected, next, cancellationToken);
         else
@@ -716,14 +718,14 @@ public sealed class SystemUpdateService : ISingletonService
         return (next, new SystemUpdateLogEntry(failedAt, logStage ?? stage ?? state.Stage, logMessage ?? reason));
     }
 
-    private static SystemUpdateJobState ApplyTransitionLog(SystemUpdateJobState next, SystemUpdateLogEntry? logEntry)
+    private static SystemUpdateJobState ApplyTransitionLog(SystemUpdateJobState next, SystemUpdateLogEntry? logEntry, DateTimeOffset? timestamp = null)
     {
         var logs = logEntry is not null ? AppendLog(next.Logs, logEntry) : next.Logs;
-        var timestamp = logEntry?.At ?? DateTimeOffset.UtcNow;
+        timestamp ??= logEntry?.At ?? DateTimeOffset.UtcNow;
         return next with
         {
             Logs = logs,
-            UpdatedAt = timestamp
+            UpdatedAt = timestamp.Value
         };
     }
 
