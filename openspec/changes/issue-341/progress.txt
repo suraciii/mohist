@@ -174,3 +174,72 @@ Each gets a default summary chip on narrow (e.g. "Backlog" / "default model" / "
 - Cross-tier verification gate across every conditional path (archived, backlog readiness, draft, drift, convergence, interrupted health, PR delivery, capacity gating).
 - Mobile drawer/bottom-sheet for the rail (next issue, out of scope).
 - Inline primary action in the sticky headline (D4 alternative, deferred).
+
+T-004 progress notes
+
+## Cross-tier verification gate (T-004)
+
+## Scope
+
+- Performed a holistic cross-tier audit across every conditional path the detail page supports.
+- Verification surface spans: archived (done) — backlog readiness (draft + waiting) — drift detected — convergence items — interrupted health (workflowStatus='interrupted') — PR delivery (publish-via-pr timeline) — capacity gating (full + non-full).
+- No code-level changes; this is a REVIEW task consuming T-001..T-003.
+
+## Verification Artifacts
+
+- New test file: `packages/web/src/pages/issue-detail/ui/IssueDetailPage.cross-tier.test.tsx` (17 tests, all green).
+- New test file reuses every per-tier spec test already added by T-001..T-003 (`IssueDetailPage.status-header.test.tsx`, `.reading-flow.test.tsx`, `.reference-rail.test.tsx`, `.archived.test.tsx`, `.capacity-gating.test.tsx`, `.readiness.test.tsx`) — no duplication of assertions.
+- The existing four target test suites (`IssueDetailPage.{main,readiness,capacity-gating,archived}.test.tsx`) plus the legacy integration test were already updated in place by T-001 and remained green through T-002..T-004.
+- Total web suite at gate: 263 test files / 4114 tests passing (1 documented skip for legacy event-format coverage in `live-task-cloud-event.test.tsx:311`, not a flakiness mask).
+- `npm run typecheck -w packages/web`: clean. `npm run test:run -w packages/web`: all green.
+
+## Per-path Pass/Fail Matrix (test-asserted)
+
+| Conditional path | D2 status-header tier assignment | D2 reading-flow tier | D2 reference-rail tier | Visual weight | Pass |
+|---|---|---|---|---|---|
+| archived done | `status-headline` (summary=done, sticky, no active workflow controls) + `issue-detail-header` (with archived pill + archived-banner) + `runtime-decision-surface` (done, no Start/Stop) | `description-section`, `comments-section` | `reference-rail-details`, `reference-rail-actions` | status > flow > rail | PASS |
+| backlog draft | `status-headline` (situation alone, no fabricated stage/progress) + identity row (draft pill) + `runtime-decision-surface` (Start disabled with draft blocker) | excluded | `reference-rail-readiness` (backlog-only card shows isDraft=Yes, blocker=draft, canStart=No) | status > flow > rail | PASS |
+| drift detected | `status-headline` unaffected | reading flow excludes drift block | `reference-rail-drift` (default-collapsed, expandable on click) | status > flow > rail | PASS |
+| convergence items | `status-headline` reflects `blocked` (or `approval-required`) when convergence items exist | reading flow excludes convergence | `reference-rail-convergence` (default-collapsed, expandable on click) | status > flow > rail | PASS |
+| interrupted health | `status-headline` shows `Blocked`/`Failed` (driven by `deriveRuntimeDecision`'s interrupted-to-blocked classification) — `WorkflowInterrupted` static card remains removed per design D5 | reading flow excludes | `reference-rail-convergence` (since interrupted health surfaces convergence items) | status > flow > rail | PASS |
+| PR delivery | `status-headline` unaffected | `workflow-view-frame` precedes `pr-delivery-summary-frame` (publish-via-pr indicator with completed task) + diff/commits/description/comments chain preserved | excluded | status > flow > rail | PASS |
+| capacity gating (full) | `status-headline` unaffected + Start action disabled with "capacity is full" title in the header tier | reading flow excludes Start | reference rail excludes Start (no duplicate Start) | status > flow > rail | PASS |
+| capacity gating (not full) | `status-headline` unaffected + Start action enabled in header tier | reading flow excludes Start | reference rail excludes Start | status > flow > rail | PASS |
+
+## Duplication / Orphan Audit (test-asserted)
+
+- Each D2 block was asserted to live in exactly one tier via the "single rendering" test. Specifically: status-header blocks (`status-headline`, `issue-detail-header`, `runtime-decision-surface`) live ONLY in `status-header-tier` (not in the flow or rail); reading-flow blocks (`workflow-view-frame`, `pr-delivery-summary-frame`, `diff-summary-banner`, `diff-files-section`, `commits-section`, `description-section`, `comments-section`) live ONLY in `reading-flow`; reference-rail blocks (`reference-rail-details`, `reference-rail-workflow-profile`, `reference-rail-drift`, `reference-rail-convergence`, `reference-rail-configuration`, `reference-rail-actions`, `reference-rail-prerequisites`) live ONLY in `reference-rail`.
+- All 7 runtime actions (`runtime-action-{approve,send-back,stop,start,retry,resume,rerun}`) were asserted to live ONLY in `status-header-tier`.
+- Stickiness invariant asserted: exactly ONE `[data-sticky="true"]` element across the page, and it IS `status-headline`. Reading flow and rail contain no sticky children.
+- No removed card regression: `WorkflowInterrupted` static card (`workflow-interrupted-card`) absent everywhere; surfaced instead via `deriveRuntimeDecision.blockedReason` -> headline blocked-class.
+
+## Weight Hierarchy Audit (test-asserted)
+
+- `data-tier-weight` numeric order {status-header: 3 > reading-flow: 2 > reference-rail: 1} held across every conditional path tested.
+- Headline carries the unique sticky + `bg-*-subtle` + icon + border combination; reading flow and rail contain NO semantic fill.
+- Reading flow asserts `lg:col-span-2` of `lg:grid-cols-3` (widest); rail asserts `lg:col-span-1` on desktop (narrower than flow); on narrow viewport the rail loses `lg:col-span-1` and stacks beneath the flow.
+
+## Regression Sentinels
+
+- `IssueDetailPage.archived.test.tsx` — 18 tests, all green. Covers archived pill/banner preservation, back-link routing, workflow history rendering equivalence between archived and non-archived Done, no active-workflow controls under archive, and `runtime-decision-surface.dataset.summary === 'done'`.
+- `IssueDetailPage.capacity-gating.test.tsx` — 8 tests, all green. Covers `capacity.active === capacity.max` disabling Start regardless of `activeAgents.length`; 0-max placeholder does not disable; `agentStatus.activeAgents` reaching into the cross-issue indicator without falsely gating this issue's Start.
+- Combined sentinel bundle: 26 tests, all green.
+
+## Open-Question Audit (T-001 deferred items revisited)
+
+- **Reducer wording for interrupted health**: `deriveRuntimeDecision` already maps `workflowStatus='interrupted'` to a blocked-class situation, and the headline's blocked fill + semantic icon carry the user signal (via `data-summary` and `bg-warning-subtle`). The static card restoration was NOT needed; the headline + convergence rail card surface is sufficient. (Decision: keep D5 / no card restored; matches design.md Open Question resolution.)
+- **Inline primary action in sticky headline**: still deferred per T-001; not regressed.
+- **`WorkflowSessionsPanel` tier placement**: still in reading flow per T-001; not regressed; reading-flow tests pass.
+
+## Final Verification Gates
+
+- `npm run typecheck -w packages/web` → exit 0, no warnings.
+- `npm run test:run -w packages/web` → 263 files, 4114 tests pass, 1 documented legacy-skip pass.
+- Per-tier regression sentinels (archived + capacity-gating) → 26 tests, all green.
+- Cross-tier integration test → 17 tests, all green.
+
+## Codebase Patterns Reinforced
+
+- "One block per tier" is testable via a single-paragraph function: `expectAssigned(testId, anchor)`. The `data-testid` stability rule from T-001 pays off here — there's no need for fresh component-internals scanning because every block is reachable by its existing anchor.
+- The `data-tier-weight` numeric map (3 / 2 / 1) is the single attribute that distinguishes the three tiers for ordering assertions; it's preserved across all per-tier tests introduced by T-001..T-004.
+- `findPublishViaPrMetadata` requires a `completed` `mohist/publish-via-pr` (or `merge-pull-request`, `create-pull-request`) task with `output` JSON containing `prNumber` + `prUrl`. Cross-tier PR-delivery fixture uses `{ kind: 'publish-via-pr', prNumber: 42, prUrl: 'https://github.com/example/repo/pull/42' }` to drive the `pr-delivery-summary-frame`.
