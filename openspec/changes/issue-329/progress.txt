@@ -21,3 +21,22 @@
 - Replaced `GetVariables_OnlyLegacyModelSet_SynthesizesAgentObject` with `GetVariables_OnlyModelSet_ReturnsEmptyBundle` — same fixture approach (raw JSON file write), asserts `Vars == null && Stages == null`.
 - Swapped the `GetAll_MasksSecrets` probe key from `model` (gone from schema, would throw `Unknown config key: model`) to `logLevel` (existing non-sensitive schema key). The asserted behavior ("set value, GetAllAsync reads it back") is unchanged.
 - No call site change anywhere in the codebase: `ConfigService.GetAgentConfigAsync`/`SetAgentModelAsync` were already the only surfaces, and they already read from the unified `agent` object. Existing tests in `IssueWorkflowProfileManagerSpecs`, `WorkflowProfileManagerSpecs`, `VariableBundleSpecs` etc. all continue to pass unchanged.
+
+## Task T-002 Notes (Consolidate envelope success/error/code extraction)
+
+- Added `internal sealed record Envelope(bool HasBody, bool Success, JsonNode? Data, string Error, string? Code)` and two `internal static` helpers in `MohistCliApi`: `ExtractEnvelope(JsonNode?, HttpResponseMessage)` and `FailureExitCode(HttpResponseMessage)`. Added an overload `FailureExitCode(HttpStatusCode)` for catch blocks that only carry the status code (e.g. `ApiResponseException` consumers).
+- Rewired 6 internal extraction blocks in `MohistCliApi.cs`: `PrintProjectListAsync`, `PrintResponseAsync`, `PrintRawResponseAsync`, `ReadSuccessDataAsync`, `ReadPostResultAsync`, `PrintRunnerShowAsync`, plus `PrintSystemInfoAsync`. The empty-body + non-2xx case for `PrintResponseAsync`/`PrintRawResponseAsync`/`ReadPostResultAsync`/`PrintProjectListAsync` keeps the legacy "print status code to stdout" behavior — i.e. the `node is null` branch is short-circuited BEFORE the envelope is consulted, matching the spec scenario "Empty body falls back to status code text".
+- `PrintSystemInfoAsync` keeps its command-level `HttpRequestException → RenderSystemInfoDegradedAsync + exit 0` recovery and an additional `node is null → degraded + 0` recovery (the latter preserves the prior "empty body on any status renders degraded + 0" behavior). Envelope extraction only runs when a non-null body is parsed.
+- `ReadSuccessDataAsync`'s throw contract is preserved: it still throws `ApiResponseException` for its 7 callers; only the field extraction was shared, not the throw/print decision.
+- `MohistCliCommands.Agent.cs`: `ReadDataOrPrintErrorAsync` (the `node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode` rewrite at the old ~:860) now delegates to `MohistCliApi.ExtractEnvelope`. The `PrintAgentIdAsync` fallback `response.StatusCode == HttpStatusCode.NotFound ? 4 : 1` also now uses `MohistCliApi.FailureExitCode(response)`.
+- `MohistCliCommands.Otel.cs` (`RunStatusAsync`): the `node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode` rewrite at the old ~:181 now delegates to `MohistCliApi.ExtractEnvelope`. The `TaskCanceledException` catch and the empty-body "Server returned an empty response with status <code>." diagnostic are untouched.
+- `grep "node\[\"success\"\]"` over the CLI tree now returns exactly one hit, inside `MohistCliApi.ExtractEnvelope`. `grep "NotFound \? 4 : 1"` returns exactly two hits: one inside `FailureExitCode` itself, and one inside `PrintRunnerShowAsync` (intentional pre-envelope custom NotFound message: `"Runner '<id>' not found"`).
+- New `MohistCliApiEnvelopeSpecs` (20 specs) at `packages/cli/tests/Mohist.Cli.Tests/MohistCliApiEnvelopeSpecs.cs`:
+  - 6 specs for `ExtractEnvelope` itself (null node on 2xx, null node on 4xx, success body, failure body, missing-success on 2xx, missing-success on 5xx).
+  - 4 specs for `FailureExitCode` (response overload + status-code overload, both 404 and 400).
+  - 6 specs driving `PrintGetAsync` end-to-end (success body, 404 body, 400 body, empty body on 2xx, empty body on 4xx, body without `success` on 2xx).
+  - 2 specs for `PostAndReadAsync` (success + 404).
+  - 2 specs for `GetDataAsync` (success + 404-throw).
+  - Note: `ApiResponseException` is `private sealed` inside `MohistCliApi`, so the throw contract is asserted via the base `Exception` message rather than the typed exception.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests` passes 609 / 0 failed (was 589 before T-002; +20 new envelope specs). `dotnet test packages/server/tests/Mohist.Server.Tests` still 3771 / 0 failed (T-002 is CLI-only).
+- `dotnet build Mohist.sln` (TreatWarningsAsErrors) succeeds with 0 warnings.

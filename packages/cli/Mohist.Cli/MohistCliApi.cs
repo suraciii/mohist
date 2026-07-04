@@ -54,23 +54,21 @@ internal sealed class MohistCliApi
         using var response = await _http.GetAsync("/api/projects");
         await using var stream = await response.Content.ReadAsStreamAsync();
         JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+
         if (node is null)
         {
             _out.WriteLine(response.StatusCode);
             return response.IsSuccessStatusCode ? 0 : 1;
         }
 
-        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
-        if (!success)
+        var envelope = ExtractEnvelope(node, response);
+        if (!envelope.Success)
         {
-            var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
-            var code = node["code"]?.GetValue<string>();
-            _err.WriteLine(code is null ? error : $"{error} ({code})");
-            return response.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            return FailureExitCode(response);
         }
 
-        var data = node["data"];
-        if (data is not JsonArray array || array.Count == 0)
+        if (envelope.Data is not JsonArray array || array.Count == 0)
         {
             _out.WriteLine("No projects");
             return 0;
@@ -185,7 +183,7 @@ internal sealed class MohistCliApi
         catch (ApiResponseException ex)
         {
             _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
-            return (ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1, null);
+            return (FailureExitCode(ex.StatusCode), null);
         }
         catch (HttpRequestException)
         {
@@ -241,7 +239,7 @@ internal sealed class MohistCliApi
         catch (ApiResponseException ex)
         {
             _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
-            return ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+            return FailureExitCode(ex.StatusCode);
         }
 
         if (responseData is null)
@@ -310,19 +308,17 @@ internal sealed class MohistCliApi
             return 4;
         }
 
-        if (!response.IsSuccessStatusCode)
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+
+        var envelope = ExtractEnvelope(node, response);
+        if (!envelope.Success)
         {
-            await using var stream = await response.Content.ReadAsStreamAsync();
-            JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
-            var error = node?["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
-            var code = node?["code"]?.GetValue<string>();
-            _err.WriteLine(code is null ? error : $"{error} ({code})");
-            return 1;
+            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            return FailureExitCode(response);
         }
 
-        await using var okStream = await response.Content.ReadAsStreamAsync();
-        JsonNode? okNode = okStream.Length == 0 ? null : await JsonNode.ParseAsync(okStream);
-        var runner = okNode?["data"]?["runner"] as JsonObject;
+        var runner = envelope.Data?["runner"] as JsonObject;
         if (runner is null)
         {
             _err.WriteLine(ServerUnavailableMessage);
@@ -360,7 +356,7 @@ internal sealed class MohistCliApi
         catch (ApiResponseException ex)
         {
             _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
-            return ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+            return FailureExitCode(ex.StatusCode);
         }
 
         if (data is null)
@@ -483,7 +479,7 @@ internal sealed class MohistCliApi
         catch (ApiResponseException ex)
         {
             _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
-            return ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+            return FailureExitCode(ex.StatusCode);
         }
 
         if (data is null)
@@ -530,16 +526,14 @@ internal sealed class MohistCliApi
             return 0;
         }
 
-        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
-        if (!success)
+        var envelope = ExtractEnvelope(node, response);
+        if (!envelope.Success)
         {
-            var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
-            var code = node["code"]?.GetValue<string>();
-            _err.WriteLine(code is null ? error : $"{error} ({code})");
-            return response.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            return FailureExitCode(response);
         }
 
-        var data = node["data"];
+        var data = envelope.Data;
 
         if (string.Equals(mode, "json", StringComparison.Ordinal))
         {
@@ -870,7 +864,7 @@ internal sealed class MohistCliApi
         catch (ApiResponseException ex)
         {
             _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
-            return ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+            return FailureExitCode(ex.StatusCode);
         }
         catch (HttpRequestException)
         {
@@ -922,7 +916,7 @@ internal sealed class MohistCliApi
         catch (ApiResponseException ex)
         {
             _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
-            return ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+            return FailureExitCode(ex.StatusCode);
         }
     }
 
@@ -1005,63 +999,57 @@ internal sealed class MohistCliApi
     {
         await using var stream = await response.Content.ReadAsStreamAsync();
         JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
-        if (node is null)
-            throw new ApiResponseException(response.StatusCode, response.ReasonPhrase ?? "Request failed");
 
-        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
-        if (success)
-            return node["data"];
+        var envelope = ExtractEnvelope(node, response);
+        if (envelope.Success)
+            return envelope.Data;
 
-        var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
-        var code = node["code"]?.GetValue<string>();
-        throw new ApiResponseException(response.StatusCode, error, code);
+        throw new ApiResponseException(response.StatusCode, envelope.Error, envelope.Code);
     }
 
     private async Task<int> PrintResponseAsync(HttpResponseMessage response, JsonNode? successDataFallback = null)
     {
         await using var stream = await response.Content.ReadAsStreamAsync();
         JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+
         if (node is null)
         {
             _out.WriteLine(response.StatusCode);
             return response.IsSuccessStatusCode ? 0 : 1;
         }
 
-        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
-        if (success)
+        var envelope = ExtractEnvelope(node, response);
+        if (!envelope.Success)
         {
-            var data = node["data"] ?? successDataFallback;
-            _out.WriteLine(data is null ? "OK" : data.ToJsonString(JsonOptions));
-            return 0;
+            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            return FailureExitCode(response);
         }
 
-        var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
-        var code = node["code"]?.GetValue<string>();
-        _err.WriteLine(code is null ? error : $"{error} ({code})");
-        return response.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+        var data = envelope.Data ?? successDataFallback;
+        _out.WriteLine(data is null ? "OK" : data.ToJsonString(JsonOptions));
+        return 0;
     }
 
     private async Task<int> PrintRawResponseAsync(HttpResponseMessage response)
     {
         await using var stream = await response.Content.ReadAsStreamAsync();
         JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+
         if (node is null)
         {
             _out.WriteLine(response.StatusCode);
             return response.IsSuccessStatusCode ? 0 : 1;
         }
 
-        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
-        if (success)
+        var envelope = ExtractEnvelope(node, response);
+        if (!envelope.Success)
         {
-            _out.WriteLine(node.ToJsonString(JsonOptions));
-            return 0;
+            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            return FailureExitCode(response);
         }
 
-        var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
-        var code = node["code"]?.GetValue<string>();
-        _err.WriteLine(code is null ? error : $"{error} ({code})");
-        return response.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+        _out.WriteLine(node.ToJsonString(JsonOptions));
+        return 0;
     }
 
     public sealed record PostResult(int ExitCode, JsonNode? Data, string? Error, string? Code);
@@ -1070,6 +1058,7 @@ internal sealed class MohistCliApi
     {
         await using var stream = await response.Content.ReadAsStreamAsync();
         JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+
         if (node is null)
         {
             var statusOk = response.IsSuccessStatusCode;
@@ -1077,18 +1066,16 @@ internal sealed class MohistCliApi
             return new PostResult(statusOk ? 0 : 1, null, statusOk ? null : response.ReasonPhrase, null);
         }
 
-        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
-        if (success)
+        var envelope = ExtractEnvelope(node, response);
+        if (!envelope.Success)
         {
-            var data = node["data"];
-            _out.WriteLine(data is null ? "OK" : data.ToJsonString(JsonOptions));
-            return new PostResult(0, data, null, null);
+            _err.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
+            return new PostResult(FailureExitCode(response), null, envelope.Error, envelope.Code);
         }
 
-        var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
-        var code = node["code"]?.GetValue<string>();
-        _err.WriteLine(code is null ? error : $"{error} ({code})");
-        return new PostResult(response.StatusCode == HttpStatusCode.NotFound ? 4 : 1, null, error, code);
+        var data = envelope.Data;
+        _out.WriteLine(data is null ? "OK" : data.ToJsonString(JsonOptions));
+        return new PostResult(0, data, null, null);
     }
 
     private sealed class ApiResponseException : Exception
@@ -1102,4 +1089,36 @@ internal sealed class MohistCliApi
         public HttpStatusCode StatusCode { get; }
         public string? Code { get; }
     }
+
+    internal sealed record Envelope(
+        bool HasBody,
+        bool Success,
+        JsonNode? Data,
+        string Error,
+        string? Code);
+
+    internal static Envelope ExtractEnvelope(JsonNode? node, HttpResponseMessage response)
+    {
+        if (node is null)
+        {
+            return new Envelope(
+                HasBody: false,
+                Success: response.IsSuccessStatusCode,
+                Data: null,
+                Error: response.ReasonPhrase ?? "Request failed",
+                Code: null);
+        }
+
+        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
+        var data = node["data"];
+        var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
+        var code = node["code"]?.GetValue<string>();
+        return new Envelope(HasBody: true, Success: success, Data: data, Error: error, Code: code);
+    }
+
+    internal static int FailureExitCode(HttpResponseMessage response) =>
+        FailureExitCode(response.StatusCode);
+
+    internal static int FailureExitCode(HttpStatusCode statusCode) =>
+        statusCode == HttpStatusCode.NotFound ? 4 : 1;
 }

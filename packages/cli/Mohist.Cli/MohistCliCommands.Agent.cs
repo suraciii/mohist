@@ -830,7 +830,7 @@ internal static class AgentCommands
             using var response = await api.Http.PostAsJsonAsync(path, body, JsonOptions);
             var data = await ReadDataOrPrintErrorAsync(api, response);
             if (data is null)
-                return response.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+                return MohistCliApi.FailureExitCode(response);
             var id = data["id"]?.GetValue<string>();
             api.Output.WriteLine(string.IsNullOrWhiteSpace(id) ? data.ToJsonString(JsonOptions) : id);
             return 0;
@@ -861,20 +861,12 @@ internal static class AgentCommands
     {
         await using var stream = await response.Content.ReadAsStreamAsync();
         JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
-        if (node is null)
-        {
-            if (!response.IsSuccessStatusCode)
-                api.Error.WriteLine(response.ReasonPhrase ?? "Request failed");
-            return response.IsSuccessStatusCode ? null : null;
-        }
 
-        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
-        if (success)
-            return node["data"];
+        var envelope = MohistCliApi.ExtractEnvelope(node, response);
+        if (envelope.Success)
+            return envelope.Data;
 
-        var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
-        var code = node["code"]?.GetValue<string>();
-        api.Error.WriteLine(code is null ? error : $"{error} ({code})");
+        api.Error.WriteLine(envelope.Code is null ? envelope.Error : $"{envelope.Error} ({envelope.Code})");
         return null;
     }
 
