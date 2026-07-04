@@ -33,20 +33,17 @@ internal static class ProjectRepoCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
-            var validation = MohistCliApi.ValidateOutputMode(output);
-            if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-            {
-                api.Error.WriteLine(invalid.Message);
-                return Task.FromResult(1);
-            }
-            var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+            var (mode, exit) = api.ResolveOutputMode(output);
+
+            if (exit != 0) return Task.FromResult(exit);
+
             return ListAsync();
 
             async Task<int> ListAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (string.IsNullOrWhiteSpace(resolvedProjectId))
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintWithOutputAsync(
                     $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/repositories",
                     mode,
@@ -92,9 +89,9 @@ internal static class ProjectRepoCommands
 
             async Task<int> AddAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (string.IsNullOrWhiteSpace(resolvedProjectId))
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
                 var resolvedGitUrl = !string.IsNullOrWhiteSpace(gitUrl) ? gitUrl : path;
                 return await api.PrintPostAsync(
                     $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/repositories",
@@ -128,9 +125,9 @@ internal static class ProjectRepoCommands
 
             async Task<int> SetDefaultAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (string.IsNullOrWhiteSpace(resolvedProjectId))
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintPatchAsync(
                     $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/repositories/{MohistCliCommands.Escape(name!)}",
                     new { setDefault = true });
@@ -158,9 +155,9 @@ internal static class ProjectRepoCommands
 
             async Task<int> RemoveAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (string.IsNullOrWhiteSpace(resolvedProjectId))
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintDeleteAsync(
                     $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/repositories/{MohistCliCommands.Escape(name!)}");
             }

@@ -24,7 +24,6 @@ public class ConfigService : ISingletonService
         ["taskTimeout"] = ("number", 600),
         ["stageTimeout"] = ("number", 3600),
         ["maxGracePeriods"] = ("number", 3),
-        ["model"] = ("string", null),
         ["agent"] = ("json", null),
         ["stageAgents"] = ("json", null),
         ["logLevel"] = ("string", "INFO"),
@@ -114,40 +113,28 @@ public class ConfigService : ISingletonService
     }
 
     /// <summary>
-    /// 获取全局默认 agent 配置（向后兼容：如果 agent 不存在但 model 存在，从 model 构建）。
+    /// Returns the global default agent configuration read from the <c>agent</c>
+    /// object in <c>config.jsonc</c>, or <c>null</c> if no <c>agent</c> object
+    /// is configured.
     /// </summary>
     public Task<Dictionary<string, object?>?> GetAgentConfigAsync()
     {
         var fileValues = ReadConfigFile();
 
-        // 优先读取 agent 对象配置
         var agentJson = GetConfigValue("agent", fileValues);
-        if (!string.IsNullOrWhiteSpace(agentJson))
-        {
-            try
-            {
-                var agentConfig = JSON.Deserialize<Dictionary<string, object?>>(agentJson);
-                if (agentConfig is not null)
-                    return Task.FromResult<Dictionary<string, object?>?>(agentConfig);
-            }
-            catch
-            {
-                // ignore parse errors
-            }
-        }
+        if (string.IsNullOrWhiteSpace(agentJson))
+            return Task.FromResult<Dictionary<string, object?>?>(null);
 
-        // 向后兼容：从 model 字段构建 agent 配置
-        var model = GetConfigValue("model", fileValues);
-        if (!string.IsNullOrWhiteSpace(model))
+        try
         {
-            var fallbackConfig = new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["model"] = model,
-            };
-            return Task.FromResult<Dictionary<string, object?>?>(fallbackConfig);
+            var agentConfig = JSON.Deserialize<Dictionary<string, object?>>(agentJson);
+            return Task.FromResult<Dictionary<string, object?>?>(agentConfig);
         }
-
-        return Task.FromResult<Dictionary<string, object?>?>(null);
+        catch
+        {
+            // ignore parse errors
+            return Task.FromResult<Dictionary<string, object?>?>(null);
+        }
     }
 
     public Task<Dictionary<string, Dictionary<string, object?>>> GetStageAgentConfigsAsync()
@@ -179,9 +166,9 @@ public class ConfigService : ISingletonService
     /// <summary>
     /// Global config.jsonc expressed as a <see cref="VariableBundle"/> for use as the
     /// global layer in the T1 (issue creation) merge. <c>vars.agent</c> is populated
-    /// from the existing <see cref="GetAgentConfigAsync"/> output (which already
-    /// handles the legacy <c>model</c> fallback). <c>stages</c> is always empty
-    /// because stage names are project-specific and cannot be configured globally.
+    /// from the existing <see cref="GetAgentConfigAsync"/> output. <c>stages</c> is
+    /// always empty because stage names are project-specific and cannot be configured
+    /// globally.
     /// </summary>
     public async Task<VariableBundle> GetVariables()
     {
@@ -210,9 +197,6 @@ public class ConfigService : ISingletonService
             await ClearAsync("agent");
         else
             await SetAsync("agent", agent);
-
-        // Keep legacy model from shadowing the unified agent config.
-        await ClearAsync("model");
     }
 
     private static readonly HashSet<string> SupportedLogLevels = new(StringComparer.Ordinal)

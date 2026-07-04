@@ -159,9 +159,9 @@ internal static class RunnerCommands
 
             async Task<int> ListAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
 
                 var scope = ParseScopeFilter(scopeRaw);
                 if (scope is null)
@@ -170,13 +170,11 @@ internal static class RunnerCommands
                     return 1;
                 }
 
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (mode, exit) = api.ResolveOutputMode(output);
+
+
+                if (exit != 0) return exit;
+
 
                 var colorEnabled = !Console.IsOutputRedirected
                     && string.IsNullOrEmpty(environment.GetEnvironmentVariable("NO_COLOR"));
@@ -212,16 +210,13 @@ internal static class RunnerCommands
                     api.Error.WriteLine("runner-id is required");
                     return 1;
                 }
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
+
+                if (exit != 0) return exit;
+
                 return await api.PrintRunnerShowAsync(
                     resolvedProjectId,
                     Uri.EscapeDataString(runnerId!),
@@ -248,17 +243,15 @@ internal static class RunnerCommands
 
             async Task<int> StatusAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
 
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                if (resolveExit != 0) return resolveExit;
+
+                var (mode, exit) = api.ResolveOutputMode(output);
+
+
+                if (exit != 0) return exit;
+
                 return await api.PrintRunnerStatusAsync(resolvedProjectId, mode);
             }
         });

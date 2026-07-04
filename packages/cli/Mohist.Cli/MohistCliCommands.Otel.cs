@@ -166,11 +166,15 @@ internal static class OtelCommands
     {
         try
         {
-            using var response = await api.Http.GetAsync(StatusPath).ConfigureAwait(false);
+            using var response = await api.SendAsync(HttpMethod.Get, StatusPath, body: null).ConfigureAwait(false);
+            if (response is null)
+                return 1;
+
             await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
             JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream).ConfigureAwait(false);
 
-            if (node is null)
+            var envelope = MohistCliApi.ExtractEnvelope(node, response);
+            if (!envelope.HasBody)
             {
                 await api.Error.WriteLineAsync(
                     $"Server returned an empty response with status {(int)response.StatusCode}.")
@@ -178,15 +182,13 @@ internal static class OtelCommands
                 return 1;
             }
 
-            var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
-            if (!success)
+            if (!envelope.Success)
             {
-                var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
-                await api.Error.WriteLineAsync(error).ConfigureAwait(false);
+                await api.Error.WriteLineAsync(envelope.Error).ConfigureAwait(false);
                 return 1;
             }
 
-            await RenderStatusAsync(api.Output, node["data"]).ConfigureAwait(false);
+            await RenderStatusAsync(api.Output, envelope.Data).ConfigureAwait(false);
             return 0;
         }
         catch (HttpRequestException)

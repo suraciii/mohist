@@ -58,26 +58,6 @@ internal static partial class IssueCommands
         return !result.Implicit;
     }
 
-    private static (string Mode, int Exit) ValidateOutput(MohistCliApi api, string? output)
-    {
-        var validation = MohistCliApi.ValidateOutputMode(output);
-        if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-        {
-            api.Error.WriteLine(invalid.Message);
-            return ("json", 1);
-        }
-        return (((MohistCliApi.OutputModeResult.Valid)validation).Mode, 0);
-    }
-
-    private static async Task<(string ProjectId, int Exit)> ResolveProjectId(
-        MohistCliApi api, string? project, string? projectId)
-    {
-        var resolved = await api.ResolveProjectIdAsync(project, projectId);
-        if (resolved is null)
-            return ("", 1);
-        return (resolved, 0);
-    }
-
     private static string IssueTemplatesPath(string? projectId, string path)
     {
         if (string.IsNullOrWhiteSpace(projectId))

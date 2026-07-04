@@ -35,17 +35,14 @@ internal static class LabelCommands
 
             async Task<int> ListAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
                 var path = $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/labels/catalog";
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (mode, exit) = api.ResolveOutputMode(output);
+
+                if (exit != 0) return exit;
+
                 return await api.PrintWithOutputAsync(path, mode, nameof(MohistCliApi.TableShape.LabelList));
             }
         });
@@ -91,9 +88,10 @@ internal static class LabelCommands
                     return 1;
                 }
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+
+                if (resolveExit != 0) return resolveExit;
 
                 var path = $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/labels/catalog";
 
@@ -183,9 +181,10 @@ internal static class LabelCommands
                     }
                 }
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+
+                if (resolveExit != 0) return resolveExit;
 
                 var path = $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/labels/catalog/{MohistCliCommands.Escape(key!)}";
 
@@ -222,9 +221,9 @@ internal static class LabelCommands
 
             async Task<int> RemoveAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
 
                 var path = $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/labels/catalog/{MohistCliCommands.Escape(key!)}";
                 return await api.PrintDeleteAsync(path);

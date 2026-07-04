@@ -145,8 +145,10 @@ public class IssueModelVariantRoundTripSpecs
         using var scope = _fixture.Services.CreateScope();
         var env = scope.ServiceProvider.GetRequiredService<IEnvironmentVariableProvider>();
         var mockEnv = (MockEnvironmentVariableProvider)env;
-        var previousModel = mockEnv["MOHIST__CONFIG__MODEL"];
-        mockEnv["MOHIST__CONFIG__MODEL"] = "anthropic/claude-sonnet-4-20250514";
+        var previousAgent = mockEnv["MOHIST__CONFIG__AGENT"];
+        mockEnv["MOHIST__CONFIG__AGENT"] = """
+            { "model": "anthropic/claude-sonnet-4-20250514" }
+            """;
         try
         {
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -200,7 +202,7 @@ public class IssueModelVariantRoundTripSpecs
         }
         finally
         {
-            mockEnv["MOHIST__CONFIG__MODEL"] = previousModel;
+            mockEnv["MOHIST__CONFIG__AGENT"] = previousAgent;
         }
     }
 

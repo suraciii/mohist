@@ -37,20 +37,16 @@ internal static class OpencodeCommands
 
             async Task<int> ModelsAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0)
                 {
                     api.Error.WriteLine("No project resolved. " + MohistCliCommands.NoActiveProjectMessage);
-                    return 1;
+                    return resolveExit;
                 }
 
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (mode, exit) = api.ResolveOutputMode(output);
+
+                if (exit != 0) return exit;
 
                 return await api.PrintOpencodeModelsAsync(resolvedProjectId, mode);
             }

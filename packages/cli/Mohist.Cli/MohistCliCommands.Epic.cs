@@ -35,17 +35,6 @@ internal static class EpicCommands
         return $"/api/projects/{MohistCliCommands.Escape(projectId)}/epics{(path.StartsWith('/') ? path : "/" + path)}";
     }
 
-    private static (string Mode, int Exit) ValidateOutput(MohistCliApi api, string? output)
-    {
-        var validation = MohistCliApi.ValidateOutputMode(output);
-        if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-        {
-            api.Error.WriteLine(invalid.Message);
-            return ("json", 1);
-        }
-        return (((MohistCliApi.OutputModeResult.Valid)validation).Mode, 0);
-    }
-
     private static Command BuildList(MohistCliApi api)
     {
         var cmd = new Command("list", "List epics");
@@ -63,10 +52,10 @@ internal static class EpicCommands
 
             async Task<int> ListAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     ProjectEpicsPath(resolvedProjectId, "/"),
@@ -108,10 +97,10 @@ internal static class EpicCommands
                     api.Error.WriteLine("Title is required");
                     return 1;
                 }
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
                     ProjectEpicsPath(resolvedProjectId, "/"),
@@ -143,10 +132,10 @@ internal static class EpicCommands
 
             async Task<int> ShowAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}"),
@@ -186,9 +175,9 @@ internal static class EpicCommands
 
             async Task<int> UpdateAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
                 var body = new JsonObject();
                 if (title is not null)
                     body["title"] = title;
@@ -196,7 +185,7 @@ internal static class EpicCommands
                     body["description"] = description;
                 if (priority is not null)
                     body["priority"] = priority;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPatchWithOutputAsync(
                     ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}"),
@@ -231,10 +220,10 @@ internal static class EpicCommands
 
             async Task<int> LinkAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
                     ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(epic!)}/issues"),
@@ -269,10 +258,10 @@ internal static class EpicCommands
 
             async Task<int> UnlinkAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintDeleteWithOutputAsync(
                     ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(epic!)}/issues/{MohistCliCommands.Escape(issue!)}"),
@@ -303,10 +292,10 @@ internal static class EpicCommands
 
             async Task<int> DoneAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
                     ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}/done"),
@@ -353,10 +342,10 @@ internal static class EpicCommands
 
             async Task<int> PostAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
                     ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}/{action}"),
@@ -388,10 +377,10 @@ internal static class EpicCommands
 
             async Task<int> CloseAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
                     ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}/close"),

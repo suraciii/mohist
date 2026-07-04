@@ -37,7 +37,7 @@ internal static partial class IssueCommands
 
             async Task<int> ListAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
                 if (labels is { Length: > 0 })
                 {
@@ -54,7 +54,7 @@ internal static partial class IssueCommands
                     Priority: priority,
                     Archived: archived ? true : null,
                     All: all ? true : null);
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     ProjectIssuesPath(resolvedProjectId, "/issues") + query,
@@ -85,9 +85,9 @@ internal static partial class IssueCommands
 
             async Task<int> GetAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}"),

@@ -33,6 +33,11 @@ public class CliProjectWorkflowCommandSpecs
         },
     };
 
+    private static HttpResponseMessage EmptyResponse(HttpStatusCode status, string reason)
+    {
+        return new HttpResponseMessage(status) { ReasonPhrase = reason };
+    }
+
     [Fact]
     public async Task WorkflowHelp_ListsTemplateAndConfigSubgroups()
     {
@@ -587,6 +592,26 @@ public class CliProjectWorkflowCommandSpecs
         Assert.Contains("plan_prompt", stdout);
         Assert.Contains("You are a planner", stdout);
         Assert.Equal(2, getCount);
+    }
+
+    [Fact]
+    public async Task ConfigGet_EmptySuccessBodyOnProfile_PrintsReasonAndExitsOne()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile")
+                return EmptyResponse(HttpStatusCode.NoContent, "No Content");
+
+            return RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() });
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["project", "workflow", "config", "get", "-o", "table"], output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("No Content", error.ToString());
+        Assert.Equal(string.Empty, output.ToString());
+        Assert.Single(handler.Requests);
     }
 
     [Fact]

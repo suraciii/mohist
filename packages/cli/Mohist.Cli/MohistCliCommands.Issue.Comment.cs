@@ -39,9 +39,9 @@ internal static partial class IssueCommands
 
             async Task<int> AddAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 var resolved = await BodyInputResolver.ResolveAsync(
                     body, bodyFile, false, api.FileSystem, api.StandardInput, api.Error);

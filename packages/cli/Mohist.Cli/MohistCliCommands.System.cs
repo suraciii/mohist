@@ -28,14 +28,10 @@ internal static class SystemCommands
         cmd.SetAction(ctx =>
         {
             var output = ctx.GetValue(outputOpt);
-            var validation = MohistCliApi.ValidateOutputMode(output);
-            if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-            {
-                api.Error.WriteLine(invalid.Message);
-                return Task.FromResult(1);
-            }
+            var (mode, exit) = api.ResolveOutputMode(output);
 
-            var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+            if (exit != 0) return Task.FromResult(exit);
+
             return api.PrintSystemInfoAsync(mode);
         });
 

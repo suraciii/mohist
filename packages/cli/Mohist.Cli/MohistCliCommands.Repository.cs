@@ -31,7 +31,8 @@ internal static class RepositoryCommands
 
             async Task<int> ListAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(null, projectId);
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintGetAsync(ProjectRepositoriesPath(resolvedProjectId));
             }
         });
@@ -67,7 +68,8 @@ internal static class RepositoryCommands
 
             async Task<int> AddAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(null, projectId);
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintPostAsync(ProjectRepositoriesPath(resolvedProjectId), new
                 {
                     name,
@@ -107,7 +109,8 @@ internal static class RepositoryCommands
 
             async Task<int> UpdateAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(null, projectId);
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintPatchAsync(
                     $"{ProjectRepositoriesPath(resolvedProjectId)}/{MohistCliCommands.Escape(name!)}",
                     new
@@ -139,7 +142,8 @@ internal static class RepositoryCommands
 
             async Task<int> RemoveAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(null, projectId);
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintDeleteAsync(
                     $"{ProjectRepositoriesPath(resolvedProjectId)}/{MohistCliCommands.Escape(name!)}");
             }

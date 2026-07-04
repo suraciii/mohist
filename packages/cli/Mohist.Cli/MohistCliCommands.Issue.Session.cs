@@ -25,9 +25,9 @@ internal static partial class IssueCommands
 
             async Task<int> SessionsAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/coder-sessions"),
@@ -81,9 +81,9 @@ internal static partial class IssueCommands
 
             async Task<int> ShowAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
@@ -120,9 +120,9 @@ internal static partial class IssueCommands
 
             async Task<int> TranscriptAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
@@ -159,9 +159,9 @@ internal static partial class IssueCommands
 
             async Task<int> CompactAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
@@ -199,9 +199,9 @@ internal static partial class IssueCommands
 
             async Task<int> ResetAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 var path = ProjectIssuesPath(
                     resolvedProjectId,
@@ -251,10 +251,10 @@ internal static partial class IssueCommands
 
             async Task<int> FollowupAsync()
             {
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
 
                 var resolvedText = await BodyInputResolver.ResolveAsync(

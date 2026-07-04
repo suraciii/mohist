@@ -27,9 +27,9 @@ internal static partial class IssueCommands
 
             async Task<int> StatusAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintWithOutputAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow/status"),
@@ -52,7 +52,7 @@ internal static partial class IssueCommands
 
             async Task<int> TimelineAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
                 return await api.PrintGetAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow/timeline"));
@@ -95,9 +95,9 @@ internal static partial class IssueCommands
 
             async Task<int> GetAsync()
             {
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
                 var profilePath = ProjectIssuesPath(
@@ -168,9 +168,9 @@ internal static partial class IssueCommands
                     api.Error.WriteLine($"prompt key '{key}' must not contain '/'");
                     return 1;
                 }
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow-profile/prompts/{Uri.EscapeDataString(key!)}/preview"),
@@ -231,10 +231,10 @@ internal static partial class IssueCommands
                     return 1;
                 }
 
-                var (resolvedProjectId, resolveExit) = await ResolveProjectId(api, project, projectId);
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
                 if (resolveExit != 0) return resolveExit;
 
-                var (mode, exit) = ValidateOutput(api, output);
+                var (mode, exit) = api.ResolveOutputMode(output);
                 if (exit != 0) return exit;
 
                 var issuePath = ProjectIssuesPath(
