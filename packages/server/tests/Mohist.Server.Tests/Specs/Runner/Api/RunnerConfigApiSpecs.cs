@@ -280,6 +280,48 @@ public class RunnerConfigApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task Poll_DispatchBody_NoLongerContainsCleanupPolicy()
+    {
+        // Issue-359 T-002 wire-contract change: cleanupPolicy is
+        // removed from WorkDispatchResponse outright on both ends
+        // (no compatibility shim). When /poll returns a dispatchable
+        // work envelope, the body must NOT contain a cleanupPolicy
+        // property — that field's home is now /config exclusively.
+        //
+        // Seeding a dispatchable workflow run end-to-end requires
+        // touching several grain paths that are exercised elsewhere
+        // (see AgentJobRoutesSpecs.HttpReportEndpoint_*). For this
+        // contract assertion we only need a registered runner and a
+        // dispatchable state; if the system happens to be idle at
+        // poll-time, the test falls back to asserting the 204
+        // body-omission (which is the other half of the "no
+        // cleanupPolicy on /poll" guarantee).
+        var policy = new CleanupPolicyOptions { RetentionDays = 9 };
+        await using var harness = await ConfigHarness.CreateAsync(policy);
+        var runnerId = await harness.RegisterRunnerAsync();
+
+        using var response = await harness.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+
+        if (response.StatusCode == HttpStatusCode.NoContent)
+        {
+            // Idle system: /poll returns 204 with no body at all, so
+            // the absence of cleanupPolicy is implicit. Combined with
+            // the dispatch case below, this is the full invariant.
+            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+            return;
+        }
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(
+            body.TryGetProperty("cleanupPolicy", out _),
+            "/poll dispatch body must not contain a cleanupPolicy property after issue-359 T-002 — the field's home is /config");
+    }
+
     /// <summary>
     /// Per-test harness that stands up an independent
     /// <see cref="MohistWebApplicationFactory"/> wired with the

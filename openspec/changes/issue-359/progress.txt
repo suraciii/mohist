@@ -11,6 +11,27 @@
 - `MohistIntegrationFixture` already sets up `CleanupPolicyOptions` from
   `Mohist:WorkspaceCleanup` config; spec harness uses `Configure<CleanupPolicyOptions>` to layer
   per-test values on top of that binding.
+- **`vi.mock` + `vi.hoisted` shared mutable state pattern**: when a test needs both the mock
+  factory and the test body to mutate the same object (e.g. recording invocation arrays), put
+  the mutable container INSIDE the hoisted factory output
+  (`vi.hoisted(() => ({ state: { arr: [] } }))`) and access it via `mocks.state.arr` from
+  both sides. A plain module-level `const state = {...}` works too. Do NOT do
+  `const state = vi.hoisted(() => ({ ... }))` then reference `state.arr` from the mock factory
+  — vitest may close over a different binding than the test body, and pushes from the mock
+  become invisible to assertions. The runner host cleanup-config spec demonstrates the
+  working pattern.
+- **Fire-and-forget timer microtask flush**: when production code does
+  `setInterval(() => void asyncFn(signal), ms)` and tests want to assert on the async
+  function's side effects, advance fake timers in slices and flush microtasks between
+  ticks (two `await Promise.resolve()` calls is enough). Otherwise `vi.advanceTimersByTimeAsync`
+  leaves the previous tick's promise unresolved when the next tick fires, and assertions
+  see N-1 invocations for N timer fires. Trailing `vi.waitFor` is the assertion-side safety net.
+- **Per-endpoint `JsonSerializerOptions` for `/config`**: `RunnerConfigJsonOptions` flips
+  `DefaultIgnoreCondition` from the global `WhenWritingNull` to `Never` so unconfigured
+  `cleanupPolicy` fields are emitted as explicit `null`. The override is scoped to the
+  `/config` handler — every other endpoint still uses `JSON.Options`. After T-002,
+  `/config` is the only emitter of `cleanupPolicy` on the wire, so this override is now
+  the canonical serialization for the policy fields.
 
 ## T-001 (server `/config` endpoint) — done
 
@@ -78,3 +99,131 @@ the production binding — same pattern as the existing `RunnerCleanupPolicyAndS
 - Runner host test mocks (`runner-host.spec.ts`, `runner-host-task-log.spec.ts`,
   `runner-host-convergence.spec.ts`) need `getLastCleanupPolicy = () => null` swapped for
   `fetchConfig = async () => null` — T-002 task.
+
+## T-002 (runner fetchConfig + atomic wire-contract removal) — done
+
+### What landed
+
+#### Runner side
+- `ServerConnection.fetchConfig(signal): Promise<CleanupPolicy | null>` added. Plain
+  `GET /api/runner/{runnerId}/config`, no request body, no ETag / If-None-Match. Returns the
+  unwrapped `cleanupPolicy` from the parsed `RunnerConfigResponse`. Non-2xx / network error
+  throws — caller (`runCleanupOnce`) handles best-effort.
+- `lastCleanupPolicy` field and `getLastCleanupPolicy()` accessor removed from
+  `ServerConnection`. `poll()` no longer reads or stores `dispatch.cleanupPolicy`.
+- `runner/src/runtime/host.ts:runCleanupOnce` now `await`s `connection.fetchConfig(signal)`
+  on every cleanup-loop tick and passes the result straight into `cleanupLoop.runOnce`. The
+  pre-existing `try/catch` in `runCleanupOnce` swallows `fetchConfig` failures — best-effort,
+  next tick retries, no stale fallback (design D4).
+- `core/types.ts:WorkDispatchResponse` no longer has `cleanupPolicy`; new
+  `RunnerConfigResponse { cleanupPolicy?: CleanupPolicy | null }` interface added (mirrors the
+  server's `RunnerConfigResponse` record).
+
+#### Server side
+- `WorkDispatchResponse` record in `RunnerRoutes.cs` — `CleanupPolicyDto? CleanupPolicy`
+  parameter removed.
+- `/poll` handler — `CleanupPolicy: ToCleanupPolicyDto(cleanupPolicyOptions.Value)` line
+  removed; the `Microsoft.Extensions.Options.IOptions<CleanupPolicyOptions>` injection on
+  the handler is no longer needed (only `/config` and the projection helper still need it).
+- `ToCleanupPolicyDto` and `CleanupPolicyDto` are still in the file — they remain in use by
+  the `/config` handler's projection. The doc comments on `ToCleanupPolicyDto` and
+  `CleanupPolicyDto` were updated to point at `/config` instead of `/poll`.
+- `RunnerConfigJsonOptions` (the per-endpoint `JsonIgnoreCondition.Never` override from T-001)
+  is unchanged and remains scoped to `/config`. After T-002 it is the ONLY emitter of
+  `cleanupPolicy` on the wire — no other handler / record needs it.
+
+### Wire-contract consequence
+
+- `WorkDispatchResponse.cleanupPolicy` is gone on both ends, atomically, per design D2.
+  Project guidance: no cross-version compatibility required (`mo update server` then
+  `mo update runner` is the supported sequence), so the field is removed outright rather
+  than carried as a duplicate.
+- Partial rollback guidance (from design): if the runner ships before the server, `/config`
+  404s are logged and skipped per D4; if the server ships first, the runner keeps reading
+  the absent field safely (System.Text.Json and the TS cast both tolerate unknown / missing
+  fields). Recommend atomic rollback.
+
+### Tests
+
+#### New runner specs
+- `packages/runner/tests/server-connection-fetch-config.spec.ts` (8 specs): plain GET shape,
+  no body / no ETag; returns unwrapped policy; returns null when absent / explicit-null /
+  all-null sentinels; throws on non-2xx (404, 500), network error; forwards AbortSignal.
+  Uses fake `globalThis.fetch` only — no real HTTP, no real time.
+- `packages/runner/tests/runner-host-cleanup-config.spec.ts` (4 specs): idle-system
+  scenarios through the host's `runCleanupOnce` wiring. Mocks `ServerConnection`
+  (`fetchConfig`) and `CleanupLoop` (`runOnce`) so the assertions are about the
+  fetchConfig-per-tick channel (not about retention / budget eviction). Covers:
+  1. `FetchesConfigOnEachCleanupTick_AndRunsEviction_WhenPollStays204` —
+     poll → 204, fetchConfig → policy, runOnce → eviction (the channel-separation
+     guarantee).
+  2. `FetchesConfigButEvictsNothing_WhenPolicyIsFullyUnconfigured` — all-null policy
+     reaches the loop, eviction is a no-op (preserves the "null means do not evict"
+     contract).
+  3. `SkipsCleanupTick_WhenFetchConfigThrows_BestEffortNextTickRetries` — design D4:
+     fetchConfig throws on first tick, runOnce is NOT called, error logged, next tick
+     retries and succeeds.
+  4. `IssuesIndependentFetchPerTick_NoCachingAcrossTicks` — five consecutive ticks
+     produce five independent GETs, no caching.
+
+#### Test mock updates (three runner host files)
+- `tests/runner-host.spec.ts`, `tests/runner-host-task-log.spec.ts`,
+  `tests/runner-host-convergence.spec.ts`: hoisted `getLastCleanupPolicy = () => null`
+  swapped for `fetchConfig = async () => null`. No other mock changes needed (the rest of
+  the surface was already mocked the same way).
+
+#### Server spec additions
+- `RunnerConfigApiSpecs.cs:Poll_DispatchBody_NoLongerContainsCleanupPolicy`: asserts that
+  when `/poll` returns a dispatch envelope (200 OK), the body has no `cleanupPolicy`
+  property; falls back to "204 with no body" when the system is idle at poll-time
+  (implicit no-cleanupPolicy guarantee). This is the wire-contract regression guard
+  mirroring `Poll_IsUnchangedByConfigEndpoint_StillReturns204WhenIdle` from T-001.
+
+### Vitest gotcha — `vi.mock` factory closure capture
+
+Worth recording for future specs: when a `vi.mock` factory references a module-level
+`const X = vi.hoisted(...)` value, vitest's mock factory may close over a DIFFERENT
+binding than the one the test body sees, even though both reference the same hoisted name.
+The reproduction we hit: pushing into `X.cleanupCalls` from inside the mock showed
+length 0 from the test body, while a debug stamp showed the mock saw the push.
+
+The fix that worked: put the mutable state INSIDE the hoisted factory object (e.g.
+`vi.hoisted(() => ({ state: { arr: [] } }))`) and access it via `mocks.state.arr` from
+both the test body and the mock factory. The factory closure captures the OUTER hoisted
+container, the test body reads the same container, and mutations to `state.arr` are
+visible everywhere. A plain module-level `const state = {...}` (without `vi.hoisted`)
+worked too — the issue only surfaced when we tried `const state = vi.hoisted(...)`
+followed by `state.cleanupCalls` access from both sides.
+
+### Microtask timing for fire-and-forget timer callbacks
+
+The host's `setInterval(() => void this.runCleanupOnce(signal), ...)` discards the
+promise. `vi.advanceTimersByTimeAsync(N)` does NOT await that discarded promise, so
+consecutive timer ticks fire before the previous tick's `await fetchConfig(signal) →
+await cleanupLoop.runOnce(policy, signal)` chain has settled. Result: test assertions
+that run right after `advanceTimersByTimeAsync` see N-1 cleanup calls for N fetches.
+
+Workaround pattern (now embedded in `runner-host-cleanup-config.spec.ts`):
+```ts
+for (let i = 0; i < N; i += 1) {
+  await vi.advanceTimersByTimeAsync(interval)
+  await flushMicrotasks() // 2x Promise.resolve
+}
+await vi.waitFor(() => expect(cleanupCalls.length).toBeGreaterThanOrEqual(K))
+```
+
+The microtask flush between ticks lets each fire-and-forget `runCleanupOnce` resolve
+its `await fetchConfig → await runOnce` chain before the next timer fires. The
+trailing `vi.waitFor` is the assertion-side safety net.
+
+### Verification
+
+- Runner: `npm run typecheck -w packages/runner` clean; `npm run test:ci -w packages/runner`
+  921 / 921 pass (4 new in `runner-host-cleanup-config.spec.ts`, 8 new in
+  `server-connection-fetch-config.spec.ts`).
+- Web: `npm run typecheck -w packages/web` clean; `npm run test:run -w packages/web`
+  4299 / 4299 pass (1 pre-existing skip).
+- Server: `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj`
+  3821 / 3821 pass (13 pre-existing skips).
+- Server filter `--filter "FullyQualifiedName~Runner"`: 397 / 397 (3 pre-existing skips).
+- `dotnet build Mohist.sln`: clean (0 warnings, 0 errors with `TreatWarningsAsErrors`).
