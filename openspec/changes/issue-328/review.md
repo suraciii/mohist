@@ -1,6 +1,6 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
 
 ## Repaired Items
 
@@ -8,49 +8,39 @@
 
 ## Blocking Items
 
-- [ID: item-1]
-  Severity: blocking
-  Scope: packages/server/src/Mohist.Server/SystemInfo/SystemUpdateService.cs
-  Evidence: The final success transition now sets `CompletedAt` from `completedAt` at lines 182-190, then calls `PersistTransitionAsync` with no log entry at lines 183-192. `ApplyTransitionLog` stamps no-log transitions with a fresh `DateTimeOffset.UtcNow` at lines 719-727, so the persisted `succeeded` state now has `UpdatedAt` later than `CompletedAt`. The pre-change code assigned both fields from the same `completedAt` value, and the issue/spec require transition semantics, response timestamps, and persisted data shape to remain behavior-preserving. This affects the public status payload because both timestamps are returned by `ToResponse`. [disallowed:product-behavior-change]
-  SuggestedAction: Preserve the old timestamp semantics for no-log terminal transitions, for example by letting the transition helper accept an explicit timestamp or by preserving a caller-supplied `UpdatedAt` when no log entry is appended. Add a regression spec that the ready -> succeeded transition persists equal `UpdatedAt` and `CompletedAt`.
-  Verification: Run `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj -p:SkipWebBuild=true --no-build --filter FullyQualifiedName~AdvanceActiveJobAsync_WhenReady_RestartsRunnerBeforeReadyCompletion` plus the full system-update spec class.
-  Status: open
-
-- [ID: item-2]
-  Severity: blocking
-  Scope: verification / packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs
-  Evidence: The candidate does not currently demonstrate the required "all existing system update spec pass" acceptance criterion in aggregate. `npm test` timed out after 120s during the .NET test phase. A focused aggregate run, `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj -p:SkipWebBuild=true --no-build --filter FullyQualifiedName~SystemUpdateServiceSpecs --logger console;verbosity=normal`, timed out after 300s twice. Narrower subsets and individual tests passed, which points to an aggregate-suite hang or leaked async work rather than a compile failure.
-  SuggestedAction: Identify the spec or background update task that prevents the full `SystemUpdateServiceSpecs` filtered run from completing, then make the aggregate class run and `npm test` finish reliably.
-  Verification: `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj -p:SkipWebBuild=true --no-build --filter FullyQualifiedName~SystemUpdateServiceSpecs --logger console;verbosity=normal` and `npm test` both complete without timeout.
-  Status: open
-
-- [ID: item-3]
-  Severity: test-gap
-  Scope: packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs
-  Evidence: The status-read spec explicitly requires readiness-failure deduplication: when the persisted stage/reason already match the readiness failure, polling must append no log and perform no persist. The current tests cover changing readiness failures at lines 391-421 and a mismatched existing reason at lines 505-535, but there is no test where the stored `Stage` is `Waiting for reconnect` and the stored `Reason` exactly equals the readiness failure reason, with an assertion that no new saved state/log entry is produced.
-  SuggestedAction: Add a focused spec that seeds a waiting job with the same stage/reason returned by the readiness probe, calls `AdvanceActiveJobAsync` or `GetStatusEnvelopeAsync`, and asserts the store did not save another state and the log count is unchanged.
-  Verification: Run the new focused spec and the full `SystemUpdateServiceSpecs` class.
-  Status: open
-
-- [ID: item-4]
-  Severity: test-gap
-  Scope: packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs
-  Evidence: `SourceAudit_AppendLogSaveAsyncSequenceOnlyInSharedHelper` at lines 1383-1395 is effectively vacuous. Its regex searches for an inline `AppendLog(...)` immediately followed by `_store.SaveAsync(...)`, but the refactored source intentionally separates `AppendLog` into `ApplyTransitionLog` and `_store.SaveAsync` into `PersistTransitionAsync`. The test does not assert that any match exists, so it would pass even if the shared-helper structure changed in a way that no longer proves the intended consolidation.
-  SuggestedAction: Replace this audit with assertions that `AppendLog` is only called from the intended helper path and that all transition saves flow through `PersistTransitionAsync`, or remove the vacuous test and rely on non-vacuous behavioral specs.
-  Verification: Run `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj -p:SkipWebBuild=true --no-build --filter FullyQualifiedName~SourceAudit`.
-  Status: open
+- None.
 
 ## Follow-up Items
 
-- None.
+- [ID: item-1]
+  Severity: follow-up
+  Scope: packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs
+  Evidence: `GetLatestStatusAsync_DoesNotReleaseLockAndStartStillRejected` verifies the pure query contract indirectly by asserting that an active persisted state still rejects a later start. The implementation is visibly read-only at `packages/server/src/Mohist.Server/SystemInfo/SystemUpdateService.cs:101`, and `ReleaseLockAsync` calls are confined to `PersistTransitionAsync` / `RunUpdateAsync` in the source audit, so this is not a current correctness problem. A future test would be sharper if it used a store that records `ReleaseLockAsync` calls directly for the query method.
+  SuggestedAction: Add a direct query-purity fake for release calls if this area is touched again.
+  Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-5]
+- [ID: item-2]
+  Severity: warning
+  Scope: packages/server/src/Mohist.Server/SystemInfo/FileSystemSystemUpdateStore.cs
+  Evidence: The durable lock file recovery path still depends on in-memory owner state. `ReleaseLockAsync` only deletes the lock file when `_lockOwnerJobId == jobId` (`FileSystemSystemUpdateStore.cs:84`), but a restarted server instance has `_lockOwnerJobId == null`. This appears unchanged from the pre-split implementation and the issue explicitly scoped the file-lock mechanism out, so it does not block this refactor. It remains an adjacent recovery risk: an active persisted job completed after process restart can become terminal while the old `.lock` file remains.
+  SuggestedAction: Handle stale lock-file ownership in a dedicated file-lock recovery issue with focused FileSystem store tests.
+  Status: pre-existing
+
+- [ID: item-3]
   Severity: info
   Scope: packages/server/src/Mohist.Server/SystemInfo/SystemUpdateService.cs
-  Evidence: The update state machine still relies directly on `DateTimeOffset.UtcNow` throughout the service. This was explicitly called out as out of scope in the design, so it is not a blocker for this review.
-  SuggestedAction: Consider a later `TimeProvider` pass if timestamp behavior needs deterministic unit-level coverage.
+  Evidence: The service and specs still use `DateTimeOffset.UtcNow` directly for transition timestamps. The change design explicitly declared TimeProvider injection out of scope, and this refactor did not introduce a new clock dependency class of behavior.
+  SuggestedAction: Consider a later TimeProvider pass if timestamp behavior needs deterministic unit-level testing.
   Status: out-of-scope
 
-<promise>FAIL</promise>
+## Verification
+
+- Issue acceptance checked against source: collaborators are split into separate files; `GetLatestStatusAsync` is read-only; `AdvanceActiveJobAsync` owns status advancement; failure/save transitions route through shared helpers; named sibling files and DI/routes are unmodified.
+- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter FullyQualifiedName~SystemUpdateServiceSpecs -p:SkipWebBuild=true` passed: 45 passed, 0 failed.
+- `dotnet test Mohist.sln -p:SkipWebBuild=true` passed: 3714 passed, 13 skipped, 0 failed.
+- `npm run test:ci --workspaces --if-present` passed.
+- `git diff --check master...HEAD` passed.
+
+<promise>PASS</promise>
