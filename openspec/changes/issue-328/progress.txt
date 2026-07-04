@@ -194,3 +194,88 @@
   `UnavailableCapability = null`, `Stage = "Recovered"`, a `Recovered`
   log entry) on the call site and only delegates the persist tail to
   `PersistTransitionAsync`, per the design decision.
+
+## Task T-003 (separate status query from job-advancement command)
+
+- `GetLatestStatusAsync` (orchestrator) is now strictly read-only —
+  exactly `await _store.GetLatestAsync(...); return ToResponse(...)`
+  at `SystemUpdateService.cs:101-105`. No `_getSystemInfo` /
+  `_readinessProbe` / `_commandRunner` calls, no `_store.Save*`, no
+  `_store.ReleaseLockAsync`. Acceptance criteria #1 + #2 + #3 verified
+  by the new unit specs.
+- New `AdvanceActiveJobAsync` command at `SystemUpdateService.cs:107-193`
+  owns the three previously-hidden branches: supersede (`:119-138`),
+  waiting-persist with dedup gate (`:140-159`), and ready→restart→
+  succeeded→release (`:161-192`). Empty/non-matching running hash
+  guard at `:161-162` keeps the job waiting without persisting.
+- `GetStatusEnvelopeAsync` at `SystemUpdateService.cs:195-200` is now
+  the command-then-query wrapper (`AdvanceActiveJobAsync` then
+  `GetLatestStatusAsync` then `ToEnvelope`). The polling HTTP
+  contract is unchanged (still a GET); only the orchestration shape
+  differs.
+- Success-path ordering preserved verbatim: persist ready
+  (`PersistTransitionAsync` at `:165-173`) → restart runner via
+  `RunCommandAsync` (`:175-180`) → persist succeeded with
+  `releaseLock: true` (`:182-192`). Each transition still flows
+  through the T-002 `PersistTransitionAsync` helper.
+- Spec migration (8 specs at master → re-pointed at the polling
+  flow / command):
+  - `GetLatestStatusAsync_WhenReady_RestartsRunnerBeforeReadyCompletion`
+    → `AdvanceActiveJobAsync_WhenReady_RestartsRunnerBeforeReadyCompletion`
+  - `GetLatestStatusAsync_DoesNotSucceedUntilReadinessAndHashMatch`
+    → `GetStatusEnvelopeAsync_DoesNotSucceedUntilReadinessAndHashMatch`
+  - `GetLatestStatusAsync_PersistsReadinessFailuresAcrossReconnectBoundary`
+    → `GetStatusEnvelopeAsync_PersistsReadinessFailuresAcrossReconnectBoundary`
+  - `GetLatestStatusAsync_BoundsPersistedLogEntries`
+    → `AdvanceActiveJobAsync_BoundsPersistedLogEntries`
+  - `GetLatestStatusAsync_StaleWaitingForReconnectIsSuperseded`
+    → `AdvanceActiveJobAsync_StaleWaitingForReconnectIsSuperseded`
+  - `GetLatestStatusAsync_ActiveWaitingForReconnectIsPreservedWhenHashMatches`
+    → `GetStatusEnvelopeAsync_ActiveWaitingForReconnectIsPreservedWhenHashMatches`
+  - `GetLatestStatusAsync_EmptyRunningHashDoesNotSupersede`
+    → `AdvanceActiveJobAsync_EmptyRunningHashDoesNotSupersede`
+  - `GetLatestStatusAsync_SupersededStatusDoesNotBlockNewUpdateStarts`
+    → `SupersededStatus_DoesNotBlockNewUpdateStarts` (was the lock
+    semantic, now exercised through the store without going through
+    `GetLatestStatusAsync`).
+- New purity specs (in `SystemUpdateServiceSpecs.cs`):
+  - `GetLatestStatusAsync_DispatchesNoCommandsForActiveJob` (line 605):
+    seeded waiting-for-reconnect job, ready+matching readiness probe;
+    after `GetLatestStatusAsync` the in-memory recording command
+    runner has zero requests and the store's log entry count is
+    unchanged (1).
+  - `GetLatestStatusAsync_DoesNotPersistStateFile` (line 646): uses
+    `FileSystemSystemUpdateStore` against a `Path.GetTempPath()` JSON
+    state file; reads byte content before and after the query and
+    asserts the bytes are identical.
+  - `GetLatestStatusAsync_DoesNotReleaseLockAndStartStillRejected`
+    (line 699): polls with the lock held by another `jobId`; query
+    result is non-null; `TryAcquireLockAsync("job-2")` still returns
+    false after the query.
+- All 42 `SystemUpdateServiceSpecs` green; full server suite
+  passes (3711 passed, 13 pre-existing skips, 0 failed).
+
+## Gotchas (T-003)
+
+- The original (master) 8th spec was `GetLatestStatusAsync_SupersededStatusDoesNotBlockNewUpdateStarts`
+  which exercised the lock-release semantic through the query. After
+  the CQS split the new lock release belongs entirely to the command,
+  so that spec no longer fits at the query level and was renamed
+  `SupersededStatus_DoesNotBlockNewUpdateStarts` — the assertion is
+  now entirely on the store state (`SystemUpdateService.IsActive` +
+  `TryAcquireLockAsync("job-2")`) rather than on the query method.
+- The 3 new purity specs use `SequencedSystemInfo` with
+  `CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")` so
+  the waiting-for-reconnect job's hash matches both the runtime and
+  the source HEAD — that's the configuration where the *old* query
+  would have silently advanced the job, making it a sharp test of
+  the new pure-read contract.
+- `GetLatestStatusAsync_DoesNotPersistStateFile` compares raw bytes
+  (`File.ReadAllBytesAsync`) rather than parsed JSON to keep the
+  assertion robust against System.Text.Json ordering or whitespace
+  drift; the lock file (`.lock`) is cleaned in the `finally`.
+- `AdvanceActiveJobAsync` re-uses T-002's `PersistTransitionAsync`
+  for every transition it owns (supersede at `:125`, waiting at
+  `:148`, ready at `:165`, succeeded at `:183`), so no new inline
+  `AppendLog + SaveAsync` sequences were introduced — the CQS split
+  is a clean relocation against the existing helper surface.

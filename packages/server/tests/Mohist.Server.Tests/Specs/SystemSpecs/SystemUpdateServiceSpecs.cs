@@ -97,7 +97,7 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_WhenReady_RestartsRunnerBeforeReadyCompletion()
+    public async Task AdvanceActiveJobAsync_WhenReady_RestartsRunnerBeforeReadyCompletion()
     {
         var store = new InMemoryUpdateStore();
         var commands = new RecordingCommandRunner();
@@ -124,10 +124,11 @@ public class SystemUpdateServiceSpecs
             commands,
             new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
 
-        var status = await service.GetLatestStatusAsync();
+        await service.AdvanceActiveJobAsync();
 
-        Assert.Equal("succeeded", status!.Status);
-        Assert.Equal("Ready", status.Stage);
+        var latest = await store.GetLatestAsync();
+        Assert.Equal("succeeded", latest!.Status);
+        Assert.Equal("Ready", latest.Stage);
         Assert.Collection(commands.Requests, command =>
         {
             Assert.Equal("systemctl", command.FileName);
@@ -344,7 +345,7 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_DoesNotSucceedUntilReadinessAndHashMatch()
+    public async Task GetStatusEnvelopeAsync_DoesNotSucceedUntilReadinessAndHashMatch()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -373,21 +374,21 @@ public class SystemUpdateServiceSpecs
             CreateInfo(runningGitHash: "newhash", sourceHead: "newhash"));
         var service = CreateService(systemInfo, store, new RecordingCommandRunner(), readiness);
 
-        var first = await service.GetLatestStatusAsync();
-        var second = await service.GetLatestStatusAsync();
-        var third = await service.GetLatestStatusAsync();
+        var first = await service.GetStatusEnvelopeAsync();
+        var second = await service.GetStatusEnvelopeAsync();
+        var third = await service.GetStatusEnvelopeAsync();
 
-        Assert.Equal("waiting-for-reconnect", first!.Status);
-        Assert.Equal("waiting-for-reconnect", second!.Status);
-        Assert.Equal("succeeded", third!.Status);
-        Assert.Equal("Ready", third.Stage);
-        Assert.Contains(third.Logs, log => log.Stage == "Ready" && log.Message.Contains("asset /assets/app.js is ready"));
+        Assert.Equal("waiting-for-reconnect", first.Job!.Status);
+        Assert.Equal("waiting-for-reconnect", second.Job!.Status);
+        Assert.Equal("succeeded", third.Job!.Status);
+        Assert.Equal("Ready", third.Job.Stage);
+        Assert.Contains(third.Job.Logs, log => log.Stage == "Ready" && log.Message.Contains("asset /assets/app.js is ready"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_PersistsReadinessFailuresAcrossReconnectBoundary()
+    public async Task GetStatusEnvelopeAsync_PersistsReadinessFailuresAcrossReconnectBoundary()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -412,18 +413,18 @@ public class SystemUpdateServiceSpecs
             new(true, true, false, "/assets/app.js", "Bundled asset is not ready"));
         var service = CreateService(new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")), store, new RecordingCommandRunner(), readiness);
 
-        var first = await service.GetLatestStatusAsync();
-        var second = await service.GetLatestStatusAsync();
+        var first = await service.GetStatusEnvelopeAsync();
+        var second = await service.GetStatusEnvelopeAsync();
 
-        Assert.Equal("API health endpoint is not ready", first!.Reason);
-        Assert.Equal("Bundled asset is not ready", second!.Reason);
-        Assert.Contains(second.Logs, log => log.Stage == "Waiting for reconnect" && log.Message.Contains("Bundled asset is not ready"));
+        Assert.Equal("API health endpoint is not ready", first.Job!.Reason);
+        Assert.Equal("Bundled asset is not ready", second.Job!.Reason);
+        Assert.Contains(second.Job.Logs, log => log.Stage == "Waiting for reconnect" && log.Message.Contains("Bundled asset is not ready"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_BoundsPersistedLogEntries()
+    public async Task AdvanceActiveJobAsync_BoundsPersistedLogEntries()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -452,7 +453,7 @@ public class SystemUpdateServiceSpecs
             new RecordingCommandRunner(),
             new StubReadinessProbe(new(false, false, false, null, "Still waiting")));
 
-        await service.GetLatestStatusAsync();
+        await service.AdvanceActiveJobAsync();
 
         var latest = await store.GetLatestAsync();
         Assert.Equal(200, latest!.Logs.Count);
@@ -463,7 +464,7 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_StaleWaitingForReconnectIsSuperseded()
+    public async Task AdvanceActiveJobAsync_StaleWaitingForReconnectIsSuperseded()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -489,21 +490,19 @@ public class SystemUpdateServiceSpecs
             new RecordingCommandRunner(),
             new StubReadinessProbe(new(false, false, false, null, "ignored")));
 
-        var status = await service.GetLatestStatusAsync();
-
-        Assert.Equal("superseded", status!.Status);
-        Assert.Equal("Superseded", status.Stage);
-        Assert.Contains(status.Logs, log => log.Stage == "Superseded" && log.Message.Contains("currenthash"));
+        await service.AdvanceActiveJobAsync();
 
         var latest = await store.GetLatestAsync();
         Assert.Equal("superseded", latest!.Status);
+        Assert.Equal("Superseded", latest.Stage);
+        Assert.Contains(latest.Logs, log => log.Stage == "Superseded" && log.Message.Contains("currenthash"));
         Assert.Equal("currenthash", latest.RunningGitHash);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_ActiveWaitingForReconnectIsPreservedWhenHashMatches()
+    public async Task GetStatusEnvelopeAsync_ActiveWaitingForReconnectIsPreservedWhenHashMatches()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -529,9 +528,9 @@ public class SystemUpdateServiceSpecs
             new RecordingCommandRunner(),
             new StubReadinessProbe(new(false, false, false, null, "still waiting")));
 
-        var status = await service.GetLatestStatusAsync();
+        var envelope = await service.GetStatusEnvelopeAsync();
 
-        Assert.Equal("waiting-for-reconnect", status!.Status);
+        Assert.Equal("waiting-for-reconnect", envelope.Job!.Status);
         var latest = await store.GetLatestAsync();
         Assert.Equal("waiting-for-reconnect", latest!.Status);
     }
@@ -539,7 +538,7 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_EmptyRunningHashDoesNotSupersede()
+    public async Task AdvanceActiveJobAsync_EmptyRunningHashDoesNotSupersede()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -565,15 +564,16 @@ public class SystemUpdateServiceSpecs
             new RecordingCommandRunner(),
             new StubReadinessProbe(new(false, false, false, null, "waiting")));
 
-        var status = await service.GetLatestStatusAsync();
+        await service.AdvanceActiveJobAsync();
 
-        Assert.Equal("waiting-for-reconnect", status!.Status);
+        var latest = await store.GetLatestAsync();
+        Assert.Equal("waiting-for-reconnect", latest!.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetLatestStatusAsync_SupersededStatusDoesNotBlockNewUpdateStarts()
+    public async Task SupersededStatus_DoesNotBlockNewUpdateStarts()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -597,6 +597,139 @@ public class SystemUpdateServiceSpecs
         Assert.NotNull(persisted);
         Assert.False(SystemUpdateService.IsActive(persisted!));
         Assert.True(await store.TryAcquireLockAsync("job-2"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetLatestStatusAsync_DispatchesNoCommandsForActiveJob()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new RecordingCommandRunner();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            "oldhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Waiting for restart",
+            [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting for restart")],
+            now,
+            now,
+            null));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            commands,
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        var status = await service.GetLatestStatusAsync();
+
+        Assert.NotNull(status);
+        Assert.Equal("waiting-for-reconnect", status!.Status);
+        Assert.Empty(commands.Requests);
+
+        var latest = await store.GetLatestAsync();
+        Assert.NotNull(latest);
+        Assert.Single(latest!.Logs);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetLatestStatusAsync_DoesNotPersistStateFile()
+    {
+        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = CreateFileSystemStore(statePath);
+            var commands = new RecordingCommandRunner();
+            var now = DateTimeOffset.UtcNow;
+            var initial = new SystemUpdateJobState(
+                "job-1",
+                "waiting-for-reconnect",
+                "Waiting for reconnect",
+                true,
+                "oldhash",
+                "newhash",
+                "/repo",
+                "mohist.service",
+                "mohist-runner.service",
+                "Waiting for restart",
+                [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting for restart")],
+                now,
+                now,
+                null);
+            await store.SaveAsync(initial);
+
+            var beforeBytes = await File.ReadAllBytesAsync(statePath);
+
+            var service = CreateService(
+                new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+                store,
+                commands,
+                new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+            var status = await service.GetLatestStatusAsync();
+
+            Assert.NotNull(status);
+            Assert.Empty(commands.Requests);
+
+            var afterBytes = await File.ReadAllBytesAsync(statePath);
+            Assert.Equal(beforeBytes, afterBytes);
+        }
+        finally
+        {
+            if (File.Exists(statePath))
+                File.Delete(statePath);
+            if (File.Exists(statePath + ".lock"))
+                File.Delete(statePath + ".lock");
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetLatestStatusAsync_DoesNotReleaseLockAndStartStillRejected()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new RecordingCommandRunner();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            "oldhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Waiting for restart",
+            [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting for restart")],
+            now,
+            now,
+            null));
+
+        Assert.False(await store.TryAcquireLockAsync("job-2"));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            commands,
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        var status = await service.GetLatestStatusAsync();
+
+        Assert.NotNull(status);
+        Assert.Empty(commands.Requests);
+        Assert.False(await store.TryAcquireLockAsync("job-2"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

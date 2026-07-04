@@ -101,96 +101,100 @@ public sealed class SystemUpdateService : ISingletonService
     public async Task<SystemUpdateStatusResponse?> GetLatestStatusAsync(CancellationToken cancellationToken = default)
     {
         var latest = await _store.GetLatestAsync(cancellationToken);
+        return latest is null ? null : ToResponse(latest);
+    }
+
+    public async Task AdvanceActiveJobAsync(CancellationToken cancellationToken = default)
+    {
+        var latest = await _store.GetLatestAsync(cancellationToken);
         if (latest is null)
-            return null;
+            return;
 
-        if (latest.Status is "running" or "waiting-for-reconnect")
+        if (latest.Status is not ("running" or "waiting-for-reconnect"))
+            return;
+
+        var info = await _getSystemInfo(cancellationToken);
+        var runningHash = info.Running.GitHash;
+
+        if (latest.Status == "waiting-for-reconnect"
+            && !string.IsNullOrWhiteSpace(runningHash)
+            && !string.IsNullOrWhiteSpace(latest.SourceHead)
+            && !string.Equals(runningHash, latest.SourceHead, StringComparison.Ordinal))
         {
-            var info = await _getSystemInfo(cancellationToken);
-            var runningHash = info.Running.GitHash;
-
-            if (latest.Status == "waiting-for-reconnect"
-                && !string.IsNullOrWhiteSpace(runningHash)
-                && !string.IsNullOrWhiteSpace(latest.SourceHead)
-                && !string.Equals(runningHash, latest.SourceHead, StringComparison.Ordinal))
-            {
-                var supersededAt = DateTimeOffset.UtcNow;
-                latest = await PersistTransitionAsync(
-                    latest with
-                    {
-                        Status = "superseded",
-                        Stage = "Superseded",
-                        RunningGitHash = runningHash,
-                        Reason = "Server runtime has advanced past this job's source HEAD; this update is no longer relevant.",
-                        CompletedAt = supersededAt
-                    },
-                    cancellationToken,
-                    new SystemUpdateLogEntry(supersededAt, "Superseded", $"Running git hash '{runningHash}' differs from job source HEAD '{latest.SourceHead}'; marking job as superseded."),
-                    releaseLock: true);
-                return ToResponse(latest);
-            }
-
-            var readiness = await _readinessProbe.ProbeAsync(cancellationToken);
-            if (!readiness.HealthReady || !readiness.RootReady || !readiness.AssetsReady)
-            {
-                var failureReason = readiness.FailureReason ?? "Waiting for reconnect";
-                var shouldPersistWaiting = latest.Stage != "Waiting for reconnect" || latest.Reason != failureReason;
-                if (shouldPersistWaiting)
+            var supersededAt = DateTimeOffset.UtcNow;
+            await PersistTransitionAsync(
+                latest with
                 {
-                    var waitingAt = DateTimeOffset.UtcNow;
-                    latest = await PersistTransitionAsync(
-                        latest with
-                        {
-                            Status = "waiting-for-reconnect",
-                            Stage = "Waiting for reconnect",
-                            Reason = failureReason
-                        },
-                        cancellationToken,
-                        new SystemUpdateLogEntry(waitingAt, "Waiting for reconnect", failureReason));
-                }
-            }
-            else
-            {
-                if (!string.IsNullOrWhiteSpace(runningHash) && runningHash == latest.SourceHead)
-                {
-                    var now = DateTimeOffset.UtcNow;
-                    latest = await PersistTransitionAsync(
-                        latest with
-                        {
-                            RunningGitHash = runningHash,
-                            SourceHead = info.Source.Head,
-                            Reason = "Server runtime matches source HEAD and readiness checks passed"
-                        },
-                        cancellationToken,
-                        new SystemUpdateLogEntry(now, "Ready", $"Server runtime matches source HEAD and asset {readiness.RootAssetPath} is ready"));
-
-                    if (!string.IsNullOrWhiteSpace(latest.RunnerUnit))
-                    {
-                        latest = await RunCommandAsync(latest, latest.SourcePath!, "Restarting runner", "systemctl", ["--user", "restart", latest.RunnerUnit!], cancellationToken);
-                        if (latest.Status == "failed")
-                            return ToResponse(latest);
-                    }
-
-                    var completedAt = DateTimeOffset.UtcNow;
-                    latest = await PersistTransitionAsync(
-                        latest with
-                        {
-                            Status = "succeeded",
-                            Outcome = "succeeded",
-                            Stage = "Ready",
-                            CompletedAt = completedAt
-                        },
-                        cancellationToken,
-                        releaseLock: true);
-                }
-            }
+                    Status = "superseded",
+                    Stage = "Superseded",
+                    RunningGitHash = runningHash,
+                    Reason = "Server runtime has advanced past this job's source HEAD; this update is no longer relevant.",
+                    CompletedAt = supersededAt
+                },
+                cancellationToken,
+                new SystemUpdateLogEntry(supersededAt, "Superseded", $"Running git hash '{runningHash}' differs from job source HEAD '{latest.SourceHead}'; marking job as superseded."),
+                releaseLock: true);
+            return;
         }
 
-        return ToResponse(latest);
+        var readiness = await _readinessProbe.ProbeAsync(cancellationToken);
+        if (!readiness.HealthReady || !readiness.RootReady || !readiness.AssetsReady)
+        {
+            var failureReason = readiness.FailureReason ?? "Waiting for reconnect";
+            var shouldPersistWaiting = latest.Stage != "Waiting for reconnect" || latest.Reason != failureReason;
+            if (shouldPersistWaiting)
+            {
+                var waitingAt = DateTimeOffset.UtcNow;
+                await PersistTransitionAsync(
+                    latest with
+                    {
+                        Status = "waiting-for-reconnect",
+                        Stage = "Waiting for reconnect",
+                        Reason = failureReason
+                    },
+                    cancellationToken,
+                    new SystemUpdateLogEntry(waitingAt, "Waiting for reconnect", failureReason));
+            }
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(runningHash) || runningHash != latest.SourceHead)
+            return;
+
+        var now = DateTimeOffset.UtcNow;
+        latest = await PersistTransitionAsync(
+            latest with
+            {
+                RunningGitHash = runningHash,
+                SourceHead = info.Source.Head,
+                Reason = "Server runtime matches source HEAD and readiness checks passed"
+            },
+            cancellationToken,
+            new SystemUpdateLogEntry(now, "Ready", $"Server runtime matches source HEAD and asset {readiness.RootAssetPath} is ready"));
+
+        if (!string.IsNullOrWhiteSpace(latest.RunnerUnit))
+        {
+            latest = await RunCommandAsync(latest, latest.SourcePath!, "Restarting runner", "systemctl", ["--user", "restart", latest.RunnerUnit!], cancellationToken);
+            if (latest.Status == "failed")
+                return;
+        }
+
+        var completedAt = DateTimeOffset.UtcNow;
+        await PersistTransitionAsync(
+            latest with
+            {
+                Status = "succeeded",
+                Outcome = "succeeded",
+                Stage = "Ready",
+                CompletedAt = completedAt
+            },
+            cancellationToken,
+            releaseLock: true);
     }
 
     public async Task<SystemUpdateStatusEnvelope> GetStatusEnvelopeAsync(CancellationToken cancellationToken = default)
     {
+        await AdvanceActiveJobAsync(cancellationToken);
         var latest = await GetLatestStatusAsync(cancellationToken);
         return new SystemUpdateStatusEnvelope(latest is not null, latest);
     }
