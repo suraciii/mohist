@@ -1,5 +1,6 @@
 using System.Net;
 using EnvironmentAbstractions.TestHelpers;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Cli.Tests.Support;
 using Xunit;
 
@@ -16,7 +17,10 @@ public class RuntimeConsistencyValidatorSpecs
         FakeFileSystem? fs = null,
         MockEnvironmentVariableProvider? env = null,
         Func<string?>? getUserHome = null,
-        TextWriter? output = null)
+        TextWriter? output = null,
+        TimeProvider? timeProvider = null,
+        TimeSpan? runnerIdentityTimeout = null,
+        TimeSpan? runnerIdentityPollInterval = null)
     {
         return new RuntimeConsistencyValidator(
             http,
@@ -24,7 +28,10 @@ public class RuntimeConsistencyValidatorSpecs
             fs ?? new FakeFileSystem(),
             env ?? new MockEnvironmentVariableProvider(),
             output ?? TextWriter.Null,
-            getUserHome);
+            getUserHome,
+            timeProvider,
+            runnerIdentityTimeout,
+            runnerIdentityPollInterval);
     }
 
     [Fact]
@@ -317,8 +324,96 @@ public class RuntimeConsistencyValidatorSpecs
     }
 
     [Fact]
-    public async Task CheckRunnerIdentityAsync_EndpointUnreachable_ReportsWarn()
+    public async Task CheckRunnerIdentityAsync_IdentityImmediatelyAvailable_ReportsPassWithoutDelay()
     {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var handler = new RecordingHttpHandler((req, _) =>
+        {
+            Assert.Equal("/api/runner/identity", req.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"data\":{\"buildGitHash\":\"abc123\"}}", System.Text.Encoding.UTF8, "application/json"),
+            });
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
+
+        var validator = BuildValidator(
+            http,
+            timeProvider: time,
+            runnerIdentityTimeout: TimeSpan.FromSeconds(30),
+            runnerIdentityPollInterval: TimeSpan.FromMilliseconds(500));
+        var context = BuildContext(repoRoot: "/repo");
+        context.SourceHead = "abc123";
+
+        var result = await validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+
+        Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
+        Assert.Equal("Runner identity matches source HEAD 'abc123'", result.Message);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task CheckRunnerIdentityAsync_IdentityArrivesAfterNPolls_ReportsPass()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        const int readyOnAttempt = 3;
+        var probeCount = 0;
+        var probeStartedSignals = new List<TaskCompletionSource>();
+        var handler = new RecordingHttpHandler((req, _) =>
+        {
+            Assert.Equal("/api/runner/identity", req.RequestUri!.AbsolutePath);
+            var attempt = Interlocked.Increment(ref probeCount);
+            lock (probeStartedSignals)
+            {
+                while (probeStartedSignals.Count < attempt)
+                {
+                    probeStartedSignals.Add(new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+                }
+                probeStartedSignals[attempt - 1].TrySetResult();
+            }
+            if (attempt < readyOnAttempt)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"data\":{\"buildGitHash\":\"abc123\"}}", System.Text.Encoding.UTF8, "application/json"),
+            });
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
+
+        var pollInterval = TimeSpan.FromMilliseconds(500);
+        var validator = BuildValidator(
+            http,
+            timeProvider: time,
+            runnerIdentityTimeout: TimeSpan.FromSeconds(30),
+            runnerIdentityPollInterval: pollInterval);
+        var context = BuildContext(repoRoot: "/repo");
+        context.SourceHead = "abc123";
+
+        var checkTask = validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+
+        for (var i = 0; i < readyOnAttempt - 1; i++)
+        {
+            await probeStartedSignals[i].Task.WaitAsync(TimeSpan.FromSeconds(5));
+            time.Advance(pollInterval);
+        }
+
+        await probeStartedSignals[readyOnAttempt - 1].Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var result = await checkTask;
+
+        Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
+        Assert.Equal("Runner identity matches source HEAD 'abc123'", result.Message);
+        Assert.Equal(readyOnAttempt, handler.Requests.Count);
+        var elapsedSinceStart = time.GetUtcNow() - new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        Assert.Equal(TimeSpan.FromTicks(pollInterval.Ticks * (readyOnAttempt - 1)), elapsedSinceStart);
+    }
+
+    [Fact]
+    public async Task CheckRunnerIdentityAsync_IdentityNeverAvailable_ReportsWarnAfterTimeout()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         var handler = new RecordingHttpHandler((req, _) =>
         {
             Assert.Equal("/api/runner/identity", req.RequestUri!.AbsolutePath);
@@ -326,14 +421,26 @@ public class RuntimeConsistencyValidatorSpecs
         });
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
 
-        var validator = BuildValidator(http);
+        var timeout = TimeSpan.FromSeconds(2);
+        var pollInterval = TimeSpan.FromMilliseconds(500);
+        var validator = BuildValidator(
+            http,
+            timeProvider: time,
+            runnerIdentityTimeout: timeout,
+            runnerIdentityPollInterval: pollInterval);
         var context = BuildContext(repoRoot: "/repo");
         context.SourceHead = "abc123";
 
-        var result = await validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+        var checkTask = validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+        await Task.Yield();
+        Assert.False(checkTask.IsCompleted);
+
+        time.Advance(timeout);
+        var result = await checkTask;
 
         Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
-        Assert.Equal("Runner identity", result.Component);
+        Assert.Contains("did not respond", result.Message);
+        Assert.NotEmpty(handler.Requests);
     }
 
     [Fact]
