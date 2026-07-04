@@ -136,4 +136,3 @@ changes for issue-353.)
   bubbles into the user-facing message.
 - Refresh step (`mo update server`) is asserted on the happy path via
   `Assert.Contains("mo update server", stdout)`.
-

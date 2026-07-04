@@ -375,8 +375,27 @@ internal static class NotifyCommands
         {
             var text = fileSystem.ReadAllText(configPath);
             var root = JsonNode.Parse(StripJsoncComments(text)) as JsonObject ?? new JsonObject();
-            var hermes = root["Mohist"]?["Notifications"]?["Hermes"];
-            var exists = hermes is JsonObject hermesObj && hermesObj.Count > 0;
+            var mohist = root["Mohist"];
+            if (mohist is not null && mohist is not JsonObject)
+            {
+                return HermesConfigLoadResult.Failed(
+                    $"Could not update Mohist config file '{configPath}': Mohist must be a JSON object.");
+            }
+
+            var notifications = ((JsonObject?)mohist)?["Notifications"];
+            if (notifications is not null && notifications is not JsonObject)
+            {
+                return HermesConfigLoadResult.Failed(
+                    $"Could not update Mohist config file '{configPath}': Mohist:Notifications must be a JSON object.");
+            }
+
+            var hermes = ((JsonObject?)notifications)?["Hermes"];
+            var exists = hermes switch
+            {
+                null => false,
+                JsonObject hermesObj => hermesObj.Count > 0,
+                _ => true,
+            };
             return HermesConfigLoadResult.Loaded(root, exists);
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)

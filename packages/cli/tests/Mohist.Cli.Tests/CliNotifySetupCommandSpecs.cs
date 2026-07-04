@@ -322,6 +322,62 @@ public class CliNotifySetupCommandSpecs : IDisposable
     }
 
     [Fact]
+    public async Task NotifySetup_ExistingHermesScalar_PromptsBeforeOverwrite()
+    {
+        const string existingScalar = """
+            {
+              "Mohist": {
+                "Notifications": {
+                  "Hermes": "old-value"
+                }
+              }
+            }
+            """;
+        var fileSystem = new FakeFileSystem();
+        fileSystem.AddFile(_configPath, existingScalar);
+        NotifyCommands.HealthProbeOverride = new StubProbe(success: true);
+        var stdin = new StringReader("n\n");
+
+        var (exitCode, stdout, _) = await RunAsync(
+            new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
+            fileSystem,
+            new FakeCommandExecutor(),
+            ["notify", "setup"],
+            stdin);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Overwrite them?", stdout);
+        Assert.Equal(existingScalar, fileSystem.ReadAllText(_configPath));
+    }
+
+    [Fact]
+    public async Task NotifySetup_NonObjectNotificationsParent_AbortsWithoutWriting()
+    {
+        const string invalidShape = """
+            {
+              "Mohist": {
+                "Notifications": "old-value"
+              }
+            }
+            """;
+        var fileSystem = new FakeFileSystem();
+        fileSystem.AddFile(_configPath, invalidShape);
+        NotifyCommands.HealthProbeOverride = new StubProbe(success: true);
+        NotifyCommands.SecretGeneratorOverride = () => "should-not-be-written";
+
+        var (exitCode, stdout, stderr) = await RunAsync(
+            new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
+            fileSystem,
+            new FakeCommandExecutor(),
+            ["notify", "setup"]);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(stdout);
+        Assert.Contains("Mohist:Notifications must be a JSON object", stderr);
+        Assert.Equal(invalidShape, fileSystem.ReadAllText(_configPath));
+    }
+
+    [Fact]
     public async Task NotifySetup_NonInteractiveStdin_AbortsWithoutWritingNoHang()
     {
         var fileSystem = new FakeFileSystem();
