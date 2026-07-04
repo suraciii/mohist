@@ -1,6 +1,6 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
 
 ## Repaired Items
 
@@ -8,48 +8,46 @@ _None._
 
 ## Blocking Items
 
-- [ID: item-1]
-  Severity: warning
-  Scope: packages/web/src/pages/session/ui/SessionDetailShell.tsx
-  Evidence: The cancel confirmation dialog is never closed by the confirm path. `AlertDialog` only calls `onConfirm()` and does not close itself (`packages/web/src/shared/ui/components/alert-dialog.tsx:39-47`), while the new handler only calls `cancel.mutate()` (`packages/web/src/pages/session/ui/SessionDetailShell.tsx:535-549`) and never clears `cancelDialogOpen`. For the normal best-effort response `{ state: "cancelled" }`, the summary can still remain running until the agent later emits a terminal event, so `showCancelControl` remains true and the dialog stays open with the confirm button re-enabled after the mutation settles. The user can submit duplicate cancel POSTs and the UI looks stuck after a successful notification. [disallowed:product-behavior]
-  SuggestedAction: Close the dialog from the cancel mutation lifecycle, for example by allowing the data-source cancel callback to accept per-call mutation options and calling `setCancelDialogOpen(false)` on success/settled, while preserving the loading guard during the in-flight request. Add a regression test that confirms the dialog closes after the cancel mutation settles while the session is still non-terminal.
-  Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed with 264 files, 4176 tests passed, 1 skipped. These tests do not cover post-confirm dialog closure.
-  Status: open
-
-- [ID: item-2]
-  Severity: warning
-  Scope: packages/web/src/pages/session/data/useGenericSessionDataSource.ts
-  Evidence: The generic session summary has the owning agent id (`summary.agentId`), and `useCancelGenericSession` already invalidates the owning agent session list when `agentRef` is provided (`packages/web/src/entities/agent/api/agent-sessions.ts:205-207`). The new page wrapper discards that available id and calls `cancelGeneric.mutate({ sessionId })` only (`packages/web/src/pages/session/data/useGenericSessionDataSource.ts:114-116`). `AgentDetailPage` reads the affected cache with query key `['agents', projectId, agentRef, 'sessions']` (`packages/web/src/entities/agent/api/queries.ts:137-143`) and has no refetch interval, so returning to the agent detail page after cancelling can show the old running session list indefinitely until another invalidation or remount/refetch path occurs. [disallowed:product-behavior]
-  SuggestedAction: Pass the owning agent reference from the loaded summary when cancelling, e.g. `cancelGeneric.mutate({ sessionId, agentRef: summary?.agentId })`, and add a data-source/page test that the cancel mutation receives `agentRef` once the summary is available.
-  Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed with 264 files, 4176 tests passed, 1 skipped. Existing hook tests prove the invalidation works only when `agentRef` is supplied; the new UI path does not supply it.
-  Status: open
-
-- [ID: item-3]
-  Severity: test-gap
-  Scope: packages/web/src/pages/session/ui/GenericSessionPage.test.tsx
-  Evidence: The issue/spec acceptance criteria explicitly require the cancel control to be visible for `active`, `running`, and `probing` generic sessions, and hidden/disabled for `completed`, `failed`, `cancelled`, and `stopped` terminal sessions (`openspec/changes/issue-349/specs/generic-agent-session-cancel/spec.md:23-32`). The new tests cover `running`, `completed`, `failed`, and `cancelled` only (`packages/web/src/pages/session/ui/GenericSessionPage.test.tsx:300-338`). They do not cover `active`, `probing`, or `stopped`, so three acceptance-state branches are unverified in the product UI test suite. [disallowed:test-coverage]
-  SuggestedAction: Add parameterized visibility tests for non-terminal statuses `active`, `running`, and `probing`, and terminal statuses `completed`, `failed`, `cancelled`, and `stopped`.
-  Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed with 264 files, 4176 tests passed, 1 skipped. The passing suite lacks the missing status cases above.
-  Status: open
+_None._
 
 ## Follow-up Items
 
-_None._
+- [ID: item-1]
+  Severity: follow-up
+  Scope: openspec/changes/issue-349/progress.txt
+  Evidence: The product snapshot now covers the prior review gaps, but `progress.txt` still contains stale progress evidence: it says `GenericSessionPage.test.tsx` added visibility coverage only for `running` vs `completed` / `failed` / `cancelled` and omits the now-present `active`, `probing`, `stopped`, and post-settlement dialog-close assertions (`progress.txt:92-100`; current tests are in `packages/web/src/pages/session/ui/GenericSessionPage.test.tsx:300-437`). This does not affect the product deliverable or verdict because the current tests and review evidence are authoritative, but stale handoff notes can confuse future traceability.
+  SuggestedAction: Refresh `progress.txt` if it will be used as handoff evidence after this review.
+  Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-4]
-  Severity: warning
-  Scope: packages/web/src/entities/agent/api/agent-sessions.ts
-  Evidence: `useGenericSessionSummary` stops polling only for `completed`, `failed`, and `stopped` (`packages/web/src/entities/agent/api/agent-sessions.ts:127-131`), but other code and the new issue acceptance treat `cancelled` as terminal. This was not introduced by the UI wiring, and the new cancel button still hides for cancelled because `isRunning` becomes false, but cancelled summaries may continue polling unnecessarily.
-  SuggestedAction: In a separate cleanup, include `cancelled` in the generic-session summary terminal polling predicate and add a unit test.
+- [ID: item-2]
+  Severity: info
+  Scope: packages/web/src/pages/session/data/buildGenericSessionMetadata.ts
+  Evidence: Generic session status presentation still maps raw `cancelled` to the existing failed badge and raw `stopped` through the existing non-running fallback to completed (`buildGenericSessionMetadata.ts:4-17`). This predates the cancel-button wiring and does not block the issue acceptance criteria, which are about providing the cancel affordance, confirming it, invoking the existing endpoint, refreshing state, hiding the control for terminal states, and preserving issue/workflow session pages.
+  SuggestedAction: Consider a separate UI vocabulary cleanup if stopped/cancelled generic sessions need distinct labels.
   Status: pre-existing
 
-- [ID: item-5]
+- [ID: item-3]
   Severity: info
   Scope: openspec/changes/issue-349
-  Evidence: Workflow artifacts (`proposal.md`, `design.md`, `tasks.json`, `self-review.md`, spec delta, and this review) are present as expected review context under the issue change directory. Per the candidate boundary, these are not product deliverables and do not affect the verdict by themselves.
+  Evidence: Workflow artifacts (`proposal.md`, `design.md`, `tasks.json`, `self-review.md`, spec delta, and this review) are present under the issue change directory as expected review context. Per the candidate boundary, these are not product deliverables by themselves and did not affect the verdict.
   SuggestedAction: No action.
   Status: out-of-scope
 
-<promise>FAIL</promise>
+## Acceptance Evidence
+
+- Generic session header cancel affordance is implemented in `packages/web/src/pages/session/ui/SessionDetailShell.tsx:518-550`, gated by `cancel != null && isRunning` (`SessionDetailShell.tsx:404-406`) and supplied only by `useGenericSessionDataSource` (`packages/web/src/pages/session/data/useGenericSessionDataSource.ts:114-123`).
+- Confirmation is destructive-toned and does not invoke the mutation until confirm (`SessionDetailShell.tsx:534-550`; shared loading/dismiss guard in `packages/web/src/shared/ui/components/alert-dialog.tsx:39-47`). Tests cover open-without-request, dismiss-without-request, confirm, pending UI, and post-settlement dialog close (`GenericSessionPage.test.tsx:338-437`).
+- Terminal hiding and non-terminal visibility are covered for `active`, `running`, `probing`, `completed`, `failed`, `cancelled`, and `stopped` in `GenericSessionPage.test.tsx:300-323`; summary polling also treats `cancelled` as terminal in `packages/web/src/entities/agent/api/agent-sessions.ts:127-131`.
+- The existing cancel endpoint is called through `cancelGenericSession` (`agent-sessions.ts:110-116`) and the wrapper passes the owning `agentRef` for list invalidation (`useGenericSessionDataSource.ts:114-119`). Hook tests cover success, terminal, `not-cancellable`, and error toast paths (`agent-sessions.test.ts:336-393`).
+- Issue/workflow sessions remain structurally unable to render cancel because `useIssueSessionDataSource` returns `cancel: null` (`packages/web/src/pages/session/data/useIssueSessionDataSource.tsx:245-260`), with regression coverage in `packages/web/src/pages/session/ui/SessionPage.cancel.test.tsx:252-266`. Backend/runner isolation remains pre-existing and unchanged (`AgentSessionCancelRoutes.cs:44-105`; `runner-signalr.ts:561-621`).
+
+## Verification
+
+- `git diff --check origin/master...HEAD` passed.
+- `npm run typecheck -w packages/web` passed.
+- `npm run test:run -w packages/web -- src/entities/agent/api/agent-sessions.test.ts src/pages/session/ui/GenericSessionPage.test.tsx src/pages/session/ui/SessionPage.cancel.test.tsx` passed: 3 files, 61 tests.
+- `npm run test:run -w packages/web` passed: 264 files, 4183 passed, 1 skipped.
+
+<promise>PASS</promise>
