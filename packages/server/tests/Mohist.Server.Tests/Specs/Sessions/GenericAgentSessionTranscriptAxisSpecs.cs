@@ -88,7 +88,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task GenericLaunch_PolledDispatch_FakeAgentRun_PersistsNonEmptyTranscriptTurn()
+    public async Task GenericLaunch_PolledDispatch_FakeAgentRunThroughRuntimeEventsEndpoint_PersistsNonEmptyTranscriptTurn()
     {
         var project = await CreateProjectAsync("transcript-axis-transcript");
         var agent = await CreateAgentAsync(project.Id, "transcript-axis-events-agent");
@@ -112,7 +112,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
 
             var polledWork = await PollOnceAsync(_runnerId, sessionId);
 
-            var fakeRun = await RunFakeAcpAgentFromPolledDispatchAsync(
+            var fakeRun = await RunFakeAcpAgentThroughRuntimeEventsEndpointAsync(
                 project.Id,
                 sessionId,
                 polledWork,
@@ -245,7 +245,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
 
             var polledWork = await PollOnceAsync(_runnerId, sessionId);
-            await RunFakeAcpAgentFromPolledDispatchAsync(
+            await RunFakeAcpAgentThroughRuntimeEventsEndpointAsync(
                 project.Id,
                 sessionId,
                 polledWork,
@@ -409,16 +409,16 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         }
     }
 
-    private async Task OpenGenericSessionAsync(string projectId, string sessionId)
+    private async Task OpenGenericSessionAsync(string projectId, string sessionId, PollResult polledWork)
     {
         await _fixture.Client.PostOkAsync(
             $"/api/runner/{_runnerId}/agent-sessions/{projectId}/{sessionId}/open",
             new
             {
-                workId = $"work-{Guid.NewGuid():N}",
-                workType = "agent-job",
-                stage = "agent",
-                title = "transcript axis session",
+                workId = polledWork.WorkId,
+                workType = polledWork.WorkType,
+                stage = polledWork.Stage,
+                title = "Agent Job",
             });
         await _fixture.Client.PostOkAsync(
             $"/api/runner/{_runnerId}/agent-sessions/{projectId}/{sessionId}/attach",
@@ -430,7 +430,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
             });
     }
 
-    private async Task<FakeAgentRunResult> RunFakeAcpAgentFromPolledDispatchAsync(
+    private async Task<FakeAgentRunResult> RunFakeAcpAgentThroughRuntimeEventsEndpointAsync(
         string projectId,
         string sessionId,
         PollResult polledWork,
@@ -444,7 +444,7 @@ public class GenericAgentSessionTranscriptAxisSpecs : IAsyncLifetime
         Assert.False(string.IsNullOrWhiteSpace(polledWork.WorkType));
         Assert.False(string.IsNullOrWhiteSpace(polledWork.Stage));
 
-        await OpenGenericSessionAsync(projectId, sessionId);
+        await OpenGenericSessionAsync(projectId, sessionId, polledWork);
         await _fixture.Client.PostOkAsync(
             $"/api/runner/{_runnerId}/agent-sessions/{projectId}/{sessionId}/runtime-events",
             new
