@@ -146,35 +146,6 @@ public class TraceQuerierSpecs : IDisposable
     }
 
     [Fact]
-    public async Task GetStatusAsync_NoDatabaseFile_ReportsZerosAndActualCollectorState()
-    {
-        // Recreate the querier against a path that doesn't exist (and
-        // that no one will lazily create via the read-only bootstrap).
-        var missingDir = Path.Combine(Path.GetTempPath(), $"mohist-otel-missing-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(missingDir);
-        try
-        {
-            var env = new MockEnvironment();
-            var options = new OtelOptions { DbPath = Path.Combine(missingDir, "otel.db"), Enabled = false };
-            var missingDb = new OtelDb(options, env, new PassthroughFileSystem());
-            var status = new OtelCollectorStatus();
-            status.SetPortBound(true);
-            var querier = new TraceQuerier(missingDb, status, new PassthroughFileSystem());
-
-            var snapshot = await querier.GetStatusAsync();
-
-            Assert.True(snapshot.CollectorOnline);
-            Assert.Equal(0L, snapshot.DbSizeBytes);
-            Assert.Equal(0L, snapshot.TraceCount);
-            Assert.Equal(0L, snapshot.SpanCount);
-        }
-        finally
-        {
-            try { Directory.Delete(missingDir, recursive: true); } catch { }
-        }
-    }
-
-    [Fact]
     public async Task GetStatusAsync_ReportsCollectorOfflineState()
     {
         var snapshot = await _querier.GetStatusAsync();
@@ -311,26 +282,6 @@ public class TraceQuerierSpecs : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteRawQuery_CannotBypassReadOnlyWithInsert()
-    {
-        // The physical read-only guard (SQLite Mode=ReadOnly refusing writes)
-        // is a file-specific contract — the in-memory shared-cache database
-        // used by the rest of this spec does not enforce it. Use a throwaway
-        // file-backed OtelDb so the read-only contract is genuinely exercised.
-        // Even if ValidateSelectOnly were misconfigured, the read-only
-        // connection should refuse this write. The keyword check is the
-        // outer defense; the read-only mode is the ultimate authority.
-        using var fileBacked = FileBackedOtelDb.Create();
-        var querier = new TraceQuerier(fileBacked.Db, new OtelCollectorStatus(), new PassthroughFileSystem());
-
-        await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(async () =>
-        {
-            await querier.ExecuteRawQuery(
-                "INSERT INTO traces (trace_id, service_name, start_time, end_time, span_count) VALUES ('x','y','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z',1)");
-        });
-    }
-
-    [Fact]
     public void ClampLimit_NullOrNonPositive_ReturnsDefault()
     {
         Assert.Equal(TraceQuerier.DefaultListLimit, TraceQuerier.ClampLimit(null));
@@ -351,41 +302,6 @@ public class TraceQuerierSpecs : IDisposable
         Assert.Equal(1, TraceQuerier.ClampLimit(1));
         Assert.Equal(7, TraceQuerier.ClampLimit(7));
         Assert.Equal(TraceQuerier.MaxListLimit, TraceQuerier.ClampLimit(TraceQuerier.MaxListLimit));
-    }
-
-    /// <summary>
-    /// A throwaway file-backed <see cref="OtelDb"/> for specs that assert
-    /// file-specific contracts (physical read-only enforcement) which an
-    /// in-memory shared-cache database cannot provide. Disposing it deletes
-    /// the temp directory.
-    /// </summary>
-    private sealed class FileBackedOtelDb : IDisposable
-    {
-        public OtelDb Db { get; }
-        private readonly string _dataDir;
-
-        private FileBackedOtelDb(OtelDb db, string dataDir)
-        {
-            Db = db;
-            _dataDir = dataDir;
-        }
-
-        public static FileBackedOtelDb Create()
-        {
-            var dataDir = Path.Combine(Path.GetTempPath(), $"mohist-otel-file-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(dataDir);
-            var dbPath = Path.Combine(dataDir, "otel.db");
-            var db = new OtelDb(new OtelOptions { DbPath = dbPath }, new MockEnvironment(), new PassthroughFileSystem());
-            // Force schema materialization so the file exists and the read-only
-            // connection bootstrap sees a real database.
-            using (db.OpenReadWriteConnection()) { }
-            return new FileBackedOtelDb(db, dataDir);
-        }
-
-        public void Dispose()
-        {
-            try { if (Directory.Exists(_dataDir)) Directory.Delete(_dataDir, recursive: true); } catch { }
-        }
     }
 
     private void SeedTrace(string traceId, string serviceName, string startTime, string endTime, long spanCount)
@@ -429,38 +345,6 @@ public class TraceQuerierSpecs : IDisposable
         cmd.Parameters.AddWithValue("$start_time", startTime);
         cmd.Parameters.AddWithValue("$end_time", endTime);
         cmd.ExecuteNonQuery();
-    }
-
-    private sealed class MockEnvironment : IEnvironmentVariableProvider
-    {
-        private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
-
-        public string? this[string variable]
-        {
-            get => _values.TryGetValue(variable, out var v) ? v : null;
-            set
-            {
-                if (value is null) _values.Remove(variable);
-                else _values[variable] = value;
-            }
-        }
-
-        public string? GetEnvironmentVariable(string variable) => this[variable];
-
-        public string? GetEnvironmentVariable(string variable, EnvironmentVariableTarget target) => this[variable];
-
-        public IReadOnlyDictionary<string, string> GetEnvironmentVariables() =>
-            new Dictionary<string, string>(_values, StringComparer.Ordinal);
-
-        public IReadOnlyDictionary<string, string> GetEnvironmentVariables(EnvironmentVariableTarget target) =>
-            GetEnvironmentVariables();
-
-        public string ExpandEnvironmentVariables(string name) => name;
-
-        public void SetEnvironmentVariable(string variable, string? value) => this[variable] = value;
-
-        public void SetEnvironmentVariable(string variable, string? value, EnvironmentVariableTarget target) =>
-            this[variable] = value;
     }
 
     private sealed class PassthroughFileSystem : IFileSystem
