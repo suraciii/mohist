@@ -1,0 +1,41 @@
+## Codebase Patterns
+
+- Test files mock `sonner` toast with `success`, `error`, and now `warning` — keep
+  them in `vi.mock('sonner', () => ({ toast: { success, error, warning } }))` and
+  reset them all in `beforeEach`.
+- `invalidateQueries({ queryKey: [...] })` is a TanStack Query *prefix* match;
+  invalidating `['agent-session', projectId, sessionId]` already covers both
+  the summary query and the more specific transcript query
+  (`['agent-session', projectId, sessionId, 'transcript']`). No need for a
+  second call.
+- `useCancelGenericSession`'s `onSuccess` must be the source of truth for toast
+  honesty (the hook fires before the page can intercept). The page-level
+  control in T-002 just calls `cancel.mutate()`; it does not get a chance to
+  override the toast.
+- Cancel wire state union: `cancelled` | `not-cancellable` | terminal name
+  (`completed` / `failed` / `stopped`). Anything else is unknown — treat as
+  the warning path, not success, so the API cannot fake a clean cancel.
+- Server's terminal short-circuit (`AgentSessionCancelRoutes.cs:62-63`) returns
+  the terminal state name verbatim, so the hook must accept every terminal
+  value as a successful cancel — `cancelled` itself is also a terminal state
+  per the server contract.
+
+## T-001 Notes
+
+- Refined `useCancelGenericSession.onSuccess` to branch on `data.state`:
+  - terminal-or-`cancelled` → `toast.success('Session cancelled')`
+  - everything else (including `not-cancellable` and unknown) →
+    `toast.warning('Session could not be cancelled')`
+- Query invalidation (`agent-status`, `agent-activity`,
+  `['agent-session', projectId, sessionId]`, optional `agents/.../sessions`)
+  runs unconditionally before the branch — both branches refetch.
+- `onError` unchanged (network/5xx → `toast.error`).
+- Tests: added `toastWarningMock` to the sonner mock; replaced the old
+  "shows success toast" + "invalidates … on success" with three
+  branch-coverage tests (cancelled, three terminal states via `it.each`,
+  not-cancellable), kept the "skips agent sessions invalidation" guard,
+  and tightened the error-path test to assert success+warning are NOT fired.
+  28 tests pass in this file; 4165 across the web workspace.
+- `npm run typecheck -w packages/web` and `npm run build -w packages/web` both
+  pass. No other callers depend on the unconditional success toast — `grep`
+  confirms `useCancelGenericSession` is only consumed in its own test today.

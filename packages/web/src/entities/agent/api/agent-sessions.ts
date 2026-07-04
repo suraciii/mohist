@@ -190,20 +190,27 @@ export function useGenericFollowup() {
   })
 }
 
+const CANCEL_TERMINAL_STATES = new Set(['completed', 'failed', 'stopped', 'cancelled'])
+
 export function useCancelGenericSession() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   return useMutation<{ state?: string }, Error, { sessionId: string; agentRef?: string }>({
     mutationFn: ({ sessionId }) =>
       cancelGenericSession(projectId!, sessionId),
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['agent-session', projectId, variables.sessionId] })
       if (variables.agentRef) {
         queryClient.invalidateQueries({ queryKey: ['agents', projectId, variables.agentRef, 'sessions'] })
       }
-      toast.success('Session cancelled')
+      const state = data?.state
+      if (state && CANCEL_TERMINAL_STATES.has(state)) {
+        toast.success('Session cancelled')
+        return
+      }
+      toast.warning('Session could not be cancelled')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
