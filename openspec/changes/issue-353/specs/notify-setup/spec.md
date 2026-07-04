@@ -55,6 +55,13 @@ sections).
 - **THEN** the command SHALL prompt the user for confirmation before overwriting
 - **AND** SHALL NOT silently overwrite existing values
 
+#### Scenario: Non-interactive stdin aborts without writing
+
+- **WHEN** the command would prompt for confirmation but standard input is at EOF
+  or otherwise non-interactive
+- **THEN** the command SHALL abort without writing any Mohist configuration
+- **AND** SHALL NOT hang waiting for input
+
 #### Scenario: Reload guidance is printed after a successful write
 
 - **WHEN** the command successfully writes Mohist config
