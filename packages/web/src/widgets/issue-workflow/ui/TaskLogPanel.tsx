@@ -13,10 +13,10 @@ import {
 } from '../../../shared/api/events-hub'
 import type { StageTaskStatus } from '../../../entities/issue/model/stage-state'
 import {
-  compareTimelineRows,
   deriveMilestones,
   isAcpAgentTask,
   isTaskLogMilestone,
+  mergeTimelineRows,
   serializeMilestoneForExport,
   type TaskLogMilestone,
   type TimelineRow,
@@ -179,23 +179,24 @@ export function TaskLogPanel({
 
   const filteredRows: TimelineRow[] = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
-    const rows: TimelineRow[] = []
+    const opsRows: TaskLogLine[] = []
+    const milestoneRows: TaskLogMilestone[] = []
     for (const line of lines) {
       if (disabledSources.has(line.source)) continue
       if (query) {
         const haystack = `${line.text} ${line.source}`.toLowerCase()
         if (!haystack.includes(query)) continue
       }
-      rows.push(line)
+      opsRows.push(line)
     }
     for (const milestone of milestones) {
       if (query) {
         const haystack = `${milestone.label} ${milestone.detail}`.toLowerCase()
         if (!haystack.includes(query)) continue
       }
-      rows.push(milestone)
+      milestoneRows.push(milestone)
     }
-    return rows.slice().sort(compareTimelineRows)
+    return mergeTimelineRows(opsRows, milestoneRows)
   }, [lines, disabledSources, milestones, searchQuery])
 
   const visibleLines = filteredRows.length

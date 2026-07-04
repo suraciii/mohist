@@ -1436,6 +1436,31 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     expect(screen.queryByTestId('task-log-milestone-session-ended')).not.toBeInTheDocument()
   })
 
+  it('renders NO milestone rows when origin.uses and sessionName are present but classification is missing', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({ id: 'session-1', sessionName: 'plan-issue-339' }),
+    ])
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, source: 'workspace-prep', text: 'prep-without-classification' }),
+    ]))
+
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+      />,
+      harness,
+    )
+
+    await screen.findByText('prep-without-classification')
+    expect(screen.queryByTestId('task-log-milestone-model-bound')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('task-log-milestone-session-ended')).not.toBeInTheDocument()
+  })
+
   it('renders NO milestone rows when the workflow-run sessions data is empty (graceful degradation)', async () => {
     mockedGetWorkflowRunSessions.mockResolvedValue([])
     const harness = buildHarness(makePage([
@@ -1458,6 +1483,53 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     await screen.findByText('ops-line')
     expect(screen.queryByTestId('task-log-milestone-model-bound')).not.toBeInTheDocument()
     expect(screen.queryByTestId('task-log-milestone-session-ended')).not.toBeInTheDocument()
+  })
+
+  it('preserves ops seq order when ops timestamps disagree and uses the same order for export', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({
+        id: 'session-1',
+        sessionName: 'plan-issue-339',
+        startedAt: '2026-07-03T08:04:00.000Z',
+        completedAt: '2026-07-03T08:06:00.000Z',
+        status: 'completed',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    ])
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'workspace-prep', text: 'seq-one-late-clock' }),
+      makeLine({ seq: 2, timestamp: '2026-07-03T08:00:00.000Z', source: 'cleanup', text: 'seq-two-early-clock' }),
+    ]))
+
+    const user = userEvent.setup()
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    await screen.findByText('seq-two-early-clock')
+    const items = Array.from(document.querySelectorAll('[data-testid="task-log-lines"] > li')).map((li) => li.textContent ?? '')
+    expect(items.findIndex((t) => t.includes('seq-one-late-clock'))).toBeLessThan(
+      items.findIndex((t) => t.includes('seq-two-early-clock')),
+    )
+
+    const capture = installDownloadSpy()
+    await user.click(await screen.findByTestId('task-log-download-button'))
+
+    await waitFor(() => {
+      expect(capture.clicks.length).toBeGreaterThan(0)
+    })
+
+    const exported = await readBlobText(capture.blob)
+    expect(exported.indexOf('seq-one-late-clock')).toBeLessThan(exported.indexOf('seq-two-early-clock'))
   })
 
   it('keyword search hides non-matching milestones and keeps matching ones', async () => {

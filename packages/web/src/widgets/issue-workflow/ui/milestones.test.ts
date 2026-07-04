@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { WorkflowRunSession } from '../../../entities/coder-session/model/types'
 import {
-  compareTimelineRows,
   deriveMilestones,
   isAcpAgentTask,
   isTaskLogMilestone,
+  mergeTimelineRows,
   serializeMilestoneForExport,
 } from './milestones'
 
@@ -33,33 +33,41 @@ function sessionFixture(overrides: Partial<WorkflowRunSession> = {}): WorkflowRu
 }
 
 describe('isAcpAgentTask', () => {
-  it('returns true only when origin.uses is "mohist/acp-agent" and sessionName is a non-empty string', () => {
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1' })).toBe(true)
+  it('returns true only when origin.uses is "mohist/acp-agent", sessionName is non-empty, and classification is present', () => {
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(true)
   })
 
-  it('ignores classification once the agent criterion is satisfied (classification is retained but not deciding)', () => {
+  it('accepts either task classification value as the retained classification signal', () => {
     expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: 'Orchestration' })).toBe(true)
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: undefined })).toBe(true)
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(true)
+  })
+
+  it('returns false when classification is missing or empty', () => {
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: undefined })).toBe(false)
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: null })).toBe(false)
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: '' })).toBe(false)
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: '   ' })).toBe(false)
   })
 
   it('returns false for ops uses (mohist/rebase, core/process) even when sessionName is present', () => {
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/rebase' }, sessionName: 'plan-1' })).toBe(false)
-    expect(isAcpAgentTask({ origin: { uses: 'core/process' }, sessionName: 'plan-1' })).toBe(false)
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/rebase' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(isAcpAgentTask({ origin: { uses: 'core/process' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
   })
 
   it('returns false when origin.uses is the agent action but sessionName is empty', () => {
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: '' })).toBe(false)
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: '', classification: 'UserFacing' })).toBe(false)
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: '   ', classification: 'UserFacing' })).toBe(false)
   })
 
   it('returns false when sessionName is missing entirely even with the agent uses', () => {
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: null })).toBe(false)
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' } })).toBe(false)
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: null, classification: 'UserFacing' })).toBe(false)
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, classification: 'UserFacing' })).toBe(false)
   })
 
   it('returns false when origin.uses is non-string or missing', () => {
-    expect(isAcpAgentTask({ origin: null, sessionName: 'plan-1' })).toBe(false)
-    expect(isAcpAgentTask({ origin: {}, sessionName: 'plan-1' })).toBe(false)
-    expect(isAcpAgentTask({ origin: { uses: undefined }, sessionName: 'plan-1' })).toBe(false)
+    expect(isAcpAgentTask({ origin: null, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(isAcpAgentTask({ origin: {}, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
+    expect(isAcpAgentTask({ origin: { uses: undefined }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(false)
   })
 
   it('returns false for empty/null/undefined input', () => {
@@ -69,11 +77,11 @@ describe('isAcpAgentTask', () => {
 
   it('never reads workType (workType is not a task-level field)', () => {
     const inputs: unknown[] = [
-      { origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', workType: 'ops' },
-      { origin: { uses: 'mohist/rebase' }, sessionName: 'plan-1', workType: 'agent' },
+      { origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: 'UserFacing', workType: 'ops' },
+      { origin: { uses: 'mohist/rebase' }, sessionName: 'plan-1', classification: 'UserFacing', workType: 'agent' },
     ]
     for (const input of inputs) {
-      expect(isAcpAgentTask(input as never)).toBe((input as { origin?: { uses?: string }; sessionName?: string | null }).origin?.uses === 'mohist/acp-agent')
+      expect(isAcpAgentTask(input as never)).toBe((input as { origin?: { uses?: string } }).origin?.uses === 'mohist/acp-agent')
     }
   })
 })
@@ -208,26 +216,50 @@ describe('deriveMilestones', () => {
   })
 })
 
-describe('compareTimelineRows', () => {
-  it('orders by ISO timestamp ascending', () => {
-    const rows = [
-      { seq: 1, timestamp: '2026-06-15T10:02:00.000Z', source: 'action:rebase', text: 'late' },
-      { kind: 'model-bound' as const, timestamp: '2026-06-15T10:00:00.000Z', label: 'Model bound', detail: 'foo' },
-    ]
-    rows.sort(compareTimelineRows)
-    expect(rows[0]).toMatchObject({ kind: 'model-bound' })
-    expect(rows[1]).toMatchObject({ seq: 1 })
+describe('mergeTimelineRows', () => {
+  it('inserts milestone rows by timestamp around the seq-ordered ops stream', () => {
+    const rows = mergeTimelineRows(
+      [
+        { seq: 1, timestamp: '2026-06-15T10:00:00.000Z', source: 'action:rebase', text: 'before' },
+        { seq: 2, timestamp: '2026-06-15T10:02:00.000Z', source: 'action:rebase', text: 'after' },
+      ],
+      [
+        { kind: 'model-bound' as const, timestamp: '2026-06-15T10:01:00.000Z', label: 'Model bound', detail: 'foo' },
+      ],
+    )
+    expect(rows.map((row) => (isTaskLogMilestone(row) ? row.kind : row.text))).toEqual([
+      'before',
+      'model-bound',
+      'after',
+    ])
+  })
+
+  it('keeps ops lines in seq order even when their timestamps disagree', () => {
+    const rows = mergeTimelineRows(
+      [
+        { seq: 1, timestamp: '2026-06-15T10:05:00.000Z', source: 'action:rebase', text: 'seq-1-late-clock' },
+        { seq: 2, timestamp: '2026-06-15T10:00:00.000Z', source: 'action:rebase', text: 'seq-2-early-clock' },
+      ],
+      [
+        { kind: 'session-ended' as const, timestamp: '2026-06-15T10:04:00.000Z', label: 'Session ended', detail: 'completed' },
+      ],
+    )
+    const rendered = rows.map((row) => (isTaskLogMilestone(row) ? row.kind : row.text))
+    expect(rendered.indexOf('seq-1-late-clock')).toBeLessThan(rendered.indexOf('seq-2-early-clock'))
   })
 
   it('keeps ops lines in seq order at the same timestamp and places milestones after them', () => {
-    const rows = [
-      { kind: 'session-ended' as const, timestamp: '2026-06-15T10:01:00.000Z', label: 'Session ended', detail: 'completed' },
-      { seq: 2, timestamp: '2026-06-15T10:01:00.000Z', source: 'action:rebase', text: 'b' },
-      { seq: 1, timestamp: '2026-06-15T10:01:00.000Z', source: 'action:rebase', text: 'a' },
-    ]
-    rows.sort(compareTimelineRows)
-    expect((rows[0] as { seq: number }).seq).toBe(1)
-    expect((rows[1] as { seq: number }).seq).toBe(2)
+    const rows = mergeTimelineRows(
+      [
+        { seq: 2, timestamp: '2026-06-15T10:01:00.000Z', source: 'action:rebase', text: 'b' },
+        { seq: 1, timestamp: '2026-06-15T10:01:00.000Z', source: 'action:rebase', text: 'a' },
+      ],
+      [
+        { kind: 'session-ended' as const, timestamp: '2026-06-15T10:01:00.000Z', label: 'Session ended', detail: 'completed' },
+      ],
+    )
+    expect(rows[0]).toMatchObject({ seq: 1 })
+    expect(rows[1]).toMatchObject({ seq: 2 })
     expect(rows[2]).toMatchObject({ kind: 'session-ended' })
   })
 })

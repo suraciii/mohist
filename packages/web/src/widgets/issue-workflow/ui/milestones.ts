@@ -27,8 +27,11 @@ export function isAcpAgentTask(input: AgentTaskIdentity | null | undefined): boo
   if (!input) return false
   const uses = input.origin?.uses
   const sessionName = input.sessionName
+  const classification = input.classification
   if (typeof sessionName !== 'string') return false
-  if (sessionName.length === 0) return false
+  if (sessionName.trim().length === 0) return false
+  if (typeof classification !== 'string') return false
+  if (classification.trim().length === 0) return false
   return uses === 'mohist/acp-agent'
 }
 
@@ -72,15 +75,35 @@ export function deriveMilestones(session: WorkflowRunSession | null | undefined)
   return out
 }
 
-export function compareTimelineRows(a: TimelineRow, b: TimelineRow): number {
-  const aTs = a.timestamp
-  const bTs = b.timestamp
-  if (aTs < bTs) return -1
-  if (aTs > bTs) return 1
-  if (isTaskLogMilestone(a) && isTaskLogMilestone(b)) return 0
-  if (isTaskLogMilestone(a)) return 1
-  if (isTaskLogMilestone(b)) return -1
-  return a.seq - b.seq
+function compareMilestonesByTimestamp(a: TaskLogMilestone, b: TaskLogMilestone): number {
+  if (a.timestamp < b.timestamp) return -1
+  if (a.timestamp > b.timestamp) return 1
+  return 0
+}
+
+export function mergeTimelineRows(lines: TaskLogLine[], milestones: TaskLogMilestone[]): TimelineRow[] {
+  const sortedLines = lines.slice().sort((a, b) => a.seq - b.seq)
+  const sortedMilestones = milestones.slice().sort(compareMilestonesByTimestamp)
+  const rows: TimelineRow[] = []
+  let milestoneIndex = 0
+
+  for (const line of sortedLines) {
+    while (
+      milestoneIndex < sortedMilestones.length &&
+      sortedMilestones[milestoneIndex].timestamp < line.timestamp
+    ) {
+      rows.push(sortedMilestones[milestoneIndex])
+      milestoneIndex += 1
+    }
+    rows.push(line)
+  }
+
+  while (milestoneIndex < sortedMilestones.length) {
+    rows.push(sortedMilestones[milestoneIndex])
+    milestoneIndex += 1
+  }
+
+  return rows
 }
 
 export function serializeMilestoneForExport(milestone: TaskLogMilestone): string {
