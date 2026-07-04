@@ -2029,10 +2029,10 @@ public class SystemUpdateServiceSpecs
             return Task.CompletedTask;
         }
 
-        public Task ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default)
+        public Task<bool> ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default)
         {
             Events.Add("ReleaseStaleLock");
-            return Task.CompletedTask;
+            return Task.FromResult(true);
         }
 
         public Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default)
@@ -2109,10 +2109,13 @@ public class SystemUpdateServiceSpecs
             return Task.CompletedTask;
         }
 
-        public Task ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default)
+        public Task<bool> ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default)
         {
             lock (_gate)
             {
+                if (_locked && _lockOwnerJobId != jobId)
+                    return Task.FromResult(false);
+
                 if (_lockOwnerJobId == jobId)
                 {
                     _locked = false;
@@ -2121,7 +2124,7 @@ public class SystemUpdateServiceSpecs
                 }
             }
 
-            return Task.CompletedTask;
+            return Task.FromResult(true);
         }
 
         public Task WaitForUnlockAsync()

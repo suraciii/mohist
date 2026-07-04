@@ -12,6 +12,7 @@ namespace Mohist.Server.Tests.Specs.SystemSpecs;
 public class SystemUpdateRecoverySpecs
 {
     private static readonly DateTimeOffset ProcessStart = new(2026, 7, 1, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset FixtureNow = new(2026, 7, 1, 12, 30, 0, TimeSpan.Zero);
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
@@ -40,6 +41,52 @@ public class SystemUpdateRecoverySpecs
             && entry.Message.Contains(SystemUpdateRecoveryService.InterruptedByProcessRestartReason));
 
         Assert.Contains(store.ReleasedStaleJobs, jobId => jobId == "stale-job");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task StartAsync_WhenStaleLockCannotBeReleased_DoesNotCommitTerminalState()
+    {
+        var store = new InMemoryRecoveryStore { ReleaseStaleLockSucceeds = false };
+        var time = new FakeTimeProvider(ProcessStart.AddMinutes(1));
+        var persistedUpdatedAt = ProcessStart.AddMinutes(-5);
+        await store.SaveAsync(BuildJob("stale-job", "running", persistedUpdatedAt));
+
+        var reconciler = BuildReconciler(store, time, ProcessStart);
+
+        await reconciler.StartAsync(CancellationToken.None);
+
+        var latest = await store.GetLatestAsync();
+        Assert.NotNull(latest);
+        Assert.Equal("running", latest!.Status);
+        Assert.Equal(persistedUpdatedAt, latest.UpdatedAt);
+        Assert.Single(store.SavedStates);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task StartAsync_StaleRecoveryLog_IsCappedAtTwoHundredEntries()
+    {
+        var store = new InMemoryRecoveryStore();
+        var time = new FakeTimeProvider(ProcessStart.AddMinutes(1));
+        var persistedUpdatedAt = ProcessStart.AddMinutes(-5);
+        var existingLogs = Enumerable.Range(0, 200)
+            .Select(index => new SystemUpdateLogEntry(persistedUpdatedAt.AddSeconds(index), "Building", $"entry-{index}"))
+            .ToArray();
+        await store.SaveAsync(BuildJob("stale-job", "running", persistedUpdatedAt, logs: existingLogs));
+
+        var reconciler = BuildReconciler(store, time, ProcessStart);
+
+        await reconciler.StartAsync(CancellationToken.None);
+
+        var latest = await store.GetLatestAsync();
+        Assert.NotNull(latest);
+        Assert.Equal(200, latest!.Logs.Count);
+        Assert.DoesNotContain(latest.Logs, entry => entry.Message == "entry-0");
+        Assert.Contains(latest.Logs, entry => entry.Stage == "Failed"
+            && entry.Message.Contains(SystemUpdateRecoveryService.InterruptedByProcessRestartReason));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -183,7 +230,7 @@ public class SystemUpdateRecoverySpecs
         {
             var first = CreateFileSystemStore(statePath);
             Assert.True(await first.TryAcquireLockAsync("stale-job"));
-            var staleUpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-5);
+            var staleUpdatedAt = ProcessStart.AddMinutes(-5);
             await first.SaveAsync(BuildJob("stale-job", "running", staleUpdatedAt));
 
             var refreshed = CreateFileSystemStore(statePath);
@@ -209,14 +256,54 @@ public class SystemUpdateRecoverySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public void ProcessStartTimeProvider_DefaultReadsActualProcess()
+    public async Task StartAsync_WhenInterruptedRecoveryWasAlreadySaved_RetriesStaleLockRelease()
     {
-        var provider = new ProcessStartTimeProvider();
+        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-recovery-{Guid.NewGuid():N}.json");
+        try
+        {
+            var first = CreateFileSystemStore(statePath);
+            Assert.True(await first.TryAcquireLockAsync("stale-job"));
+            var staleUpdatedAt = ProcessStart.AddMinutes(-5);
+            await first.SaveAsync(BuildJob(
+                "stale-job",
+                "failed",
+                staleUpdatedAt,
+                completedAt: staleUpdatedAt,
+                reason: SystemUpdateRecoveryService.InterruptedByProcessRestartReason));
 
-        var start = provider.GetStartTime();
+            var refreshed = CreateFileSystemStore(statePath);
+            Assert.True(File.Exists(statePath + ".lock"));
+            Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
 
-        Assert.True(start <= DateTimeOffset.UtcNow);
-        Assert.Equal(TimeSpan.Zero, start.Offset);
+            var reconciler = BuildReconciler(refreshed, new FakeTimeProvider(FixtureNow), ProcessStart);
+            await reconciler.StartAsync(CancellationToken.None);
+
+            Assert.False(File.Exists(statePath + ".lock"));
+
+            Assert.True(await refreshed.TryAcquireLockAsync("new-job"));
+            var latest = await refreshed.GetLatestAsync();
+            Assert.NotNull(latest);
+            Assert.Equal("failed", latest!.Status);
+            Assert.Equal(SystemUpdateRecoveryService.InterruptedByProcessRestartReason, latest.Reason);
+        }
+        finally
+        {
+            if (File.Exists(statePath))
+                File.Delete(statePath);
+            if (File.Exists(statePath + ".lock"))
+                File.Delete(statePath + ".lock");
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void SourceAudit_ProcessStartTimeProviderDefaultReadsProcessInfoOnlyInProductionProvider()
+    {
+        var source = File.ReadAllText(ProcessStartTimeProviderSourcePath);
+
+        Assert.Contains("Process.GetCurrentProcess", source);
+        Assert.Contains("StartTime.ToUniversalTime", source);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -227,8 +314,8 @@ public class SystemUpdateRecoverySpecs
         var source = File.ReadAllText(SourcePath);
         var codeOnly = StripXmlDocComments(source);
 
-        Assert.DoesNotContain("DateTimeOffset.UtcNow", codeOnly);
-        Assert.DoesNotContain("DateTime.UtcNow", codeOnly);
+        Assert.DoesNotContain(nameof(DateTimeOffset) + ".UtcNow", codeOnly);
+        Assert.DoesNotContain(nameof(DateTime) + ".UtcNow", codeOnly);
         Assert.DoesNotContain("Environment.TickCount", codeOnly);
         Assert.DoesNotContain("GetCurrentProcess", codeOnly);
         Assert.DoesNotContain("Process.StartTime", codeOnly);
@@ -256,7 +343,7 @@ public class SystemUpdateRecoverySpecs
     private static SystemUpdateService CreateSystemUpdateService(ISystemUpdateStore store, TimeProvider time)
     {
         var systemInfo = new SystemInfoResponse(
-            new RunningInfo("1.0.0", "oldhash", DateTimeOffset.UtcNow),
+            new RunningInfo("1.0.0", "oldhash", FixtureNow),
             new SourceInfo("/repo", "main", "newhash", false),
             new InstallInfo("local-source", "systemd-user", "mohist.service", "mohist-runner.service", "local-source"),
             new UpdateInfo("update-available", true, null),
@@ -290,7 +377,9 @@ public class SystemUpdateRecoverySpecs
         string jobId,
         string status,
         DateTimeOffset updatedAt,
-        DateTimeOffset? completedAt = null)
+        DateTimeOffset? completedAt = null,
+        IReadOnlyList<SystemUpdateLogEntry>? logs = null,
+        string? reason = null)
     {
         return new SystemUpdateJobState(
             jobId,
@@ -302,8 +391,8 @@ public class SystemUpdateRecoverySpecs
             "/repo",
             "mohist.service",
             "mohist-runner.service",
-            null,
-            [new SystemUpdateLogEntry(updatedAt, status, $"entry-{jobId}")],
+            reason,
+            logs ?? [new SystemUpdateLogEntry(updatedAt, status, $"entry-{jobId}")],
             updatedAt,
             updatedAt,
             completedAt);
@@ -313,6 +402,11 @@ public class SystemUpdateRecoverySpecs
         AppContext.BaseDirectory,
         "..", "..", "..", "..", "..",
         "src", "Mohist.Server", "SystemInfo", "SystemUpdateRecoveryService.cs"));
+
+    private static string ProcessStartTimeProviderSourcePath => Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory,
+        "..", "..", "..", "..", "..",
+        "src", "Mohist.Server", "SystemInfo", "ProcessStartTimeProvider.cs"));
 
     private sealed class FakeProcessStartTimeProvider : IProcessStartTimeProvider
     {
@@ -329,6 +423,7 @@ public class SystemUpdateRecoverySpecs
         private SystemUpdateJobState? _latest;
         public List<SystemUpdateJobState> SavedStates { get; } = [];
         public List<string> ReleasedStaleJobs { get; } = [];
+        public bool ReleaseStaleLockSucceeds { get; init; } = true;
 
         public Task<SystemUpdateJobState?> GetLatestAsync(CancellationToken cancellationToken = default)
         {
@@ -348,10 +443,10 @@ public class SystemUpdateRecoverySpecs
         public Task ReleaseLockAsync(string jobId, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
-        public Task ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default)
+        public Task<bool> ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default)
         {
             lock (_gate) ReleasedStaleJobs.Add(jobId);
-            return Task.CompletedTask;
+            return Task.FromResult(ReleaseStaleLockSucceeds);
         }
 
         public Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default)

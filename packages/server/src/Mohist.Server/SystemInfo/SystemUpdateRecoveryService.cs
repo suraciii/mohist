@@ -13,9 +13,8 @@ namespace Mohist.Server.SystemInfo;
 ///
 /// A job whose <c>UpdatedAt</c> strictly precedes the injected process
 /// start time is transitioned to <c>failed</c> with the literal reason
-/// <c>"interrupted by process restart"</c>, persisted via
-/// <see cref="ISystemUpdateStore.SaveAsync"/>, and its lock released
-/// via <see cref="ISystemUpdateStore.ReleaseStaleLockAsync"/>. Fresh
+    /// <c>"interrupted by process restart"</c> after its lock is released
+    /// via <see cref="ISystemUpdateStore.ReleaseStaleLockAsync"/>. Fresh
 /// active jobs (<c>UpdatedAt &gt;=</c> process start) and all terminal
 /// jobs (<c>succeeded</c>/<c>failed</c>/<c>recovered</c>/<c>superseded</c>/<c>cancelled</c>)
 /// are never modified.
@@ -29,6 +28,7 @@ namespace Mohist.Server.SystemInfo;
 public sealed class SystemUpdateRecoveryService : IHostedService
 {
     public const string InterruptedByProcessRestartReason = "interrupted by process restart";
+    private const int MaxLogEntries = 200;
 
     private readonly ISystemUpdateStore _store;
     private readonly TimeProvider _time;
@@ -53,6 +53,12 @@ public sealed class SystemUpdateRecoveryService : IHostedService
         if (latest is null)
             return;
 
+        if (IsInterruptedRecoveryState(latest))
+        {
+            await RetryInterruptedRecoveryLockReleaseAsync(latest, cancellationToken);
+            return;
+        }
+
         if (SystemUpdateJobState.TerminalStatuses.Contains(latest.Status))
             return;
 
@@ -62,6 +68,15 @@ public sealed class SystemUpdateRecoveryService : IHostedService
         var processStart = _processStart.GetStartTime();
         if (latest.UpdatedAt >= processStart)
             return;
+
+        var releasedStaleLock = await _store.ReleaseStaleLockAsync(latest.JobId, cancellationToken);
+        if (!releasedStaleLock)
+        {
+            _logger.LogWarning(
+                "Skipped interrupted system-update recovery for job {JobId}: stale lock was not released.",
+                latest.JobId);
+            return;
+        }
 
         var recoveredAt = _time.GetUtcNow();
         var logEntry = new SystemUpdateLogEntry(
@@ -79,7 +94,6 @@ public sealed class SystemUpdateRecoveryService : IHostedService
         };
 
         await _store.SaveAsync(next, cancellationToken);
-        await _store.ReleaseStaleLockAsync(latest.JobId, cancellationToken);
 
         _logger.LogWarning(
             "Recovered interrupted system-update job {JobId}: marked failed (UpdatedAt {UpdatedAt} predates process start {ProcessStart}); released stale lock.",
@@ -94,6 +108,27 @@ public sealed class SystemUpdateRecoveryService : IHostedService
     {
         var next = logs.ToList();
         next.Add(entry);
+        if (next.Count > MaxLogEntries)
+            next = next[^MaxLogEntries..];
         return next;
+    }
+
+    private static bool IsInterruptedRecoveryState(SystemUpdateJobState state)
+    {
+        return state.Status == "failed"
+            && state.Reason == InterruptedByProcessRestartReason;
+    }
+
+    private async Task RetryInterruptedRecoveryLockReleaseAsync(
+        SystemUpdateJobState state,
+        CancellationToken cancellationToken)
+    {
+        var releasedStaleLock = await _store.ReleaseStaleLockAsync(state.JobId, cancellationToken);
+        if (releasedStaleLock)
+        {
+            _logger.LogWarning(
+                "Retried stale lock release for interrupted system-update job {JobId}.",
+                state.JobId);
+        }
     }
 }
