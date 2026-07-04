@@ -47,44 +47,22 @@ internal sealed partial class TableRenderer
         var name = StringOf(data, "name");
         var description = StringOf(data, "description");
         var source = StringOf(data, "source");
-        var sections = data["sections"] as JsonArray;
+        var body = StringOf(data, "body");
 
         _out.WriteLine($"id:          {id}");
         _out.WriteLine($"name:        {name}");
         _out.WriteLine($"description: {Truncate(description, BodySoftCap)}");
         _out.WriteLine($"source:      {source}");
 
-        if (sections is null || sections.Count == 0)
+        _out.WriteLine("");
+        _out.WriteLine("body:");
+        if (string.IsNullOrEmpty(body))
         {
-            _out.WriteLine("");
-            _out.WriteLine("sections: (none)");
+            _out.WriteLine("  (empty)");
             return;
         }
-
-        _out.WriteLine("");
-        _out.WriteLine($"sections: {sections.Count}");
-        for (var i = 0; i < sections.Count; i++)
-        {
-            if (sections[i] is not JsonObject section) continue;
-            var title = StringOf(section, "title");
-            var guidance = StringOf(section, "guidance");
-            var placeholder = StringOf(section, "placeholder");
-
-            _out.WriteLine("");
-            _out.WriteLine($"  [{i + 1}] {title}");
-            if (!string.IsNullOrEmpty(guidance))
-            {
-                _out.WriteLine("      guidance:");
-                foreach (var line in guidance.Split('\n'))
-                    _out.WriteLine($"        {line.TrimEnd('\r')}");
-            }
-            if (!string.IsNullOrEmpty(placeholder))
-            {
-                _out.WriteLine("      placeholder:");
-                foreach (var line in placeholder.Split('\n'))
-                    _out.WriteLine($"        {line.TrimEnd('\r')}");
-            }
-        }
+        foreach (var line in body.Replace("\r\n", "\n").Split('\n'))
+            _out.WriteLine($"  | {line.TrimEnd('\r')}");
     }
 
     private void RenderWorkflowProfile(JsonNode? data)

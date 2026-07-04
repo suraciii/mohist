@@ -1,24 +1,54 @@
 ---
 name: mohist-create-issue
-description: 创建 Mohist issue 的机械执行：给 PRD 内容加 frontmatter、推荐 workflow/risk、用 label 目录分类打标、确认后跑 mo issue create。当用户要把已探索好的需求落成 issue 时使用。触发词包括 "创建 issue"、"建 issue"、"new issue"、"mo issue create"、"给 issue 打标"。issue 还是 epic 的决策由 mohist-explore 完成。
+description: 创建 Mohist issue 的机械执行：选模板、给内容加 frontmatter、推荐 workflow/risk、用 label 目录分类打标、确认后跑 mo issue create。当用户要把已探索好的需求落成 issue 时使用。触发词包括 "创建 issue"、"建 issue"、"new issue"、"mo issue create"、"给 issue 打标"。issue 还是 epic 的决策由 mohist-explore 完成。
 ---
 
 # mohist-create-issue
 
-This skill owns the **mechanics** of turning requirement content into a Mohist issue. The `mohist-explore` skill produces the PRD *content* (User Voice, Product Shape, Domain Model, acceptance criteria, non-goals) and decides whether the work is an issue or an epic; this skill wraps that content with the right frontmatter, recommends a workflow and risk, classifies with labels, and runs the CLI to create the issue after user confirmation.
+This skill owns the **mechanics** of turning requirement content into a Mohist issue. The `mohist-explore` skill produces the requirement clarification (the thinking — what problem, what target shape, what boundary, what domain constraints, what acceptance, what non-goals); this skill picks the right issue template, fills it, wraps it with frontmatter, recommends a workflow and risk, classifies with labels, and runs the CLI after confirmation.
 
 The split is deliberate: `mohist-explore` is about thinking clearly (including the issue-vs-epic decision) and is immune to CLI changes; this skill tracks the CLI version and owns every execution detail for issue creation.
 
-### Body content vs frontmatter
+## Pick the issue template (required before writing the body)
+
+An issue body's shape comes from a built-in template, not from this skill. Discover and select it:
+
+```bash
+mo issue template list          # metadata only: id, name, description
+mo issue template get <id>      # full body, with per-section guidance comments
+```
+
+Select by reading the **descriptions** and applying one boundary question — *does external behavior change?*
+
+| Answer | Template |
+|---|---|
+| External behavior **changes** in a user-perceivable way (new feature, or iteration of an existing one) | `feature` |
+| Behavior **deviates from correct** — an invariant is violated (functional or non-functional bug) | `bug` |
+| External behavior **unchanged**; value is internal (refactor, test coverage, optimization) | `refactor` |
+
+Once selected, `mo issue template get <id>` returns the raw body. It is markdown with two things per section: an HTML comment (`<!-- ... -->`) carrying the per-section writing instructions, and a `<placeholder>` line. **Read the comments — they tell you exactly what to write and what to forbid in that section.** Fill the body by replacing each `<placeholder>` with the matching piece of the requirement clarification from `mohist-explore`. The HTML comments may be left in place (they are hidden in rendered markdown; they do not need stripping).
+
+## Universal writing rules (apply to every section, stated once here)
+
+These cut across all three templates and all sections; do not restate them inside the body.
+
+- **Literal, not figurative.** No metaphors, no anthropomorphism ("the CLI lies", "dead code", "silently drops"). Describe what actually happens in plain terms.
+- **Product source language.** Use the names the product already uses for its own concepts — issue, workflow, stage, label, prerequisite, comment, epic. Do not invent synonyms.
+- **No source paths in the body.** The body must not cite source paths, file names, line numbers, or symbol names. Mapping to code is the Plan stage's job.
+- **Planner-actionable.** Every section must be reproducible / observable / quantifiable. The body's primary consumer is the AI planner at Plan time — vague input yields a vague plan.
+
+The per-section guidance comments in the template carry the section-specific rules (what to write, what to forbid, when to delete an optional section). This skill states the universals once; the template states the particulars.
+
+## Body content vs frontmatter
 
 An issue body has two layers:
 
 - **Frontmatter** (parsed by the CLI): carries `recommended_workflow`, `recommended_workflow_reason`, and `risk`. The CLI uses these to pre-fill `--workflow-profile` and `--risk`; explicit CLI flags still override frontmatter values.
-- **Structured content** (human-readable): the five sections produced by `mohist-explore` — User Voice, Product Shape, Domain Model, Acceptance Criteria, Non-Goals.
+- **Structured content** (human-readable): the template body, with placeholders filled from the `mohist-explore` clarification.
 
-When the user arrives with content from `mohist-explore`, your job is to add the frontmatter layer and hand the full file to `mo issue create <title> --body-file <file>`.
+Write the filled body to a temp file and hand it to `mo issue create <title> --body-file <file>`.
 
-### Workflow discovery (required before recommending)
+## Workflow discovery (required before recommending)
 
 Before recommending a workflow, discover what is available:
 
@@ -38,7 +68,7 @@ mohist/github-pr — Mohist GitHub PR Workflow
 
 Use this output as the source of truth for the `id` of any profile you write into the frontmatter. The natural-language description tells you what the profile does; you do not parse or score structured tags.
 
-### Selecting a workflow
+## Selecting a workflow
 
 Pick `recommended_workflow` using **default or operator choice** — there is no tag-based scoring. Concretely:
 
@@ -50,7 +80,7 @@ Do not score profiles against content keywords. Do not look for suitability tags
 
 If workflow discovery is unavailable, stop before writing frontmatter and ask the user to fix discovery first. If no profile is enabled for the project, stop before writing frontmatter and ask the user to enable a workflow first. Do not invent a recommendation or create frontmatter until discovery returns at least one enabled profile.
 
-### Writing `recommended_workflow_reason`
+## Writing `recommended_workflow_reason`
 
 `recommended_workflow_reason` is one short sentence in natural language that explains **why** the chosen id was selected. It does not cite matched tags, scoring, or any rule the operator cannot verify by reading the description. Choose the wording to match the path you took:
 
@@ -60,7 +90,7 @@ If workflow discovery is unavailable, stop before writing frontmatter and ask th
 
 Keep it to one sentence. The YAML `|` block scalar is the right tool if the sentence wraps across two lines. Do not pad the reason with restatements of the profile's own description — the description already lives in the system, not the frontmatter.
 
-### Risk assessment
+## Risk assessment
 
 Set the `risk` frontmatter field to one of `low`, `medium`, or `high` based on the content:
 
@@ -70,9 +100,9 @@ Set the `risk` frontmatter field to one of `low`, `medium`, or `high` based on t
 
 Document the risk driver in the `Product Shape` or `Acceptance Criteria` section (as a one-line note) so the reviewer can validate the rating.
 
-### Frontmatter format
+## Frontmatter format
 
-The body file MUST start with a YAML frontmatter block delimited by leading and trailing `---` lines. The frontmatter carries the workflow recommendation and risk; the structured sections (produced by `mohist-explore`) follow.
+The body file MUST start with a YAML frontmatter block delimited by leading and trailing `---` lines. The frontmatter carries the workflow recommendation and risk; the filled template body follows.
 
 Supported fields:
 
@@ -82,9 +112,9 @@ Supported fields:
 | `recommended_workflow_reason` | yes | One short natural-language sentence explaining the choice (default, operator-chosen, or first-enabled fallback). Multi-line values use the YAML `\|` block scalar. |
 | `risk` | yes | One of `low`, `medium`, `high`. |
 
-Unrecognized keys are ignored by the CLI; do not invent additional fields. The full frontmatter + body template is at `references/issue-templates.md`.
+Unrecognized keys are ignored by the CLI; do not invent additional fields.
 
-### Issue labeling
+## Issue labeling
 
 Before `mo issue create`, classify the issue with labels — be proactive, never submit an unclassified issue.
 
@@ -95,7 +125,7 @@ Before `mo issue create`, classify the issue with labels — be proactive, never
 
 The catalog is descriptive — a manual the agent reads — not a governance constraint. Classification is the agent's job; the server only serves the catalog.
 
-### Priority guidance
+## Priority guidance
 
 When assigning priority, use lowercase (`p0`–`p3`):
 
@@ -104,28 +134,32 @@ When assigning priority, use lowercase (`p0`–`p3`):
 - `p2`: an important experience improvement, observability gap, or local flow friction.
 - `p3`: low-risk polish, performance, or copy changes.
 
-### User confirmation flow
+## User confirmation flow
 
 Before creating the issue, present the recommendation to the user and wait for explicit confirmation:
 
 1. Show a compact summary:
+   - The chosen **template** (feature/bug/refactor) and why
    - `recommended_workflow` and a one-line `recommended_workflow_reason`
    - `risk` and the driver behind it
    - `priority` (if you are setting it)
-   - The five section headings with a one-sentence gist of each
+   - The section headings with a one-sentence gist of each
    - The selected labels (`key=value`), including any you invented when the catalog was empty or had no match
-2. Ask the user to confirm, override the workflow, override the risk, or edit the body.
+2. Ask the user to confirm, override the template, override the workflow, override the risk, or edit the body.
 3. On confirm, run `mo issue create <title> --body-file <produced-file>` with no additional workflow/risk flags (the CLI applies the frontmatter values); append `-l key=value` for each selected label.
 4. On override, update the frontmatter (or pass `--workflow-profile` / `--risk` explicitly) and then create. Always honor the user's final choice over the agent's recommendation.
 
 Never run `mo issue create --body-file` without confirmation. The body file is advisory until the user approves it.
 
-### End-to-end creation checklist
+## End-to-end creation checklist
 
+- [ ] `mo issue template list` was run; a template selected via the boundary question (behavior changes / deviates / unchanged).
+- [ ] `mo issue template get <id>` was run; the per-section guidance comments were read and followed.
+- [ ] Each `<placeholder>` in the body is replaced by content from the `mohist-explore` clarification; no placeholder remains.
+- [ ] The body obeys the universal writing rules: literal, product source language, no source paths, planner-actionable.
 - [ ] `mo workflow list --described` was run and parsed.
 - [ ] `recommended_workflow` is populated (project default, operator-chosen enabled id, or first enabled profile).
 - [ ] `recommended_workflow_reason` is one natural-language sentence explaining the choice (default, operator, or first-enabled fallback) — no tag citations.
 - [ ] `risk` is `low`, `medium`, or `high`, with the driver noted in the body.
-- [ ] The body's sections appear in order: User Voice, Product Shape, [Domain Model], Acceptance Criteria, Non-Goals. Domain Model is optional (omit for pure technical changes).
 - [ ] `mo label list` was run; labels applied via `-l key=value` (invented when the catalog is empty or has no match); confirmed with the user.
-- [ ] The user has confirmed the recommendation and body summary before `mo issue create` runs.
+- [ ] The user has confirmed the template, workflow, risk, and body summary before `mo issue create` runs.

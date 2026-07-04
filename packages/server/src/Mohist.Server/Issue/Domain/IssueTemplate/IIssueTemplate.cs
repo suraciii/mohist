@@ -5,7 +5,5 @@ public interface IIssueTemplate
     string Id { get; }
     string Name { get; }
     string Description { get; }
-    IReadOnlyList<IssueTemplateSection> Sections { get; }
+    string Body { get; }
 }
-
-public sealed record IssueTemplateSection(string Title, string Guidance, string Placeholder);

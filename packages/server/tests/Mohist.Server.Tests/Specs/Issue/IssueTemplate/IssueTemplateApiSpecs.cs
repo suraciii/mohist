@@ -47,7 +47,7 @@ public class IssueTemplateApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task Get_Feature_ReturnsFullTemplateWithSections()
+    public async Task Get_Feature_ReturnsFullTemplateWithBody()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"it-get-{Guid.NewGuid():N}" });
 
@@ -60,19 +60,17 @@ public class IssueTemplateApiSpecs
         Assert.Equal("Feature", data.GetProperty("name").GetString());
         Assert.False(string.IsNullOrEmpty(data.GetProperty("description").GetString()));
 
-        var sections = data.GetProperty("sections");
-        Assert.True(sections.GetArrayLength() > 0);
-
-        var firstSection = sections[0];
-        Assert.False(string.IsNullOrEmpty(firstSection.GetProperty("title").GetString()));
-        Assert.False(string.IsNullOrEmpty(firstSection.GetProperty("guidance").GetString()));
-        Assert.False(string.IsNullOrEmpty(firstSection.GetProperty("placeholder").GetString()));
+        var body = data.GetProperty("body").GetString();
+        Assert.False(string.IsNullOrEmpty(body));
+        Assert.Contains("## User Voice", body);
+        Assert.Contains("## Non-Goals", body);
 
         // The removed fields should not appear
         Assert.False(data.TryGetProperty("about", out _));
         Assert.False(data.TryGetProperty("suitableFor", out _));
         Assert.False(data.TryGetProperty("isDefault", out _));
         Assert.False(data.TryGetProperty("defaults", out _));
+        Assert.False(data.TryGetProperty("sections", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

@@ -33,7 +33,7 @@ public static class IssueTemplateRoutes
                 template.Id,
                 template.Name,
                 template.Description,
-                template.Sections,
+                template.Body,
                 lookup.Source);
 
             return ApiResults.Ok(detail);
@@ -62,5 +62,5 @@ public sealed record IssueTemplateDetail(
     string Id,
     string Name,
     string Description,
-    IReadOnlyList<IssueTemplateSection> Sections,
+    string Body,
     string Source);

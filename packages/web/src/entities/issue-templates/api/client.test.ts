@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { composeIssueTemplateBody, getIssueTemplate, getIssueTemplates } from './client'
+import { getIssueTemplate, getIssueTemplates } from './client'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -45,7 +45,7 @@ describe('getIssueTemplate', () => {
       id: 'feature',
       name: 'Feature',
       description: 'Three-voice PRD template',
-      sections: [],
+      body: '## User Voice\n\n<user voice>',
       source: 'builtin',
     }))
     vi.stubGlobal('fetch', fetchMock)
@@ -57,40 +57,5 @@ describe('getIssueTemplate', () => {
     expect(calledPath).toBe('/api/issue-templates/mohist/default?projectId=proj-1')
     expect(calledPath).not.toContain('mohist%2Fdefault')
     expect(calledPath).not.toContain('%2F')
-  })
-})
-
-describe('composeIssueTemplateBody', () => {
-  it('joins "## {title}\\n{placeholder}" for each section in order, excluding guidance', () => {
-    const body = composeIssueTemplateBody({
-      sections: [
-        { title: 'User Voice', guidance: 'what to write', placeholder: '<user voice>' },
-        { title: 'Product Shape', guidance: 'what to write', placeholder: '<product shape>' },
-      ],
-    })
-
-    expect(body).toBe([
-      '## User Voice',
-      '<user voice>',
-      '',
-      '## Product Shape',
-      '<product shape>',
-    ].join('\n'))
-  })
-
-  it('returns an empty string for templates with no sections', () => {
-    expect(composeIssueTemplateBody({ sections: [] })).toBe('')
-  })
-
-  it('uses only the placeholder, never the guidance, even when guidance is non-empty', () => {
-    const body = composeIssueTemplateBody({
-      sections: [
-        { title: 'AC', guidance: 'sensitive guidance that must not leak', placeholder: 'placeholder' },
-      ],
-    })
-
-    expect(body).toContain('## AC')
-    expect(body).toContain('placeholder')
-    expect(body).not.toContain('sensitive guidance that must not leak')
   })
 })

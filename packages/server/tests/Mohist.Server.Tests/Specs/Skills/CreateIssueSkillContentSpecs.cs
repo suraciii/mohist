@@ -11,12 +11,6 @@ public sealed class CreateIssueSkillContentSpecs
 
     private static string SkillMarkdown => File.ReadAllText(Path.Combine(SkillDataRoot, "mohist-create-issue", "SKILL.md"));
 
-    private static string IssueTemplatesMarkdown => File.ReadAllText(Path.Combine(
-        SkillDataRoot,
-        "mohist-create-issue",
-        "references",
-        "issue-templates.md"));
-
     [Fact]
     public void PackagedCreateIssueSkill_StopsWhenNoWorkflowProfileIsEnabled()
     {
@@ -31,16 +25,17 @@ public sealed class CreateIssueSkillContentSpecs
     }
 
     [Fact]
-    public void PackagedCreateIssueTemplate_UsesDiscoveredEnabledWorkflowProfileOnly()
+    public void PackagedCreateIssueSkill_SelectsIssueTemplateViaCli()
     {
-        var content = IssueTemplatesMarkdown;
+        var content = SkillMarkdown;
 
-        Assert.Contains("An enabled profile id returned by `mo workflow list --described`", content, StringComparison.Ordinal);
-        Assert.Contains("stop and ask the user to enable a workflow first", content, StringComparison.Ordinal);
-        Assert.Contains("<enabled-profile-id-from-discovery>", content, StringComparison.Ordinal);
-        Assert.DoesNotContain("mohist/local when nothing matches", content, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("falling back to", content, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("or `mohist/local`", content, StringComparison.OrdinalIgnoreCase);
+        // The skill must discover templates via the CLI, not from a bundled static copy.
+        Assert.Contains("mo issue template list", content, StringComparison.Ordinal);
+        Assert.Contains("mo issue template get", content, StringComparison.Ordinal);
+        // The boundary question drives template selection.
+        Assert.Contains("does external behavior change", content, StringComparison.OrdinalIgnoreCase);
+        // The static per-template reference file is gone.
+        Assert.DoesNotContain("references/issue-templates.md", content, StringComparison.Ordinal);
     }
 
     private static string ResolveSkillDataRoot()

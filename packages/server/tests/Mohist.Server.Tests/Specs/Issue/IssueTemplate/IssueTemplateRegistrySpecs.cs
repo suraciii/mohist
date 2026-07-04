@@ -197,7 +197,7 @@ public class IssueTemplateRegistrySpecs
         var template = registry.Get("bug");
 
         Assert.Equal("bug", template.Id);
-        Assert.Equal("Bug Body", template.Sections[0].Title);
+        Assert.Contains("## Bug Body", template.Body);
         var path = Assert.Single(fullReads);
         Assert.Equal("/templates/bug.md", path);
     }
@@ -215,11 +215,12 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal("feature", template.Id);
         Assert.Equal("Feature", template.Name);
         Assert.Equal("Product feature work", template.Description);
-        Assert.Equal(2, template.Sections.Count);
-        Assert.Equal("Section A", template.Sections[0].Title);
-        Assert.Equal("guidance-a", template.Sections[0].Guidance);
-        Assert.Equal("<placeholder-a>", template.Sections[0].Placeholder);
-        Assert.Equal("Section B", template.Sections[1].Title);
+        // Body is the raw markdown after frontmatter — contains both sections verbatim, including
+        // the inline guidance comment (not parsed/stripped by the server).
+        Assert.Contains("## Section A", template.Body);
+        Assert.Contains("<!-- guidance-a -->", template.Body);
+        Assert.Contains("<placeholder-a>", template.Body);
+        Assert.Contains("## Section B", template.Body);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -281,10 +282,7 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal(canonical.Id, alias.Id);
         Assert.Equal(canonical.Name, alias.Name);
         Assert.Equal(canonical.Description, alias.Description);
-        Assert.Equal(canonical.Sections.Count, alias.Sections.Count);
-        Assert.Equal(canonical.Sections[0].Title, alias.Sections[0].Title);
-        Assert.Equal(canonical.Sections[0].Guidance, alias.Sections[0].Guidance);
-        Assert.Equal(canonical.Sections[0].Placeholder, alias.Sections[0].Placeholder);
+        Assert.Equal(canonical.Body, alias.Body);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -613,110 +611,13 @@ public class IssueTemplateRegistrySpecs
         var template = registry.Get("legacy", "project-1");
         Assert.Equal("legacy", template.Id);
         Assert.Equal("Old description", template.Description);
-        Assert.Single(template.Sections);
+        Assert.Contains("## S", template.Body);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public void List_CustomTemplateWithInvalidSectionGuidance_StillSurfacesMetadata()
-    {
-        var dbFactory = new FakeDbContextFactory(db =>
-        {
-            db.ProjectIssueTemplates.Add(new ProjectIssueTemplateRow
-            {
-                ProjectId = "project-1",
-                Name = "invalid",
-                Template = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    Id = "invalid",
-                    Name = "Invalid",
-                    Sections = new[]
-                    {
-                        new { Title = "Section", Guidance = "", Placeholder = "p" },
-                    },
-                }),
-            });
-            db.SaveChanges();
-        });
-        var registry = new IssueTemplateRegistry(dbFactory, Builtins());
-
-        var list = registry.List("project-1");
-
-        var info = Assert.Single(list, t => t.Id == "invalid");
-        Assert.Equal("Invalid", info.Name);
-        Assert.Equal("custom", info.Source);
-        Assert.False(registry.Exists("invalid", "project-1"));
-        Assert.Throws<KeyNotFoundException>(() => registry.Get("invalid", "project-1"));
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public void List_CustomTemplateWithInvalidSectionPlaceholder_StillSurfacesMetadata()
-    {
-        var dbFactory = new FakeDbContextFactory(db =>
-        {
-            db.ProjectIssueTemplates.Add(new ProjectIssueTemplateRow
-            {
-                ProjectId = "project-1",
-                Name = "invalid",
-                Template = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    Id = "invalid",
-                    Name = "Invalid",
-                    Sections = new[]
-                    {
-                        new { Title = "Section", Guidance = "g", Placeholder = "" },
-                    },
-                }),
-            });
-            db.SaveChanges();
-        });
-        var registry = new IssueTemplateRegistry(dbFactory, Builtins());
-
-        var list = registry.List("project-1");
-
-        var info = Assert.Single(list, t => t.Id == "invalid");
-        Assert.Equal("Invalid", info.Name);
-        Assert.Equal("custom", info.Source);
-        Assert.False(registry.Exists("invalid", "project-1"));
-        Assert.Throws<KeyNotFoundException>(() => registry.Get("invalid", "project-1"));
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public void List_CustomTemplateWithInvalidSectionTitle_StillSurfacesMetadata()
-    {
-        var dbFactory = new FakeDbContextFactory(db =>
-        {
-            db.ProjectIssueTemplates.Add(new ProjectIssueTemplateRow
-            {
-                ProjectId = "project-1",
-                Name = "invalid",
-                Template = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    Id = "invalid",
-                    Name = "Invalid",
-                    Sections = new[]
-                    {
-                        new { Title = "", Guidance = "g", Placeholder = "p" },
-                    },
-                }),
-            });
-            db.SaveChanges();
-        });
-        var registry = new IssueTemplateRegistry(dbFactory, Builtins());
-
-        var list = registry.List("project-1");
-
-        var info = Assert.Single(list, t => t.Id == "invalid");
-        Assert.Equal("Invalid", info.Name);
-        Assert.Equal("custom", info.Source);
-        Assert.False(registry.Exists("invalid", "project-1"));
-        Assert.Throws<KeyNotFoundException>(() => registry.Get("invalid", "project-1"));
-    }
+    // Note: per-section field validation (Title/Guidance/Placeholder non-empty) was removed together
+    // with IssueTemplateSection. The body is now a raw string composed from sections; an empty Title
+    // or Placeholder no longer fails — it just yields a thinner body. Only structural problems
+    // (missing Id/Name, id≠rowName, empty sections, corrupt JSON) still reject a custom template.
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
@@ -861,7 +762,7 @@ public class IssueTemplateRegistrySpecs
         Assert.Equal("custom", template.Id);
         Assert.Equal("Custom", template.Name);
         Assert.Equal("Custom template", template.Description);
-        Assert.Single(template.Sections);
+        Assert.Contains("## S", template.Body);
     }
 
     private sealed class FrontmatterOnlyReader : StringReader

@@ -16,7 +16,7 @@ import { LabelEditor } from '../../../entities/issue/lib/label-editor'
 import type { LabelMap } from '../../../entities/issue/model/labels'
 import { useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
-import { composeIssueTemplateBody, useIssueTemplate, useIssueTemplates } from '../../../entities/issue-templates'
+import { useIssueTemplate, useIssueTemplates } from '../../../entities/issue-templates'
 import { useProject, useRepositories } from '../../../entities/project'
 import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
 import { parseIssueFrontmatter } from '../lib/frontmatter'
@@ -181,7 +181,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
 
   useEffect(() => {
     if (selectedTemplate) {
-      setBody(composeIssueTemplateBody(selectedTemplate))
+      setBody(selectedTemplate.body)
     }
   }, [selectedTemplate])
 

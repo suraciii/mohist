@@ -37,7 +37,7 @@ beforeEach(() => {
     id: 'feature',
     name: 'Feature',
     description: '',
-    sections: [],
+    body: '',
     source: 'builtin',
   })
   void clientModule

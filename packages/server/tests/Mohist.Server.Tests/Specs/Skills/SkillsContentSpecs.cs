@@ -120,13 +120,13 @@ public sealed class SkillsContentSpecs
     {
         using var stdout = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "get", "mohist-create-issue", "--full"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "get", "mohist-create-epic", "--full"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         var content = stdout.ToString();
-        var marker = "--- references/issue-templates.md ---";
+        var marker = "--- references/epic-templates.md ---";
         Assert.Contains(marker, content);
-        Assert.True(content.IndexOf(marker, StringComparison.Ordinal) > content.IndexOf("name: mohist-create-issue", StringComparison.Ordinal));
+        Assert.True(content.IndexOf(marker, StringComparison.Ordinal) > content.IndexOf("name: mohist-create-epic", StringComparison.Ordinal));
         Assert.DoesNotContain("mo skills get mohist --full", content, StringComparison.Ordinal);
     }
 
@@ -403,9 +403,7 @@ public sealed class SkillsContentSpecs
         WriteSkill(targetRoot, "mohist-explore", "managed explore body");
         WriteSkill(targetRoot, "mohist-create-epic", "managed create-epic body");
         WriteSkill(targetRoot, "mohist-create-issue", "managed create-issue body");
-        WriteSupplementaryFile(targetRoot, "mohist-create-issue", "references", "issue-templates.md", "# Issue Templates");
         WriteSupplementaryFile(targetRoot, "mohist-create-epic", "references", "epic-templates.md", "# Epic Templates");
-        WriteSupplementaryFile(targetRoot, "mohist-explore", "references", "issue-body-template.md", "# Issue Body Template");
 
         return targetRoot;
     }
