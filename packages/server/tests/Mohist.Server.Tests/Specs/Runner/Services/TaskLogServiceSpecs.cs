@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -16,16 +17,18 @@ namespace Mohist.Server.Tests.Specs.Runner.Services;
 [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
 public class TaskLogServiceSpecs : IAsyncLifetime
 {
-    private readonly string _dbPath;
     private readonly DbContextOptions<MohistDbContext> _options;
     private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     private readonly TaskLogService _service;
+    private readonly SqliteConnection _keeper;
 
     public TaskLogServiceSpecs()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"task-log-service-{Guid.NewGuid():N}.db");
+        var connectionString = $"Data Source=task-log-service-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        _keeper = new SqliteConnection(connectionString);
+        _keeper.Open();
         _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite($"Data Source={_dbPath}")
+            .UseSqlite(connectionString)
             .Options;
         var factory = new Factory(_options);
         _service = new TaskLogService(
@@ -41,11 +44,10 @@ public class TaskLogServiceSpecs : IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        await using var db = new MohistDbContext(_options);
-        await db.Database.EnsureDeletedAsync();
-        if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        _keeper.Dispose();
+        return Task.CompletedTask;
     }
 
     [Fact]

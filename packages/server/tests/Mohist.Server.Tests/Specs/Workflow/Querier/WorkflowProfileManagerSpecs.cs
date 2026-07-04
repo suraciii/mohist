@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -16,15 +17,17 @@ namespace Mohist.Server.Tests.Specs.Workflow.Querier;
 
 public class WorkflowProfileManagerSpecs : IAsyncLifetime
 {
-    private readonly string _dbPath;
     private readonly DbContextOptions<MohistDbContext> _options;
     private readonly WorkflowProfileManager _manager;
+    private readonly SqliteConnection _keeper;
 
     public WorkflowProfileManagerSpecs()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"profile-specs-{Guid.NewGuid():N}.db");
+        var connectionString = $"Data Source=profile-specs-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        _keeper = new SqliteConnection(connectionString);
+        _keeper.Open();
         _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite($"Data Source={_dbPath}")
+            .UseSqlite(connectionString)
             .Options;
 
         var factory = new TestDbContextFactory(_options);
@@ -45,11 +48,10 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        await using var db = new MohistDbContext(_options);
-        await db.Database.EnsureDeletedAsync();
-        if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        _keeper.Dispose();
+        return Task.CompletedTask;
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
