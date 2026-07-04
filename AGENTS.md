@@ -69,6 +69,12 @@ npm test           -w packages/runner
 
 * 数据模型应该尽可能地简洁，只包括必要的属性
 
+## 文档分工原则
+
+* **产品文档（`docs/`）只写产品**：用户需求、心智模型、用户怎么用、场景、责任边界。**不写任何技术细节**——不引用源码文件/路径、不写实现机制、不写 API/grain/字段名。面向使用者，假设读者不读代码。
+* **设计文档（`design/`）才写技术方案**：架构边界、数据模型、grain/接口、handler、存储、技术选型与取舍。
+* 两层各自的 WIP/未实装标注惯例见 [`docs/README.md`](docs/README.md) 与 [`design/README.md`](design/README.md)。
+
 ## 测试原则
 
 详见 [`design/testing.md`](design/testing.md)。要点：
