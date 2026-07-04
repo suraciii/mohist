@@ -118,3 +118,79 @@
     the current tree (which now also includes T-002 consolidation).
 - No new commits produced for this re-run; the tree is clean on
   `mohist/run-wr_17865cb3816543c5a9f58589a2b76a2d`.
+
+## Task T-002 (consolidate transition templates into shared helpers)
+
+- `PersistTransitionAsync` (private) owns the shared tail at
+  `SystemUpdateService.cs:652-673`:
+  `append log → set UpdatedAt → SaveAsync/SaveIfCurrentAsync → optional
+  ReleaseLockAsync` (release runs strictly after save, line 670).
+- `FailAsync` (private) generalized at `SystemUpdateService.cs:675-701`
+  with optional `stage` / `outcome` / `unavailableCapability` /
+  `logStage` / `logMessage` / `releaseLock`; it is the *single* definition
+  of the failed transition (`Status = "failed"` literal at line 689).
+- `MaxLogEntries = 200` (`SystemUpdateService.cs:9`) is the only 200
+  literal in the file and is referenced once at `:707-708`.
+- Every persisted transition (`StartAsync` initial save at `:81`,
+  `GetLatestStatusAsync` supersede/waiting/ready/succeeded at
+  `:118, :141, :157, :175`, `RunCommandAsync` stage/result at
+  `:630, :646`, `RunUpdateAsync` waiting at `:490`, `TryRestoreRunnerAsync`
+  restoring/recovered at `:526, :550`, `SupersedeStaleWebJobsAsync`
+  CLI supersede at `:293`, `RecordCliOutcomeAsync` CLI outcome at `:275`)
+  goes through `PersistTransitionAsync`. The only remaining `SaveAsync`
+  call is in `StartAsync` (initial state before `RunUpdateAsync`) — that
+  is the pre-existing first save and is not a transition tail.
+- Every catch block and non-zero-exit branch delegates to `FailAsync`:
+  `StartAsync` catch at `:93`, `RunUpdateAsync` catch at `:503`,
+  `RevalidateInstallAsync` install-changed failure at `:609, :615`,
+  `RunCommandAsync` non-zero-exit at `:643`, `TryRestoreRunnerAsync`
+  restore-failure at `:564-573`.
+- New unit/spec tests (39 total in `SystemUpdateServiceSpecs.cs`):
+  - `PersistTransitionAsync_ReleasesLockOnlyAfterSave` — uses
+    `OrderTrackingStore` to record `Save` / `ReleaseLock` order and
+    asserts save index < release index.
+  - `SourceAudit_FailedStateIsDefinedOnlyInFailAsync` — regex over the
+    orchestrator source pins exactly one `state with { ... Status =
+    "failed"` match, and that match is inside `FailAsync`.
+  - `SourceAudit_SaveAsyncOnlyInSharedHelpersAndStartAsync` — every
+    `_store.SaveAsync(` call sits inside `PersistTransitionAsync` or
+    `StartAsync`.
+  - `SourceAudit_AppendLogSaveAsyncSequenceOnlyInSharedHelper` — every
+    inline `AppendLog(...); await _store.SaveAsync(...)` sequence sits
+    inside `PersistTransitionAsync`.
+  - `SourceAudit_SaveIfCurrentAsyncOnlyInPersistTransitionAsync` —
+    every `_store.SaveIfCurrentAsync(` call sits inside
+    `PersistTransitionAsync`.
+  - `SourceAudit_ReleaseLockAsyncOnlyInSharedHelpersAndRunUpdateFinally`
+    — every `_store.ReleaseLockAsync(` call sits inside
+    `PersistTransitionAsync` or `RunUpdateAsync`'s `finally` cleanup.
+  - `SourceAudit_LogCapDefinedOnce` — only one `200` literal and it is
+    the `MaxLogEntries` constant.
+- Re-verification of an already-landed T-002 commit `7a34aa66` (no
+  source edits produced): `dotnet build Mohist.sln` 0 warnings /
+  0 errors; filtered `SystemUpdateServiceSpecs` 39 passed /
+  0 failed; runner suite 63 files / 875 tests passed; web + runner
+  typechecks clean.
+
+## Gotchas (T-002)
+
+- The CLI-outcome branch (`RecordCliOutcomeAsync`) used to inline an
+  extra `SystemUpdateLogEntry` for the CLI report *plus* the
+  helper's transition log, double-recording. After T-002 the call
+  site hands only one log entry (`outcomeEntry`) to
+  `PersistTransitionAsync`, so the helper owns the appended log line
+  and the duplicate is gone — this is a behavior-preserving deletion
+  that is part of the consolidation, not a semantic change to the
+  persisted log content.
+- `PersistTransitionAsync` infers the `UpdatedAt` timestamp from
+  `logEntry.At` when a log entry is supplied (so a single wall-clock
+  read drives both the log entry and `UpdatedAt`), and falls back to
+  `DateTimeOffset.UtcNow` when no log entry is supplied (e.g. the
+  `TryRestoreRunnerAsync` "Restoring runner" stage bump at `:526`,
+  which records the transition through the helper rather than the
+  state shape).
+- The `TryRestoreRunnerAsync` path keeps the recovered transition
+  shape (`Status = "recovered"`, `Outcome = "recovered"`,
+  `UnavailableCapability = null`, `Stage = "Recovered"`, a `Recovered`
+  log entry) on the call site and only delegates the persist tail to
+  `PersistTransitionAsync`, per the design decision.
