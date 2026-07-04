@@ -37,6 +37,7 @@
         "AgentSessionComposerPage filters its agent picker to status !== 'archived', so archived agents do not appear as launchable in the session launcher (the server's archived-cannot-launch invariant is preserved as a backstop)",
         "client.test.ts covers unarchiveAgent issuing the POST; queries.test.ts covers useUnarchiveAgent cache invalidation (['agents'] and ['agent-status']) and useAgents passing all:true",
         "A composer test covers an archived agent not appearing in the launcher picker",
+        "A list-page component test covers the agent-archive spec's Archived section scenarios: archived agents appear in the 'Archived (n)' section (count matches), archived rows render visually distinct and remain navigable into the detail page, and the section is omitted when no archived agents exist",
         "Web typecheck passes (npm run typecheck -w packages/web) and web tests pass (npm run test:run -w packages/web)"
       ],
       "priority": 2,
