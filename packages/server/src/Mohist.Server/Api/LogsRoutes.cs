@@ -1,9 +1,14 @@
 using Mohist.Server.Logging;
+using System.Text;
 
 namespace Mohist.Server.Api;
 
 public static class LogsRoutes
 {
+    private const int DefaultTailLimit = 100;
+    private const int DefaultTailMaxBytes = 64 * 1024;
+    private const int MaximumTailMaxBytes = 1024 * 1024;
+
     public static WebApplication MapLogsRoutes(this WebApplication app)
     {
         app.MapGet("/api/logs/tail", async (
@@ -27,6 +32,13 @@ public static class LogsRoutes
                 return ApiResults.BadRequest("maxBytes must be greater than 0", "invalid_max_bytes");
             }
 
+            if (maxBytes is > MaximumTailMaxBytes)
+            {
+                return ApiResults.BadRequest(
+                    $"maxBytes must be less than or equal to {MaximumTailMaxBytes}",
+                    "invalid_max_bytes");
+            }
+
             var logDir = pathResolver.Resolve();
             var expectedFile = Path.Combine(logDir, FileLoggerProvider.LogFileName);
 
@@ -47,8 +59,8 @@ public static class LogsRoutes
             }
 
             var sourceName = Path.GetFileName(activeFile);
-            var readLimit = limit ?? 100;
-            var readMaxBytes = maxBytes ?? 64 * 1024;
+            var readLimit = limit ?? DefaultTailLimit;
+            var readMaxBytes = maxBytes ?? DefaultTailMaxBytes;
             var fileLength = new FileInfo(activeFile).Length;
 
             // reset semantics: first read (no cursor) OR the file shrank
@@ -155,11 +167,11 @@ public static class LogsRoutes
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         stream.Seek(startPosition, SeekOrigin.Begin);
 
-        using var reader = new StreamReader(stream);
         while (entries.Count < limit && bytesRead < maxBytes)
         {
-            var line = await reader.ReadLineAsync();
-            if (line is null)
+            var remainingBytes = maxBytes - bytesRead;
+            var lineRead = await ReadLineWithinBudgetAsync(stream, remainingBytes);
+            if (lineRead.EndOfFile && lineRead.BytesConsumed == 0)
             {
                 // EOF reached cleanly within the caps. The byte position
                 // matches startPosition + bytesRead (every byte before
@@ -168,13 +180,96 @@ public static class LogsRoutes
                 return (entries, nextCursor, false);
             }
 
-            bytesRead += System.Text.Encoding.UTF8.GetByteCount(line) + 1;
-            entries.Add(LogEntryProjection.Project(line));
+            bytesRead += lineRead.BytesConsumed;
             nextCursor = startPosition + bytesRead;
+
+            if (lineRead.ExceededBudget)
+            {
+                return (entries, nextCursor, true);
+            }
+
+            entries.Add(LogEntryProjection.Project(lineRead.Line ?? string.Empty));
         }
 
         // The cap was hit before EOF; the client should pass nextCursor
         // back to continue.
-        return (entries, nextCursor, true);
+        return (entries, nextCursor, nextCursor < stream.Length);
     }
+
+    private static async Task<BoundedLineRead> ReadLineWithinBudgetAsync(FileStream stream, long byteBudget)
+    {
+        var lineBytes = new List<byte>(capacity: (int)Math.Min(byteBudget, 4096));
+        var consumed = 0L;
+        var oneByte = new byte[1];
+
+        while (true)
+        {
+            var read = await stream.ReadAsync(oneByte.AsMemory(0, 1));
+            if (read == 0)
+            {
+                return consumed == 0
+                    ? new BoundedLineRead(null, 0, EndOfFile: true, ExceededBudget: false)
+                    : new BoundedLineRead(DecodeLine(lineBytes), consumed, EndOfFile: true, ExceededBudget: false);
+            }
+
+            consumed++;
+            var b = oneByte[0];
+            if (consumed > byteBudget)
+            {
+                if (b != (byte)'\n')
+                {
+                    consumed += await DrainUntilLineEndAsync(stream);
+                }
+                return new BoundedLineRead(null, consumed, EndOfFile: false, ExceededBudget: true);
+            }
+
+            if (b == (byte)'\n')
+            {
+                return new BoundedLineRead(DecodeLine(lineBytes), consumed, EndOfFile: false, ExceededBudget: false);
+            }
+
+            lineBytes.Add(b);
+        }
+    }
+
+    private static async Task<long> DrainUntilLineEndAsync(FileStream stream)
+    {
+        var consumed = 0L;
+        var buffer = new byte[4096];
+
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length));
+            if (read == 0)
+            {
+                return consumed;
+            }
+
+            for (var i = 0; i < read; i++)
+            {
+                consumed++;
+                if (buffer[i] == (byte)'\n')
+                {
+                    var unread = read - i - 1;
+                    if (unread > 0)
+                    {
+                        stream.Seek(-unread, SeekOrigin.Current);
+                    }
+                    return consumed;
+                }
+            }
+        }
+    }
+
+    private static string DecodeLine(List<byte> lineBytes)
+    {
+        if (lineBytes.Count > 0 && lineBytes[^1] == (byte)'\r')
+        {
+            lineBytes.RemoveAt(lineBytes.Count - 1);
+        }
+
+        return Encoding.UTF8.GetString(lineBytes.ToArray());
+    }
+
+    private sealed record BoundedLineRead(string? Line, long BytesConsumed, bool EndOfFile, bool ExceededBudget);
 }

@@ -320,11 +320,39 @@ public class LogsRouteSpecs
     [InlineData("?limit=-1", "invalid_limit")]
     [InlineData("?maxBytes=0", "invalid_max_bytes")]
     [InlineData("?maxBytes=-1", "invalid_max_bytes")]
+    [InlineData("?maxBytes=1048577", "invalid_max_bytes")]
     public async Task Get_WhenQueryParametersAreInvalid_ReturnsBadRequest(string query, string expectedCode)
     {
         ResetState();
 
         await AssertBadRequestAsync(_fixture.Client, query, expectedCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task Get_WhenSinglePhysicalLineExceedsMaxBytes_DoesNotReturnOversizedLineAndAdvancesCursor()
+    {
+        ResetState();
+        var oversizedLine = new string('x', 4096);
+        var followingLine = """{"level":"INFO","time":"2026-06-30T12:00:01.0000000+00:00","service":"Mohist.Server","message":"after oversized"}""";
+        await SeedServerLogAsync(oversizedLine, followingLine);
+
+        var first = await GetTailAsync(_fixture.Client, "?maxBytes=64");
+
+        Assert.True(first.GetProperty("truncated").GetBoolean());
+        Assert.True(first.GetProperty("reset").GetBoolean());
+        Assert.Equal(0, first.GetProperty("lines").GetArrayLength());
+        var cursorAfterOversizedLine = first.GetProperty("nextCursor").GetInt64();
+        Assert.True(cursorAfterOversizedLine > 64);
+
+        var second = await GetTailAsync(_fixture.Client, $"?cursor={cursorAfterOversizedLine}&maxBytes=1024");
+        Assert.False(second.GetProperty("truncated").GetBoolean());
+        Assert.False(second.GetProperty("reset").GetBoolean());
+
+        var lines = second.GetProperty("lines").EnumerateArray().ToList();
+        Assert.Single(lines);
+        Assert.Equal("after oversized", lines[0].GetProperty("message").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

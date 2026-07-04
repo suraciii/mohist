@@ -104,6 +104,24 @@ describe('LogsPage: unavailable diagnostic', () => {
     expect(screen.queryByText('No logs available')).not.toBeInTheDocument()
   })
 
+  it('disables export while unavailable even if stale entries are present', () => {
+    useLogsMock.mockImplementation(() =>
+      defaultUseLogs({
+        unavailable: true,
+        expectedLocation: '/home/me/.mohist/logs/server.log',
+        reason: 'Log file server.log is missing.',
+        source: null,
+        entries: [makeEntry({ message: 'stale', raw: 'stale' })],
+      }),
+    )
+
+    render(<LogsPage />)
+
+    expect(screen.getByTestId('logs-unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /export/i })).toBeDisabled()
+    expect(screen.queryByText('stale')).not.toBeInTheDocument()
+  })
+
   it('does NOT render the unavailable diagnostic when the source is available but the view is empty', () => {
     useLogsMock.mockImplementation(() => defaultUseLogs({ entries: [] }))
 

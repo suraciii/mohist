@@ -264,6 +264,45 @@ describe('useLogs: unavailable passthrough', () => {
     expect(result.current.source).toBe('server.log')
     expect(result.current.unavailable).toBe(false)
   })
+
+  it('clears the active view and cursor when an available source becomes unavailable', async () => {
+    mocks.getLogTail
+      .mockResolvedValueOnce(
+        ok({
+          lines: [makeEntry({ message: 'old-source', raw: 'old-source' })],
+          reset: true,
+          cursor: 100,
+          nextCursor: 100,
+          source: 'server.log',
+        }),
+      )
+      .mockResolvedValueOnce(
+        unavailableResponse(
+          'Log file server.log is missing.',
+          '/home/me/.mohist/logs/server.log',
+        ),
+      )
+
+    const { result } = renderHook(() => useLogs())
+
+    await flushMicrotasks()
+    expect(result.current.entries.map((entry) => entry.message)).toEqual(['old-source'])
+    expect(result.current.nextCursor).toBe(100)
+    expect(result.current.source).toBe('server.log')
+
+    await act(async () => {
+      await result.current.refresh()
+    })
+
+    expect(result.current.unavailable).toBe(true)
+    expect(result.current.entries).toEqual([])
+    expect(result.current.cursor).toBeNull()
+    expect(result.current.nextCursor).toBeNull()
+    expect(result.current.source).toBeNull()
+    expect(result.current.reset).toBe(true)
+    expect(result.current.expectedLocation).toBe('/home/me/.mohist/logs/server.log')
+    expect(mocks.getLogTail.mock.calls[1][0]).toBe(100)
+  })
 })
 
 describe('useLogs: auto-follow polling', () => {

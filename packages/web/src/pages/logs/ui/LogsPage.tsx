@@ -84,6 +84,8 @@ export function LogsPage() {
   }, [handleScroll])
 
   const handleExport = useCallback(() => {
+    if (unavailable || filtered.length === 0) return
+
     const text = filtered.map((e) => e.raw).join('\n')
     const blob = new Blob([text], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -94,7 +96,9 @@ export function LogsPage() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-  }, [filtered])
+  }, [filtered, unavailable])
+
+  const exportDisabled = unavailable || filtered.length === 0
 
   return (
     <div className="flex-1 flex flex-col bg-gray-50 overflow-hidden">
@@ -118,7 +122,7 @@ export function LogsPage() {
             </button>
             <button
               onClick={handleExport}
-              disabled={filtered.length === 0}
+              disabled={exportDisabled}
               className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm min-h-[36px]"
             >
               <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">

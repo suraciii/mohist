@@ -38,23 +38,25 @@ export function useLogs(): UseLogsReturn {
   const fetchingRef = useRef(false)
 
   const applyResult = useCallback((result: LogTailResult) => {
-    if (result.reset) {
-      setEntries(result.lines)
+    const effectiveReset = result.reset || result.unavailable
+
+    if (effectiveReset) {
+      setEntries(result.unavailable ? [] : result.lines)
     } else {
       setEntries((prev) => {
         const next = [...prev, ...result.lines]
         return next.length > MAX_ENTRIES ? next.slice(next.length - MAX_ENTRIES) : next
       })
     }
-    cursorRef.current = result.nextCursor
-    setCursor(result.cursor)
-    setNextCursor(result.nextCursor)
-    setSource(result.source)
+    cursorRef.current = result.unavailable ? null : result.nextCursor
+    setCursor(result.unavailable ? null : result.cursor)
+    setNextCursor(result.unavailable ? null : result.nextCursor)
+    setSource(result.unavailable ? null : result.source)
     setUnavailable(result.unavailable)
     setExpectedLocation(result.expectedLocation)
     setReason(result.reason)
-    setTruncated(result.truncated)
-    setReset(result.reset)
+    setTruncated(result.unavailable ? false : result.truncated)
+    setReset(effectiveReset)
   }, [])
 
   const fetchLogs = useCallback(async () => {
