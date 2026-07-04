@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import type { UseMutationResult } from '@tanstack/react-query'
-import { ActivityIcon, AlertCircleIcon, CheckCircle2Icon, ClockIcon, PauseCircleIcon, XCircleIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
@@ -35,46 +34,32 @@ export interface RuntimeDecisionSurfaceProps {
 interface SummaryPresentation {
   label: string
   tone: 'blue' | 'amber' | 'red' | 'orange' | 'green' | 'gray' | 'violet'
-  icon: typeof ActivityIcon
-  testId: string
 }
 
 const SUMMARY_PRESENTATION: Record<RuntimeSummary, SummaryPresentation> = {
   'running': {
     label: 'Running',
     tone: 'blue',
-    icon: ActivityIcon,
-    testId: 'runtime-summary-running',
   },
   'queued': {
     label: 'Queued',
     tone: 'violet',
-    icon: ClockIcon,
-    testId: 'runtime-summary-queued',
   },
   'approval-required': {
     label: 'Approval required',
     tone: 'amber',
-    icon: PauseCircleIcon,
-    testId: 'runtime-summary-approval-required',
   },
   'blocked': {
     label: 'Blocked',
     tone: 'orange',
-    icon: AlertCircleIcon,
-    testId: 'runtime-summary-blocked',
   },
   'failed': {
     label: 'Failed',
     tone: 'red',
-    icon: XCircleIcon,
-    testId: 'runtime-summary-failed',
   },
   'done': {
     label: 'Done',
     tone: 'green',
-    icon: CheckCircle2Icon,
-    testId: 'runtime-summary-done',
   },
 }
 
@@ -86,54 +71,6 @@ const toneEdgeClass: Record<SummaryPresentation['tone'], string> = {
   green: 'border-l-success',
   gray: 'border-l-muted-foreground',
   violet: 'border-l-info',
-}
-
-const toneLabelClass: Record<SummaryPresentation['tone'], string> = {
-  blue: 'bg-info-subtle text-info border-info-border',
-  amber: 'bg-warning-subtle text-warning border-warning-border',
-  red: 'bg-danger-subtle text-danger border-danger-border',
-  orange: 'bg-warning-subtle text-warning border-warning-border',
-  green: 'bg-success-subtle text-success border-success-border',
-  gray: 'bg-muted text-muted-foreground border-border',
-  violet: 'bg-info-subtle text-info border-info-border',
-}
-
-const toneIconClass: Record<SummaryPresentation['tone'], string> = {
-  blue: 'text-info',
-  amber: 'text-warning',
-  red: 'text-danger',
-  orange: 'text-warning',
-  green: 'text-success',
-  gray: 'text-muted-foreground',
-  violet: 'text-info',
-}
-
-function CurrentTaskPill({
-  task,
-}: {
-  task: RuntimeDecision['currentTask']
-}) {
-  if (!task) return null
-  return (
-    <span
-      data-testid="runtime-current-task"
-      data-task-kind={task.kind}
-      className="inline-flex items-center gap-1.5 rounded-full bg-card/70 border border-current/20 px-2.5 py-1 text-xs font-medium"
-    >
-      <span className="text-[10px] uppercase tracking-wide opacity-70">
-        {task.kind === 'check' ? 'Check' : 'Task'}
-      </span>
-      <span className="font-semibold">{task.title}</span>
-      {task.status && (
-        <span
-          data-testid="runtime-current-task-status"
-          className="text-[10px] uppercase tracking-wide opacity-80"
-        >
-          · {task.status}
-        </span>
-      )}
-    </span>
-  )
 }
 
 function SurfaceActionButton({
@@ -229,7 +166,6 @@ export function RuntimeDecisionSurface({
   } = mutations
 
   const presentation = SUMMARY_PRESENTATION[decision.summary]
-  const Icon = presentation.icon
   const pendingKind: RuntimeAvailableAction['kind'] | null =
     approveMutation.isPending ? 'approve'
     : sendBackMutation.isPending ? 'send-back'
@@ -293,35 +229,9 @@ export function RuntimeDecisionSurface({
         toneEdgeClass[presentation.tone],
       )}
     >
-      <header className="flex flex-wrap items-start gap-3">
-        <div className="flex items-center gap-2">
-          <Icon
-            className={cn('h-4 w-4', toneIconClass[presentation.tone])}
-            aria-hidden="true"
-            data-testid={presentation.testId}
-          />
-          <span
-            data-testid="runtime-summary-label"
-            className={cn(
-              'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
-              toneLabelClass[presentation.tone],
-            )}
-          >
-            {presentation.label}
-          </span>
-        </div>
-        <h2
-          data-testid="runtime-headline"
-          className="flex-1 min-w-0 text-base font-semibold leading-tight text-card-foreground"
-        >
-          {decision.headline}
-        </h2>
-        <CurrentTaskPill task={decision.currentTask} />
-      </header>
-
       <p
         data-testid="runtime-rationale"
-        className="mt-2 text-sm text-muted-foreground"
+        className="text-sm text-muted-foreground"
       >
         {decision.rationale}
       </p>

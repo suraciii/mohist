@@ -947,7 +947,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     expect(within(profileCard).getByText('Inherited')).toBeInTheDocument()
   })
 
-  it('groups issue detail right rail panels by user intent', async () => {
+  it('groups reference-rail panels by user intent and keeps workflow outputs in the reading flow', async () => {
     mocks.issue = makeIssue({
       body: 'Issue body',
       status: 'in_progress',
@@ -963,15 +963,21 @@ describe('IssueDetailPage workflow profile integration', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Details', { selector: 'h2' })).toBeInTheDocument()
-      expect(screen.getByText('Latest Artifacts', { selector: 'h3' })).toBeInTheDocument()
-      expect(screen.getByText('Runtime/Sessions', { selector: 'h2' })).toBeInTheDocument()
       expect(screen.getByText('Configuration', { selector: 'h2' })).toBeInTheDocument()
       expect(screen.getByText('Actions', { selector: 'h2' })).toBeInTheDocument()
+      expect(screen.getByText('Latest Artifacts', { selector: 'h3' })).toBeInTheDocument()
     })
 
-    const runtimeSessionsCard = findCardByHeading('Runtime/Sessions')
-    expect(within(runtimeSessionsCard).getByText('Task Progress')).toBeInTheDocument()
-    expect(within(runtimeSessionsCard).getByText('Sessions')).toBeInTheDocument()
+    const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
+    const readingFlow = await waitFor(() => screen.getByTestId('reading-flow'))
+
+    expect(referenceRail.contains(screen.getByText('Details', { selector: 'h2' }))).toBe(true)
+    expect(referenceRail.contains(screen.getByText('Configuration', { selector: 'h2' }))).toBe(true)
+    expect(referenceRail.contains(screen.getByText('Actions', { selector: 'h2' }))).toBe(true)
+    expect(readingFlow.contains(screen.getByText('Latest Artifacts', { selector: 'h3' }))).toBe(true)
+    expect(readingFlow.contains(screen.getByText('Task Progress'))).toBe(true)
+    expect(readingFlow.contains(screen.getByText('Sessions'))).toBe(true)
+    expect(referenceRail.contains(screen.queryByText('Latest Artifacts', { selector: 'h3' })!)).toBe(false)
 
     const configurationCard = findCardByHeading('Configuration')
     expect(within(configurationCard).getByText('Coder Model')).toBeInTheDocument()

@@ -14,13 +14,13 @@ import { formatTime } from '../../../shared/lib/format-time'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
-import { CardSection } from '@/shared/ui/components/card-section'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { attachmentFromMetadata } from '../model/format'
 import { useIssueDetailMutations } from '../model/useIssueDetailMutations'
 import { deriveRuntimeDecision } from '../../../widgets/issue-workflow/model/derive-runtime-decision'
 import { ArchivedPill, DraftPill, PriorityChip, RuntimeSummaryPill } from './pills'
+import { StatusHeadline } from './StatusHeadline'
 import { WorkflowYamlDialog } from './WorkflowYamlDialog'
 import { IssueActionsCard } from './cards/IssueActionsCard'
 import { IssueDetailsCard } from './cards/IssueDetailsCard'
@@ -155,176 +155,198 @@ export function IssueDetailPage() {
             <span>{isArchived ? 'Back to archived' : 'Back to board'}</span>
           </button>
 
-          <div className="mb-8" data-testid="issue-detail-header">
-            <div className="flex flex-wrap items-center gap-3 mb-2">
-              <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-identity">
-                <span className="text-sm font-mono text-muted-foreground/70 tabular-nums">
-                  #{issue.number}
-                </span>
-                <PriorityChip priority={issue.priority} />
-                {issue.isDraft && <DraftPill />}
-                {isArchived && <ArchivedPill archivedAt={issue.archivedAt} />}
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-runtime">
-                <RuntimeSummaryPill summary={decision.summary} />
-              </div>
-            </div>
-            {isArchived && (
-              <div
-                data-testid="archived-banner"
-                data-archived-at={issue.archivedAt ?? ''}
-                className="mt-3 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground"
-              >
-                Archived{issue.archivedAt ? ` ${formatTime(issue.archivedAt)}` : ''}.
-                The workflow timeline, artifacts, events, and feedback below are preserved for reference.
-              </div>
-            )}
-            <div className="flex items-start gap-3">
-              <h1 className="text-2xl font-bold text-foreground flex-1 min-w-0">
-                {issue.title}
-              </h1>
-              <div className="flex shrink-0 items-center gap-2">
-                <ActivityDialog
-                  issueNumber={issueNumber}
-                  issueId={issue?.id}
-                  workflowStatus={issue?.workflowStatus}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setEditOpen(true)}
-                  aria-label="Edit issue"
-                  title="Edit issue"
-                  data-testid="edit-issue-button"
-                >
-                  <PencilIcon className="size-4" />
-                </Button>
-              </div>
-            </div>
-            {Object.keys(issue.labels ?? {}).length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1">
-                {sortLabels(issue.labels).map((label) => {
-                  const s = getLabelStyle(label)
-                  return (
-                    <span
-                      key={label}
-                      className={`inline-block rounded-full px-2 font-medium ${
-                        s.size === 'sm' ? 'text-[11px] py-0.5' : 'text-xs py-0.5'
-                      }`}
-                      style={{ backgroundColor: s.bg, color: s.text }}
-                    >
-                      {label}
-                    </span>
-                  )
-                })}
-              </div>
-            )}
-            {issue.primaryEpic && (
-              <button
-                type="button"
-                onClick={() => navigate(toProjectPath(`/epics/${issue.primaryEpic!.id}`))}
-                className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                data-testid="primary-epic-label"
-              >
-                <span className="text-xs text-muted-foreground/70">Part of Epic:</span>
-                <span
-                  className="font-mono font-medium text-foreground/80"
-                  data-testid="primary-epic-number"
-                >
-                  {issue.primaryEpic.number != null
-                    ? `#${issue.primaryEpic.number}`
-                    : `#${issue.primaryEpic.id.slice(0, 8)}`}
-                </span>
-                <span className="font-medium text-foreground/90">
-                  {issue.primaryEpic.title}
-                </span>
-              </button>
-            )}
-            <div className="mt-2 text-xs text-muted-foreground/70">
-              Created {formatTime(issue.createdAt)} · Updated {formatTime(issue.updatedAt)}
-            </div>
-          </div>
-
-          <div className="mb-8" data-testid="runtime-decision-surface-frame">
-            <RuntimeDecisionSurface
+          <div data-testid="status-header-tier" className="space-y-4">
+            <StatusHeadline
               decision={decision}
-              mutations={{
-                approveMutation,
-                sendBackMutation,
-                retryMutation,
-                resumeMutation,
-                rerunMutation,
-                forceStopMutation,
-                stopMutation,
-                startMutation,
-              }}
+              stageProgress={issue.workflowStageProgress ?? null}
             />
-          </div>
 
-          <BranchBar
-            issueNumber={issueNumber}
-            stage={workflowStage}
-            isAgentRunning={isAgentRunningOnThis}
-            baseBranch={issue.repository?.baseBranch}
-            allowRebase={!isBacklog && !!issue.workflowRunId}
-          />
-
-          <div className="mb-8" data-testid="workflow-view-frame">
-            <WorkflowView issue={issue} readOnly />
-          </div>
-
-          {prDeliveryMetadata && (
-            <div className="mb-8" data-testid="pr-delivery-summary-frame">
-              <PrDeliverySummary timeline={workflowTimeline} />
+            <div data-testid="issue-detail-header">
+              <div className="flex flex-wrap items-center gap-3 mb-2">
+                <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-identity">
+                  <span className="text-sm font-mono text-muted-foreground/70 tabular-nums">
+                    #{issue.number}
+                  </span>
+                  <PriorityChip priority={issue.priority} />
+                  {issue.isDraft && <DraftPill />}
+                  {isArchived && <ArchivedPill archivedAt={issue.archivedAt} />}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-runtime">
+                  <RuntimeSummaryPill summary={decision.summary} />
+                </div>
+              </div>
+              {isArchived && (
+                <div
+                  data-testid="archived-banner"
+                  data-archived-at={issue.archivedAt ?? ''}
+                  className="mt-3 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground"
+                >
+                  Archived{issue.archivedAt ? ` ${formatTime(issue.archivedAt)}` : ''}.
+                  The workflow timeline, artifacts, events, and feedback below are preserved for reference.
+                </div>
+              )}
+              <div className="flex items-start gap-3">
+                <h1 className="text-2xl font-bold text-foreground flex-1 min-w-0">
+                  {issue.title}
+                </h1>
+                <div className="flex shrink-0 items-center gap-2">
+                  <ActivityDialog
+                    issueNumber={issueNumber}
+                    issueId={issue?.id}
+                    workflowStatus={issue?.workflowStatus}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setEditOpen(true)}
+                    aria-label="Edit issue"
+                    title="Edit issue"
+                    data-testid="edit-issue-button"
+                  >
+                    <PencilIcon className="size-4" />
+                  </Button>
+                </div>
+              </div>
+              {Object.keys(issue.labels ?? {}).length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {sortLabels(issue.labels).map((label) => {
+                    const s = getLabelStyle(label)
+                    return (
+                      <span
+                        key={label}
+                        className={`inline-block rounded-full px-2 font-medium ${
+                          s.size === 'sm' ? 'text-[11px] py-0.5' : 'text-xs py-0.5'
+                        }`}
+                        style={{ backgroundColor: s.bg, color: s.text }}
+                      >
+                        {label}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+              {issue.primaryEpic && (
+                <button
+                  type="button"
+                  onClick={() => navigate(toProjectPath(`/epics/${issue.primaryEpic!.id}`))}
+                  className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  data-testid="primary-epic-label"
+                >
+                  <span className="text-xs text-muted-foreground/70">Part of Epic:</span>
+                  <span
+                    className="font-mono font-medium text-foreground/80"
+                    data-testid="primary-epic-number"
+                  >
+                    {issue.primaryEpic.number != null
+                      ? `#${issue.primaryEpic.number}`
+                      : `#${issue.primaryEpic.id.slice(0, 8)}`}
+                  </span>
+                  <span className="font-medium text-foreground/90">
+                    {issue.primaryEpic.title}
+                  </span>
+                </button>
+              )}
+              <div className="mt-2 text-xs text-muted-foreground/70">
+                Created {formatTime(issue.createdAt)} · Updated {formatTime(issue.updatedAt)}
+              </div>
             </div>
-          )}
 
-          <div className="mb-8" data-testid="workflow-profile-editor-frame">
-            <IssueWorkflowProfileEditor issueNumber={issueNumber} />
+            <div data-testid="runtime-decision-surface-frame">
+              <RuntimeDecisionSurface
+                decision={decision}
+                mutations={{
+                  approveMutation,
+                  sendBackMutation,
+                  retryMutation,
+                  resumeMutation,
+                  rerunMutation,
+                  forceStopMutation,
+                  stopMutation,
+                  startMutation,
+                }}
+              />
+            </div>
           </div>
 
-          {diffData?.available === true && (
-            <div className="min-w-0 rounded-lg bg-card p-4 mb-8 border-l-2 border-border" data-testid="diff-summary-banner">
-              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                <span className="min-w-0 text-muted-foreground break-words">
-                  <span className="font-medium text-card-foreground break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
-                  {' wants to merge into '}
-                  <span className="font-medium text-card-foreground break-all" title={diffData.base} data-testid="diff-summary-base">{diffData.base}</span>
-                </span>
-                <span className="text-muted-foreground/40">·</span>
-                <span className="text-muted-foreground">
-                  <span className="font-medium text-card-foreground">{diffData.ahead}</span> ahead
-                </span>
-                {diffData.behind > 0 && (
-                  <>
+          <div className="mt-8 grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-8" data-testid="issue-detail-content-grid">
+            <div className="min-w-0 lg:col-span-2 space-y-8" data-testid="reading-flow">
+              <BranchBar
+                issueNumber={issueNumber}
+                stage={workflowStage}
+                isAgentRunning={isAgentRunningOnThis}
+                baseBranch={issue.repository?.baseBranch}
+                allowRebase={!isBacklog && !!issue.workflowRunId}
+              />
+
+              <div data-testid="workflow-view-frame">
+                <WorkflowView issue={issue} readOnly />
+              </div>
+
+              {prDeliveryMetadata && (
+                <div data-testid="pr-delivery-summary-frame">
+                  <PrDeliverySummary timeline={workflowTimeline} />
+                </div>
+              )}
+
+              <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
+
+              <div data-testid="workflow-profile-editor-frame">
+                <IssueWorkflowProfileEditor issueNumber={issueNumber} />
+              </div>
+
+              {(!isBacklog || issue.workflowRunId) && (
+                <div data-testid="runtime-evidence-frame" className="space-y-4">
+                  {!isBacklog && workflowStage && (
+                    <TaskProgressPanel
+                      issueNumber={issueNumber}
+                      currentStage={workflowStage}
+                      isAgentRunning={isAgentRunningOnThis}
+                    />
+                  )}
+
+                  {!isBacklog && issue.workflowRunId && (
+                    <WorkflowSessionsPanel
+                      issueNumber={issueNumber}
+                      workflowRunId={issue.workflowRunId}
+                    />
+                  )}
+                </div>
+              )}
+
+              {diffData?.available === true && (
+                <div className="min-w-0 rounded-lg bg-card p-4 border-l-2 border-border" data-testid="diff-summary-banner">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                    <span className="min-w-0 text-muted-foreground break-words">
+                      <span className="font-medium text-card-foreground break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
+                      {' wants to merge into '}
+                      <span className="font-medium text-card-foreground break-all" title={diffData.base} data-testid="diff-summary-base">{diffData.base}</span>
+                    </span>
                     <span className="text-muted-foreground/40">·</span>
                     <span className="text-muted-foreground">
-                      <span className="font-medium text-card-foreground">{diffData.behind}</span> behind
+                      <span className="font-medium text-card-foreground">{diffData.ahead}</span> ahead
                     </span>
-                  </>
-                )}
-                <span className="text-muted-foreground/40">·</span>
-                <span className="text-muted-foreground">
-                  <span className="font-medium text-card-foreground">{diffData.summary.filesChanged}</span> files changed
-                </span>
-                <span className="text-muted-foreground/40">·</span>
-                <span className="text-success">+{diffData.summary.additions}</span>
-                <span className="text-danger">-{diffData.summary.deletions}</span>
-              </div>
-              <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span className="min-w-0 break-words">showing merge-base → <span className="break-all" title={diffData.head}>{diffData.head}</span></span>
-                <span>·</span>
-                <span>Workspace retained</span>
-              </div>
-            </div>
-          )}
-
-          <div className="grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-8" data-testid="issue-detail-content-grid">
-            <div className="min-w-0 lg:col-span-2 space-y-8">
-              <IssueDescriptionSection issue={issue} resolveIssueAttachment={resolveIssueAttachment} />
-
-              {issue.workflowRunId && (
-                <WorkflowYamlDialog workflowRunId={issue.workflowRunId} isArchived={isArchived} />
+                    {diffData.behind > 0 && (
+                      <>
+                        <span className="text-muted-foreground/40">·</span>
+                        <span className="text-muted-foreground">
+                          <span className="font-medium text-card-foreground">{diffData.behind}</span> behind
+                        </span>
+                      </>
+                    )}
+                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-muted-foreground">
+                      <span className="font-medium text-card-foreground">{diffData.summary.filesChanged}</span> files changed
+                    </span>
+                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-success">+{diffData.summary.additions}</span>
+                    <span className="text-danger">-{diffData.summary.deletions}</span>
+                  </div>
+                  <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span className="min-w-0 break-words">showing merge-base → <span className="break-all" title={diffData.head}>{diffData.head}</span></span>
+                    <span>·</span>
+                    <span>Workspace retained</span>
+                  </div>
+                </div>
               )}
 
               <IssueDiffFilesSection
@@ -347,6 +369,12 @@ export function IssueDetailPage() {
                 </div>
               )}
 
+              <IssueDescriptionSection issue={issue} resolveIssueAttachment={resolveIssueAttachment} />
+
+              {issue.workflowRunId && (
+                <WorkflowYamlDialog workflowRunId={issue.workflowRunId} isArchived={isArchived} />
+              )}
+
               <IssueCommentsSection
                 comments={comments}
                 issueNumber={issueNumber}
@@ -361,10 +389,8 @@ export function IssueDetailPage() {
               />
             </div>
 
-            <div className="min-w-0 space-y-6" data-testid="issue-detail-right-rail">
+            <div className="min-w-0 space-y-6" data-testid="reference-rail">
               <IssueDetailsCard issue={issue} />
-
-              <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
 
               <div data-testid="issue-workflow-profile-control-frame">
                 <WorkflowProfileControl issue={issue} />
@@ -374,38 +400,8 @@ export function IssueDetailPage() {
                 <IssueDriftCard drift={issue.drift} />
               )}
 
-              {issue.health === IssueHealth.Interrupted && (
-                <CardSection title="Workflow Interrupted" tone="orange">
-                  <p className="text-xs text-warning">
-                    The workflow was interrupted (e.g. server restart). Your progress has been preserved.
-                    Click &quot;Resume&quot; below to continue from where it left off.
-                  </p>
-                </CardSection>
-              )}
-
               {(issue.health === IssueHealth.Blocked || issue.convergence) && (
                 <WorkflowConvergencePanel convergence={issue.convergence} />
-              )}
-
-              {(!isBacklog || issue.workflowRunId) && (
-                <CardSection title="Runtime/Sessions">
-                  <div className="space-y-4">
-                    {!isBacklog && workflowStage && (
-                      <TaskProgressPanel
-                        issueNumber={issueNumber}
-                        currentStage={workflowStage}
-                        isAgentRunning={isAgentRunningOnThis}
-                      />
-                    )}
-
-                    {!isBacklog && issue.workflowRunId && (
-                      <WorkflowSessionsPanel
-                        issueNumber={issueNumber}
-                        workflowRunId={issue.workflowRunId}
-                      />
-                    )}
-                  </div>
-                </CardSection>
               )}
 
               <IssueConfigurationCard

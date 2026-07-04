@@ -1,0 +1,62 @@
+T-001 progress notes
+
+## Codebase Patterns
+
+- jsdom cannot lay out: stickiness is asserted via `data-sticky="true"` + className contains `sticky` + first-child-of-scroll-container (mirrors `SessionPage.sticky.test.tsx:445` / `SessionDetailShell.tsx:289-290`).
+- The scroll container for the detail page is `issue-detail-page-container` (`flex-1 min-w-0 overflow-y-auto`). Sticky positioning is relative to this container, not the window.
+- The runtime situation is built up via `deriveRuntimeDecision` (single source of truth); presentation layers must consume `decision.summary`/`decision.currentTask` verbatim and never re-classify.
+- Tone map lives in `pills.tsx` (`runtimeSummaryPresentation`) — `StatusHeadline` reuses a parallel map keyed off the same `RuntimeSummary` values but with the `*-subtle` fill + icon + border to layer as the heaviest tier.
+- `WorkflowInterrupted` "static" card is removed because `deriveRuntimeDecision.blockedReason` already surfaces interrupted health in the headline/surface; removal is the D5 outcome, not a regression.
+
+## Layer Reassignment (D2) — T-001 Outcomes
+
+- **status-header tier** (new anchor `status-header-tier`): `StatusHeadline` (sticky, `data-sticky="true"`, `data-testid="status-headline"`), `issue-detail-header` (identity row), `runtime-decision-surface-frame`. Headline is the **only** sticky element.
+- **reading flow** (anchor `reading-flow`, `lg:col-span-2`): `BranchBar`, `WorkflowView`, `PrDeliverySummary`, `LatestArtifactsPanel`, `IssueWorkflowProfileEditor`, runtime evidence (`TaskProgressPanel` + `WorkflowSessionsPanel` wrapped in `runtime-evidence-frame`), `diff-summary-banner`, `IssueDiffFilesSection`, `IssueCommitsSection`, `IssueDescriptionSection`, `WorkflowYamlDialog`, `IssueCommentsSection`.
+- **reference rail** (anchor `reference-rail`, `lg:col-span-1`): `IssueDetailsCard`, `WorkflowProfileControl`, `IssueDriftCard`, `WorkflowConvergencePanel`, `IssueConfigurationCard`, `IssueActionsCard`, `IssuePrerequisitesCard`, `IssueReadinessCard` (backlog only). All 7 runtime actions live in the status-header tier via `RuntimeDecisionSurface`; none are duplicated here.
+
+## D5 (single-runtime-badge) Outcome
+
+- Identity row keeps exactly one `RuntimeSummaryPill` (lightweight badge).
+- `StatusHeadline` is the single heavy status region (situation + stage + progress + current task).
+- `RuntimeDecisionSurface` drops its own summary label/icon row + `runtime-summary-label` + `CurrentTaskPill`. The surface keeps rationale, next-action, drift-note, wait-reason, and the action buttons. Surface `data-testid`/`data-summary`/`data-tone` and `bg-card border-l-{tone}` anchor are preserved so existing test surface continues to be hit.
+
+## Test Anchors Changed in T-001
+
+- `issue-detail-right-rail` → `reference-rail` (archived and main test files).
+- `runtime-decision-surface-frame`'s `mb-8` is no longer at the page level — the new `status-header-tier` uses `space-y-4` for header-tier spacing. Tests were updated to assert tier containment + spacing instead of `mb-8` on the frame.
+- `IssueActionsCard` remains in the rail (D2); `IssueActionsCard`'s `archived-actions-note` is unaffected.
+- `IssueWorkflowProfileEditor` is not listed in D2 explicitly. To avoid re-introducing a block that was tested in `IssueDetailPage.test.tsx` as `workflow-profile-editor-frame`, it was kept inside the reading flow (where it was, just under `LatestArtifactsPanel`).
+
+## Test Files Updated
+
+- `IssueDetailPage.test.tsx` (main) — 5 tests touched: spacing-density, header margin rhythm, data-testid stability, branch rebase ordering, stop-action-rail-negative.
+- `IssueDetailPage.archived.test.tsx` — 2 tests: right-rail → reference-rail anchor swap.
+- `IssueDetailPage.readiness.test.tsx` — no anchor changes (no failures); passes.
+- `IssueDetailPage.capacity-gating.test.tsx` — no anchor changes (no failures); passes.
+- `tests/IssueDetailPage.test.tsx` (legacy integration test outside the four target files) — single test rewritten ("groups issue detail right rail panels by user intent") to reflect new tier assignment; all 46 tests pass.
+
+## New Spec Tests (T-001)
+
+- `IssueDetailPage.status-header.test.tsx` — 13 tests across:
+  - three-tier anchors (`status-header-tier`, `reading-flow`, `reference-rail`)
+  - stickiness (data-sticky + className + first-child + only-one-sticky invariant)
+  - surface NOT sticky (asserts `data-sticky !== 'true'` + className absence)
+  - single glanceable region (situation + stage + progress + current task)
+  - backlog case (no fabricated stage/progress)
+  - archived done case (done situation + no active workflow controls)
+  - adjudicated situation variants (running / approval-required / done-archived)
+  - single-badge invariant (identity row has exactly one runtime-status-pill; surface has none)
+  - action-surface anchoring (all 7 actions live inside status-header-tier)
+  - heaviest visual weight (sticky + fill + icon + border combination unique to headline; reading flow and rail have no sticky elements)
+
+## Notes for T-002 / T-003
+
+- Reading-flow blocks now live inside a `data-testid="reading-flow"` wrapper that already uses `space-y-8`. T-002 will set per-block chrome (description/comments light, structured summaries minimal) without needing to touch tier containers.
+- Reference rail blocks live inside a `data-testid="reference-rail"` wrapper that uses `space-y-6`. T-003 will add narrow-screen collapse and default-collapse state for drift + convergence without changing the rail's structure.
+- `WorkflowConvergencePanel` and `IssueDriftCard` are currently rendered unconditionally in the rail (when their data exists); T-003 should wrap their `data-collapsed="true"` default state without changing placement.
+
+## Outstanding Scope (deferred to T-002/T-003/T-004)
+
+- Inline-primary-action in sticky headline (D4 alternative, deferred to keep first cut simple).
+- Narrow-screen collapse for reference rail (T-003).
+- Cross-tier verification gate (T-004).
