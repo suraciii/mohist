@@ -13,6 +13,7 @@ using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SystemInfo;
 using Xunit;
@@ -82,6 +83,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _configPath;
     private readonly string _artifactStorageRoot;
     private string? _webRoot;
+    // Keeper for the in-memory OtelDb override; disposed with the factory.
+    private SqliteConnection? _otelKeeper;
 
     public string ArtifactStorageRoot => _artifactStorageRoot;
     public string LogsPath => _logsPath;
@@ -181,7 +184,25 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.AddDbContextFactory<MohistDbContext>(options =>
                 options
                     .UseSqlite(_connectionString));
+            // Replace the file-backed production OtelDb (which would otherwise
+            // resolve to $HOME/.mohist/otel.db) with an in-memory instance so
+            // the integration factory never creates a real otel.db file
+            // (design/testing.md hard-constraint 1). The keeper connection is
+            // owned by this factory and disposed in Dispose(bool).
+            var (otelDb, otelKeeper) = InMemoryOtelDb.Create();
+            _otelKeeper = otelKeeper;
+            services.RemoveAll<OtelDb>();
+            services.AddSingleton(otelDb);
         });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _otelKeeper?.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     public async Task EnsureSchemaAsync()

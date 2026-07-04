@@ -138,6 +138,30 @@ public sealed class OtelDb
     }
 
     /// <summary>
+    /// Test-only constructor that injects explicit connection strings instead
+    /// of deriving them from a file path. Used to back <c>OtelDb</c> with an
+    /// in-memory shared-cache SQLite database so OTel specs never touch a real
+    /// <c>otel.db</c> file (design/testing.md hard-constraint 1). The caller
+    /// owns a keeper <see cref="SqliteConnection"/> that keeps the in-memory
+    /// database alive for the lifetime of this instance.
+    /// </summary>
+    /// <remarks>
+    /// When the connection strings target an in-memory database, the read-only
+    /// contract is <strong>not</strong> physically enforced by SQLite (the
+    /// <c>Mode=ReadOnly</c> open flag is a no-op against an in-memory
+    /// shared-cache database). That is acceptable in tests because the
+    /// read-only contract is a production CLI safety guard, not a behavior the
+    /// specs assert on; <see cref="TraceQuerier"/> only ever issues
+    /// <c>SELECT</c> statements.
+    /// </remarks>
+    internal OtelDb(string readWriteConnectionString, string readOnlyConnectionString)
+    {
+        ReadWriteConnectionString = readWriteConnectionString;
+        ReadOnlyConnectionString = readOnlyConnectionString;
+        DatabasePath = "<in-memory>";
+    }
+
+    /// <summary>
     /// Resolves the absolute path of the <c>otel.db</c> file from the
     /// provided options + environment. Pure function — does not touch
     /// the filesystem.

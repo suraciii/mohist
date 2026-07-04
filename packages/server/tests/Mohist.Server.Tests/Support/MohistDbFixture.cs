@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Otel;
 using EnvironmentAbstractions;
 using EnvironmentAbstractions.TestHelpers;
 using Orleans;
@@ -34,6 +35,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
         NullLogger<InMemoryEventBus>.Instance);
     private readonly RecordingEventStore _eventStore = new();
     private SqliteConnection _keeper = null!;
+    private SqliteConnection _otelKeeper = null!;
     private IServiceProvider? _services;
     private string? _connectionString;
 
@@ -67,7 +69,6 @@ public sealed class MohistDbFixture : IAsyncLifetime
         var systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-{Guid.NewGuid():N}.json");
         var artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
         Directory.CreateDirectory(artifactStorageRoot);
-        var otelDbPath = Path.Combine(Path.GetTempPath(), $"mohist-otel-{Guid.NewGuid():N}.db");
 
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -77,7 +78,6 @@ public sealed class MohistDbFixture : IAsyncLifetime
                 ["Mohist:WebRoot"] = Path.Combine(Path.GetTempPath(), $"mohist-web-{Guid.NewGuid():N}"),
                 ["Mohist:SystemUpdate:StatePath"] = systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = artifactStorageRoot,
-                ["Mohist:Otel:DbPath"] = otelDbPath,
                 ["Mohist:ServerUrl"] = "http://127.0.0.1:3456",
             })
             .Build();
@@ -104,6 +104,15 @@ public sealed class MohistDbFixture : IAsyncLifetime
         // RecordingEventStore remains available via the EventStore
         // property for specs that explicitly want to assert on recorded
         // calls; the in-scope IEventStore is the real one.
+
+        // Replace the file-backed production OtelDb with an in-memory instance
+        // so the service graph never creates a real otel.db file
+        // (design/testing.md hard-constraint 1). The keeper connection keeps
+        // the database alive until DisposeAsync.
+        var (otelDb, otelKeeper) = InMemoryOtelDb.Create();
+        _otelKeeper = otelKeeper;
+        services.RemoveAll<OtelDb>();
+        services.AddSingleton(otelDb);
 
         _services = services.BuildServiceProvider();
 
@@ -144,6 +153,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
     {
         _services = null;
         _keeper?.Dispose();
+        _otelKeeper?.Dispose();
         return Task.CompletedTask;
     }
 }

@@ -33,8 +33,9 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _connectionString;
     private readonly string _runnerRoot;
     private readonly string _systemUpdateStatePath;
-    private readonly string _otelDbPath;
     private readonly string _artifactStorageRoot;
+    private readonly SqliteConnection _otelKeeper;
+    private readonly OtelDb _otelDb;
     private string? _webRoot;
 
     public int OtlpPort { get; }
@@ -49,20 +50,21 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         _runnerRoot = runnerRoot;
         _systemUpdateStatePath = systemUpdateStatePath;
         OtlpPort = otlpPort;
-        // OTel ingester/query storage requires a real on-disk SQLite file: the
-        // production OtelDb opens separate read-write and read-only connections
-        // (the read-only open physically refuses to create a missing file), and
-        // resolves the path via Path.GetFullPath + EnsureDirectoryExists. An
-        // in-memory shared-cache database would break that contract. This is a
-        // documented controlled exception to the "no SQLite files on disk" rule
-        // (design/testing.md hard-constraint 1); each instance uses a unique
-        // Guid-suffixed path under GetTempPath and is cleaned up by the caller.
-        _otelDbPath = Path.Combine(Path.GetTempPath(), $"mohist-otel-int-{Guid.NewGuid():N}.db");
+        // OTel ingester/query storage is backed by an in-memory shared-cache
+        // SQLite database so the integration specs never touch a real otel.db
+        // file (design/testing.md hard-constraint 1). The keeper connection
+        // keeps the database alive for the factory's lifetime; it is disposed
+        // in Dispose(bool). The physical read-only contract is not enforced
+        // against an in-memory database, which is acceptable here because
+        // TraceQuerier only issues SELECTs (the read-only guard is a production
+        // CLI safety constraint, not a behavior under test).
+        (_otelDb, _otelKeeper) = InMemoryOtelDb.Create();
         _artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-otel-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_artifactStorageRoot);
     }
 
-    public string OtlpDbPath => _otelDbPath;
+    /// <summary>The in-memory <see cref="OtelDb"/> shared by the integration specs.</summary>
+    public OtelDb OtelDb => _otelDb;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -73,7 +75,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
         builder.UseSetting("Mohist:ArtifactStorage:Root", _artifactStorageRoot);
         builder.UseSetting("Mohist:Otel:Port", OtlpPort.ToString());
-        builder.UseSetting("Mohist:Otel:DbPath", _otelDbPath);
         builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:3456");
 
         builder.ConfigureAppConfiguration((_, config) =>
@@ -86,7 +87,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = _artifactStorageRoot,
                 ["Mohist:Otel:Port"] = OtlpPort.ToString(),
-                ["Mohist:Otel:DbPath"] = _otelDbPath,
                 ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",
                 ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
@@ -116,7 +116,21 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             services.AddDbContextFactory<MohistDbContext>(options =>
                 options
                     .UseSqlite(_connectionString));
+            // Replace the file-backed production OtelDb with the in-memory
+            // instance so the OTLP/query routes exercise the real TraceIngester
+            // and TraceQuerier without touching the filesystem.
+            services.RemoveAll<OtelDb>();
+            services.AddSingleton(_otelDb);
         });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _otelKeeper.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     public new HttpClient CreateClient()

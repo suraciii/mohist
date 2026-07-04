@@ -56,7 +56,6 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         await _keeper.DisposeAsync();
         try { if (Directory.Exists(_runnerRoot)) Directory.Delete(_runnerRoot, recursive: true); } catch { }
         try { if (File.Exists(_systemUpdateStatePath)) File.Delete(_systemUpdateStatePath); } catch { }
-        try { if (File.Exists(_factory?.OtlpDbPath)) File.Delete(_factory.OtlpDbPath); } catch { }
     }
 
     [Fact]
@@ -413,7 +412,10 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
 
         Assert.Equal(3L, data.GetProperty("trace_count").GetInt64());
         Assert.True(data.GetProperty("span_count").GetInt64() >= 3L);
-        Assert.True(data.GetProperty("db_size_bytes").GetInt64() > 0L);
+        // db_size_bytes is the otel.db file size; it is 0 against the in-memory
+        // database this factory uses. The file-size contract (> 0 for a
+        // file-backed db) is covered by TraceQuerierSpecs.GetStatusAsync_ReportsCountsAndFileSize.
+        Assert.True(data.GetProperty("db_size_bytes").GetInt64() >= 0L);
     }
 
     [Fact]
