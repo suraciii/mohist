@@ -16,6 +16,7 @@ style: ["短索引，只说明入口。"]
 - [testing.md](testing.md) — 测试两条轨道（spec/unit）、外部依赖、时间依赖、fake 入口速查。
 - [eventbus.md](eventbus.md) — 事件总线边界和 CloudEvent 约定（as-is，当前运行时）。
 - [eventbus-v2.md](eventbus-v2.md) — 事件总线目标态：复用已落盘事件表 + 单分发器可靠 at-least-once 通知（设计已收敛，**未交付**，跟踪 epic #36）。
+- [agent-subscriptions.md](agent-subscriptions.md) — Agent 事件订阅（**WIP**）：Agent 监听 CloudEvent、按订阅响应提示词自动启动。归属 Agent 上下文，消费 PL；handler 只读信封、Agent 用 mo workflow get 自拉上下文；前置依赖 mo workflow 命令套件。
 
 ## Workflow 核心域
 
