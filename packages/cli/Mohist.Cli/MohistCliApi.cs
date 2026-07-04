@@ -709,6 +709,25 @@ internal sealed class MohistCliApi
             $"--output must be 'table' or 'json' (got '{mode}')");
     }
 
+    public (string Mode, int Exit) ResolveOutputMode(string? output)
+    {
+        var validation = ValidateOutputMode(output);
+        if (validation is OutputModeResult.Invalid invalid)
+        {
+            _err.WriteLine(invalid.Message);
+            return ("json", 1);
+        }
+        return (((OutputModeResult.Valid)validation).Mode, 0);
+    }
+
+    public async Task<(string ProjectId, int Exit)> ResolveProject(string? project, string? projectId)
+    {
+        var resolved = await ResolveProjectIdAsync(project, projectId);
+        if (resolved is null)
+            return ("", 1);
+        return (resolved, 0);
+    }
+
     public async Task<int> PrintWithOutputAsync(string path, string mode, string? tableShape = null)
     {
         using var response = await SendAsync(HttpMethod.Get, path, body: null);

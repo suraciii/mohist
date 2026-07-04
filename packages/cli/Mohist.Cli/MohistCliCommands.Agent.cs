@@ -88,9 +88,10 @@ internal static class AgentCommands
                     return 1;
                 }
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+
+                if (resolveExit != 0) return resolveExit;
 
                 var resolvedInstructions = await ResolveInstructionsAsync(instructions, instructionsStdin, api);
                 if (resolvedInstructions is null)
@@ -139,18 +140,14 @@ internal static class AgentCommands
 
             async Task<int> ListAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
+
+                if (exit != 0) return exit;
 
                 var query = AgentQuery(all ? true : null, status);
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
                 return await api.PrintWithOutputAsync(
                     ProjectAgentsPath(resolvedProjectId, "/agents") + query,
                     mode,
@@ -181,21 +178,16 @@ internal static class AgentCommands
 
             async Task<int> ShowAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
+                var (mode, exit) = api.ResolveOutputMode(output);
+
+                if (exit != 0) return exit;
 
                 var agent = await ResolveAgentAsync(api, resolvedProjectId, nameOrId!);
                 if (agent is null)
                     return 1;
-
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
                 return await api.PrintWithOutputAsync(
                     ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}"),
                     mode,
@@ -262,9 +254,10 @@ internal static class AgentCommands
                     || !ValidateClearSetPair(api, "--max-concurrent-runs", maxConcurrentRuns is not null, "--clear-max-concurrent-runs", clearMaxConcurrentRuns))
                     return 1;
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+
+                if (resolveExit != 0) return resolveExit;
 
                 var agent = await ResolveAgentAsync(api, resolvedProjectId, nameOrId!);
                 if (agent is null)
@@ -336,9 +329,9 @@ internal static class AgentCommands
 
             async Task<int> DeleteAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+                if (resolveExit != 0) return resolveExit;
 
                 var agent = await ResolveAgentAsync(api, resolvedProjectId, nameOrId!);
                 if (agent is null)
@@ -414,16 +407,14 @@ internal static class AgentCommands
 
             async Task<int> LaunchAsync()
             {
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalidOutput)
-                {
-                    api.Error.WriteLine(invalidOutput.Message);
-                    return 1;
-                }
+                var (mode, exit) = api.ResolveOutputMode(output);
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                if (exit != 0) return exit;
+
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+
+                if (resolveExit != 0) return resolveExit;
 
                 var resolvedPrompt = await BodyInputResolver.ResolveAsync(
                     prompt, promptFile, promptStdin,
@@ -437,8 +428,6 @@ internal static class AgentCommands
                 object body = contextRefs is null
                     ? new { prompt = promptText }
                     : new { prompt = promptText, context = contextRefs };
-
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
                 return await api.PrintPostWithOutputAsync(
                     ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agentRef!)}/sessions"),
                     body,
@@ -482,16 +471,14 @@ internal static class AgentCommands
 
             async Task<int> FollowupAsync()
             {
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalidOutput)
-                {
-                    api.Error.WriteLine(invalidOutput.Message);
-                    return 1;
-                }
+                var (mode, exit) = api.ResolveOutputMode(output);
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                if (exit != 0) return exit;
+
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+
+                if (resolveExit != 0) return resolveExit;
 
                 var resolvedText = await BodyInputResolver.ResolveAsync(
                     text, textFile, textStdin,
@@ -500,8 +487,6 @@ internal static class AgentCommands
                 if (resolvedText is BodyInputResolver.Result.Failure)
                     return 1;
                 var textValue = ((BodyInputResolver.Result.Success)resolvedText).Body;
-
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
                 return await api.PrintPostWithOutputAsync(
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/followup"),
                     new { text = textValue },
@@ -536,18 +521,14 @@ internal static class AgentCommands
 
             async Task<int> CancelAsync()
             {
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalidOutput)
-                {
-                    api.Error.WriteLine(invalidOutput.Message);
-                    return 1;
-                }
+                var (mode, exit) = api.ResolveOutputMode(output);
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                if (exit != 0) return exit;
 
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintPostWithOutputAsync(
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/cancel"),
                     new { },
@@ -586,16 +567,14 @@ internal static class AgentCommands
 
             async Task<int> ListAsync()
             {
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
+                var (mode, exit) = api.ResolveOutputMode(output);
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                if (exit != 0) return exit;
+
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+
+                if (resolveExit != 0) return resolveExit;
 
                 var agent = await ResolveAgentAsync(api, resolvedProjectId, agentRef!);
                 if (agent is null)
@@ -604,7 +583,6 @@ internal static class AgentCommands
                 var query = string.IsNullOrWhiteSpace(status)
                     ? ""
                     : $"?status={Uri.EscapeDataString(status)}";
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
                 return await api.PrintWithOutputAsync(
                     ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}/sessions") + query,
                     mode,
@@ -637,18 +615,14 @@ internal static class AgentCommands
 
             async Task<int> ShowAsync()
             {
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
+                var (mode, exit) = api.ResolveOutputMode(output);
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                if (exit != 0) return exit;
 
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintWithOutputAsync(
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}"),
                     mode,
@@ -681,18 +655,14 @@ internal static class AgentCommands
 
             async Task<int> TranscriptAsync()
             {
-                var validation = MohistCliApi.ValidateOutputMode(output);
-                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
-                {
-                    api.Error.WriteLine(invalid.Message);
-                    return 1;
-                }
+                var (mode, exit) = api.ResolveOutputMode(output);
 
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
+                if (exit != 0) return exit;
 
-                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+
+
+                if (resolveExit != 0) return resolveExit;
                 return await api.PrintWithOutputAsync(
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/transcript"),
                     mode,
