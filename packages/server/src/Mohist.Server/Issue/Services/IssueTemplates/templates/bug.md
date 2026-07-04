@@ -5,31 +5,53 @@ description: "Fix — functional bugs (wrong behavior) or non-functional bugs (p
 
 ## Symptom & Evidence
 
-<!-- Pick the mode first: functional = repro steps from a known state + Expected vs Actual; non-functional = current measured value + target + how it was measured. 'A bit slow' is forbidden. -->
+<!--
+Pick the mode first:
+  functional     = repro steps from a known state + Expected vs Actual (state what triggers it and the data/objects involved).
+  non-functional = current measured value + target + how it was measured (a number and a method, always).
+Forbidden: 'a bit slow', 'sometimes crashes', 'feels off' — anything unreproducible or unquantifiable.
+Do not jump to the root cause or the fix here — that belongs in Domain Context / Fix Shape.
+-->
 
-<Functional: repro steps from a known state + Expected vs Actual. Non-functional: current measured value + target + how it was measured.>
+<Functional: repro steps from a known state + Expected vs Actual.
+ Non-functional: current measured value + target + how it was measured.>
 
 ## Domain Context
 
-<!-- Required: state the violated invariant ('system should X, actually Y'). For pure typo/copy bugs, shrink to one line or delete the section. No fix proposal. -->
+<!--
+Required: state the violated invariant — 'the system should X, actually Y'.
+Name the domain concepts and their intended relationship; cite the code path only if it carries the concept.
+For a pure typo / copy bug: shrink to one line, or delete this whole section.
+Do NOT propose the fix here.
+-->
 
 <The invariant that should hold, and how the current state violates it.>
 
 ## Fix Shape
 
-<!-- Correction direction + blast boundary (what you touch / don't touch). Stay minimal: change only what restores the invariant. Leave concrete files/functions to plan. -->
+<!--
+The correction direction + the blast boundary (what you touch / don't touch).
+Stay minimal: change only what restores the invariant, not what is 'more elegant'.
+Leave concrete files / functions / table schemas to the Plan stage.
+Adjacent bugs you noticed go to a separate issue, not here.
+-->
 
 <The correction direction and what is in/out of scope.>
 
 ## Acceptance Criteria
 
-<!-- Functional = behavior is correct along the repro path; non-functional = the metric meets target (give the number). One [ ] per line, no implementation-level checks. -->
+<!--
+Functional = the behavior is correct along the repro path; Non-functional = the metric meets the target (give the number).
+One [ ] per line. Forbidden: implementation-level checks ('unit tests pass').
+-->
 
 - [ ] <Functional: observable correct behavior; Non-functional: metric meets target>
 - [ ] <...>
 
 ## Non-Goals
 
-<!-- Adjacent bugs not fixed here, and boundaries deliberately not expanded. -->
+<!--
+Adjacent bugs not fixed here, and boundaries deliberately not expanded.
+-->
 
 - <Explicit out-of-scope item>

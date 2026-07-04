@@ -1,10 +1,10 @@
 /**
  * Markdown scaffold for the Epic description field.
  *
- * Mirrors the {@link composeIssueTemplateBody} convention used by
- * `CreateIssueDialog`: each section is a `## Title` heading followed by a single
- * placeholder line, and the sections are joined with a blank line. The result is
- * a free-form markdown string the user can edit, reorder, or replace wholesale.
+ * Same convention as the built-in issue templates: each section is a `## Title`
+ * heading followed by a placeholder line, sections joined with a blank line.
+ * The result is a free-form markdown string the user can edit, reorder, or
+ * replace wholesale.
  *
  * The scaffold is a starting point only — the Create/Edit dialogs are free to
  * send any markdown string the user authors; no API field changes.

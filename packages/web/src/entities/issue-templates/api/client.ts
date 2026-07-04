@@ -9,12 +9,6 @@ export function getIssueTemplate(name: string, projectId: string | null | undefi
   return request<IssueTemplateDetail>(`/issue-templates/${name}${projectQuery(projectId)}`)
 }
 
-export function composeIssueTemplateBody(template: Pick<IssueTemplateDetail, 'sections'>): string {
-  return template.sections
-    .map((section) => `## ${section.title}\n${section.placeholder}`)
-    .join('\n\n')
-}
-
 function issueTemplatesPath(projectId: string | null | undefined) {
   return `/issue-templates${projectQuery(projectId)}`
 }

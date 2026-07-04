@@ -7,9 +7,11 @@ namespace Mohist.Server.Tests.Specs.Skills;
 
 /// <summary>
 /// Verifies the packaged <c>mohist-explore</c> skill guidance carries the
-/// three-voice requirement-distillation workflow. The explore skill produces
-/// PRD content only; issue-creation mechanics (frontmatter, workflow, risk,
-/// CLI handoff) live in the <c>mohist</c> skill and are not expected here.
+/// three-lens requirement-distillation workflow. The explore skill produces
+/// clarified thinking only — it does not define issue-body sections or carry
+/// a body template. Section structure and per-section writing rules live in
+/// the server-side issue templates; issue-creation mechanics (frontmatter,
+/// workflow, risk, CLI handoff) live in <c>mohist-create-issue</c>.
 /// These specs read the actual packaged asset on disk so they catch drift
 /// between the served skill content and the spec.
 /// </summary>
@@ -73,20 +75,16 @@ public sealed class ExploreSkillContentSpecs
     }
 
     [Fact]
-    public void PackagedExploreSkill_ProvidesReferenceTemplateFile()
+    public void PackagedExploreSkill_DoesNotCarryBodyTemplateReference()
     {
+        // Section structure and per-section writing rules live in the server-side issue templates,
+        // fetched by mohist-create-issue via `mo issue template get`. Explore must not carry its own
+        // body template — that would duplicate and drift from the canonical templates.
         var templatePath = Path.Combine(ReferencesRoot, "issue-body-template.md");
-
-        Assert.True(File.Exists(templatePath), $"Expected issue body template at '{templatePath}'.");
-
-        var template = File.ReadAllText(templatePath);
-        // The template is pure PRD content — no frontmatter (that is mohist's job).
-        Assert.DoesNotContain("recommended_workflow", template, StringComparison.Ordinal);
-        Assert.Contains("## User Voice", template, StringComparison.Ordinal);
-        Assert.Contains("## Product Shape", template, StringComparison.Ordinal);
-        Assert.Contains("## Domain Model", template, StringComparison.Ordinal);
-        Assert.Contains("## Acceptance Criteria", template, StringComparison.Ordinal);
-        Assert.Contains("## Non-Goals", template, StringComparison.Ordinal);
+        Assert.False(File.Exists(templatePath),
+            $"explore must not ship a body template reference, but '{templatePath}' exists.");
+        Assert.False(Directory.Exists(ReferencesRoot),
+            $"explore must not ship a references/ directory.");
     }
 
     [Fact]
@@ -110,10 +108,9 @@ public sealed class ExploreSkillContentSpecs
         Assert.True(result.Found, result.Error);
         Assert.NotNull(result.Skill);
         Assert.Equal("mohist-explore", result.Skill!.Name);
-        Assert.NotEmpty(result.Skill.SupplementaryFiles);
-        Assert.Contains(
-            result.Skill.SupplementaryFiles,
-            file => string.Equals(file.RelativePath, "references/issue-body-template.md", StringComparison.Ordinal));
+        // Explore no longer ships a supplementary body-template file; it produces clarified
+        // thinking only, and the create skills own the templates.
+        Assert.Empty(result.Skill.SupplementaryFiles);
     }
 
     [Fact]

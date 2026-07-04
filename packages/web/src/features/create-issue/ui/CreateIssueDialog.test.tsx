@@ -11,23 +11,40 @@ const TEMPLATE_FIXTURES = {
     id: 'feature',
     name: 'Feature',
     description: 'Three-voice PRD template',
-    sections: [
-      { title: 'User Voice', guidance: 'What to write in User Voice', placeholder: '<user voice goes here>' },
-      { title: 'Product Shape', guidance: 'What to write in Product Shape', placeholder: '<product shape goes here>' },
-      { title: 'Domain Model', guidance: 'What to write in Domain Model', placeholder: '<domain model goes here>' },
-      { title: 'Acceptance Criteria', guidance: 'What to write in AC', placeholder: '<ac goes here>' },
-      { title: 'Non-Goals', guidance: 'What to write in Non-Goals', placeholder: '<non-goals go here>' },
-    ],
+    body: [
+      '## User Voice',
+      '<!-- first-person user need -->',
+      '<user voice goes here>',
+      '',
+      '## Product Shape',
+      '<!-- product boundary -->',
+      '<product shape goes here>',
+      '',
+      '## Domain Model',
+      '<!-- optional domain context -->',
+      '<domain model goes here>',
+      '',
+      '## Acceptance Criteria',
+      '<ac goes here>',
+      '',
+      '## Non-Goals',
+      '<non-goals go here>',
+    ].join('\n'),
     source: 'builtin' as const,
   },
   custom: {
     id: 'team/bug-report',
     name: 'Bug Report',
     description: 'Minimal bug report template',
-    sections: [
-      { title: 'Summary', guidance: 'One-paragraph summary guidance', placeholder: '<one-paragraph summary>' },
-      { title: 'Repro', guidance: 'Steps to reproduce guidance', placeholder: '<steps to reproduce>' },
-    ],
+    body: [
+      '## Summary',
+      '<!-- one-paragraph summary -->',
+      '<one-paragraph summary>',
+      '',
+      '## Repro',
+      '<!-- steps to reproduce -->',
+      '<steps to reproduce>',
+    ].join('\n'),
     source: 'custom' as const,
   },
 }
@@ -250,7 +267,7 @@ describe('CreateIssueDialog template selector', () => {
     expect(options[0]?.textContent).toBe('Loading templates…')
   })
 
-  it('prefills the body with a section skeleton in section order using each placeholder', async () => {
+  it('prefills the body with the template body verbatim', async () => {
     setupTemplates()
 
     renderDialog()
@@ -261,22 +278,7 @@ describe('CreateIssueDialog template selector', () => {
     const description = await screen.findByPlaceholderText('Optional description') as HTMLTextAreaElement
 
     await waitFor(() => {
-      expect(description.value).toBe([
-        '## User Voice',
-        '<user voice goes here>',
-        '',
-        '## Product Shape',
-        '<product shape goes here>',
-        '',
-        '## Domain Model',
-        '<domain model goes here>',
-        '',
-        '## Acceptance Criteria',
-        '<ac goes here>',
-        '',
-        '## Non-Goals',
-        '<non-goals go here>',
-      ].join('\n'))
+      expect(description.value).toBe(TEMPLATE_FIXTURES.default.body)
     })
 
     const descriptionValue = description.value
@@ -292,26 +294,7 @@ describe('CreateIssueDialog template selector', () => {
     expect(nonGoalsIdx).toBeGreaterThan(acIdx)
   })
 
-  it('does not include any section guidance in the prefilled body', async () => {
-    setupTemplates()
-
-    renderDialog()
-
-    const selector = await screen.findByTestId('issue-template-selector')
-    fireEvent.change(selector, { target: { value: 'feature' } })
-
-    const description = await screen.findByPlaceholderText('Optional description') as HTMLTextAreaElement
-
-    await waitFor(() => {
-      expect(description.value.length).toBeGreaterThan(0)
-    })
-
-    for (const section of TEMPLATE_FIXTURES.default.sections) {
-      expect(description.value).not.toContain(section.guidance)
-    }
-  })
-
-  it('preserves the section order from a custom template (smaller section list)', async () => {
+  it('preserves the custom template body verbatim', async () => {
     setupTemplates()
 
     renderDialog()
@@ -322,18 +305,8 @@ describe('CreateIssueDialog template selector', () => {
     const description = await screen.findByPlaceholderText('Optional description') as HTMLTextAreaElement
 
     await waitFor(() => {
-      expect(description.value).toBe([
-        '## Summary',
-        '<one-paragraph summary>',
-        '',
-        '## Repro',
-        '<steps to reproduce>',
-      ].join('\n'))
+      expect(description.value).toBe(TEMPLATE_FIXTURES.custom.body)
     })
-
-    for (const section of TEMPLATE_FIXTURES.custom.sections) {
-      expect(description.value).not.toContain(section.guidance)
-    }
   })
 
   it('does not apply advisory defaults from the selected template', async () => {

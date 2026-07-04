@@ -1,46 +1,43 @@
 ---
 name: mohist-explore
-description: 把模糊的产品想法提炼成清晰的、有边界的 Mohist issue 需求文档。当用户带着一句话、一个模糊念头或未沉淀的改进意图，需要探索当前产品形态和技术实现，最终产出一份用户视角、产品视角、领域视角三段协作的 PRD 时使用。触发词包括 "提炼需求"、"写 PRD"、"沉淀 issue"、"需求文档"、"探索"、"完善 issue"。
+description: 把模糊的产品想法提炼成清晰的、有边界的 Mohist issue 需求澄清。当用户带着一句话、一个模糊念头或未沉淀的改进意图，需要探索当前产品形态和技术实现，最终产出一份想清楚的需求澄清时使用。触发词包括 "提炼需求"、"写 PRD"、"沉淀 issue"、"需求文档"、"探索"、"完善 issue"。
 ---
 
 # mohist-explore
 
-Use this skill to **distill** a fuzzy idea into a clear, bounded product requirement document (PRD) for a Mohist issue.
+Use this skill to **distill** a fuzzy idea into a clear, bounded requirement clarification for a Mohist issue.
 
-The input is a seed — a sentence, a vague hunch, an improvement intent, or a half-formed thought. The output is a structured PRD that is clear enough for the Plan stage to act on. This skill is about *thinking clearly*, not about operating the CLI. Once the PRD content is finalized, hand it off to the `mohist` skill to actually create the issue.
+The input is a seed — a sentence, a vague hunch, an improvement intent, or a half-formed thought. The output is a requirement clarification that is clear enough for the `mohist-create-issue` skill to fill an issue template against. This skill is about *thinking clearly*; it does not define issue-body sections, prescribe their format, or touch the CLI. Section structure and per-section writing rules live in the issue templates; this skill only makes sure the right questions are answered before an issue is created.
 
 ## When to use
 
 - The user arrives with a fuzzy idea and wants it turned into a Mohist issue.
 - The user has a few sentences and needs them sharpened into something with a real boundary.
-- An issue exists but its body is too vague, too wide, or missing the domain context needed to plan implementation.
+- An issue exists but its thinking is too vague, too wide, or missing the domain context needed to plan implementation.
 - The user wants to think through a product change before committing it to an issue.
 
 Do **not** use this skill for unfocused product patrols ("go find anything broken"). That is a different mode. This skill always starts from a seed the user provides.
 
-## Writing principles
+## The three thinking lenses
 
-The PRD is a product document, not a technical design. Every section of the output must be:
+A clear requirement is reached by working through three perspectives in order. They are **not** peers — they form a dependency chain: Product builds on User, Domain builds on Product. Each lens is a way of *interrogating* the requirement; it does not prescribe a section of the eventual issue body. The lenses ensure the right questions are answered; the issue template (chosen later by `mohist-create-issue`) decides how those answers are written down.
+
+| Lens | Who thinks | Explores | Core question |
+|---|---|---|---|
+| **User Voice** | The user (you); the agent records faithfully | The user's real scenario | What do you actually need? Where do you get stuck? |
+| **Product Shape** | The agent as PM | The **product form** the user experiences today (Web UI, CLI, user journeys) and the target form | How does the need become a concrete product decision with a real boundary? |
+| **Domain Model** | The agent as domain expert | The **domain** the decision lives in — its concepts, invariants, and constraints. **Optional** for simple technical changes. | How does this decision hold up in the domain? What invariants and constraints shape it? |
+
+The most common failure is skipping User Voice and jumping straight to implementation. This skill enforces that User Voice comes first, even when the idea feels obvious.
+
+## Thinking principles
+
+These govern how you explore and how you record the user's thinking. They are not section-writing rules (those live in the templates); they are the discipline of clear thinking.
 
 - **Concise and precise.** No filler, no restating context, no throat-clearing. Each sentence carries information the next sentence depends on.
-- **Literal, not figurative.** No metaphors and no anthropomorphism ("the CLI lies", "dead code", "silently drops", "wiring"). Describe what actually happens in plain terms: *the `--model` flag is accepted by the command but not persisted on the issue.*
+- **Literal, not figurative.** No metaphors and no anthropomorphism ("the CLI lies", "dead code", "silently drops", "wiring"). Describe what actually happens in plain terms.
 - **Product source language.** Use the names the product already uses for its own concepts — issue, workflow, stage, label, prerequisite, comment, feedback, epic, repository. Do not invent fancy synonyms or borrowed jargon.
-- **Product perspective for functional requirements.** Describe what the user sees and can do, not which files or symbols change. The PRD body must not cite source paths, file names, line numbers, or symbol names. Mapping to code is the Plan stage's job.
-- **Domain concepts in domain language.** When the Domain Model section is present, name its concepts, invariants, and constraints in the vocabulary of the domain — not as a tour of the codebase.
-
-The distinction that governs everything below: **you explore the code internally to ground your understanding, but the PRD you write down is product-facing prose. Code paths are your evidence, never your output.**
-
-## The three-voice model
-
-A good PRD is a collaboration between three perspectives. They are **not** peers — they form a dependency chain: Product builds on User, Domain builds on Product. The skill works through them in order, and each voice has its own exploration direction and a gate it must pass before the next voice begins.
-
-| Voice | Who speaks | Explores | Language | Core question |
-|---|---|---|---|---|
-| **User Voice** | The user (you); the agent records faithfully | The user's real scenario | The user's own words | What do you actually need? Where do you get stuck? |
-| **Product Shape** | The agent as PM | The **product form** the user experiences today (Web UI, CLI, user journeys) and the target form | Product language | How does the need become a concrete product decision with a real boundary? |
-| **Domain Model** | The agent as domain expert | The **domain** the decision lives in — its concepts, invariants, and constraints. **Optional** for simple technical changes (see step 3). | Domain language | How does this product decision hold up in the domain? What are the invariants and constraints? |
-
-The most common PRD failure is skipping User Voice and jumping straight to implementation. This skill enforces that User Voice comes first, even when the idea feels obvious.
+- **Explore code internally, record in product/domain terms.** You explore the codebase to ground your understanding, but what you record for the user is product- and domain-facing prose. Code paths are your evidence, never your output.
 
 ## Workflow
 
@@ -53,7 +50,7 @@ Act as an interviewer. The goal here is to **record**, not to solve.
 - Capture intent, not solution. If the user proposes a fix ("just add a toggle"), ask what problem the toggle solves and record the problem.
 - Do not invent requirements the user did not express.
 
-**Gate:** Can the user read back the captured User Voice and say "yes, that is exactly what I mean"? If not, keep asking. You may not proceed until the user recognizes their own need in this section.
+**Gate:** Can the user read back the captured User Voice and say "yes, that is exactly what I mean"? If not, keep asking. You may not proceed until the user recognizes their own need.
 
 A minimal User Voice is one sentence naming the scenario and the need. Even for a clear-cut idea ("add dark mode"), require at least that — never skip the voice entirely.
 
@@ -61,9 +58,9 @@ A minimal User Voice is one sentence naming the scenario and the need. Even for 
 
 Switch to PM perspective. Explore the current product form, then translate User Voice into a concrete product decision.
 
-- Explore what the user experiences today: the relevant Web UI pages, CLI commands, user journeys, and failure paths. This exploration is internal — use it to ground your understanding. Do not put source paths, file names, or symbol names in the PRD body; describe the product form in product language.
+- Explore what the user experiences today: the relevant Web UI pages, CLI commands, user journeys, and failure paths. This exploration is internal — use it to ground your understanding. Describe the product form in product language, not source paths.
 - Translate the need into a target product form: what will the user see or be able to do? What changes in their journey?
-- Decide the boundary. State what is in scope and — just as importantly — what is not. A PRD that cannot name its non-goals is under-cooked.
+- Decide the boundary. State what is in scope and — just as importantly — what is not. A requirement that cannot name its non-goals is under-cooked.
 - Make the trade-offs explicit. If two directions exist, name the one you chose and why.
 
 **Gate:** Is the boundary clear? Are the non-goals brave enough (actually cutting things, not just listing safe trivia)? Does the Product Shape demonstrably resolve the User Voice — can you trace each user need to a product decision that addresses it? If not, refine.
@@ -72,14 +69,14 @@ Switch to PM perspective. Explore the current product form, then translate User 
 
 Switch to domain expert perspective. Explore the current technical implementation, then express the Product Shape in domain terms — just enough for the Plan stage to understand the problem, not a full technical design.
 
-**When to include this section.** Write the Domain Model when the requirement touches a non-trivial business domain — where invariants, lifecycle rules, or cross-aggregate constraints are part of what makes the decision hard. **Omit the section entirely** when the change is a pure technical correction (a flag that doesn't persist, a missing subcommand, a CLI/API parity gap) with no complex business scenario behind it. An omitted Domain Model is better than a padded one that restates Product Shape in code terms.
+**When to think this through.** Pursue this lens when the requirement touches a non-trivial business domain — where invariants, lifecycle rules, or cross-aggregate constraints are part of what makes the decision hard. **Skip it** when the change is a pure technical correction (a flag that doesn't persist, a missing subcommand, a CLI/API parity gap) with no complex business scenario behind it.
 
-- Explore how the relevant area works today: the code paths, data models, and architectural constraints. This exploration is internal; do not cite files, symbols, or line numbers in the PRD body.
-- Name the key domain concepts, the invariants that must hold, and the constraints that shape the solution — in the domain's own vocabulary, not as a codebase tour.
-- Do **not** prescribe files, functions, database tables, or step-by-step implementation tasks. That belongs to the Plan stage. Domain Model is about the *problem space*, not the solution space.
+- Explore how the relevant area works today: the code paths, data models, and architectural constraints. This exploration is internal; do not cite files, symbols, or line numbers in what you record.
+- Name the key domain concepts, the invariants that must hold, and the constraints that shape the solution — in the domain's own vocabulary.
+- Do **not** prescribe files, functions, database tables, or step-by-step implementation tasks. That belongs to the Plan stage. This lens is about the *problem space*, not the solution space.
 - If the Product Shape turns out to be infeasible or more complex than expected, stop and say so — then go back and revise Product Shape (see Iteration below).
 
-**Gate:** If the section is present, are the domain concepts accurate and stated in domain language? Are the real constraints identified? Is this the minimum domain context needed to plan — or have you drifted into premature design? Trim anything that looks like an implementation recipe. If the section is omitted, confirm the change genuinely has no complex business scenario worth capturing.
+**Gate:** If this lens was pursued, are the domain concepts accurate and stated in domain language? Are the real constraints identified? Is this the minimum domain context needed to plan — or have you drifted into premature design? Trim anything that looks like an implementation recipe. If skipped, confirm the change genuinely has no complex business scenario worth capturing.
 
 ### 4. Scope: one issue or many?
 
@@ -96,10 +93,10 @@ Exception: many small, scattered, low-cost changes across different problems and
 
 Then decide whether the split issues form an **epic**:
 
-- If they share **one milestone goal** (a single product outcome that ties them together) → produce an **epic + one PRD per issue**. The epic description captures the milestone (Goal / Background / Non-goals / Scope); each child issue gets its own three-voice PRD scoped to its context + concern.
-- If they are independent (no shared milestone) → produce **several standalone issue PRDs**, no epic.
+- If they share **one milestone goal** (a single product outcome that ties them together) → produce an **epic + one requirement clarification per issue**. The epic description captures the milestone (Goal / Background / Non-goals / Scope); each child issue gets its own clarification scoped to its context + concern.
+- If they are independent (no shared milestone) → produce **several standalone requirement clarifications**, no epic.
 
-If no rule triggers a split → single issue; proceed to Converge with one PRD.
+If no rule triggers a split → single issue; proceed to Converge with one clarification.
 
 #### Dependency order (whenever there are 2+ issues)
 
@@ -114,50 +111,47 @@ Produce as part of the output:
 - A **dependency list**: "issue X requires issue Y" for each real dependency.
 - A **suggested start order**: which issue(s) can start now, which wait, and which can run in parallel (no dependency between them).
 
-Prefer fewer dependencies — if two issues seem tightly coupled, re-check whether they are really one issue, or whether the split seam is wrong. But do not invent fake independence: if B genuinely needs A's contract, say so. The `mohist` skill turns this list into issue prerequisites at creation time, so the epic can advance issue-by-issue without false starts.
+Prefer fewer dependencies — if two issues seem tightly coupled, re-check whether they are really one issue, or whether the split seam is wrong. But do not invent fake independence: if B genuinely needs A's contract, say so. The `mohist-create-epic` skill turns this list into issue prerequisites at creation time, so the epic can advance issue-by-issue without false starts.
 
 **Gate:** Does every proposed issue deliver standalone value? Check that different-context work is split one issue per context, within-context splits each still stand alone, and scattered trivial changes are bundled — not over-split. If you propose an epic, can you state its milestone goal in one sentence? For 2+ issues, is the dependency order stated — including which can run in parallel?
 
 ### 5. Converge
 
+The output of this skill is a **requirement clarification** — the answers gathered through the three lenses (the user's need, the product decision and its boundary, the domain constraints if any) plus the scope decision (single issue / epic + issues / dependencies). This is pure thinking content; it is **not** an issue body and does not carry section headings, frontmatter, workflow recommendations, or risk ratings.
+
 Branch on the scope decision:
 
-- **Single issue:** assemble the three voices into one PRD using `references/issue-body-template.md`.
-- **Epic + issues:** write the epic description (Goal / Background / Non-goals / Scope — shape in the `mohist-create-epic` skill's `references/epic-templates.md`), then one PRD per child issue using `references/issue-body-template.md`, each scoped to its own context + concern. Include the dependency list and suggested start order from the Scope stage so the epic can be advanced one issue at a time.
+- **Single issue:** present the clarified requirement (the three lenses' answers + non-goals + acceptance intent) to the user for confirmation.
+- **Epic + issues:** present the epic milestone (Goal / Background / Non-goals / Scope) plus one clarification per child issue, each scoped to its own context + concern. Include the dependency list and suggested start order from the Scope stage so the epic can be advanced one issue at a time.
 
-The PRD content is pure content — it does not carry frontmatter, workflow recommendations, or risk ratings. Those are the create skills' job at creation time (`mohist-create-issue` / `mohist-create-epic`).
-
-Present the assembled output (single PRD, or epic description + issue PRDs) to the user for confirmation before anything is created.
+Present the assembled output to the user for confirmation before anything is created.
 
 ## Iteration
 
-The voices are serial, but not one-way. When a later voice reveals a gap in an earlier one, you may go back — but you must **say so explicitly**:
+The lenses are serial, but not one-way. When a later lens reveals a gap in an earlier one, you may go back — but you must **say so explicitly**:
 
-- "Writing the Domain Model surfaced a constraint that Product Shape missed. Going back to revise Product Shape: …"
+- "Thinking through the Domain Model surfaced a constraint that Product Shape missed. Going back to revise Product Shape: …"
 
-Never silently rewrite an earlier section. The user must always know which voice is currently active and why a previous decision is being revisited.
+Never silently rewrite an earlier lens's conclusions. The user must always know which lens is currently active and why a previous decision is being revisited.
 
 Common backtrack triggers:
 - Domain Model finds Product Shape is infeasible → revise Product Shape (and check User Voice still holds).
 - Product Shape realizes User Voice was actually two needs → split or revise User Voice.
-- User feedback on the converged PRD challenges a specific voice → revise only that voice, then re-check dependents.
+- User feedback on the converged clarification challenges a specific lens → revise only that lens, then re-check dependents.
 
 ## Boundaries
 
-- Do not include issue-creation execution details (frontmatter, `mo issue create`, workflow ids, risk fields). That is the `mohist-create-issue` skill's responsibility. This skill produces PRD *content*; the create skills turn it into an issue or epic.
+- Do not define issue-body sections or their writing rules. Section structure and per-section guidance live in the issue templates, applied by `mohist-create-issue`.
+- Do not include issue-creation execution details (frontmatter, `mo issue create`, workflow ids, risk fields). That is the `mohist-create-issue` skill's responsibility.
 - Do not prescribe implementation (files, functions, tables, task breakdown). That is the Plan stage's responsibility.
-- The PRD body carries no source paths, file names, line numbers, or symbol names. You explore code to ground your understanding; the PRD itself is product-facing prose.
-- When splitting: never cut one problem along a layer seam (frontend vs backend); never over-split scattered trivial changes into many issues — bundle them. Otherwise follow the split rules above.
 - Do not start from a blank slate and patrol for random problems. Always begin from a user-provided seed.
-- Do not let Domain Model grow into a technical design document. Keep it to the minimum domain context needed to understand the requirement, or omit it.
+- Do not let the Domain Model lens grow into a technical design document. Keep it to the minimum domain context needed to understand the requirement, or skip it.
 
 ## Handoff
 
-When the output is confirmed:
+When the output is confirmed, point the user to the create skills — they own every execution detail:
 
-- **Single issue:** point the user to the `mohist-create-issue` skill — it adds frontmatter, recommends workflow/risk, classifies with labels, and runs `mo issue create` after confirmation.
-- **Epic + issues:** point the user to `mohist-create-epic` for the epic (`mo epic create`, link, prerequisites, lifecycle) and to `mohist-create-issue` for each child issue (`mo issue create`). The epic description and each issue PRD become the bodies; the create skills own all CLI mechanics.
+- **Single issue:** the `mohist-create-issue` skill picks a template (`mo issue template list`/`get`), fills its sections from this clarification, adds frontmatter, recommends workflow/risk, classifies with labels, and runs `mo issue create` after confirmation.
+- **Epic + issues:** point the user to `mohist-create-epic` for the epic (`mo epic create`, link, prerequisites, lifecycle) and to `mohist-create-issue` for each child issue. The epic milestone and each issue clarification become the content the create skills fill into their templates.
 
-In both cases this skill produces only **content**; the create skills own the frontmatter and CLI execution.
-
-The issue PRD template is at `references/issue-body-template.md`. The epic description shape (Goal / Background / Non-goals / Scope) is in the `mohist-create-epic` skill's `references/epic-templates.md`.
+In both cases this skill produces only the **clarified thinking**; the create skills own the templates, the frontmatter, and the CLI execution.

@@ -13,39 +13,28 @@ public class CliIssueTemplateCommandSpecs
         name = "Feature",
         description = "Standard three-voice PRD with acceptance criteria and non-goals.",
         source = "builtin",
-        sections = new[]
+        body = string.Join("\n", new[]
         {
-            new
-            {
-                title = "User Voice",
-                guidance = "Describe the user need.",
-                placeholder = "<user need>",
-            },
-            new
-            {
-                title = "Product Shape",
-                guidance = "Describe the product boundary.",
-                placeholder = "<product shape>",
-            },
-            new
-            {
-                title = "Domain Model",
-                guidance = "Describe the domain model.",
-                placeholder = "<domain model>",
-            },
-            new
-            {
-                title = "Acceptance Criteria",
-                guidance = "List observable outcomes.",
-                placeholder = "- [ ] criterion",
-            },
-            new
-            {
-                title = "Non-Goals",
-                guidance = "List explicitly out-of-scope items.",
-                placeholder = "- non-goal",
-            },
-        },
+            "## User Voice",
+            "<!-- Describe the user need. -->",
+            "<user need>",
+            "",
+            "## Product Shape",
+            "<!-- Describe the product boundary. -->",
+            "<product shape>",
+            "",
+            "## Domain Model",
+            "<!-- Describe the domain model. -->",
+            "<domain model>",
+            "",
+            "## Acceptance Criteria",
+            "<!-- List observable outcomes. -->",
+            "- [ ] criterion",
+            "",
+            "## Non-Goals",
+            "<!-- List explicitly out-of-scope items. -->",
+            "- non-goal",
+        }),
     };
 
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
@@ -99,15 +88,7 @@ public class CliIssueTemplateCommandSpecs
                         name = id,
                         description = $"Description for {id}",
                         source = "custom",
-                        sections = new[]
-                        {
-                            new
-                            {
-                                title = "Section 1",
-                                guidance = "Guidance for section 1",
-                                placeholder = "<placeholder 1>",
-                            },
-                        },
+                        body = "## Section 1\n<!-- Guidance for section 1 -->\n<placeholder 1>",
                     },
                 });
             }
@@ -307,15 +288,7 @@ public class CliIssueTemplateCommandSpecs
                     name = "Team Bugfix",
                     description = "Bugfix template.",
                     source = "custom",
-                    sections = new[]
-                    {
-                        new
-                        {
-                            title = "Bug Summary",
-                            guidance = "What broke and how to reproduce.",
-                            placeholder = "<bug summary>",
-                        },
-                    },
+                    body = "## Bug Summary\n<!-- What broke and how to reproduce. -->\n<bug summary>",
                 },
             }));
         });
@@ -350,7 +323,7 @@ public class CliIssueTemplateCommandSpecs
     }
 
     [Fact]
-    public async Task TemplateGet_Table_DisplaysMetadataAndSectionGuidance()
+    public async Task TemplateGet_Table_DisplaysMetadataAndBody()
     {
         var (handler, http, output, error, fs, executor) = CreateHarness();
 
@@ -364,19 +337,14 @@ public class CliIssueTemplateCommandSpecs
         Assert.Contains("description:", text);
         Assert.Contains("source:", text);
         Assert.Contains("builtin", text);
-        Assert.Contains("sections:", text);
-        Assert.Contains("[1]", text);
-        Assert.Contains("User Voice", text);
-        Assert.Contains("Describe the user need.", text);
-        Assert.Contains("[2]", text);
-        Assert.Contains("Product Shape", text);
-        Assert.Contains("[5]", text);
-        Assert.Contains("Non-Goals", text);
-        Assert.Contains("placeholder:", text);
+        Assert.Contains("body:", text);
+        // Body is rendered verbatim — section headings, inline guidance comments, placeholders.
+        Assert.Contains("## User Voice", text);
+        Assert.Contains("<!-- Describe the user need. -->", text);
         Assert.Contains("<user need>", text);
-        Assert.Contains("guidance:", text);
+        Assert.Contains("## Non-Goals", text);
         Assert.DoesNotContain("about:", text, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("default:", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sections:", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -460,9 +428,10 @@ public class CliIssueTemplateCommandSpecs
         Assert.NotNull(json);
         Assert.Equal("feature", json!["id"]?.GetValue<string>());
         Assert.Equal("Feature", json["name"]?.GetValue<string>());
-        var sections = json["sections"] as JsonArray;
-        Assert.NotNull(sections);
-        Assert.Equal(5, sections!.Count);
+        var body = json["body"]?.GetValue<string>();
+        Assert.False(string.IsNullOrEmpty(body));
+        Assert.Contains("## User Voice", body);
+        Assert.Contains("## Non-Goals", body);
     }
 
     [Fact]

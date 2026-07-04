@@ -90,9 +90,8 @@ public class IssueTemplateRegistry : IScopedService
             try
             {
                 var (_, body) = PromptFrontmatterParser.Parse(entry.LoadContent(), resolvedId);
-                var sections = IssueTemplateBodyParser.Parse(body);
                 return new IssueTemplateLookup(
-                    new FileAssetIssueTemplate(resolvedId, entry.Name, entry.Description, sections),
+                    new FileAssetIssueTemplate(resolvedId, entry.Name, entry.Description, body),
                     "builtin");
             }
             catch (Exception ex)
@@ -207,22 +206,32 @@ public class IssueTemplateRegistry : IScopedService
     {
         var dto = JSON.DeserializeOrThrow<IssueTemplateMetadataDto>(json);
         ValidateTemplateMetadata(dto, rowName);
-        return new IssueTemplateInfo(
-            dto.Id,
-            dto.Name,
-            string.IsNullOrWhiteSpace(dto.Description)
-                ? (string.IsNullOrWhiteSpace(dto.About) ? string.Empty : dto.About)
-                : dto.Description,
-            "custom");
+        return new IssueTemplateInfo(dto.Id, dto.Name, DeserializedDescription(dto), "custom");
     }
 
     private static IIssueTemplate DeserializeTemplate(string json, string rowName)
     {
         var dto = JSON.DeserializeOrThrow<IssueTemplateDto>(json);
         ValidateTemplateMetadata(dto, rowName);
-        ValidateTemplateSections(dto);
-        return new DeserializedIssueTemplate(dto);
+        var body = ComposeBodyFromSections(dto);
+        if (string.IsNullOrWhiteSpace(body))
+            throw new ArgumentException("Template must have a non-empty body");
+        return new DeserializedIssueTemplate(dto.Id, dto.Name, DeserializedDescription(dto), body);
     }
+
+    // Custom templates are stored as legacy JSON with a Sections array. Compose a raw markdown
+    // body (## {title}\n{placeholder}) so the model is uniformly Body. Guidance is dropped — it
+    // was a dead field with no consumer. TODO: when custom-template CRUD lands, store {body:"..."}.
+    private static string ComposeBodyFromSections(IssueTemplateDto dto)
+    {
+        if (dto.Sections is null || dto.Sections.Count == 0) return string.Empty;
+        return string.Join("\n\n", dto.Sections.Select(s => $"## {s.Title}\n{s.Placeholder}"));
+    }
+
+    private static string DeserializedDescription(IssueTemplateMetadataDto dto) =>
+        string.IsNullOrWhiteSpace(dto.Description)
+            ? (string.IsNullOrWhiteSpace(dto.About) ? string.Empty : dto.About)
+            : dto.Description;
 
     private static void ValidateTemplateMetadata(IssueTemplateMetadataDto dto, string rowName)
     {
@@ -232,22 +241,6 @@ public class IssueTemplateRegistry : IScopedService
             throw new ArgumentException("Template is missing required field 'Name'");
         if (!string.Equals(dto.Id, rowName, StringComparison.Ordinal))
             throw new ArgumentException("Template id must match row name");
-    }
-
-    private static void ValidateTemplateSections(IssueTemplateDto dto)
-    {
-        if (dto.Sections is null || dto.Sections.Count == 0)
-            throw new ArgumentException("Template must have at least one section");
-
-        foreach (var section in dto.Sections)
-        {
-            if (string.IsNullOrWhiteSpace(section.Title))
-                throw new ArgumentException("Template section is missing required field 'Title'");
-            if (string.IsNullOrWhiteSpace(section.Guidance))
-                throw new ArgumentException("Template section is missing required field 'Guidance'");
-            if (string.IsNullOrWhiteSpace(section.Placeholder))
-                throw new ArgumentException("Template section is missing required field 'Placeholder'");
-        }
     }
 }
 
@@ -267,6 +260,9 @@ public class IssueTemplateMetadataDto
     public string Description { get; set; } = string.Empty;
 }
 
+// Legacy custom-template storage DTO. Only Sections is persisted today (the table is write-only from
+// tests). Kept so存量 JSON rows still deserialize; ComposeBodyFromSections flattens it to Body.
+// TODO: when custom-template CRUD lands, replace Sections with a single Body string.
 public class IssueTemplateDto : IssueTemplateMetadataDto
 {
     public bool IsDefault { get; set; }
@@ -291,35 +287,32 @@ public class IssueTemplateSectionDto
 
 internal sealed class DeserializedIssueTemplate : IIssueTemplate
 {
-    private readonly IssueTemplateDto _dto;
-
-    public DeserializedIssueTemplate(IssueTemplateDto dto)
-    {
-        _dto = dto;
-    }
-
-    public string Id => _dto.Id;
-    public string Name => _dto.Name;
-    public string Description => string.IsNullOrWhiteSpace(_dto.Description)
-        ? (string.IsNullOrWhiteSpace(_dto.About) ? string.Empty : _dto.About)
-        : _dto.Description;
-    public IReadOnlyList<IssueTemplateSection> Sections => _dto.Sections
-        .Select(s => new IssueTemplateSection(s.Title, s.Guidance, s.Placeholder))
-        .ToList();
-}
-
-internal sealed class FileAssetIssueTemplate : IIssueTemplate
-{
-    public string Id { get; }
-    public string Name { get; }
-    public string Description { get; }
-    public IReadOnlyList<IssueTemplateSection> Sections { get; }
-
-    public FileAssetIssueTemplate(string id, string name, string description, IReadOnlyList<IssueTemplateSection> sections)
+    public DeserializedIssueTemplate(string id, string name, string description, string body)
     {
         Id = id;
         Name = name;
         Description = description;
-        Sections = sections;
+        Body = body;
     }
+
+    public string Id { get; }
+    public string Name { get; }
+    public string Description { get; }
+    public string Body { get; }
+}
+
+internal sealed class FileAssetIssueTemplate : IIssueTemplate
+{
+    public FileAssetIssueTemplate(string id, string name, string description, string body)
+    {
+        Id = id;
+        Name = name;
+        Description = description;
+        Body = body;
+    }
+
+    public string Id { get; }
+    public string Name { get; }
+    public string Description { get; }
+    public string Body { get; }
 }

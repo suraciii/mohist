@@ -5,16 +5,10 @@ export interface IssueTemplateInfo {
   source: 'builtin' | 'custom'
 }
 
-export interface IssueTemplateSection {
-  title: string
-  guidance: string
-  placeholder: string
-}
-
 export interface IssueTemplateDetail {
   id: string
   name: string
   description: string
-  sections: IssueTemplateSection[]
+  body: string
   source: 'builtin' | 'custom'
 }
