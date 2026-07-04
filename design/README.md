@@ -29,6 +29,7 @@ style: ["短索引，只说明入口。"]
 
 ## 支撑主题
 
+- [issue-breakdown.md](issue-breakdown.md) — Issue 拆分 / sub-issue 方案（**WIP，暂不实现**）：与 Epic 重叠、#281 已列为 Non-Goal 的决策记录与开放问题。
 - [issue-templates.md](issue-templates.md) — 三类 issue 模板（Feature / Bug / Refactor）的 body 结构与设计依据。
 - [prompt-management.md](prompt-management.md) — project-scoped prompt 库和 workflow 的关系。
 - [runner.md](runner.md) — Runner 聚合信息结构与自报 status。
