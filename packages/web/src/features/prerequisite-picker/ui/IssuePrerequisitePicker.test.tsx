@@ -15,6 +15,8 @@ function buildIssue(overrides: Partial<Issue> & Pick<Issue, 'number' | 'title'>)
     status: IssueStatus.Backlog,
     health: IssueHealth.Active,
     projectId: PROJECT_ID,
+    projectName: 'Mohist',
+    repository: { name: 'main', gitUrl: 'file://main', baseBranch: 'main' },
     labels: {},
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
@@ -31,7 +33,7 @@ const TEST_ISSUES: Issue[] = [
   buildIssue({ number: 10, title: 'Wire up auth', status: IssueStatus.InProgress, health: IssueHealth.Active }),
   buildIssue({ number: 42, title: 'Audit auth tokens', status: IssueStatus.Backlog, health: IssueHealth.Active }),
   buildIssue({ number: 50, title: 'Fix auth timeout', status: IssueStatus.InProgress, health: IssueHealth.Active }),
-  buildIssue({ number: 70, title: 'Done refactor', status: IssueStatus.Done, health: IssueHealth.Done }),
+  buildIssue({ number: 70, title: 'Ship refactor', status: IssueStatus.Done, health: IssueHealth.Done }),
 ]
 
 const mocks = vi.hoisted(() => ({
@@ -113,6 +115,47 @@ describe('IssuePrerequisitePicker', () => {
       expect(numbers.sort()).toEqual([10, 42, 50])
     })
 
+    it('surfaces issues whose raw status matches the typed term', async () => {
+      setIssues(TEST_ISSUES)
+      renderPicker()
+
+      openPicker()
+      const search = await screen.findByTestId('prerequisite-picker-search')
+      fireEvent.change(search, { target: { value: 'in_progress' } })
+
+      const options = await screen.findAllByTestId('prerequisite-picker-option')
+      const numbers = options.map((opt) => Number(opt.getAttribute('data-issue-number')))
+      expect(numbers.sort()).toEqual([10, 50])
+    })
+
+    it('surfaces issues whose rendered status label matches the typed term', async () => {
+      setIssues(TEST_ISSUES)
+      renderPicker()
+
+      openPicker()
+      const search = await screen.findByTestId('prerequisite-picker-search')
+      fireEvent.change(search, { target: { value: 'in progress' } })
+
+      const options = await screen.findAllByTestId('prerequisite-picker-option')
+      const numbers = options.map((opt) => Number(opt.getAttribute('data-issue-number')))
+      expect(numbers.sort()).toEqual([10, 50])
+    })
+
+    it('surfaces backlog and done issues by status terms', async () => {
+      setIssues(TEST_ISSUES)
+      renderPicker()
+
+      openPicker()
+      const search = await screen.findByTestId('prerequisite-picker-search')
+      fireEvent.change(search, { target: { value: 'backlog' } })
+      let options = await screen.findAllByTestId('prerequisite-picker-option')
+      expect(options.map((opt) => Number(opt.getAttribute('data-issue-number')))).toEqual([42])
+
+      fireEvent.change(search, { target: { value: 'done' } })
+      options = await screen.findAllByTestId('prerequisite-picker-option')
+      expect(options.map((opt) => Number(opt.getAttribute('data-issue-number')))).toEqual([70])
+    })
+
     it('shows no-match when the search term matches nothing', async () => {
       setIssues(TEST_ISSUES)
       renderPicker()
@@ -124,7 +167,7 @@ describe('IssuePrerequisitePicker', () => {
       expect(screen.getByText(/No issues match/)).toBeInTheDocument()
     })
 
-    it('renders each candidate with its number, title, and status badge', async () => {
+    it('renders each candidate with its number, title, status badge, and project/repository context', async () => {
       setIssues(TEST_ISSUES)
       renderPicker()
 
@@ -136,6 +179,8 @@ describe('IssuePrerequisitePicker', () => {
       expect(option10).toBeDefined()
       expect(option10!).toHaveTextContent('#10')
       expect(option10!).toHaveTextContent('Wire up auth')
+      expect(option10!).toHaveTextContent('In Progress')
+      expect(option10!).toHaveTextContent('Mohist / main')
       expect(option10!.querySelector('[data-testid="prerequisite-picker-option-badge"]')).toBeTruthy()
     })
   })
@@ -290,6 +335,29 @@ describe('IssuePrerequisitePicker', () => {
       expect(
         within(completedChip!).queryByTestId('prerequisite-picker-chip-incomplete-indicator'),
       ).not.toBeInTheDocument()
+    })
+
+    it('prefers selected prerequisite summaries when a selected issue is missing from the picker list', () => {
+      setIssues(TEST_ISSUES.filter((issue) => issue.number !== 99))
+      renderPicker({
+        selected: [99],
+        excludeNumbers: [99],
+        selectedIssueSummaries: [
+          {
+            issueId: 'issue_99',
+            number: 99,
+            title: 'Authoritative prerequisite',
+            completed: false,
+            status: IssueStatus.Backlog,
+            health: IssueHealth.Active,
+          },
+        ],
+      })
+
+      const chip = screen.getByTestId('prerequisite-picker-chip')
+      expect(chip).toHaveTextContent('#99 · Authoritative prerequisite')
+      expect(chip).toHaveAttribute('data-incomplete', 'true')
+      expect(within(chip).getByTestId('prerequisite-picker-chip-incomplete-indicator')).toBeInTheDocument()
     })
 
     it('renders a canStart / blocker summary line when those fields are supplied', () => {

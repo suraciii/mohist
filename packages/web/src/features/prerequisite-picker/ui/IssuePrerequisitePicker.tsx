@@ -7,13 +7,14 @@ import {
 import { Input } from '@/shared/ui/components/input'
 import { Button } from '@/shared/ui/components/button'
 import { statusBadge, statusLabel } from '../../../entities/issue/lib/status-badge'
-import { IssueStatus, IssueHealth, type Issue, type IssueStartBlocker } from '../../../entities/issue'
+import { IssueStatus, IssueHealth, type Issue, type IssuePrerequisiteSummary, type IssueStartBlocker } from '../../../entities/issue'
 import { useIssues } from '../../../entities/issue'
 
 export interface IssuePrerequisitePickerProps {
   projectId: string
   excludeNumbers: number[]
   selected: number[]
+  /** Marks the parent contract: buffer mode stores pending selections, live mode calls persisted mutations. */
   mode: 'buffer' | 'live'
   onAdd: (number: number) => Promise<void> | void
   onRemove: (number: number) => Promise<void> | void
@@ -22,7 +23,10 @@ export interface IssuePrerequisitePickerProps {
   blocker?: IssueStartBlocker | null
   disabled?: boolean
   errorMessage?: string | null
+  selectedIssueSummaries?: IssuePrerequisiteSummary[]
 }
+
+type PrerequisiteChipIssue = Pick<IssuePrerequisiteSummary, 'number' | 'title' | 'completed' | 'status' | 'health'>
 
 function isCompleted(issue: Issue): boolean {
   return issue.status === IssueStatus.Done
@@ -69,6 +73,22 @@ function blockerDescription(blocker: IssueStartBlocker | null | undefined): stri
   return null
 }
 
+function chipIssueFromIssue(issue: Issue): PrerequisiteChipIssue {
+  return {
+    number: issue.number,
+    title: issue.title,
+    completed: isCompleted(issue),
+    status: issue.status,
+    health: issue.health,
+  }
+}
+
+function issueContextLabel(issue: Issue): string {
+  const project = issue.projectName ?? issue.projectId
+  const repository = issue.repository?.name
+  return repository ? `${project} / ${repository}` : `Project: ${project}`
+}
+
 export function IssuePrerequisitePicker({
   projectId,
   excludeNumbers,
@@ -81,6 +101,7 @@ export function IssuePrerequisitePicker({
   blocker,
   disabled = false,
   errorMessage,
+  selectedIssueSummaries = [],
 }: IssuePrerequisitePickerProps) {
   const issuesQuery = useIssues({ projectId })
   const allIssues: Issue[] = issuesQuery.data ?? []
@@ -88,13 +109,16 @@ export function IssuePrerequisitePicker({
   const excludeSet = useMemo(() => new Set(excludeNumbers), [excludeNumbers])
   const selectedSet = useMemo(() => new Set(selected), [selected])
 
-  const issuesByNumber = useMemo(() => {
-    const map = new Map<number, Issue>()
+  const selectedIssuesByNumber = useMemo(() => {
+    const map = new Map<number, PrerequisiteChipIssue>()
     for (const issue of allIssues) {
-      map.set(issue.number, issue)
+      map.set(issue.number, chipIssueFromIssue(issue))
+    }
+    for (const summary of selectedIssueSummaries) {
+      map.set(summary.number, summary)
     }
     return map
-  }, [allIssues])
+  }, [allIssues, selectedIssueSummaries])
 
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -110,7 +134,9 @@ export function IssuePrerequisitePicker({
     if (!term) return candidatePool
     return candidatePool.filter(issue => {
       if (issue.title.toLowerCase().includes(term)) return true
-      return String(issue.number).includes(term)
+      if (String(issue.number).includes(term)) return true
+      if (issue.status.toLowerCase().includes(term)) return true
+      return statusLabelForStatus(issue.status).toLowerCase().includes(term)
     })
   }, [candidatePool, search])
 
@@ -135,7 +161,7 @@ export function IssuePrerequisitePicker({
   }
 
   const triggerLabel = open
-    ? 'Search by number or title…'
+    ? 'Search by number, title, or status…'
     : selected.length > 0
       ? `${selected.length} prerequisite${selected.length === 1 ? '' : 's'} selected`
       : 'Add prerequisites'
@@ -182,7 +208,7 @@ export function IssuePrerequisitePicker({
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by number or title…"
+                placeholder="Search by number, title, or status…"
                 data-testid="prerequisite-picker-search"
                 className="pl-9"
               />
@@ -217,12 +243,18 @@ export function IssuePrerequisitePicker({
                   onClick={() => handleSelect(issue)}
                   className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
                 >
-                  <span className="min-w-0 flex-1 truncate">
-                    <span className="font-mono">#{issue.number}</span>
-                    <span className="mx-1 text-muted-foreground">·</span>
-                    <span>{issue.title}</span>
-                    <span className="mx-1 text-muted-foreground">·</span>
-                    <span className="text-xs text-muted-foreground">{statusLabelForStatus(issue.status)}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">
+                      <span className="font-mono">#{issue.number}</span>
+                      <span className="mx-1 text-muted-foreground">·</span>
+                      <span>{issue.title}</span>
+                    </span>
+                    <span
+                      data-testid="prerequisite-picker-option-context"
+                      className="mt-0.5 block truncate text-xs text-muted-foreground"
+                    >
+                      {statusLabelForStatus(issue.status)} · {issueContextLabel(issue)}
+                    </span>
                   </span>
                   <span
                     data-testid="prerequisite-picker-option-badge"
@@ -244,8 +276,8 @@ export function IssuePrerequisitePicker({
           data-mode={mode}
         >
           {selected.map((number) => {
-            const issue = issuesByNumber.get(number)
-            const incomplete = issue ? !isCompleted(issue) : false
+            const issue = selectedIssuesByNumber.get(number)
+            const incomplete = issue ? !issue.completed : false
             const label = issue ? `#${number} · ${issue.title}` : `#${number}`
             return (
               <span

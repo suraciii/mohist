@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
@@ -19,12 +22,15 @@ public class IssueCreationSpecs
     private readonly IGrainFactory _grains;
     private readonly IServiceProvider _services;
     private readonly string _connectionString;
+    private readonly HttpClient _client;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public IssueCreationSpecs(MohistIntegrationFixture fixture)
     {
         _grains = fixture.Grains;
         _services = fixture.Services;
         _connectionString = fixture.ConnectionString;
+        _client = fixture.Client;
     }
 
     private async Task<ProjectInfo> SetupProjectAsync()
@@ -36,7 +42,7 @@ public class IssueCreationSpecs
         return project;
     }
 
-private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, IReadOnlyDictionary<string, string>? labels = null, string? priority = null, string? risk = null, bool isDraft = false, int[]? prerequisiteNumbers = null)
+    private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, IReadOnlyDictionary<string, string>? labels = null, string? priority = null, string? risk = null, bool isDraft = false, int[]? prerequisiteNumbers = null)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";
@@ -461,6 +467,126 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task CreateIssueApi_WithPrerequisiteNumbers_BindsCamelCaseAndReturnsReadModels()
+    {
+        var project = await SetupProjectAsync();
+        var prereq = await _client.PostDataAsync<CreateIssueApiDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "API prereq", isDraft = false });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "API dependent", isDraft = false, prerequisiteNumbers = new[] { prereq.Number } },
+            JsonOptions);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<CreateIssueApiDto>>(JsonOptions);
+        Assert.NotNull(envelope);
+        Assert.True(envelope!.Success);
+        var created = Assert.IsType<CreateIssueApiDto>(envelope.Data);
+        Assert.Equal(new[] { prereq.Number }, created.PrerequisiteNumbers);
+        var summary = Assert.Single(created.Prerequisites);
+        Assert.Equal(prereq.Number, summary.Number);
+        Assert.Equal("API prereq", summary.Title);
+        Assert.False(summary.Completed);
+        Assert.False(created.CanStart);
+        Assert.NotNull(created.Blocker);
+        Assert.Equal("waiting-for", created.Blocker!.Kind);
+        Assert.NotNull(created.Blocker.Issue);
+        Assert.Equal(prereq.Number, created.Blocker.Issue!.Number);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssueApi_WithDuplicatePrerequisiteNumbers_CollapsesDuplicates()
+    {
+        var project = await SetupProjectAsync();
+        var prereq = await _client.PostDataAsync<CreateIssueApiDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Duplicate API prereq", isDraft = false });
+
+        var dependent = await _client.PostDataAsync<CreateIssueApiDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Duplicate API dependent", isDraft = false, prerequisiteNumbers = new[] { prereq.Number, prereq.Number, prereq.Number } });
+
+        Assert.Equal(new[] { prereq.Number }, dependent.PrerequisiteNumbers);
+        Assert.Single(dependent.Prerequisites);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssueApi_WithNonexistentPrerequisite_ReturnsBadRequestAndLeavesNoIssue()
+    {
+        var project = await SetupProjectAsync();
+        await _client.PostDataAsync<CreateIssueApiDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Existing API prereq", isDraft = false });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Rejected API dependent", isDraft = false, prerequisiteNumbers = new[] { 1, 999_999 } },
+            JsonOptions);
+
+        await AssertCreatePrerequisiteFailureAsync(project.Id, response, "prerequisite_not_found", "999999");
+        using var getAttempt = await _client.GetAsync($"/api/projects/{project.Id}/issues/2");
+        Assert.Equal(HttpStatusCode.NotFound, getAttempt.StatusCode);
+        var issues = await _client.GetDataAsync<CreateIssueApiDto[]>($"/api/projects/{project.Id}/issues?all=true");
+        Assert.DoesNotContain(issues, issue => issue.Title == "Rejected API dependent");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssueApi_WithCrossProjectPrerequisite_ReturnsBadRequestAndLeavesNoIssue()
+    {
+        var sourceProject = await SetupProjectAsync();
+        var targetProject = await SetupProjectAsync();
+        await _client.PostDataAsync<CreateIssueApiDto>(
+            $"/api/projects/{sourceProject.Id}/issues",
+            new { title = "Source one", isDraft = false });
+        await _client.PostDataAsync<CreateIssueApiDto>(
+            $"/api/projects/{sourceProject.Id}/issues",
+            new { title = "Source two", isDraft = false });
+        var sourceOnly = await _client.PostDataAsync<CreateIssueApiDto>(
+            $"/api/projects/{sourceProject.Id}/issues",
+            new { title = "Source three", isDraft = false });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{targetProject.Id}/issues",
+            new { title = "Rejected cross-project dependent", isDraft = false, prerequisiteNumbers = new[] { sourceOnly.Number } },
+            JsonOptions);
+
+        await AssertCreatePrerequisiteFailureAsync(targetProject.Id, response, "prerequisite_not_found", sourceOnly.Number.ToString());
+        using var getAttempt = await _client.GetAsync($"/api/projects/{targetProject.Id}/issues/1");
+        Assert.Equal(HttpStatusCode.NotFound, getAttempt.StatusCode);
+        var issues = await _client.GetDataAsync<CreateIssueApiDto[]>($"/api/projects/{targetProject.Id}/issues?all=true");
+        Assert.Empty(issues);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssueApi_WithSelfReferencingPrerequisite_ReturnsBadRequestAndLeavesNoIssue()
+    {
+        var project = await SetupProjectAsync();
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Rejected self dependent", isDraft = false, prerequisiteNumbers = new[] { 1 } },
+            JsonOptions);
+
+        await AssertCreatePrerequisiteFailureAsync(project.Id, response, "circular_prerequisite", "1");
+        using var getAttempt = await _client.GetAsync($"/api/projects/{project.Id}/issues/1");
+        Assert.Equal(HttpStatusCode.NotFound, getAttempt.StatusCode);
+        var issues = await _client.GetDataAsync<CreateIssueApiDto[]>($"/api/projects/{project.Id}/issues?all=true");
+        Assert.Empty(issues);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task CreateIssue_WithPrerequisiteNumbers_RecordsBothAndExposesReadModels()
     {
         var project = await SetupProjectAsync();
@@ -540,11 +666,25 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
     {
         var project = await SetupProjectAsync();
 
-        var numberBefore = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
         var attemptNumber = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var grain = _grains.GetGrain<IIssueGrain>(issueId);
 
         await Assert.ThrowsAsync<PrerequisiteValidationException>(() =>
-            CreateIssueAsync(project.Id, "Will fail", prerequisiteNumbers: [999_999]));
+            grain.CreateAsync(
+                project.Id,
+                attemptNumber,
+                "Will fail",
+                body: null,
+                labels: null,
+                priority: null,
+                repositoryRef: null,
+                issueId: issueId,
+                risk: null,
+                isDraft: false,
+                attachmentIds: null,
+                workflowProfileId: null,
+                prerequisiteNumbers: new[] { 999_999 }));
 
         var readModel = await GetIssueReadModelAsync(project.Id, attemptNumber);
         Assert.Null(readModel);
@@ -677,6 +817,44 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
         Assert.True(readModel.CanStart);
         Assert.Null(readModel.Blocker);
     }
+
+    private async Task AssertCreatePrerequisiteFailureAsync(
+        string projectId,
+        HttpResponseMessage response,
+        string expectedCode,
+        string expectedMessageFragment)
+    {
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<JsonElement>>(JsonOptions);
+        Assert.NotNull(envelope);
+        Assert.False(envelope!.Success);
+        Assert.Equal(expectedCode, envelope.Code);
+        Assert.Contains(expectedMessageFragment, envelope.Error ?? string.Empty, StringComparison.Ordinal);
+        var issues = await _client.GetDataAsync<CreateIssueApiDto[]>($"/api/projects/{projectId}/issues?all=true");
+        Assert.DoesNotContain(issues, issue => issue.Title.Contains("Rejected", StringComparison.Ordinal));
+    }
+
+    private sealed record ApiEnvelope<T>(bool Success, T? Data, string? Error = null, string? Code = null);
+
+    private sealed record CreateIssueApiDto(
+        string Id,
+        int Number,
+        string Title,
+        int[] PrerequisiteNumbers,
+        CreateIssueApiPrerequisiteDto[] Prerequisites,
+        bool CanStart,
+        CreateIssueApiBlockerDto? Blocker);
+
+    private sealed record CreateIssueApiPrerequisiteDto(
+        int Number,
+        string Title,
+        string Status,
+        string Health,
+        bool Completed);
+
+    private sealed record CreateIssueApiBlockerDto(string Kind, CreateIssueApiBlockerIssueDto? Issue);
+
+    private sealed record CreateIssueApiBlockerIssueDto(int Number, string Title);
 
     private static async Task<WorkDispatch> PollWorkForWorkflowAsync(IRunnerGrain runner, string runnerId, string workflowRunId)
     {

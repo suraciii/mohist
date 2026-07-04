@@ -493,72 +493,71 @@ public class IssueGrain : Grain, IIssueGrain
             wfStatus);
     }
 
-public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null)
-{
-    if (_issue is not null)
-        throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
-
-    var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
-    var resolvedIssueId = issueId ?? $"issue_{Guid.NewGuid():N}";
-    await _attachmentService.ValidateIssueBindAsync(projectId, resolvedIssueId, attachmentIds);
-
-    if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
+    public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null)
     {
-        throw new UnknownWorkflowProfileException(workflowProfileId);
-    }
+        if (_issue is not null)
+            throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
 
-    var issue = Domain.Issue.Create(
-        resolvedIssueId,
-        projectId,
-        number,
-        title,
-        body,
-        labels,
-        priority ?? "p2",
-        resolvedRef,
-        risk,
-        isDraft,
-        workflowProfileId);
+        var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
+        var resolvedIssueId = issueId ?? $"issue_{Guid.NewGuid():N}";
+        await _attachmentService.ValidateIssueBindAsync(projectId, resolvedIssueId, attachmentIds);
 
-    // Stage the in-memory aggregate so LoadIssueSummaryAsync can resolve
-    // the project id from _issue.ProjectId during prerequisite existence
-    // validation. The aggregate has not yet been persisted (SaveIssueAsync
-    // below is the only place this issue touches the store). On a
-    // validation failure we restore _issue to null, which means a
-    // subsequent retry on the same grain sees a clean slate, identical
-    // to the branch where prerequisites are absent.
-    _issue = issue;
-
-    // Create-time prerequisite application: validate every unique number
-    // against the project, reject self-reference against the newly allocated
-    // number, and apply idempotently before the single SaveIssueAsync so
-    // that a validation failure leaves nothing persisted. Mirrors the
-    // single-add path by reusing LoadIssueSummaryAsync verbatim — see
-    // design decision D1.
-    try
-    {
-        if (prerequisiteNumbers is { Length: > 0 })
+        if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
         {
-            foreach (var prerequisiteNumber in prerequisiteNumbers.Distinct())
+            throw new UnknownWorkflowProfileException(workflowProfileId);
+        }
+
+        var issue = Domain.Issue.Create(
+            resolvedIssueId,
+            projectId,
+            number,
+            title,
+            body,
+            labels,
+            priority ?? "p2",
+            resolvedRef,
+            risk,
+            isDraft,
+            workflowProfileId);
+
+        // Stage the in-memory aggregate so LoadIssueSummaryAsync can resolve
+        // the project id from _issue.ProjectId during prerequisite existence
+        // validation. The aggregate has not yet been persisted (SaveIssueAsync
+        // below is the only place this issue touches the store). On a
+        // validation failure we restore _issue to null, which means a
+        // subsequent retry on the same grain sees a clean slate, identical
+        // to the branch where prerequisites are absent.
+        _issue = issue;
+
+        // Create-time prerequisite application: validate every unique number
+        // against the project, reject self-reference against the newly allocated
+        // number, and apply idempotently before the single SaveIssueAsync so
+        // that a validation failure leaves nothing persisted. Mirrors the
+        // single-add path by reusing LoadIssueSummaryAsync verbatim.
+        try
+        {
+            if (prerequisiteNumbers is { Length: > 0 })
             {
-                if (prerequisiteNumber == number)
-                    throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
-                if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
-                    throw PrerequisiteValidationException.NotFound(prerequisiteNumber);
-                _issue!.AddPrerequisite(prerequisiteNumber);
+                foreach (var prerequisiteNumber in prerequisiteNumbers.Distinct())
+                {
+                    if (prerequisiteNumber == number)
+                        throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
+                    if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
+                        throw PrerequisiteValidationException.NotFound(prerequisiteNumber);
+                    _issue!.AddPrerequisite(prerequisiteNumber);
+                }
             }
         }
-    }
-    catch
-    {
-        _issue = null;
-        throw;
-    }
+        catch
+        {
+            _issue = null;
+            throw;
+        }
 
-    await SaveIssueAsync();
-    await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
-    return issue.Id;
-}
+        await SaveIssueAsync();
+        await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
+        return issue.Id;
+    }
 
     public async Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber)
     {
@@ -728,7 +727,7 @@ public async Task<string> CreateAsync(string projectId, int number, string title
 public record UpdateIssueData(
     [property: Id(0)] string? Title = null,
     [property: Id(1)] string? Body = null,
-[property: Id(2)] IReadOnlyDictionary<string, string>? Labels = null,
+    [property: Id(2)] IReadOnlyDictionary<string, string>? Labels = null,
     [property: Id(3)] string? Priority = null,
     [property: Id(4)] bool? IsDraft = null,
     [property: Id(5)] string[]? AttachmentIds = null,
