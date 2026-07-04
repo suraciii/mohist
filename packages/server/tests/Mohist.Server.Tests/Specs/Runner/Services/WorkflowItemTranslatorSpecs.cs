@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -26,17 +27,19 @@ namespace Mohist.Server.Tests.Specs.Runner.Services;
 /// </summary>
 public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 {
-    private readonly string _dbPath;
     private readonly DbContextOptions<MohistDbContext> _options;
     private readonly WorkflowProfileManager _profileManager;
     private readonly WorkflowItemTranslator _translator;
     private readonly IWorkflowArtifactBindService _bindService;
+    private readonly SqliteConnection _keeper;
 
     public WorkflowItemTranslatorSpecs()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"translator-specs-{Guid.NewGuid():N}.db");
+        var connectionString = $"Data Source=translator-specs-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        _keeper = new SqliteConnection(connectionString);
+        _keeper.Open();
         _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite($"Data Source={_dbPath}")
+            .UseSqlite(connectionString)
             .Options;
 
         var factory = new TestDbContextFactory(_options);
@@ -76,11 +79,10 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        await using var db = new MohistDbContext(_options);
-        await db.Database.EnsureDeletedAsync();
-        if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        _keeper.Dispose();
+        return Task.CompletedTask;
     }
 
     private async Task<WorkflowRun> SeedRunningWorkflowAsync(string workflowRunId, string projectId, string? issueId = null)

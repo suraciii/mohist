@@ -49,6 +49,14 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         _runnerRoot = runnerRoot;
         _systemUpdateStatePath = systemUpdateStatePath;
         OtlpPort = otlpPort;
+        // OTel ingester/query storage requires a real on-disk SQLite file: the
+        // production OtelDb opens separate read-write and read-only connections
+        // (the read-only open physically refuses to create a missing file), and
+        // resolves the path via Path.GetFullPath + EnsureDirectoryExists. An
+        // in-memory shared-cache database would break that contract. This is a
+        // documented controlled exception to the "no SQLite files on disk" rule
+        // (design/testing.md hard-constraint 1); each instance uses a unique
+        // Guid-suffixed path under GetTempPath and is cleaned up by the caller.
         _otelDbPath = Path.Combine(Path.GetTempPath(), $"mohist-otel-int-{Guid.NewGuid():N}.db");
         _artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-otel-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_artifactStorageRoot);

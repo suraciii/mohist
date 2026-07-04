@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -12,16 +13,18 @@ namespace Mohist.Server.Tests.Specs.Sessions;
 [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
 public class AgentSessionStoreSpecs : IAsyncLifetime
 {
-    private readonly string _dbPath;
     private readonly DbContextOptions<MohistDbContext> _options;
     private readonly AgentSessionStore _store;
     private readonly AgentSessionTranscriptStore _transcriptStore;
+    private readonly SqliteConnection _keeper;
 
     public AgentSessionStoreSpecs()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"agent-session-store-{Guid.NewGuid():N}.db");
+        var connectionString = $"Data Source=agent-session-store-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        _keeper = new SqliteConnection(connectionString);
+        _keeper.Open();
         _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite($"Data Source={_dbPath}")
+            .UseSqlite(connectionString)
             .Options;
         _store = new AgentSessionStore(new Factory(_options));
         _transcriptStore = new AgentSessionTranscriptStore(new Factory(_options));
@@ -32,11 +35,10 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        await using var db = new MohistDbContext(_options);
-        await db.Database.EnsureDeletedAsync();
-        if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        _keeper.Dispose();
+        return Task.CompletedTask;
     }
 
     [Fact]

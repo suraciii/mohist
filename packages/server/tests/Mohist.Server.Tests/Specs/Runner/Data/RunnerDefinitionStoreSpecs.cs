@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -11,16 +12,18 @@ namespace Mohist.Server.Tests.Specs.Runner.Data;
 [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
 public class RunnerDefinitionStoreSpecs : IAsyncLifetime
 {
-    private readonly string _dbPath;
     private readonly DbContextOptions<MohistDbContext> _options;
     private readonly RunnerDefinitionStore _store;
     private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+    private readonly SqliteConnection _keeper;
 
     public RunnerDefinitionStoreSpecs()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"runner-definition-store-{Guid.NewGuid():N}.db");
+        var connectionString = $"Data Source=runner-definition-store-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        _keeper = new SqliteConnection(connectionString);
+        _keeper.Open();
         _options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite($"Data Source={_dbPath}")
+            .UseSqlite(connectionString)
             .Options;
         _store = new RunnerDefinitionStore(new Factory(_options), _timeProvider);
 
@@ -30,11 +33,10 @@ public class RunnerDefinitionStoreSpecs : IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        await using var db = new MohistDbContext(_options);
-        await db.Database.EnsureDeletedAsync();
-        if (File.Exists(_dbPath)) File.Delete(_dbPath);
+        _keeper.Dispose();
+        return Task.CompletedTask;
     }
 
     [Fact]
