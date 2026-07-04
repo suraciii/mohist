@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
-import { IssueStatus, IssueHealth } from '../../../entities/issue'
+import { IssueStatus } from '../../../entities/issue'
 import { issueAttachmentContentPath } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
@@ -11,16 +11,17 @@ import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
 import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
 import { ActivityDialog } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
+import { useNarrowViewport } from '../../../shared/lib/use-narrow-viewport'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
-import { CardSection } from '@/shared/ui/components/card-section'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { attachmentFromMetadata } from '../model/format'
 import { useIssueDetailMutations } from '../model/useIssueDetailMutations'
 import { deriveRuntimeDecision } from '../../../widgets/issue-workflow/model/derive-runtime-decision'
 import { ArchivedPill, DraftPill, PriorityChip, RuntimeSummaryPill } from './pills'
+import { StatusHeadline } from './StatusHeadline'
 import { WorkflowYamlDialog } from './WorkflowYamlDialog'
 import { IssueActionsCard } from './cards/IssueActionsCard'
 import { IssueDetailsCard } from './cards/IssueDetailsCard'
@@ -28,6 +29,7 @@ import { IssueDriftCard } from './cards/IssueDriftCard'
 import { IssueConfigurationCard } from './cards/IssueConfigurationCard'
 import { IssuePrerequisitesCard } from './cards/IssuePrerequisitesCard'
 import { IssueReadinessCard } from './cards/IssueReadinessCard'
+import { CollapsibleRailCard } from './cards/CollapsibleRailCard'
 import { IssueDescriptionSection } from './sections/IssueDescriptionSection'
 import { IssueDiffFilesSection } from './sections/IssueDiffFilesSection'
 import { IssueCommitsSection } from './sections/IssueCommitsSection'
@@ -77,6 +79,7 @@ export function IssueDetailPage() {
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
   const { data: workflowTimeline } = useWorkflowTimeline(issueNumber, !!issue && issue.status !== IssueStatus.Backlog)
+  const isNarrowViewport = useNarrowViewport()
 
   const activeAgents = agentStatus?.activeAgents ?? []
   const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
@@ -134,6 +137,14 @@ export function IssueDetailPage() {
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
+  const convergence = issue.convergence ?? null
+  const hasConvergenceContent = !!convergence
+    && (!!convergence.failedCheck || convergence.blockingItemCount > 0 || convergence.reactionAttempts > 0)
+  const convergenceSummary = convergence?.blockingItemCount
+    ? `${convergence.blockingItemCount} blocking`
+    : convergence?.reactionAttempts
+      ? `${convergence.reactionAttempts} attempt${convergence.reactionAttempts === 1 ? '' : 's'}`
+      : 'convergence'
   const issueProjectId = projectId ?? issue.projectId
   const resolveIssueAttachment = (id: string) => attachmentFromMetadata(
     id,
@@ -145,186 +156,212 @@ export function IssueDetailPage() {
     <>
       <div className="flex-1 min-w-0 overflow-y-auto" data-testid="issue-detail-page-container">
         <div className="max-w-4xl min-w-0 mx-auto px-4 sm:px-6 py-6">
-          <button
-            type="button"
-            onClick={() => navigate(isArchived ? toProjectPath('/archived') : toProjectPath())}
-            data-testid={isArchived ? 'back-to-archived' : 'back-to-board'}
-            className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeftIcon className="size-3.5" />
-            <span>{isArchived ? 'Back to archived' : 'Back to board'}</span>
-          </button>
-
-          <div className="mb-8" data-testid="issue-detail-header">
-            <div className="flex flex-wrap items-center gap-3 mb-2">
-              <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-identity">
-                <span className="text-sm font-mono text-muted-foreground/70 tabular-nums">
-                  #{issue.number}
-                </span>
-                <PriorityChip priority={issue.priority} />
-                {issue.isDraft && <DraftPill />}
-                {isArchived && <ArchivedPill archivedAt={issue.archivedAt} />}
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-runtime">
-                <RuntimeSummaryPill summary={decision.summary} />
-              </div>
-            </div>
-            {isArchived && (
-              <div
-                data-testid="archived-banner"
-                data-archived-at={issue.archivedAt ?? ''}
-                className="mt-3 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground"
-              >
-                Archived{issue.archivedAt ? ` ${formatTime(issue.archivedAt)}` : ''}.
-                The workflow timeline, artifacts, events, and feedback below are preserved for reference.
-              </div>
-            )}
-            <div className="flex items-start gap-3">
-              <h1 className="text-2xl font-bold text-foreground flex-1 min-w-0">
-                {issue.title}
-              </h1>
-              <div className="flex shrink-0 items-center gap-2">
-                <ActivityDialog
-                  issueNumber={issueNumber}
-                  issueId={issue?.id}
-                  workflowStatus={issue?.workflowStatus}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setEditOpen(true)}
-                  aria-label="Edit issue"
-                  title="Edit issue"
-                  data-testid="edit-issue-button"
-                >
-                  <PencilIcon className="size-4" />
-                </Button>
-              </div>
-            </div>
-            {Object.keys(issue.labels ?? {}).length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1">
-                {sortLabels(issue.labels).map((label) => {
-                  const s = getLabelStyle(label)
-                  return (
-                    <span
-                      key={label}
-                      className={`inline-block rounded-full px-2 font-medium ${
-                        s.size === 'sm' ? 'text-[11px] py-0.5' : 'text-xs py-0.5'
-                      }`}
-                      style={{ backgroundColor: s.bg, color: s.text }}
-                    >
-                      {label}
-                    </span>
-                  )
-                })}
-              </div>
-            )}
-            {issue.primaryEpic && (
-              <button
-                type="button"
-                onClick={() => navigate(toProjectPath(`/epics/${issue.primaryEpic!.id}`))}
-                className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                data-testid="primary-epic-label"
-              >
-                <span className="text-xs text-muted-foreground/70">Part of Epic:</span>
-                <span
-                  className="font-mono font-medium text-foreground/80"
-                  data-testid="primary-epic-number"
-                >
-                  {issue.primaryEpic.number != null
-                    ? `#${issue.primaryEpic.number}`
-                    : `#${issue.primaryEpic.id.slice(0, 8)}`}
-                </span>
-                <span className="font-medium text-foreground/90">
-                  {issue.primaryEpic.title}
-                </span>
-              </button>
-            )}
-            <div className="mt-2 text-xs text-muted-foreground/70">
-              Created {formatTime(issue.createdAt)} · Updated {formatTime(issue.updatedAt)}
-            </div>
-          </div>
-
-          <div className="mb-8" data-testid="runtime-decision-surface-frame">
-            <RuntimeDecisionSurface
+          <div data-testid="status-header-tier" className="space-y-4">
+            <StatusHeadline
               decision={decision}
-              mutations={{
-                approveMutation,
-                sendBackMutation,
-                retryMutation,
-                resumeMutation,
-                rerunMutation,
-                forceStopMutation,
-                stopMutation,
-                startMutation,
-              }}
+              stageProgress={issue.workflowStageProgress ?? null}
             />
-          </div>
 
-          <BranchBar
-            issueNumber={issueNumber}
-            stage={workflowStage}
-            isAgentRunning={isAgentRunningOnThis}
-            baseBranch={issue.repository?.baseBranch}
-            allowRebase={!isBacklog && !!issue.workflowRunId}
-          />
+            <button
+              type="button"
+              onClick={() => navigate(isArchived ? toProjectPath('/archived') : toProjectPath())}
+              data-testid={isArchived ? 'back-to-archived' : 'back-to-board'}
+              className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeftIcon className="size-3.5" />
+              <span>{isArchived ? 'Back to archived' : 'Back to board'}</span>
+            </button>
 
-          <div className="mb-8" data-testid="workflow-view-frame">
-            <WorkflowView issue={issue} readOnly />
-          </div>
-
-          {prDeliveryMetadata && (
-            <div className="mb-8" data-testid="pr-delivery-summary-frame">
-              <PrDeliverySummary timeline={workflowTimeline} />
-            </div>
-          )}
-
-          <div className="mb-8" data-testid="workflow-profile-editor-frame">
-            <IssueWorkflowProfileEditor issueNumber={issueNumber} />
-          </div>
-
-          {diffData?.available === true && (
-            <div className="min-w-0 rounded-lg bg-card p-4 mb-8 border-l-2 border-border" data-testid="diff-summary-banner">
-              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                <span className="min-w-0 text-muted-foreground break-words">
-                  <span className="font-medium text-card-foreground break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
-                  {' wants to merge into '}
-                  <span className="font-medium text-card-foreground break-all" title={diffData.base} data-testid="diff-summary-base">{diffData.base}</span>
-                </span>
-                <span className="text-muted-foreground/40">·</span>
-                <span className="text-muted-foreground">
-                  <span className="font-medium text-card-foreground">{diffData.ahead}</span> ahead
-                </span>
-                {diffData.behind > 0 && (
-                  <>
-                    <span className="text-muted-foreground/40">·</span>
-                    <span className="text-muted-foreground">
-                      <span className="font-medium text-card-foreground">{diffData.behind}</span> behind
-                    </span>
-                  </>
-                )}
-                <span className="text-muted-foreground/40">·</span>
-                <span className="text-muted-foreground">
-                  <span className="font-medium text-card-foreground">{diffData.summary.filesChanged}</span> files changed
-                </span>
-                <span className="text-muted-foreground/40">·</span>
-                <span className="text-success">+{diffData.summary.additions}</span>
-                <span className="text-danger">-{diffData.summary.deletions}</span>
+            <div data-testid="issue-detail-header">
+              <div className="flex flex-wrap items-center gap-3 mb-2">
+                <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-identity">
+                  <span className="text-sm font-mono text-muted-foreground/70 tabular-nums">
+                    #{issue.number}
+                  </span>
+                  <PriorityChip priority={issue.priority} />
+                  {issue.isDraft && <DraftPill />}
+                  {isArchived && <ArchivedPill archivedAt={issue.archivedAt} />}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-runtime">
+                  <RuntimeSummaryPill summary={decision.summary} />
+                </div>
               </div>
-              <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span className="min-w-0 break-words">showing merge-base → <span className="break-all" title={diffData.head}>{diffData.head}</span></span>
-                <span>·</span>
-                <span>Workspace retained</span>
+              {isArchived && (
+                <div
+                  data-testid="archived-banner"
+                  data-archived-at={issue.archivedAt ?? ''}
+                  className="mt-3 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground"
+                >
+                  Archived{issue.archivedAt ? ` ${formatTime(issue.archivedAt)}` : ''}.
+                  The workflow timeline, artifacts, events, and feedback below are preserved for reference.
+                </div>
+              )}
+              <div className="flex items-start gap-3">
+                <h1 className="text-2xl font-bold text-foreground flex-1 min-w-0">
+                  {issue.title}
+                </h1>
+                <div className="flex shrink-0 items-center gap-2">
+                  <ActivityDialog
+                    issueNumber={issueNumber}
+                    issueId={issue?.id}
+                    workflowStatus={issue?.workflowStatus}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setEditOpen(true)}
+                    aria-label="Edit issue"
+                    title="Edit issue"
+                    data-testid="edit-issue-button"
+                  >
+                    <PencilIcon className="size-4" />
+                  </Button>
+                </div>
+              </div>
+              {Object.keys(issue.labels ?? {}).length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {sortLabels(issue.labels).map((label) => {
+                    const s = getLabelStyle(label)
+                    return (
+                      <span
+                        key={label}
+                        className={`inline-block rounded-full px-2 font-medium ${
+                          s.size === 'sm' ? 'text-[11px] py-0.5' : 'text-xs py-0.5'
+                        }`}
+                        style={{ backgroundColor: s.bg, color: s.text }}
+                      >
+                        {label}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+              {issue.primaryEpic && (
+                <button
+                  type="button"
+                  onClick={() => navigate(toProjectPath(`/epics/${issue.primaryEpic!.id}`))}
+                  className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  data-testid="primary-epic-label"
+                >
+                  <span className="text-xs text-muted-foreground/70">Part of Epic:</span>
+                  <span
+                    className="font-mono font-medium text-foreground/80"
+                    data-testid="primary-epic-number"
+                  >
+                    {issue.primaryEpic.number != null
+                      ? `#${issue.primaryEpic.number}`
+                      : `#${issue.primaryEpic.id.slice(0, 8)}`}
+                  </span>
+                  <span className="font-medium text-foreground/90">
+                    {issue.primaryEpic.title}
+                  </span>
+                </button>
+              )}
+              <div className="mt-2 text-xs text-muted-foreground/70">
+                Created {formatTime(issue.createdAt)} · Updated {formatTime(issue.updatedAt)}
               </div>
             </div>
-          )}
 
-          <div className="grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-8" data-testid="issue-detail-content-grid">
-            <div className="min-w-0 lg:col-span-2 space-y-8">
-              <IssueDescriptionSection issue={issue} resolveIssueAttachment={resolveIssueAttachment} />
+            <div data-testid="runtime-decision-surface-frame">
+              <RuntimeDecisionSurface
+                decision={decision}
+                mutations={{
+                  approveMutation,
+                  sendBackMutation,
+                  retryMutation,
+                  resumeMutation,
+                  rerunMutation,
+                  forceStopMutation,
+                  stopMutation,
+                  startMutation,
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="mt-8 grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-8" data-testid="issue-detail-content-grid">
+            <div className="min-w-0 lg:col-span-2 space-y-8" data-testid="reading-flow" data-tier-weight="reading-flow">
+              <BranchBar
+                issueNumber={issueNumber}
+                stage={workflowStage}
+                isAgentRunning={isAgentRunningOnThis}
+                baseBranch={issue.repository?.baseBranch}
+                allowRebase={!isBacklog && !!issue.workflowRunId}
+              />
+
+              <div data-testid="workflow-view-frame">
+                <WorkflowView issue={issue} readOnly />
+              </div>
+
+              {prDeliveryMetadata && (
+                <div data-testid="pr-delivery-summary-frame">
+                  <PrDeliverySummary timeline={workflowTimeline} />
+                </div>
+              )}
+
+              <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
 
               {issue.workflowRunId && (
                 <WorkflowYamlDialog workflowRunId={issue.workflowRunId} isArchived={isArchived} />
+              )}
+
+              {(!isBacklog || issue.workflowRunId) && (
+                <div data-testid="runtime-evidence-frame" className="space-y-4">
+                  {!isBacklog && workflowStage && (
+                    <TaskProgressPanel
+                      issueNumber={issueNumber}
+                      currentStage={workflowStage}
+                      isAgentRunning={isAgentRunningOnThis}
+                    />
+                  )}
+
+                  {!isBacklog && issue.workflowRunId && (
+                    <WorkflowSessionsPanel
+                      issueNumber={issueNumber}
+                      workflowRunId={issue.workflowRunId}
+                    />
+                  )}
+                </div>
+              )}
+
+              {diffData?.available === true && (
+                <div
+                  className="min-w-0 px-4 py-3 text-sm"
+                  data-testid="diff-summary-banner"
+                  data-tier-weight="reading-flow"
+                >
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+                    <span className="min-w-0 text-muted-foreground break-words">
+                      <span className="font-medium text-foreground break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
+                      {' wants to merge into '}
+                      <span className="font-medium text-foreground break-all" title={diffData.base} data-testid="diff-summary-base">{diffData.base}</span>
+                    </span>
+                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-muted-foreground">
+                      <span className="font-medium text-foreground">{diffData.ahead}</span> ahead
+                    </span>
+                    {diffData.behind > 0 && (
+                      <>
+                        <span className="text-muted-foreground/40">·</span>
+                        <span className="text-muted-foreground">
+                          <span className="font-medium text-foreground">{diffData.behind}</span> behind
+                        </span>
+                      </>
+                    )}
+                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-muted-foreground">
+                      <span className="font-medium text-foreground">{diffData.summary.filesChanged}</span> files changed
+                    </span>
+                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-success">+{diffData.summary.additions}</span>
+                    <span className="text-danger">-{diffData.summary.deletions}</span>
+                  </div>
+                  <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span className="min-w-0 break-words">showing merge-base → <span className="break-all" title={diffData.head}>{diffData.head}</span></span>
+                    <span>·</span>
+                    <span>Workspace retained</span>
+                  </div>
+                </div>
               )}
 
               <IssueDiffFilesSection
@@ -338,14 +375,16 @@ export function IssueDetailPage() {
               />
 
               {(diffData?.available === false || commitsData?.available === false) && (
-                <div className="rounded-lg bg-card p-4">
-                  <p className="text-sm text-muted-foreground">
+                <div className="text-sm text-muted-foreground" data-tier-weight="reading-flow">
+                  <p>
                     {diffData?.available === false && diffData.message}
                     {diffData?.available === false && commitsData?.available === false && ' / '}
                     {commitsData?.available === false && commitsData.message}
                   </p>
                 </div>
               )}
+
+              <IssueDescriptionSection issue={issue} resolveIssueAttachment={resolveIssueAttachment} />
 
               <IssueCommentsSection
                 comments={comments}
@@ -361,81 +400,118 @@ export function IssueDetailPage() {
               />
             </div>
 
-            <div className="min-w-0 space-y-6" data-testid="issue-detail-right-rail">
-              <IssueDetailsCard issue={issue} />
+            <div
+              className={isNarrowViewport ? 'min-w-0 space-y-4' : 'min-w-0 space-y-6 lg:col-span-1'}
+              data-testid="reference-rail"
+              data-tier-weight="reference-rail"
+              data-rail-mode={isNarrowViewport ? 'narrow' : 'desktop'}
+            >
+              <CollapsibleRailCard
+                testId="reference-rail-details"
+                title="Details"
+                forceCollapsed={isNarrowViewport}
+                summary={issue.status === IssueStatus.Backlog ? 'Backlog' : issue.status}
+              >
+                <IssueDetailsCard issue={issue} unframed />
+              </CollapsibleRailCard>
 
-              <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
-
-              <div data-testid="issue-workflow-profile-control-frame">
-                <WorkflowProfileControl issue={issue} />
-              </div>
+              <CollapsibleRailCard
+                testId="reference-rail-workflow-profile"
+                title="Workflow Profile"
+                forceCollapsed={isNarrowViewport}
+                summary={issue.workflowProfileId ?? 'default'}
+              >
+                <div className="space-y-4">
+                  <div data-testid="issue-workflow-profile-control-frame">
+                    <WorkflowProfileControl issue={issue} embedded />
+                  </div>
+                  <div data-testid="workflow-profile-editor-frame">
+                    <IssueWorkflowProfileEditor issueNumber={issueNumber} embedded />
+                  </div>
+                </div>
+              </CollapsibleRailCard>
 
               {issue.drift?.drifted && (
-                <IssueDriftCard drift={issue.drift} />
+                <CollapsibleRailCard
+                  testId="reference-rail-drift"
+                  title="Base Drift Detected"
+                  defaultCollapsed
+                  forceCollapsed={isNarrowViewport}
+                  summary={issue.drift.decision ?? 'drifted'}
+                >
+                  <IssueDriftCard drift={issue.drift} unframed />
+                </CollapsibleRailCard>
               )}
 
-              {issue.health === IssueHealth.Interrupted && (
-                <CardSection title="Workflow Interrupted" tone="orange">
-                  <p className="text-xs text-warning">
-                    The workflow was interrupted (e.g. server restart). Your progress has been preserved.
-                    Click &quot;Resume&quot; below to continue from where it left off.
-                  </p>
-                </CardSection>
+              {hasConvergenceContent && (
+                <CollapsibleRailCard
+                  testId="reference-rail-convergence"
+                  title="Convergence"
+                  defaultCollapsed
+                  forceCollapsed={isNarrowViewport}
+                  summary={convergenceSummary}
+                >
+                  <WorkflowConvergencePanel convergence={convergence} />
+                </CollapsibleRailCard>
               )}
 
-              {(issue.health === IssueHealth.Blocked || issue.convergence) && (
-                <WorkflowConvergencePanel convergence={issue.convergence} />
-              )}
+              <CollapsibleRailCard
+                testId="reference-rail-configuration"
+                title="Configuration"
+                forceCollapsed={isNarrowViewport}
+                summary={issue.model ?? 'default model'}
+              >
+                <IssueConfigurationCard
+                  issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prerequisites, isBacklog }}
+                  mutations={{ addPrerequisiteMutation, removePrerequisiteMutation }}
+                  unframed
+                />
+              </CollapsibleRailCard>
 
-              {(!isBacklog || issue.workflowRunId) && (
-                <CardSection title="Runtime/Sessions">
-                  <div className="space-y-4">
-                    {!isBacklog && workflowStage && (
-                      <TaskProgressPanel
-                        issueNumber={issueNumber}
-                        currentStage={workflowStage}
-                        isAgentRunning={isAgentRunningOnThis}
-                      />
-                    )}
-
-                    {!isBacklog && issue.workflowRunId && (
-                      <WorkflowSessionsPanel
-                        issueNumber={issueNumber}
-                        workflowRunId={issue.workflowRunId}
-                      />
-                    )}
-                  </div>
-                </CardSection>
-              )}
-
-              <IssueConfigurationCard
-                issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prerequisites, isBacklog }}
-                mutations={{ addPrerequisiteMutation, removePrerequisiteMutation }}
-              />
-
-              <IssueActionsCard
-                issue={issue}
-                decision={decision}
-                agentStatus={agentStatus ?? null}
-                mutations={{
-                  approveMutation,
-                  sendBackMutation,
-                  startMutation,
-                  markReadyMutation,
-                  closeMutation,
-                  resumeMutation,
-                  retryMutation,
-                  rerunMutation,
-                }}
-                onAskAgent={() => navigate(toProjectPath('/agent-sessions/new?issue=' + encodeURIComponent(issueNumber)))}
-              />
+              <CollapsibleRailCard
+                testId="reference-rail-actions"
+                title="Actions"
+                forceCollapsed={isNarrowViewport}
+                summary={issue.isDraft ? 'draft' : (issue.archivedAt ? 'archived' : 'available')}
+              >
+                <IssueActionsCard
+                  issue={issue}
+                  agentStatus={agentStatus ?? null}
+                  mutations={{
+                    approveMutation,
+                    sendBackMutation,
+                    startMutation,
+                    markReadyMutation,
+                    closeMutation,
+                    resumeMutation,
+                    retryMutation,
+                    rerunMutation,
+                  }}
+                  onAskAgent={() => navigate(toProjectPath('/agent-sessions/new?issue=' + encodeURIComponent(issueNumber)))}
+                  unframed
+                />
+              </CollapsibleRailCard>
 
               {issue.prerequisites && issue.prerequisites.length > 0 && (
-                <IssuePrerequisitesCard prerequisites={issue.prerequisites} />
+                <CollapsibleRailCard
+                  testId="reference-rail-prerequisites"
+                  title="Start Prerequisites"
+                  forceCollapsed={isNarrowViewport}
+                  summary={`${issue.prerequisites.length} item${issue.prerequisites.length === 1 ? '' : 's'}`}
+                >
+                  <IssuePrerequisitesCard prerequisites={issue.prerequisites} unframed />
+                </CollapsibleRailCard>
               )}
 
               {isBacklog && (
-                <IssueReadinessCard issue={issue} />
+                <CollapsibleRailCard
+                  testId="reference-rail-readiness"
+                  title="Readiness"
+                  forceCollapsed={isNarrowViewport}
+                  summary={issue.canStart ? 'ready' : 'not ready'}
+                >
+                  <IssueReadinessCard issue={issue} unframed />
+                </CollapsibleRailCard>
               )}
             </div>
           </div>

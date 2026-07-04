@@ -9,13 +9,13 @@ export type IssueDetailsCardIssue = Pick<
 
 export interface IssueDetailsCardProps {
   issue: IssueDetailsCardIssue
+  unframed?: boolean
 }
 
-export function IssueDetailsCard({ issue }: IssueDetailsCardProps) {
+export function IssueDetailsCard({ issue, unframed = false }: IssueDetailsCardProps) {
   const workflowStage = issue.workflowStage ?? null
-  return (
-    <CardSection title="Details">
-      <dl className="min-w-0 space-y-2 text-sm" data-testid="issue-detail-details-metadata">
+  const content = (
+    <dl className="min-w-0 space-y-2 text-sm" data-testid="issue-detail-details-metadata">
         <div className="flex min-w-0 justify-between gap-3">
           <dt className="text-muted-foreground">Issue Stage</dt>
           <dd className="min-w-0 text-foreground font-medium text-right">
@@ -62,7 +62,8 @@ export function IssueDetailsCard({ issue }: IssueDetailsCardProps) {
             </dd>
           </div>
         )}
-      </dl>
-    </CardSection>
+    </dl>
   )
+  if (unframed) return content
+  return <CardSection title="Details">{content}</CardSection>
 }
