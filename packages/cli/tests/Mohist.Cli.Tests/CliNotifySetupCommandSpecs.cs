@@ -183,7 +183,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
         Assert.Contains("--deliver telegram", stdout);
         Assert.Contains("--deliver-only", stdout);
         Assert.Contains("--secret shared-secret-xyz", stdout);
-        Assert.Contains("--prompt '{message}'", stdout);
+        Assert.Contains("--prompt '{body}'", stdout);
         Assert.DoesNotContain("--prompt-file", stdout);
 
         var hermes = ReadHermes(fileSystem.ReadAllText(_configPath));
@@ -255,6 +255,54 @@ public class CliNotifySetupCommandSpecs : IDisposable
         Assert.DoesNotContain("--deliver\t", cleaned, StringComparison.Ordinal);
         Assert.DoesNotContain("--deliver\"", cleaned, StringComparison.Ordinal);
         Assert.Contains("Replace <platform>", stdout);
+    }
+
+    [Fact]
+    public async Task NotifySetup_WithDeliverChatId_FoldsItIntoSubscribeCommand()
+    {
+        // Platforms without a default home channel (weixin and similar) reject
+        // delivery with "No chat_id" unless --deliver-chat-id is supplied.
+        // setup must fold the provided chat id into the printed command.
+        var fileSystem = new FakeFileSystem();
+        NotifyCommands.HealthProbeOverride = new StubProbe(success: true);
+        NotifyCommands.SecretGeneratorOverride = () => "secret-chatid";
+
+        var (exitCode, stdout, stderr) = await RunAsync(
+            new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
+            fileSystem,
+            new FakeCommandExecutor(),
+            ["notify", "setup", "--platform", "weixin", "--deliver-chat-id", "wx-user-123"]);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(stderr);
+        Assert.Contains("--deliver weixin --deliver-chat-id wx-user-123", stdout);
+        // When a chat id is supplied, the "no home channel" hint is not needed.
+        Assert.DoesNotContain("no default home channel", stdout);
+    }
+
+    [Fact]
+    public async Task NotifySetup_PlatformWithoutChatId_HintsAtHomeChannelRequirement()
+    {
+        // When a platform is chosen but no chat id is given, the user may hit a
+        // silent "No chat_id" failure on platforms like weixin. setup should
+        // point them at how to find the chat id rather than leaving them to
+        // discover the failure themselves.
+        var fileSystem = new FakeFileSystem();
+        NotifyCommands.HealthProbeOverride = new StubProbe(success: true);
+        NotifyCommands.SecretGeneratorOverride = () => "secret-no-chatid";
+
+        var (exitCode, stdout, stderr) = await RunAsync(
+            new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
+            fileSystem,
+            new FakeCommandExecutor(),
+            ["notify", "setup", "--platform", "weixin"]);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(stderr);
+        Assert.Contains("hermes send --list <platform>", stdout);
+        // The printed subscribe command itself carries no --deliver-chat-id
+        // (the hint text mentions the flag, but the command doesn't use it).
+        Assert.DoesNotContain("--deliver weixin --deliver-chat-id", stdout);
     }
 
     [Fact]

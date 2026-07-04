@@ -9,7 +9,10 @@ namespace Mohist.Server.Notifications;
 
 public sealed class HermesWebhookClient : IHermesWebhookClient
 {
-    public const string SignatureHeader = "X-Mohist-Signature";
+    // Hermes validates incoming webhooks against the GitHub-style
+    // X-Hub-Signature-256 header (sha256=<hex>), same format Sign() produces.
+    // A bespoke X-Mohist-Signature header is rejected by Hermes with 401.
+    public const string SignatureHeader = "X-Hub-Signature-256";
     public const string EventHeader = "X-Mohist-Event";
 
     private readonly HttpClient _http;
