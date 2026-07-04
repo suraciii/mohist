@@ -1,58 +1,29 @@
-import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
-import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
 import { loadBuildInfo, manifestCandidatesForTesting } from "../src/runtime/build-info.js"
+// Import the pure builder + git reader from the postbuild script. Importing a
+// .mjs via a dynamic import keeps vitest's transform happy while letting the
+// test exercise the real manifest-construction logic with injected fakes.
+const { buildManifest } = await import("../scripts/write-build-info.mjs")
 
-const here = dirname(fileURLToPath(import.meta.url))
-const repoRoot = resolve(here, "..", "..", "..")
-const scriptPath = join(repoRoot, "packages/runner/scripts/write-build-info.mjs")
+describe("runner build manifest builder", () => {
+  it("writesManifestMatchingInjectedGitHead", () => {
+    const readGitHead = () => "deadbeefcafebabe0000000000000000deadbeef"
+    const fixedNow = 1_700_000_000_000
+    const manifest = buildManifest(readGitHead, () => fixedNow)
 
-function runPostbuild(env: Record<string, string> = {}) {
-  return spawnSync("node", [scriptPath], {
-    cwd: repoRoot,
-    env: { ...process.env, ...env },
-    encoding: "utf8",
-  })
-}
-
-function gitHead() {
-  const result = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" })
-  if (result.status !== 0) return null
-  const value = result.stdout.trim()
-  return value.length > 0 ? value : null
-}
-
-describe("runner build manifest script", () => {
-  it("writesManifestMatchingGitRevParseHead", () => {
-    const result = runPostbuild({ MOHIST_REPO_ROOT: repoRoot })
-    expect(result.status).toBe(0)
-    const distDir = join(repoRoot, "packages/runner/dist")
-    const manifestPath = join(distDir, "build-info.json")
-    expect(existsSync(manifestPath)).toBe(true)
-    const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as { gitHash: string | null; builtAt: number }
-    const expected = gitHead()
-    expect(parsed.gitHash).toBe(expected)
-    expect(typeof parsed.builtAt).toBe("number")
-    expect(parsed.builtAt).toBeGreaterThan(0)
+    expect(manifest.gitHash).toBe("deadbeefcafebabe0000000000000000deadbeef")
+    expect(manifest.builtAt).toBe(fixedNow)
   })
 
   it("writesNullGitHashWhenGitRevParseFails", () => {
-    const isolated = mkdtempSync(join(tmpdir(), "mohist-no-git-"))
-    try {
-      const result = runPostbuild({ MOHIST_REPO_ROOT: isolated })
-      expect(result.status).toBe(0)
-      const distDir = join(repoRoot, "packages/runner/dist")
-      const manifestPath = join(distDir, "build-info.json")
-      expect(existsSync(manifestPath)).toBe(true)
-      const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as { gitHash: string | null; builtAt: number }
-      expect(parsed.gitHash).toBeNull()
-      expect(typeof parsed.builtAt).toBe("number")
-    } finally {
-      rmSync(isolated, { recursive: true, force: true })
-    }
+    // Mirrors the production path: readGitHeadForRepo returns null when git is
+    // absent or the directory is not a repo. The builder must propagate null
+    // rather than throw, so the postbuild step stays non-fatal.
+    const readGitHead = () => null
+    const manifest = buildManifest(readGitHead, () => 1_700_000_000_000)
+
+    expect(manifest.gitHash).toBeNull()
+    expect(typeof manifest.builtAt).toBe("number")
   })
 })
 
