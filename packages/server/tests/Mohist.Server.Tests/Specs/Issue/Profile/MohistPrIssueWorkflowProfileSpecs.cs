@@ -271,6 +271,33 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public void LocalWorkflowDefinition_PlanStage_HasSingleOpenspecArtifactsCheck()
+    {
+        var plan = MohistWorkflow.Definition.Stages.Single(s => s.Stage == "plan");
+
+        var checkNames = plan.Checks.Select(c => c.Name).ToArray();
+        Assert.Equal(new[] { "plan-artifacts", "self-review-passed", "health" }, checkNames);
+
+        var planArtifacts = plan.Checks.Single(c => c.Name == "plan-artifacts");
+        Assert.Equal("mohist/openspec-artifacts", planArtifacts.Uses);
+        Assert.Equal("${{ openspecChangeDir }}", ReadStringWith(planArtifacts, "changeDir"));
+
+        Assert.DoesNotContain(plan.Checks, c => c.Name == "proposal-complete");
+        Assert.DoesNotContain(plan.Checks, c => c.Name == "specs-complete");
+        Assert.DoesNotContain(plan.Checks, c => c.Name == "design-complete");
+        Assert.DoesNotContain(plan.Checks, c => c.Name == "tasks-valid");
+
+        var selfReview = plan.Checks.Single(c => c.Name == "self-review-passed");
+        Assert.Equal("core/marker", selfReview.Uses);
+
+        var health = plan.Checks.Single(c => c.Name == "health");
+        Assert.Equal("core/script", health.Uses);
+        Assert.Equal("git diff --check", ReadStringWith(health, "run"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public void GithubPrWorkflowDefinition_BuildStage_PreservesLoadTasksAndVerify()
     {
         var def = MohistWorkflow.Definition;

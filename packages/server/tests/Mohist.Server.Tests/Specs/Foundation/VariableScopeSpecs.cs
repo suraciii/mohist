@@ -167,7 +167,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         var (check, _) = await PollWorkAnyAsync();
 
         Assert.Equal("checks", check.WorkType);
-        Assert.Contains("core/artifact-exists", check.With);
+        Assert.Contains("mohist/openspec-artifacts", check.With);
         Assert.Contains("core/marker", check.With);
         Assert.Contains("core/script", check.With);
         Assert.Contains("\"name\":\"health\"", check.With);
@@ -248,10 +248,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
                     """)),
                 ],
                 [
-                    new("proposal-complete", "Proposal complete", "core/artifact-exists", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"${{ openspecChangeDir }}/proposal.md\"").RootElement.Clone() }),
-                    new("specs-complete", "Spec complete", "core/artifact-exists", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"${{ openspecChangeDir }}/specs\"").RootElement.Clone() }),
-                    new("design-complete", "Design complete", "core/artifact-exists", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"${{ openspecChangeDir }}/design.md\"").RootElement.Clone() }),
-                    new("tasks-valid", "Tasks valid", "core/artifact-exists", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"${{ openspecChangeDir }}/tasks.json\"").RootElement.Clone() }),
+                    new("plan-artifacts", "Plan artifacts complete", "mohist/openspec-artifacts", new Dictionary<string, JsonElement?> { ["changeDir"] = JsonDocument.Parse("\"${{ openspecChangeDir }}\"").RootElement.Clone() }),
                     new("self-review-passed", "Self review passed", "core/marker", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"${{ openspecChangeDir }}/self-review.md\"").RootElement.Clone(), ["expect"] = JsonDocument.Parse("\"<promise>PASS</promise>\"").RootElement.Clone() }),
                     new("health", "Health", "core/script", new Dictionary<string, JsonElement?> { ["run"] = JsonDocument.Parse("\"git diff --check\"").RootElement.Clone() }),
                 ])

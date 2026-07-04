@@ -12,7 +12,17 @@
 - `core/artifact-exists` stays registered (D4) — do not remove. T-001 touches only `openspec.ts` + `openspec.spec.ts`.
 - Wrong-kind coverage: added two tests — one for a directory required as a file (`specs` is a file) and one for a file required as a directory (`proposal.md` is a directory). The empty-changeDir case was updated to expect all four entries in `output.missing`.
 
+## T-002 Discoveries
+
+- Local YAML edit is the four-line removal + a five-line mirror of `mohist-github-pr.workflow.yaml:127-132` (name/title/uses/with changeDir/repair chain untouched). The local check now binds `plan-artifacts` to `mohist/openspec-artifacts` exactly the way github-pr already does.
+- The new server spec `LocalWorkflowDefinition_PlanStage_HasSingleOpenspecArtifactsCheck` lives next to its github-pr counterpart in `MohistPrIssueWorkflowProfileSpecs.cs` (a single class file houses both built-in profile cases) and asserts: exactly three checks in `["plan-artifacts", "self-review-passed", "health"]` order, the consolidated check binds `changeDir: ${{ openspecChangeDir }}`, none of the four per-artifact names are present, `self-review-passed` is `core/marker`, and `health` is `core/script` running `git diff --check`. Mirrors the spec scenarios "Local plan stage declares exactly one artifact gate", "Per-artifact artifact-exists dispatches are removed", and "Plan stage retains three distinct gates".
+- `VariableScopeSpecs.cs:251` model used to inline four `core/artifact-exists` checks; updated to a single `plan-artifacts` (`mohist/openspec-artifacts`, `changeDir: ${{ openspecChangeDir }}`) plus the unchanged `self-review-passed` and `health` entries. The class file itself is `WorkflowVariableSpecs` (inside `Foundation/VariableScopeSpecs.cs`), test lives at `MohistWorkflowUsesCoreActionsForGenericChecks` and now asserts the dispatched `With` contains `mohist/openspec-artifacts` instead of `core/artifact-exists` — the test's intent ("workflow uses core actions for generic checks") is preserved with one fewer core action in play.
+- Spec assertion approach taken from `MohistPrIssueWorkflowProfileSpecs.cs:785` (the existing `ReadStringWith(check, "changeDir")` helper) rather than rolling a new helper — keeps the new test reading like the counterpart test.
+
 ## Verification
 
 - `npm run typecheck -w packages/runner`: clean.
 - `npm test -w packages/runner`: 65 files / 910 tests passed, 0 skipped. openspec.spec.ts alone: 53 passed.
+- `npm test` at root (dotnet + runner): dotnet 3805 passed / 13 skipped (architecture + a few api/session integration skips, unrelated to T-002); runner 65 files / 910 passed / 0 skipped.
+- `dotnet build Mohist.sln -p:SkipWebBuild=true`: 0 warnings, 0 errors (TreatWarningsAsErrors).
+- New spec `LocalWorkflowDefinition_PlanStage_HasSingleOpenspecArtifactsCheck` and `MohistWorkflowUsesCoreActionsForGenericChecks` both pass with the consolidated shape.
