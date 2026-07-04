@@ -425,6 +425,136 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
+    public async Task FileSystemStore_ReleaseStaleLockAsync_DeletesStaleLockFileAndAllowsReacquisitionOnFreshInstance()
+    {
+        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
+        try
+        {
+            var first = CreateFileSystemStore(statePath);
+            Assert.True(await first.TryAcquireLockAsync("stale-job"));
+
+            var refreshed = CreateFileSystemStore(statePath);
+            Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
+
+            await refreshed.ReleaseStaleLockAsync("stale-job");
+
+            Assert.False(File.Exists(statePath + ".lock"));
+
+            Assert.True(await refreshed.TryAcquireLockAsync("new-job"));
+        }
+        finally
+        {
+            if (File.Exists(statePath))
+                File.Delete(statePath);
+            if (File.Exists(statePath + ".lock"))
+                File.Delete(statePath + ".lock");
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task FileSystemStore_ReleaseStaleLockAsync_IsIdempotentWhenLockFileAbsent()
+    {
+        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = CreateFileSystemStore(statePath);
+
+            await store.ReleaseStaleLockAsync("any-job");
+
+            Assert.False(File.Exists(statePath + ".lock"));
+        }
+        finally
+        {
+            if (File.Exists(statePath))
+                File.Delete(statePath);
+            if (File.Exists(statePath + ".lock"))
+                File.Delete(statePath + ".lock");
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task FileSystemStore_ReleaseStaleLockAsync_LeavesLockHeldByDifferentOwner()
+    {
+        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
+        try
+        {
+            var first = CreateFileSystemStore(statePath);
+            Assert.True(await first.TryAcquireLockAsync("real-owner"));
+
+            var refreshed = CreateFileSystemStore(statePath);
+            await refreshed.ReleaseStaleLockAsync("someone-else");
+
+            Assert.True(File.Exists(statePath + ".lock"));
+
+            Assert.False(await refreshed.TryAcquireLockAsync("new-job"));
+        }
+        finally
+        {
+            if (File.Exists(statePath))
+                File.Delete(statePath);
+            if (File.Exists(statePath + ".lock"))
+                File.Delete(statePath + ".lock");
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task FileSystemStore_ReleaseLockAsync_StillNoOpsAfterRestart()
+    {
+        var statePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
+        try
+        {
+            var first = CreateFileSystemStore(statePath);
+            Assert.True(await first.TryAcquireLockAsync("stale-job"));
+
+            var refreshed = CreateFileSystemStore(statePath);
+
+            await refreshed.ReleaseLockAsync("stale-job");
+
+            Assert.True(File.Exists(statePath + ".lock"));
+        }
+        finally
+        {
+            if (File.Exists(statePath))
+                File.Delete(statePath);
+            if (File.Exists(statePath + ".lock"))
+                File.Delete(statePath + ".lock");
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task InMemoryUpdateStore_ReleaseStaleLockAsync_ReleasesHeldLockWithoutProcessLocalMatch()
+    {
+        var store = new InMemoryUpdateStore();
+        Assert.True(await store.TryAcquireLockAsync("stale-job"));
+
+        await store.ReleaseStaleLockAsync("stale-job");
+
+        Assert.True(await store.TryAcquireLockAsync("new-job"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task InMemoryUpdateStore_ReleaseStaleLockAsync_IsIdempotentWhenLockNotHeld()
+    {
+        var store = new InMemoryUpdateStore();
+
+        await store.ReleaseStaleLockAsync("some-job");
+
+        Assert.True(await store.TryAcquireLockAsync("new-job"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
     public async Task StartAsync_WhenInstallFactsChangeBeforeExecution_FailsWithoutCommands()
     {
         var store = new InMemoryUpdateStore();
@@ -1899,6 +2029,12 @@ public class SystemUpdateServiceSpecs
             return Task.CompletedTask;
         }
 
+        public Task ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default)
+        {
+            Events.Add("ReleaseStaleLock");
+            return Task.CompletedTask;
+        }
+
         public Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default)
         {
             Events.Add("Save");
@@ -1959,6 +2095,21 @@ public class SystemUpdateServiceSpecs
         }
 
         public Task ReleaseLockAsync(string jobId, CancellationToken cancellationToken = default)
+        {
+            lock (_gate)
+            {
+                if (_lockOwnerJobId == jobId)
+                {
+                    _locked = false;
+                    _lockOwnerJobId = null;
+                    CompleteUnlockWaiters();
+                }
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default)
         {
             lock (_gate)
             {

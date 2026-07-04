@@ -9,6 +9,7 @@ public interface ISystemUpdateStore
     Task<SystemUpdateJobState?> GetLatestAsync(CancellationToken cancellationToken = default);
     Task<bool> TryAcquireLockAsync(string jobId, CancellationToken cancellationToken = default);
     Task ReleaseLockAsync(string jobId, CancellationToken cancellationToken = default);
+    Task ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default);
     Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default);
     Task<bool> SaveIfCurrentAsync(SystemUpdateJobState expected, SystemUpdateJobState next, CancellationToken cancellationToken = default);
 }
@@ -97,6 +98,21 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
         {
             _gate.Release();
         }
+    }
+
+    public Task ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default)
+    {
+        _gate.Wait(cancellationToken);
+        try
+        {
+            ReleaseLockFile(jobId);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        return Task.CompletedTask;
     }
 
     public async Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default)

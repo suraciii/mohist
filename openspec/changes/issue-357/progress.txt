@@ -1,0 +1,40 @@
+# Issue 357 — stale system-update lock recovery
+
+## Codebase Patterns
+
+- The system-update subsystem slice (`packages/server/src/Mohist.Server/SystemInfo/`) keeps `ISystemUpdateStore` + `FileSystemSystemUpdateStore` co-declared in `FileSystemSystemUpdateStore.cs`. Convenience helpers (`ReleaseLockFile`, `TryCreateLockFile`, `ReadLatestUnlockedAsync`) are private to that file.
+- `FileSystemSystemUpdateStore` uses a `SemaphoreSlim _gate` to serialize all disk-touching operations; lock state is held in-memory (`_locked` + `_lockOwnerJobId`) on top of the on-disk `<state>.lock` file, but `_lockOwnerJobId` is process-local and is the reason a plain `ReleaseLockAsync` no-ops after a restart.
+- `ReleaseLockFile(jobId)` already does content-matched deletion (read owner from file, delete only if matches `jobId`); `IOIOException` is swallowed there because the on-disk state still serves correctness via the gate/lock file.
+- The in-memory store fake (`InMemoryUpdateStore`) is a private nested class in `SystemUpdateServiceSpecs.cs` and gates both record-keeping and waiter state behind a single `lock (_gate)`. `WaitForUnlockAsync` listens on a `TaskCompletionSource` list completed by both `ReleaseLockAsync` and the (new) `ReleaseStaleLockAsync` when they flip `_locked = false`.
+- The `OrderTrackingStore` fake only collects call events in a `List<string> Events`; mirrored method just records `"ReleaseStaleLock"` so any order-sensitive specs that observe lock-release can spot the new path being taken.
+- Existing `SourceAudit_ReleaseLockAsyncOnlyInSharedHelpersAndRunUpdateFinally` only pins `await _store.ReleaseLockAsync(...)` to be inside `PersistTransitionAsync` / `RunUpdateAsync`. Adding a NEW store method (`ReleaseStaleLockAsync`) does not show up in that regex, so the audit stays green without edits. The reconciler (T-002) will use the new method on `ISystemUpdateStore`, NOT `_store.ReleaseLockAsync` inside `SystemUpdateService`.
+- Tests on `FileSystemSystemUpdateStore` consistently use a per-test temp file `Path.GetTempPath() + "mohist-system-update-{Guid:N}.json"` plus a try/finally that deletes both `.json` and `.json.lock`.
+- All test fakes for `ISystemUpdateStore` need to implement every interface member — adding the interface method forces an update to: production class, `InMemoryUpdateStore`, `OrderTrackingStore`. (No other fakes were found, but worth grepping again before commit.)
+
+## T-001 — `ReleaseStaleLockAsync` (COMPLETED)
+
+### Decisions confirmed
+- **Add a new method, don't loosen `ReleaseLockAsync`.** `ReleaseStaleLockAsync` calls `ReleaseLockFile(jobId)` directly, bypassing the `_lockOwnerJobId == jobId` check. Content match inside `ReleaseLockFile` is the safety: a fresh process holding a different owner is preserved.
+- Gate still held inside `ReleaseStaleLockAsync` to serialize against `TryAcquireLockAsync` re-acquiring concurrently; the actual deletion is content-matched, so two stale-release calls can't trample each other.
+- Async shape: kept `Task`-returning to match interface signature; the body is sync (CPU + short filesystem read+delete). `_gate.Wait` (sync) inside is fine; the file I/O is bounded.
+- Fake mirror: `InMemoryUpdateStore.ReleaseStaleLockAsync` mirrors the production semantics (release when held by `jobId`, otherwise idempotent), so the existing `WaitForUnlockAsync` test signal works for the new path. `OrderTrackingStore.ReleaseStaleLockAsync` records `"ReleaseStaleLock"` in `Events`.
+
+### Test coverage
+Five new specs in `SystemUpdateServiceSpecs.cs`:
+- `FileSystemStore_ReleaseStaleLockAsync_DeletesStaleLockFileAndAllowsReacquisitionOnFreshInstance` — primary acceptance: stale lock file is gone after release, fresh instance `TryAcquireLockAsync("new-job")` succeeds.
+- `FileSystemStore_ReleaseStaleLockAsync_IsIdempotentWhenLockFileAbsent` — idempotent no-op when no .lock file.
+- `FileSystemStore_ReleaseStaleLockAsync_LeavesLockHeldByDifferentOwner` — content match guard: if the file says `"real-owner"`, calling release with `"someone-else"` leaves it; a subsequent acquire still fails.
+- `FileSystemStore_ReleaseLockAsync_StillNoOpsAfterRestart` — regression guard for the existing `ReleaseLockAsync` semantics: on a fresh instance `_lockOwnerJobId` is null and `ReleaseLockAsync(staleJobId)` must NOT delete the on-disk lock file. This pins the additive-only contract.
+- `InMemoryUpdateStore_ReleaseStaleLockAsync_ReleasesHeldLockWithoutProcessLocalMatch` + `InMemoryUpdateStore_ReleaseStaleLockAsync_IsIdempotentWhenLockNotHeld` — fake mirror behavior.
+
+### Build/test outcome
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` clean (0 warnings, 0 errors) — `TreatWarningsAsErrors` acts as lint.
+- `npm test` (server .NET): 3780 passed / 13 skipped (pre-existing) / 0 failed.
+- `vitest` failures on web/runner are env-only (tsc/vitest not installed in this sandbox), unrelated to .NET changes.
+- All `SystemUpdateServiceSpecs` (53 tests, including the 5 new ones) pass.
+- `SourceAudit_ReleaseLockAsyncOnlyInSharedHelpersAndRunUpdateFinally` continues to pass — the audit regex only matches the existing `ReleaseLockAsync` site; the new `ReleaseStaleLockAsync` lives outside `SystemUpdateService`.
+
+### Gotchas for T-002
+- The reconciler (T-002) calls `ISystemUpdateStore.ReleaseStaleLockAsync(jobId)`, NOT `_store.ReleaseLockAsync` from `SystemUpdateService` — so it doesn't violate the SourceAudit rule even if it were audited in `SystemUpdateService` (it won't be, because the reconciler is a new file and the audit only scans `SystemUpdateService`).
+- The fake's `_lockOwnerJobId` does not survive across store constructions, mirroring the post-restart real situation in semantics (the fake never persists to disk). So the `InMemoryUpdateStore_ReleaseStaleLockAsync_ReleasesHeldLockWithoutProcessLocalMatch` test name is slightly misleading — in the in-memory fake the in-process flag still matches because we never construct a second instance there. The TEMP-FILE tests on `FileSystemSystemUpdateStore` are the ones that truly exercise the "fresh process" case (new `CreateFileSystemStore` instance, file still on disk).
+- No `DateTimeOffset.UtcNow` / `Environment.TickCount` reads inside reconciler; both time sides come through `TimeProvider` (already wired in #356) and the new `IProcessStartTimeProvider`.
