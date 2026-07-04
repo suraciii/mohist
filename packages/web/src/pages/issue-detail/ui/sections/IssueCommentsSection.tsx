@@ -36,22 +36,22 @@ export function IssueCommentsSection({
   const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<string | null>(null)
 
   return (
-    <div className="rounded-lg bg-white p-4" data-testid="comments-section">
-      <h2 className="text-sm font-semibold text-gray-700 mb-3">
+    <div className="rounded-lg bg-card p-4" data-testid="comments-section">
+      <h2 className="text-sm font-semibold text-card-foreground mb-3">
         Comments ({comments.length})
       </h2>
       {comments.length === 0 ? (
-        <p className="text-sm text-gray-400">No comments yet.</p>
+        <p className="text-sm text-muted-foreground">No comments yet.</p>
       ) : (
         <div className="space-y-3">
           {comments.map((comment) => (
             <div
               key={comment.id}
-              className="border-b border-gray-100 pb-3 last:border-0 last:pb-0"
+              className="border-b border-border/60 pb-3 last:border-0 last:pb-0"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1">
-                  <div className="text-xs text-gray-400 mb-1">
+                  <div className="text-xs text-muted-foreground mb-1">
                     {formatTime(comment.createdAt)}
                   </div>
                   <MarkdownReader
@@ -72,7 +72,7 @@ export function IssueCommentsSection({
                     setPendingDeleteCommentId(comment.id)
                   }}
                   disabled={deletingCommentId === comment.id}
-                  className="text-muted-foreground hover:text-red-500"
+                  className="text-muted-foreground hover:text-danger"
                   title="Delete comment"
                   data-testid="comment-delete-button"
                 >
@@ -80,7 +80,7 @@ export function IssueCommentsSection({
                 </Button>
               </div>
               {deleteCommentError && deletingCommentId === null && pendingDeleteCommentId === null && (
-                <div className="mt-1 text-xs text-red-500" data-testid="comment-delete-error">
+                <div className="mt-1 text-xs text-danger" data-testid="comment-delete-error">
                   {deleteCommentError}
                 </div>
               )}
@@ -89,7 +89,7 @@ export function IssueCommentsSection({
         </div>
       )}
 
-      <div className="mt-4 pt-3 border-t border-gray-100">
+      <div className="mt-4 pt-3 border-t border-border/60">
         <AttachmentComposer
           projectId={issueProjectId}
           value={commentText}
@@ -100,7 +100,7 @@ export function IssueCommentsSection({
         />
         <div className="flex items-center justify-between mt-2">
           {addCommentMutation.error && (
-            <span className="text-xs text-red-500">
+            <span className="text-xs text-danger">
               {addCommentMutation.error.message}
             </span>
           )}

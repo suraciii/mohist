@@ -73,13 +73,13 @@ export function WorkflowProfileControl({ issue }: WorkflowProfileControlProps) {
       data-testid="issue-workflow-profile-control"
       data-effective-profile={effectiveProfileId}
       data-default-profile={defaultProfileId}
-      className="rounded-lg border border-gray-200 bg-white p-4 space-y-2"
+      className="rounded-lg border border-border bg-card p-4 space-y-2"
     >
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-gray-700">Workflow Profile</h3>
+        <h3 className="text-sm font-semibold text-card-foreground">Workflow Profile</h3>
         <span
           data-testid="issue-workflow-profile-value"
-          className="text-xs font-mono text-gray-600"
+          className="text-xs font-mono text-muted-foreground"
         >
           {effectiveProfileId}
         </span>
@@ -117,7 +117,7 @@ export function WorkflowProfileControl({ issue }: WorkflowProfileControlProps) {
       {started && lockedReason && (
         <p
           data-testid="issue-workflow-profile-locked-reason"
-          className="text-xs text-amber-700"
+          className="text-xs text-warning"
         >
           {lockedReason}
         </p>
@@ -125,7 +125,7 @@ export function WorkflowProfileControl({ issue }: WorkflowProfileControlProps) {
       {error && (
         <p
           data-testid="issue-workflow-profile-error"
-          className="text-xs text-red-600"
+          className="text-xs text-danger"
         >
           {error}
         </p>

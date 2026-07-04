@@ -68,14 +68,14 @@ function TaskLifecycleTime({ task }: { task: StageTaskState }) {
   const completedAt = task.completedAt
   if (!completedAt) {
     return (
-      <span className="text-xs text-gray-400 flex-shrink-0">{startClock}</span>
+      <span className="text-xs text-muted-foreground/70 flex-shrink-0">{startClock}</span>
     )
   }
 
   const endClock = formatClock(completedAt)
   const dur = task.duration > 0 ? ` · ${formatDuration(task.duration)}` : ''
   return (
-    <span className="text-xs text-gray-400 flex-shrink-0" title={`Started ${startClock}, ended ${endClock}`}>
+    <span className="text-xs text-muted-foreground/70 flex-shrink-0" title={`Started ${startClock}, ended ${endClock}`}>
       {startClock}→{endClock}{dur}
     </span>
   )
@@ -92,7 +92,7 @@ function RunningElapsed({ startClock, startedAt }: { startClock: string; started
   }, [startedAt])
 
   return (
-    <span className="text-xs text-gray-400 flex-shrink-0" title={`Started at ${startClock}`}>
+    <span className="text-xs text-muted-foreground/70 flex-shrink-0" title={`Started at ${startClock}`}>
       {startClock} · {formatDuration(elapsedMs)}
     </span>
   )
@@ -186,7 +186,7 @@ function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useWorkflow
   return map
 }
 
-function CheckmarkIcon({ className = 'h-5 w-5 text-green-500' }: { className?: string }) {
+function CheckmarkIcon({ className = 'h-5 w-5 text-success' }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="currentColor">
       <path
@@ -198,7 +198,7 @@ function CheckmarkIcon({ className = 'h-5 w-5 text-green-500' }: { className?: s
   )
 }
 
-function CrossIcon({ className = 'h-5 w-5 text-red-500' }: { className?: string }) {
+function CrossIcon({ className = 'h-5 w-5 text-danger' }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="currentColor">
       <path
@@ -210,7 +210,7 @@ function CrossIcon({ className = 'h-5 w-5 text-red-500' }: { className?: string 
   )
 }
 
-function SpinnerIcon({ className = 'h-5 w-5 text-blue-500 animate-spin' }: { className?: string }) {
+function SpinnerIcon({ className = 'h-5 w-5 text-info animate-spin' }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -219,7 +219,7 @@ function SpinnerIcon({ className = 'h-5 w-5 text-blue-500 animate-spin' }: { cla
   )
 }
 
-function EmptyCircleIcon({ className = 'h-5 w-5 text-gray-300' }: { className?: string }) {
+function EmptyCircleIcon({ className = 'h-5 w-5 text-muted-foreground/40' }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="currentColor">
       <path
@@ -231,7 +231,7 @@ function EmptyCircleIcon({ className = 'h-5 w-5 text-gray-300' }: { className?: 
   )
 }
 
-function HourglassIcon({ className = 'h-5 w-5 text-amber-500' }: { className?: string }) {
+function HourglassIcon({ className = 'h-5 w-5 text-warning' }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="currentColor">
       <path
@@ -243,7 +243,7 @@ function HourglassIcon({ className = 'h-5 w-5 text-amber-500' }: { className?: s
   )
 }
 
-function InterruptedIcon({ className = 'h-5 w-5 text-orange-500' }: { className?: string }) {
+function InterruptedIcon({ className = 'h-5 w-5 text-warning' }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="currentColor">
       <path
@@ -287,7 +287,7 @@ function StageBarCell({
   onClick: () => void
   isMobile: boolean
 }) {
-  const bgColor = selected ? 'bg-muted border-gray-300' : 'bg-background border'
+  const bgColor = selected ? 'bg-muted border-border' : 'bg-background border-border'
   const stageLabel = stage.charAt(0).toUpperCase() + stage.slice(1)
   const layoutClass = isMobile ? 'min-w-32 shrink-0' : 'flex-1 min-w-0'
   const labelClass = isMobile ? 'whitespace-nowrap' : 'truncate'
@@ -309,7 +309,7 @@ function StageBarCell({
         <span className="text-xs text-muted-foreground/70 ml-7">{formatDuration(duration)}</span>
       )}
       {status === 'running' && duration != null && (
-        <span className="text-xs text-blue-500 ml-7">{formatDuration(duration)}</span>
+        <span className="text-xs text-info ml-7">{formatDuration(duration)}</span>
       )}
     </Button>
   )
@@ -342,7 +342,7 @@ function StageBar({
           <div key={stage} className={`flex items-stretch ${isMobile ? 'shrink-0' : 'flex-1 min-w-0'}`}>
             {idx > 0 && (
               <div className="flex items-center px-1">
-                <svg className="h-4 w-4 text-gray-300 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <svg className="h-4 w-4 text-muted-foreground/40 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
                   <path
                     fillRule="evenodd"
                     d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
@@ -397,17 +397,17 @@ function RequiredFileEntry({ rf, issueNumber }: { rf: { path: string; source: st
         disabled={!rf.canFetchContent}
         className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
       >
-        <svg className="h-3 w-3 flex-shrink-0 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
+        <svg className="h-3 w-3 flex-shrink-0 text-info" viewBox="0 0 20 20" fill="currentColor">
           <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
         </svg>
         <span className="font-mono truncate">{rf.path}</span>
-        {rf.source === 'task-expect' && <span className="text-[10px] text-blue-400 flex-shrink-0">expect</span>}
+        {rf.source === 'task-expect' && <span className="text-[10px] text-info/80 flex-shrink-0">expect</span>}
       </button>
       {open && (
-        <div className="mt-1 rounded bg-gray-100 p-2 max-h-60 overflow-auto">
-          {loading && <span className="text-gray-400">loading...</span>}
-          {error && <span className="text-red-400">File content unavailable</span>}
-          {content && <pre className="whitespace-pre-wrap break-words font-mono text-xs text-gray-600">{content}</pre>}
+        <div className="mt-1 rounded bg-muted p-2 max-h-60 overflow-auto">
+          {loading && <span className="text-muted-foreground">loading...</span>}
+          {error && <span className="text-danger">File content unavailable</span>}
+          {content && <pre className="whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">{content}</pre>}
         </div>
       )}
     </div>
@@ -422,7 +422,7 @@ function TaskSessionChip({ issueNumber, sessionName }: { issueNumber: number; se
     <Link
       to={transcriptPath}
       onClick={(event) => event.stopPropagation()}
-      className="inline-flex items-center gap-1 rounded border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 hover:border-blue-200 hover:bg-blue-100 shrink-0"
+      className="inline-flex items-center gap-1 rounded border border-info-border bg-info-subtle px-1.5 py-0.5 text-[11px] font-medium text-info hover:border-info/50 shrink-0"
       title={`Open ${sessionName} transcript`}
     >
       <MessageSquareIcon className="h-3 w-3" aria-hidden="true" />
@@ -455,7 +455,7 @@ function TaskArtifactSummaryChip({
           onClick()
         }
       }}
-      className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer"
+      className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-info-subtle text-info hover:bg-info-subtle/80 transition-colors cursor-pointer"
       title={`Open recorded ${summary.path}`}
     >
       {isDirectory ? (
@@ -511,13 +511,13 @@ function TaskItem({
 
   let icon: React.ReactNode
   if (task.status === 'completed') {
-    icon = <CheckmarkIcon className="h-4 w-4 text-green-500 flex-shrink-0" />
+    icon = <CheckmarkIcon className="h-4 w-4 text-success flex-shrink-0" />
   } else if (isFailed) {
-    icon = <CrossIcon className="h-4 w-4 text-red-500 flex-shrink-0" />
+    icon = <CrossIcon className="h-4 w-4 text-danger flex-shrink-0" />
   } else if (isRunning) {
-    icon = <SpinnerIcon className="h-4 w-4 text-blue-500 animate-spin flex-shrink-0" />
+    icon = <SpinnerIcon className="h-4 w-4 text-info animate-spin flex-shrink-0" />
   } else {
-    icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
+    icon = <EmptyCircleIcon className="h-4 w-4 text-muted-foreground/40 flex-shrink-0" />
   }
 
   const hasReason = task.reason != null
@@ -527,7 +527,7 @@ function TaskItem({
 
   return (
     <div
-      className={`rounded-md border overflow-hidden ${isPending ? 'opacity-50' : ''} ${isFailed ? 'border-red-200' : ''}`}
+      className={`rounded-md border overflow-hidden ${isPending ? 'opacity-50' : ''} ${isFailed ? 'border-danger-border bg-danger-subtle/40' : 'border-border bg-card'}`}
     >
       <Button
         variant="ghost"
@@ -536,7 +536,7 @@ function TaskItem({
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted transition-colors h-auto justify-start font-normal"
       >
         {icon}
-        <span className="text-sm text-gray-900 flex-1 truncate">{task.title}</span>
+        <span className="text-sm text-card-foreground flex-1 truncate">{task.title}</span>
         {task.status === 'completed' && hasArtifacts && (
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {artifactSummaries.map((summary) => (
@@ -549,21 +549,21 @@ function TaskItem({
           </div>
         )}
         {hasReason && (
-          <span className="text-xs text-amber-500 flex-shrink-0" title={task.reason}>reason</span>
+          <span className="text-xs text-warning flex-shrink-0" title={task.reason}>reason</span>
         )}
         {originLabel && (
-          <span className="text-[11px] text-gray-400 flex-shrink-0 font-mono" title={originTitle}>{originLabel}</span>
+          <span className="text-[11px] text-muted-foreground flex-shrink-0 font-mono" title={originTitle}>{originLabel}</span>
         )}
         {sessionName && (
           <TaskSessionChip issueNumber={issueNumber} sessionName={sessionName} />
         )}
         <TaskLifecycleTime task={task} />
         {isFailed && (
-          <span className="text-xs text-red-500 flex-shrink-0">failed</span>
+          <span className="text-xs text-danger flex-shrink-0">failed</span>
         )}
         {canExpand && !readOnly && (
           <svg
-            className={`h-3 w-3 text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`}
+            className={`h-3 w-3 text-muted-foreground transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`}
             viewBox="0 0 20 20"
             fill="currentColor"
           >
@@ -588,7 +588,7 @@ function TaskItem({
               />
             )}
             {hasReason && (
-              <div className="text-xs text-amber-600 bg-amber-50 rounded px-2 py-1">
+              <div className="text-xs text-warning bg-warning-subtle rounded px-2 py-1">
                 {task.reason}
               </div>
             )}
@@ -610,7 +610,7 @@ function TaskItem({
               <RequiredFileEntry key={rf.path} rf={rf} issueNumber={issueNumber} />
             ))}
             {hasOutput && (
-              <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words font-mono bg-gray-100 rounded p-2 max-h-40 overflow-auto">
+              <pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words font-mono bg-muted rounded p-2 max-h-40 overflow-auto">
                 {typeof taskOutput === 'string' ? taskOutput : JSON.stringify(taskOutput, null, 2)}
               </pre>
             )}
@@ -680,25 +680,25 @@ function DeliveryFailureBanner({
   } | null
 }) {
   const colors: Record<DeliveryFailureKind, string> = {
-    conflict: 'border-red-300 bg-red-50 text-red-800',
-    'base-moved': 'border-amber-300 bg-amber-50 text-amber-800',
-    'retry-safe': 'border-blue-300 bg-blue-50 text-blue-800',
-    'branch-invariant-violation': 'border-purple-300 bg-purple-50 text-purple-800',
-    'workspace-setup': 'border-rose-300 bg-rose-50 text-rose-800',
-    'config-error': 'border-orange-300 bg-orange-50 text-orange-800',
-    'protection-conflict': 'border-orange-300 bg-orange-50 text-orange-800',
-    'pr-state-conflict': 'border-orange-300 bg-orange-50 text-orange-800',
+    conflict: 'border-danger-border bg-danger-subtle text-danger',
+    'base-moved': 'border-warning-border bg-warning-subtle text-warning',
+    'retry-safe': 'border-info-border bg-info-subtle text-info',
+    'branch-invariant-violation': 'border-info-border bg-info-subtle text-info',
+    'workspace-setup': 'border-danger-border bg-danger-subtle text-danger',
+    'config-error': 'border-warning-border bg-warning-subtle text-warning',
+    'protection-conflict': 'border-warning-border bg-warning-subtle text-warning',
+    'pr-state-conflict': 'border-warning-border bg-warning-subtle text-warning',
   }
   const isWorkspaceSetup = failureKind === 'workspace-setup'
   return (
     <div className={`rounded-md border px-2.5 py-2 text-xs space-y-1 ${colors[failureKind]}`}>
       <div className="flex items-center gap-2 font-semibold">
         <span className="text-[10px] uppercase tracking-wide opacity-80">Failure kind</span>
-        <span className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-[11px]">{failureKind}</span>
+        <span className="rounded bg-card/70 px-1.5 py-0.5 font-mono text-[11px]">{failureKind}</span>
         <span>{label}</span>
       </div>
       {failureKind === 'branch-invariant-violation' && (
-        <div className="rounded bg-white/60 px-2 py-1 space-y-0.5 font-mono text-[11px]">
+        <div className="rounded bg-card/70 px-2 py-1 space-y-0.5 font-mono text-[11px]">
           <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">Attribution: runner/action (not issue work)</div>
           {evidence?.boundary && (
             <div>
@@ -707,11 +707,11 @@ function DeliveryFailureBanner({
           )}
           <div>
             <span className="font-sans opacity-70">expected:</span>{' '}
-            <span className="text-green-700">{evidence?.expectedBranch || '(unknown)'}</span>
+            <span className="text-success">{evidence?.expectedBranch || '(unknown)'}</span>
           </div>
           <div>
             <span className="font-sans opacity-70">observed:</span>{' '}
-            <span className="text-red-700">
+            <span className="text-danger">
               {evidence?.observedBranch
                 ? evidence.observedBranch
                 : evidence?.observedRef
@@ -722,7 +722,7 @@ function DeliveryFailureBanner({
         </div>
       )}
       {isWorkspaceSetup && (
-        <div className="rounded bg-white/60 px-2 py-1 space-y-0.5 font-mono text-[11px]">
+        <div className="rounded bg-card/70 px-2 py-1 space-y-0.5 font-mono text-[11px]">
           <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">
             Attribution: workflow infrastructure (not issue work)
           </div>
@@ -746,13 +746,13 @@ function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLab
 
   let icon: React.ReactNode
   if (check.status === 'completed' || check.status === 'passed') {
-    icon = <CheckmarkIcon className="h-4 w-4 text-green-500 flex-shrink-0" />
+    icon = <CheckmarkIcon className="h-4 w-4 text-success flex-shrink-0" />
   } else if (isFailed) {
-    icon = <CrossIcon className="h-4 w-4 text-red-500 flex-shrink-0" />
+    icon = <CrossIcon className="h-4 w-4 text-danger flex-shrink-0" />
   } else if (check.status === 'running') {
-    icon = <SpinnerIcon className="h-4 w-4 text-blue-500 animate-spin flex-shrink-0" />
+    icon = <SpinnerIcon className="h-4 w-4 text-info animate-spin flex-shrink-0" />
   } else {
-    icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
+    icon = <EmptyCircleIcon className="h-4 w-4 text-muted-foreground/40 flex-shrink-0" />
   }
 
   const fallbackName = isHealthCheck ? 'Health check' : check.checkName
@@ -763,26 +763,26 @@ function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLab
 
   return (
     <div
-      className={`flex items-center gap-2 px-3 py-2 rounded-md border ${isHealthCheck && isFailed ? 'border-red-200 bg-red-50' : ''} ${isPending ? 'opacity-50' : ''}`}
+      className={`flex items-center gap-2 px-3 py-2 rounded-md border ${isHealthCheck && isFailed ? 'border-danger-border bg-danger-subtle' : 'border-border bg-card'} ${isPending ? 'opacity-50' : ''}`}
     >
       {icon}
-      <span className="text-sm text-gray-900 flex-1 truncate">{displayName}</span>
+      <span className="text-sm text-card-foreground flex-1 truncate">{displayName}</span>
       {isFailed && check.message && (
-        <span className="text-xs text-red-500 flex-shrink-0 truncate max-w-48">{check.message}</span>
+        <span className="text-xs text-danger flex-shrink-0 truncate max-w-48">{check.message}</span>
       )}
       {originLabel && (
-        <span className="text-[11px] text-gray-400 flex-shrink-0 font-mono" title={originTitle}>{originLabel}</span>
+        <span className="text-[11px] text-muted-foreground flex-shrink-0 font-mono" title={originTitle}>{originLabel}</span>
       )}
       {isHealthCheck && healthOutput && (
         <>
           {healthOutput.command && (
-            <span className="text-xs text-gray-400 flex-shrink-0 font-mono truncate max-w-32" title={healthOutput.command}>{healthOutput.command}</span>
+            <span className="text-xs text-muted-foreground flex-shrink-0 font-mono truncate max-w-32" title={healthOutput.command}>{healthOutput.command}</span>
           )}
           {healthOutput.duration != null && (
-            <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(healthOutput.duration)}</span>
+            <span className="text-xs text-muted-foreground flex-shrink-0">{formatDuration(healthOutput.duration)}</span>
           )}
           {isFailed && healthOutput.summary && (
-            <span className="text-xs text-red-400 flex-shrink-0 truncate max-w-48" title={healthOutput.summary}>{healthOutput.summary}</span>
+            <span className="text-xs text-danger flex-shrink-0 truncate max-w-48" title={healthOutput.summary}>{healthOutput.summary}</span>
           )}
         </>
       )}
@@ -801,15 +801,13 @@ function formatOriginTitle(origin?: WorkItemOrigin | null): string | undefined {
   return `${origin.source} workflow item using ${origin.uses}`
 }
 
-function InlineApproval({
+function InlineApprovalControls({
   issueNumber,
   stage,
-  readOnly,
   approvalOutput,
 }: {
   issueNumber: number
   stage: WorkflowStage
-  readOnly: boolean
   approvalOutput?: Record<string, unknown>
 }) {
   const queryClient = useQueryClient()
@@ -873,12 +871,10 @@ function InlineApproval({
     return 'Approve & Continue'
   }
 
-  if (readOnly) return null
-
   const hasApprovalOutput = approvalOutput != null
 
   return (
-    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-3">
+    <div className="rounded-lg border border-warning-border bg-warning-subtle p-4 space-y-3">
       {reportModalOpen && (
         <FullReportModal
           review={review}
@@ -887,8 +883,8 @@ function InlineApproval({
         />
       )}
 
-      <h3 className="text-sm font-semibold text-amber-800">Approval Required</h3>
-      <p className="text-xs text-amber-600">
+      <h3 className="text-sm font-semibold text-warning">Approval Required</h3>
+      <p className="text-xs text-warning">
         {stage === WorkflowStage.Plan
           ? 'Review the design proposal and approve to continue the workflow.'
           : stage === WorkflowStage.Check
@@ -927,7 +923,7 @@ function InlineApproval({
             data-testid="approve-button"
             className={`flex-1 ${
               hasApprovalOutput && classified === 'PASS'
-                ? 'bg-green-600 hover:bg-green-700 text-white'
+                ? 'bg-success hover:bg-success/90 text-success-foreground'
                 : ''
             }`}
           >
@@ -948,12 +944,12 @@ function InlineApproval({
 
         {feedbackOpen && (
           <div
-            className="space-y-2 rounded-md border border-amber-300 bg-white p-3"
+            className="space-y-2 rounded-md border border-border bg-card p-3"
             data-testid="request-changes-form"
           >
             <label
               htmlFor="request-changes-body"
-              className="text-xs font-medium text-gray-700"
+              className="text-xs font-medium text-card-foreground"
             >
               What changes should the agent make?
             </label>
@@ -989,7 +985,7 @@ function InlineApproval({
       </div>
 
       {(approveMutation.error || requestChangesMutation.error) && (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+        <div className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger">
           {approveMutation.error?.message || requestChangesMutation.error?.message}
         </div>
       )}
@@ -1029,7 +1025,7 @@ function StepList({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Tasks</h3>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Tasks</h3>
         <div className="space-y-1.5">
           {taskResults.length > 0 ? (
             taskResults.map((task) => (
@@ -1041,14 +1037,14 @@ function StepList({
               />
             ))
           ) : (
-            <div className="text-sm text-gray-400 py-2">No tasks yet</div>
+            <div className="text-sm text-muted-foreground py-2">No tasks yet</div>
           )}
         </div>
       </div>
 
       {checkResults.length > 0 && (
         <div>
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Checks</h3>
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Checks</h3>
           <div className="space-y-1.5">
             {(() => {
               const nameCounts = new Map<string, number>()
@@ -1068,17 +1064,16 @@ function StepList({
         </div>
       )}
 
-      {isAwaitingApproval && (
+      {isAwaitingApproval && !readOnly && (
         <div className="space-y-3">
           {checkResults.length === 0 && (
-            <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700">
+            <div className="rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning">
               Approval is awaiting, but this stage has no recorded check results. This usually means the issue was recovered from an interrupted state; rerun the stage if you need fresh verification before approving.
             </div>
           )}
-          <InlineApproval
+          <InlineApprovalControls
             issueNumber={issue.number}
             stage={stage}
-            readOnly={readOnly}
             approvalOutput={issue.approvalState?.output}
           />
         </div>
@@ -1095,14 +1090,14 @@ function StepList({
         />
       )}
 
-      {!isAwaitingApproval && stage === WorkflowStage.Check && failedScriptHealthChecks.length > 0 && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+      {!readOnly && !isAwaitingApproval && stage === WorkflowStage.Check && failedScriptHealthChecks.length > 0 && (
+        <div className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger">
           <span className="font-semibold">Full verification failed:</span> Check approval is blocked until the health check passes. Fix the failures and rerun Check.
         </div>
       )}
 
-      {!isAwaitingApproval && stage === WorkflowStage.Check && scriptHealthChecks.length > 0 && scriptHealthChecks.every(c => c.status === 'pending') && (
-        <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
+      {!readOnly && !isAwaitingApproval && stage === WorkflowStage.Check && scriptHealthChecks.length > 0 && scriptHealthChecks.every(c => c.status === 'pending') && (
+        <div className="rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning">
           Full verification has not run yet. Approval will be available once verification completes.
         </div>
       )}
@@ -1113,11 +1108,9 @@ function StepList({
 function SpecialStatePanel({
   issue,
   issueNumber,
-  readOnly,
 }: {
   issue: Issue
   issueNumber: number
-  readOnly: boolean
 }) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
@@ -1138,8 +1131,6 @@ function SpecialStatePanel({
     },
   })
 
-  if (readOnly) return null
-
   if (issue.status === IssueStatus.Backlog) {
     return (
       <div className="flex justify-center py-4">
@@ -1156,13 +1147,13 @@ function SpecialStatePanel({
 
   if (issue.health === IssueHealth.Blocked) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-2">
+      <div className="rounded-lg border border-danger-border bg-danger-subtle p-4 space-y-2">
         <div className="flex items-center gap-2">
-          <CrossIcon className="h-4 w-4 text-red-500" />
-          <span className="text-sm font-semibold text-red-800">Needs Action</span>
+          <CrossIcon className="h-4 w-4 text-danger" />
+          <span className="text-sm font-semibold text-danger">Needs Action</span>
         </div>
         {issue.blockedReason && (
-          <p className="text-sm text-red-600">{issue.blockedReason}</p>
+          <p className="text-sm text-danger">{issue.blockedReason}</p>
         )}
       </div>
     )
@@ -1170,18 +1161,18 @@ function SpecialStatePanel({
 
   if (issue.health === IssueHealth.Interrupted) {
     return (
-      <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-3">
+      <div className="rounded-lg border border-warning-border bg-warning-subtle p-4 space-y-3">
         <div className="flex items-center gap-2">
           <InterruptedIcon />
-          <span className="text-sm font-semibold text-orange-800">Workflow Interrupted</span>
+          <span className="text-sm font-semibold text-warning">Workflow Interrupted</span>
         </div>
-        <p className="text-xs text-orange-600">
+        <p className="text-xs text-warning">
           The workflow was interrupted. Click &quot;Resume&quot; to continue from where it left off.
         </p>
         <Button
           onClick={() => resumeMutation.mutate()}
           disabled={resumeMutation.isPending}
-          className="bg-orange-500 hover:bg-orange-600 text-white"
+          className="bg-warning hover:bg-warning/90 text-warning-foreground"
         >
           {resumeMutation.isPending ? 'Resuming...' : 'Resume'}
         </Button>
@@ -1211,16 +1202,16 @@ export function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairStat
   }
 
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
+    <div className="rounded-lg border border-danger-border bg-danger-subtle p-4 space-y-3">
       <div className="flex items-center gap-2">
-        <CrossIcon className="h-4 w-4 text-red-500" />
-        <span className="text-sm font-semibold text-red-800">Check failed: {checkRepair.checkName}</span>
+        <CrossIcon className="h-4 w-4 text-danger" />
+        <span className="text-sm font-semibold text-danger">Check failed: {checkRepair.checkName}</span>
       </div>
 
-      <div className="space-y-1.5 text-xs text-red-700">
+      <div className="space-y-1.5 text-xs text-danger">
         <div className="flex items-center justify-between">
           <span className="font-medium">Auto-fix status:</span>
-          <span className={checkRepair.status === 'exhausted' ? 'text-red-600 font-medium' : ''}>
+          <span className={checkRepair.status === 'exhausted' ? 'text-danger font-medium' : ''}>
             {statusLabels[checkRepair.status] ?? checkRepair.status}
           </span>
         </div>
@@ -1235,7 +1226,7 @@ export function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairStat
         {checkRepair.lastRepairStatus && (
           <div className="flex items-center justify-between">
             <span className="font-medium">Last repair:</span>
-            <span className={checkRepair.lastRepairStatus === 'completed' ? 'text-green-600' : ''}>
+            <span className={checkRepair.lastRepairStatus === 'completed' ? 'text-success' : ''}>
               {checkRepair.lastRepairStatus === 'completed' ? 'completed' : checkRepair.lastRepairStatus}
               {checkRepair.followUpReviewStatus === 'failed' && ' — follow-up check failed'}
             </span>
@@ -1245,7 +1236,7 @@ export function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairStat
         {checkRepair.followUpReviewStatus && (
           <div className="flex items-center justify-between">
             <span className="font-medium">Follow-up check:</span>
-            <span className={checkRepair.followUpReviewStatus === 'failed' ? 'text-red-600' : checkRepair.followUpReviewStatus === 'passed' ? 'text-green-600' : ''}>
+            <span className={checkRepair.followUpReviewStatus === 'failed' ? 'text-danger' : checkRepair.followUpReviewStatus === 'passed' ? 'text-success' : ''}>
               {checkRepair.followUpReviewStatus}
             </span>
           </div>
@@ -1259,16 +1250,16 @@ export function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairStat
         )}
 
         {checkRepair.unresolvedSummary && (
-          <div className="mt-2 rounded bg-red-100 p-2">
-            <div className="font-medium text-red-800 mb-1">Unresolved findings:</div>
-            <div className="text-red-700 whitespace-pre-wrap">{checkRepair.unresolvedSummary}</div>
+          <div className="mt-2 rounded border border-danger-border bg-card/70 p-2">
+            <div className="font-medium text-danger mb-1">Unresolved findings:</div>
+            <div className="text-danger whitespace-pre-wrap">{checkRepair.unresolvedSummary}</div>
           </div>
         )}
       </div>
 
       {checkRepair.status === 'exhausted' && (
-        <div className="pt-2 border-t border-red-200">
-          <p className="text-xs text-red-600">
+        <div className="pt-2 border-t border-danger-border">
+          <p className="text-xs text-danger">
             Auto-fix will not continue automatically. You can rerun this stage after making code changes, or take over manually.
           </p>
         </div>
@@ -1321,24 +1312,24 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   const isWorkspaceSetupFailure = deliveryGuidance?.failureKind === 'workspace-setup'
 
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
+    <div className="rounded-lg border border-danger-border bg-danger-subtle p-4 space-y-3">
       <div className="flex items-center gap-2">
-        <CrossIcon className="h-4 w-4 text-red-500" />
-        <span className="text-sm font-semibold text-red-800">Integration Failed</span>
+        <CrossIcon className="h-4 w-4 text-danger" />
+        <span className="text-sm font-semibold text-danger">Integration Failed</span>
       </div>
       <div className="space-y-1.5">
-        <div className="text-xs text-red-700">
+        <div className="text-xs text-danger">
           <span className="font-medium">Failing step:</span> {failingStep}
         </div>
         {deliveryFailureLabel && deliveryGuidance && (
-          <div className="text-xs text-red-700">
+          <div className="text-xs text-danger">
             <span className="font-medium">Failure kind:</span>{' '}
-            <span className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-[11px] mr-1">{deliveryGuidance.failureKind}</span>
+            <span className="rounded bg-card/70 px-1.5 py-0.5 font-mono text-[11px] mr-1">{deliveryGuidance.failureKind}</span>
             {deliveryFailureLabel}
           </div>
         )}
         {isBranchViolation && branchEvidence && (
-          <div className="rounded border border-purple-300 bg-purple-50 px-2.5 py-2 text-xs text-purple-800 space-y-0.5 font-mono">
+          <div className="rounded border border-info-border bg-info-subtle px-2.5 py-2 text-xs text-info space-y-0.5 font-mono">
             <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">Attribution: runner/action (not issue work)</div>
             {branchEvidence.boundary && (
               <div>
@@ -1347,11 +1338,11 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
             )}
             <div>
               <span className="font-sans opacity-70">expected:</span>{' '}
-              <span className="text-green-700">{branchEvidence.expectedBranch || '(unknown)'}</span>
+              <span className="text-success">{branchEvidence.expectedBranch || '(unknown)'}</span>
             </div>
             <div>
               <span className="font-sans opacity-70">observed:</span>{' '}
-              <span className="text-red-700">
+              <span className="text-danger">
                 {branchEvidence.observedBranch
                   ? branchEvidence.observedBranch
                   : branchEvidence.observedRef
@@ -1362,7 +1353,7 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
           </div>
         )}
         {isWorkspaceSetupFailure && workspaceEvidence && (
-          <div className="rounded border border-rose-300 bg-rose-50 px-2.5 py-2 text-xs text-rose-800 space-y-0.5 font-mono">
+          <div className="rounded border border-danger-border bg-danger-subtle px-2.5 py-2 text-xs text-danger space-y-0.5 font-mono">
             <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">Attribution: workflow infrastructure (not issue work)</div>
             {workspaceEvidence.workspacePath && (
               <div>
@@ -1372,41 +1363,41 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
           </div>
         )}
         {capabilityOrFiles && (
-          <div className="text-xs text-red-700">
+          <div className="text-xs text-danger">
             <span className="font-medium">Affected:</span> {capabilityOrFiles}
           </div>
         )}
         {(requirementHeader || mergeReason) && (
-          <div className="text-xs text-red-700">
+          <div className="text-xs text-danger">
             {requirementHeader || mergeReason}
           </div>
         )}
         {(healthCommand || healthSummary) && (
-          <div className="rounded bg-red-100 p-2 space-y-1">
+          <div className="rounded border border-danger-border bg-card/70 p-2 space-y-1">
             {healthCommand && (
-              <div className="text-xs font-mono text-red-800">{healthCommand}</div>
+              <div className="text-xs font-mono text-danger">{healthCommand}</div>
             )}
             {healthSummary && (
-              <div className="text-xs text-red-700">{healthSummary}</div>
+              <div className="text-xs text-danger">{healthSummary}</div>
             )}
             {healthLogExcerpt && (
-              <div className="text-xs text-red-600 mt-1 font-mono whitespace-pre-wrap">{healthLogExcerpt}</div>
+              <div className="text-xs text-danger mt-1 font-mono whitespace-pre-wrap">{healthLogExcerpt}</div>
             )}
           </div>
         )}
-        <div className="pt-1 border-t border-red-200">
-          <p className="text-xs text-red-600">{nextAction}</p>
+        <div className="pt-1 border-t border-danger-border">
+          <p className="text-xs text-danger">{nextAction}</p>
         </div>
       </div>
     </div>
   )
 }
 
-export function WorkflowView({ issue }: { issue: Issue }) {
+export function WorkflowView({ issue, readOnly: readOnlyProp = false }: { issue: Issue; readOnly?: boolean }) {
   const isClosed = issue.status === IssueStatus.Cancelled
   const isCompleted = issue.status === IssueStatus.Done
   const isBacklog = issue.status === IssueStatus.Backlog
-  const readOnly = isClosed
+  const readOnly = readOnlyProp || isClosed
   const { data: timeline } = useWorkflowTimeline(issue.number, !isBacklog)
   const stageStateMap = useMemo(() => workflowTimelineToStageStateMap(timeline), [timeline])
 
@@ -1442,8 +1433,8 @@ export function WorkflowView({ issue }: { issue: Issue }) {
         readOnly={readOnly}
       />
 
-      {(isBacklog || issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (
-        <SpecialStatePanel issue={issue} issueNumber={issue.number} readOnly={readOnly} />
+      {!readOnly && (isBacklog || issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (
+        <SpecialStatePanel issue={issue} issueNumber={issue.number} />
       )}
 
       {!isBacklog && (
@@ -1455,7 +1446,7 @@ export function WorkflowView({ issue }: { issue: Issue }) {
         />
       )}
 
-      {issue.workflowStage === WorkflowStage.Integrate && (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (
+      {!readOnly && issue.workflowStage === WorkflowStage.Integrate && (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (
         <IntegrateFailurePanel issue={issue} />
       )}
 

@@ -38,10 +38,13 @@ export interface RuntimeDecision {
   rationale: string
   currentTask: RuntimeCurrentTask | null
   nextAction: string
+  primary: RuntimeAvailableAction | null
   actions: RuntimeAvailableAction[]
+  stopRecoverable: boolean | null
   waitReason: string | null
   driftNote: string | null
   blockedReason: string | null
+  approvalStage: string | null
 }
 
 export interface RuntimeDecisionInput {
@@ -160,6 +163,13 @@ function buildAllowedActions(input: RuntimeDecisionInput): Set<string> {
   return new Set([...recoveryActions, ...timelineActions])
 }
 
+function hasRecoverableStop(input: RuntimeDecisionInput): boolean {
+  const recoveryActions = input.issue?.recovery?.allowedActions ?? []
+  return recoveryActions.includes('stop')
+    || recoveryActions.includes('force-stop')
+    || recoveryActions.includes('force_stop')
+}
+
 function actionEnabled(
   allowed: Set<string>,
   kind: RuntimeActionKind,
@@ -200,6 +210,11 @@ function buildActions(
 ): RuntimeAvailableAction[] {
   const allowed = buildAllowedActions(input)
   const actions: RuntimeAvailableAction[] = []
+  const waitReason = buildWaitReason(input)
+  const startOffered = actionEnabled(allowed, 'start') || (isBacklog && input.issue?.canStart === true)
+  const startEnabled = !isClosed && startOffered && !waitReason
+  const startReason = waitReason
+    ?? (startOffered ? undefined : 'Start is not currently offered by the backend projection.')
 
   if (summary === 'approval-required') {
     actions.push({
@@ -258,7 +273,7 @@ function buildActions(
     } else {
       actions.push({
         kind: 'stop',
-        label: 'Stop workflow',
+        label: 'Stop',
         enabled: !isClosed && !isDone && actionEnabled(allowed, 'stop'),
         reason: actionEnabled(allowed, 'stop')
           ? undefined
@@ -268,19 +283,28 @@ function buildActions(
     actions.push({
       kind: 'inspect',
       label: 'View transcript',
-      enabled: actionEnabled(allowed, 'inspect'),
+      enabled: false,
+      reason: 'Transcript navigation is not available from this surface yet.',
     })
     return actions
   }
 
   if (summary === 'queued') {
+    if (isBacklog) {
+      actions.push({
+        kind: 'start',
+        label: 'Start',
+        enabled: startEnabled,
+        reason: startReason,
+      })
+    }
     return actions
   }
 
   if (summary === 'running') {
     actions.push({
       kind: 'stop',
-      label: 'Stop workflow',
+      label: 'Stop',
       enabled: !isClosed && !isDone && actionEnabled(allowed, 'stop'),
       reason: actionEnabled(allowed, 'stop')
         ? undefined
@@ -289,7 +313,8 @@ function buildActions(
     actions.push({
       kind: 'inspect',
       label: 'View transcript',
-      enabled: actionEnabled(allowed, 'inspect'),
+      enabled: false,
+      reason: 'Transcript navigation is not available from this surface yet.',
     })
     return actions
   }
@@ -298,7 +323,8 @@ function buildActions(
     actions.push({
       kind: 'inspect',
       label: 'View transcript',
-      enabled: actionEnabled(allowed, 'inspect'),
+      enabled: false,
+      reason: 'Transcript navigation is not available from this surface yet.',
     })
     return actions
   }
@@ -307,14 +333,18 @@ function buildActions(
     actions.push({
       kind: 'start',
       label: 'Start',
-      enabled: !isClosed && actionEnabled(allowed, 'start'),
-      reason: actionEnabled(allowed, 'start')
-        ? undefined
-        : 'Start is not currently offered by the backend projection.',
+      enabled: startEnabled,
+      reason: startReason,
     })
   }
 
   return actions
+}
+
+function pickPrimaryAction(actions: RuntimeAvailableAction[]): RuntimeAvailableAction | null {
+  const executable = actions.find((action) => action.kind !== 'inspect' && action.enabled)
+  if (executable) return executable
+  return actions.find((action) => action.kind !== 'inspect') ?? null
 }
 
 function pickCurrentTask(
@@ -441,6 +471,10 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
     return 'queued'
   }
 
+  if (isBacklog) {
+    return 'queued'
+  }
+
   if (recovery?.latestAttemptState === 'running' || input.hasActiveAgent) {
     return 'running'
   }
@@ -546,6 +580,8 @@ function buildNextAction(
   }
 
   if (summary === 'queued') {
+    const start = actions.find((a) => a.kind === 'start' && a.enabled)
+    if (start) return 'Start the workflow.'
     return waitReason ?? 'Wait for prerequisites or runner capacity.'
   }
 
@@ -593,12 +629,18 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInput): RuntimeDecis
   const isClosed = issue?.status === 'cancelled'
   const isDone = summary === 'done'
   const actions = buildActions(summary, input, isBacklog, isClosed, isDone)
+  const primary = pickPrimaryAction(actions)
+  const hasStop = actions.some((action) => action.kind === 'stop')
+  const stopRecoverable = hasStop ? hasRecoverableStop(input) : null
   const headline = buildHeadline(summary, currentTask, issue)
   const rationale = buildRationale(summary, input, waitReason)
   const nextAction = buildNextAction(summary, actions, currentTask, waitReason)
   const driftNote = buildDriftNote(input)
   const blockedReason = summary === 'failed' || summary === 'blocked'
     ? (issue?.blockedReason ?? null)
+    : null
+  const approvalStage = summary === 'approval-required'
+    ? (issue?.approvalState?.stage ?? issue?.workflowStage ?? null)
     : null
 
   return {
@@ -607,10 +649,13 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInput): RuntimeDecis
     rationale,
     currentTask,
     nextAction,
+    primary,
     actions,
+    stopRecoverable,
     waitReason,
     driftNote,
     blockedReason,
+    approvalStage,
   }
 }
 

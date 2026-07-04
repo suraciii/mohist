@@ -1,34 +1,35 @@
-import { useMemo } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import type { UseMutationResult } from '@tanstack/react-query'
 import { ActivityIcon, AlertCircleIcon, CheckCircle2Icon, ClockIcon, PauseCircleIcon, XCircleIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
-import {
-  approveIssue,
-  invalidateApprovalWait,
-  rejectIssue,
-  retryIssue,
-  resumeIssue,
-  rerunIssue,
-  startIssue,
-  stopIssue,
-  type Issue,
-  type WorkflowTimeline,
-} from '../../../entities/issue'
-import type { AgentStatus } from '../../../entities/agent'
-import { useProject } from '../../../entities/project'
+import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
 import {
-  deriveRuntimeDecision,
   type RuntimeAvailableAction,
   type RuntimeDecision,
   type RuntimeSummary,
 } from '../model/derive-runtime-decision'
 
+interface RuntimeActionMutation<TVariables = void> {
+  mutate: UseMutationResult<unknown, Error, TVariables, unknown>['mutate']
+  isPending: boolean
+  error: Error | null
+}
+
+export interface RuntimeDecisionSurfaceMutations {
+  approveMutation: RuntimeActionMutation
+  sendBackMutation: RuntimeActionMutation<{ stage: string; body: string }>
+  retryMutation: RuntimeActionMutation
+  resumeMutation: RuntimeActionMutation
+  rerunMutation: RuntimeActionMutation
+  forceStopMutation: RuntimeActionMutation
+  stopMutation: RuntimeActionMutation
+  startMutation: RuntimeActionMutation
+}
+
 export interface RuntimeDecisionSurfaceProps {
-  issue: Issue | null | undefined
-  timeline?: WorkflowTimeline | null
-  agentStatus?: AgentStatus | null
-  hasActiveAgent?: boolean
+  decision: RuntimeDecision
+  mutations: RuntimeDecisionSurfaceMutations
 }
 
 interface SummaryPresentation {
@@ -78,33 +79,33 @@ const SUMMARY_PRESENTATION: Record<RuntimeSummary, SummaryPresentation> = {
 }
 
 const toneEdgeClass: Record<SummaryPresentation['tone'], string> = {
-  blue: 'border-l-blue-500',
-  amber: 'border-l-amber-500',
-  red: 'border-l-red-500',
-  orange: 'border-l-orange-500',
-  green: 'border-l-green-500',
-  gray: 'border-l-gray-500',
-  violet: 'border-l-violet-500',
+  blue: 'border-l-info',
+  amber: 'border-l-warning',
+  red: 'border-l-danger',
+  orange: 'border-l-warning',
+  green: 'border-l-success',
+  gray: 'border-l-muted-foreground',
+  violet: 'border-l-info',
 }
 
 const toneLabelClass: Record<SummaryPresentation['tone'], string> = {
-  blue: 'bg-blue-50 text-blue-700 border-blue-200',
-  amber: 'bg-amber-50 text-amber-700 border-amber-200',
-  red: 'bg-red-50 text-red-700 border-red-200',
-  orange: 'bg-orange-50 text-orange-700 border-orange-200',
-  green: 'bg-green-50 text-green-700 border-green-200',
-  gray: 'bg-gray-100 text-gray-700 border-gray-200',
-  violet: 'bg-violet-50 text-violet-700 border-violet-200',
+  blue: 'bg-info-subtle text-info border-info-border',
+  amber: 'bg-warning-subtle text-warning border-warning-border',
+  red: 'bg-danger-subtle text-danger border-danger-border',
+  orange: 'bg-warning-subtle text-warning border-warning-border',
+  green: 'bg-success-subtle text-success border-success-border',
+  gray: 'bg-muted text-muted-foreground border-border',
+  violet: 'bg-info-subtle text-info border-info-border',
 }
 
 const toneIconClass: Record<SummaryPresentation['tone'], string> = {
-  blue: 'text-blue-600',
-  amber: 'text-amber-600',
-  red: 'text-red-600',
-  orange: 'text-orange-600',
-  green: 'text-green-600',
-  gray: 'text-gray-600',
-  violet: 'text-violet-600',
+  blue: 'text-info',
+  amber: 'text-warning',
+  red: 'text-danger',
+  orange: 'text-warning',
+  green: 'text-success',
+  gray: 'text-muted-foreground',
+  violet: 'text-info',
 }
 
 function CurrentTaskPill({
@@ -117,7 +118,7 @@ function CurrentTaskPill({
     <span
       data-testid="runtime-current-task"
       data-task-kind={task.kind}
-      className="inline-flex items-center gap-1.5 rounded-full bg-white/70 border border-current/20 px-2.5 py-1 text-xs font-medium"
+      className="inline-flex items-center gap-1.5 rounded-full bg-card/70 border border-current/20 px-2.5 py-1 text-xs font-medium"
     >
       <span className="text-[10px] uppercase tracking-wide opacity-70">
         {task.kind === 'check' ? 'Check' : 'Task'}
@@ -145,6 +146,7 @@ function SurfaceActionButton({
   onStop,
   onStart,
   pendingKind,
+  primary,
 }: {
   action: RuntimeAvailableAction
   onApprove: () => void
@@ -155,13 +157,17 @@ function SurfaceActionButton({
   onStop: () => void
   onStart: () => void
   pendingKind: RuntimeAvailableAction['kind'] | null
+  primary: boolean
 }) {
   const isPending = pendingKind === action.kind
-  const variant = action.kind === 'approve'
+  const variant = primary && action.kind !== 'stop'
     ? 'default'
-    : action.kind === 'send-back' || action.kind === 'stop'
+    : action.kind === 'send-back' || (primary && action.kind === 'stop')
       ? 'destructive'
       : 'outline'
+  const disabledReason = action.kind === 'inspect'
+    ? (action.reason ?? 'Transcript navigation is not available from this surface yet.')
+    : action.reason
 
   let onClick: () => void = () => undefined
   let busyLabel = ''
@@ -191,11 +197,12 @@ function SurfaceActionButton({
   return (
     <Button
       data-testid={`runtime-action-${action.kind}`}
+      data-primary={primary ? 'true' : 'false'}
       variant={variant}
       size="sm"
       onClick={onClick}
-      disabled={!action.enabled || isPending}
-      title={action.reason ?? undefined}
+      disabled={!action.enabled || isPending || action.kind === 'inspect'}
+      title={disabledReason ?? undefined}
       className="min-w-[7rem]"
     >
       {isPending ? busyLabel : action.label}
@@ -204,97 +211,22 @@ function SurfaceActionButton({
 }
 
 export function RuntimeDecisionSurface({
-  issue,
-  timeline,
-  agentStatus,
-  hasActiveAgent,
+  decision,
+  mutations,
 }: RuntimeDecisionSurfaceProps) {
-  const { projectId } = useProject()
-  const queryClient = useQueryClient()
-
-  const decision = useMemo(
-    () =>
-      deriveRuntimeDecision({
-        issue: issue
-          ? {
-              status: issue.status,
-              workflowStage: issue.workflowStage ?? null,
-              workflowStatus: issue.workflowStatus ?? null,
-              health: issue.health,
-              approvalState: issue.approvalState ?? undefined,
-              blockedReason: issue.blockedReason ?? undefined,
-              recovery: issue.recovery ?? undefined,
-              convergence: issue.convergence ?? undefined,
-              drift: issue.drift ?? undefined,
-              workflowStageProgress: issue.workflowStageProgress ?? undefined,
-              prerequisites: issue.prerequisites ?? [],
-              isDraft: issue.isDraft,
-              canStart: issue.canStart,
-              blocker: issue.blocker,
-            }
-          : null,
-        timeline: timeline
-          ? {
-              currentStage: timeline.currentStage,
-              status: timeline.status,
-              stages: timeline.stages,
-              pendingWork: timeline.pendingWork,
-              availableActions: timeline.availableActions,
-            }
-          : null,
-        agentStatus: agentStatus ?? null,
-        issueNumber: issue?.number,
-        hasActiveAgent,
-      }),
-    [issue, timeline, agentStatus, hasActiveAgent],
-  )
-
-  const invalidateAll = () => {
-    queryClient.invalidateQueries({ queryKey: ['issues'] })
-    if (issue?.number != null) {
-      queryClient.invalidateQueries({ queryKey: ['issues', issue.number] })
-    }
-    queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
-    invalidateApprovalWait(queryClient)
-  }
-
-  const approveMutation = useMutation({
-    mutationFn: () => approveIssue(issue!.number, projectId),
-    onSuccess: invalidateAll,
-  })
-
-  const sendBackMutation = useMutation({
-    mutationFn: () => rejectIssue(issue!.number, {}, projectId),
-    onSuccess: invalidateAll,
-  })
-
-  const retryMutation = useMutation({
-    mutationFn: () => retryIssue(issue!.number, projectId),
-    onSuccess: invalidateAll,
-  })
-
-  const resumeMutation = useMutation({
-    mutationFn: () => resumeIssue(issue!.number, projectId),
-    onSuccess: invalidateAll,
-  })
-
-  const rerunMutation = useMutation({
-    mutationFn: () => rerunIssue(issue!.number, projectId),
-    onSuccess: invalidateAll,
-  })
-
-  const stopMutation = useMutation({
-    mutationFn: () => stopIssue(issue!.number, projectId),
-    onSuccess: invalidateAll,
-  })
-
-  const startMutation = useMutation({
-    mutationFn: () => startIssue(issue!.number, projectId),
-    onSuccess: invalidateAll,
-  })
-
-  if (!issue) return null
+  const [stopConfirming, setStopConfirming] = useState(false)
+  const [sendBackOpen, setSendBackOpen] = useState(false)
+  const [sendBackText, setSendBackText] = useState('')
+  const {
+    approveMutation,
+    sendBackMutation,
+    retryMutation,
+    resumeMutation,
+    rerunMutation,
+    forceStopMutation,
+    stopMutation,
+    startMutation,
+  } = mutations
 
   const presentation = SUMMARY_PRESENTATION[decision.summary]
   const Icon = presentation.icon
@@ -304,9 +236,50 @@ export function RuntimeDecisionSurface({
     : retryMutation.isPending ? 'retry'
     : resumeMutation.isPending ? 'resume'
     : rerunMutation.isPending ? 'rerun'
-    : stopMutation.isPending ? 'stop'
+    : forceStopMutation.isPending || stopMutation.isPending ? 'stop'
     : startMutation.isPending ? 'start'
     : null
+  const actionError = approveMutation.error
+    || sendBackMutation.error
+    || retryMutation.error
+    || resumeMutation.error
+    || rerunMutation.error
+    || forceStopMutation.error
+    || stopMutation.error
+    || startMutation.error
+  const visibleActions = [
+    ...(decision.primary ? [decision.primary] : []),
+    ...decision.actions.filter((action) => action.kind !== decision.primary?.kind),
+  ]
+  const hasVisibleStop = visibleActions.some((action) => action.kind === 'stop')
+
+  const runStop = () => {
+    if (!stopConfirming) {
+      setStopConfirming(true)
+      return
+    }
+    if (decision.stopRecoverable) {
+      forceStopMutation.mutate()
+    } else {
+      stopMutation.mutate()
+    }
+  }
+  const openSendBack = () => {
+    setSendBackOpen(true)
+  }
+  const submitSendBack = () => {
+    const body = sendBackText.trim()
+    if (!body || !decision.approvalStage) return
+    sendBackMutation.mutate(
+      { stage: decision.approvalStage, body },
+      {
+        onSuccess: () => {
+          setSendBackOpen(false)
+          setSendBackText('')
+        },
+      },
+    )
+  }
 
   return (
     <section
@@ -316,7 +289,7 @@ export function RuntimeDecisionSurface({
       role="region"
       aria-label="Issue runtime decision"
       className={cn(
-        'rounded-lg border border-l-4 border-gray-200 bg-white p-4 shadow-sm',
+        'rounded-lg border border-l-4 border-border bg-card p-4 shadow-sm',
         toneEdgeClass[presentation.tone],
       )}
     >
@@ -339,7 +312,7 @@ export function RuntimeDecisionSurface({
         </div>
         <h2
           data-testid="runtime-headline"
-          className="flex-1 min-w-0 text-base font-semibold leading-tight text-gray-900"
+          className="flex-1 min-w-0 text-base font-semibold leading-tight text-card-foreground"
         >
           {decision.headline}
         </h2>
@@ -348,7 +321,7 @@ export function RuntimeDecisionSurface({
 
       <p
         data-testid="runtime-rationale"
-        className="mt-2 text-sm text-gray-700"
+        className="mt-2 text-sm text-muted-foreground"
       >
         {decision.rationale}
       </p>
@@ -356,13 +329,13 @@ export function RuntimeDecisionSurface({
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <span
           data-testid="runtime-next-action"
-          className="text-xs font-medium uppercase tracking-wide text-gray-500"
+          className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
         >
           Next action
         </span>
         <span
           data-testid="runtime-next-action-body"
-          className="text-sm text-gray-700"
+          className="text-sm text-card-foreground"
         >
           {decision.nextAction}
         </span>
@@ -371,7 +344,7 @@ export function RuntimeDecisionSurface({
       {decision.summary === 'queued' && decision.waitReason && (
         <p
           data-testid="runtime-wait-reason"
-          className="mt-2 text-xs text-gray-600"
+          className="mt-2 text-xs text-muted-foreground"
         >
           Waiting on: {decision.waitReason}
         </p>
@@ -380,52 +353,98 @@ export function RuntimeDecisionSurface({
       {decision.driftNote && (
         <p
           data-testid="runtime-drift-note"
-          className="mt-2 text-xs italic text-gray-600"
+          className="mt-2 text-xs italic text-muted-foreground"
         >
           Drift: {decision.driftNote}
         </p>
       )}
 
-      {decision.actions.length > 0 && (
+      {visibleActions.length > 0 && (
         <div
           data-testid="runtime-actions"
           className="mt-4 flex flex-wrap gap-2"
         >
-          {decision.actions.map((action) => (
+          {visibleActions.map((action) => (
             <SurfaceActionButton
               key={action.kind}
               action={action}
               onApprove={() => approveMutation.mutate()}
-              onSendBack={() => sendBackMutation.mutate()}
+              onSendBack={openSendBack}
               onRetry={() => retryMutation.mutate()}
               onResume={() => resumeMutation.mutate()}
               onRerun={() => rerunMutation.mutate()}
-              onStop={() => stopMutation.mutate()}
+              onStop={runStop}
               onStart={() => startMutation.mutate()}
               pendingKind={pendingKind}
+              primary={action.kind === decision.primary?.kind}
             />
           ))}
         </div>
       )}
 
-      {(approveMutation.error
-        || sendBackMutation.error
-        || retryMutation.error
-        || resumeMutation.error
-        || rerunMutation.error
-        || stopMutation.error
-        || startMutation.error) && (
+      {sendBackOpen && (
+        <div
+          data-testid="runtime-send-back-form"
+          className="mt-3 rounded-md border border-border bg-muted p-3"
+        >
+          <label
+            htmlFor="runtime-send-back-body"
+            className="text-xs font-medium text-card-foreground"
+          >
+            What should the agent change?
+          </label>
+          <Textarea
+            id="runtime-send-back-body"
+            data-testid="runtime-send-back-textarea"
+            value={sendBackText}
+            onChange={(event) => setSendBackText(event.target.value)}
+            rows={3}
+            className="mt-2 resize-none bg-card"
+            placeholder="Describe the changes you want before the workflow continues..."
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={sendBackMutation.isPending}
+              onClick={() => {
+                setSendBackOpen(false)
+                setSendBackText('')
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              data-testid="runtime-submit-send-back"
+              disabled={!sendBackText.trim() || !decision.approvalStage || sendBackMutation.isPending}
+              onClick={submitSendBack}
+            >
+              {sendBackMutation.isPending ? 'Sending back...' : 'Submit feedback'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {stopConfirming && hasVisibleStop && (
+        <div
+          data-testid="runtime-stop-confirmation-copy"
+          className="mt-3 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
+        >
+          {decision.stopRecoverable
+            ? 'Stop will preserve progress so this workflow can be resumed later.'
+            : 'Stop is irreversible for this workflow run; progress cannot be resumed.'}
+        </div>
+      )}
+
+      {actionError && (
         <div
           data-testid="runtime-action-error"
-          className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+          className="mt-3 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
         >
-          {approveMutation.error?.message
-            || sendBackMutation.error?.message
-            || retryMutation.error?.message
-            || resumeMutation.error?.message
-            || rerunMutation.error?.message
-            || stopMutation.error?.message
-            || startMutation.error?.message}
+          {actionError.message}
         </div>
       )}
     </section>

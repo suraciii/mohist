@@ -14,6 +14,8 @@ const invalidateQueriesMock = vi.fn()
 
 const apiMocks = {
   startIssue: vi.fn(),
+  approveIssue: vi.fn(),
+  requestChangesIssue: vi.fn(),
   updateIssue: vi.fn(),
   closeIssue: vi.fn(),
   reopenIssue: vi.fn(),
@@ -41,11 +43,13 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     ...actual,
     addComment: (...args: unknown[]) => apiMocks.addComment(...args),
     addPrerequisite: (...args: unknown[]) => apiMocks.addPrerequisite(...args),
+    approveIssue: (...args: unknown[]) => apiMocks.approveIssue(...args),
     closeIssue: (...args: unknown[]) => apiMocks.closeIssue(...args),
     deleteComment: (...args: unknown[]) => apiMocks.deleteComment(...args),
     extractAttachmentIds: (...args: unknown[]) => apiMocks.extractAttachmentIds(...args),
     forceStopIssue: (...args: unknown[]) => apiMocks.forceStopIssue(...args),
     removePrerequisite: (...args: unknown[]) => apiMocks.removePrerequisite(...args),
+    requestChangesIssue: (...args: unknown[]) => apiMocks.requestChangesIssue(...args),
     reopenIssue: (...args: unknown[]) => apiMocks.reopenIssue(...args),
     rerunIssue: (...args: unknown[]) => apiMocks.rerunIssue(...args),
     resumeIssue: (...args: unknown[]) => apiMocks.resumeIssue(...args),
@@ -72,7 +76,7 @@ function getMutationConfigs(): MutationConfig[] {
   return useMutationMock.mock.calls.map((call) => call[0] as MutationConfig)
 }
 
-const expectedMutationCount = 13
+const expectedMutationCount = 15
 
 function findMutationByApiCall(apiMock: ReturnType<typeof vi.fn>): MutationConfig {
   // Call every mutationFn with no args; the one that ultimately invokes
@@ -103,7 +107,7 @@ function findMutationByApiCallWithArg(apiMock: ReturnType<typeof vi.fn>, arg: un
 }
 
 describe('useIssueDetailMutations', () => {
-  it('registers exactly 13 useMutation calls', () => {
+  it('registers exactly 15 useMutation calls', () => {
     renderHook(() => useIssueDetailMutations({ issueNumber: 42, projectId: 'proj-1' }))
     expect(useMutationMock).toHaveBeenCalledTimes(expectedMutationCount)
   })
@@ -139,6 +143,39 @@ describe('useIssueDetailMutations', () => {
     markReady.onSuccess?.()
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
+  })
+
+  it('approve / send-back: call approval APIs and invalidate runtime plus approval wait queries', () => {
+    renderHook(() => useIssueDetailMutations({ issueNumber: 7, projectId: 'proj-x' }))
+
+    const approve = findMutationByApiCall(apiMocks.approveIssue)
+    expect(apiMocks.approveIssue).toHaveBeenCalledWith(7, 'proj-x')
+
+    invalidateQueriesMock.mockClear()
+    approve.onSuccess?.()
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
+
+    const sendBack = findMutationByApiCallWithArg(apiMocks.requestChangesIssue, {
+      stage: 'check',
+      body: 'Please update the implementation.',
+    })
+    expect(apiMocks.requestChangesIssue).toHaveBeenCalledWith(
+      7,
+      { stage: 'check', body: 'Please update the implementation.' },
+      'proj-x',
+    )
+
+    invalidateQueriesMock.mockClear()
+    sendBack.onSuccess?.()
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 7] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
   })
 
   it('addPrerequisite: passes the prerequisite number and invalidates ["issues"] + ["issues", issueNumber] on success', () => {

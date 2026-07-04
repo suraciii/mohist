@@ -301,6 +301,46 @@ describe('IssueDetailPage runtime decision surface', () => {
     expect(surface.dataset.summary).toBe('approval-required')
     expect(surface.querySelector('[data-testid="runtime-action-approve"]')).toBeTruthy()
     expect(surface.querySelector('[data-testid="runtime-action-send-back"]')).toBeTruthy()
+    const workflowFrame = screen.getByTestId('workflow-view-frame')
+    expect(workflowFrame.querySelector('[data-testid="approve-button"]')).toBeNull()
+    expect(workflowFrame.querySelector('[data-testid="request-changes-button"]')).toBeNull()
+  })
+
+  it('renders one Stop control on the page and it belongs to the runtime decision surface', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+      isLoading: false,
+      isError: false,
+    })
+    mockUseWorkflowTimeline.mockReturnValue({
+      data: {
+        workflowRunId: 'wr-1',
+        status: 'running',
+        currentStage: 'build',
+        pendingWork: null,
+        stages: [],
+        availableActions: [{ name: 'stop', label: 'Stop', target: null }],
+      },
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('runtime-decision-surface')).toBeTruthy())
+    const stopButtons = screen.getAllByRole('button', { name: 'Stop' })
+    expect(stopButtons).toHaveLength(1)
+    expect(stopButtons[0]).toBe(screen.getByTestId('runtime-action-stop'))
+    expect(screen.getByTestId('issue-detail-right-rail').querySelector('[data-testid="runtime-action-stop"]')).toBeNull()
   })
 
   it('keeps the sessions panel reachable as supporting evidence beneath the surface', async () => {
@@ -1082,7 +1122,7 @@ describe('IssueDetailPage Ask Agent entry (T-005)', () => {
   })
 })
 
-describe('IssueDetailPage workflow run status pill (issue-318 T-005)', () => {
+describe('IssueDetailPage runtime status badges', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockUseIssueDiff.mockReturnValue({ data: undefined })
@@ -1096,71 +1136,21 @@ describe('IssueDetailPage workflow run status pill (issue-318 T-005)', () => {
     cleanup()
   })
 
-  it('renders the pending-runner pill when the workflow timeline status is pending', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'pending',
-        health: 'active',
-      }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseWorkflowTimeline.mockReturnValue({
-      data: {
-        workflowRunId: 'wr-1',
-        status: 'pending',
-        currentStage: 'build',
-        pendingWork: null,
-        stages: [],
-        availableActions: [],
-      },
-    })
-
-    renderPage()
-
-    await waitFor(() => expect(screen.getByTestId('workflow-run-status-pending')).toBeTruthy())
-    const pill = screen.getByTestId('workflow-run-status-pending')
-    expect(pill.dataset.status).toBe('pending')
-  })
-
-  it('renders the ready-to-run pill when the workflow timeline status is ready', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'ready',
-        health: 'active',
-      }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseWorkflowTimeline.mockReturnValue({
-      data: {
-        workflowRunId: 'wr-1',
-        status: 'ready',
-        currentStage: 'build',
-        pendingWork: { workId: 'build.1', workType: 'task', stage: 'build', title: 'Build', uses: null },
-        stages: [],
-        availableActions: [],
-      },
-    })
-
-    renderPage()
-
-    await waitFor(() => expect(screen.getByTestId('workflow-run-status-ready')).toBeTruthy())
-    const pill = screen.getByTestId('workflow-run-status-ready')
-    expect(pill.dataset.status).toBe('ready')
-  })
-
-  it('renders the running pill when the workflow timeline status is running', async () => {
+  it('groups identity metadata separately from one runtime summary badge', async () => {
     mockUseIssue.mockReturnValue({
       data: makeIssue({
         status: 'in_progress',
         workflowStage: 'build',
         workflowStatus: 'running',
         health: 'active',
+        priority: 'p1',
+        isDraft: true,
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
       }),
       isLoading: false,
       isError: false,
@@ -1170,20 +1160,25 @@ describe('IssueDetailPage workflow run status pill (issue-318 T-005)', () => {
         workflowRunId: 'wr-1',
         status: 'running',
         currentStage: 'build',
-        pendingWork: { workId: 'build.1', workType: 'task', stage: 'build', title: 'Build', uses: null },
+        pendingWork: null,
         stages: [],
-        availableActions: [],
+        availableActions: [{ name: 'stop', label: 'Stop', target: null }],
       },
     })
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('workflow-run-status-running')).toBeTruthy())
-    const pill = screen.getByTestId('workflow-run-status-running')
-    expect(pill.dataset.status).toBe('running')
+    const identity = await waitFor(() => screen.getByTestId('status-badges-identity'))
+    const runtime = screen.getByTestId('status-badges-runtime')
+    expect(within(identity).getByTestId('priority-chip')).toBeTruthy()
+    expect(within(identity).getByTestId('draft-pill')).toBeTruthy()
+    expect(within(runtime).getAllByTestId('runtime-status-pill')).toHaveLength(1)
+    expect(within(runtime).getByTestId('runtime-status-pill')).toHaveAttribute('data-summary', 'running')
+    expect(screen.queryByTestId('workflow-run-status-running')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('health-pill')).not.toBeInTheDocument()
   })
 
-  it('does not render a workflow run status pill for backlog issues without a timeline', async () => {
+  it('renders the queued runtime badge for backlog issues waiting on a prerequisite', async () => {
     mockUseIssue.mockReturnValue({
       data: makeIssue({
         status: 'backlog',
@@ -1191,6 +1186,7 @@ describe('IssueDetailPage workflow run status pill (issue-318 T-005)', () => {
         workflowStatus: null,
         workflowRunId: null,
         health: 'active',
+        blocker: { kind: 'waiting-for', issue: { number: 9, title: 'Prerequisite' } },
       }),
       isLoading: false,
       isError: false,
@@ -1199,10 +1195,7 @@ describe('IssueDetailPage workflow run status pill (issue-318 T-005)', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('issue-detail-header')).toBeInTheDocument())
-    expect(screen.queryByTestId('workflow-run-status-unknown')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('workflow-run-status-pending')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('workflow-run-status-ready')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('workflow-run-status-running')).not.toBeInTheDocument()
+    const runtime = await waitFor(() => screen.getByTestId('status-badges-runtime'))
+    expect(within(runtime).getByTestId('runtime-status-pill')).toHaveAttribute('data-summary', 'queued')
   })
 })
