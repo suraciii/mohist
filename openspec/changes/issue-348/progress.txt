@@ -85,3 +85,21 @@ Detail-page component tests, under the new `Actions card` block:
 - `for an archived agent, clicking the Unarchive control invokes useUnarchiveAgent with the agent id` — detail-page unarchive wiring.
 - `for an active agent, the Unarchive control is NOT rendered (no mismatch)` — no archived-only affordance leaks into the active state.
 - `for an archived agent, the New Session control remains disabled (archived-cannot-launch invariant)` — no regression of the existing constraint.
+
+## T-004 Web Honest Archive Confirmation Text
+
+### Decisions Applied (T-004)
+- D8: Rewrote `DialogDescription` in `AgentProfileEditor.tsx:255-258` from `"This agent will be marked as archived. It will remain visible but cannot be used to start new sessions. This action can be reversed."` to `"This agent will be marked as archived. It will leave the Active group and cannot be used to start new sessions. You can restore it from the agent detail page."` — drops the vague "remain visible" claim, drops the unbacked "can be reversed", and adds an honest reversibility sentence that points at the working Unarchive affordance on the detail page (delivered in T-003 at `AgentDetailPage.tsx:326-336`, testid `agent-detail-unarchive-btn`). The reversibility sentence is reachable: navigating to the agent detail page after archive exposes the Unarchive control bound to `useUnarchiveAgent`.
+
+### Codebase Patterns (T-004)
+- The `DialogDescription` component renders with `data-slot="dialog-description"` (shared/ui/components/dialog.tsx:131-144). In tests targeting a specific nested dialog, the cleanest pattern is to start from a unique testid inside the target dialog and walk up to `closest('[role="dialog"]')`, then `querySelector('[data-slot="dialog-description"]')` — avoids brittleness around which `DialogDescription` is the active one when multiple dialogs are mounted.
+
+### Verification
+- `npm run typecheck -w packages/web` — clean.
+- `npm run test:run -w packages/web -- src/widgets/agent-profile-editor` — 13 tests pass (11 pre-existing + 2 new).
+- Full web suite: `npm run test:run -w packages/web` — 259 files / 4101 tests pass (1 pre-existing skip). T-003 baseline was 4099; T-004 added 2 honest-copy tests, all green.
+
+### Test Coverage (T-004)
+`AgentProfileEditor.test.tsx`, new tests under `archive flow`:
+- `archive confirmation text describes the real effect and contains no pre-fix false phrase` — asserts the DialogDescription mentions "leave the Active group" + "cannot start new sessions", and does NOT contain "remain visible" or "can be reversed". Satisfies the spec's "Confirmation text matches archive's actual effect" scenario (agent-archive/spec.md:45-48).
+- `archive confirmation states reversibility with reference to the agent detail page (backed by the unarchive affordance)` — asserts the reversibility sentence mentions "restore" + "detail page". Satisfies the spec's "Reversibility claim is backed by a working affordance" scenario (agent-archive/spec.md:50-52) by anchoring the wording to the agent detail page where T-003's `agent-detail-unarchive-btn` lives.

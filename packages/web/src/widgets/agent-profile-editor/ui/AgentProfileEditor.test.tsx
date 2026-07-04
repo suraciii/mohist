@@ -229,6 +229,42 @@ describe('AgentProfileEditor', () => {
       })
       expect(mocks.archiveMutation.mutate).toHaveBeenCalledWith('agent-1', expect.any(Object))
     })
+
+    it('archive confirmation text describes the real effect and contains no pre-fix false phrase', async () => {
+      renderEditor({ agent: activeAgent })
+      await act(async () => {
+        screen.getByTestId('editor-archive').click()
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId('editor-archive-confirm')).toBeInTheDocument()
+      })
+      const confirmButton = screen.getByTestId('editor-archive-confirm')
+      const confirmDialog = confirmButton.closest('[role="dialog"]') as HTMLElement
+      expect(confirmDialog).toBeTruthy()
+      const description = confirmDialog.querySelector('[data-slot="dialog-description"]') as HTMLElement
+      expect(description).toBeTruthy()
+      const text = description.textContent ?? ''
+      expect(text).toMatch(/leave the Active group/i)
+      expect(text).toMatch(/cannot.*start new sessions/i)
+      expect(text.toLowerCase()).not.toContain('remain visible')
+      expect(text).not.toMatch(/can be reversed/i)
+    })
+
+    it('archive confirmation states reversibility with reference to the agent detail page (backed by the unarchive affordance)', async () => {
+      renderEditor({ agent: activeAgent })
+      await act(async () => {
+        screen.getByTestId('editor-archive').click()
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId('editor-archive-confirm')).toBeInTheDocument()
+      })
+      const confirmButton = screen.getByTestId('editor-archive-confirm')
+      const confirmDialog = confirmButton.closest('[role="dialog"]') as HTMLElement
+      const description = confirmDialog.querySelector('[data-slot="dialog-description"]') as HTMLElement
+      const text = description.textContent ?? ''
+      expect(text).toMatch(/restore/i)
+      expect(text).toMatch(/detail page/i)
+    })
   })
 
   describe('validation', () => {
