@@ -125,6 +125,16 @@ function buildHost() {
   })
 }
 
+function deferred() {
+  let resolve!: () => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 function workWith(overrides: Partial<{ workflowRunId: string; workId: string; uses: string; ownerKind: string; agentJobId: string }> = {}) {
   return {
     workflowRunId: "wf-336",
@@ -139,6 +149,154 @@ function workWith(overrides: Partial<{ workflowRunId: string; workId: string; us
 }
 
 describe("RunnerHost task-log best-effort flush (T-003)", () => {
+  it("UploadsIncrementalLogBeforeWorkCompletes", async () => {
+    vi.clearAllMocks()
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    uploadTaskLog.mockResolvedValue({ accepted: 1, truncated: false })
+    report.mockResolvedValue({})
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    poll.mockResolvedValueOnce(workWith({ workId: "work-live", agentJobId: "aj-live" })).mockImplementation(async () => null)
+    const release = deferred()
+    blockingAction.mockImplementationOnce(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
+      log?.write("action:test", "line before completion")
+      await release.promise
+      return { status: "success", message: "ok" }
+    })
+
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-host-task-log-live",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+      taskLogFlushLineThreshold: 1,
+      taskLogFlushIntervalMs: 60_000,
+    })
+    const run = host.run(controller.signal)
+
+    await vi.waitFor(() => expect(uploadTaskLog).toHaveBeenCalled(), { timeout: 5_000 })
+    expect(report).not.toHaveBeenCalled()
+
+    release.resolve()
+    await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+  })
+
+  it("RoutesConcurrentIncrementalUploadsToEachWorkItemCollector", async () => {
+    vi.clearAllMocks()
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    uploadTaskLog.mockResolvedValue({ accepted: 1, truncated: false })
+    report.mockResolvedValue({})
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    poll
+      .mockResolvedValueOnce(workWith({ workId: "work-A", agentJobId: "aj-A" }))
+      .mockResolvedValueOnce(workWith({ workId: "work-B", agentJobId: "aj-B" }))
+      .mockImplementation(async () => null)
+    const releases = new Map<string, ReturnType<typeof deferred>>()
+    blockingAction.mockImplementation(async ({ workId, log }: { workId: string; log?: { write: (source: string, text: string) => void } }) => {
+      const release = deferred()
+      releases.set(workId, release)
+      log?.write("action:test", `line for ${workId}`)
+      await release.promise
+      return { status: "success", message: "ok" }
+    })
+
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-host-task-log-concurrent",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+      taskLogFlushLineThreshold: 1,
+      taskLogFlushIntervalMs: 60_000,
+    })
+    const run = host.run(controller.signal)
+
+    await vi.waitFor(() => expect(uploadTaskLog.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
+
+    for (const call of uploadTaskLog.mock.calls) {
+      const [, workId, batch] = call as [string, string, { entries: Array<{ text: string }> }]
+      const workLines = batch.entries.filter((entry) => entry.text.startsWith("line for "))
+      for (const entry of workLines) {
+        expect(entry.text).toBe(`line for ${workId}`)
+      }
+    }
+
+    releases.get("work-A")?.resolve()
+    releases.get("work-B")?.resolve()
+    await vi.waitFor(() => expect(report).toHaveBeenCalledTimes(2), { timeout: 5_000 })
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+  })
+
+  it("FallbackExecutorPathStreamsIncrementalLogsBeforeReport", async () => {
+    vi.clearAllMocks()
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    uploadTaskLog.mockResolvedValue({ accepted: 1, truncated: false })
+    report.mockResolvedValue({})
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    poll.mockResolvedValueOnce(workWith({ workId: "work-fallback", agentJobId: "aj-fallback" })).mockImplementation(async () => null)
+    const release = deferred()
+    createSharedAcpConnection
+      .mockRejectedValueOnce(new Error("shared ACP unavailable"))
+      .mockResolvedValueOnce({
+        connection: {
+          prompt: vi.fn(),
+          cancel: vi.fn(),
+          newSession: vi.fn(),
+          resumeSession: vi.fn(),
+          setSessionConfigOption: vi.fn(),
+          closeSession: vi.fn(),
+        },
+        processPid: 99999,
+        setSessionHandlers: vi.fn(),
+        clearSessionHandlers: vi.fn(),
+        shutdown: shutdownSharedAcpConnection,
+      })
+    blockingAction.mockImplementationOnce(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
+      log?.write("action:test", "fallback live line")
+      await release.promise
+      return { status: "success", message: "ok" }
+    })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-host-task-log-fallback",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+      taskLogFlushLineThreshold: 1,
+      taskLogFlushIntervalMs: 60_000,
+    })
+    const run = host.run(controller.signal)
+
+    await vi.waitFor(() => expect(uploadTaskLog).toHaveBeenCalled(), { timeout: 5_000 })
+    expect(report).not.toHaveBeenCalled()
+
+    release.resolve()
+    await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+    errorSpy.mockRestore()
+  })
+
   it("FlushesCapturedLogViaUploadTaskLogBeforeReport", async () => {
     vi.clearAllMocks()
     getConnectionId.mockReturnValue("conn-1")
@@ -182,6 +340,11 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
+    // With incremental flushing the FIRST upload may be the increment
+    // (depending on the trigger fire ordering); the test mocks a
+    // rejection on the first call and the terminal call resolves via
+    // the default mock. Both failures / successes are best-effort and
+    // never block the report (design D1 / D6).
     uploadTaskLog.mockRejectedValueOnce(new Error("server returned 500"))
     report.mockResolvedValue({})
     startSignalR.mockResolvedValue(undefined)
@@ -203,9 +366,11 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     controller.abort()
     await expect(run).resolves.toBeUndefined()
 
-    expect(uploadTaskLog).toHaveBeenCalledTimes(1)
+    expect(uploadTaskLog).toHaveBeenCalled()
     expect(report).toHaveBeenCalledTimes(1)
-    expect(errorSpy.mock.calls.some((call) => call.some((arg) => typeof arg === "string" && arg.includes("task-log upload failed")))).toBe(true)
+    // At least one upload error must have been logged. The label is
+    // "incremental" or "terminal" — both contain "upload failed for work".
+    expect(errorSpy.mock.calls.some((call) => call.some((arg) => typeof arg === "string" && arg.includes("upload failed for work")))).toBe(true)
 
     errorSpy.mockRestore()
   })
@@ -232,9 +397,9 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     controller.abort()
     await expect(run).resolves.toBeUndefined()
 
-    expect(uploadTaskLog).toHaveBeenCalledTimes(1)
+    expect(uploadTaskLog).toHaveBeenCalled()
     expect(report).toHaveBeenCalledTimes(1)
-    expect(errorSpy.mock.calls.some((call) => call.some((arg) => typeof arg === "string" && arg.includes("task-log upload failed")))).toBe(true)
+    expect(errorSpy.mock.calls.some((call) => call.some((arg) => typeof arg === "string" && arg.includes("upload failed for work")))).toBe(true)
 
     errorSpy.mockRestore()
   })
@@ -276,3 +441,247 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     expect(reportCall[1].message).toBe("boom")
   })
 })
+
+describe("TaskLogCollector incremental flush integration (T-003 Phase 2)", () => {
+  // These tests exercise the `drain` + watermark + flush trigger
+  // contract end-to-end through the host's `executeAndReport`. They
+  // use a stub collector + flush helper instead of running a real
+  // work item, so the assertions are not entangled with branch-stability
+  // git() writes or workspace-prep output.
+
+  it("IncrementalFlushFiresBeforeCompletion_WhenIntervalElapsesDuringWork", async () => {
+    vi.useFakeTimers()
+    const uploadBatches: Array<Array<{ seq: number }>> = []
+    uploadTaskLog.mockImplementation(async (_ownerId: string, _workId: string, batch: { entries: Array<{ seq: number }> }) => {
+      uploadBatches.push(batch.entries.map((e) => ({ seq: e.seq })))
+      return { accepted: batch.entries.length, truncated: false }
+    })
+
+    // Drive the trigger manually with a real collector + a fake
+    // helper that mirrors what `executeAndReport` wires up. This
+    // verifies the trigger timing without depending on the executor's
+    // git() side-effects.
+    const collector = new (await import("../src/runtime/task-log.js")).TaskLogCollector()
+    const flushCalls: Array<Array<{ seq: number }>> = []
+    const flushIncremental = () => {
+      const batch = collector.drain()
+      if (batch === null) return
+      flushCalls.push(batch.entries.map((e) => ({ seq: e.seq })))
+    }
+    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 60, 1_000)
+
+    collector.append("a", "1")
+    await vi.advanceTimersByTimeAsync(120)
+    collector.append("a", "2")
+    await vi.advanceTimersByTimeAsync(120)
+    await trigger.stop()
+
+    expect(flushCalls.length).toBeGreaterThanOrEqual(2)
+    // Each incremental carries only the NEW lines since the last drain.
+    const first = flushCalls[0]!
+    expect(first.map((e) => e.seq)).toEqual([1])
+    const second = flushCalls[1]!
+    expect(second.map((e) => e.seq)).toEqual([2])
+    // No duplicates across increments.
+    const seenSeqs = new Set<number>()
+    for (const batch of flushCalls) {
+      for (const entry of batch) {
+        expect(seenSeqs.has(entry.seq)).toBe(false)
+        seenSeqs.add(entry.seq)
+      }
+    }
+    vi.useRealTimers()
+  })
+
+  it("WatermarkExcludesAlreadySent_IncrementalBatchCarriesOnlyNewLines", async () => {
+    vi.useFakeTimers()
+    const collector = new (await import("../src/runtime/task-log.js")).TaskLogCollector()
+    const drainedSeqs: Array<number[]> = []
+    const flushIncremental = () => {
+      const batch = collector.drain()
+      if (batch === null) return
+      drainedSeqs.push(batch.entries.map((e) => e.seq))
+    }
+    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 60, 1_000)
+
+    collector.append("a", "1")
+    collector.append("a", "2")
+    await vi.advanceTimersByTimeAsync(80)
+    collector.append("a", "3")
+    collector.append("a", "4")
+    await vi.advanceTimersByTimeAsync(80)
+    collector.append("a", "5")
+    await vi.advanceTimersByTimeAsync(80)
+    await trigger.stop()
+
+    expect(drainedSeqs[0]).toEqual([1, 2])
+    expect(drainedSeqs[1]).toEqual([3, 4])
+    expect(drainedSeqs[2]).toEqual([5])
+    // Confirm no seq repeats.
+    const flat = drainedSeqs.flat()
+    expect(flat).toEqual([...new Set(flat)].sort((a, b) => a - b))
+    vi.useRealTimers()
+  })
+
+  it("EmptyDrainProducesNoUpload_QuietPeriodSkipsNetworkRoundTrip", async () => {
+    vi.useFakeTimers()
+    const flushCalls = vi.fn()
+    const collector = new (await import("../src/runtime/task-log.js")).TaskLogCollector()
+    const flushIncremental = () => {
+      const batch = collector.drain()
+      if (batch === null) return
+      flushCalls(batch)
+    }
+    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 60, 1_000)
+
+    await vi.advanceTimersByTimeAsync(300)
+    await trigger.stop()
+
+    // The trigger fired multiple times, but the host-side upload
+    // helper is invoked only when the drain returns non-null.
+    // Here we count it via the wrapper that did fire — we instead
+    // assert that the underlying drain returned null at every tick.
+    expect(flushCalls).not.toHaveBeenCalled()
+    // pendingSinceWatermark must still be 0 (no appends).
+    expect(collector.pendingSinceWatermark()).toBe(0)
+    vi.useRealTimers()
+  })
+
+  it("LineCountThresholdFiresEagerly_BeforeNextIntervalTick", async () => {
+    vi.useFakeTimers()
+    const collector = new (await import("../src/runtime/task-log.js")).TaskLogCollector()
+    const drainedSeqs: Array<number[]> = []
+    const flushIncremental = () => {
+      const batch = collector.drain()
+      if (batch === null) return
+      drainedSeqs.push(batch.entries.map((e) => e.seq))
+    }
+    // Long interval, low threshold — the threshold path drives the fire.
+    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 10_000, 3)
+    const listener = () => trigger.noteAppend()
+    collector.setAppendListener(listener)
+
+    collector.append("a", "1")
+    collector.append("a", "2")
+    // Two appends is below the threshold — no eager fire yet.
+    expect(drainedSeqs).toEqual([])
+    collector.append("a", "3")
+    // Threshold reached — eager fire.
+    expect(drainedSeqs.length).toBeGreaterThanOrEqual(1)
+    expect(drainedSeqs[0]).toEqual([1, 2, 3])
+
+    collector.setAppendListener(null)
+    await trigger.stop()
+    vi.useRealTimers()
+  })
+
+  it("FailedIncrementalUploadIsReconciledByTerminalBatch_AuthoritativeStoreRecovers", async () => {
+    vi.useFakeTimers()
+    const collector = new (await import("../src/runtime/task-log.js")).TaskLogCollector()
+    const uploadBatches: Array<Array<{ seq: number }>> = []
+    const errors: unknown[] = []
+    const uploadIncremental = async () => {
+      const batch = collector.drain()
+      if (batch === null) return
+      try {
+        throw new Error("server returned 500")
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    const uploadTerminal = async () => {
+      const batch = collector.flush()
+      uploadBatches.push(batch.entries.map((e) => ({ seq: e.seq })))
+    }
+
+    collector.append("a", "1")
+    collector.append("a", "2")
+    await uploadIncremental()
+    expect(errors).toHaveLength(1)
+
+    await uploadTerminal()
+    const terminalBatch = uploadBatches[0]!
+    expect(terminalBatch.map((e) => e.seq)).toEqual([1, 2])
+    vi.useRealTimers()
+  })
+
+  it("FlushTriggerIsStoppedBeforeTerminalFlush_NoLateIncrementalFiresAfterCompletion", async () => {
+    vi.useFakeTimers()
+    const collector = new (await import("../src/runtime/task-log.js")).TaskLogCollector()
+    const drainedSeqs: Array<number[]> = []
+    const flushIncremental = () => {
+      const batch = collector.drain()
+      if (batch === null) return
+      drainedSeqs.push(batch.entries.map((e) => e.seq))
+    }
+    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 60, 1_000)
+    collector.append("a", "1")
+    await vi.advanceTimersByTimeAsync(80)
+    // Stop BEFORE the next tick — no further fires.
+    await trigger.stop()
+    const beforeCount = drainedSeqs.length
+    await vi.advanceTimersByTimeAsync(500)
+    expect(drainedSeqs.length).toBe(beforeCount)
+    vi.useRealTimers()
+  })
+
+  it("IncrementalFlushesAreSerialized_WhenTriggerFiresDuringInFlightUpload", async () => {
+    const resolvers: Array<() => void> = []
+    let active = 0
+    let maxActive = 0
+    const flushIncremental = vi.fn(() => new Promise<void>((resolve) => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      resolvers.push(() => {
+        active -= 1
+        resolve()
+      })
+    }))
+
+    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 10_000, 1)
+
+    trigger.noteAppend()
+    trigger.noteAppend()
+    trigger.noteAppend()
+
+    expect(flushIncremental).toHaveBeenCalledTimes(1)
+    expect(maxActive).toBe(1)
+
+    resolvers.shift()?.()
+    await vi.waitFor(() => expect(flushIncremental).toHaveBeenCalledTimes(2))
+    expect(maxActive).toBe(1)
+
+    resolvers.shift()?.()
+    await trigger.stop()
+    expect(active).toBe(0)
+  })
+
+  it("FlushTriggerTimingIsDrivenByFakeTimers_NoWallClock", async () => {
+    vi.useFakeTimers()
+    const collector = new (await import("../src/runtime/task-log.js")).TaskLogCollector()
+    let drainCount = 0
+    const flushIncremental = () => {
+      const batch = collector.drain()
+      if (batch === null) return
+      drainCount += 1
+    }
+    const trigger = startTaskLogFlushTriggerForTest(flushIncremental, 100, 1_000)
+    // No appends — every tick still calls the flush callback, which
+    // is a no-op (drain returns null). After 250 ms three ticks fire.
+    await vi.advanceTimersByTimeAsync(250)
+    expect(drainCount).toBe(0)
+    // Add a line and tick again — it gets drained.
+    collector.append("a", "1")
+    await vi.advanceTimersByTimeAsync(110)
+    expect(drainCount).toBe(1)
+    await trigger.stop()
+    vi.useRealTimers()
+  })
+})
+
+// Re-export the host's private trigger so these unit tests can drive
+// the same code path the host uses (rather than reimplementing the
+// setInterval dance). The host deliberately keeps this symbol private
+// to its module — the test reaches it through a thin re-export kept
+// in the host module itself for testability.
+import { startTaskLogFlushTrigger as startTaskLogFlushTriggerForTest } from "../src/runtime/host.js"

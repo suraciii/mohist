@@ -159,7 +159,7 @@ public class TaskLogStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AppendAsync_TwiceForSameWorkItem_ReplacesPreviousBatch()
+    public async Task AppendAsync_SecondIncrementalBatchKeepsEarlierLines()
     {
         var ownerKind = "workflow";
         var ownerId = $"wr-{Guid.NewGuid():N}";
@@ -176,20 +176,109 @@ public class TaskLogStoreSpecs : IAsyncLifetime
 
         var second = new List<TaskLogLine>
         {
-            new(1, _timeProvider.GetUtcNow(), "action", "retry-1"),
+            new(3, _timeProvider.GetUtcNow(), "action", "third"),
+            new(4, _timeProvider.GetUtcNow(), "action", "fourth"),
         };
         await _store.AppendAsync(ownerKind, ownerId, workId, second, truncated: true);
 
         var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 10);
-        Assert.Single(page.Lines);
-        Assert.Equal("action", page.Lines[0].Source);
-        Assert.Equal("retry-1", page.Lines[0].Text);
+        Assert.Equal([1, 2, 3, 4], page.Lines.Select(l => l.Seq).ToArray());
+        Assert.Equal(["first", "second", "third", "fourth"], page.Lines.Select(l => l.Text).ToArray());
         Assert.True(page.Truncated);
 
         await using var db = new MohistDbContext(_options);
         var batchCount = await db.TaskLogBatches.AsNoTracking()
             .CountAsync(b => b.OwnerKind == ownerKind && b.OwnerId == ownerId && b.WorkId == workId);
         Assert.Equal(1, batchCount);
+    }
+
+    [Fact]
+    public async Task AppendAsync_TerminalBatchDedupsOverlappingIncrementalSeqs()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+
+        await _store.AppendAsync(ownerKind, ownerId, workId,
+            Enumerable.Range(1, 10)
+                .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "incremental", $"incremental-{seq}"))
+                .ToList(),
+            truncated: false);
+
+        await _store.AppendAsync(ownerKind, ownerId, workId,
+            Enumerable.Range(1, 15)
+                .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "terminal", $"terminal-{seq}"))
+                .ToList(),
+            truncated: true);
+
+        var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 20);
+
+        Assert.Equal(Enumerable.Range(1, 15).Select(i => (long)i).ToArray(), page.Lines.Select(l => l.Seq).ToArray());
+        Assert.Equal(15, page.Lines.Select(l => l.Seq).Distinct().Count());
+        Assert.Equal("incremental-1", page.Lines[0].Text);
+        Assert.Equal("terminal-15", page.Lines[^1].Text);
+        Assert.True(page.Truncated);
+    }
+
+    [Fact]
+    public async Task AppendAsync_TerminalBatchPrunesRowsOutsideRetainedTail()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+
+        await _store.AppendAsync(ownerKind, ownerId, workId,
+            Enumerable.Range(1, 5000)
+                .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "incremental", $"line-{seq}"))
+                .ToList(),
+            truncated: false);
+        await _store.AppendAsync(ownerKind, ownerId, workId,
+            Enumerable.Range(5001, 1000)
+                .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "incremental", $"line-{seq}"))
+                .ToList(),
+            truncated: true);
+
+        await _store.AppendAsync(ownerKind, ownerId, workId,
+            Enumerable.Range(1001, 5000)
+                .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "terminal", $"line-{seq}"))
+                .ToList(),
+            truncated: true,
+            terminal: true);
+
+        var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 5000);
+
+        Assert.Equal(5000, page.Lines.Count);
+        Assert.Equal(1001, page.Lines[0].Seq);
+        Assert.Equal(6000, page.Lines[^1].Seq);
+        Assert.True(page.Truncated);
+        Assert.Null(page.NextCursor);
+    }
+
+    [Fact]
+    public async Task AppendAsync_TerminalBatchRestoresLinesMissingFromFailedIncrement()
+    {
+        var ownerKind = "workflow";
+        var ownerId = $"wr-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+
+        await _store.AppendAsync(ownerKind, ownerId, workId,
+            new List<TaskLogLine>
+            {
+                new(1, _timeProvider.GetUtcNow(), "incremental", "line-1"),
+                new(2, _timeProvider.GetUtcNow(), "incremental", "line-2"),
+            },
+            truncated: false);
+
+        await _store.AppendAsync(ownerKind, ownerId, workId,
+            Enumerable.Range(1, 5)
+                .Select(seq => new TaskLogLine(seq, _timeProvider.GetUtcNow(), "terminal", $"line-{seq}"))
+                .ToList(),
+            truncated: false);
+
+        var page = await _store.QueryAsync(ownerKind, ownerId, workId, afterSeq: null, limit: 10);
+
+        Assert.Equal([1, 2, 3, 4, 5], page.Lines.Select(l => l.Seq).ToArray());
+        Assert.Equal(["line-1", "line-2", "line-3", "line-4", "line-5"], page.Lines.Select(l => l.Text).ToArray());
     }
 
     [Fact]

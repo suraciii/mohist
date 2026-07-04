@@ -15,7 +15,11 @@
  *   - {@link TaskLogCollector}: the per-work buffer. Drops oldest head
  *     lines when the capacity ceiling is exceeded, keeps the most
  *     recent tail (error context), sets `truncated`, and never reuses
- *     a discarded `seq` so cursor pagination stays stable.
+ *     a discarded `seq` so cursor pagination stays stable. Exposes a
+ *     `drain()` primitive that returns only entries past the sent-seq
+ *     watermark (Phase 2 incremental flush) and a `flush()` primitive
+ *     that returns the complete snapshot (Phase 1 terminal flush,
+ *     retained as final reconciliation).
  *
  * The Phase 1 masker is intentionally minimal: a small set of
  * credential patterns (git remote URLs with embedded credentials,
@@ -198,10 +202,27 @@ export class TaskLogger {
 
 /**
  * Per-work item collector. Single producer-side `append` (the sink
- * owns the only write path), `flush` returns the terminal batch.
- * The collector is **not** safe for concurrent producers — the only
- * caller is the sink which serialises writes through the executor
- * lifecycle.
+ * owns the only write path); `flush` returns the terminal batch and
+ * `drain` returns the next incremental batch past the sent-seq
+ * watermark. The collector is **not** safe for concurrent producers
+ * — the only producer is the sink which serialises writes through
+ * the executor lifecycle.
+ *
+ * Concurrent producers (logical): `drain` and `flush` are both
+ * consumer-side. In single-threaded JS a `setInterval` callback that
+ * runs `drain` cannot interleave with a synchronous `append` — the
+ * only possible interleaving is logical (`append` after `drain` but
+ * before the upload completes). That is safe because the new line
+ * picks up a higher `seq` and is included in the next `drain`. The
+ * watermark makes this ordering explicit so retries never re-send a
+ * line that has already been included in an increment (design D1).
+ *
+ * Append listener: {@link TaskLogCollector.setAppendListener} wires an
+ * optional callback that is invoked synchronously from inside
+ * `append` after the entry is buffered. The host's flush trigger uses
+ * this to count newly-captured lines for the line-count threshold so
+ * a chatty command can fire eagerly without waiting for the next
+ * interval tick.
  */
 export class TaskLogCollector {
   private readonly entries: TaskLogEntry[] = []
@@ -210,10 +231,34 @@ export class TaskLogCollector {
   private nextSeq = 1
   private truncated = false
   private discardedCount = 0
+  /**
+   * Highest `seq` already included in a prior `drain()` call. A
+   * subsequent drain returns only entries with `seq > watermark`
+   * and advances the watermark to the new high-water mark. Starts
+   * at 0 so the very first drain captures every line.
+   */
+  private watermark = 0
+  /**
+   * Optional listener invoked synchronously from inside `append`
+   * after the entry is buffered. Wired by the host's flush trigger
+   * via {@link TaskLogCollector.setAppendListener} so it can fire
+   * eagerly when the line-count threshold is reached.
+   */
+  private appendListener: ((entry: TaskLogEntry) => void) | null = null
 
   constructor(options: TaskLogCollectorOptions = {}) {
     this.maxLines = positiveInt(options.maxLines ?? MAX_TASK_LOG_LINES, MAX_TASK_LOG_LINES)
     this.now = options.now ?? (() => new Date())
+  }
+
+  /**
+   * Set (or clear, with `null`) the listener invoked from `append`.
+   * Pass `null` to detach. The host MUST call this before any
+   * concurrent trigger can fire — the binding is read on every
+   * append, so a late binding is observed immediately.
+   */
+  setAppendListener(listener: ((entry: TaskLogEntry) => void) | null): void {
+    this.appendListener = listener
   }
 
   /**
@@ -224,12 +269,17 @@ export class TaskLogCollector {
   append(source: string, text: string): number {
     const seq = this.nextSeq
     this.nextSeq += 1
-    this.entries.push({ seq, timestamp: this.now(), source, text })
+    const entry: TaskLogEntry = { seq, timestamp: this.now(), source, text }
+    this.entries.push(entry)
     if (this.entries.length > this.maxLines) {
       const overflow = this.entries.length - this.maxLines
       this.entries.splice(0, overflow)
       this.discardedCount += overflow
       this.truncated = true
+    }
+    const listener = this.appendListener
+    if (listener !== null) {
+      listener(entry)
     }
     return seq
   }
@@ -270,12 +320,59 @@ export class TaskLogCollector {
   }
 
   /**
+   * Returns the number of new (un-drained) lines currently buffered
+   * past the sent-seq watermark. The flush trigger uses this to
+   * decide whether the line-count threshold has been reached without
+   * taking the drain and discarding an empty result.
+   */
+  pendingSinceWatermark(): number {
+    let count = 0
+    for (const entry of this.entries) {
+      if (entry.seq > this.watermark) count += 1
+    }
+    return count
+  }
+
+  /**
+   * Incremental-batch primitive. Returns the entries whose `seq` is
+   * strictly greater than the current sent-seq watermark, in `seq`
+   * ascending order, and advances the watermark to the highest
+   * returned `seq`. Returns `null` when there is nothing new — the
+   * caller can short-circuit without issuing an upload (design D1,
+   * spec "An empty increment produces no upload").
+   *
+   * The returned array is a defensive copy; later `append`s are not
+   * observed. `truncated` is included so a late head-drop that
+   * occurred between two drains propagates to the next batch.
+   */
+  drain(): TaskLogBatch | null {
+    const out: TaskLogEntry[] = []
+    let highWatermark = this.watermark
+    for (const entry of this.entries) {
+      if (entry.seq > this.watermark) {
+        out.push({ ...entry })
+        if (entry.seq > highWatermark) highWatermark = entry.seq
+      }
+    }
+    if (out.length === 0) return null
+    this.watermark = highWatermark
+    return { entries: out, truncated: this.truncated }
+  }
+
+  /**
    * Terminal-batch snapshot. The collector is NOT cleared after a
    * flush — design D6 makes this a one-shot terminal batch per work
    * item, so the buffer is discarded by the host once the upload
    * completes. The returned array is a defensive copy.
+   *
+   * The watermark is advanced past the end of the buffer so a
+   * follow-up `drain()` (defensive — the host stops the flush
+   * trigger before the terminal flush) returns `null`.
    */
   flush(): TaskLogBatch {
+    for (const entry of this.entries) {
+      if (entry.seq > this.watermark) this.watermark = entry.seq
+    }
     return {
       entries: this.entries.map((entry) => ({ ...entry })),
       truncated: this.truncated,

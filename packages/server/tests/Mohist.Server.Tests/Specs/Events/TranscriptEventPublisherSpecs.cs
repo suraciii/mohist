@@ -135,6 +135,28 @@ public class TranscriptEventPublisherSpecs
         await Assert.ThrowsAsync<ArgumentNullException>(() => publisher.PublishAsync(null!));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task PublishAsync_TranscriptEnvelope_DoesNotLeakOnTaskLogChannel()
+    {
+        // Channel-separation contract: the transcript publisher
+        // forwards envelopes only via OnTranscriptEvent. A task-log
+        // client must NEVER see a transcript envelope as a task-log
+        // delta — the two channels are physically separate.
+        var registry = new ConnectionSubscriptionRegistry();
+        registry.RegisterConnection("conn-A");
+        registry.Subscribe("conn-A", "coder_text_chunk");
+
+        var hub = new RecordingHubContext();
+        var publisher = new SignalRTranscriptEventPublisher(hub, registry, NullLogger<SignalRTranscriptEventPublisher>.Instance);
+
+        await publisher.PublishAsync(NewTranscriptEnvelope(type: "coder_text_chunk", text: "hi"));
+
+        Assert.Single(hub.TranscriptMessages);
+        Assert.Empty(hub.TaskLogDeltaMessages);
+    }
+
     private static TranscriptEnvelope NewTranscriptEnvelope(string type, string text)
     {
         var payload = JsonSerializer.SerializeToElement(new { text });
@@ -158,6 +180,7 @@ public class TranscriptEventPublisherSpecs
         }
 
         public List<RecordedTranscriptEvent> TranscriptMessages { get; } = [];
+        public List<RecordedTaskLogDelta> TaskLogDeltaMessages { get; } = [];
         public IHubClients<IEventsClient> Clients => _clients;
         public IGroupManager Groups { get; } = new NoopGroupManager();
 
@@ -199,6 +222,12 @@ public class TranscriptEventPublisherSpecs
                 _context.TranscriptMessages.Add(new RecordedTranscriptEvent(_connectionId, envelope));
                 return Task.CompletedTask;
             }
+
+            public Task OnTaskLogDelta(TaskLogDeltaEnvelope envelope)
+            {
+                _context.TaskLogDeltaMessages.Add(new RecordedTaskLogDelta(_connectionId, envelope));
+                return Task.CompletedTask;
+            }
         }
 
         private sealed class NoopGroupManager : IGroupManager
@@ -209,4 +238,5 @@ public class TranscriptEventPublisherSpecs
     }
 
     private sealed record RecordedTranscriptEvent(string ConnectionId, TranscriptEnvelope Envelope);
+    private sealed record RecordedTaskLogDelta(string ConnectionId, TaskLogDeltaEnvelope Envelope);
 }
