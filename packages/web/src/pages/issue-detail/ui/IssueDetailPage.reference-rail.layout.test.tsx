@@ -1,0 +1,498 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import {
+  DEFAULT_RECOVERY,
+  enabledString,
+  expectPreceding,
+  makeIssue,
+  mockMatchMedia,
+  RAIL_CARD_TESTIDS,
+  READING_FLOW_LAST_TESTIDS,
+  renderPage,
+} from './_issueDetailReferenceRailTestUtils'
+
+const mockUseNavigate = vi.fn()
+
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return {
+    ...actual,
+    useNavigate: () => mockUseNavigate,
+  }
+})
+
+const mockUseIssueDiff = vi.fn()
+const mockUseIssueCommits = vi.fn()
+const mockUseWorkflowTimeline = vi.fn()
+const mockUseWorkflowYaml = vi.fn()
+const mockUseAgentStatus = vi.fn()
+const mockUseIssue = vi.fn()
+const mockUseWorkspaceStatus = vi.fn()
+
+vi.mock('../../../entities/issue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/issue')>()
+  return {
+    ...actual,
+    useIssue: (...args: unknown[]) => mockUseIssue(...args),
+    useIssueDiff: (...args: unknown[]) => mockUseIssueDiff(...args),
+    useIssueCommits: (...args: unknown[]) => mockUseIssueCommits(...args),
+    useWorkflowTimeline: (...args: unknown[]) => mockUseWorkflowTimeline(...args),
+    useWorkflowYaml: (...args: unknown[]) => mockUseWorkflowYaml(...args),
+    useWorkspaceStatus: (...args: unknown[]) => mockUseWorkspaceStatus(...args),
+    useIssueEvents: () => ({ data: undefined, isLoading: false }),
+    getIssueWorkflowVariables: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
+    patchIssueWorkflowDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
+    patchIssueWorkflowStageDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
+  }
+})
+
+vi.mock('../../../entities/settings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/settings')>()
+  return {
+    ...actual,
+    useWorkflowProfiles: () => ({ data: [] }),
+    useAvailableModelIds: () => ({ data: [] }),
+    useOpencodeModel: () => ({ data: null }),
+    useModelVariants: () => ({ data: [] }),
+    useEffectiveDefaultWorkflowProfile: () => ({ data: null }),
+  }
+})
+
+vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
+  EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null; enabled?: boolean }) => (
+    <div
+      data-testid="event-timeline-panel-mock"
+      data-issue-number={props.issueNumber}
+      data-issue-id={props.issueId ?? ''}
+      data-workflow-status={props.workflowStatus ?? ''}
+      data-enabled={enabledString(props.enabled)}
+    />
+  )),
+}))
+
+vi.mock('../../../entities/agent', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/agent')>()
+  return {
+    ...actual,
+    useAgentStatus: (...args: unknown[]) => mockUseAgentStatus(...args),
+  }
+})
+
+describe('IssueDetailPage reference-rail — desktop right column', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockMatchMedia(false)
+    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseIssueDiff.mockReturnValue({ data: undefined })
+    mockUseIssueCommits.mockReturnValue({ data: undefined })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  it('marks the rail as desktop mode and lays it out as a right column narrower than the reading flow', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({ recovery: DEFAULT_RECOVERY }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
+    expect(referenceRail.dataset.railMode).toBe('desktop')
+
+    const readingFlow = screen.getByTestId('reading-flow')
+    expectPreceding(readingFlow, referenceRail)
+
+    expect(referenceRail.className).toMatch(/lg:col-span-1\b/)
+
+    const railSpanMatch = referenceRail.className.match(/lg:col-span-(\d)/)
+    const railSpan = railSpanMatch ? Number(railSpanMatch[1]) : 1
+    const flowSpanMatch = readingFlow.className.match(/lg:col-span-(\d)/)
+    const flowSpan = flowSpanMatch ? Number(flowSpanMatch[1]) : 0
+    expect(railSpan).toBeLessThan(flowSpan)
+
+    const grid = screen.getByTestId('issue-detail-content-grid')
+    expect(grid.className).toMatch(/lg:grid-cols-3/)
+  })
+})
+
+describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockMatchMedia(true)
+    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseIssueDiff.mockReturnValue({ data: undefined })
+    mockUseIssueCommits.mockReturnValue({ data: undefined })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  it('marks the rail as narrow mode and does not occupy a right column beside the reading flow', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        recovery: DEFAULT_RECOVERY,
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
+    expect(referenceRail.dataset.railMode).toBe('narrow')
+    expect(referenceRail.className).not.toMatch(/lg:col-span-1\b/)
+
+    fireEvent.click(screen.getByTestId('reference-rail-details-toggle'))
+    expect(referenceRail.contains(screen.getByTestId('issue-detail-details-metadata'))).toBe(true)
+
+    fireEvent.click(screen.getByTestId('reference-rail-workflow-profile-toggle'))
+    expect(referenceRail.contains(screen.getByTestId('issue-workflow-profile-control-frame'))).toBe(true)
+  })
+
+  it('renders all rail items as collapsed sections on a narrow viewport', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+        recovery: DEFAULT_RECOVERY,
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
+    expect(referenceRail.dataset.railMode).toBe('narrow')
+
+    const railItems = [
+      'reference-rail-details',
+      'reference-rail-workflow-profile',
+      'reference-rail-drift',
+      'reference-rail-convergence',
+      'reference-rail-configuration',
+      'reference-rail-actions',
+      'reference-rail-prerequisites',
+    ]
+    for (const testId of railItems) {
+      const card = screen.getByTestId(testId)
+      expect(card.dataset.collapsed).toBe('true')
+      expect(referenceRail.contains(card)).toBe(true)
+    }
+  })
+
+  it('collapses expanded rail cards when the viewport changes from desktop to narrow', async () => {
+    const viewport = mockMatchMedia(false)
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+        recovery: DEFAULT_RECOVERY,
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
+    expect(referenceRail.dataset.railMode).toBe('desktop')
+    expect(screen.getByTestId('reference-rail-details').dataset.collapsed).toBe('false')
+    expect(screen.getByTestId('reference-rail-actions').dataset.collapsed).toBe('false')
+
+    act(() => {
+      viewport.setNarrow(true)
+    })
+
+    await waitFor(() => {
+      expect(referenceRail.dataset.railMode).toBe('narrow')
+    })
+
+    for (const testId of [
+      'reference-rail-details',
+      'reference-rail-workflow-profile',
+      'reference-rail-drift',
+      'reference-rail-convergence',
+      'reference-rail-configuration',
+      'reference-rail-actions',
+      'reference-rail-prerequisites',
+    ]) {
+      expect(screen.getByTestId(testId).dataset.collapsed).toBe('true')
+    }
+  })
+
+  it('stacks rail items beneath the reading flow on a narrow viewport', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({ recovery: DEFAULT_RECOVERY }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const readingFlow = await waitFor(() => screen.getByTestId('reading-flow'))
+    const referenceRail = screen.getByTestId('reference-rail')
+
+    expect(readingFlow.compareDocumentPosition(referenceRail) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+  })
+})
+
+describe('IssueDetailPage reference-rail — document-order audit (narrow)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockMatchMedia(true)
+    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseIssueDiff.mockReturnValue({ data: undefined })
+    mockUseIssueCommits.mockReturnValue({ data: undefined })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  it('places every rail card after every last reading-flow item in document order on a narrow viewport', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+        recovery: DEFAULT_RECOVERY,
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
+    expect(referenceRail.dataset.railMode).toBe('narrow')
+
+    const lastReadingFlowElement = READING_FLOW_LAST_TESTIDS
+      .map((id) => screen.queryByTestId(id))
+      .find((el): el is HTMLElement => el !== null)
+
+    if (lastReadingFlowElement) {
+      const referenceRailPos = lastReadingFlowElement.compareDocumentPosition(referenceRail)
+      expect(referenceRailPos & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    }
+
+    for (const railTestId of RAIL_CARD_TESTIDS) {
+      const railCard = screen.queryByTestId(railTestId)
+      if (!railCard) continue
+      for (const readingTestId of READING_FLOW_LAST_TESTIDS) {
+        const readingEl = screen.queryByTestId(readingTestId)
+        if (!readingEl) continue
+        const relationship = readingEl.compareDocumentPosition(railCard)
+        expect(
+          relationship & Node.DOCUMENT_POSITION_FOLLOWING,
+          `expected ${railTestId} to follow ${readingTestId} in document order on narrow viewport`,
+        ).not.toBe(0)
+      }
+    }
+  })
+
+  it('places the rail container after the reading-flow container on narrow, not interleaved', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({ recovery: DEFAULT_RECOVERY }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const readingFlow = await waitFor(() => screen.getByTestId('reading-flow'))
+    const referenceRail = screen.getByTestId('reference-rail')
+
+    expect(readingFlow.compareDocumentPosition(referenceRail) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+  })
+})
+
+describe('IssueDetailPage reference-rail — desktop restoration excludes mobile-only chrome', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockMatchMedia(false)
+    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseIssueDiff.mockReturnValue({ data: undefined })
+    mockUseIssueCommits.mockReturnValue({ data: undefined })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  it('does not render MobileActionBar or ConfirmationDrawer in the DOM at desktop', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({ recovery: DEFAULT_RECOVERY }),
+      isLoading: false,
+      isError: false,
+    })
+
+    const { container } = renderPage()
+
+    await waitFor(() => screen.getByTestId('reference-rail'))
+
+    expect(container.querySelector('[data-testid="mobile-action-bar"]')).toBeNull()
+    expect(container.querySelector('[data-testid="confirmation-drawer"]')).toBeNull()
+  })
+
+  it('does not render MobileActionBar or ConfirmationDrawer on desktop even with a primary action', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    const { container } = renderPage()
+
+    await waitFor(() => screen.getByTestId('reference-rail'))
+
+    expect(container.querySelector('[data-testid="mobile-action-bar"]')).toBeNull()
+    expect(container.querySelector('[data-testid="confirmation-drawer"]')).toBeNull()
+  })
+})
+
+describe('IssueDetailPage reference-rail — convergence panel collapsed on every viewport', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseIssueDiff.mockReturnValue({ data: undefined })
+    mockUseIssueCommits.mockReturnValue({ data: undefined })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  function issueWithConvergence() {
+    return makeIssue({
+      health: 'blocked',
+      convergence: {
+        blockingItemCount: 1,
+        directlyRepairedCount: 0,
+        reactionAttempts: 0,
+        attemptedItemIds: [],
+        resolvedItemIds: [],
+        unresolvedItemIds: ['cb-1'],
+        newBlockingItemIds: [],
+        nonBlockingItemIds: [],
+        blockedReason: 'A blocking check failed.',
+      },
+      recovery: DEFAULT_RECOVERY,
+    })
+  }
+
+  it('keeps convergence collapsed by default on desktop', async () => {
+    mockMatchMedia(false)
+    mockUseIssue.mockReturnValue({ data: issueWithConvergence(), isLoading: false, isError: false })
+
+    renderPage()
+
+    const convergenceCard = await waitFor(() => screen.getByTestId('reference-rail-convergence'))
+    expect(convergenceCard.dataset.collapsed).toBe('true')
+    expect(convergenceCard.querySelector('[data-testid="reference-rail-convergence-body"]')).toBeNull()
+  })
+
+  it('keeps convergence collapsed by default on narrow', async () => {
+    mockMatchMedia(true)
+    mockUseIssue.mockReturnValue({ data: issueWithConvergence(), isLoading: false, isError: false })
+
+    renderPage()
+
+    const convergenceCard = await waitFor(() => screen.getByTestId('reference-rail-convergence'))
+    expect(convergenceCard.dataset.collapsed).toBe('true')
+    expect(convergenceCard.querySelector('[data-testid="reference-rail-convergence-body"]')).toBeNull()
+  })
+})
