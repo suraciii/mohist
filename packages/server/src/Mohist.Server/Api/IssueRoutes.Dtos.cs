@@ -20,7 +20,8 @@ public record CreateIssueRequest(
     string? RepositoryName = null,
     string? Risk = null,
     bool? IsDraft = null,
-    string[]? AttachmentIds = null);
+    string[]? AttachmentIds = null,
+    int[]? PrerequisiteNumbers = null);
 
 /// <summary>
 /// PATCH body for issue updates. Includes a <see cref="Raw"/> JsonElement

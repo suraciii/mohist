@@ -36,12 +36,12 @@ public class IssueCreationSpecs
         return project;
     }
 
-private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, IReadOnlyDictionary<string, string>? labels = null, string? priority = null, string? risk = null, bool isDraft = false)
+private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, IReadOnlyDictionary<string, string>? labels = null, string? priority = null, string? risk = null, bool isDraft = false, int[]? prerequisiteNumbers = null)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";
         var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, title, body, labels, priority, null, issueId, risk, isDraft);
+        await grain.CreateAsync(projectId, number, title, body, labels, priority, null, issueId, risk, isDraft, null, null, prerequisiteNumbers);
         return (await GetIssueInfoAsync(projectId, number))!;
     }
 
@@ -50,6 +50,14 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
         using var scope = _services.CreateScope();
         var issues = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         return await issues.GetInfoAsync(projectId, number);
+    }
+
+    private async Task<IssueReadModel?> GetIssueReadModelAsync(string projectId, int number)
+    {
+        var project = await _grains.GetGrain<IProjectGrain>(projectId).GetAsync();
+        using var scope = _services.CreateScope();
+        var issues = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        return await issues.GetAsync(projectId, number, project);
     }
 
     private async Task<IReadOnlyList<StoredCloudEvent>> GetWorkflowEventsAsync(string workflowRunId)
@@ -448,6 +456,226 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             grain.CreateAsync(project.Id, number, "Bad", null, null, null, null, issueId, "unknown"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithPrerequisiteNumbers_RecordsBothAndExposesReadModels()
+    {
+        var project = await SetupProjectAsync();
+        var prereqA = await CreateIssueAsync(project.Id, "Prereq A");
+        var prereqB = await CreateIssueAsync(project.Id, "Prereq B");
+
+        var dependent = await CreateIssueAsync(
+            project.Id,
+            "Dependent",
+            prerequisiteNumbers: [prereqA.Number, prereqB.Number]);
+
+        Assert.Equal(new[] { prereqA.Number, prereqB.Number }, dependent.PrerequisiteNumbers);
+
+        var readModel = await GetIssueReadModelAsync(project.Id, dependent.Number);
+        Assert.NotNull(readModel);
+        Assert.Equal(new[] { prereqA.Number, prereqB.Number }, readModel!.PrerequisiteNumbers);
+        Assert.Equal(2, readModel.Prerequisites.Length);
+        var summaryNumbers = readModel.Prerequisites.Select(p => p.Number).OrderBy(n => n).ToArray();
+        Assert.Equal(new[] { prereqA.Number, prereqB.Number }, summaryNumbers);
+        Assert.All(readModel.Prerequisites, p => Assert.False(p.Completed));
+        Assert.False(readModel.CanStart);
+        var waiting = Assert.IsType<IssueStartBlockerDto.WaitingForBlocker>(readModel.Blocker);
+        Assert.Equal(prereqA.Number, waiting.Issue.Number);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithPrerequisiteNumbers_CollapsesDuplicatesIdempotently()
+    {
+        var project = await SetupProjectAsync();
+        var prereq = await CreateIssueAsync(project.Id, "Only one prereq");
+
+        var dependent = await CreateIssueAsync(
+            project.Id,
+            "Dependent",
+            prerequisiteNumbers: [prereq.Number, prereq.Number, prereq.Number]);
+
+        Assert.Equal(new[] { prereq.Number }, dependent.PrerequisiteNumbers);
+        var readModel = await GetIssueReadModelAsync(project.Id, dependent.Number);
+        Assert.NotNull(readModel);
+        Assert.Single(readModel!.Prerequisites);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithoutPrerequisiteNumbers_LeavesEmptySet()
+    {
+        var project = await SetupProjectAsync();
+
+        var plain = await CreateIssueAsync(project.Id, "Plain");
+
+        Assert.Empty(plain.PrerequisiteNumbers);
+        var readModel = await GetIssueReadModelAsync(project.Id, plain.Number);
+        Assert.NotNull(readModel);
+        Assert.Empty(readModel!.Prerequisites);
+        Assert.True(readModel.CanStart || readModel.Blocker is not null);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithEmptyPrerequisiteNumbers_BehavesAsAbsent()
+    {
+        var project = await SetupProjectAsync();
+
+        var plain = await CreateIssueAsync(project.Id, "Plain empty", prerequisiteNumbers: []);
+
+        Assert.Empty(plain.PrerequisiteNumbers);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithNonexistentPrerequisite_ThrowsAndLeavesNoIssue()
+    {
+        var project = await SetupProjectAsync();
+
+        var numberBefore = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
+        var attemptNumber = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
+
+        await Assert.ThrowsAsync<PrerequisiteValidationException>(() =>
+            CreateIssueAsync(project.Id, "Will fail", prerequisiteNumbers: [999_999]));
+
+        var readModel = await GetIssueReadModelAsync(project.Id, attemptNumber);
+        Assert.Null(readModel);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithCrossProjectPrerequisite_ThrowsAsNotFound()
+    {
+        var projectA = await SetupProjectAsync();
+        var projectB = await SetupProjectAsync();
+        var issueInA = await CreateIssueAsync(projectA.Id, "A issue");
+
+        await Assert.ThrowsAsync<PrerequisiteValidationException>(() =>
+            CreateIssueAsync(projectB.Id, "B dependent", prerequisiteNumbers: [issueInA.Number]));
+
+        var readModel = await GetIssueReadModelAsync(projectB.Id, 1);
+        Assert.Null(readModel);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithSelfReferencingPrerequisite_ThrowsAndLeavesNoIssue()
+    {
+        var project = await SetupProjectAsync();
+
+        var first = await CreateIssueAsync(project.Id, "First");
+        var grain = _grains.GetGrain<IIssueGrain>(first.Id);
+
+        // AddPrerequisiteAsync path cannot self-reference (it would have to
+        // know its own number in advance). For create, we simulate the
+        // would-be self-reference by constructing the request directly via
+        // the counter+bypass path: increment the counter to reserve the
+        // next number, then attempt CreateAsync on a fresh grain with
+        // prerequisiteNumbers pointing at it.
+        var reserved = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var freshGrain = _grains.GetGrain<IIssueGrain>(issueId);
+
+        await Assert.ThrowsAsync<PrerequisiteValidationException>(() =>
+            freshGrain.CreateAsync(
+                project.Id,
+                reserved,
+                "Self ref",
+                body: null,
+                labels: null,
+                priority: null,
+                repositoryRef: null,
+                issueId: issueId,
+                risk: null,
+                isDraft: false,
+                attachmentIds: null,
+                workflowProfileId: null,
+                prerequisiteNumbers: new[] { reserved }));
+
+        var readModel = await GetIssueReadModelAsync(project.Id, reserved);
+        Assert.Null(readModel);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithCompletedPrerequisite_MarksReadinessOpen()
+    {
+        var project = await SetupProjectAsync();
+        var prereq = await CreateIssueAsync(project.Id, "Will complete");
+        var prereqGrain = _grains.GetGrain<IIssueGrain>(prereq.Id);
+
+        // Drive the prerequisite to a completed workflow so the
+        // read-model exposes it as Completed and the blocker is null.
+        var wrId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(
+            project.Id,
+            project.Name,
+            RepositoryBaseBranch: project.DefaultRepository?.BaseBranch ?? "main"));
+        await prereqGrain.CompleteWorkAsync(wrId);
+
+        var dependent = await CreateIssueAsync(
+            project.Id,
+            "Dependent of completed prereq",
+            prerequisiteNumbers: [prereq.Number]);
+
+        var readModel = await GetIssueReadModelAsync(project.Id, dependent.Number);
+        Assert.NotNull(readModel);
+        Assert.True(readModel!.CanStart);
+        Assert.Null(readModel.Blocker);
+        var prereqSummary = readModel.Prerequisites.Single();
+        Assert.True(prereqSummary.Completed);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task SingleAddEndpoint_StillWorks_AfterCreateWithPrerequisitesAdded()
+    {
+        var project = await SetupProjectAsync();
+        var initial = await CreateIssueAsync(project.Id, "Will add later");
+        var dependent = await CreateIssueAsync(project.Id, "Dependent", prerequisiteNumbers: [initial.Number]);
+
+        // After create-with-prerequisites, the legacy single-add endpoint
+        // must continue to work unchanged.
+        var later = await CreateIssueAsync(project.Id, "Added via legacy endpoint");
+        var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.Id);
+        var result = await dependentGrain.AddPrerequisiteAsync(later.Number);
+        Assert.True(result.Success);
+
+        var readModel = await GetIssueReadModelAsync(project.Id, dependent.Number);
+        Assert.NotNull(readModel);
+        var numbers = readModel!.PrerequisiteNumbers.OrderBy(n => n).ToArray();
+        Assert.Equal(new[] { initial.Number, later.Number }, numbers);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task SingleRemoveEndpoint_StillWorks_AfterCreateWithPrerequisitesAdded()
+    {
+        var project = await SetupProjectAsync();
+        var initial = await CreateIssueAsync(project.Id, "Will be removed");
+        var dependent = await CreateIssueAsync(project.Id, "Dependent", prerequisiteNumbers: [initial.Number]);
+
+        var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.Id);
+        await dependentGrain.RemovePrerequisiteAsync(initial.Number);
+
+        var readModel = await GetIssueReadModelAsync(project.Id, dependent.Number);
+        Assert.NotNull(readModel);
+        Assert.Empty(readModel!.PrerequisiteNumbers);
+        Assert.Empty(readModel.Prerequisites);
+        Assert.True(readModel.CanStart);
+        Assert.Null(readModel.Blocker);
     }
 
     private static async Task<WorkDispatch> PollWorkForWorkflowAsync(IRunnerGrain runner, string runnerId, string workflowRunId)

@@ -493,7 +493,7 @@ public class IssueGrain : Grain, IIssueGrain
             wfStatus);
     }
 
-public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null)
+public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null)
 {
     if (_issue is not null)
         throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
@@ -520,7 +520,41 @@ public async Task<string> CreateAsync(string projectId, int number, string title
         isDraft,
         workflowProfileId);
 
+    // Stage the in-memory aggregate so LoadIssueSummaryAsync can resolve
+    // the project id from _issue.ProjectId during prerequisite existence
+    // validation. The aggregate has not yet been persisted (SaveIssueAsync
+    // below is the only place this issue touches the store). On a
+    // validation failure we restore _issue to null, which means a
+    // subsequent retry on the same grain sees a clean slate, identical
+    // to the branch where prerequisites are absent.
     _issue = issue;
+
+    // Create-time prerequisite application: validate every unique number
+    // against the project, reject self-reference against the newly allocated
+    // number, and apply idempotently before the single SaveIssueAsync so
+    // that a validation failure leaves nothing persisted. Mirrors the
+    // single-add path by reusing LoadIssueSummaryAsync verbatim — see
+    // design decision D1.
+    try
+    {
+        if (prerequisiteNumbers is { Length: > 0 })
+        {
+            foreach (var prerequisiteNumber in prerequisiteNumbers.Distinct())
+            {
+                if (prerequisiteNumber == number)
+                    throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
+                if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
+                    throw PrerequisiteValidationException.NotFound(prerequisiteNumber);
+                _issue!.AddPrerequisite(prerequisiteNumber);
+            }
+        }
+    }
+    catch
+    {
+        _issue = null;
+        throw;
+    }
+
     await SaveIssueAsync();
     await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
     return issue.Id;

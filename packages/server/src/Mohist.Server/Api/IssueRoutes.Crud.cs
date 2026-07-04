@@ -94,7 +94,8 @@ public static partial class IssueRoutes
                     req.Risk,
                     req.IsDraft ?? true,
                     req.AttachmentIds,
-                    requestedWorkflowProfileId);
+                    requestedWorkflowProfileId,
+                    req.PrerequisiteNumbers);
             }
             catch (AttachmentLimitException ex)
             {
@@ -107,6 +108,16 @@ public static partial class IssueRoutes
             catch (IssueDomain.UnknownWorkflowProfileException ex)
             {
                 return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
+            }
+            catch (IssueDomain.PrerequisiteValidationException ex)
+            {
+                var code = ex.Reason switch
+                {
+                    "self_reference" => "circular_prerequisite",
+                    "not_found" => "prerequisite_not_found",
+                    _ => $"prerequisite_{ex.Reason}",
+                };
+                return ApiResults.BadRequest(ex.Message, code);
             }
 
             await ApplyCreateModelMetadataAsync(issueProfileManager, issueId, req);

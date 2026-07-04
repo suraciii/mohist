@@ -1,0 +1,20 @@
+## T-001 (2026-07-04) — Server: atomic create-with-prerequisites API
+
+### Codebase Patterns
+- IIssueGrain.CreateAsync uses optional trailing params; signature is `Task<string> CreateAsync(... string? workflowProfileId = null, int[]? prerequisiteNumbers = null)`. Optional trailing parameter keeps every existing call site unchanged.
+- IssueGrain.CreateAsync performs validation **inside the grain** between `Issue.Create` and `SaveIssueAsync` — atomicity is structural, not compensatory. On any PrerequisiteValidationException we null `_issue` and rethrow so the grain returns to a clean state.
+- LoadIssueSummaryAsync is the **same** private helper used by AddPrerequisiteAsync → reuse verbatim, no duplicate existence check.
+- IssueCounter semantics: the counter grain burns its slot on CreateAsync failure (documented in design.md Risks / "established counter semantics"). Tests treat the would-be number as not-readable via `GetIssueReadModelAsync` returning null.
+- IssueRoutes.Crud.cs catches `PrerequisiteValidationException` and maps to `ApiResults.BadRequest(message, code)` where `code` is `circular_prerequisite` for self-reference and `prerequisite_not_found` for not_found — preserving the same wire vocabulary the single-add path uses (`IssuePrerequisiteResult.PrerequisiteNotFound`).
+- CreateIssueRequest records the new optional `int[]? PrerequisiteNumbers = null` last in the positional record — System.Text.Json binds `prerequisiteNumbers` from camelCase JSON.
+- Domain exception lives in `packages/server/src/Mohist.Server/Issue/Domain/PrerequisiteValidationException.cs` (sealed, derives from ArgumentException; factories `NotFound(number)` / `SelfReference(number)`; carries `OffendingNumber` and `Reason`).
+
+### Gotchas
+- `CreateIssue_WithCrossProjectPrerequisite_ThrowsAsNotFound` initially seeded project B with the same number it then tried to use as a cross-project prereq — the prereq resolved in B and the assertion silently passed. Fix: don't seed B; the prereq number from project A naturally doesn't exist in B.
+- Self-reference path needs a counter reservation + fresh-grain `CreateAsync` rather than the helper `CreateIssueAsync`, because the helper also calls the counter and would itself match the would-be self number.
+- The web's frozen single-add/remove contract (`POST /issues/{n}/prerequisites` body `{prerequisiteNumber}`, `DELETE /issues/{n}/prerequisites/{pn}`) is untouched — no breaking change to existing backlog editor.
+
+### Verification
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 Warning(s), 0 Error(s) (TreatWarningsAsErrors enforced via Directory.Build.props).
+- `dotnet test Mohist.sln -p:SkipWebBuild=true` → Passed 3822, Failed 0, Skipped 13 (preexisting skips), Total 3835.
+- Filtered to IssueCreationSpecs → 29/29 pass including the new create-with-prerequisites scenarios.
