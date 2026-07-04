@@ -577,7 +577,7 @@ describe('IssueDetailPage archived Done issue — workflow status reflects Done 
     cleanup()
   })
 
-  it('renders the Done health pill for an archived Done issue and never the running one', async () => {
+  it('renders one Done runtime pill for an archived Done issue', async () => {
     mockUseIssue.mockReturnValue({
       data: archivedDoneIssue(),
       isLoading: false,
@@ -586,8 +586,10 @@ describe('IssueDetailPage archived Done issue — workflow status reflects Done 
 
     renderPage()
 
-    const health = await waitFor(() => screen.getByTestId('health-pill'))
-    expect(health.textContent ?? '').toMatch(/Done/i)
+    const runtime = await waitFor(() => screen.getByTestId('runtime-status-pill'))
+    expect(runtime).toHaveAttribute('data-summary', 'done')
+    expect(runtime.textContent ?? '').toMatch(/Done/i)
+    expect(screen.queryByTestId('health-pill')).toBeNull()
   })
 
   it('renders the runtime-decision surface with summary=done for an archived Done issue', async () => {

@@ -2,12 +2,15 @@ import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/r
 import {
   addComment,
   addPrerequisite,
+  approveIssue,
   closeIssue,
   deleteComment,
   extractAttachmentIds,
   forceStopIssue,
+  invalidateApprovalWait,
   removePrerequisite,
   reopenIssue,
+  rejectIssue,
   rerunIssue,
   resumeIssue,
   retryIssue,
@@ -28,6 +31,8 @@ export interface UseIssueDetailMutationsOptions {
 
 export interface IssueDetailMutations {
   startMutation: UseMutationResult<{ issue: unknown; message: string }, Error, void, unknown>
+  approveMutation: UseMutationResult<{ issue: unknown; context?: unknown; message: string }, Error, void, unknown>
+  sendBackMutation: UseMutationResult<{ issue: unknown; message: string }, Error, void, unknown>
   markReadyMutation: UseMutationResult<unknown, Error, void, unknown>
   addPrerequisiteMutation: UseMutationResult<{ issue: unknown; message: string }, Error, number, unknown>
   removePrerequisiteMutation: UseMutationResult<{ issue: unknown; message: string }, Error, number, unknown>
@@ -53,6 +58,18 @@ export function useIssueDetailMutations({
 }: UseIssueDetailMutationsOptions): IssueDetailMutations {
   const queryClient = useQueryClient()
 
+  const invalidateRuntimeQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ['issues'] })
+    queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+    queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+  }
+
+  const invalidateApprovalQueries = () => {
+    invalidateRuntimeQueries()
+    invalidateApprovalWait(queryClient)
+  }
+
   const startMutation = useMutation({
     mutationFn: () => startIssue(issueNumber, projectId),
     onSuccess: () => {
@@ -64,6 +81,16 @@ export function useIssueDetailMutations({
         queryClient.invalidateQueries({ queryKey: ['issues'] })
       }
     },
+  })
+
+  const approveMutation = useMutation({
+    mutationFn: () => approveIssue(issueNumber, projectId),
+    onSuccess: invalidateApprovalQueries,
+  })
+
+  const sendBackMutation = useMutation({
+    mutationFn: () => rejectIssue(issueNumber, {}, projectId),
+    onSuccess: invalidateApprovalQueries,
   })
 
   const markReadyMutation = useMutation({
@@ -167,6 +194,8 @@ export function useIssueDetailMutations({
 
   return {
     startMutation,
+    approveMutation,
+    sendBackMutation,
     markReadyMutation,
     addPrerequisiteMutation,
     removePrerequisiteMutation,

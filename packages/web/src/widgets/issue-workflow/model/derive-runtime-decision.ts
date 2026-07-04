@@ -38,7 +38,9 @@ export interface RuntimeDecision {
   rationale: string
   currentTask: RuntimeCurrentTask | null
   nextAction: string
+  primary: RuntimeAvailableAction | null
   actions: RuntimeAvailableAction[]
+  stopRecoverable: boolean | null
   waitReason: string | null
   driftNote: string | null
   blockedReason: string | null
@@ -160,6 +162,13 @@ function buildAllowedActions(input: RuntimeDecisionInput): Set<string> {
   return new Set([...recoveryActions, ...timelineActions])
 }
 
+function hasRecoverableStop(input: RuntimeDecisionInput): boolean {
+  const recoveryActions = input.issue?.recovery?.allowedActions ?? []
+  return recoveryActions.includes('stop')
+    || recoveryActions.includes('force-stop')
+    || recoveryActions.includes('force_stop')
+}
+
 function actionEnabled(
   allowed: Set<string>,
   kind: RuntimeActionKind,
@@ -258,7 +267,7 @@ function buildActions(
     } else {
       actions.push({
         kind: 'stop',
-        label: 'Stop workflow',
+        label: 'Stop',
         enabled: !isClosed && !isDone && actionEnabled(allowed, 'stop'),
         reason: actionEnabled(allowed, 'stop')
           ? undefined
@@ -280,7 +289,7 @@ function buildActions(
   if (summary === 'running') {
     actions.push({
       kind: 'stop',
-      label: 'Stop workflow',
+      label: 'Stop',
       enabled: !isClosed && !isDone && actionEnabled(allowed, 'stop'),
       reason: actionEnabled(allowed, 'stop')
         ? undefined
@@ -315,6 +324,12 @@ function buildActions(
   }
 
   return actions
+}
+
+function pickPrimaryAction(actions: RuntimeAvailableAction[]): RuntimeAvailableAction | null {
+  const executable = actions.find((action) => action.kind !== 'inspect' && action.enabled)
+  if (executable) return executable
+  return actions.find((action) => action.kind !== 'inspect') ?? null
 }
 
 function pickCurrentTask(
@@ -593,6 +608,9 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInput): RuntimeDecis
   const isClosed = issue?.status === 'cancelled'
   const isDone = summary === 'done'
   const actions = buildActions(summary, input, isBacklog, isClosed, isDone)
+  const primary = pickPrimaryAction(actions)
+  const hasStop = actions.some((action) => action.kind === 'stop')
+  const stopRecoverable = hasStop ? hasRecoverableStop(input) : null
   const headline = buildHeadline(summary, currentTask, issue)
   const rationale = buildRationale(summary, input, waitReason)
   const nextAction = buildNextAction(summary, actions, currentTask, waitReason)
@@ -607,7 +625,9 @@ export function deriveRuntimeDecision(input: RuntimeDecisionInput): RuntimeDecis
     rationale,
     currentTask,
     nextAction,
+    primary,
     actions,
+    stopRecoverable,
     waitReason,
     driftNote,
     blockedReason,

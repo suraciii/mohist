@@ -8,7 +8,7 @@ import { useAgentStatus } from '../../../entities/agent'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
-import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, WorkflowRunStatusPill, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
+import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
 import { ActivityDialog } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -19,10 +19,10 @@ import { CardSection } from '@/shared/ui/components/card-section'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { attachmentFromMetadata } from '../model/format'
 import { useIssueDetailMutations } from '../model/useIssueDetailMutations'
-import { computeActionsState } from '../model/actionsState'
-import { ArchivedPill, DraftPill, HealthPill, PriorityChip, WorkflowStagePill } from './pills'
+import { deriveRuntimeDecision } from '../../../widgets/issue-workflow/model/derive-runtime-decision'
+import { ArchivedPill, DraftPill, PriorityChip, RuntimeSummaryPill } from './pills'
 import { WorkflowYamlDialog } from './WorkflowYamlDialog'
-import { IssueActionsCard, extractActionsErrorMessages } from './cards/IssueActionsCard'
+import { IssueActionsCard } from './cards/IssueActionsCard'
 import { IssueDetailsCard } from './cards/IssueDetailsCard'
 import { IssueDriftCard } from './cards/IssueDriftCard'
 import { IssueConfigurationCard } from './cards/IssueConfigurationCard'
@@ -41,20 +41,19 @@ export function IssueDetailPage() {
   const issueNumber = parseInt(number ?? '0', 10)
   const [editOpen, setEditOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
-  const [forceStopConfirming, setForceStopConfirming] = useState(false)
-  const [stopConfirming, setStopConfirming] = useState(false)
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null)
   const [deleteCommentError, setDeleteCommentError] = useState<string | null>(null)
 
   const {
     startMutation,
+    approveMutation,
+    sendBackMutation,
     markReadyMutation,
     addPrerequisiteMutation,
     removePrerequisiteMutation,
     closeMutation,
     forceStopMutation,
     stopMutation,
-    reopenMutation,
     resumeMutation,
     retryMutation,
     rerunMutation,
@@ -63,8 +62,6 @@ export function IssueDetailPage() {
   } = useIssueDetailMutations({
     issueNumber,
     projectId,
-    onForceStopSuccess: () => setForceStopConfirming(false),
-    onStopSuccess: () => setStopConfirming(false),
     onAddCommentSuccess: () => setCommentText(''),
     onDeleteCommentSuccess: () => {
       setDeletingCommentId(null)
@@ -95,7 +92,7 @@ export function IssueDetailPage() {
   if (isLoading || !issue) {
     return (
       <div className="flex items-center justify-center flex-1">
-        <div className="text-gray-400">Loading...</div>
+        <div className="text-muted-foreground">Loading...</div>
       </div>
     )
   }
@@ -104,21 +101,35 @@ export function IssueDetailPage() {
   const isArchived = !!issue.archivedAt
   const workflowStage = issue.workflowStage ?? null
   const prDeliveryMetadata = findPublishViaPrMetadata(workflowTimeline)
-  const actionsState = computeActionsState({
-    issue,
+  const decision = deriveRuntimeDecision({
+    issue: {
+      status: issue.status,
+      workflowStage: issue.workflowStage ?? null,
+      workflowStatus: issue.workflowStatus ?? null,
+      health: issue.health,
+      approvalState: issue.approvalState ?? undefined,
+      blockedReason: issue.blockedReason ?? undefined,
+      recovery: issue.recovery ?? undefined,
+      convergence: issue.convergence ?? undefined,
+      drift: issue.drift ?? undefined,
+      workflowStageProgress: issue.workflowStageProgress ?? undefined,
+      prerequisites: issue.prerequisites ?? [],
+      isDraft: issue.isDraft,
+      canStart: issue.canStart,
+      blocker: issue.blocker,
+    },
+    timeline: workflowTimeline
+      ? {
+          currentStage: workflowTimeline.currentStage,
+          status: workflowTimeline.status,
+          stages: workflowTimeline.stages,
+          pendingWork: workflowTimeline.pendingWork,
+          availableActions: workflowTimeline.availableActions,
+        }
+      : null,
     agentStatus: agentStatus ?? null,
-    workflowTimeline: workflowTimeline ?? null,
-    errorMessages: extractActionsErrorMessages({
-      startMutation,
-      markReadyMutation,
-      closeMutation,
-      forceStopMutation,
-      stopMutation,
-      reopenMutation,
-      resumeMutation,
-      retryMutation,
-      rerunMutation,
-    }),
+    issueNumber,
+    hasActiveAgent: isAgentRunningOnThis,
   })
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -145,37 +156,24 @@ export function IssueDetailPage() {
           </button>
 
           <div className="mb-8" data-testid="issue-detail-header">
-            <div className="flex flex-wrap items-center gap-1.5 mb-2">
-              <span className="text-sm font-mono text-muted-foreground/70 tabular-nums">
-                #{issue.number}
-              </span>
-              <PriorityChip priority={issue.priority} />
-              {issue.isDraft && <DraftPill />}
-              {isArchived && <ArchivedPill archivedAt={issue.archivedAt} />}
-              <WorkflowStagePill stage={issue.workflowStage ?? undefined} />
-              <WorkflowRunStatusPill status={workflowTimeline?.status ?? null} />
-              <HealthPill health={issue.health} />
-              {!isArchived && isAgentRunningOnThis && (
-                <span
-                  data-testid="running-pill"
-                  className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 text-[10px] font-semibold"
-                >
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
-                  Running
+            <div className="flex flex-wrap items-center gap-3 mb-2">
+              <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-identity">
+                <span className="text-sm font-mono text-muted-foreground/70 tabular-nums">
+                  #{issue.number}
                 </span>
-              )}
-              {issue.approvalState?.status === 'awaiting' && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-[10px] font-semibold">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
-                  Approval needed
-                </span>
-              )}
+                <PriorityChip priority={issue.priority} />
+                {issue.isDraft && <DraftPill />}
+                {isArchived && <ArchivedPill archivedAt={issue.archivedAt} />}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5" data-testid="status-badges-runtime">
+                <RuntimeSummaryPill summary={decision.summary} />
+              </div>
             </div>
             {isArchived && (
               <div
                 data-testid="archived-banner"
                 data-archived-at={issue.archivedAt ?? ''}
-                className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700"
+                className="mt-3 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground"
               >
                 Archived{issue.archivedAt ? ` ${formatTime(issue.archivedAt)}` : ''}.
                 The workflow timeline, artifacts, events, and feedback below are preserved for reference.
@@ -249,10 +247,17 @@ export function IssueDetailPage() {
 
           <div className="mb-8" data-testid="runtime-decision-surface-frame">
             <RuntimeDecisionSurface
-              issue={issue}
-              timeline={workflowTimeline ?? null}
-              agentStatus={agentStatus ?? null}
-              hasActiveAgent={isAgentRunningOnThis}
+              decision={decision}
+              mutations={{
+                approveMutation,
+                sendBackMutation,
+                retryMutation,
+                resumeMutation,
+                rerunMutation,
+                forceStopMutation,
+                stopMutation,
+                startMutation,
+              }}
             />
           </div>
 
@@ -279,34 +284,34 @@ export function IssueDetailPage() {
           </div>
 
           {diffData?.available === true && (
-            <div className="min-w-0 rounded-lg bg-white p-4 mb-8 border-l-2 border-gray-200" data-testid="diff-summary-banner">
+            <div className="min-w-0 rounded-lg bg-card p-4 mb-8 border-l-2 border-border" data-testid="diff-summary-banner">
               <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                <span className="min-w-0 text-gray-500 break-words">
-                  <span className="font-medium text-gray-700 break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
+                <span className="min-w-0 text-muted-foreground break-words">
+                  <span className="font-medium text-card-foreground break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
                   {' wants to merge into '}
-                  <span className="font-medium text-gray-700 break-all" title={diffData.base} data-testid="diff-summary-base">{diffData.base}</span>
+                  <span className="font-medium text-card-foreground break-all" title={diffData.base} data-testid="diff-summary-base">{diffData.base}</span>
                 </span>
-                <span className="text-gray-300">·</span>
-                <span className="text-gray-500">
-                  <span className="font-medium text-gray-700">{diffData.ahead}</span> ahead
+                <span className="text-muted-foreground/40">·</span>
+                <span className="text-muted-foreground">
+                  <span className="font-medium text-card-foreground">{diffData.ahead}</span> ahead
                 </span>
                 {diffData.behind > 0 && (
                   <>
-                    <span className="text-gray-300">·</span>
-                    <span className="text-gray-500">
-                      <span className="font-medium text-gray-700">{diffData.behind}</span> behind
+                    <span className="text-muted-foreground/40">·</span>
+                    <span className="text-muted-foreground">
+                      <span className="font-medium text-card-foreground">{diffData.behind}</span> behind
                     </span>
                   </>
                 )}
-                <span className="text-gray-300">·</span>
-                <span className="text-gray-500">
-                  <span className="font-medium text-gray-700">{diffData.summary.filesChanged}</span> files changed
+                <span className="text-muted-foreground/40">·</span>
+                <span className="text-muted-foreground">
+                  <span className="font-medium text-card-foreground">{diffData.summary.filesChanged}</span> files changed
                 </span>
-                <span className="text-gray-300">·</span>
-                <span className="text-green-600">+{diffData.summary.additions}</span>
-                <span className="text-red-500">-{diffData.summary.deletions}</span>
+                <span className="text-muted-foreground/40">·</span>
+                <span className="text-success">+{diffData.summary.additions}</span>
+                <span className="text-danger">-{diffData.summary.deletions}</span>
               </div>
-              <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400">
+              <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span className="min-w-0 break-words">showing merge-base → <span className="break-all" title={diffData.head}>{diffData.head}</span></span>
                 <span>·</span>
                 <span>Workspace retained</span>
@@ -333,8 +338,8 @@ export function IssueDetailPage() {
               />
 
               {(diffData?.available === false || commitsData?.available === false) && (
-                <div className="rounded-lg bg-white p-4">
-                  <p className="text-sm text-gray-400">
+                <div className="rounded-lg bg-card p-4">
+                  <p className="text-sm text-muted-foreground">
                     {diffData?.available === false && diffData.message}
                     {diffData?.available === false && commitsData?.available === false && ' / '}
                     {commitsData?.available === false && commitsData.message}
@@ -371,7 +376,7 @@ export function IssueDetailPage() {
 
               {issue.health === IssueHealth.Interrupted && (
                 <CardSection title="Workflow Interrupted" tone="orange">
-                  <p className="text-xs text-orange-700">
+                  <p className="text-xs text-warning">
                     The workflow was interrupted (e.g. server restart). Your progress has been preserved.
                     Click &quot;Resume&quot; below to continue from where it left off.
                   </p>
@@ -409,23 +414,18 @@ export function IssueDetailPage() {
               />
 
               <IssueActionsCard
-                state={actionsState}
+                issue={issue}
+                decision={decision}
+                agentStatus={agentStatus ?? null}
                 mutations={{
+                  approveMutation,
+                  sendBackMutation,
                   startMutation,
                   markReadyMutation,
                   closeMutation,
-                  forceStopMutation,
-                  stopMutation,
-                  reopenMutation,
                   resumeMutation,
                   retryMutation,
                   rerunMutation,
-                }}
-                confirmState={{
-                  forceStopConfirming,
-                  setForceStopConfirming,
-                  stopConfirming,
-                  setStopConfirming,
                 }}
                 onAskAgent={() => navigate(toProjectPath('/agent-sessions/new?issue=' + encodeURIComponent(issueNumber)))}
               />

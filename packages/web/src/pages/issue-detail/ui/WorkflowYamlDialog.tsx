@@ -22,11 +22,11 @@ export function WorkflowYamlDialog({
         onClick={() => setOpen(true)}
         data-testid="active-run-yaml-trigger"
         data-yaml-mode={isArchived ? 'archived' : 'active'}
-        className="w-full text-left rounded-lg border border-gray-200 bg-white p-3 hover:bg-gray-50 transition-colors"
+        className="w-full text-left rounded-lg border border-border bg-card p-3 hover:bg-muted transition-colors"
       >
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600">{heading}</span>
-          <span className="text-xs text-blue-600">View</span>
+          <span className="text-sm text-card-foreground">{heading}</span>
+          <span className="text-xs text-info">View</span>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{description}</p>
       </button>
@@ -40,15 +40,15 @@ export function WorkflowYamlDialog({
             {isLoading ? (
               <div className="space-y-2">
                 {[1, 2, 3, 4, 5].map((i) => (
-                  <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />
+                  <div key={i} className="h-4 bg-muted rounded animate-pulse" />
                 ))}
               </div>
             ) : data?.yaml ? (
-              <pre className="text-xs font-mono leading-relaxed text-gray-800 whitespace-pre-wrap break-all bg-gray-50 rounded-md p-4 border">
+              <pre className="text-xs font-mono leading-relaxed text-card-foreground whitespace-pre-wrap break-all bg-muted rounded-md p-4 border">
                 {data.yaml}
               </pre>
             ) : (
-              <p className="text-sm text-gray-400">No workflow YAML available.</p>
+              <p className="text-sm text-muted-foreground">No workflow YAML available.</p>
             )}
           </div>
         </DialogContent>

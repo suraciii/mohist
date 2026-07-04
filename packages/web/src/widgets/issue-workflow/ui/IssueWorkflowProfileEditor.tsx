@@ -160,11 +160,11 @@ function LoadingCard() {
   return (
     <div
       data-testid="workflow-profile-loading"
-      className="rounded-lg border border-gray-200 bg-white p-4 space-y-2"
+      className="rounded-lg border border-border bg-card p-4 space-y-2"
     >
-      <div className="h-3 w-32 bg-gray-100 rounded animate-pulse" />
-      <div className="h-3 w-48 bg-gray-100 rounded animate-pulse" />
-      <div className="h-3 w-40 bg-gray-100 rounded animate-pulse" />
+      <div className="h-3 w-32 bg-muted rounded animate-pulse" />
+      <div className="h-3 w-48 bg-muted rounded animate-pulse" />
+      <div className="h-3 w-40 bg-muted rounded animate-pulse" />
     </div>
   )
 }
@@ -173,9 +173,9 @@ function ErrorCard({ message, onRetry }: { message: string; onRetry: () => void 
   return (
     <div
       data-testid="workflow-profile-error"
-      className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-2"
+      className="rounded-lg border border-danger-border bg-danger-subtle p-4 space-y-2"
     >
-      <p className="text-xs text-red-600">Failed to load workflow profile: {message}</p>
+      <p className="text-xs text-danger">Failed to load workflow profile: {message}</p>
       <div>
         <Button variant="outline" size="sm" onClick={onRetry}>
           Retry
@@ -196,9 +196,9 @@ function ReferenceSummaryCard({
   return (
     <div
       data-testid="workflow-profile-reference"
-      className="rounded-lg border border-gray-200 bg-white p-4 space-y-3"
+      className="rounded-lg border border-border bg-card p-4 space-y-3"
     >
-      <h3 className="text-sm font-semibold text-gray-700">Workflow Profile</h3>
+      <h3 className="text-sm font-semibold text-card-foreground">Workflow Profile</h3>
       <dl className="text-xs space-y-1.5">
         <div className="flex justify-between gap-3">
           <dt className="text-muted-foreground">Profile</dt>
@@ -258,12 +258,12 @@ function CustomEditorCard({
   return (
     <div
       data-testid="workflow-profile-custom"
-      className="rounded-lg border border-gray-200 bg-white p-4"
+      className="rounded-lg border border-border bg-card p-4"
     >
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-gray-700">Workflow Profile</h3>
+        <h3 className="text-sm font-semibold text-card-foreground">Workflow Profile</h3>
         {data.workflowRunId && (
-          <span className="text-xs text-muted-foreground bg-gray-100 px-1.5 py-0.5 rounded">
+          <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
             Active run: {data.workflowRunId.slice(0, 8)}
           </span>
         )}
@@ -283,9 +283,9 @@ function CustomEditorCard({
         />
 
         {validationErrors.length > 0 && (
-          <div className="rounded-md bg-red-50 border border-red-200 p-2 space-y-1">
+          <div className="rounded-md bg-danger-subtle border border-danger-border p-2 space-y-1">
             {validationErrors.map((err, idx) => (
-              <p key={idx} className="text-xs text-red-600">
+              <p key={idx} className="text-xs text-danger">
                 <span className="font-medium uppercase">{err.code}:</span> {err.message}
               </p>
             ))}
@@ -293,8 +293,8 @@ function CustomEditorCard({
         )}
 
         {revertError && (
-          <div className="rounded-md bg-red-50 border border-red-200 p-2">
-            <p className="text-xs text-red-600">
+          <div className="rounded-md bg-danger-subtle border border-danger-border p-2">
+            <p className="text-xs text-danger">
               <span className="font-medium uppercase">revert:</span> {revertError}
             </p>
           </div>
@@ -304,10 +304,10 @@ function CustomEditorCard({
           <div className="text-xs text-muted-foreground flex items-center gap-3">
             {data.profileId && <span>Profile: {data.profileId}</span>}
             {isDirty && (
-              <span className="text-amber-600 font-medium">Unsaved changes</span>
+              <span className="text-warning font-medium">Unsaved changes</span>
             )}
             {saveSuccess && (
-              <span className="text-green-600 font-medium">Saved</span>
+              <span className="text-success font-medium">Saved</span>
             )}
           </div>
           <div className="flex items-center gap-2">
