@@ -1,84 +1,71 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { getLogTail, type LogTailResult } from './api'
-
-export interface ParsedLogEntry {
-  raw: string
-  level: string | null
-  time: string | null
-  service: string | null
-  message: string
-}
-
-export function parseLogLine(line: string): ParsedLogEntry {
-  try {
-    const obj = JSON.parse(line)
-    return {
-      raw: line,
-      level: typeof obj.level === 'string' ? obj.level : null,
-      time: typeof obj.time === 'string' ? obj.time : null,
-      service: typeof obj.service === 'string' ? obj.service : null,
-      message: typeof obj.message === 'string' ? obj.message : line,
-    }
-  } catch {
-    return {
-      raw: line,
-      level: null,
-      time: null,
-      service: null,
-      message: line,
-    }
-  }
-}
+import { getLogTail, type LogEntry, type LogTailResult } from './api'
 
 const MAX_ENTRIES = 2000
 const POLL_INTERVAL = 3000
 
-interface UseLogsReturn {
-  entries: ParsedLogEntry[]
+export interface UseLogsReturn {
+  entries: LogEntry[]
   loading: boolean
   error: string | null
   refresh: () => void
-  cursor: number
+  cursor: number | null
+  nextCursor: number | null
+  source: string | null
+  unavailable: boolean
+  expectedLocation: string | null
+  reason: string | null
   truncated: boolean
-  file: string | null
+  reset: boolean
 }
 
 export function useLogs(): UseLogsReturn {
-  const [entries, setEntries] = useState<ParsedLogEntry[]>([])
+  const [entries, setEntries] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [cursor, setCursor] = useState<number>(0)
+  const [cursor, setCursor] = useState<number | null>(null)
+  const [nextCursor, setNextCursor] = useState<number | null>(null)
+  const [source, setSource] = useState<string | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
+  const [expectedLocation, setExpectedLocation] = useState<string | null>(null)
+  const [reason, setReason] = useState<string | null>(null)
   const [truncated, setTruncated] = useState(false)
-  const [file, setFile] = useState<string | null>(null)
+  const [reset, setReset] = useState(false)
 
-  const cursorRef = useRef(0)
+  const cursorRef = useRef<number | null>(null)
   const visibleRef = useRef(true)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const fetchingRef = useRef(false)
 
-  const fetchLogs = useCallback(async (useCursor?: number) => {
+  const applyResult = useCallback((result: LogTailResult) => {
+    if (result.reset) {
+      setEntries(result.lines)
+    } else {
+      setEntries((prev) => {
+        const next = [...prev, ...result.lines]
+        return next.length > MAX_ENTRIES ? next.slice(next.length - MAX_ENTRIES) : next
+      })
+    }
+    cursorRef.current = result.nextCursor
+    setCursor(result.cursor)
+    setNextCursor(result.nextCursor)
+    setSource(result.source)
+    setUnavailable(result.unavailable)
+    setExpectedLocation(result.expectedLocation)
+    setReason(result.reason)
+    setTruncated(result.truncated)
+    setReset(result.reset)
+  }, [])
+
+  const fetchLogs = useCallback(async () => {
     if (fetchingRef.current) return
     fetchingRef.current = true
     try {
-      const c = useCursor ?? cursorRef.current
-      const result: LogTailResult = c === 0
+      const result = cursorRef.current == null
         ? await getLogTail()
-        : await getLogTail(c)
+        : await getLogTail(cursorRef.current)
 
-      const parsed: ParsedLogEntry[] = result.lines.map(parseLogLine)
-      if (result.reset) {
-        setEntries(parsed)
-      } else {
-        setEntries((prev: ParsedLogEntry[]) => {
-          const next = [...prev, ...parsed]
-          return next.length > MAX_ENTRIES ? next.slice(next.length - MAX_ENTRIES) : next
-        })
-      }
-
-      cursorRef.current = result.cursor
-      setCursor(result.cursor)
-      setTruncated(result.truncated)
-      setFile(result.file)
+      applyResult(result)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch logs')
@@ -86,7 +73,7 @@ export function useLogs(): UseLogsReturn {
       setLoading(false)
       fetchingRef.current = false
     }
-  }, [])
+  }, [applyResult])
 
   const refresh = useCallback(() => {
     fetchLogs()
@@ -125,5 +112,18 @@ export function useLogs(): UseLogsReturn {
     }
   }, [fetchLogs])
 
-  return { entries, loading, error, refresh, cursor, truncated, file }
+  return {
+    entries,
+    loading,
+    error,
+    refresh,
+    cursor,
+    nextCursor,
+    source,
+    unavailable,
+    expectedLocation,
+    reason,
+    truncated,
+    reset,
+  }
 }

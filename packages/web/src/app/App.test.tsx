@@ -134,9 +134,14 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
       loading: false,
       error: null,
       refresh: vi.fn(),
-      cursor: 0,
+      cursor: null,
+      nextCursor: null,
+      source: null,
+      unavailable: false,
+      expectedLocation: null,
+      reason: null,
       truncated: false,
-      file: null,
+      reset: false,
     })
     metricsMocks.useCompletionThroughput.mockReturnValue({ data: undefined, isLoading: false })
     metricsMocks.useDeliveryTime.mockReturnValue({ data: undefined, isLoading: false })
@@ -211,9 +216,14 @@ describe('App routing split for settings scopes', () => {
       loading: false,
       error: null,
       refresh: vi.fn(),
-      cursor: 0,
+      cursor: null,
+      nextCursor: null,
+      source: null,
+      unavailable: false,
+      expectedLocation: null,
+      reason: null,
       truncated: false,
-      file: null,
+      reset: false,
     })
     metricsMocks.useCompletionThroughput.mockReturnValue({ data: undefined, isLoading: false })
     metricsMocks.useDeliveryTime.mockReturnValue({ data: undefined, isLoading: false })
@@ -319,7 +329,7 @@ describe('App routing split for settings scopes', () => {
       expect(window.location.pathname).toBe('/demo/logs')
     })
     expect(logsMocks.useLogs).toHaveBeenCalled()
-    expect(screen.getByText('No logs available')).toBeInTheDocument()
+    expect(screen.getByText('No matching logs')).toBeInTheDocument()
   })
 
   it('renders /settings/<app-section> on the application scope (no project prefix) for every global section', () => {
