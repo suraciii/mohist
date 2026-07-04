@@ -80,6 +80,8 @@ public static class MohistServiceRegistration
         services.AddSingleton<ITaskLogDeltaPublisher, SignalRTaskLogDeltaPublisher>();
         services.AddHostedService<AttachmentCleanupService>();
         services.AddHostedService<EpicReconciliationService>();
+        services.TryAddSingleton<IProcessStartTimeProvider, ProcessStartTimeProvider>();
+        services.AddHostedService<SystemUpdateRecoveryService>();
         services.AddOptions<StagePopulationSnapshotOptions>()
             .Bind(configuration.GetSection(StagePopulationSnapshotOptions.SectionName))
             .Validate(options => options.SnapshotPeriod > TimeSpan.Zero,

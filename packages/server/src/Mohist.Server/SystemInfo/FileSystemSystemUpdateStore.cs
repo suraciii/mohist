@@ -9,6 +9,7 @@ public interface ISystemUpdateStore
     Task<SystemUpdateJobState?> GetLatestAsync(CancellationToken cancellationToken = default);
     Task<bool> TryAcquireLockAsync(string jobId, CancellationToken cancellationToken = default);
     Task ReleaseLockAsync(string jobId, CancellationToken cancellationToken = default);
+    Task<bool> ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default);
     Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default);
     Task<bool> SaveIfCurrentAsync(SystemUpdateJobState expected, SystemUpdateJobState next, CancellationToken cancellationToken = default);
 }
@@ -90,8 +91,21 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
             {
                 _locked = false;
                 _lockOwnerJobId = null;
-                ReleaseLockFile(jobId);
+                ReleaseLockFileOwnedByCurrentProcess(jobId);
             }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<bool> ReleaseStaleLockAsync(string jobId, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            return ReleaseLockFile(jobId);
         }
         finally
         {
@@ -171,7 +185,32 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
         }
     }
 
-    private void ReleaseLockFile(string jobId)
+    private bool ReleaseLockFile(string jobId)
+    {
+        if (!File.Exists(_lockPath))
+            return true;
+
+        try
+        {
+            var owner = File.ReadAllText(_lockPath);
+            if (owner != jobId)
+                return false;
+
+            File.Delete(_lockPath);
+            return !File.Exists(_lockPath);
+        }
+        catch (IOException)
+        {
+            // A concurrently starting process may be reading the lock. The active state still protects correctness.
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private void ReleaseLockFileOwnedByCurrentProcess(string jobId)
     {
         if (!File.Exists(_lockPath))
             return;
