@@ -50,8 +50,9 @@ export function sessionTargetFromContext(context: ActionContext): SessionTarget 
   if (!projectId) return null
 
   if (context.ownerKind === "agent-job") {
-    return context.agentSessionId
-      ? { kind: "generic", projectId, sessionId: context.agentSessionId }
+    const agentSessionId = context.agentSessionId?.trim()
+    return agentSessionId
+      ? { kind: "generic", projectId, sessionId: agentSessionId }
       : null
   }
 
@@ -60,9 +61,29 @@ export function sessionTargetFromContext(context: ActionContext): SessionTarget 
   return { kind: "workflow", projectId, workflowRunId: context.workflowRunId, sessionName }
 }
 
+/**
+ * Per-process guard so an unresolved agent-job session target is logged
+ * once per work item, not once per event. Holds even when the same
+ * `ActionContext` is shared across many `emitSessionEvent` calls in a
+ * prompt loop, so a noisy drop never becomes a log flood. The closure
+ * is keyed by identity of the context object so different work items
+ * (each with its own context) get their own latch.
+ */
+const unresolvedAgentJobTargetWarned = new WeakSet<ActionContext>()
+
 export async function emitSessionEvent(context: ActionContext, type: string, payload: JsonObject) {
   const target = sessionTargetFromContext(context)
-  if (!target || !context.serverConnection) return
+  if (!target || !context.serverConnection) {
+    if (context.ownerKind === "agent-job" && !unresolvedAgentJobTargetWarned.has(context)) {
+      unresolvedAgentJobTargetWarned.add(context)
+      const agentJobId = context.agentJobId ?? "unknown"
+      context.log?.write(
+        "action:session-events",
+        `unresolved generic session target — events dropped workId=${context.workId} agentJobId=${agentJobId} type=${type}`,
+      )
+    }
+    return
+  }
 
   const body = { workId: context.workId, workType: context.workType, stage: context.stage, runtimeEvents: [{ type, payload }] }
   if (target.kind === "workflow") {

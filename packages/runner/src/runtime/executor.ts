@@ -245,6 +245,7 @@ function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: Abor
     projectId: work.projectId,
     issueNumber: work.issueNumber,
     ownerKind: work.ownerKind,
+    agentJobId: work.agentJobId,
     agentSessionId: work.agentSessionId,
     acpSessionManager: sessionManager,
     acpConnection,

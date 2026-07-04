@@ -25,3 +25,40 @@
 - **Outcome**: D2 reproduces-green — without changing any source code, both tests confirm the runner's pipeline maps `agentSessionId` to `agentSessionRuntimeEvents` and that the transcript turn is non-empty when the agent produces deltas, tool calls, and usage. The previously-observed "messages:0/events:0" was reproduced only as a hypothetical; with the wiring in place, no behavioral fix is needed.
 - **No server-side or runner-side code changes**: T-002's deliverable is purely test coverage (the design's verify-then-fix posture paid off — the launch path propagates `agentSessionId` correctly). T-003 still needs to harden the drop observability (`session-events.ts:65`) and add the launch-route regression guard at the spec level, but those are separate from this task's scope.
 - **Tooling note**: Server test build path is `dotnet build Mohist.sln -p:SkipWebBuild=true`; runner test path is `npm test -w packages/runner`. Both pass with this change.
+
+## T-003 launch-to-dispatch contract hardening
+
+### Runner (D3) — observable drop on unresolved generic session target
+- **`packages/runner/src/actions/acp/session-events.ts:63-89`**: Replaced the silent early-return at line 65 with an observable warning when an agent-job work item cannot resolve its generic session target (missing/null/whitespace `agentSessionId`, or absent `serverConnection`). The warning is emitted via `context.log.write("action:session-events", ...)` carrying `workId`, `agentJobId`, and the event `type`. It uses a module-level `WeakSet<ActionContext>` so it fires **once per work item** (not once per event) even when the same context is reused across a noisy prompt loop — matches the design's "log once per unresolved target" requirement.
+- **Scope**: log fires only when `ownerKind === "agent-job"`. Ephemeral/validation dispatches (`ownerKind !== "agent-job"` with no resolvable session name) stay quiet, preserving the "by-design null targets don't log" intent.
+- **Non-throwing**: the warning is a single `context.log?.write(...)` call; the function still `return`s after. No exception path, so the prompt loop cannot abort on a missing session id (matches D3's "keep it non-throwing" requirement).
+- **Defense-in-depth whitespace check**: also tightened `sessionTargetFromContext` to treat whitespace-only `agentSessionId` as missing via `.trim()` — the spec scenario explicitly includes whitespace as a missing-value condition. Server-side already normalizes via `string.IsNullOrWhiteSpace` (AgentJobGrain:357), so this is belt-and-suspenders.
+- **`ActionContext.agentJobId` wired**: Added `agentJobId?: string | null` to `ActionContext` (was previously on `RenderedWorkItem` only) and wired it through `WorkExecutor.buildActionContext` so the observable drop log carries the dispatch's `agentJobId`. Default `null` (treated as `"unknown"` in the log line) preserves every existing call site.
+
+### Runner unit test
+- **`packages/runner/tests/acp/session-events-observable-drop.spec.ts`** (new file, 7 tests):
+  1. `AgentJobWithMissingAgentSessionId_LogsUnresolvedTargetOnce_AndDoesNotThrow` — emits one drop log carrying workId/agentJobId for 3 different event types, no server calls.
+  2. `AgentJobWithNullAgentSessionId_LogsUnresolvedTargetOnce` — null agentSessionId produces one log line, regardless of repeat calls.
+  3. `AgentJobWithWhitespaceAgentSessionId_LogsUnresolvedTargetOnce` — whitespace string is treated as missing (validates the `.trim()` defense-in-depth).
+  4. `EphemeralJobWithoutOwnerKindAgent_DoesNotLogAndDoesNotThrow` — workflow owner kind with empty workId + empty session name produces no drop log (matches the "by-design null targets stay quiet" intent).
+  5. `AgentJobWithoutLogSink_SilentlyDropsButDoesNotThrow` — missing `context.log` does not throw (the optional-chain `context.log?.write(...)` covers this).
+  6. `AgentJobWithNonNullAgentSessionId_DeliversGenericEventsWithoutDropLog` — happy path: events are POSTed to `agentSessionRuntimeEvents` and no drop log is emitted (no spurious log on the happy path, matches acceptance criterion).
+  7. `AgentJobWithoutServerConnection_StillLogsOnceButDoesNotThrow` — combined missing-conn + missing-sessionId produces one log line and doesn't throw.
+
+### Server (D4) — launch-route regression spec
+- **`packages/server/tests/Mohist.Server.Tests/Specs/Agent/Api/AgentSessionLaunchRoutesSpecs.cs`**: Added `Launch_PolledDispatch_CarriesMintedAgentSessionIdVerbatimWithNoWorkflowRunId`. The spec:
+  1. Registers a runner + patches slots (matches `RegisterRunnerAndAwaitOnlineAsync` pattern).
+  2. POSTs to `/api/projects/{projectId}/agents/{agentRef}/sessions` and asserts 201 with a non-empty `sessionId` in the response.
+  3. Polls `/api/runner/{runnerId}/poll` until the dispatch envelope carrying the minted session id is observed.
+  4. Asserts the polled envelope has: `workflowRunId == string.Empty`, `agentSessionId == mintedSessionId` (non-null), `ownerKind == "agent-job"`, `projectId == projectId`, `agentJobId` non-empty.
+  5. Drains the dispatch afterward via `ReportResultAsync` to keep the test idempotent across reruns.
+- Added `PollDispatchForSessionAsync` + `DrainDispatchAsync` helpers + `PollSnapshot` record to keep the test self-contained.
+
+### Codebase pattern: module-level WeakSet for once-per-context latches
+- The runner uses this pattern in `session-events.ts` to dedupe log emission across many `emitSessionEvent` calls per work item. The WeakSet keys on the `ActionContext` identity, which is constructed once per work item by the executor and reused across all phases. Holds across test boundaries because each test builds a fresh context. This is more robust than threading a "warned" boolean through every callsite (the call sites don't know about the latch).
+- The `ActionContext.agentJobId` addition is the first such field added in this style; existing call sites that build `ActionContext` (test fixtures, action handlers) don't pass it, so defaulting to `null` / `"unknown"` in the log keeps them green.
+
+### Test verification
+- **Runner**: `npm test -w packages/runner` → 65 test files, 885 tests pass (7 new in `session-events-observable-drop.spec.ts`). `npm run typecheck -w packages/runner` clean.
+- **Server**: `dotnet build Mohist.sln -p:SkipWebBuild=true` clean (0 warnings, 0 errors). `dotnet test Mohist.sln -p:SkipWebBuild=true --no-build` → 3696 pass, 13 pre-existing skips, 0 fail (full server suite). Targeted launch-route spec pass: 12/12 (`AgentSessionLaunchRoutesSpecs`). Transcript-axis (T-002) still green: 4/4.
+
