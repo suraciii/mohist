@@ -10,7 +10,7 @@
 
 ### Requirement: Consistent per-line element type with no double-parsing
 
-Every entry in the response `lines` list SHALL be a single agreed structured element type carrying `level`, `time`, `service`, and `message` fields. The server SHALL emit each element already in that structured type and SHALL NOT emit raw JSON strings for the client to parse. The Web client SHALL render elements directly without running `JSON.parse` on them, so `level`/`time`/`service`/`message` extraction no longer silently fails.
+Every entry in the response `lines` list SHALL be a single agreed structured element type carrying `level`, `time`, `service`, `message`, and `raw` fields (`raw` holds the faithful original serialized line so search/export operate on it even when structured fields are absent). The server SHALL emit each element already in that structured type and SHALL NOT emit raw JSON strings for the client to parse. The Web client SHALL render elements directly without running `JSON.parse` on them, so `level`/`time`/`service`/`message` extraction no longer silently fails.
 
 #### Scenario: Server emits a structured element for a valid JSON line
 
