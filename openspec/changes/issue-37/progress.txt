@@ -58,3 +58,22 @@
 ### Verification
 - `npm run typecheck -w packages/web` → clean.
 - `npm run test:run -w packages/web` → 270/270 test files pass, 4320 tests pass, 1 preexisting skip (5 new prerequisite tests in `CreateIssueDialog.test.tsx`).
+
+## T-004 (2026-07-04) — Web: backlog IssueConfigurationCard adopts the picker (live mode)
+
+### Codebase Patterns
+- `IssueConfigurationCard` is a thin presentation card — it composes `IssueModelSelector` and the picker, and forwards existing `addPrerequisiteMutation` / `removePrerequisiteMutation` from `useIssueDetailMutations`. No new mutation, no new endpoint — the picker is layered over the frozen single-add/remove HTTP contract.
+- The picker expects `(n) => void | Promise<void>`; `mutateAsync` returns the full mutation response shape `{ issue, message }`. The card wraps the call in `.then(() => undefined)` to coerce the type to `void` without dropping the error path — rejections still propagate to the picker's `try/catch` so error surfacing works as before.
+- Error surfacing still maps "circular" → "Circular prerequisite: this would create a cycle" (preserves the legacy message), and the remaining server errors (`Issue #99999 not found`, `Issue cannot be a prerequisite of itself`) flow through as raw `error.message`. The picker renders this through its `errorMessage` prop, which takes precedence when `pendingError` is null (i.e. the picker isn't currently mid-mutation).
+- The card's `projectId` prop is sourced from `IssueDetailPage` via the existing `issueProjectId = projectId ?? issue.projectId` seam — the same value the rest of the page passes to entity queries. This keeps cross-project exclusion structural (the picker's `useIssues` query is project-scoped).
+- The card keeps the existing `prerequisite-configuration-controls` test ID on the section wrapper so the page-level test asserting "groups backlog prerequisite controls with configuration instead of a separate rail card" continues to find it.
+
+### Gotchas
+- The picker renders the readiness line (`prerequisite-picker-readiness`) when `canStart` is supplied. For the backlog editor we always pass it (the read model is always present on `Issue`), which means the readiness indicator is rendered whenever prerequisites exist — this is intentional per design D7 ("the picker explains incomplete prerequisites and their effect on Start eligibility"). Tests assert the readiness line for both blocked and ready states.
+- `addPrerequisiteMutation.error` and `removePrerequisiteMutation.error` are mutually exclusive surfaces in practice (only one runs at a time), but the card coalesces them with `addError ?? removeError` so neither silently swallows the other.
+- `IssueStartBlocker` is re-exported through `entities/issue`; the picker accepts the full type. Importing it inside the card lets us satisfy the picker's prop typing without casting to `unknown`.
+- `IssueDetailPage.reference-rail.test.tsx`'s test asserting `prerequisite-configuration-controls` lives inside the `Configuration` rail card still passes — the test ID lives on the same wrapper element that has always hosted it.
+
+### Verification
+- `npm run typecheck -w packages/web` → clean.
+- `npm run test:run -w packages/web` → 271/271 test files pass, 4335 tests pass (15 new), 1 preexisting skip. `IssueConfigurationCard.test.tsx` covers: picker swap (numeric input + Add button removed, picker rendered), add-via-picker (calls `addPrerequisite` mutation with the candidate number), remove-via-chip (calls `removePrerequisite` mutation with the chip number), error surfacing (nonexistent, self-reference, circular → readable messages), start-eligibility (readiness line reflects `canStart` + `blocker`), no-regression (legacy "Remove prerequisite:" block is gone; chips own removal). `IssueDetailPage.test.tsx` reference-rail test continues to pass unchanged.
