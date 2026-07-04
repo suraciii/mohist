@@ -853,6 +853,29 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
     expect(lines).toEqual(['rebasing-1', 'rebasing-2'])
   })
 
+  it('preserves colon-containing task ids in the download filename', async () => {
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
+    ]))
+
+    const user = userEvent.setup()
+    renderWithHarness(
+      <TaskLogPanel issueNumber={161} taskId="integrate:prepare" workflowRunId="wr-1" taskStatus="failed" />,
+      harness,
+    )
+
+    await screen.findByTestId('task-log-panel')
+
+    const capture = installDownloadSpy()
+    await user.click(await screen.findByTestId('task-log-download-button'))
+
+    await waitFor(() => {
+      expect(capture.clicks.length).toBeGreaterThan(0)
+    })
+
+    expect(capture.clicks[0].download).toMatch(/^task-logs-integrate:prepare-\d{4}-\d{2}-\d{2}\.txt$/)
+  })
+
   it('exports the full loaded log when no filter is active', async () => {
     const harness = buildHarness(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
@@ -1048,6 +1071,78 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
     })
 
     expect(scrollNode.scrollTop).toBe(0)
+  })
+
+  it('does not force-scroll when a filter change hides lines while the user is paused away from the bottom', async () => {
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, source: 'workspace-prep', text: 'needle line' }),
+      makeLine({ seq: 2, source: 'cleanup', text: 'other line' }),
+    ]))
+
+    const user = userEvent.setup()
+    renderWithHarness(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
+      harness,
+    )
+
+    await screen.findByTestId('task-log-panel')
+
+    const scrollNode = (await screen.findByTestId('task-log-scroll')) as HTMLDivElement
+    Object.defineProperty(scrollNode, 'scrollHeight', { configurable: true, value: 2000 })
+    Object.defineProperty(scrollNode, 'clientHeight', { configurable: true, value: 200 })
+    scrollNode.scrollTop = 0
+
+    await act(async () => {
+      fireEvent.scroll(scrollNode)
+    })
+
+    await user.type(await screen.findByTestId('task-log-search-input'), 'needle')
+
+    await waitFor(() => {
+      expect(screen.queryByText('other line')).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('needle line')).toBeInTheDocument()
+    expect(scrollNode.scrollTop).toBe(0)
+  })
+
+  it('resumes auto-follow near the bottom and follows the next visible-line change', async () => {
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, source: 'workspace-prep', text: 'alpha line' }),
+      makeLine({ seq: 2, source: 'cleanup', text: 'beta line' }),
+    ]))
+
+    const user = userEvent.setup()
+    renderWithHarness(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
+      harness,
+    )
+
+    await screen.findByTestId('task-log-panel')
+
+    const scrollNode = (await screen.findByTestId('task-log-scroll')) as HTMLDivElement
+    Object.defineProperty(scrollNode, 'scrollHeight', { configurable: true, value: 2000 })
+    Object.defineProperty(scrollNode, 'clientHeight', { configurable: true, value: 200 })
+    scrollNode.scrollTop = 0
+
+    await act(async () => {
+      fireEvent.scroll(scrollNode)
+    })
+
+    scrollNode.scrollTop = 1795
+    await act(async () => {
+      fireEvent.scroll(scrollNode)
+    })
+
+    Object.defineProperty(scrollNode, 'scrollHeight', { configurable: true, value: 2200 })
+    await user.type(await screen.findByTestId('task-log-search-input'), 'beta')
+
+    await waitFor(() => {
+      expect(screen.queryByText('alpha line')).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('beta line')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(scrollNode.scrollTop).toBe(2200)
+    })
   })
 
   it('live-append during a running task still appends in seq order when no filter is active (non-regression)', async () => {

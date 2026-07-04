@@ -65,8 +65,7 @@ function isTaskLogEnvelope(value: unknown): value is TaskLogDeltaEnvelopeWire {
 
 function buildExportFilename(taskId: string): string {
   const isoDate = new Date().toISOString().slice(0, 10)
-  const safeTaskId = taskId.replace(/[^A-Za-z0-9._-]/g, '-')
-  return `task-logs-${safeTaskId}-${isoDate}.txt`
+  return `task-logs-${taskId}-${isoDate}.txt`
 }
 
 export function mergeTaskLogDelta(
@@ -309,8 +308,8 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
 
   return (
     <div className="rounded border border-slate-200 bg-white px-2 py-1.5 space-y-1" data-testid="task-log-panel">
-      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-slate-500">
-        <span>Execution log</span>
+      <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-slate-500">
+        <span className="shrink-0">Execution log</span>
         {truncated && (
           <span
             className="rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 font-mono normal-case tracking-normal"
@@ -319,8 +318,8 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
             Earlier lines truncated — showing retained tail
           </span>
         )}
-        <div className="ml-auto flex items-center gap-2 normal-case tracking-normal">
-          <div className="relative">
+        <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 normal-case tracking-normal sm:flex-initial">
+          <div className="relative min-w-0 flex-1 basis-44 sm:flex-initial sm:basis-auto">
             <svg
               className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"
               viewBox="0 0 20 20"
@@ -340,7 +339,7 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
               placeholder="Search log lines…"
               aria-label="Search log lines"
               data-testid="task-log-search-input"
-              className="rounded-md border border-slate-300 bg-white pl-7 pr-3 py-1 text-[11px] text-slate-900 placeholder-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 focus:outline-none min-h-[28px]"
+              className="w-full rounded-md border border-slate-300 bg-white pl-7 pr-3 py-1 text-[11px] text-slate-900 placeholder-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 focus:outline-none min-h-[28px] sm:w-48"
             />
           </div>
           <button
