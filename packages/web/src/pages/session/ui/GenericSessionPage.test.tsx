@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   transcriptTurns: [] as any[],
   transcriptIsRunning: false,
   followupMutation: { mutate: vi.fn(), isPending: false },
+  cancelMutation: { mutate: vi.fn(), isPending: false },
   routeParams: { sessionId: 'sess-abc' },
 }))
 
@@ -35,6 +36,7 @@ vi.mock('../../../entities/agent', () => ({
     data: mocks.transcriptData,
   }),
   useGenericFollowup: () => mocks.followupMutation,
+  useCancelGenericSession: () => mocks.cancelMutation,
   useAgentSessions: () => ({ data: [], isLoading: false }),
 }))
 
@@ -133,6 +135,7 @@ describe('GenericSessionPage', () => {
     mocks.transcriptData = null
     mocks.transcriptTurns = []
     mocks.followupMutation = { mutate: vi.fn(), isPending: false }
+    mocks.cancelMutation = { mutate: vi.fn(), isPending: false }
     mocks.routeParams = { sessionId: 'sess-abc' }
   })
 
@@ -291,6 +294,146 @@ describe('GenericSessionPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('session-transcript-scroll-container')).toBeInTheDocument()
       })
+    })
+  })
+
+  describe('cancel control (issue-349 T-002)', () => {
+    it.each(['active', 'running', 'probing'])(
+      'renders the cancel trigger in the header when the generic session is non-terminal (%s)',
+      async (status) => {
+        mocks.summaryData = baseSummary({ status })
+        mocks.transcriptTurns = [makeTurn()]
+        renderPage()
+        await waitFor(() => {
+          expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
+        })
+      },
+    )
+
+    it.each(['completed', 'failed', 'cancelled', 'stopped'])(
+      'does not render the cancel trigger when the session is terminal (%s)',
+      async (status) => {
+        mocks.summaryData = baseSummary({ status })
+        mocks.transcriptTurns = [makeTurn()]
+        renderPage()
+        await waitFor(() => {
+          expect(screen.getByTestId('session-transcript-scroll-container')).toBeInTheDocument()
+        })
+        expect(screen.queryByTestId('session-cancel-trigger')).not.toBeInTheDocument()
+      },
+    )
+
+    it('does not render the cancel trigger inside the followup composer (issue-242 composer constraint)', async () => {
+      mocks.summaryData = baseSummary({ status: 'running' })
+      mocks.transcriptTurns = [makeTurn()]
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
+      })
+      const composer = screen.getByTestId('session-followup-composer')
+      expect(composer.querySelector('[data-testid="session-cancel-trigger"]')).toBeNull()
+      expect(composer.querySelector('[data-testid="session-cancel-alert"]')).toBeNull()
+    })
+
+    it('opens a destructive-toned AlertDialog without sending the cancel request', async () => {
+      mocks.summaryData = baseSummary({ status: 'running' })
+      mocks.transcriptTurns = [makeTurn()]
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
+      })
+
+      expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
+      expect(mocks.cancelMutation.mutate).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByTestId('session-cancel-trigger'))
+
+      const dialog = screen.getByTestId('session-cancel-alert')
+      expect(dialog).toBeInTheDocument()
+      expect(dialog).toHaveAttribute('data-tone', 'destructive')
+
+      // Mutate must not fire before explicit confirmation
+      expect(mocks.cancelMutation.mutate).not.toHaveBeenCalled()
+    })
+
+    it('dismissing the dialog sends no cancel request and leaves the session running', async () => {
+      mocks.summaryData = baseSummary({ status: 'running' })
+      mocks.transcriptTurns = [makeTurn()]
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByTestId('session-cancel-trigger'))
+      expect(screen.getByTestId('session-cancel-alert')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('session-cancel-alert-cancel'))
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
+      })
+      expect(mocks.cancelMutation.mutate).not.toHaveBeenCalled()
+
+      // Session is still running — cancel control is still present
+      expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
+    })
+
+    it('confirming the dialog calls cancel.mutate() with the owning agent reference', async () => {
+      mocks.summaryData = baseSummary({ status: 'running' })
+      mocks.transcriptTurns = [makeTurn()]
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByTestId('session-cancel-trigger'))
+      fireEvent.click(screen.getByTestId('session-cancel-alert-confirm'))
+
+      expect(mocks.cancelMutation.mutate).toHaveBeenCalledTimes(1)
+      expect(mocks.cancelMutation.mutate).toHaveBeenCalledWith(
+        { sessionId: 'sess-abc', agentRef: 'agent-1' },
+        expect.objectContaining({ onSettled: expect.any(Function) }),
+      )
+    })
+
+    it('closes the confirmation dialog after the cancel mutation settles while the session remains non-terminal', async () => {
+      mocks.summaryData = baseSummary({ status: 'running' })
+      mocks.transcriptTurns = [makeTurn()]
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByTestId('session-cancel-trigger'))
+      fireEvent.click(screen.getByTestId('session-cancel-alert-confirm'))
+
+      const mutationOptions = mocks.cancelMutation.mutate.mock.calls[0][1]
+      act(() => {
+        mutationOptions.onSettled()
+      })
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
+      })
+      expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
+    })
+
+    it('AlertDialog confirm button reflects cancel.isPending (dismissing disabled while in flight)', async () => {
+      mocks.cancelMutation = { mutate: vi.fn(), isPending: true }
+      mocks.summaryData = baseSummary({ status: 'running' })
+      mocks.transcriptTurns = [makeTurn()]
+      renderPage()
+      await waitFor(() => {
+        expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByTestId('session-cancel-trigger'))
+
+      const confirmButton = screen.getByTestId('session-cancel-alert-confirm') as HTMLButtonElement
+      const cancelButton = screen.getByTestId('session-cancel-alert-cancel') as HTMLButtonElement
+      expect(confirmButton).toBeDisabled()
+      expect(cancelButton).toBeDisabled()
+      expect(confirmButton.textContent).toContain('Working')
     })
   })
 })

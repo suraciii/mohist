@@ -20,6 +20,7 @@ const useProjectMock = vi.fn()
 const invalidateQueriesMock = vi.fn()
 const toastSuccessMock = vi.fn()
 const toastErrorMock = vi.fn()
+const toastWarningMock = vi.fn()
 
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
@@ -36,6 +37,7 @@ vi.mock('sonner', () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccessMock(...args),
     error: (...args: unknown[]) => toastErrorMock(...args),
+    warning: (...args: unknown[]) => toastWarningMock(...args),
   },
 }))
 
@@ -47,6 +49,7 @@ beforeEach(() => {
   invalidateQueriesMock.mockReset()
   toastSuccessMock.mockReset()
   toastErrorMock.mockReset()
+  toastWarningMock.mockReset()
   useProjectMock.mockReturnValue({ projectId: 'proj-1' })
   useQueryClientMock.mockReturnValue({ invalidateQueries: invalidateQueriesMock })
   useQueryMock.mockReturnValue({ data: null, isLoading: false })
@@ -206,15 +209,18 @@ describe('useGenericSessionSummary', () => {
     expect(interval).toBe(5000)
   })
 
-  it('stops polling when session is terminal', () => {
-    useQueryMock.mockReturnValue({ data: { status: 'completed' } })
-    useGenericSessionSummary('sess-abc')
-    const opts = getLastQueryOptions()
-    const interval = typeof opts.refetchInterval === 'function'
-      ? opts.refetchInterval({ state: { data: { status: 'completed' } } })
-      : opts.refetchInterval
-    expect(interval).toBe(false)
-  })
+  it.each(['completed', 'failed', 'stopped', 'cancelled'])(
+    'stops polling when session is terminal (%s)',
+    (status) => {
+      useQueryMock.mockReturnValue({ data: { status } })
+      useGenericSessionSummary('sess-abc')
+      const opts = getLastQueryOptions()
+      const interval = typeof opts.refetchInterval === 'function'
+        ? opts.refetchInterval({ state: { data: { status } } })
+        : opts.refetchInterval
+      expect(interval).toBe(false)
+    },
+  )
 })
 
 /* ── useGenericSessionTranscript ────────────────────────── */
@@ -327,33 +333,62 @@ describe('useCancelGenericSession', () => {
     useMutationMock.mockImplementation((options: unknown) => ({ mutate: vi.fn(), options }))
   })
 
-  it('invalidates agent-status, agent-activity, and session query on success', () => {
+  it('emits a success toast and invalidates session queries on cancelled', () => {
     useCancelGenericSession()
-    getLastMutationOptions().onSuccess({}, { sessionId: 'sess-abc', agentRef: 'agent-foo' })
+    getLastMutationOptions().onSuccess(
+      { state: 'cancelled' },
+      { sessionId: 'sess-abc', agentRef: 'agent-foo' },
+    )
+    expect(toastSuccessMock).toHaveBeenCalledWith('Session cancelled')
+    expect(toastWarningMock).not.toHaveBeenCalled()
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
+  })
+
+  it.each(['completed', 'failed', 'stopped'])(
+    'emits a success toast when the runner reports a terminal state (%s)',
+    (terminalState) => {
+      useCancelGenericSession()
+      getLastMutationOptions().onSuccess(
+        { state: terminalState },
+        { sessionId: 'sess-abc', agentRef: 'agent-foo' },
+      )
+      expect(toastSuccessMock).toHaveBeenCalledWith('Session cancelled')
+      expect(toastWarningMock).not.toHaveBeenCalled()
+      expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
+    },
+  )
+
+  it('emits a warning toast and still invalidates session queries on not-cancellable', () => {
+    useCancelGenericSession()
+    getLastMutationOptions().onSuccess(
+      { state: 'not-cancellable' },
+      { sessionId: 'sess-abc', agentRef: 'agent-foo' },
+    )
+    expect(toastWarningMock).toHaveBeenCalledWith('Session could not be cancelled')
+    expect(toastSuccessMock).not.toHaveBeenCalled()
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
     expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
   })
 
   it('skips agent sessions invalidation when agentRef is omitted', () => {
     useCancelGenericSession()
-    getLastMutationOptions().onSuccess({}, { sessionId: 'sess-abc' })
+    getLastMutationOptions().onSuccess({ state: 'cancelled' }, { sessionId: 'sess-abc' })
     const agentSessionsCalls = invalidateQueriesMock.mock.calls.filter(
       (c: unknown[]) => (c[0] as { queryKey: string[] }).queryKey[3] === 'sessions',
     )
     expect(agentSessionsCalls).toHaveLength(0)
   })
 
-  it('shows success toast', () => {
-    useCancelGenericSession()
-    getLastMutationOptions().onSuccess({}, { sessionId: 's1', agentRef: 'a' })
-    expect(toastSuccessMock).toHaveBeenCalledWith('Session cancelled')
-  })
-
   it('shows error toast on failure', () => {
     useCancelGenericSession()
     getLastMutationOptions().onError(new Error('NOT_CANCELLABLE'))
     expect(toastErrorMock).toHaveBeenCalledWith('NOT_CANCELLABLE')
+    expect(toastSuccessMock).not.toHaveBeenCalled()
+    expect(toastWarningMock).not.toHaveBeenCalled()
   })
 })
