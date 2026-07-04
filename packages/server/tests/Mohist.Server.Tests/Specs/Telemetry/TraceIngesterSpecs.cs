@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Otel;
 using Mohist.Server.Otel.OtlpJson;
-using Mohist.Server.SystemInfo;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -66,30 +65,20 @@ public class TraceIngesterSpecs : IDisposable
         }
         """;
 
-    private readonly string _dataDir;
     private readonly OtelDb _db;
     private readonly TraceIngester _ingester;
+    // Keeper keeps the in-memory SQLite database alive for the test's lifetime.
+    private readonly Microsoft.Data.Sqlite.SqliteConnection _keeper;
 
     public TraceIngesterSpecs()
     {
-        _dataDir = Path.Combine(Path.GetTempPath(), $"mohist-otel-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_dataDir);
-        var dbPath = Path.Combine(_dataDir, "otel.db");
-        _db = new OtelDb(new OtelOptions { DbPath = dbPath }, new MockEnvironment(), new PassthroughFileSystem());
+        (_db, _keeper) = InMemoryOtelDb.Create();
         _ingester = new TraceIngester(_db, NullLogger<TraceIngester>.Instance);
     }
 
     public void Dispose()
     {
-        try
-        {
-            if (Directory.Exists(_dataDir))
-                Directory.Delete(_dataDir, recursive: true);
-        }
-        catch
-        {
-            // best-effort
-        }
+        _keeper.Dispose();
     }
 
     [Fact]
@@ -277,7 +266,7 @@ public class TraceIngesterSpecs : IDisposable
         Assert.Equal(3L, (long)cmd.ExecuteScalar()!);
     }
 
-    [Fact(Skip = "Flaky under parallel execution: Microsoft.Data.Sqlite ObjectDisposedException on the SQLitePCL handle during EnsureInitialized. Reproduces only in the full suite, passes in isolation. Tracked for follow-up.")]
+    [Fact]
     public void IngestJson_MultipleResources_TakesFirstServiceName()
     {
         const string traceId = "00000000000000000000000000000040";
@@ -338,34 +327,5 @@ public class TraceIngesterSpecs : IDisposable
     public void TryConvertUnixNanoToUtcIso_RejectsBadInputs(string? raw)
     {
         Assert.False(TraceIngester.TryConvertUnixNanoToUtcIso(raw, out _));
-    }
-
-    private sealed class MockEnvironment : IEnvironmentVariableProvider
-    {
-        private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
-
-        public string? this[string variable]
-        {
-            get => _values.TryGetValue(variable, out var v) ? v : null;
-            set
-            {
-                if (value is null) _values.Remove(variable);
-                else _values[variable] = value;
-            }
-        }
-
-        public string? GetEnvironmentVariable(string variable) => this[variable];
-        public string? GetEnvironmentVariable(string variable, EnvironmentVariableTarget target) => this[variable];
-        public IReadOnlyDictionary<string, string> GetEnvironmentVariables() => new Dictionary<string, string>(_values, StringComparer.Ordinal);
-        public IReadOnlyDictionary<string, string> GetEnvironmentVariables(EnvironmentVariableTarget target) => GetEnvironmentVariables();
-        public string ExpandEnvironmentVariables(string name) => name;
-        public void SetEnvironmentVariable(string variable, string? value) => this[variable] = value;
-        public void SetEnvironmentVariable(string variable, string? value, EnvironmentVariableTarget target) => this[variable] = value;
-    }
-
-    private sealed class PassthroughFileSystem : IFileSystem
-    {
-        public bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
-        public string ReadAllText(string path) => File.ReadAllText(path);
     }
 }

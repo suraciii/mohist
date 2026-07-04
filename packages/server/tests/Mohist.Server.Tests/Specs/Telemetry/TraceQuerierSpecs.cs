@@ -10,20 +10,16 @@ namespace Mohist.Server.Tests.Specs.Telemetry;
 [Trait(Traits.Sut.Name, Traits.Sut.Telemetry)]
 public class TraceQuerierSpecs : IDisposable
 {
-    private readonly string _dataDir;
     private readonly OtelDb _db;
     private readonly TraceQuerier _querier;
     private readonly OtelCollectorStatus _status;
     private readonly TraceIngester _ingester;
+    // Keeper keeps the in-memory SQLite database alive for the test's lifetime.
+    private readonly Microsoft.Data.Sqlite.SqliteConnection _keeper;
 
     public TraceQuerierSpecs()
     {
-        _dataDir = Path.Combine(Path.GetTempPath(), $"mohist-otel-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_dataDir);
-        var dbPath = Path.Combine(_dataDir, "otel.db");
-
-        var env = new MockEnvironment();
-        _db = new OtelDb(new OtelOptions { DbPath = dbPath }, env, new PassthroughFileSystem());
+        (_db, _keeper) = InMemoryOtelDb.Create();
         _ingester = new TraceIngester(_db, NullLogger<TraceIngester>.Instance);
         _status = new OtelCollectorStatus();
         _querier = new TraceQuerier(_db, _status, new PassthroughFileSystem());
@@ -31,15 +27,7 @@ public class TraceQuerierSpecs : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            if (Directory.Exists(_dataDir))
-                Directory.Delete(_dataDir, recursive: true);
-        }
-        catch
-        {
-            // best-effort cleanup
-        }
+        _keeper.Dispose();
     }
 
     [Fact]
@@ -205,8 +193,12 @@ public class TraceQuerierSpecs : IDisposable
     }
 
     [Fact]
-    public async Task GetStatusAsync_ReportsCountsAndFileSize()
+    public async Task GetStatusAsync_ReportsCounts()
     {
+        // Count reporting is exercised against the in-memory db (the file-size
+        // portion of the former ReportsCountsAndFileSize spec was WAL-mode
+        // timing-dependent and is covered by OtelDbSpecs against a quiescent
+        // file-backed db).
         SeedTrace("t1", "svc", "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", 1);
         SeedTrace("t2", "svc", "2026-01-02T00:00:00Z", "2026-01-02T00:00:01Z", 1);
         SeedTrace("t3", "svc", "2026-01-03T00:00:00Z", "2026-01-03T00:00:01Z", 1);
@@ -218,7 +210,6 @@ public class TraceQuerierSpecs : IDisposable
 
         Assert.Equal(3L, snapshot.TraceCount);
         Assert.True(snapshot.SpanCount >= 3L);
-        Assert.True(snapshot.DbSizeBytes > 0L);
     }
 
     [Fact]
@@ -322,12 +313,19 @@ public class TraceQuerierSpecs : IDisposable
     [Fact]
     public async Task ExecuteRawQuery_CannotBypassReadOnlyWithInsert()
     {
+        // The physical read-only guard (SQLite Mode=ReadOnly refusing writes)
+        // is a file-specific contract — the in-memory shared-cache database
+        // used by the rest of this spec does not enforce it. Use a throwaway
+        // file-backed OtelDb so the read-only contract is genuinely exercised.
         // Even if ValidateSelectOnly were misconfigured, the read-only
         // connection should refuse this write. The keyword check is the
         // outer defense; the read-only mode is the ultimate authority.
+        using var fileBacked = FileBackedOtelDb.Create();
+        var querier = new TraceQuerier(fileBacked.Db, new OtelCollectorStatus(), new PassthroughFileSystem());
+
         await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(async () =>
         {
-            await _querier.ExecuteRawQuery(
+            await querier.ExecuteRawQuery(
                 "INSERT INTO traces (trace_id, service_name, start_time, end_time, span_count) VALUES ('x','y','2026-01-01T00:00:00Z','2026-01-01T00:00:01Z',1)");
         });
     }
@@ -353,6 +351,41 @@ public class TraceQuerierSpecs : IDisposable
         Assert.Equal(1, TraceQuerier.ClampLimit(1));
         Assert.Equal(7, TraceQuerier.ClampLimit(7));
         Assert.Equal(TraceQuerier.MaxListLimit, TraceQuerier.ClampLimit(TraceQuerier.MaxListLimit));
+    }
+
+    /// <summary>
+    /// A throwaway file-backed <see cref="OtelDb"/> for specs that assert
+    /// file-specific contracts (physical read-only enforcement) which an
+    /// in-memory shared-cache database cannot provide. Disposing it deletes
+    /// the temp directory.
+    /// </summary>
+    private sealed class FileBackedOtelDb : IDisposable
+    {
+        public OtelDb Db { get; }
+        private readonly string _dataDir;
+
+        private FileBackedOtelDb(OtelDb db, string dataDir)
+        {
+            Db = db;
+            _dataDir = dataDir;
+        }
+
+        public static FileBackedOtelDb Create()
+        {
+            var dataDir = Path.Combine(Path.GetTempPath(), $"mohist-otel-file-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(dataDir);
+            var dbPath = Path.Combine(dataDir, "otel.db");
+            var db = new OtelDb(new OtelOptions { DbPath = dbPath }, new MockEnvironment(), new PassthroughFileSystem());
+            // Force schema materialization so the file exists and the read-only
+            // connection bootstrap sees a real database.
+            using (db.OpenReadWriteConnection()) { }
+            return new FileBackedOtelDb(db, dataDir);
+        }
+
+        public void Dispose()
+        {
+            try { if (Directory.Exists(_dataDir)) Directory.Delete(_dataDir, recursive: true); } catch { }
+        }
     }
 
     private void SeedTrace(string traceId, string serviceName, string startTime, string endTime, long spanCount)

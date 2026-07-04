@@ -52,7 +52,6 @@ public class OtlpRoutesIntegrationSpecs : IAsyncLifetime
         await _keeper.DisposeAsync();
         try { if (Directory.Exists(_runnerRoot)) Directory.Delete(_runnerRoot, recursive: true); } catch { }
         try { if (File.Exists(_systemUpdateStatePath)) File.Delete(_systemUpdateStatePath); } catch { }
-        try { if (File.Exists(_factory?.OtlpDbPath)) File.Delete(_factory.OtlpDbPath); } catch { }
     }
 
     [Fact]
