@@ -18,3 +18,25 @@
 - `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 Warning(s), 0 Error(s) (TreatWarningsAsErrors enforced via Directory.Build.props).
 - `dotnet test Mohist.sln -p:SkipWebBuild=true` → Passed 3822, Failed 0, Skipped 13 (preexisting skips), Total 3835.
 - Filtered to IssueCreationSpecs → 29/29 pass including the new create-with-prerequisites scenarios.
+
+## T-002 (2026-07-04) — Web: reusable IssuePrerequisitePicker feature component
+
+### Codebase Patterns
+- FSD slice shape: `packages/web/src/features/<name>/{index.ts, ui/<Component>.tsx, ui/<Component>.test.tsx}`; index re-exports the component + its props type, component lives under `ui/`. Mirrors `features/create-issue`, `features/edit-issue`, `features/select-issue-model`.
+- `@/shared/ui/components/popover` is the base-ui wrapped Popover (Popover/PopoverTrigger/PopoverContent, `data-slot` attributes). PopoverTrigger accepts a `render={<Button .../>}` shim — exactly the shape EpicDetailPage's `IssuePicker` uses.
+- `useIssues({ projectId })` already takes the project id directly (no `useProject` indirection needed at the call site). When `projectId` is supplied, the query is enabled and project-scoped via `projectApiPath`. This is the structural reason cross-project exclusions are not a concern at this layer — the query returns only the target project's issues.
+- `IssuePrerequisiteSummary.completed` on the server is derived from `Issue.Status == IssueStatus.Done` (`IssueInfo.FromDomain`). For the picker, we don't need a server-side summary to know "completed" — `Issue.status === 'done'` on the `useIssues` payload is equivalent.
+- `entities/issue/lib/status-badge` exposes `statusBadge(health)` and `statusLabel(health)`. For candidate rows we render both the IssueStatus (Backlog/InProgress/Done/Cancelled) and the IssueHealth badge — status in plain text, health as a colored chip.
+
+### Gotchas
+- Popover's Radix Popper renders into a portal, so test selectors must `await screen.findByTestId(...)` for the listbox that mounts after the popover opens. `openPicker()` clicks the trigger; the listbox testid appears on the next tick.
+- `getByTestId` does not accept compound CSS selectors (e.g. `'prerequisite-picker-option[data-issue-number="10"]'`). Use `getAllByTestId(...)` + `.find(o => o.getAttribute('data-issue-number') === '10')` or import `* as queries from '@testing-library/dom'` with the `querySelector` extension. Same trick applies to chips.
+- For the cross-project exclusion test, mocking `useIssues` with `mockReturnValue` is insufficient — the mock needs to be project-aware (`mockImplementation(params => ...)`) so passing a different `projectId` legitimately returns a different (or empty) list. Otherwise the test passes vacuously: the picker is given `TEST_ISSUES` and simply filters them, never demonstrating the project-scoping behavior.
+- React state in the picker is **fully controlled**: `selected` is the source of truth, `onAdd`/`onRemove` are the only mutation seams. The component does not maintain a local copy of `selected`. Buffer mode is therefore achieved by the parent wrapping `setState` in `onAdd`/`onRemove`; the picker never knows the difference between a buffered write and a live mutation.
+- `mode` is exposed on the chip container as `data-mode` so downstream consumers (e.g. the create dialog tests, the backlog editor tests) can assert which contract is active without poking into React state.
+- The picker's chips look up the underlying issue in the `useIssues` map for the title/completion badge. If the issue isn't in the list (stale query, just-typed number with no row yet), the chip degrades to just `#number` with no incomplete indicator. This is acceptable: the create dialog will issue a server validation error if the number doesn't exist; the backlog editor always has the issue in the project list.
+- `useIssues` is mocked at the top of the test file (`vi.mock('../../../entities/issue', ...)`) with a hoisted `vi.fn()`. The mock's return value can be reassigned per-test via `mocks.useIssues.mockReturnValue(...)` or `mockImplementation(...)` (preferred when the test cares about the projectId argument).
+
+### Verification
+- `npm run typecheck -w packages/web` → clean.
+- `npm run test:run -w packages/web` → 270/270 test files pass, 4315 tests pass, 1 preexisting skip. IssuePrerequisitePicker contributes 16 tests across 5 describe blocks: candidate search (4), exclusions (3), chips (4), incomplete/start-eligibility messaging (3), mode seam (1), plus rendering tests.
