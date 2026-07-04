@@ -38,3 +38,39 @@ Five new specs in `SystemUpdateServiceSpecs.cs`:
 - The reconciler (T-002) calls `ISystemUpdateStore.ReleaseStaleLockAsync(jobId)`, NOT `_store.ReleaseLockAsync` from `SystemUpdateService` — so it doesn't violate the SourceAudit rule even if it were audited in `SystemUpdateService` (it won't be, because the reconciler is a new file and the audit only scans `SystemUpdateService`).
 - The fake's `_lockOwnerJobId` does not survive across store constructions, mirroring the post-restart real situation in semantics (the fake never persists to disk). So the `InMemoryUpdateStore_ReleaseStaleLockAsync_ReleasesHeldLockWithoutProcessLocalMatch` test name is slightly misleading — in the in-memory fake the in-process flag still matches because we never construct a second instance there. The TEMP-FILE tests on `FileSystemSystemUpdateStore` are the ones that truly exercise the "fresh process" case (new `CreateFileSystemStore` instance, file still on disk).
 - No `DateTimeOffset.UtcNow` / `Environment.TickCount` reads inside reconciler; both time sides come through `TimeProvider` (already wired in #356) and the new `IProcessStartTimeProvider`.
+
+## T-002 — startup recovery service (COMPLETED)
+
+### Decisions confirmed
+- Direct `IHostedService` (not `BackgroundService`). The hosted host awaits every `IHostedService.StartAsync` before serving requests — this is the seam that closes the early-request race. Reused the existing `EpicReconciliationService` / `AttachmentCleanupService` / `StagePopulationSnapshotService` registration shape (`AddHostedService<T>()`) without copying their `BackgroundService` base class.
+- `IProcessStartTimeProvider` exposed a single-purpose seam (`DateTimeOffset GetStartTime()`), not a `TimeProvider` subclass and not a captured-at-DI-build `DateTimeOffset` parameter. Default `ProcessStartTimeProvider` reads `Process.GetCurrentProcess().StartTime.ToUniversalTime()` via an internal `Func<Process>` ctor (lets tests swap a fake but defaults to the real process). No .NET 11 alternative API exists (`Environment.ProcessStartTime`-style), so the design's fallback is the implementation.
+- Reconciler shape mirrors `SystemUpdateService.CreateFailedTransition` but is inlined (D5): `latest with { Status = "failed", Stage = "Failed", Reason = InterruptedByProcessRestartReason, CompletedAt = now, UpdatedAt = now, Logs = … }`, then `SaveAsync` + `ReleaseStaleLockAsync`. Reason is exposed as `public const string InterruptedByProcessRestartReason = "interrupted by process restart"` so specs can assert without stringly-typed drift.
+- Reconciler does NOT depend on `SystemUpdateService` (D5). The `SourceAudit_ReconcilerHasNoWallClockOrProcessInfoReads` test pins this — it strips XML doc comments (to ignore the explanatory `<see cref="SystemUpdateService"/>` reference in the summary) and asserts no `DateTimeOffset.UtcNow` / `DateTime.UtcNow` / `Environment.TickCount` / `GetCurrentProcess` / `Process.StartTime` / bare `SystemUpdateService` token appears in code.
+
+### Registration order
+- `MohistServiceRegistration.ConfigureMohistServices` registers `IProcessStartTimeProvider` via `TryAddSingleton<IProcessStartTimeProvider, ProcessStartTimeProvider>()` BEFORE `AddHostedService<SystemUpdateRecoveryService>()`. `ISystemUpdateStore` and `TimeProvider` are already registered earlier in the same method (lines 96 / 91 respectively), so the reconciler's DI graph resolves cleanly.
+- `SystemUpdateRecoveryService` deliberately does NOT implement `ISingletonService` / `IScopedService` so the `AddMohistConventionalServices` scanner leaves it alone; only the explicit `AddHostedService<SystemUpdateRecoveryService>()` registers it.
+
+### Test coverage
+New `Specs/SystemSpecs/SystemUpdateRecoverySpecs.cs` (15.6 KB, under the 24 KB budget) drives all spec scenarios with fake time + injected process start time:
+- `StartAsync_StaleRunningJob_IsMarkedFailedAndLockReleased` — primary acceptance for active `running` stale job.
+- `StartAsync_StaleWaitingForReconnectJob_IsMarkedFailedAndLockReleased` — active `waiting-for-reconnect` stale job.
+- `StartAsync_NoPersistedJob_IsNoOp` — empty-store case.
+- `StartAsync_FreshActiveJob_IsLeftInPlace` / `StartAsync_FreshWaitingForReconnectJob_IsLeftInPlace` — fresh active jobs left alone (one with `UpdatedAt > process start`, one with `UpdatedAt == process start` to pin the strict-`<` rule).
+- `StartAsync_TerminalJob_IsNeverModifiedRegardlessOfUpdatedAt(status)` — `Theory` covering all five terminal statuses (`succeeded`, `failed`, `recovered`, `superseded`, `cancelled`).
+- `StartAsync_AfterRecovery_FreshStartAsyncAcquiresLockWithoutUpdateInProgress` — wires a real `SystemUpdateService` against the recovered in-memory store, asserts `Started = true` and `Code = null`.
+- `StartAsync_AfterFileSystemStoreRecovery_FreshStartAsyncAcquiresLock` — temp-file pattern: confirms the on-disk `.lock` is actually removed and a follow-up `TryAcquireLockAsync` on the same instance succeeds (mirrors `SystemUpdateServiceSpecs.FileSystemStore_ReleaseStaleLockAsync_*`).
+- `ProcessStartTimeProvider_DefaultReadsActualProcess` — sanity check that the production default returns a UTC offset-zero timestamp `<= UtcNow`.
+- `SourceAudit_ReconcilerHasNoWallClockOrProcessInfoReads` — pins the design rules: no wall-clock reads, no process-info reads, no `SystemUpdateService` dependency in code.
+
+### Build/test outcome
+- `dotnet build Mohist.sln -p:SkipWebBuild=true`: 0 warnings, 0 errors. `TreatWarningsAsErrors` acts as lint.
+- `dotnet test --filter "FullyQualifiedName~SystemUpdateRecoverySpecs"`: 14 passed / 0 failed.
+- `dotnet test --filter "FullyQualifiedName~SystemUpdate"`: 68 passed / 0 failed (54 existing `SystemUpdateServiceSpecs` + 14 new `SystemUpdateRecoverySpecs`). Regression confirmed: `SourceAudit_ReleaseLockAsyncOnlyInSharedHelpersAndRunUpdateFinally` and every existing test still pass.
+- `dotnet test --filter "FullyQualifiedName~ArchitectureRules"`: 24 passed / 3 skipped (pre-existing) / 0 failed. `SpecFiles_MustStayBellowSizeBudget`, `SpecNamespaces_MustBeUnderSpecs`, `SpecClasses_MustBePublic`, `SpecFiles_MustHaveSpecOrCollectionSuffix` all green.
+- Full `npm test` server .NET suite: 3794 passed / 13 skipped / 0 failed.
+
+### Gotchas for downstream
+- xUnit2017 (analyzer) flags `Assert.True(list.Contains(x))` — must use `Assert.Contains(list, item => item == x)` for the released-stale-job list assertions.
+- The doc-comment `<see cref="SystemUpdateService"/>` in the reconciler summary survives the source audit because the test strips all `<see cref="..."/>` references before grepping for `SystemUpdateService`. Without that strip, the audit would always fail for a service that mentions the class it intentionally avoids depending on.
+- `ArchitectureRules.FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices` whitelists `Agent` / `Epic` / `Issue` / `Project` / `Runner` / `Sessions` / `Workflow` as feature roots — `SystemInfo` is NOT in that list, so adding files to `packages/server/src/Mohist.Server/SystemInfo/` is fine (matches the placement pattern used by `SystemUpdateService`, `FileSystemSystemUpdateStore`, etc.).
