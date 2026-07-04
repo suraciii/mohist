@@ -116,7 +116,10 @@ describe("RunnerSignalRClient.ReceiveWorkflowRunStatus (T-003 push)", () => {
     expect(registry.get("wr-1")?.phase).toBe("eligible")
   })
 
-  it("OnFailedPush_TransitionsActiveEntryToEligible", async () => {
+  it("OnFailedPush_LeavesEntryActive", async () => {
+    // Failed is a recoverable mid-state (Retry/Rerun revive it), NOT
+    // terminal: a push for Failed must not transition the workspace to
+    // eligible — reclaims mid-retry lose the run branch.
     const registry = new WorkspaceRegistry(root)
     await registry.load()
     await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
@@ -124,7 +127,8 @@ describe("RunnerSignalRClient.ReceiveWorkflowRunStatus (T-003 push)", () => {
     const { handler } = await newClient(registry)
     await handler({ workflowRunId: "wr-1", status: "Failed" })
 
-    expect(registry.get("wr-1")?.phase).toBe("eligible")
+    expect(registry.get("wr-1")?.phase).toBe("active")
+    expect(registry.get("wr-1")?.terminalAt).toBeNull()
   })
 
   it("OnRePushForAlreadyEligibleEntry_DoesNotReStampTerminalAt", async () => {
@@ -243,7 +247,7 @@ describe("RunnerSignalRClient.ReceiveWorkflowRunStatus (T-003 push)", () => {
     await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
     const { handler } = await newClient(registry)
-    await handler({ workflowRunId: "wr-1", status: "Failed" })
+    await handler({ workflowRunId: "wr-1", status: "Completed" })
 
     expect(registry.get("wr-1")?.terminalAt).toBe(at.toISOString())
     vi.useRealTimers()

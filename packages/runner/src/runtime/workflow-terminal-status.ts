@@ -7,8 +7,15 @@
 //
 // The runner is the consumer: it receives the canonical enum name as a
 // string (via SignalR push or convergence batch query) and decides what
-// to do with each state. Only terminal states (Completed / Stopped /
-// Failed) cause a workspace to transition from `active` to `eligible`.
+// to do with each state. Only terminal states (Completed / Stopped)
+// cause a workspace to transition from `active` to `eligible`.
+//
+// `Failed` is deliberately NOT terminal: it is a recoverable mid-state —
+// the server's Retry/Rerun/RerunFromStage revive it back to a
+// dispatchable status. A run that can be retried must not have its
+// workspace reclaimed (reclaiming mid-retry loses plan/build artifacts
+// because the next prepare() rebuilds the branch from base). Only the
+// true terminals (Completed / Stopped) make a workspace eligible.
 //
 // Keeping the terminal-set knowledge centralized here means the SignalR
 // handler and the convergence loop share one definition. A status that
@@ -40,7 +47,6 @@ export type WorkflowRunStatusName =
 export const TERMINAL_WORKFLOW_STATUSES = new Set<WorkflowRunStatusName>([
   "Completed",
   "Stopped",
-  "Failed",
 ])
 
 export function isTerminalWorkflowStatus(status: string | null | undefined): status is WorkflowRunStatusName {

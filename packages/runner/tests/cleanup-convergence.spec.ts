@@ -108,7 +108,10 @@ describe("ConvergenceBackstop", () => {
     expect(registry.get("wr-1")?.phase).toBe("eligible")
   })
 
-  it("RunOnce_OnFailedStatus_TransitionsActiveToEligible", async () => {
+  it("RunOnce_OnFailedStatus_LeavesEntryActive", async () => {
+    // Failed is a recoverable mid-state (Retry/Rerun revive it), NOT
+    // terminal: a failed run's workspace must stay active so the next
+    // dispatch finds the run branch intact.
     const registry = await makeRegistry()
     await registry.register({ issueId: "i1", issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
@@ -117,7 +120,9 @@ describe("ConvergenceBackstop", () => {
 
     const result = await backstop.runOnce(new AbortController().signal)
 
-    expect(result.transitioned).toBe(1)
+    expect(result).toEqual({ queried: 1, transitioned: 0, dropped: 0 })
+    expect(registry.get("wr-1")?.phase).toBe("active")
+    expect(registry.get("wr-1")?.terminalAt).toBeNull()
   })
 
   it("RunOnce_OnNonTerminalStatus_LeavesEntryActive", async () => {

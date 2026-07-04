@@ -16,8 +16,13 @@ public enum WorkflowRunStatus { Created, Pending, Ready, Running, AwaitingApprov
 
 public static class WorkflowRunStatusExtensions
 {
+    // Terminal = the run is permanently done and will not be dispatched again.
+    // `Failed` is deliberately NOT terminal: it is a recoverable mid-state —
+    // Retry/Rerun/RerunFromStage revive it back to a dispatchable status. A run
+    // that can be retried must not have its workspace reclaimed, so cleanup
+    // eligibility is keyed on the true terminals (Completed / Stopped) only.
     public static bool IsTerminal(this WorkflowRunStatus status) =>
-        status is WorkflowRunStatus.Stopped or WorkflowRunStatus.Completed or WorkflowRunStatus.Failed;
+        status is WorkflowRunStatus.Stopped or WorkflowRunStatus.Completed;
 }
 
 [GenerateSerializer]

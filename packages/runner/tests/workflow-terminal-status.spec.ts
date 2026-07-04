@@ -5,9 +5,11 @@ import { isTerminalWorkflowStatus, TERMINAL_WORKFLOW_STATUSES } from "../src/run
 // The server is the source of truth (see
 // `packages/server/.../Workflow/Domain/Run/WorkflowRun.cs`); the runner
 // only needs to recognize the canonical enum names and treat Completed /
-// Stopped / Failed as terminal. Anything else must be treated as
-// non-terminal so the convergence loop leaves the entry active for the
-// next tick (or for a future push).
+// Stopped as terminal. Anything else must be treated as non-terminal so
+// the convergence loop leaves the entry active for the next tick (or for
+// a future push). Failed is intentionally non-terminal: it is a
+// recoverable mid-state (Retry/Rerun/RerunFromStage revive it), so a
+// failed run's workspace must be preserved for the next dispatch.
 
 describe("isTerminalWorkflowStatus", () => {
   it("ReturnsTrueForCompleted", () => {
@@ -18,8 +20,10 @@ describe("isTerminalWorkflowStatus", () => {
     expect(isTerminalWorkflowStatus("Stopped")).toBe(true)
   })
 
-  it("ReturnsTrueForFailed", () => {
-    expect(isTerminalWorkflowStatus("Failed")).toBe(true)
+  it("ReturnsFalseForFailed", () => {
+    // Failed is a recoverable mid-state, NOT terminal: a run that can be
+    // retried must not have its workspace reclaimed mid-retry.
+    expect(isTerminalWorkflowStatus("Failed")).toBe(false)
   })
 
   it("ReturnsFalseForRunning", () => {
@@ -80,7 +84,7 @@ describe("isTerminalWorkflowStatus", () => {
     expect(isTerminalWorkflowStatus("STOPPED")).toBe(false)
   })
 
-  it("TerminalStatusesSetExactlyMatchesTheThreeTerminalStates", () => {
-    expect(Array.from(TERMINAL_WORKFLOW_STATUSES).sort()).toEqual(["Completed", "Failed", "Stopped"])
+  it("TerminalStatusesSetExactlyMatchesTheTwoTerminalStates", () => {
+    expect(Array.from(TERMINAL_WORKFLOW_STATUSES).sort()).toEqual(["Completed", "Stopped"])
   })
 })

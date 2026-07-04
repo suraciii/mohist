@@ -7,11 +7,16 @@ namespace Mohist.Server.Events.Subscriptions;
 
 /// <summary>
 /// Server-side subscriber to workflow terminal lifecycle events. When a
-/// workflow run reaches <see cref="WorkflowRunStatus.Completed"/>,
-/// <see cref="WorkflowRunStatus.Stopped"/>, or
-/// <see cref="WorkflowRunStatus.Failed"/>, this handler asks the runner
+/// workflow run reaches <see cref="WorkflowRunStatus.Completed"/> or
+/// <see cref="WorkflowRunStatus.Stopped"/>, this handler asks the runner
 /// that owns the workspace to flip its local registry entry to
 /// cleanup-eligible.
+///
+/// <c>Failed</c> is intentionally excluded: it is a recoverable mid-state
+/// (Retry/Rerun/RerunFromStage revive it), so a failed run's workspace
+/// must be preserved for the next dispatch. Treating <c>Failed</c> as
+/// terminal caused retrying runs to have their workspaces reclaimed
+/// mid-retry, losing plan/build artifacts.
 ///
 /// The server never performs filesystem deletion; it only delivers the
 /// notification. The runner's convergence backstop
@@ -19,10 +24,10 @@ namespace Mohist.Server.Events.Subscriptions;
 /// events when the SignalR push cannot be delivered (runner offline at
 /// terminal moment, transient SignalR failure, etc.).
 ///
-/// Subscriptions for the three terminal event types are registered as a
-/// pipe-separated pattern so a single handler instance serves all three
+/// Subscriptions for the two terminal event types are registered as a
+/// pipe-separated pattern so a single handler instance serves both
 /// types — the public CloudEvents bus wildcard syntax does not match
-/// these three names with a single <c>.*</c> suffix.
+/// these two names with a single <c>.*</c> suffix.
 ///
 /// The router call is fired on a detached background task: the bus
 /// publishes from inside a workflow-grain call stack
@@ -33,7 +38,7 @@ namespace Mohist.Server.Events.Subscriptions;
 /// (push failures are logged, never propagated) and avoids blocking
 /// the lifecycle commit.
 /// </summary>
-[Subscription(Type = "com.mohist.workflow.run.completed|com.mohist.workflow.run.stopped|com.mohist.workflow.run.failed")]
+[Subscription(Type = "com.mohist.workflow.run.completed|com.mohist.workflow.run.stopped")]
 public sealed class RunnerWorkflowTerminalStatusHandler : ICloudEventHandler
 {
     private readonly IRunnerWorkflowStatusRouter _router;
@@ -99,11 +104,6 @@ public sealed class RunnerWorkflowTerminalStatusHandler : ICloudEventHandler
         if (string.Equals(type, EventCatalog.ReverseDns.WorkflowRunStopped, StringComparison.Ordinal))
         {
             status = WorkflowRunStatus.Stopped;
-            return true;
-        }
-        if (string.Equals(type, EventCatalog.ReverseDns.WorkflowRunFailed, StringComparison.Ordinal))
-        {
-            status = WorkflowRunStatus.Failed;
             return true;
         }
         return false;
