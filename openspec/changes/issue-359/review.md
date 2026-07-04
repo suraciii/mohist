@@ -1,56 +1,60 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
+
+Current candidate satisfies the issue acceptance criteria after one local documentation repair. Evidence checked:
+
+- AC1/AC4: `GET /api/runner/{runnerId}/config` is implemented at `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:139` and projects server-bound `CleanupPolicyOptions` through `ToCleanupPolicyDto` at `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:142` and `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:483`.
+- AC2/AC5: `RunnerHost.runCleanupOnce` fetches config on each cleanup pass and passes the fetched policy into `cleanupLoop.runOnce` at `packages/runner/src/runtime/host.ts:173`; `ServerConnection.fetchConfig` performs a plain GET and unwraps `cleanupPolicy` at `packages/runner/src/server/connection.ts:34`.
+- AC3: `/poll` still returns 204 when idle at `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:96`, and `WorkDispatchResponse` no longer contains `CleanupPolicy` at `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:577`; the runner type similarly has no `cleanupPolicy` field at `packages/runner/src/core/types.ts:69`.
+- AC6: Server endpoint, poll contract, runner fetch, idle cleanup, no-cache, all-null policy, and failure-skip/retry behavior are covered by `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Api/RunnerConfigApiSpecs.cs:35`, `packages/runner/tests/server-connection-fetch-config.spec.ts:20`, and `packages/runner/tests/runner-host-cleanup-config.spec.ts:190`.
+- AC7: The breaking wire-contract removal is explicit in `openspec/changes/issue-359/design.md:122` and implemented atomically on both server and runner.
 
 ## Repaired Items
 
-- (none)
+- [ID: item-1]
+  Severity: info
+  Scope: typos | stale-adjacent-doc-comment
+  Evidence: `packages/server/src/Mohist.Server/Infrastructure/Config/CleanupPolicyOptions.cs:4` still described the cleanup policy as exposed through the runner poll response, which is stale after this issue split policy transport into `/config`. Updated the XML comment to say the policy is exposed through the dedicated runner config endpoint. No product behavior changed.
+  Verification: `dotnet test Mohist.sln -p:SkipWebBuild=true --filter FullyQualifiedName~RunnerConfigApiSpecs` passed: 9 passed, 0 failed.
+  Status: resolved
 
 ## Blocking Items
 
-- [ID: item-1]
-  Severity: warning
-  Scope: packages/runner/src/runtime/host.ts
-  Evidence: The candidate changes the production interval floor for both cleanup convergence and workspace cleanup from 1000ms to 50ms at `packages/runner/src/runtime/host.ts:61-62` (`git diff master...HEAD` shows both `Math.max(1000, ...)` calls became `Math.max(50, ...)`). That means an operator setting `CLEANUP_LOOP_INTERVAL_MS=1` or `CLEANUP_CONVERGENCE_INTERVAL_MS=1` now gets a 50ms loop instead of the previous 1s safety floor. This is not required for the config-channel change, it was introduced to make `runner-host-cleanup-config.spec.ts:183` use a 50ms test interval, and it conflicts with the issue/spec non-goal that cleanup cadence and convergence behavior remain unchanged. [disallowed:reason] Repair would change runtime behavior and test strategy, so it is outside the small local repair policy.
-  SuggestedAction: Restore the 1000ms production floor, and adjust the tests to use fake timers with a 1000ms interval or another test-only seam that does not alter runtime cadence safeguards.
-  Verification: Re-run `npm run typecheck -w packages/runner` and `npm test -w packages/runner`; add or update a host unit test that asserts sub-1000 configured cleanup/convergence intervals are clamped to 1000ms if that safeguard is intentional.
-  Status: open
-
-- [ID: item-2]
-  Severity: test-gap
-  Scope: packages/server/tests/Mohist.Server.Tests/Specs/Runner/Api/RunnerConfigApiSpecs.cs
-  Evidence: `Poll_DispatchBody_NoLongerContainsCleanupPolicy` at `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Api/RunnerConfigApiSpecs.cs:287-323` does not seed dispatchable work. It posts to `/poll` on an idle registered runner, then exits successfully when the response is `204 No Content` at lines 309-315. That means the test can pass without ever observing a `200 OK` `WorkDispatchResponse`, so it does not verify the acceptance criterion in `openspec/changes/issue-359/tasks.json:47` or the spec scenario in `openspec/changes/issue-359/specs/poll-policy-decoupling/spec.md:5-8` that a dispatch body omits `cleanupPolicy`. The product code currently removes the field from `WorkDispatchResponse`, but the regression guard for the wire payload is not meaningful. [disallowed:reason] Repair requires choosing or building the correct dispatch seeding path in integration tests, which is more than a small local review repair.
-  SuggestedAction: Replace the idle fallback with a deterministic dispatch case: seed/assign a real dispatchable work item for the registered runner, call `POST /api/runner/{runnerId}/poll`, assert `200 OK`, and assert the JSON body has all expected dispatch fields but no `cleanupPolicy`. Keep the separate idle `204` assertions in the existing idle tests.
-  Verification: Run `dotnet test Mohist.sln -p:SkipWebBuild=true` and confirm the new dispatch-body test fails if `CleanupPolicy` is reintroduced to `WorkDispatchResponse` or populated by `/poll`.
-  Status: open
+- None.
 
 ## Follow-up Items
 
-- [ID: item-3]
-  Severity: follow-up
-  Scope: packages/server/src/Mohist.Server/Api/RunnerRoutes.cs
-  Evidence: The new `/config` endpoint satisfies the issue requirement that policy comes from server-bound `CleanupPolicyOptions` and not from runner-side config files (`RunnerRoutes.cs:139-144`, `RunnerRoutes.cs:483-488`). The endpoint locally overrides null serialization through `RunnerConfigJsonOptions` at `RunnerRoutes.cs:503-507`; this is correct for the present-null contract, but it intentionally diverges from the global `JSON.Options` surface.
-  SuggestedAction: If future runner config fields need custom converters or global JSON behavior, consider deriving this endpoint's options from the shared options and only overriding `DefaultIgnoreCondition`.
-  Status: follow-up
+- None.
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-4]
+- [ID: item-2]
   Severity: info
-  Scope: verification
-  Evidence: `dotnet test Mohist.sln -p:SkipWebBuild=true` passed with 3821 passed and 13 skipped tests; the skipped tests are existing suite skips, not failures introduced by this change. `npm run test:run -w packages/web` passed with 4299 passed and 1 skipped test; no web files changed in this candidate.
-  SuggestedAction: None for issue 359.
+  Scope: branch integration state
+  Evidence: `git status -sb` reports the review branch as ahead 9 and behind `origin/master` by 13 commits. The behind commits touch broad areas including docs, issue templates, server test support, and web issue-template code; no candidate-specific failure was observed in the reviewed snapshot.
+  SuggestedAction: Rebase or merge latest `origin/master` before integration if the workflow does not do that automatically, then rerun the same server and runner verification.
+  Status: out-of-scope
+
+- [ID: item-3]
+  Severity: info
+  Scope: verification noise
+  Evidence: A duplicate concurrent `npm test -w packages/runner` invocation timed out once in `runner-host-cleanup-config.spec.ts` while another overlapping full test run was executing. The affected spec then passed in isolation, and `npm test -w packages/runner` passed on a clean rerun. This is not treated as a candidate failure.
+  SuggestedAction: Avoid running multiple full runner suites concurrently when using timing-sensitive fake-timer host specs.
   Status: out-of-scope
 
 ## Verification
 
-- `mo issue show 359 --project-id proj_f6c141d63b6243bfbb481737b2243b87` reviewed for acceptance criteria and scope.
-- Read `openspec/changes/issue-359/proposal.md`, `design.md`, `tasks.json`, all three delta specs, and `self-review.md`.
-- Inspected `git diff master...HEAD`, all changed product files, all changed test files, and adjacent cleanup/recovery/artifact paths including `cleanup-loop.ts`, `cleanup-convergence.ts`, `cli.ts`, existing runner host mocks, and existing cleanup-policy/status specs.
+- Read issue 359 via `mo issue show 359 --project-id proj_f6c141d63b6243bfbb481737b2243b87`.
+- Read `openspec/changes/issue-359/proposal.md`, `design.md`, `tasks.json`, `self-review.md`, and all delta specs under `openspec/changes/issue-359/specs/`.
+- Inspected `git diff master...HEAD`, all changed product files, all changed tests, and adjacent cleanup/recovery paths including `cleanup-loop.ts` and existing runner host mocks.
+- `git diff --check master...HEAD` passed.
 - `npm run typecheck -w packages/runner` passed.
-- `npm test -w packages/runner` passed: 67 files, 921 tests.
-- `dotnet test Mohist.sln -p:SkipWebBuild=true` passed: 3821 passed, 13 skipped.
+- `npm test -w packages/runner -- tests/runner-host-cleanup-config.spec.ts` passed: 5 passed.
+- `npm test -w packages/runner` passed: 67 files, 922 tests.
 - `npm run typecheck -w packages/web` passed.
 - `npm run test:run -w packages/web` passed: 269 files, 4299 passed, 1 skipped.
+- `dotnet test Mohist.sln -p:SkipWebBuild=true` passed: 3821 passed, 13 skipped.
+- `dotnet test Mohist.sln -p:SkipWebBuild=true --filter FullyQualifiedName~RunnerConfigApiSpecs` passed after the documentation repair: 9 passed.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
