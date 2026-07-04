@@ -17,16 +17,6 @@ export interface MobileActionBarProps {
   mutations: RuntimeDecisionSurfaceMutations
 }
 
-const PRIMARY_LABEL_BY_KIND: Record<string, string> = {
-  approve: 'Approve',
-  'send-back': 'Send back',
-  retry: 'Retry',
-  resume: 'Resume',
-  rerun: 'Rerun stage',
-  stop: 'Stop',
-  start: 'Start',
-}
-
 const PENDING_LABEL_BY_KIND: Record<string, string> = {
   approve: 'Approving...',
   'send-back': 'Sending back...',
@@ -56,6 +46,17 @@ function isPending(decision: RuntimeDecision, mutations: RuntimeDecisionSurfaceM
   return false
 }
 
+function getActionError(mutations: RuntimeDecisionSurfaceMutations): Error | null {
+  return mutations.approveMutation.error
+    || mutations.sendBackMutation.error
+    || mutations.retryMutation.error
+    || mutations.resumeMutation.error
+    || mutations.rerunMutation.error
+    || mutations.forceStopMutation.error
+    || mutations.stopMutation.error
+    || mutations.startMutation.error
+}
+
 export function MobileActionBar({ decision, mutations }: MobileActionBarProps) {
   const [confirmKind, setConfirmKind] = useState<ConfirmKind | null>(null)
   const [sendBackText, setSendBackText] = useState('')
@@ -64,6 +65,7 @@ export function MobileActionBar({ decision, mutations }: MobileActionBarProps) {
   if (!primary) return null
 
   const handlePrimaryClick = () => {
+    if (!primary.enabled || pending) return
     if (isDestructiveKind(primary.kind)) {
       setConfirmKind(primary.kind)
       setSendBackText('')
@@ -101,8 +103,11 @@ export function MobileActionBar({ decision, mutations }: MobileActionBarProps) {
   }
 
   const pending = isPending(decision, mutations)
-  const label = pending ? PENDING_LABEL_BY_KIND[primary.kind] : PRIMARY_LABEL_BY_KIND[primary.kind] ?? primary.label
-  const buttonVariant = primary.kind === 'stop' ? 'destructive' : 'default'
+  const actionError = getActionError(mutations)
+  const disabledReason = primary.reason
+  const disabledDescriptionId = disabledReason ? `mobile-action-${primary.kind}-reason` : undefined
+  const label = pending ? PENDING_LABEL_BY_KIND[primary.kind] ?? primary.label : primary.label
+  const buttonVariant = primary.kind === 'stop' || primary.kind === 'send-back' ? 'destructive' : 'default'
 
   const drawerTitleId = 'mobile-confirmation-drawer-title'
   const drawerDescriptionId = 'mobile-confirmation-drawer-description'
@@ -115,21 +120,38 @@ export function MobileActionBar({ decision, mutations }: MobileActionBarProps) {
         data-summary={decision.summary}
         className={cn(
           'fixed inset-x-0 z-30 isolate px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))]',
-          'bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-[calc(0.5rem+env(safe-area-inset-bottom))]',
+          'bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0',
         )}
       >
-        <div className="mx-auto w-full max-w-md rounded-xl border border-border bg-popover/95 backdrop-blur p-2 shadow-lg ring-1 ring-foreground/5">
+        <div className="mx-auto w-full max-w-md rounded-xl border border-border bg-popover/95 backdrop-blur p-2 shadow-lg ring-1 ring-foreground/5 space-y-2">
           <Button
             type="button"
             variant={buttonVariant}
             data-testid={`mobile-action-${primary.kind}`}
             data-primary="true"
-            disabled={pending}
+            disabled={!primary.enabled || pending}
+            title={disabledReason ?? undefined}
+            aria-describedby={disabledDescriptionId}
             onClick={handlePrimaryClick}
             className="w-full min-h-[44px] text-sm font-semibold"
           >
             {label}
           </Button>
+          {disabledReason && (
+            <p id={disabledDescriptionId} className="sr-only">
+              {disabledReason}
+            </p>
+          )}
+          {actionError && !confirmKind && (
+            <div
+              role="alert"
+              aria-live="polite"
+              data-testid="mobile-action-error"
+              className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
+            >
+              {actionError.message}
+            </div>
+          )}
         </div>
       </div>
 
@@ -181,6 +203,16 @@ export function MobileActionBar({ decision, mutations }: MobileActionBarProps) {
                   : 'Stop workflow'}
               </Button>
             </div>
+            {actionError && (
+              <div
+                role="alert"
+                aria-live="polite"
+                data-testid="mobile-action-error"
+                className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
+              >
+                {actionError.message}
+              </div>
+            )}
           </div>
         )}
 
@@ -244,6 +276,16 @@ export function MobileActionBar({ decision, mutations }: MobileActionBarProps) {
                 {mutations.sendBackMutation.isPending ? 'Sending back...' : 'Submit feedback'}
               </Button>
             </div>
+            {actionError && (
+              <div
+                role="alert"
+                aria-live="polite"
+                data-testid="mobile-action-error"
+                className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
+              >
+                {actionError.message}
+              </div>
+            )}
           </div>
         )}
       </ConfirmationDrawer>

@@ -303,6 +303,118 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
     expect(within(bar).getByTestId('mobile-action-start')).toBeInTheDocument()
   })
 
+  it('draft backlog surfaces disabled Start with the draft blocker reason', async () => {
+    mockUseIssue.mockReturnValue({
+      data: baseIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+        isDraft: true,
+        canStart: true,
+        blocker: { kind: 'draft' },
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('mobile-action-bar')).toBeTruthy())
+
+    const start = screen.getByTestId('mobile-action-start')
+    expect(start).toBeDisabled()
+    expect(start).toHaveTextContent('Start')
+    expect(start).toHaveAttribute('title', 'Issue is still a draft. Mark it ready before starting.')
+  })
+
+  it('prerequisite-blocked backlog surfaces disabled Start with the prerequisite reason', async () => {
+    mockUseIssue.mockReturnValue({
+      data: baseIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+        canStart: true,
+        blocker: {
+          kind: 'waiting-for',
+          issue: { number: 9, title: 'Prepare spec' },
+        },
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('mobile-action-bar')).toBeTruthy())
+
+    const start = screen.getByTestId('mobile-action-start')
+    expect(start).toBeDisabled()
+    expect(start).toHaveAttribute('title', 'Waiting for #9 Prepare spec')
+  })
+
+  it('runner-blocked backlog surfaces disabled Start with the runner reason', async () => {
+    mockUseAgentStatus.mockReturnValue({
+      data: {
+        activeAgents: [],
+        capacity: { max: 1 },
+        runnerAvailable: false,
+        runnerMessage: 'No runner is connected. Start a runner before this issue can run.',
+      },
+    })
+    mockUseIssue.mockReturnValue({
+      data: baseIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+        canStart: true,
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('mobile-action-bar')).toBeTruthy())
+
+    const start = screen.getByTestId('mobile-action-start')
+    expect(start).toBeDisabled()
+    expect(start).toHaveAttribute('title', 'No runner is connected. Start a runner before this issue can run.')
+  })
+
+  it('failed state preserves the Start new workflow primary label', async () => {
+    mockUseIssue.mockReturnValue({
+      data: baseIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'failed',
+        health: 'active',
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: 'failed',
+          workflowSummaryState: 'failed',
+          allowedActions: ['start'],
+        },
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('mobile-action-bar')).toBeTruthy())
+
+    const bar = screen.getByTestId('mobile-action-bar')
+    expect(bar.dataset.summary).toBe('failed')
+    expect(bar.dataset.actionKind).toBe('start')
+    expect(within(bar).getByTestId('mobile-action-start')).toHaveTextContent('Start new workflow')
+  })
+
   it('done state renders no bottom bar and strips RuntimeDecisionSurface from the header tier', async () => {
     mockUseIssue.mockReturnValue({
       data: baseIssue({
@@ -497,12 +609,8 @@ describe('IssueDetailPage narrow-viewport 768-1024px band (flush-bottom bar)', (
     const bar = screen.getByTestId('mobile-action-bar')
     expect(bar.className).toMatch(/\bbottom-\[calc\(/)
 
-    expect(bar.className).toMatch(/md:bottom-\[calc\(/)
-
-    const wideMatch = /md:bottom-\[calc\(([\s\S]+?)\)\]/.exec(bar.className)
-    expect(wideMatch).toBeTruthy()
-    expect(wideMatch?.[1]).toMatch(/env\(safe-area-inset-bottom\)/)
-    expect(wideMatch?.[1]).not.toMatch(/3\.5rem/)
+    expect(bar.className).toMatch(/\bmd:bottom-0\b/)
+    expect(bar.className).not.toMatch(/md:bottom-\[calc\(/)
 
     const narrowMatch = /\bbottom-\[calc\(([\s\S]+?)\)\]/.exec(bar.className)
     expect(narrowMatch).toBeTruthy()

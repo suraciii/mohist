@@ -82,6 +82,54 @@ describe('MobileActionBar', () => {
     expect(screen.getByTestId('mobile-action-stop')).toHaveTextContent('Stop')
   })
 
+  it('preserves custom primary labels from decision.primary', () => {
+    const start: RuntimeAvailableAction = { kind: 'start', label: 'Start new workflow', enabled: true }
+    render(
+      <MobileActionBar
+        decision={decision({
+          summary: 'failed',
+          primary: start,
+          actions: [start],
+          stopRecoverable: null,
+        })}
+        mutations={mutations()}
+      />,
+    )
+
+    expect(screen.getByTestId('mobile-action-start')).toHaveTextContent('Start new workflow')
+  })
+
+  it('disables unavailable primary actions, exposes the reason, and does not invoke mutations', () => {
+    const start: RuntimeAvailableAction = {
+      kind: 'start',
+      label: 'Start',
+      enabled: false,
+      reason: 'Issue is still a draft. Mark it ready before starting.',
+    }
+    const startMutation = mutation()
+    render(
+      <MobileActionBar
+        decision={decision({
+          summary: 'queued',
+          primary: start,
+          actions: [start],
+          stopRecoverable: null,
+        })}
+        mutations={mutations({ startMutation })}
+      />,
+    )
+
+    const button = screen.getByTestId('mobile-action-start')
+    expect(button).toBeDisabled()
+    expect(button).toHaveTextContent('Start')
+    expect(button).toHaveAttribute('title', 'Issue is still a draft. Mark it ready before starting.')
+    expect(button).toHaveAttribute('aria-describedby', 'mobile-action-start-reason')
+
+    fireEvent.click(button)
+
+    expect(startMutation.mutate).not.toHaveBeenCalled()
+  })
+
   it('opens the confirmation drawer when a destructive primary (Stop) is activated', () => {
     render(<MobileActionBar decision={decision()} mutations={mutations()} />)
 
@@ -278,7 +326,70 @@ describe('MobileActionBar', () => {
     expect(bar.className).toMatch(/inset-x-0\b/)
     expect(bar.className).toMatch(/\bz-30\b/)
     expect(bar.className).toMatch(/bottom-\[calc\(/)
-    expect(bar.className).toMatch(/md:bottom-\[/)
+    expect(bar.className).toMatch(/md:bottom-0/)
+  })
+
+  it('renders immediate action mutation errors in an alert region', () => {
+    const start: RuntimeAvailableAction = { kind: 'start', label: 'Start', enabled: true }
+    render(
+      <MobileActionBar
+        decision={decision({
+          summary: 'queued',
+          primary: start,
+          actions: [start],
+          stopRecoverable: null,
+        })}
+        mutations={mutations({
+          startMutation: mutation<RuntimeDecisionSurfaceMutations['startMutation']>({
+            error: new Error('Start failed'),
+          }),
+        })}
+      />,
+    )
+
+    const error = screen.getByTestId('mobile-action-error')
+    expect(error).toHaveAttribute('role', 'alert')
+    expect(error).toHaveAttribute('aria-live', 'polite')
+    expect(error).toHaveTextContent('Start failed')
+  })
+
+  it('renders drawer-confirmed mutation errors inside the open drawer', () => {
+    const sendBack: RuntimeAvailableAction = { kind: 'send-back', label: 'Send back', enabled: true }
+    const baseDecision = decision({
+      summary: 'approval-required',
+      primary: sendBack,
+      actions: [{ kind: 'approve', label: 'Approve', enabled: true }, sendBack],
+      approvalStage: 'check',
+    })
+    const sendBackMutation = mutation<RuntimeDecisionSurfaceMutations['sendBackMutation']>()
+    const { rerender } = render(
+      <MobileActionBar
+        decision={baseDecision}
+        mutations={mutations({ sendBackMutation })}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('mobile-action-send-back'))
+    fireEvent.change(screen.getByTestId('mobile-send-back-textarea'), {
+      target: { value: 'Please revise this.' },
+    })
+    fireEvent.click(screen.getByTestId('mobile-confirmation-confirm'))
+
+    rerender(
+      <MobileActionBar
+        decision={baseDecision}
+        mutations={mutations({
+          sendBackMutation: mutation<RuntimeDecisionSurfaceMutations['sendBackMutation']>({
+            error: new Error('Send back failed'),
+          }),
+        })}
+      />,
+    )
+
+    const drawer = screen.getByTestId('confirmation-drawer')
+    const error = within(drawer).getByTestId('mobile-action-error')
+    expect(error).toHaveAttribute('role', 'alert')
+    expect(error).toHaveTextContent('Send back failed')
   })
 
   it('disables the primary button while a mutation is pending and shows pending copy', () => {

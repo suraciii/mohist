@@ -1,6 +1,20 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { cn } from '@/shared/lib/utils'
 
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ')
+
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+    .filter((element) => !element.hasAttribute('disabled') && element.tabIndex !== -1)
+}
+
 export interface ConfirmationDrawerProps {
   open: boolean
   onClose: () => void
@@ -29,9 +43,7 @@ export function ConfirmationDrawer({
     }
     const panel = panelRef.current
     if (panel) {
-      const focusable = panel.querySelector<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      )
+      const focusable = getFocusableElements(panel)[0]
       if (focusable) {
         focusable.focus()
       } else {
@@ -49,11 +61,52 @@ export function ConfirmationDrawer({
       if (event.key === 'Escape') {
         event.stopPropagation()
         onClose()
+        return
+      }
+
+      if (event.key !== 'Tab') return
+
+      const panel = panelRef.current
+      if (!panel) return
+      const focusable = getFocusableElements(panel)
+      if (focusable.length === 0) {
+        event.preventDefault()
+        panel.focus()
+        return
+      }
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+
+      if (event.shiftKey) {
+        if (active === first || !panel.contains(active)) {
+          event.preventDefault()
+          last.focus()
+        }
+        return
+      }
+
+      if (active === last || !panel.contains(active)) {
+        event.preventDefault()
+        first.focus()
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [open, onClose])
+
+  useEffect(() => {
+    if (!open) return
+    const handleFocusIn = (event: FocusEvent) => {
+      const panel = panelRef.current
+      if (!panel || panel.contains(event.target as Node | null)) return
+      const focusable = getFocusableElements(panel)
+      ;(focusable[0] ?? panel).focus()
+    }
+    document.addEventListener('focusin', handleFocusIn)
+    return () => document.removeEventListener('focusin', handleFocusIn)
+  }, [open])
 
   if (!open) return null
 
@@ -66,8 +119,14 @@ export function ConfirmationDrawer({
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
       className={cn(
-        'fixed inset-x-0 bottom-0 z-50 isolate px-3 pb-3 pointer-events-none',
+        'fixed inset-x-0 top-0 bottom-0 z-50 isolate flex items-end px-3 pb-3 pointer-events-auto bg-transparent',
       )}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+      }}
     >
       <div
         ref={panelRef}

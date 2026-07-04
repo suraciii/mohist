@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { ConfirmationDrawer } from './ConfirmationDrawer'
 
@@ -91,6 +92,37 @@ describe('ConfirmationDrawer', () => {
     render(<ControlledDrawer />)
     const firstAction = screen.getByTestId('first-action')
     expect(document.activeElement).toBe(firstAction)
+  })
+
+  it('traps keyboard focus inside the modal drawer', async () => {
+    const user = userEvent.setup()
+    render(<ControlledDrawer />)
+
+    const firstAction = screen.getByTestId('first-action')
+    const secondAction = screen.getByTestId('second-action')
+    const externalTrigger = screen.getByTestId('external-trigger')
+
+    expect(document.activeElement).toBe(firstAction)
+
+    await user.tab()
+    expect(document.activeElement).toBe(secondAction)
+
+    await user.tab()
+    expect(document.activeElement).toBe(firstAction)
+
+    await user.tab({ shift: true })
+    expect(document.activeElement).toBe(secondAction)
+
+    externalTrigger.focus()
+    expect(document.activeElement).toBe(firstAction)
+  })
+
+  it('blocks pointer interaction outside the sheet region while keeping the overlay transparent', () => {
+    render(<ControlledDrawer />)
+    const drawer = screen.getByTestId('confirmation-drawer')
+    expect(drawer.className).toMatch(/pointer-events-auto/)
+    expect(drawer.className).toMatch(/bg-transparent/)
+    expect(drawer.className).not.toMatch(/pointer-events-none/)
   })
 
   it('renders the drawer content with title and description', () => {
