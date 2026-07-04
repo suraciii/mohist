@@ -26,6 +26,7 @@ using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Label.Services;
 using Mohist.Server.Otel;
 using Mohist.Server.Infrastructure.Data.Runner;
+using Mohist.Server.Logging;
 using Mohist.Server.Notifications;
 
 namespace Mohist.Server.Infrastructure.Hosting;
@@ -91,6 +92,7 @@ public static class MohistServiceRegistration
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
         services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
+        services.AddSingleton<ILogPathResolver, LogPathResolver>();
         services.AddSingleton<IGitSourceInspector, GitSourceInspector>();
         services.AddSingleton<IServiceStatusChecker, SystemdServiceStatusChecker>();
         services.AddSingleton<ISystemUpdateStore, FileSystemSystemUpdateStore>();

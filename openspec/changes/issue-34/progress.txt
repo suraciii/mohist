@@ -1,0 +1,40 @@
+# issue-34 progress
+
+## Codebase Patterns (read first)
+
+- `ILoggerProvider`/`ILogger` wiring convention: register a singleton of the provider class AND register it as `ILoggerProvider` on the application service collection. The framework's `AddLogging` enumerates `ILoggerProvider` from DI and wires it into the `LoggerFactory` automatically. There is no `AddProvider(Func<IServiceProvider, ILoggerProvider>)` overload in `Microsoft.Extensions.Logging` 10.x — calling `builder.AddProvider(sp => ...)` does not compile.
+- `IEnvironmentVariableProvider` is in the `System` namespace (from the `EnvironmentAbstractions` NuGet), not `EnvironmentAbstractions`. Existing code uses no `using` directive for it.
+- `ISingletonService` lives in `Mohist.Server.Infrastructure.Hosting`. Marking a class with it is enough to get the conventional `AddMohistConventionalServices` to register it as itself with singleton lifetime; explicit `services.AddSingleton<T>()` is still needed when other registrations depend on it (e.g. `ILoggerProvider`).
+- `MohistIntegrationFixture` redirects filesystem concerns to per-run temp dirs in `ConfigureWebHost` and cleans them in `DisposeAsync`; the existing `RunnerRoot` and `ArtifactStorageRoot` pattern is the right seam to follow for any new redirectable directory.
+- `JSON.Options` (`Mohist.Server.Infrastructure.JSON`) is the single shared `JsonSerializerOptions` for the entire API pipeline. Always serialize through it so the on-disk file and the API response have identical formatting.
+- `SystemInfoService` advertises the `Logs` path. The advertised path is now consumed from `ILogPathResolver` so the `SystemPaths.Logs` field and the real file logger target are guaranteed to agree.
+- `MohistWebApplicationFactory` constructor signature is part of the public test surface — `EventPublishingIntegrationFixture` (a separate `WebApplicationFactory<Program>` subclass) chains `base(...)` and broke when the constructor gained a new positional parameter. Add a new parameter at the end of the ctor and update both subclasses; do not reorder.
+
+## T-001 — Server file logging
+
+Files added (under `packages/server/src/Mohist.Server/Logging/`):
+- `ILogPathResolver.cs` — single-method abstraction (`Resolve()`) so the file logger, the tail endpoint (T-002), and `SystemInfoService` cannot drift on the path.
+- `LogPathResolver.cs` — `Mohist:LogsPath` config override (test fixture redirect), falls back to `$HOME/.mohist/logs` (matches the previous inline computation). Reads `HOME` via the existing `IEnvironmentVariableProvider`, not `Environment.GetEnvironmentVariable` directly (Roslyn analyzer would block that).
+- `LogRecord.cs` — the per-line element type shared by the file logger and the tail endpoint's `LogEntry`. Fields: `Level`, `Time`, `Service`, `Message`, `Exception`, `Fields`.
+- `FileLoggerProvider.cs` — singleton `ISingletonService` holding the file handle. Opens `server.log` with `FileShare.ReadWrite | FileShare.Delete` so the tail reader never blocks the writer. Creates the directory on first write. Serializes through `JSON.Options` so the format inherits the API's `camelCase` settings and round-trips through `LogRecord`. Uses an injected `TimeProvider` for `time` (deterministic in tests).
+- `FileLogger.cs` — per-category `ILogger` that normalizes `LogLevel` to upper-case (`INFO`/`WARN`/`ERROR`/`FATAL`) and projects the category to the service (first two segments — e.g. `Mohist.Server.Workflow.X` → `Mohist.Server`, matching the OpenTelemetry `ServiceName = "Mohist.Server"` registration).
+- `FileLoggerExtensions.cs` — `AddFileLogger` on `ILoggingBuilder`. Registers the provider as both `FileLoggerProvider` (for direct resolution) and `ILoggerProvider` (for the framework's automatic enumeration).
+
+Files modified:
+- `Program.cs` — calls `builder.Logging.AddFileLogger()` on both the primary host and `BuildAlternateApp` (OTLP-bind-failure fallback) so the alternate host keeps logging identically.
+- `MohistServiceRegistration.cs` — `services.AddSingleton<ILogPathResolver, LogPathResolver>()` alongside the existing `IFileSystem`/`IEnvironmentVariableProvider` registrations.
+- `SystemInfo/SystemInfoService.cs` — `ResolvePaths()` now sources its `Logs` field from `_logPathResolver.Resolve()` instead of computing `Path.Combine(home, ".mohist", "logs")` inline. Constructor gained the `ILogPathResolver` parameter.
+- `tests/.../Support/MohistIntegrationFixture.cs` — adds a per-run `_logsPath` temp directory; sets `Mohist:LogsPath` via both `UseSetting` and the in-memory configuration so it reaches `MohistServerFactory`. Cleanup in `DisposeAsync` so server specs never touch real `~/.mohist/logs`.
+- `tests/.../Specs/SystemSpecs/SystemInfoServiceSpecs.cs` — every `SystemInfoService` construction site now passes a `LogPathResolver` matching the new constructor.
+- `tests/.../Specs/Events/EventPublishingIntegrationFixture.cs` — adds a `_logsPath` field and passes it through to the base ctor. **Heads-up: this fixture is a separate `WebApplicationFactory<Program>` subclass;** when we add a parameter to `MohistWebApplicationFactory`'s ctor, we have to update this subclass too. (Forgotten in the first build — caught by the compiler, easy fix.)
+
+Tests added (under `packages/server/tests/Mohist.Server.Tests/Specs/Logging/`):
+- `LogPathResolverSpecs.cs` — config override wins, blank config falls back to home, unset config falls back to home, missing `HOME` falls back to `Environment.SpecialFolder.UserProfile`. All `Speed=Unit` (no I/O).
+- `FileLoggerProviderSpecs.cs` — six cases: writes a JSON object with `level`/`time`/`service`/`message` populated; creates the directory before the first record when it does not exist; appends across multiple writes and the file remains concurrently readable with `FileShare.ReadWrite`; includes `exception` when provided; projects the category to the service (top two segments); and explicitly asserts the on-disk JSON deserializes back into a `LogRecord` via `JSON.Options` (no field loss, format matches the API pipeline). Uses `FakeTimeProvider` from `Microsoft.Extensions.TimeProvider.Testing` so the `time` field is deterministic.
+
+Gotchas:
+- `LogLevel.Information`/`Warning`/`Error`/`Critical` map to `INFO`/`WARN`/`ERROR`/`FATAL`. The Tail/Spec agreement later (T-002) uses these as the wire `level` values.
+- `IServiceProvider`-based `AddProvider` overload does not exist in `Microsoft.Extensions.Logging` 10.x. The correct DI-friendly pattern is `services.AddSingleton<ILoggerProvider>(sp => sp.GetRequiredService<MyProvider>())` and the framework picks it up automatically. `services.AddLogging` is the entry that does the wiring.
+- `ILogger.BeginScope` must return a non-null `IDisposable`; use a shared `NullScope.Instance`.
+- The `service` projection (first two segments) is a deliberate choice — see D2 example. The OTel `ServiceName = "Mohist.Server"` in `MohistOpenTelemetryRegistration.cs:18` is the matching fixed value.
+- Spec file naming: `*Specs.cs` under `Specs/Logging/`. The archtest `SpecFiles_MustHaveSpecOrCollectionSuffix` enforces the suffix.
