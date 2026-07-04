@@ -28,3 +28,25 @@
 - `npm run typecheck -w packages/web` passes (no dead imports / unused locals).
 - `npm run test:run -w packages/web` passes: 259 files, 4080 tests, 1 skipped. The agent-list file goes from 6 → 9 tests.
 - All 9 agent-list specs pass, including the 3 new create-entry-point specs.
+
+## fix-tests repair task (build stage `verify` check)
+
+- `vars.ci.verify` (per `mo project show proj_f6c141d63b6243bfbb481737b2243b87`):
+  ```
+  npm ci
+  dotnet test Mohist.sln --nologo
+  npm run -w packages/web typecheck
+  timeout 60 npm run -w packages/web test:run
+  npm run -w packages/runner typecheck
+  timeout 60 npm run -w packages/runner test -- --no-file-parallelism
+  ```
+- Previous `fix-tests:1.1` agent confirmed all suites green but timed out at 1800s during a redundant double-check ("Timed out after 1800s") — there was **no actual code failure**. The verify check (`checks[0].name == "verify"`) status is still `pending` because the previous agent never reached the `<promise>done</promise>` marker.
+- Re-ran the exact `vars.ci.verify` sequence (skipping `npm ci` since node_modules already matches `package-lock.json`):
+  - `dotnet test Mohist.sln --nologo` → Passed!  Failed: 0, Passed: 3718, Skipped: 13, Total: 3731
+  - `npm run -w packages/web typecheck` → clean (`tsc -b`)
+  - `timeout 60 npm run -w packages/web test:run` → 259 files, 4080 passed, 1 skipped (~17s)
+  - `npm run -w packages/runner typecheck` → clean (`tsc --noEmit`)
+  - `timeout 60 npm run -w packages/runner test -- --no-file-parallelism` → 65 files, 886 passed (~17s)
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → Build succeeded, 0 warnings, 0 errors.
+- `npm run build --workspaces --if-present` → web Vite build + runner `tsc` both clean.
+- **No code change required**: T-001 implementation is already correct. The fix-tests repair task's only job is to confirm green, then return `<promise>done</promise>` promptly so the orchestrator can re-enter the verify check.
