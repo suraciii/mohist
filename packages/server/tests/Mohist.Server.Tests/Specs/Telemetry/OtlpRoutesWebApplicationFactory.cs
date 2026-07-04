@@ -83,6 +83,9 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
                 ["Mohist:AgentJob:JobTimeout"] = "00:00:08",
+                // 同 MohistIntegrationFixture：置空 Hermes webhook，避免测试把通知
+                // 投递到用户真实的聊天平台（见 MohistIntegrationFixture 注释）。
+                ["Mohist:Notifications:Hermes:WebhookUrl"] = null,
             });
         });
 
