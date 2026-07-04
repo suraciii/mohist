@@ -33,20 +33,14 @@ function sessionFixture(overrides: Partial<WorkflowRunSession> = {}): WorkflowRu
 }
 
 describe('isAcpAgentTask', () => {
-  it('returns true only when origin.uses is "mohist/acp-agent", sessionName is non-empty, and classification is present', () => {
+  it('returns true when origin.uses is "mohist/acp-agent" and sessionName is non-empty', () => {
     expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(true)
   })
 
-  it('accepts either task classification value as the retained classification signal', () => {
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: 'Orchestration' })).toBe(true)
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: 'UserFacing' })).toBe(true)
-  })
-
-  it('returns false when classification is missing or empty', () => {
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: undefined })).toBe(false)
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: null })).toBe(false)
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: '' })).toBe(false)
-    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: '   ' })).toBe(false)
+  it('does not require classification for eligibility; classification is retained context only', () => {
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: undefined })).toBe(true)
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: null })).toBe(true)
+    expect(isAcpAgentTask({ origin: { uses: 'mohist/acp-agent' }, sessionName: 'plan-1', classification: '' })).toBe(true)
   })
 
   it('returns false for ops uses (mohist/rebase, core/process) even when sessionName is present', () => {
@@ -234,7 +228,7 @@ describe('mergeTimelineRows', () => {
     ])
   })
 
-  it('keeps ops lines in seq order even when their timestamps disagree', () => {
+  it('sorts the mixed timeline globally by timestamp even when ops seq order disagrees', () => {
     const rows = mergeTimelineRows(
       [
         { seq: 1, timestamp: '2026-06-15T10:05:00.000Z', source: 'action:rebase', text: 'seq-1-late-clock' },
@@ -245,7 +239,21 @@ describe('mergeTimelineRows', () => {
       ],
     )
     const rendered = rows.map((row) => (isTaskLogMilestone(row) ? row.kind : row.text))
-    expect(rendered.indexOf('seq-1-late-clock')).toBeLessThan(rendered.indexOf('seq-2-early-clock'))
+    expect(rendered).toEqual(['seq-2-early-clock', 'session-ended', 'seq-1-late-clock'])
+  })
+
+  it('preserves ops seq order when there are no visible milestones', () => {
+    const rows = mergeTimelineRows(
+      [
+        { seq: 1, timestamp: '2026-06-15T10:05:00.000Z', source: 'action:rebase', text: 'seq-1-late-clock' },
+        { seq: 2, timestamp: '2026-06-15T10:00:00.000Z', source: 'action:rebase', text: 'seq-2-early-clock' },
+      ],
+      [],
+    )
+    expect(rows.map((row) => (isTaskLogMilestone(row) ? row.kind : row.text))).toEqual([
+      'seq-1-late-clock',
+      'seq-2-early-clock',
+    ])
   })
 
   it('keeps ops lines in seq order at the same timestamp and places milestones after them', () => {

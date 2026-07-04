@@ -160,7 +160,7 @@ export function TaskLogPanel({
 
   const isAgentTask = isAcpAgentTask({ origin: origin ?? null, sessionName: sessionName ?? null, classification: classification ?? null })
   const trimmedSessionName = typeof sessionName === 'string' ? sessionName.trim() : ''
-  const { sessions } = useWorkflowRunSessions(isAgentTask && trimmedSessionName.length > 0 ? workflowRunId ?? null : null)
+  const { sessions, isLoading: sessionsLoading } = useWorkflowRunSessions(isAgentTask && trimmedSessionName.length > 0 ? workflowRunId ?? null : null)
   const resolvedSession = useMemo(() => {
     if (!isAgentTask || trimmedSessionName.length === 0) return null
     const match = sessions.find((s) => s.sessionName === trimmedSessionName)
@@ -171,6 +171,7 @@ export function TaskLogPanel({
     () => (isAgentTask && trimmedSessionName.length > 0 ? deriveMilestones(resolvedSession) : []),
     [isAgentTask, trimmedSessionName, resolvedSession],
   )
+  const isSessionSummaryLoading = isAgentTask && trimmedSessionName.length > 0 && sessionsLoading
 
   const sources = useMemo(
     () => Array.from(new Set(lines.map((line) => line.source))).sort(),
@@ -315,7 +316,7 @@ export function TaskLogPanel({
   }, [workflowRunId, taskId])
 
   const renderScrollBody = () => {
-    if (isLoading) {
+    if (isLoading || (isSessionSummaryLoading && lines.length === 0 && milestones.length === 0)) {
       return <div className="text-slate-400">Loading execution log…</div>
     }
     if (isError) {

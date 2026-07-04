@@ -1321,6 +1321,30 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     expect(await screen.findByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
   })
 
+  it('keeps showing a loading state instead of the true-empty copy while agent session summaries load', async () => {
+    mockedGetWorkflowRunSessions.mockImplementation(() => new Promise<WorkflowRunSession[]>(() => {}))
+    const harness = buildHarness(makePage([]))
+
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    await waitFor(() => {
+      expect(mockedGetWorkflowRunSessions).toHaveBeenCalledWith('wr-1')
+    })
+    expect(screen.getByText('Loading execution log…')).toBeInTheDocument()
+    expect(screen.queryByTestId('task-log-empty')).not.toBeInTheDocument()
+  })
+
   it('renders terminal-state milestones from the persisted summary without any real-time event for a finished agent task', async () => {
     mockedGetWorkflowRunSessions.mockResolvedValue([
       sessionFixture({
@@ -1436,7 +1460,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     expect(screen.queryByTestId('task-log-milestone-session-ended')).not.toBeInTheDocument()
   })
 
-  it('renders NO milestone rows when origin.uses and sessionName are present but classification is missing', async () => {
+  it('renders milestone rows when origin.uses and sessionName are present even if classification is missing', async () => {
     mockedGetWorkflowRunSessions.mockResolvedValue([
       sessionFixture({ id: 'session-1', sessionName: 'plan-issue-339' }),
     ])
@@ -1457,8 +1481,8 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     )
 
     await screen.findByText('prep-without-classification')
-    expect(screen.queryByTestId('task-log-milestone-model-bound')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('task-log-milestone-session-ended')).not.toBeInTheDocument()
+    expect(await screen.findByTestId('task-log-milestone-model-bound')).toBeInTheDocument()
+    expect(await screen.findByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
   })
 
   it('renders NO milestone rows when the workflow-run sessions data is empty (graceful degradation)', async () => {
@@ -1485,7 +1509,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     expect(screen.queryByTestId('task-log-milestone-session-ended')).not.toBeInTheDocument()
   })
 
-  it('preserves ops seq order when ops timestamps disagree and uses the same order for export', async () => {
+  it('sorts the mixed timeline by timestamp when ops timestamps disagree and uses the same order for export', async () => {
     mockedGetWorkflowRunSessions.mockResolvedValue([
       sessionFixture({
         id: 'session-1',
@@ -1517,8 +1541,14 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
 
     await screen.findByText('seq-two-early-clock')
     const items = Array.from(document.querySelectorAll('[data-testid="task-log-lines"] > li')).map((li) => li.textContent ?? '')
+    expect(items.findIndex((t) => t.includes('seq-two-early-clock'))).toBeLessThan(
+      items.findIndex((t) => t.includes('Model bound')),
+    )
+    expect(items.findIndex((t) => t.includes('Model bound'))).toBeLessThan(
+      items.findIndex((t) => t.includes('seq-one-late-clock')),
+    )
     expect(items.findIndex((t) => t.includes('seq-one-late-clock'))).toBeLessThan(
-      items.findIndex((t) => t.includes('seq-two-early-clock')),
+      items.findIndex((t) => t.includes('Session ended')),
     )
 
     const capture = installDownloadSpy()
@@ -1529,7 +1559,9 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     })
 
     const exported = await readBlobText(capture.blob)
-    expect(exported.indexOf('seq-one-late-clock')).toBeLessThan(exported.indexOf('seq-two-early-clock'))
+    expect(exported.indexOf('seq-two-early-clock')).toBeLessThan(exported.indexOf('Model bound'))
+    expect(exported.indexOf('Model bound')).toBeLessThan(exported.indexOf('seq-one-late-clock'))
+    expect(exported.indexOf('seq-one-late-clock')).toBeLessThan(exported.indexOf('Session ended'))
   })
 
   it('keyword search hides non-matching milestones and keeps matching ones', async () => {

@@ -27,11 +27,8 @@ export function isAcpAgentTask(input: AgentTaskIdentity | null | undefined): boo
   if (!input) return false
   const uses = input.origin?.uses
   const sessionName = input.sessionName
-  const classification = input.classification
   if (typeof sessionName !== 'string') return false
   if (sessionName.trim().length === 0) return false
-  if (typeof classification !== 'string') return false
-  if (classification.trim().length === 0) return false
   return uses === 'mohist/acp-agent'
 }
 
@@ -75,35 +72,33 @@ export function deriveMilestones(session: WorkflowRunSession | null | undefined)
   return out
 }
 
-function compareMilestonesByTimestamp(a: TaskLogMilestone, b: TaskLogMilestone): number {
-  if (a.timestamp < b.timestamp) return -1
-  if (a.timestamp > b.timestamp) return 1
+function compareTimelineRows(
+  a: { row: TimelineRow; index: number },
+  b: { row: TimelineRow; index: number },
+): number {
+  if (a.row.timestamp < b.row.timestamp) return -1
+  if (a.row.timestamp > b.row.timestamp) return 1
+
+  if (!isTaskLogMilestone(a.row) && !isTaskLogMilestone(b.row)) return a.row.seq - b.row.seq
+  const aIsMilestone = isTaskLogMilestone(a.row)
+  const bIsMilestone = isTaskLogMilestone(b.row)
+  if (aIsMilestone !== bIsMilestone) return aIsMilestone ? 1 : -1
+  return a.index - b.index
+}
+
+function compareOpsBySeq(a: TaskLogLine, b: TaskLogLine): number {
+  if (a.seq < b.seq) return -1
+  if (a.seq > b.seq) return 1
   return 0
 }
 
 export function mergeTimelineRows(lines: TaskLogLine[], milestones: TaskLogMilestone[]): TimelineRow[] {
-  const sortedLines = lines.slice().sort((a, b) => a.seq - b.seq)
-  const sortedMilestones = milestones.slice().sort(compareMilestonesByTimestamp)
-  const rows: TimelineRow[] = []
-  let milestoneIndex = 0
+  if (milestones.length === 0) return lines.slice().sort(compareOpsBySeq)
 
-  for (const line of sortedLines) {
-    while (
-      milestoneIndex < sortedMilestones.length &&
-      sortedMilestones[milestoneIndex].timestamp < line.timestamp
-    ) {
-      rows.push(sortedMilestones[milestoneIndex])
-      milestoneIndex += 1
-    }
-    rows.push(line)
-  }
-
-  while (milestoneIndex < sortedMilestones.length) {
-    rows.push(sortedMilestones[milestoneIndex])
-    milestoneIndex += 1
-  }
-
-  return rows
+  return ([...lines, ...milestones] as TimelineRow[])
+    .map((row, index) => ({ row, index }))
+    .sort(compareTimelineRows)
+    .map((entry) => entry.row)
 }
 
 export function serializeMilestoneForExport(milestone: TaskLogMilestone): string {
