@@ -1,0 +1,18 @@
+## Codebase Patterns
+
+- Runner action tests live next to source under `packages/runner/tests/`; each describe block is `mohist/<action-name>` and uses `mkdtemp` + `mkdir`/`writeFile` to build isolated change dirs.
+- `ActionContext` is shaped via local helpers (`context`, `artifactsContext`, `archiveContext`) defined at the bottom of `openspec.spec.ts`. The artifacts helper takes `(workDir, changeDir, extra?)`.
+- Existing `openspecArtifactsAction` accumulates all missing paths (does not stop at the first) and emits structured `{ kind: "openspec-artifacts", changeDir, present, missing }` plus a human-readable failure message listing every missing path.
+- Wrong-kind detection (file vs directory) lives in `isPresentOfKind` (`packages/runner/src/actions/openspec.ts:518`); it already treats a path of the wrong kind as missing, so flipping specs/ from "optional" to "required" reuses it for free.
+
+## T-001 Discoveries
+
+- The action's previous three-entry set silently permitted a missing `specs/` directory. Appending `{ path: join(changeDir, "specs"), kind: "directory" }` between `proposal.md` and `design.md` is the only implementation change needed for T-001.
+- The github-pr server spec (`MohistPrIssueWorkflowProfileSpecs.cs:260`) already binds `plan-artifacts` to `mohist/openspec-artifacts`. T-001 tightens github-pr immediately but its plan stage always produces `specs/`, so no in-flight run breaks. The T-002 server-side consolidation of `mohist-local.workflow.yaml` is what gives local the previously-implicit specs gate.
+- `core/artifact-exists` stays registered (D4) — do not remove. T-001 touches only `openspec.ts` + `openspec.spec.ts`.
+- Wrong-kind coverage: added two tests — one for a directory required as a file (`specs` is a file) and one for a file required as a directory (`proposal.md` is a directory). The empty-changeDir case was updated to expect all four entries in `output.missing`.
+
+## Verification
+
+- `npm run typecheck -w packages/runner`: clean.
+- `npm test -w packages/runner`: 65 files / 910 tests passed, 0 skipped. openspec.spec.ts alone: 53 passed.
