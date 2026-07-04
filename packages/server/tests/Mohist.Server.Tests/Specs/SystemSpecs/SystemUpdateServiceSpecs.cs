@@ -276,6 +276,50 @@ public class SystemUpdateServiceSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData("   ", true)]
+    public async Task StartAsync_UnconfiguredEnabled_DefaultsToEnabledAndStarts(
+        string? enabled,
+        bool includeEnabled)
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new RecordingCommandRunner();
+        var service = CreateService(
+            systemInfo: CreateInfo(),
+            store: store,
+            commandRunner: commands,
+            readinessProbe: new StubReadinessProbe(new(false, false, false, null, "API health endpoint is not ready")),
+            enabled: enabled,
+            includeEnabled: includeEnabled);
+
+        var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
+        await commands.WaitForCountAsync(2);
+        await store.WaitForStatusAsync("waiting-for-reconnect");
+
+        Assert.True(result.Started);
+        Assert.Null(result.Error);
+        Assert.Null(result.Code);
+        Assert.NotNull(result.Status);
+        Assert.Collection(commands.Requests,
+            command =>
+            {
+                Assert.Equal("dotnet", command.FileName);
+                Assert.Equal(["build", "Mohist.sln"], command.Arguments);
+                Assert.Equal("/repo", command.WorkingDirectory);
+            },
+            command =>
+            {
+                Assert.Equal("systemctl", command.FileName);
+                Assert.Equal(["--user", "restart", "mohist.service"], command.Arguments);
+                Assert.Equal("/repo", command.WorkingDirectory);
+            });
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartAsync_WhenPersistedActiveJobExistsAfterRestart_ReturnsConflict()
     {
@@ -1712,9 +1756,10 @@ public class SystemUpdateServiceSpecs
         ISystemUpdateStore store,
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe,
-        string? enabled)
+        string? enabled,
+        bool includeEnabled = true)
     {
-        return CreateService(new SequencedSystemInfo(systemInfo), store, commandRunner, readinessProbe, enabled);
+        return CreateService(new SequencedSystemInfo(systemInfo), store, commandRunner, readinessProbe, enabled, includeEnabled);
     }
 
     private static FileSystemSystemUpdateStore CreateFileSystemStore(string statePath)
@@ -1740,7 +1785,8 @@ public class SystemUpdateServiceSpecs
         ISystemUpdateStore store,
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe,
-        string? enabled)
+        string? enabled,
+        bool includeEnabled = true)
     {
         return CreateService(
             systemInfo,
@@ -1748,7 +1794,8 @@ public class SystemUpdateServiceSpecs
             commandRunner,
             readinessProbe,
             new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
-            enabled).Service;
+            enabled,
+            includeEnabled).Service;
     }
 
     private static (SystemUpdateService Service, FakeTimeProvider Time) CreateService(
@@ -1757,12 +1804,13 @@ public class SystemUpdateServiceSpecs
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe,
         FakeTimeProvider time,
-        string? enabled = "true")
+        string? enabled = "true",
+        bool includeEnabled = true)
     {
-        var settings = new Dictionary<string, string?>
-        {
-            ["Mohist:SystemUpdate:Enabled"] = enabled
-        };
+        var settings = new Dictionary<string, string?>();
+        if (includeEnabled)
+            settings["Mohist:SystemUpdate:Enabled"] = enabled;
+
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
 
         var service = new SystemUpdateService(

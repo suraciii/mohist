@@ -22,7 +22,7 @@
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Modified packages/server/src/MohistServer/SystemInfo/SystemUpdateService.cs (IsUpdateEnabled rewrite) and packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs (factory variant + Enabled=\"false\" start-path spec + ordering spec + SourceAudit spec + parity assertions); npm test green.",
+      "output": "Modified packages/server/src/Mohist.Server/SystemInfo/SystemUpdateService.cs (IsUpdateEnabled rewrite) and packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/SystemUpdateServiceSpecs.cs (factory variant + Enabled=\"false\" start-path spec + ordering spec + SourceAudit spec + parity assertions); npm test green.",
       "dependsOn": [],
       "passes": false,
       "notes": "Pure structural rewrite preserving observable behavior; no API/contract/storage/Runner/Web/CLI changes. Do not touch SystemInfoService.IsUpdateEnabled (already correct). Do not unify the two gates into a shared function — their unconfigured defaults are intentionally different (SystemInfoService gates on local-source+ServerUnit; SystemUpdateService defaults true because ValidateStart independently enforces install mode and completeness). The new factory variant must default to \"true\" semantics to keep existing specs as regression baselines. Reference the D1 code block in design.md for the exact target form."
