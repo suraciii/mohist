@@ -959,7 +959,7 @@ public class SystemUpdateServiceSpecs
 
         var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
         await commands.WaitForCountAsync(2);
-        await store.WaitForStatusAsync("failed");
+        await store.WaitForStatusAndStageAsync("failed", "Failed");
 
         var latest = await store.GetLatestAsync();
         Assert.True(result.Started);
@@ -1269,12 +1269,25 @@ public class SystemUpdateServiceSpecs
             return waiter.Task;
         }
 
+        public Task WaitForStatusAndStageAsync(string status, string stage)
+        {
+            if (string.Equals(_latest?.Status, status, StringComparison.Ordinal)
+                && string.Equals(_latest?.Stage, stage, StringComparison.Ordinal))
+            {
+                return Task.CompletedTask;
+            }
+
+            var waiter = new StatusWaiter(status, stage);
+            _statusWaiters.Add(waiter);
+            return waiter.Task;
+        }
+
         private void CompleteStatusWaiters()
         {
             for (var i = _statusWaiters.Count - 1; i >= 0; i--)
             {
                 var waiter = _statusWaiters[i];
-                if (!string.Equals(_latest?.Status, waiter.Status, StringComparison.Ordinal))
+                if (!waiter.Matches(_latest))
                     continue;
 
                 _statusWaiters.RemoveAt(i);
@@ -1390,11 +1403,24 @@ public class SystemUpdateServiceSpecs
     {
         private readonly TaskCompletionSource _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public StatusWaiter(string status) => Status = status;
+        public StatusWaiter(string status, string? stage = null)
+        {
+            Status = status;
+            Stage = stage;
+        }
 
         public string Status { get; }
 
+        public string? Stage { get; }
+
         public Task Task => _tcs.Task;
+
+        public bool Matches(SystemUpdateJobState? state)
+        {
+            return state is not null
+                && string.Equals(state.Status, Status, StringComparison.Ordinal)
+                && (Stage is null || string.Equals(state.Stage, Stage, StringComparison.Ordinal));
+        }
 
         public void Complete() => _tcs.TrySetResult();
     }
