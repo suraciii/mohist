@@ -41,4 +41,4 @@
 
 ## 范围外
 
-`Workflow/Services/Sessions/AgentSessionQuerier.cs` → `Issue.Services` 的依赖是 **Session 上下文**的问题（session 查询要 issue 上下文做富化），不在本边界。Session 现为独立子域（见 [`domain-analysis.md`](../../domain-analysis.md) Session 小节），其读侧应从 `Workflow/Services/Sessions/` 迁回 `Sessions/`，见该偏差项。
+Session 读侧 → `Issue.Services` / `Runner.Services` / `Workflow.Services` 的反向依赖是 **Session 上下文**的问题（session 查询/报告要 issue/runner/workflow 上下文做富化与跨域组装），不在本边界。Session 现为独立子域（见 [`domain-analysis.md`](../../domain-analysis.md) Session 小节），其读侧已迁回 `Sessions/Services/`，但跨域报告需求（活动 feed、用量成本）仍反向依赖业务上下文——解法是抽离 AgentOps 报告上下文，见 [`domain-analysis.md`](../../domain-analysis.md) 现状偏差项。

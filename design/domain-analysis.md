@@ -71,6 +71,8 @@ Project 是**横切的执行环境容器**：git 仓库绑定、数据隔离、�
 
 **Session 是叶子域**：被多上下文消费，但不反向依赖任何业务上下文。Runner 向其 append runtime events（Published Language），Issue/Workflow/Api 只读消费其读模型（OHS）。
 
+**跨域报告不走叶子**：需要 join Session + Issue + Workflow + Runner 的读侧组装（活动 feed、单次交付成本等）不属 Session 子域——那是被允许依赖全部域的报告上下文（见 [`context-map.md`](context-map.md) 的 AgentOps）。把跨域报告塞进叶子域会让 Session 反向依赖业务上下文，破坏叶子不变量。
+
 ### Runner（执行资源）
 
 **收敛的问题类**：执行资源**在哪、是否健康、租约给谁**——资源注册、心跳、租约。
@@ -122,6 +124,14 @@ Session（执行痕迹）            ← 横向叶子：被 Agent/Runner/Issue/W
 
 通用子域不应承载业务规则。
 
+## 读侧报告子域：AgentOps
+
+**收敛的问题类**：跨多个业务子域**组装只读报告**——活动 feed、单次交付成本、跨聚合看板。
+
+它**被允许依赖全部业务子域**（Session + Issue + Workflow + Runner），因为它的职责就是把各域的读模型 join 起来呈现。这与"叶子域不反向依赖"不冲突——AgentOps 不是任何业务域的叶子，它是位于业务域**之上**的读侧消费者。
+
+引入它的动机：把跨域报告需求从 Session 叶子域里抽出来，让 Session 重回真叶子（只拥有自有数据），让"依赖全部域"这件事有名、合法、可被架构守护。
+
 ## 判断规则
 
 按问题类判定一个改动落在哪：
@@ -132,6 +142,7 @@ Session（执行痕迹）            ← 横向叶子：被 Agent/Runner/Issue/W
 - 智能体定义、执行发起、job 分派、report 校验 → **Agent**
 - 执行过程的记录、transcript、context 压缩、usage 统计、session 查询 → **Session**
 - 执行资源注册、心跳、租约 → **Runner**
+- 跨多域组装只读报告（活动 feed、成本、看板） → **AgentOps**（允许依赖全部业务域）
 - 标签、用户、系统信息 → 通用子域，不应承载业务规则
 
 ## 现状偏差（迁移项）
@@ -140,7 +151,7 @@ Session（执行痕迹）            ← 横向叶子：被 Agent/Runner/Issue/W
 
 - **默认 `WorkflowDefinition` 内容错位**：`MohistWorkflow` + `mohist-local.workflow.yaml` 是应用级配置，却躺在 `Issue/Services/WorkflowProfiles/`——应挪到应用配置层。workflow profile 配置本身（template 选择 + variables）是 Issue/Project 自己的配置，留原处是对的；详见 [`workflow/boundaries/issue.md`](workflow/boundaries/issue.md)。
 - **Workflow↔Issue 目标为单向依赖**（Issue→Workflow）；目前 `ProjectWorkflowProfileManager` 因拿 `MohistWorkflow.Definition` 而反向引用 Issue，搬走默认定义即消除。
-- **Session 读侧寄生 Workflow 目录**：Session 是独立子域（本文已修正，原误归为 Agent facet），但其读侧（`AgentSessionQuerier` 1510 行、对外 DTO、metadata 键名常量、transcript 投影）当前寄生在 `Workflow/Services/Sessions/`。这导致领域核心层 `Sessions/Services/AgentSessionQuery.cs` 必须反向 `using Workflow.Services.Sessions` 取常量——叶子域反向依赖 Workflow，违反依赖方向硬约束。应将 `Workflow/Services/Sessions/` 全部迁回 `Sessions/`，消除反向依赖。
+- **Session 读侧反向依赖业务上下文**：Session 的读侧（`AgentSessionQuerier`、`AgentUsageReporter`、`AgentActivityFeedAssembler`）已从 `Workflow/Services/Sessions/` 迁回 `Sessions/Services/`（原寄生问题已解决），但迁回后这些类为组装活动 feed / 用量报告而反向 `using` Issue / Runner / Workflow——横向叶子域反向依赖业务上下文，违反依赖方向硬约束。根因是把跨域报告需求塞进了叶子域；解法是抽离一个被允许依赖全部域的读侧/报告上下文（如 AgentOps），让 Session 重回真叶子。
 - **模块目录与子域归属**未对齐：`Epic/` 属 Issue 子域、`Sessions/` 与 `Agent/` 是各自独立的子域，目前是独立模块目录（这是对的，无需合并——Session 独立成域后不并入 Agent）。
 
 ## 与文档的关系
