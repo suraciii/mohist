@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { HubConnection } from '@microsoft/signalr'
+import { DiamondIcon } from 'lucide-react'
 import { useProject } from '../../../entities/project'
 import { useIssueWorkflowTaskLog, type TaskLogLine, type TaskLogPage } from '../../../entities/issue'
+import { useWorkflowRunSessions } from '../../../entities/coder-session'
 import {
   useEventsConnection,
   subscribeTaskLog,
@@ -10,12 +12,24 @@ import {
   type TaskLogDeltaEnvelopeWire,
 } from '../../../shared/api/events-hub'
 import type { StageTaskStatus } from '../../../entities/issue/model/stage-state'
+import {
+  compareTimelineRows,
+  deriveMilestones,
+  isAcpAgentTask,
+  isTaskLogMilestone,
+  serializeMilestoneForExport,
+  type TaskLogMilestone,
+  type TimelineRow,
+} from './milestones'
 
 interface TaskLogPanelProps {
   issueNumber: number
   taskId: string
   workflowRunId?: string | null
   taskStatus?: StageTaskStatus | null
+  sessionName?: string | null
+  origin?: { uses?: string } | null
+  classification?: string | null
 }
 
 const TASK_LOG_RETAINED_LIMIT = 5000
@@ -97,7 +111,15 @@ export function mergeTaskLogDelta(
   }
 }
 
-export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }: TaskLogPanelProps) {
+export function TaskLogPanel({
+  issueNumber,
+  taskId,
+  workflowRunId,
+  taskStatus,
+  sessionName,
+  origin,
+  classification,
+}: TaskLogPanelProps) {
   const { projectId } = useProject()
   const queryClient = useQueryClient()
   const { data, isLoading, isError } = useIssueWorkflowTaskLog(
@@ -136,22 +158,47 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
   const lines = data?.lines ?? []
   const truncated = data?.truncated ?? false
 
+  const isAgentTask = isAcpAgentTask({ origin: origin ?? null, sessionName: sessionName ?? null, classification: classification ?? null })
+  const trimmedSessionName = typeof sessionName === 'string' ? sessionName.trim() : ''
+  const { sessions } = useWorkflowRunSessions(isAgentTask && trimmedSessionName.length > 0 ? workflowRunId ?? null : null)
+  const resolvedSession = useMemo(() => {
+    if (!isAgentTask || trimmedSessionName.length === 0) return null
+    const match = sessions.find((s) => s.sessionName === trimmedSessionName)
+    return match ?? null
+  }, [isAgentTask, trimmedSessionName, sessions])
+
+  const milestones: TaskLogMilestone[] = useMemo(
+    () => (isAgentTask && trimmedSessionName.length > 0 ? deriveMilestones(resolvedSession) : []),
+    [isAgentTask, trimmedSessionName, resolvedSession],
+  )
+
   const sources = useMemo(
     () => Array.from(new Set(lines.map((line) => line.source))).sort(),
     [lines],
   )
 
-  const filtered = useMemo(() => {
+  const filteredRows: TimelineRow[] = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
-    return lines.filter((line) => {
-      if (disabledSources.has(line.source)) return false
-      if (!query) return true
-      const haystack = `${line.text} ${line.source}`.toLowerCase()
-      return haystack.includes(query)
-    })
-  }, [lines, disabledSources, searchQuery])
+    const rows: TimelineRow[] = []
+    for (const line of lines) {
+      if (disabledSources.has(line.source)) continue
+      if (query) {
+        const haystack = `${line.text} ${line.source}`.toLowerCase()
+        if (!haystack.includes(query)) continue
+      }
+      rows.push(line)
+    }
+    for (const milestone of milestones) {
+      if (query) {
+        const haystack = `${milestone.label} ${milestone.detail}`.toLowerCase()
+        if (!haystack.includes(query)) continue
+      }
+      rows.push(milestone)
+    }
+    return rows.slice().sort(compareTimelineRows)
+  }, [lines, disabledSources, milestones, searchQuery])
 
-  const visibleLines = filtered.length
+  const visibleLines = filteredRows.length
 
   const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value)
@@ -170,8 +217,10 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
   }, [])
 
   const handleDownload = useCallback(() => {
-    if (filtered.length === 0) return
-    const text = filtered.map((line) => line.text).join('\n')
+    if (filteredRows.length === 0) return
+    const text = filteredRows
+      .map((row) => (isTaskLogMilestone(row) ? serializeMilestoneForExport(row) : row.text))
+      .join('\n')
     const blob = new Blob([text], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -181,7 +230,7 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
     anchor.click()
     document.body.removeChild(anchor)
     URL.revokeObjectURL(url)
-  }, [filtered, taskId])
+  }, [filteredRows, taskId])
 
   useEffect(() => {
     const node = scrollRef.current
@@ -271,7 +320,7 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
     if (isError) {
       return <div className="text-slate-400">Execution log unavailable</div>
     }
-    if (lines.length === 0) {
+    if (lines.length === 0 && milestones.length === 0) {
       return (
         <div className="text-slate-400" data-testid="task-log-empty">
           No execution log captured for this task.
@@ -279,7 +328,7 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
       )
     }
     const trimmedQuery = searchQuery.trim()
-    if (filtered.length === 0) {
+    if (filteredRows.length === 0) {
       if (trimmedQuery) {
         return (
           <div className="text-slate-400" data-testid="task-log-no-search-match">
@@ -295,13 +344,34 @@ export function TaskLogPanel({ issueNumber, taskId, workflowRunId, taskStatus }:
     }
     return (
       <ol className="space-y-0.5" data-testid="task-log-lines">
-        {filtered.map((line) => (
-          <li key={line.seq} className="flex gap-2 whitespace-pre-wrap break-words">
-            <span className="text-slate-500 flex-shrink-0">{formatTimestamp(line.timestamp)}</span>
-            <span className="text-sky-300 flex-shrink-0">[{line.source}]</span>
-            <span className="flex-1 min-w-0">{line.text}</span>
-          </li>
-        ))}
+        {filteredRows.map((row, index) =>
+          isTaskLogMilestone(row) ? (
+            <li
+              key={`milestone-${row.kind}-${row.timestamp}-${index}`}
+              data-testid={`task-log-milestone-${row.kind}`}
+              className="flex gap-2 whitespace-pre-wrap break-words rounded border border-violet-400/40 bg-violet-400/10 px-1.5"
+            >
+              <span className="text-slate-500 flex-shrink-0">{formatTimestamp(row.timestamp)}</span>
+              <DiamondIcon
+                className="h-3 w-3 flex-shrink-0 text-violet-300"
+                aria-label="Session event"
+                data-testid="task-log-milestone-marker"
+                role="img"
+              />
+              <span className="text-violet-200 flex-shrink-0">[session]</span>
+              <span className="flex-1 min-w-0">
+                <span className="font-semibold">{row.label}:</span>{' '}
+                <span className={row.failed ? 'text-red-300' : 'text-slate-100'}>{row.detail}</span>
+              </span>
+            </li>
+          ) : (
+            <li key={row.seq} className="flex gap-2 whitespace-pre-wrap break-words">
+              <span className="text-slate-500 flex-shrink-0">{formatTimestamp(row.timestamp)}</span>
+              <span className="text-sky-300 flex-shrink-0">[{row.source}]</span>
+              <span className="flex-1 min-w-0">{row.text}</span>
+            </li>
+          ),
+        )}
       </ol>
     )
   }

@@ -9,6 +9,8 @@ import { getIssueWorkflowTaskLog } from '../../../entities/issue'
 import { TaskLogPanel, mergeTaskLogDelta } from './TaskLogPanel'
 import type { TaskLogLine, TaskLogPage } from '../../../entities/issue'
 import type { TaskLogDeltaEnvelopeWire } from '../../../shared/api/events-hub'
+import { getWorkflowRunSessions } from '../../../entities/coder-session/api/client'
+import type { WorkflowRunSession } from '../../../entities/coder-session/model/types'
 
 vi.mock('@microsoft/signalr', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@microsoft/signalr')>()
@@ -27,6 +29,52 @@ vi.mock('../../../entities/issue/api/client', async (importOriginal) => {
 })
 
 const mockedGetIssueWorkflowTaskLog = vi.mocked(getIssueWorkflowTaskLog)
+
+const sessionEventHandlers = new Map<string, ((detail: unknown) => void)[]>()
+
+vi.mock('../../../entities/agent/@x/events', () => ({
+  onAgentEvent: vi.fn((name: string, handler: (detail: unknown) => void) => {
+    if (!sessionEventHandlers.has(name)) sessionEventHandlers.set(name, [])
+    sessionEventHandlers.get(name)!.push(handler)
+    return () => {
+      const handlers = sessionEventHandlers.get(name)
+      if (handlers) {
+        const idx = handlers.indexOf(handler)
+        if (idx !== -1) handlers.splice(idx, 1)
+      }
+    }
+  }),
+}))
+
+vi.mock('../../../entities/coder-session/api/client', () => ({
+  getWorkflowRunSessions: vi.fn(),
+}))
+
+const mockedGetWorkflowRunSessions = vi.mocked(getWorkflowRunSessions)
+
+function sessionFixture(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
+  return {
+    id: 'session-id',
+    workflowRunId: 'wr-1',
+    sessionName: 'plan-issue-339',
+    acpSessionId: 'acp-1',
+    projectId: 'proj-1',
+    issueNumber: 339,
+    runnerId: null,
+    status: 'completed',
+    stage: null,
+    model: 'minimax/MiniMax-M3',
+    workDir: null,
+    processPid: null,
+    createdAt: '2026-07-03T08:00:00.000Z',
+    startedAt: '2026-07-03T08:00:01.000Z',
+    completedAt: '2026-07-03T08:01:00.000Z',
+    lastDataAt: null,
+    failureReason: null,
+    exitCode: null,
+    ...overrides,
+  }
+}
 
 type Listener = (...args: unknown[]) => void
 
@@ -1177,5 +1225,503 @@ describe('TaskLogPanel — viewing enhancement (Phase 3a T-001)', () => {
     expect(lines[0]).toMatch(/line-1/)
     expect(lines[1]).toMatch(/line-2/)
     expect(lines[2]).toMatch(/line-3/)
+  })
+})
+
+describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    fakeConnections.length = 0
+    recordedInvokes.length = 0
+    sessionEventHandlers.clear()
+    mockConnectionBuilder()
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  const agentOrigin = { uses: 'mohist/acp-agent' }
+
+  it('renders milestone rows interleaved by ISO timestamp alongside ops lines for an agent task', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({
+        id: 'session-1',
+        sessionName: 'plan-issue-339',
+        startedAt: '2026-07-03T08:01:00.000Z',
+        completedAt: '2026-07-03T08:04:00.000Z',
+        status: 'completed',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    ])
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, timestamp: '2026-07-03T08:00:01.000Z', source: 'workspace-prep', text: 'ops-08:00:01' }),
+      makeLine({ seq: 2, timestamp: '2026-07-03T08:05:00.000Z', source: 'cleanup', text: 'ops-08:05:00' }),
+    ]))
+
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    await screen.findByTestId('task-log-panel')
+    expect(await screen.findByTestId('task-log-milestone-model-bound')).toBeInTheDocument()
+    expect(await screen.findByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
+
+    const items = Array.from(document.querySelectorAll('[data-testid="task-log-lines"] > li')).map((li) => li.textContent ?? '')
+    expect(items).toHaveLength(4)
+    const indices = {
+      ops1: items.findIndex((t) => t.includes('ops-08:00:01')),
+      model: items.findIndex((t) => t.includes('Model bound')),
+      ended: items.findIndex((t) => t.includes('Session ended')),
+      ops2: items.findIndex((t) => t.includes('ops-08:05:00')),
+    }
+    expect(indices.ops1).toBeLessThan(indices.model)
+    expect(indices.model).toBeLessThan(indices.ended)
+    expect(indices.ended).toBeLessThan(indices.ops2)
+  })
+
+  it('renders milestones as the timeline content (suppresses the empty state) when there are no ops lines', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({
+        id: 'session-1',
+        sessionName: 'plan-issue-339',
+        startedAt: '2026-07-03T08:00:01.000Z',
+        completedAt: '2026-07-03T08:01:00.000Z',
+        status: 'completed',
+        eventSummary: { resolvedModel: 'mohist/coder-agent' },
+      }),
+    ])
+    const harness = buildHarness(makePage([]))
+
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    expect(screen.queryByTestId('task-log-empty')).not.toBeInTheDocument()
+    expect(await screen.findByTestId('task-log-milestone-model-bound')).toBeInTheDocument()
+    expect(await screen.findByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
+  })
+
+  it('renders terminal-state milestones from the persisted summary without any real-time event for a finished agent task', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({
+        id: 'session-1',
+        sessionName: 'plan-issue-339',
+        startedAt: '2026-07-03T08:00:01.000Z',
+        completedAt: '2026-07-03T08:01:00.000Z',
+        status: 'completed',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    ])
+    const harness = buildHarness(makePage([]))
+
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    expect(await screen.findByTestId('task-log-milestone-model-bound')).toBeInTheDocument()
+    expect(await screen.findByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
+    expect(screen.getByText('minimax/MiniMax-M3')).toBeInTheDocument()
+    expect(screen.getAllByText('completed').length).toBeGreaterThan(0)
+  })
+
+  it('renders failure milestones with the failureReason and applies the failed styling', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({
+        id: 'session-1',
+        sessionName: 'plan-issue-339',
+        status: 'failed',
+        completedAt: '2026-07-03T08:01:00.000Z',
+        failureReason: 'agent stream blew up',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    ])
+    const harness = buildHarness(makePage([]))
+
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="failed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    expect(await screen.findByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
+    expect(screen.getByText(/failed/)).toBeInTheDocument()
+    expect(screen.getByText(/agent stream blew up/)).toBeInTheDocument()
+  })
+
+  it('renders NO milestone rows for a pure ops task even when sessionName is present', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({ id: 'session-1', sessionName: 'rebase-1' }),
+    ])
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' }),
+    ]))
+
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="failed"
+        sessionName="rebase-1"
+        origin={{ uses: 'mohist/rebase' }}
+        classification="Orchestration"
+      />,
+      harness,
+    )
+
+    await screen.findByText('rebasing')
+    expect(screen.queryByTestId('task-log-milestone-model-bound')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('task-log-milestone-session-ended')).not.toBeInTheDocument()
+  })
+
+  it('renders NO milestone rows when origin.uses is the agent action but sessionName is empty', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({ id: 'session-1', sessionName: '' }),
+    ])
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, source: 'workspace-prep', text: 'prep' }),
+    ]))
+
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName=""
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    await screen.findByText('prep')
+    expect(screen.queryByTestId('task-log-milestone-model-bound')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('task-log-milestone-session-ended')).not.toBeInTheDocument()
+  })
+
+  it('renders NO milestone rows when the workflow-run sessions data is empty (graceful degradation)', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([])
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, source: 'workspace-prep', text: 'ops-line' }),
+    ]))
+
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    await screen.findByText('ops-line')
+    expect(screen.queryByTestId('task-log-milestone-model-bound')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('task-log-milestone-session-ended')).not.toBeInTheDocument()
+  })
+
+  it('keyword search hides non-matching milestones and keeps matching ones', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({
+        id: 'session-1',
+        sessionName: 'plan-issue-339',
+        status: 'completed',
+        startedAt: '2026-07-03T08:00:01.000Z',
+        completedAt: '2026-07-03T08:01:00.000Z',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    ])
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'cleanup', text: 'final cleanup' }),
+    ]))
+
+    const user = userEvent.setup()
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    await screen.findByTestId('task-log-panel')
+
+    await user.type(await screen.findByTestId('task-log-search-input'), 'cleanup')
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-log-milestone-model-bound')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('task-log-milestone-session-ended')).not.toBeInTheDocument()
+    })
+    expect(screen.getByText('final cleanup')).toBeInTheDocument()
+
+    await user.clear(await screen.findByTestId('task-log-search-input'))
+    await user.type(await screen.findByTestId('task-log-search-input'), 'Model bound')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-log-milestone-model-bound')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('final cleanup')).not.toBeInTheDocument()
+  })
+
+  it('source-chip filtering never hides milestone rows even when the chip would hide ops lines', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({
+        id: 'session-1',
+        sessionName: 'plan-issue-339',
+        status: 'completed',
+        startedAt: '2026-07-03T08:00:01.000Z',
+        completedAt: '2026-07-03T08:01:00.000Z',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    ])
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'workspace-prep', text: 'prep-line' }),
+    ]))
+
+    const user = userEvent.setup()
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    await screen.findByTestId('task-log-panel')
+    const chip = await screen.findByTestId('task-log-source-chip-workspace-prep')
+    await user.click(chip)
+
+    await waitFor(() => {
+      expect(screen.queryByText('prep-line')).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId('task-log-milestone-model-bound')).toBeInTheDocument()
+    expect(screen.getByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
+  })
+
+  it('source-chip set is ops-only — no chip is derived from a milestone row', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({
+        id: 'session-1',
+        sessionName: 'plan-issue-339',
+        status: 'completed',
+        startedAt: '2026-07-03T08:00:01.000Z',
+        completedAt: '2026-07-03T08:01:00.000Z',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    ])
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' }),
+    ]))
+
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    const chipBar = await screen.findByTestId('task-log-source-chips')
+    const chips = Array.from(chipBar.querySelectorAll('button')).map((b) => b.textContent?.trim())
+    expect(chips).toEqual(['action:rebase'])
+  })
+
+  it('exports the filtered merged view with milestone rows serialized as "<timestamp> [session] <label>: <detail>"', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({
+        id: 'session-1',
+        sessionName: 'plan-issue-339',
+        status: 'completed',
+        startedAt: '2026-07-03T08:00:01.000Z',
+        completedAt: '2026-07-03T08:01:00.000Z',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    ])
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', source: 'workspace-prep', text: 'before' }),
+      makeLine({ seq: 2, timestamp: '2026-07-03T08:02:00.000Z', source: 'cleanup', text: 'after' }),
+    ]))
+
+    const user = userEvent.setup()
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    await screen.findByTestId('task-log-panel')
+
+    const capture = installDownloadSpy()
+    await user.click(await screen.findByTestId('task-log-download-button'))
+
+    await waitFor(() => {
+      expect(capture.clicks.length).toBeGreaterThan(0)
+    })
+
+    const blobText = await readBlobText(capture.blob)
+    const lines = blobText.split('\n')
+    expect(lines).toContain('before')
+    expect(lines).toContain('after')
+    expect(lines).toContain('2026-07-03T08:00:01.000Z [session] Model bound: minimax/MiniMax-M3')
+    expect(lines).toContain('2026-07-03T08:01:00.000Z [session] Session ended: completed')
+  })
+
+  it('download applies a keyword filter to milestones (only filtered rows go in the export)', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({
+        id: 'session-1',
+        sessionName: 'plan-issue-339',
+        status: 'failed',
+        startedAt: '2026-07-03T08:00:01.000Z',
+        completedAt: '2026-07-03T08:01:00.000Z',
+        failureReason: 'agent stream blew up',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    ])
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, timestamp: '2026-07-03T08:02:00.000Z', source: 'cleanup', text: 'unrelated' }),
+    ]))
+
+    const user = userEvent.setup()
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="failed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    await screen.findByTestId('task-log-panel')
+
+    await user.type(await screen.findByTestId('task-log-search-input'), 'minimax')
+
+    await waitFor(() => {
+      expect(screen.queryByText('unrelated')).not.toBeInTheDocument()
+    })
+
+    const capture = installDownloadSpy()
+    await user.click(await screen.findByTestId('task-log-download-button'))
+
+    await waitFor(() => {
+      expect(capture.clicks.length).toBeGreaterThan(0)
+    })
+
+    const blobText = await readBlobText(capture.blob)
+    expect(blobText).toContain('Model bound')
+    expect(blobText).not.toContain('Session ended')
+    expect(blobText).not.toContain('unrelated')
+  })
+
+  it('uses the marker with a non-color-only accessible name and a human label prefix', async () => {
+    mockedGetWorkflowRunSessions.mockResolvedValue([
+      sessionFixture({
+        id: 'session-1',
+        sessionName: 'plan-issue-339',
+        status: 'completed',
+        startedAt: '2026-07-03T08:00:01.000Z',
+        completedAt: '2026-07-03T08:01:00.000Z',
+        eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
+      }),
+    ])
+    const harness = buildHarness(makePage([]))
+
+    renderWithHarness(
+      <TaskLogPanel
+        issueNumber={339}
+        taskId="build-task-1"
+        workflowRunId="wr-1"
+        taskStatus="completed"
+        sessionName="plan-issue-339"
+        origin={agentOrigin}
+        classification="UserFacing"
+      />,
+      harness,
+    )
+
+    const markers = await screen.findAllByTestId('task-log-milestone-marker')
+    expect(markers.length).toBeGreaterThan(0)
+    for (const marker of markers) {
+      expect(marker).toHaveAttribute('aria-label', 'Session event')
+    }
+
+    expect(screen.getAllByText((_, el) => el?.textContent?.startsWith('Model bound') ?? false).length).toBeGreaterThan(0)
+    expect(screen.getAllByText((_, el) => el?.textContent?.startsWith('Session ended') ?? false).length).toBeGreaterThan(0)
+  })
+
+  it('mergeTaskLogDelta is byte-identical to Phase 1/2 — TaskLogLine shape stays {seq,timestamp,source,text} and no "kind" leaks in', () => {
+    const page = makePage([makeLine({ seq: 1, text: 'a' })])
+    const delta = makeEnvelope([{ seq: 99, source: 'session', text: 'fake-milestone' }])
+    const merged = mergeTaskLogDelta(page, delta)
+    expect(merged.lines.every((line) => 'seq' in line)).toBe(true)
+    expect(merged.lines.map((line) => line.seq)).toEqual([1, 99])
+    const keys = Object.keys(merged.lines[0]).sort()
+    expect(keys).toEqual(['seq', 'source', 'text', 'timestamp'])
   })
 })

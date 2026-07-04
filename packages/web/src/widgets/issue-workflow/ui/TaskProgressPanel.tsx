@@ -170,7 +170,15 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: Stage
             </p>
           )}
           {typeof task.taskId === 'string' && task.taskId.length > 0 && (
-            <TaskLogPanel issueNumber={issueNumber} taskId={task.taskId} workflowRunId={workflowRunId} taskStatus={task.status} />
+            <TaskLogPanel
+              issueNumber={issueNumber}
+              taskId={task.taskId}
+              workflowRunId={workflowRunId}
+              taskStatus={task.status}
+              sessionName={task.sessionName ?? null}
+              origin={task.origin ?? null}
+              classification={task.classification ?? null}
+            />
           )}
         </div>
       )}
@@ -231,6 +239,7 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
     taskId: task.id,
     title: task.title,
     status: task.status,
+    sessionName: task.sessionName,
     order: index,
     attempts: task.attempts,
     duration: task.durationMs ?? 0,
@@ -241,6 +250,7 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
     updatedAt: task.completedAt ?? task.startedAt ?? new Date().toISOString(),
     reason: task.message ?? undefined,
     origin: task.uses ? { source: 'runtime', uses: task.uses } : null,
+    classification: task.classification,
   }))
 
   if (tasks.length === 0) {
