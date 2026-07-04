@@ -294,7 +294,7 @@ public sealed class SystemUpdateService : ISingletonService
             return;
 
         var now = DateTimeOffset.UtcNow;
-        var superseded = await PersistTransitionAsync(
+        await PersistTransitionAsync(
             existing with
             {
                 Status = "superseded",
@@ -504,10 +504,15 @@ public sealed class SystemUpdateService : ISingletonService
         catch (Exception ex)
         {
             _logger.LogError(ex, "System update failed");
-            state = await FailAsync(state, ex.Message, cancellationToken);
+            var failure = CreateFailedTransition(state, ex.Message);
+            state = ApplyTransitionLog(failure.State, failure.LogEntry);
             if (runnerWasPresent && !string.IsNullOrWhiteSpace(state.RunnerUnit))
             {
                 state = await TryRestoreRunnerAsync(state, runnerWasPresent: true, cancellationToken);
+            }
+            else
+            {
+                state = await PersistTransitionAsync(failure.State, cancellationToken, failure.LogEntry);
             }
         }
         finally
@@ -660,13 +665,7 @@ public sealed class SystemUpdateService : ISingletonService
         bool releaseLock = false,
         SystemUpdateJobState? expected = null)
     {
-        var logs = logEntry is not null ? AppendLog(next.Logs, logEntry) : next.Logs;
-        var timestamp = logEntry?.At ?? DateTimeOffset.UtcNow;
-        next = next with
-        {
-            Logs = logs,
-            UpdatedAt = timestamp
-        };
+        next = ApplyTransitionLog(next, logEntry);
         if (expected is not null)
             await _store.SaveIfCurrentAsync(expected, next, cancellationToken);
         else
@@ -687,6 +686,23 @@ public sealed class SystemUpdateService : ISingletonService
         string? logMessage = null,
         bool releaseLock = false)
     {
+        var failure = CreateFailedTransition(state, reason, stage, outcome, unavailableCapability, logStage, logMessage);
+        return await PersistTransitionAsync(
+            failure.State,
+            cancellationToken,
+            failure.LogEntry,
+            releaseLock: releaseLock);
+    }
+
+    private static (SystemUpdateJobState State, SystemUpdateLogEntry LogEntry) CreateFailedTransition(
+        SystemUpdateJobState state,
+        string reason,
+        string? stage = null,
+        string? outcome = null,
+        string? unavailableCapability = null,
+        string? logStage = null,
+        string? logMessage = null)
+    {
         var failedAt = DateTimeOffset.UtcNow;
         var next = state with
         {
@@ -697,11 +713,18 @@ public sealed class SystemUpdateService : ISingletonService
             UnavailableCapability = unavailableCapability,
             CompletedAt = failedAt
         };
-        return await PersistTransitionAsync(
-            next,
-            cancellationToken,
-            new SystemUpdateLogEntry(failedAt, logStage ?? stage ?? state.Stage, logMessage ?? reason),
-            releaseLock: releaseLock);
+        return (next, new SystemUpdateLogEntry(failedAt, logStage ?? stage ?? state.Stage, logMessage ?? reason));
+    }
+
+    private static SystemUpdateJobState ApplyTransitionLog(SystemUpdateJobState next, SystemUpdateLogEntry? logEntry)
+    {
+        var logs = logEntry is not null ? AppendLog(next.Logs, logEntry) : next.Logs;
+        var timestamp = logEntry?.At ?? DateTimeOffset.UtcNow;
+        return next with
+        {
+            Logs = logs,
+            UpdatedAt = timestamp
+        };
     }
 
     private static IReadOnlyList<SystemUpdateLogEntry> AppendLog(IReadOnlyList<SystemUpdateLogEntry> logs, SystemUpdateLogEntry entry)

@@ -1122,6 +1122,94 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
+    public async Task RunUpdateAsync_OnBuildException_RestoresRunnerWithoutPersistingFailedBeforeRecovery()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new ThrowingCommandRunner(
+            ("dotnet", () => throw new InvalidOperationException("build threw")),
+            ("systemctl", () => new SystemCommandResult(0, "runner restart ok")));
+        var service = CreateService(
+            systemInfo: CreateInfo(),
+            store: store,
+            commandRunner: commands,
+            readinessProbe: new StubReadinessProbe(new(false, false, false, null, "ignored")));
+
+        var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
+        await commands.WaitForCountAsync(2);
+        await store.WaitForStatusAsync("recovered");
+
+        var latest = await store.GetLatestAsync();
+        Assert.True(result.Started);
+        Assert.Equal("recovered", latest!.Status);
+        Assert.Equal("Recovered", latest.Stage);
+        Assert.Equal("recovered", latest.Outcome);
+        Assert.Null(latest.UnavailableCapability);
+        Assert.Contains(latest.Logs, log => log.Stage == "Building" && log.Message == "build threw");
+        Assert.Contains(latest.Logs, log => log.Stage == "Restoring runner");
+        Assert.Contains(latest.Logs, log => log.Stage == "Recovered" && log.Message.Contains("Runner restore succeeded"));
+
+        var restoringIndex = store.SavedStates.FindIndex(state => state.Stage == "Restoring runner");
+        Assert.True(restoringIndex >= 0);
+        Assert.DoesNotContain(store.SavedStates.Take(restoringIndex), state => state.Status == "failed");
+        Assert.DoesNotContain(store.SavedStates, state => state.Status == "failed");
+
+        Assert.Collection(commands.Requests,
+            command => Assert.Equal("dotnet", command.FileName),
+            command =>
+            {
+                Assert.Equal("systemctl", command.FileName);
+                Assert.Equal(["--user", "restart", "mohist-runner.service"], command.Arguments);
+            });
+
+        await store.WaitForUnlockAsync();
+        Assert.True(await store.TryAcquireLockAsync("job-next"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task RunUpdateAsync_OnBuildException_RunnerRestoreFails_MarksFailedAfterRestoreAttempt()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new ThrowingCommandRunner(
+            ("dotnet", () => throw new InvalidOperationException("build threw")),
+            ("systemctl", () => new SystemCommandResult(1, "runner restart failed")));
+        var service = CreateService(
+            systemInfo: CreateInfo(),
+            store: store,
+            commandRunner: commands,
+            readinessProbe: new StubReadinessProbe(new(false, false, false, null, "ignored")));
+
+        var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
+        await commands.WaitForCountAsync(2);
+        await WaitUntilAsync(async () =>
+        {
+            var current = await store.GetLatestAsync();
+            return current?.Status == "failed" && current.Stage == "Failed";
+        });
+
+        var latest = await store.GetLatestAsync();
+        Assert.True(result.Started);
+        Assert.Equal("failed", latest!.Status);
+        Assert.Equal("Failed", latest.Stage);
+        Assert.Equal("failed", latest.Outcome);
+        Assert.Equal("Runner", latest.UnavailableCapability);
+        Assert.Contains(latest.Logs, log => log.Stage == "Building" && log.Message == "build threw");
+        Assert.Contains(latest.Logs, log => log.Stage == "Failed" && log.Message.Contains("mo server start --runner"));
+
+        var restoringIndex = store.SavedStates.FindIndex(state => state.Stage == "Restoring runner");
+        var finalFailedIndex = store.SavedStates.FindLastIndex(state => state.Status == "failed" && state.Stage == "Failed");
+        Assert.True(restoringIndex >= 0);
+        Assert.True(finalFailedIndex > restoringIndex);
+        Assert.DoesNotContain(store.SavedStates.Take(restoringIndex), state => state.Status == "failed");
+
+        await store.WaitForUnlockAsync();
+        Assert.True(await store.TryAcquireLockAsync("job-next"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
     public async Task RunUpdateAsync_OnServerRestartFailure_RestoresRunnerAndMarksRecovered()
     {
         var store = new InMemoryUpdateStore();
@@ -1256,16 +1344,16 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public void SourceAudit_FailedStateIsDefinedOnlyInFailAsync()
+    public void SourceAudit_FailedStateIsDefinedOnlyInCreateFailedTransition()
     {
         var source = ReadSource();
-        var failAsyncStart = source.IndexOf("private async Task<SystemUpdateJobState> FailAsync", StringComparison.Ordinal);
-        Assert.True(failAsyncStart >= 0, "FailAsync method not found");
-        var failAsyncEnd = FindMethodEnd(source, failAsyncStart);
+        var composerStart = source.IndexOf("private static (SystemUpdateJobState State, SystemUpdateLogEntry LogEntry) CreateFailedTransition", StringComparison.Ordinal);
+        Assert.True(composerStart >= 0, "CreateFailedTransition method not found");
+        var composerEnd = FindMethodEnd(source, composerStart);
 
         var matches = Regex.Matches(source, @"state\s+with\s*\{[^}]*Status\s*=\s*""failed""", RegexOptions.Singleline);
         Assert.Single(matches);
-        Assert.InRange(matches[0].Index, failAsyncStart, failAsyncEnd);
+        Assert.InRange(matches[0].Index, composerStart, composerEnd);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -1498,6 +1586,8 @@ public class SystemUpdateServiceSpecs
             _acquireLock = acquireLock;
         }
 
+        public List<SystemUpdateJobState> SavedStates { get; } = [];
+
         public Task<SystemUpdateJobState?> GetLatestAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(_latest);
 
@@ -1546,6 +1636,7 @@ public class SystemUpdateServiceSpecs
         public Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default)
         {
             _latest = state;
+            SavedStates.Add(state);
             CompleteStatusWaiters();
             return Task.CompletedTask;
         }
@@ -1559,6 +1650,7 @@ public class SystemUpdateServiceSpecs
                 return Task.FromResult(false);
             }
             _latest = next;
+            SavedStates.Add(next);
             CompleteStatusWaiters();
             return Task.FromResult(true);
         }
@@ -1664,6 +1756,59 @@ public class SystemUpdateServiceSpecs
             }
 
             return Task.FromResult(entry.Result);
+        }
+
+        public Task WaitForCountAsync(int count)
+        {
+            if (Requests.Count >= count)
+                return Task.CompletedTask;
+
+            var waiter = new CountWaiter(count);
+            _waiters.Add(waiter);
+            return waiter.Task;
+        }
+
+        private void CompleteSatisfiedWaiters()
+        {
+            for (var i = _waiters.Count - 1; i >= 0; i--)
+            {
+                var waiter = _waiters[i];
+                if (Requests.Count < waiter.Count)
+                    continue;
+
+                _waiters.RemoveAt(i);
+                waiter.Complete();
+            }
+        }
+    }
+
+    private sealed class ThrowingCommandRunner : ISystemUpdateCommandRunner
+    {
+        private readonly (string FileName, Func<SystemCommandResult> Run)[] _script;
+        private readonly List<CountWaiter> _waiters = [];
+        public List<SystemCommandRequest> Requests { get; } = [];
+
+        public ThrowingCommandRunner(params (string FileName, Func<SystemCommandResult> Run)[] script)
+        {
+            _script = script;
+        }
+
+        public Task<SystemCommandResult> RunAsync(SystemCommandRequest command, CancellationToken cancellationToken = default)
+        {
+            var index = Requests.Count;
+            Requests.Add(command);
+            CompleteSatisfiedWaiters();
+
+            if (index >= _script.Length)
+                return Task.FromResult(new SystemCommandResult(0, "ok"));
+
+            var entry = _script[index];
+            if (!string.Equals(entry.FileName, command.FileName, StringComparison.Ordinal))
+            {
+                return Task.FromResult(new SystemCommandResult(-1, $"unexpected command at index {index}: expected {entry.FileName} but got {command.FileName}"));
+            }
+
+            return Task.FromResult(entry.Run());
         }
 
         public Task WaitForCountAsync(int count)
