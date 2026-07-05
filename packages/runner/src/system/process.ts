@@ -4,7 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { dirname } from "node:path"
 import { StringDecoder } from "node:string_decoder"
-import { timeoutSignal } from "./timeout-signal.js"
+import { createTimeoutSignal } from "./timeout-signal.js"
 
 export interface CommandResult {
   exitCode: number
@@ -92,7 +92,8 @@ export async function runCommand(
   const onClose = options?.onClose
   // Layer the per-command timer over the caller signal only when armed.
   // Omitted / non-positive ⇒ byte-identical behavior (no timer, no keys).
-  const effectiveSignal = timeoutMs && timeoutMs > 0 ? timeoutSignal(signal, timeoutMs) : signal
+  const timeoutHandle = timeoutMs && timeoutMs > 0 ? createTimeoutSignal(signal, timeoutMs) : undefined
+  const effectiveSignal = timeoutHandle?.signal ?? signal
   return await new Promise<CommandResult>((resolve, reject) => {
     // detached:true makes the child the leader of its own process group,
     // so on timeout / parent-abort we can signal the whole group via
@@ -108,9 +109,11 @@ export async function runCommand(
     // carries the timeout Error if and only if the per-command timer fired.
     // We consult it lazily from inside the error / close handlers so we
     // never race Node's internal abort listener.
-    const wasTimeout = () => {
-      const reason = effectiveSignal.reason
-      return reason instanceof Error && /Timed out after/.test(reason.message)
+    const wasTimeout = () => timeoutHandle?.timedOut() === true
+    const onAbort = () => killProcess(child)
+    const cleanup = () => {
+      effectiveSignal.removeEventListener("abort", onAbort)
+      timeoutHandle?.dispose()
     }
     child.stdout.on("data", (chunk: Buffer) => {
       stdout.push(chunk)
@@ -126,14 +129,17 @@ export async function runCommand(
       //   - timeout fired ⇒ swallow (close resolves with structured timeout)
       //   - parent aborted ⇒ reject (today's behavior, unchanged)
       if (wasTimeout()) return
+      cleanup()
       reject(error)
     })
     // Group-kill helper processes (git-remote-http, …) alongside the direct
     // child. Node's `signal` option only kills the direct child, so an
     // explicit process-group kill is required on both abort paths.
-    effectiveSignal.addEventListener("abort", () => killProcess(child), { once: true })
+    effectiveSignal.addEventListener("abort", onAbort, { once: true })
     child.on("close", (code) => {
       const exitCode = code ?? 1
+      const timedOut = wasTimeout()
+      cleanup()
       if (onLine) {
         emitLines(stdoutState.decoder.end(), stdoutState, onLine)
         emitLines(stderrState.decoder.end(), stderrState, onLine)
@@ -145,7 +151,7 @@ export async function runCommand(
       if (onClose) onClose(exitCode)
       const stdoutText = Buffer.concat(stdout).toString("utf8")
       const stderrText = Buffer.concat(stderr).toString("utf8")
-      if (wasTimeout()) {
+      if (timedOut) {
         // Structured timeout result. The sentinel `Command timed out after Ns`
         // matches the unchanged `looksLikeRetrySafe` arm in
         // `actions/github-pr-classify.ts` so the classifier absorbs the
@@ -202,22 +208,17 @@ export async function copyDirectory(source: string, destination: string) {
  * Signal the child. When the child was spawned detached (it leads its
  * own process group), prefer `process.kill(-pid)` to reap helper
  * processes alongside the direct child. On Windows (no negative-PID
- * support) or when the group has already been reaped (ESRCH / EINVAL),
- * fall back to `child.kill(sig)` so the call is always best-effort.
+ * support) or when the group kill fails (including non-detached children),
+ * fall back to `child.kill(sig)` so the direct child is still signaled.
  */
 export function killProcess(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM") {
   if (child.pid !== undefined && process.platform !== "win32") {
     try {
       process.kill(-child.pid, signal)
       return
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (code !== "ESRCH" && code !== "EINVAL") {
-        try { child.kill(signal) } catch {}
-        return
-      }
-      // Group already gone: nothing else to do.
-      return
+    } catch {
+      // A non-detached child has no process group whose id equals child.pid;
+      // keep ACP and other existing callers safe by signaling the direct child.
     }
   }
   try {

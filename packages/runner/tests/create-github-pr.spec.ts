@@ -584,8 +584,11 @@ describe("mohist/create-github-pr action", () => {
     // existing structured `steps` array — no new transport field was added.
     const ghPrCreateStep = output.steps.find((step: { name: string }) => step.name === "gh-pr-create")
     expect(ghPrCreateStep).toBeDefined()
+    expect(ghPrCreateStep.command).toBe("pr create --head mohist/run-wr-gh-pr-1 --base master --title \"Use GitHub PR workflow\" --draft")
     expect(ghPrCreateStep.output).toContain("timed out")
     expect(ghPrCreateStep.exitCode).toBe(124)
+    expect(ghPrCreateStep.status).toBe("timeout")
+    expect(ghPrCreateStep.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
   })
 
   it("PushTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
@@ -637,7 +640,10 @@ describe("mohist/create-github-pr action", () => {
     expect(output.output).toContain("timed out")
     const gitPushStep = output.steps.find((step: { name: string }) => step.name === "git-push")
     expect(gitPushStep).toBeDefined()
+    expect(gitPushStep.command).toBe("push --force-with-lease origin mohist/run-wr-gh-pr-1")
     expect(gitPushStep.output).toContain("timed out")
     expect(gitPushStep.exitCode).toBe(124)
+    expect(gitPushStep.status).toBe("timeout")
+    expect(gitPushStep.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
   })
 })

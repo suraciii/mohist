@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { killProcess, runCommand } from "../src/system/process.js"
+import { createDefaultRegistry } from "../src/actions/registry.js"
+import type { ChildProcess } from "node:child_process"
+import type { ActionContext } from "../src/core/types.js"
 
 // `runCommand` per-command timeout (issue-291, design D1–D5):
 //   - optional `timeoutMs` rides in `CommandLineOptions`;
@@ -19,14 +22,26 @@ import { killProcess, runCommand } from "../src/system/process.js"
 
 const LINUX_DARWIN = process.platform !== "win32"
 
-async function yieldRealTime(ms: number) {
-  // Spin on `setImmediate` (real) until the requested wall-clock window
-  // has elapsed. We can't `await new Promise(setTimeout)` because under
-  // fake-timers-only-setTimeout that would never fire.
-  const start = Date.now()
-  while (Date.now() - start < ms) {
+async function waitForProcessExit(pid: number) {
+  for (let attempt = 0; attempt < 1_000; attempt += 1) {
+    try {
+      process.kill(pid, 0)
+    } catch {
+      return
+    }
     await new Promise<void>((resolve) => setImmediate(resolve))
   }
+  throw new Error(`Process ${pid} is still alive`)
+}
+
+async function waitForChildClose(child: ChildProcess) {
+  await new Promise<void>((resolve) => child.once("close", () => resolve()))
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => { resolve = r })
+  return { promise, resolve }
 }
 
 describe("runCommand per-command timeout", () => {
@@ -77,20 +92,30 @@ describe("runCommand per-command timeout", () => {
   it("CommandExitsBeforeTimeout_HasNoTimeoutCategory", async () => {
     // Exits immediately — even with a long timeout, no `status`/`timeoutMs`
     // is serialized, and the captured output is the normal exit shape.
-    const result = await runCommand(
-      process.execPath,
-      ["-e", "process.stdout.write('quick\\n'); process.exit(2)"],
-      process.cwd(),
-      new AbortController().signal,
-      undefined,
-      { timeoutMs: 10_000 },
-    )
+    vi.useFakeTimers({ toFake: ["setTimeout"] })
+    const killSpy = vi.spyOn(process, "kill")
+    try {
+      const result = await runCommand(
+        process.execPath,
+        ["-e", "process.stdout.write('quick\\n'); process.exit(2)"],
+        process.cwd(),
+        new AbortController().signal,
+        undefined,
+        { timeoutMs: 10_000 },
+      )
 
-    expect(result.exitCode).toBe(2)
-    expect(result.stdout).toBe("quick\n")
-    expect(result.stderr).toBe("")
-    expect("status" in result).toBe(false)
-    expect("timeoutMs" in result).toBe(false)
+      expect(result.exitCode).toBe(2)
+      expect(result.stdout).toBe("quick\n")
+      expect(result.stderr).toBe("")
+      expect("status" in result).toBe(false)
+      expect("timeoutMs" in result).toBe(false)
+      killSpy.mockClear()
+      await vi.advanceTimersByTimeAsync(10_001)
+      expect(killSpy).not.toHaveBeenCalled()
+    } finally {
+      killSpy.mockRestore()
+      vi.useRealTimers()
+    }
   })
 
   it("TimeoutExpires_KillsHungChildAndResolvesStructured", async () => {
@@ -100,18 +125,17 @@ describe("runCommand per-command timeout", () => {
 
     vi.useFakeTimers({ toFake: ["setTimeout"] })
     try {
+      const ready = deferred<void>()
       const promise = runCommand(
         process.execPath,
         ["-e", "process.stdout.write('partial-output\\n'); setInterval(() => {}, 1000)"],
         process.cwd(),
         new AbortController().signal,
         undefined,
-        { timeoutMs: HANG_TIMEOUT_MS },
+        { timeoutMs: HANG_TIMEOUT_MS, onLine: (line) => { if (line === "partial-output") ready.resolve() } },
       )
 
-      // Let real I/O flow so the parent captures the child's stdout write
-      // before the timer fires.
-      await yieldRealTime(30)
+      await ready.promise
 
       // Advance the fake setTimeout past the per-command timer. The
       // callback aborts the layered signal → killProcess + Node's
@@ -150,6 +174,8 @@ describe("runCommand per-command timeout", () => {
     const HANG_TIMEOUT_MS = 50
 
     vi.useFakeTimers({ toFake: ["setTimeout"] })
+    const pids = deferred<{ parentPid: number; helperPid: number }>()
+    let resolvedPids = false
     let parentPid: number | undefined
     let helperPid: number | undefined
     try {
@@ -166,13 +192,16 @@ describe("runCommand per-command timeout", () => {
             if (m) {
               parentPid = Number(m[1])
               helperPid = Number(m[2])
+              if (!resolvedPids) {
+                resolvedPids = true
+                pids.resolve({ parentPid, helperPid })
+              }
             }
           },
         },
       )
 
-      // Wait long enough for the child to spawn the helper and emit PIDs.
-      await yieldRealTime(60)
+      ;({ parentPid, helperPid } = await pids.promise)
 
       await vi.advanceTimersByTimeAsync(HANG_TIMEOUT_MS + 1)
 
@@ -187,12 +216,8 @@ describe("runCommand per-command timeout", () => {
 
     expect(parentPid).toBeDefined()
     expect(helperPid).toBeDefined()
-    // Give the OS a brief moment to deliver the group-kill after the
-    // close event. process.kill(pid, 0) throws ESRCH when the pid is
-    // no longer alive.
-    await yieldRealTime(20)
-    expect(() => process.kill(parentPid!, 0)).toThrow()
-    expect(() => process.kill(helperPid!, 0)).toThrow()
+    await waitForProcessExit(parentPid!)
+    await waitForProcessExit(helperPid!)
   })
 
   it("ParentAbort_StillRejectsAndPerCommandTimerDoesNotMaskIt", async () => {
@@ -205,18 +230,53 @@ describe("runCommand per-command timeout", () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] })
     try {
       const controller = new AbortController()
+      const ready = deferred<void>()
       const promise = runCommand(
         process.execPath,
         ["-e", "process.stdout.write('before-abort\\n'); setInterval(() => {}, 1000)"],
         process.cwd(),
         controller.signal,
         undefined,
-        { timeoutMs: 60_000 },
+        { timeoutMs: 60_000, onLine: (line) => { if (line === "before-abort") ready.resolve() } },
       )
 
-      // Let the child start and emit its first line.
-      await yieldRealTime(30)
+      await ready.promise
       controller.abort(new Error("work-level abort"))
+
+      vi.useRealTimers()
+      await expect(promise).rejects.toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("CoreScriptTimeout_RemainsParentAbortAndRejects", async () => {
+    if (!LINUX_DARWIN) return
+
+    const registry = createDefaultRegistry()
+    const action = registry.resolve("core/script")
+    if (!action) throw new Error("core/script action is not registered")
+
+    vi.useFakeTimers({ toFake: ["setTimeout"] })
+    try {
+      const ready = deferred<void>()
+      const promise = action({
+        workflowRunId: "wr-timeout",
+        workId: "script-timeout",
+        workType: "task",
+        stage: "check",
+        title: "script timeout",
+        uses: "core/script",
+        with: { run: "printf 'script-ready\\n'; while true; do sleep 1; done", timeout: 50 },
+        variables: {},
+        workDir: process.cwd(),
+        signal: new AbortController().signal,
+        writeVars: async () => {},
+        log: { write: (_source: string, text: string) => { if (text === "script-ready") ready.resolve(); return 1 } } as never,
+      } satisfies ActionContext)
+
+      await ready.promise
+      await vi.advanceTimersByTimeAsync(51)
 
       vi.useRealTimers()
       await expect(promise).rejects.toBeTruthy()
@@ -242,6 +302,8 @@ describe("runCommand per-command timeout", () => {
       ].join("")
 
       const child = spawn(process.execPath, ["-e", parentScript], { cwd: process.cwd(), detached: true, stdio: ["ignore", "pipe", "ignore"] })
+      const pids = deferred<{ parentPid: number; helperPid: number }>()
+      let resolvedPids = false
       let parentPid: number | undefined
       let helperPid: number | undefined
       child.stdout!.on("data", (chunk: Buffer) => {
@@ -250,11 +312,14 @@ describe("runCommand per-command timeout", () => {
         if (m) {
           parentPid = Number(m[1])
           helperPid = Number(m[2])
+          if (!resolvedPids) {
+            resolvedPids = true
+            pids.resolve({ parentPid, helperPid })
+          }
         }
       })
 
-      // Wait for both pids to appear.
-      await yieldRealTime(50)
+      ;({ parentPid, helperPid } = await pids.promise)
 
       expect(parentPid).toBeDefined()
       expect(helperPid).toBeDefined()
@@ -264,13 +329,42 @@ describe("runCommand per-command timeout", () => {
 
       killProcess(child)
 
-      // Wait for both pids to be reaped.
-      await yieldRealTime(50)
-
-      expect(() => process.kill(parentPid!, 0)).toThrow()
-      expect(() => process.kill(helperPid!, 0)).toThrow()
+      await waitForProcessExit(parentPid!)
+      await waitForProcessExit(helperPid!)
     } finally {
       vi.useRealTimers()
+    }
+  })
+
+  it("KillProcess_FallsBackToDirectKillForNonDetachedChild", async () => {
+    if (!LINUX_DARWIN) return
+
+    const { spawn } = await import("node:child_process")
+    const child = spawn(process.execPath, ["-e", "process.stdout.write('pid=' + process.pid + '\\n'); setInterval(() => {}, 1000)"], { cwd: process.cwd(), detached: false, stdio: ["ignore", "pipe", "ignore"] })
+    const ready = deferred<number>()
+    let resolvedPid = false
+    let childPid: number | undefined
+    child.stdout!.on("data", (chunk: Buffer) => {
+      const m = /^pid=(\d+)$/m.exec(chunk.toString("utf8"))
+      if (m) {
+        childPid = Number(m[1])
+        if (!resolvedPid) {
+          resolvedPid = true
+          ready.resolve(childPid)
+        }
+      }
+    })
+
+    try {
+      childPid = await ready.promise
+      expect(() => process.kill(childPid!, 0)).not.toThrow()
+
+      killProcess(child)
+      await waitForChildClose(child)
+
+      expect(() => process.kill(childPid!, 0)).toThrow()
+    } finally {
+      killProcess(child)
     }
   })
 })

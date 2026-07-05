@@ -8,7 +8,7 @@ import { combinedGhOutput, parsePrList } from "./github-pr-parse.js"
 import { classifyGhFailure } from "./github-pr-classify.js"
 import { waitChecksAndMergePr } from "./github-pr-merge.js"
 import { getGitHubPrGh, runGhPrecheck } from "./github-pr-runtime.js"
-import type { GitHubPrErrorCode, GitHubPrStep, MergeGitHubPrOutput } from "./github-pr-types.js"
+import { timeoutStepMetadata, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata, type MergeGitHubPrOutput } from "./github-pr-types.js"
 
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:merge-github-pr"
@@ -45,7 +45,7 @@ export async function mergeGitHubPrAction(context: ActionContext): Promise<Actio
   }
 
   const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
-  record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output)
+  record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output, ghPrecheck.ok ? undefined : timeoutStepMetadata(ghPrecheck))
   if (!ghPrecheck.ok) {
     return fail("config-error", ghPrecheck.message, { output: ghPrecheck.output })
   }
@@ -84,8 +84,8 @@ export async function mergeGitHubPrAction(context: ActionContext): Promise<Actio
 }
 
 function createRecorder(steps: GitHubPrStep[]) {
-  return (name: string, command: string, exitCode: number, output: string) => {
-    steps.push({ name, command, exitCode, output })
+  return (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => {
+    steps.push({ name, command, exitCode, output, ...metadata })
   }
 }
 
@@ -99,7 +99,7 @@ async function resolvePrNumberForMerge(
   context: ActionContext,
   workDir: string,
   signal: AbortSignal,
-  record: (name: string, command: string, exitCode: number, output: string) => void,
+  record: (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => void,
   options?: CommandLineOptions,
 ): Promise<
   | { kind: "ok"; prNumber: number; prUrl: string | null }
@@ -121,7 +121,7 @@ async function resolvePrNumberForMerge(
 
   const listResult = await gh("gh", ["pr", "list", "--head", source, "--base", target, "--state", "open", "--json", "number,url"], workDir, signal, undefined, options)
   const listOutput = combinedGhOutput(listResult)
-  record("gh-pr-list", `pr list --head ${source} --base ${target} --state open --json number,url`, listResult.exitCode, listOutput)
+  record("gh-pr-list", `pr list --head ${source} --base ${target} --state open --json number,url`, listResult.exitCode, listOutput, timeoutStepMetadata(listResult))
   if (listResult.exitCode !== 0) {
     return {
       kind: "failure",

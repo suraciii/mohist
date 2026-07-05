@@ -11,21 +11,52 @@
  * `mohist/acp-agent`, and `runCommand`'s per-command timeout so callers
  * never reimplement signal-layered timeout.
  */
-export function timeoutSignal(parent: AbortSignal, timeoutMs: number) {
+export interface TimeoutSignalHandle {
+  signal: AbortSignal
+  dispose(): void
+  timedOut(): boolean
+}
+
+export function createTimeoutSignal(parent: AbortSignal, timeoutMs: number): TimeoutSignalHandle {
   const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let onAbort: (() => void) | undefined
+  let timeoutFired = false
+
+  const cleanup = () => {
+    if (timer !== undefined) {
+      clearTimeout(timer)
+      timer = undefined
+    }
+    if (onAbort) {
+      parent.removeEventListener("abort", onAbort)
+      onAbort = undefined
+    }
+  }
+
   const abort = () => controller.abort(parent.reason)
   if (parent.aborted) {
     abort()
   } else {
-    const onAbort = () => {
-      clearTimeout(timer)
+    onAbort = () => {
       abort()
+      cleanup()
     }
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
+      timeoutFired = true
       controller.abort(new Error(`Timed out after ${timeoutMs / 1000}s`))
-      parent.removeEventListener("abort", onAbort)
+      cleanup()
     }, timeoutMs)
     parent.addEventListener("abort", onAbort, { once: true })
   }
-  return controller.signal
+
+  return {
+    signal: controller.signal,
+    dispose: cleanup,
+    timedOut: () => timeoutFired,
+  }
+}
+
+export function timeoutSignal(parent: AbortSignal, timeoutMs: number) {
+  return createTimeoutSignal(parent, timeoutMs).signal
 }

@@ -2,6 +2,7 @@ import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { booleanInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
+import { timeoutStepMetadata, type GitHubPrStep } from "./github-pr-types.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
@@ -51,6 +52,7 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
   const opts = sinkOptions(context)
   const networkOpts = networkOptions(context)
+  const steps: GitHubPrStep[] = []
 
   const sourceResolve = await git(workDir, ["rev-parse", source], context.signal, opts)
   if (!sourceResolve.success) {
@@ -91,12 +93,13 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
   }
   pushArgs.push(remote, refspec)
   const push = await git(workDir, pushArgs, context.signal, networkOpts)
+  steps.push({ name: "git-push", command: pushArgs.join(" "), exitCode: push.exitCode, output: push.combinedOutput, ...timeoutStepMetadata(push) })
   if (!push.success) {
     const failureKind = looksLikeNonFastForward(push.combinedOutput) ? "base-moved" : "retry-safe"
-    return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, push.combinedOutput, failureKind, push.exitCode)
+    return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, push.combinedOutput, failureKind, push.exitCode, steps)
   }
 
-  return pushOutput(source, target, remote, workDir, landedCommit, true, force, forceWithLease, push.combinedOutput, null, push.exitCode)
+  return pushOutput(source, target, remote, workDir, landedCommit, true, force, forceWithLease, push.combinedOutput, null, push.exitCode, steps)
 }
 
 type PushFailureKind = "base-moved" | "retry-safe" | null
@@ -113,6 +116,7 @@ function pushOutput(
   gitOutput: string,
   failureKind: PushFailureKind,
   exitCode: number | null,
+  steps: GitHubPrStep[] = [],
 ): ActionResult {
   // Schema convention: `failureKind` is always present (null on success).
   // Downstream renderers (CLI DeliveryFailureGuidance, web delivery-failure.ts)
@@ -135,6 +139,7 @@ function pushOutput(
     forceWithLease,
     failureKind,
     output: gitOutput,
+    steps,
   })
   if (pushed) {
     return { status: "success", message: "Push completed", output, exitCode: exitCode ?? 0 }

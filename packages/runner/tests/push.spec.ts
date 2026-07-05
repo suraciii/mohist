@@ -671,7 +671,17 @@ describe("mohist/push", () => {
     expect(result.status).toBe("failure")
     expect(output.failureKind).toBe("retry-safe")
     expect(output.output).toContain("timed out")
-    expect(output.exitCode ?? null).not.toBe(0)
+    expect(result.exitCode).toBe(124)
+    expect(output.steps).toEqual([
+      {
+        name: "git-push",
+        command: "push origin mo/issue-99:master",
+        exitCode: 124,
+        output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+        status: "timeout",
+        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+      },
+    ])
     expect(result.message).not.toContain("base branch moved")
   })
 })
