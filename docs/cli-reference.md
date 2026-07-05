@@ -301,7 +301,6 @@ mo update runner                    仅升级执行器
 
 | 当前实装 | 本文 spec | 性质 |
 |---|---|---|
-| `mo repo ...`（顶层）与 `mo project repo ...`（嵌套）双轨 | `mo repo --project`（扁平，作用域用 flag） | 双轨合并 + 作用域用 flag 原则 |
 | `mo server install/update`、`mo runner install/update` | `mo install/update` | 双入口合并 |
 | `mo status` | `mo project status` | 裸动词归位 |
 | `mo logs` | `mo system logs` | 裸动词归位 |

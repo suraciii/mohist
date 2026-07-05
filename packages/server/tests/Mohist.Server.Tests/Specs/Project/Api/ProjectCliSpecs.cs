@@ -181,7 +181,7 @@ public class ProjectCliSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["repository", "add", "backend", "--git-url", "git@example.com:backend.git", "--base-branch", "main", "--default"],
+            ["repository", "add", "backend", "--git-url", "git@example.com:backend.git", "--base-branch", "main", "--set-default"],
             output,
             error,
             files,
