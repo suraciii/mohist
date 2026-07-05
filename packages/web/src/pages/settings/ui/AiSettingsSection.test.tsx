@@ -418,3 +418,88 @@ describe('AiSettingsSection inline variant chips', () => {
     expect(mutateMock).toHaveBeenCalledWith({ stage: 'build', model: 'anthropic/claude-3', variant: 'high' })
   })
 })
+
+describe('AiSettingsSection default-model row click', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('re-clicking the already-selected default model row fires the mutation with variant: null to clear any stale default variant', async () => {
+    const mutateMock = vi.fn()
+    arrangeLoaded({
+      defaultModel: 'anthropic/claude-3',
+      defaultVariant: 'high',
+      modelVariants: { 'anthropic/claude-3': ['low', 'medium', 'high'] },
+    })
+    useUpdateOpencodeModelMock.mockReturnValue({ mutate: mutateMock })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(screen.getByRole('button', { name: /Default Coder Agent Model/i }))
+
+    const claudeRow = await waitFor(
+      () => document.querySelector('[data-model-id="anthropic/claude-3"]') as HTMLElement,
+    )
+    fireEvent.pointerDown(claudeRow)
+
+    await waitFor(() => {
+      expect(mutateMock).toHaveBeenCalledTimes(1)
+    })
+    expect(mutateMock).toHaveBeenCalledWith({ model: 'anthropic/claude-3', variant: null })
+    const payloadArg = mutateMock.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(payloadArg).toHaveProperty('variant', null)
+    expect(Object.prototype.hasOwnProperty.call(payloadArg, 'variant')).toBe(true)
+  })
+
+  it('selecting a different default model row fires the mutation with the new model and variant: null', async () => {
+    const mutateMock = vi.fn()
+    arrangeLoaded({
+      defaultModel: 'openai/gpt-4',
+      defaultVariant: 'high',
+      modelVariants: { 'anthropic/claude-3': ['low', 'medium', 'high'] },
+    })
+    useUpdateOpencodeModelMock.mockReturnValue({ mutate: mutateMock })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(screen.getByRole('button', { name: /Default Coder Agent Model/i }))
+
+    const claudeRow = await waitFor(
+      () => document.querySelector('[data-model-id="anthropic/claude-3"]') as HTMLElement,
+    )
+    fireEvent.pointerDown(claudeRow)
+
+    await waitFor(() => {
+      expect(mutateMock).toHaveBeenCalledTimes(1)
+    })
+    expect(mutateMock).toHaveBeenCalledWith({ model: 'anthropic/claude-3', variant: null })
+    const payloadArg = mutateMock.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(payloadArg).toHaveProperty('variant', null)
+    expect(Object.prototype.hasOwnProperty.call(payloadArg, 'variant')).toBe(true)
+  })
+
+  it('clicking a default model row fires the mutation with variant: null even when no prior variant was stored (idempotent delete)', async () => {
+    const mutateMock = vi.fn()
+    arrangeLoaded({
+      defaultModel: 'openai/gpt-4',
+      defaultVariant: null,
+      modelVariants: { 'anthropic/claude-3': ['low', 'medium', 'high'] },
+    })
+    useUpdateOpencodeModelMock.mockReturnValue({ mutate: mutateMock })
+    const user = userEvent.setup()
+    renderSection()
+
+    await user.click(screen.getByRole('button', { name: /Default Coder Agent Model/i }))
+
+    const claudeRow = await waitFor(
+      () => document.querySelector('[data-model-id="anthropic/claude-3"]') as HTMLElement,
+    )
+    fireEvent.pointerDown(claudeRow)
+
+    await waitFor(() => {
+      expect(mutateMock).toHaveBeenCalledTimes(1)
+    })
+    expect(mutateMock).toHaveBeenCalledWith({ model: 'anthropic/claude-3', variant: null })
+  })
+})

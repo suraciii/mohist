@@ -71,3 +71,31 @@ Outcome: source payload fixed at both scopes (`handleSelect` + `handleSetStageMo
 - Modified: `packages/web/src/features/select-issue-model/ui/IssueModelSelector.tsx` (+2 lines net, two PATCH payload literals get `variant: null` added).
 - Modified: `packages/web/src/features/select-issue-model/ui/IssueModelSelector.test.tsx` (+127 lines net: 1 flipped assertion + 3 new tests).
 - No production source outside `packages/web`. Server / runner untouched, consistent with T-001's locked contract.
+
+## T-003 — Clear stale project default variant on AiSettingsSection same-row re-click
+
+Outcome: same-row re-click short-circuit removed; `variant: null` mutation now always fires on a default-model row click; 3 new regression tests assert the payload contract.
+
+### What landed
+- `packages/web/src/pages/settings/ui/AiSettingsSection.tsx` — `handleSetOpencodeModel`: dropped the `if (modelId === storedDefaultModel) return` guard. Body is now just `setOpencodeModel.mutate({ model: modelId, variant: null })`. `storedDefaultModel` is still referenced for the displayed `value`, `allowClear`, and `onClear` wiring, so no unused-var warnings.
+- `packages/web/src/pages/settings/ui/AiSettingsSection.test.tsx` — new `describe('AiSettingsSection default-model row click', ...)` block with three regression cases:
+  1. Re-click already-selected default row (`defaultModel: 'anthropic/claude-3'`, `defaultVariant: 'high'`): mutation fires once with `{ model: 'anthropic/claude-3', variant: null }`. Asserts `hasOwnProperty('variant')` so the key-present-and-null contract is locked (not just "variant ended up null somewhere").
+  2. Select a different default model row (`defaultModel: 'openai/gpt-4'`, `defaultVariant: 'high'`, click `anthropic/claude-3`): mutation fires with `{ model: 'anthropic/claude-3', variant: null }`, same key-present-and-null check.
+  3. Idempotent delete: re-click already-selected row when no prior variant was stored — mutation still fires with `variant: null`. Confirms the unconditional call is harmless on an absent key (T-001's null-leaf no-op contract).
+
+### Decisions / gotchas
+- Used `fireEvent.pointerDown` on the `[data-model-id="..."]` row element, mirroring the IssueModelSelector test pattern (`IssueModelSelector.test.tsx:181` clicks the same way). ModelSelect listens on `pointerdown` via a `useCallback` ref (`ModelSelect.tsx:209`), so `pointerDown` is the event that triggers `onChange → handleSetOpencodeModel`. `fireEvent.click` would NOT fire the handler because the listener is on `pointerdown`, not click.
+- Mirrored the T-002 `hasOwnProperty` defensive assertion (instead of just `expect(variant).toBeNull()`) so a future "fix" that drops the key entirely (re-introducing the omitted-key bug class) is caught here too.
+- The new tests are deliberately inside their own `describe` block (not folded into the `inline variant chips` block) because the contract under test is the row-click PATCH shape, not chip-click chip-rendering.
+- New tests: 3 (was 19 in this file → 22). The `inline variant chips` suite is untouched; its existing chip-click tests still go through `handleSetDefaultVariant` (unchanged).
+
+### Verification run
+- `npm run -w packages/web test:run -- src/pages/settings/ui/AiSettingsSection.test.tsx` → 22/22 pass (19 existing + 3 new). Duration 1.53s.
+- `npm run -w packages/web test:run` → 4413 pass / 1 skipped / 0 fail. Duration 18.77s. (Was 4410 before T-003 with 0 failing; +3 new tests, the lone skip is pre-existing and unrelated.)
+- `npm run typecheck -w packages/web` → clean (`tsc -b` no errors).
+
+### Diff footprint
+- Modified: `packages/web/src/pages/settings/ui/AiSettingsSection.tsx` (-1 line net: the `if (modelId === storedDefaultModel) return` line is removed).
+- Modified: `packages/web/src/pages/settings/ui/AiSettingsSection.test.tsx` (+85 lines net: a new `describe` block with 3 tests).
+- No production source outside `packages/web`. Server / runner untouched (consistent with T-001's locked contract and T-002's pattern).
+- No commit yet — staged for the T-003 commit on `mohist/run-wr_543aed6011a44fcfa09cb634b2cdaa5d`.
