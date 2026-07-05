@@ -174,17 +174,17 @@ Issue 的工作流快捷方式（approve/retry/rerun/...）是对应 `mo workflo
 ## Epic（产品里程碑）
 
 ```
-mo epic create <标题> [--description <描述>] [--priority p0-p3]
+mo epic create <title> [options]
 mo epic list
-mo epic get <id或编号>
-mo epic update <id或编号> [options]
+mo epic get <epic-id-or-number>
+mo epic update <epic-id-or-number> [options]
 mo epic link <epic> <issue>
 mo epic unlink <epic> <issue>
-mo epic start <id或编号>            开始自动推进
-mo epic pause <id或编号>            暂停自动推进
-mo epic resume <id或编号>
-mo epic done <id或编号>             标记里程碑完成
-mo epic close <id或编号>            放弃里程碑
+mo epic start <epic-id-or-number>            开始自动推进
+mo epic pause <epic-id-or-number>            暂停自动推进
+mo epic resume <epic-id-or-number>
+mo epic done <epic-id-or-number>             标记里程碑完成
+mo epic close <epic-id-or-number>            放弃里程碑
 ```
 
 epic 无 delete——里程碑用 done（完成）或 close（放弃）收尾，不删除。
