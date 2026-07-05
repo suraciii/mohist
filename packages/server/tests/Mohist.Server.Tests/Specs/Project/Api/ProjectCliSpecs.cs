@@ -181,7 +181,7 @@ public class ProjectCliSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["repository", "add", "backend", "--git-url", "git@example.com:backend.git", "--base-branch", "main", "--default"],
+            ["repository", "add", "backend", "--git-url", "git@example.com:backend.git", "--base-branch", "main", "--set-default"],
             output,
             error,
             files,
@@ -233,7 +233,7 @@ public class ProjectCliSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task RepositoryAdd_WithPathOnly_IsRejectedWithValidationError()
+    public async Task RepositoryAdd_ServerValidationError_IsSurfaced()
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(
