@@ -39,7 +39,7 @@ public class CliProjectWorkflowCommandSpecs
     }
 
     [Fact]
-    public async Task WorkflowHelp_ListsTemplateAndConfigSubgroups()
+    public async Task WorkflowHelp_ListsProfileTemplateAndConfigSubgroups()
     {
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
         var exitCode = await MohistCliCommands.RunAsync(
@@ -47,6 +47,7 @@ public class CliProjectWorkflowCommandSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
+        Assert.Contains("profile", stdout);
         Assert.Contains("template", stdout);
         Assert.Contains("config", stdout);
     }

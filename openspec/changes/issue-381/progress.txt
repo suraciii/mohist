@@ -51,3 +51,23 @@
 - `dotnet build Mohist.sln` clean (0 warnings, 0 errors — TreatWarningsAsErrors on).
 - New spec: 6 tests, all pass.
 - Regression: full server test surface, 3907 passed (excluding the pre-existing flaky transcript-axes test, which reproduces on master). New `WorkflowRunDetailApiSpecs` does not destabilize the existing `WorkflowRunControlApiSpecs` collection.
+
+## T-003 decisions
+
+- Profile-listing relocation is mechanical per Decision 6: the 91-line `BuildList` body moved verbatim from `MohistCliCommands.Workflow.cs` to a new `BuildProfileList` inside `MohistCliCommands.ProjectWorkflow.cs`. Same flags (`--described`, `--project` / `--project-id`, `-o`), same active-project fallback with degraded stderr note, same conflict handling, same `TableShape` (none — described mode uses the existing `RenderWorkflowProfilesDescribed` writer; plain mode goes through `PrintWithOutputAsync`).
+- The new subgroup is registered as `profile` between `template` and `config` siblings under `mo project workflow` — sibling order chosen to surface the new resource without pushing template/config down.
+- `WorkflowCommands.Build` was deliberately left with an empty `workflow` command (description: "Workflow run management") instead of being deleted, so T-004/T-005 can populate it with control + read subcommands without colliding on the file. Top-level `mo workflow` no longer exposes a `list` subcommand.
+- No alias was added — `mo workflow list` returns a `System.CommandLine` parse error (`Unrecognized command`) and exits non-zero without making any HTTP request. The acceptance criterion "顶层 mo workflow 不再暴露返回 WorkflowProfile 的 list 子命令" is satisfied by leaving `BuildList` out of `WorkflowCommands.Build`.
+- Test placement: created `packages/cli/tests/Mohist.Cli.Tests/CliProjectWorkflowProfileSpecs.cs` (12 tests) rather than folding into `CliProjectWorkflowCommandSpecs.cs`. The new file is dedicated to profile-listing behavior so future T-004/T-005 work on `mo workflow <control>` / `mo workflow <read>` doesn't have to wade through profile listing tests.
+- Updated `CliProjectWorkflowCommandSpecs.WorkflowHelp_ListsProfileTemplateAndConfigSubgroups` to assert all three subgroups now (`profile`, `template`, `config`).
+- Server-side CLI tests also exercised `mo workflow list` and needed migration: renamed `WorkflowCliListSpecs.cs` → `WorkflowCliProfileListSpecs.cs` and `WorkflowCliSpecs.cs` → `WorkflowCliProfileSpecs.cs`. The new files change every `["workflow", "list", ...]` invocation to `["project", "workflow", "profile", "list", ...]` and add `--project <id>` because the new path requires project context to avoid the degraded fallback (the old path's no-project-resolvable case is now a degraded stderr note + unfiltered list, which the test scaffolding can't easily reproduce without `cli-state.json` plumbing).
+- The new path's `--help` text now reads "Project workflow management" at the parent level; the top-level `mo workflow --help` reads "Workflow run management". The pre-existing `WorkflowCliListSpecs.WorkflowHelp_ListsListSubcommand` test was inverted to `WorkflowHelp_NoLongerExposesListSubcommand`.
+- Docs: updated `docs/cli-reference.md` minimally so existing test assertions about top-level command groups pass against the new path. `CliReferenceDocsSpecs.CliReference_DocumentsRealTopLevelCommandGroupsAndCriticalSubcommands` now expects `mo project workflow profile list` instead of `mo workflow list`; `CliReference_OptionNotesDoNotOverstateOutputOrProjectFlags` no longer asserts the deleted "顶层 `mo workflow` 不接受 `--project`/`--project-id`" line. Skill files (`mohist-create-issue/SKILL.md`, `mohist/SKILL.md`) still reference the old path — T-006 owns those.
+- Cross-region regression check: full CLI test surface (662) and server-side CLI specs (17) pass. The pre-existing flaky `Sessions.GenericAgentSessionTranscriptAxisSpecs.GenericLaunch_PolledDispatch_CarriesMintedAgentSessionIdAndNoWorkflowRunId` reproduces on master and is unrelated to this change (per progress.txt line 22).
+
+## Validation
+
+- `dotnet build Mohist.sln` clean (0 warnings, 0 errors).
+- `packages/cli/tests/Mohist.Cli.Tests`: 662 passed, 0 failed.
+- `packages/server/tests/Mohist.Server.Tests` filter `Cli & !WorkflowCliListSpecs & !WorkflowCliSpecs`: 388 passed, 0 failed.
+- `packages/server/tests/Mohist.Server.Tests` filter `Workflow` (excluding pre-existing flaky): 1041 passed, 0 failed (1 pre-existing flaky transcript-axes test reproduces on master; not blocking).

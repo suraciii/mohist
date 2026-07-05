@@ -5,41 +5,31 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class CliWorkflowListSpecs
+public class CliProjectWorkflowProfileSpecs
 {
-    private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateHarness(Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
+    private static object SampleProfile(string id = "mohist/local", string displayName = "Mohist Local Workflow", string description = "Standard pipeline.") => new
     {
-        var handler = new RecordingHttpHandler((req, _) =>
-        {
-            var response = responder?.Invoke(req);
-            if (response is not null) return Task.FromResult(response);
-            return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { } }));
-        });
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
-        var output = new StringWriter();
-        var error = new StringWriter();
-        var fs = new FakeFileSystem();
-        fs.AddFile(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
-            "{\"activeProjectId\":\"proj_abc\"}");
-        return (handler, http, output, error, fs, new FakeCommandExecutor());
-    }
+        id,
+        displayName,
+        description,
+    };
+
+    private static object SampleTemplateInfo(string templateId = "mohist/local") => new
+    {
+        id = templateId,
+    };
 
     [Fact]
-    public async Task WorkflowListDescribed_WithProject_SendsProjectQueryParam()
+    public async Task ProfileList_DescribedWithProject_SendsProjectQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=proj_abc")
             {
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new[]
-                    {
-                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
-                    },
+                    data = new[] { SampleProfile() },
                 });
             }
             return null!;
@@ -47,7 +37,7 @@ public class CliWorkflowListSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["workflow", "list", "--described", "--project", "proj_abc"],
+            ["project", "workflow", "profile", "list", "--described", "--project", "proj_abc"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -58,19 +48,16 @@ public class CliWorkflowListSpecs
     }
 
     [Fact]
-    public async Task WorkflowListDescribed_WithProjectIdAlias_SendsProjectQueryParam()
+    public async Task ProfileList_DescribedWithProjectIdAlias_SendsProjectQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=proj_abc")
             {
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new[]
-                    {
-                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
-                    },
+                    data = new[] { SampleProfile() },
                 });
             }
             return null!;
@@ -78,7 +65,7 @@ public class CliWorkflowListSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["workflow", "list", "--described", "--project-id", "proj_abc"],
+            ["project", "workflow", "profile", "list", "--described", "--project-id", "proj_abc"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -87,9 +74,9 @@ public class CliWorkflowListSpecs
     }
 
     [Fact]
-    public async Task WorkflowListDescribed_WithActiveProject_SendsProjectQueryParam()
+    public async Task ProfileList_DescribedWithActiveProject_SendsProjectQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=proj_abc")
             {
@@ -98,8 +85,8 @@ public class CliWorkflowListSpecs
                     success = true,
                     data = new[]
                     {
-                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
-                        new { id = "mohist/github-pr", displayName = "GitHub PR Workflow", description = "PR pipeline." },
+                        SampleProfile("mohist/local", "Mohist Local Workflow", "Standard pipeline."),
+                        SampleProfile("mohist/github-pr", "GitHub PR Workflow", "PR pipeline."),
                     },
                 });
             }
@@ -108,7 +95,7 @@ public class CliWorkflowListSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["workflow", "list", "--described"],
+            ["project", "workflow", "profile", "list", "--described"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -124,19 +111,16 @@ public class CliWorkflowListSpecs
     }
 
     [Fact]
-    public async Task WorkflowListDescribed_RendersIdDisplayNameAndDescriptionWithoutSuitableForLine()
+    public async Task ProfileList_Described_RendersIdDisplayNameAndDescriptionWithoutSuitableForLine()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=proj_abc")
             {
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new[]
-                    {
-                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
-                    },
+                    data = new[] { SampleProfile() },
                 });
             }
             return null!;
@@ -144,7 +128,7 @@ public class CliWorkflowListSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["workflow", "list", "--described", "--project", "proj_abc"],
+            ["project", "workflow", "profile", "list", "--described", "--project", "proj_abc"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -157,30 +141,25 @@ public class CliWorkflowListSpecs
     }
 
     [Fact]
-    public async Task WorkflowListDescribed_NoProjectResolvable_FallsBackToUnfilteredWithStderrNote()
+    public async Task ProfileList_DescribedNoProjectResolvable_FallsBackToUnfilteredWithStderrNote()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles")
             {
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new[]
-                    {
-                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
-                    },
+                    data = new[] { SampleProfile() },
                 });
             }
             return null!;
-        });
-        // No cli-state.json — no active project
-        var fs2 = new FakeFileSystem();
+        }, activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["workflow", "list", "--described"],
-            output, error, fs2, executor);
+            ["project", "workflow", "profile", "list", "--described"],
+            output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReq = handler.Requests.Last(r => r.Method == HttpMethod.Get);
@@ -190,13 +169,13 @@ public class CliWorkflowListSpecs
     }
 
     [Fact]
-    public async Task WorkflowListDescribed_WithConflictingProjectFlags_ReturnsOneAndDoesNotRequestDiscovery()
+    public async Task ProfileList_DescribedWithConflictingProjectFlags_ReturnsOneAndDoesNotRequestDiscovery()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["workflow", "list", "--described", "--project", "proj_a", "--project-id", "proj_b"],
+            ["project", "workflow", "profile", "list", "--described", "--project", "proj_a", "--project-id", "proj_b"],
             output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
@@ -206,9 +185,9 @@ public class CliWorkflowListSpecs
     }
 
     [Fact]
-    public async Task WorkflowListPlain_WithProject_SendsProjectQueryParam()
+    public async Task ProfileList_PlainWithProject_SendsProjectQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-templates/system?project=proj_abc")
             {
@@ -217,8 +196,8 @@ public class CliWorkflowListSpecs
                     success = true,
                     data = new[]
                     {
-                        new { id = "mohist/local" },
-                        new { id = "mohist/github-pr" },
+                        SampleTemplateInfo("mohist/local"),
+                        SampleTemplateInfo("mohist/github-pr"),
                     },
                 });
             }
@@ -227,7 +206,7 @@ public class CliWorkflowListSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["workflow", "list", "--project", "proj_abc"],
+            ["project", "workflow", "profile", "list", "--project", "proj_abc"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -236,19 +215,16 @@ public class CliWorkflowListSpecs
     }
 
     [Fact]
-    public async Task WorkflowListPlain_WithActiveProject_SendsProjectQueryParam()
+    public async Task ProfileList_PlainWithActiveProject_SendsProjectQueryParam()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-templates/system?project=proj_abc")
             {
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new[]
-                    {
-                        new { id = "mohist/local" },
-                    },
+                    data = new[] { SampleTemplateInfo("mohist/local") },
                 });
             }
             return null!;
@@ -256,7 +232,7 @@ public class CliWorkflowListSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["workflow", "list"],
+            ["project", "workflow", "profile", "list"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -265,13 +241,13 @@ public class CliWorkflowListSpecs
     }
 
     [Fact]
-    public async Task WorkflowListPlain_WithConflictingProjectFlags_ReturnsOneAndDoesNotRequestDiscovery()
+    public async Task ProfileList_PlainWithConflictingProjectFlags_ReturnsOneAndDoesNotRequestDiscovery()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["workflow", "list", "--project", "proj_a", "--project-id", "proj_b"],
+            ["project", "workflow", "profile", "list", "--project", "proj_a", "--project-id", "proj_b"],
             output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
@@ -280,40 +256,9 @@ public class CliWorkflowListSpecs
     }
 
     [Fact]
-    public async Task WorkflowListDescribed_WithProject_ExcludesDisabledProfile()
+    public async Task ProfileList_DescribedWithMissingProject_ReturnsNotFoundAndPrintsError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
-        {
-            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=proj_abc")
-            {
-                // Server already filters — return only enabled profiles
-                return RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new[]
-                    {
-                        new { id = "mohist/local", displayName = "Mohist Local Workflow", description = "Standard pipeline." },
-                    },
-                });
-            }
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            ["workflow", "list", "--described", "--project", "proj_abc"],
-            output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var stdout = output.ToString();
-        Assert.Contains("mohist/local", stdout);
-        Assert.DoesNotContain("mohist/github-pr", stdout);
-    }
-
-    [Fact]
-    public async Task WorkflowListDescribed_WithMissingProject_ReturnsNotFoundAndPrintsError()
-    {
-        var (handler, http, output, error, fs, executor) = CreateHarness(req =>
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-profiles?project=missing-project")
             {
@@ -327,7 +272,7 @@ public class CliWorkflowListSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["workflow", "list", "--described", "--project", "missing-project"],
+            ["project", "workflow", "profile", "list", "--described", "--project", "missing-project"],
             output, error, fs, executor);
 
         Assert.Equal(4, exitCode);
@@ -340,18 +285,32 @@ public class CliWorkflowListSpecs
     }
 
     [Fact]
-    public async Task WorkflowList_HelpMentionsDescribedOptionAndOmitsSuitableForWording()
+    public async Task ProfileList_HelpMentionsDescribedOptionAndOmitsSuitableForWording()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["workflow", "list", "--help"],
+            ["project", "workflow", "profile", "list", "--help"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains("--described", stdout);
         Assert.DoesNotContain("suitable_for", stdout);
+    }
+
+    [Fact]
+    public async Task Workflow_NoLongerExposesProfileListSubcommand()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["workflow", "list"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 }

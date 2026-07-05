@@ -295,7 +295,6 @@ mo update runner                    仅升级执行器
 
 | 当前实装 | 本文 spec | 性质 |
 |---|---|---|
-| `mo workflow list`（WorkflowProfile） | `mo project workflow profile list` | 路径变更（profile 让位给 WorkflowRun） |
 | `mo project workflow config ...` | `mo project workflow profile ...` | 正名（config → profile） |
 | `mo repo ...`（顶层） | `mo project repo ...` | 双轨合并 |
 | `mo agent delete` | `mo agent archive` | 正名（delete → archive） |

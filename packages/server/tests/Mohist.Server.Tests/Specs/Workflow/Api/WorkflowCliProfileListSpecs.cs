@@ -11,25 +11,27 @@ using EnvironmentAbstractions.TestHelpers;
 namespace Mohist.Server.Tests.Specs.Workflow.Api;
 
 [Collection("WorkflowCli")]
-public class WorkflowCliListSpecs
+public class WorkflowCliProfileListSpecs
 {
+    private const string DefaultProjectId = "proj_abc";
+
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowHelp_ListsListSubcommand()
+    public async Task WorkflowHelp_NoLongerExposesListSubcommand()
     {
         var help = await RenderHelp(["workflow", "--help"]);
 
-        Assert.Contains("list", help);
-        Assert.Contains("Workflow profile management", help);
+        Assert.DoesNotContain("list", help);
+        Assert.DoesNotContain("Workflow profile management", help);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowListHelp_DocumentsOutputOption()
+    public async Task ProfileListHelp_DocumentsOutputOption()
     {
-        var help = await RenderHelp(["workflow", "list", "--help"]);
+        var help = await RenderHelp(["project", "workflow", "profile", "list", "--help"]);
 
         Assert.Contains("--output", help);
     }
@@ -37,7 +39,7 @@ public class WorkflowCliListSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_Described_DisplaysAllProfilesWithIdAndDisplayName()
+    public async Task ProfileList_Described_DisplaysAllProfilesWithIdAndDisplayName()
     {
         const string json = """
             {
@@ -51,7 +53,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, stderr) = await InvokeWorkflowAsync(http, "workflow", "list", "--described");
+        var (exitCode, stdout, stderr) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--described", "--project", DefaultProjectId);
 
         Assert.True(exitCode == 0, $"exit={exitCode} stdout:\n{stdout}\n\nstderr:\n{stderr}");
         Assert.Contains("Mohist Local", stdout);
@@ -63,7 +65,7 @@ public class WorkflowCliListSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_Described_PreservesMultiLineDescriptionFormatting()
+    public async Task ProfileList_Described_PreservesMultiLineDescriptionFormatting()
     {
         const string multiLine = "Line one\nLine two\nLine three";
         var json = $$"""
@@ -77,7 +79,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, stderr) = await InvokeWorkflowAsync(http, "workflow", "list", "--described");
+        var (exitCode, stdout, stderr) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--described", "--project", DefaultProjectId);
 
         Assert.True(exitCode == 0, $"exit={exitCode} stderr:\n{stderr}");
         Assert.Contains("Line one", stdout);
@@ -88,7 +90,7 @@ public class WorkflowCliListSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_JsonOutput_EmitsValidArrayWithRequiredFields()
+    public async Task ProfileList_JsonOutput_EmitsValidArrayWithRequiredFields()
     {
         const string json = """
             {
@@ -102,7 +104,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, stderr) = await InvokeWorkflowAsync(http, "workflow", "list");
+        var (exitCode, stdout, stderr) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--project", DefaultProjectId);
 
         Assert.True(exitCode == 0, $"exit={exitCode} stdout:\n{stdout}\n\nstderr:\n{stderr}");
         Assert.Equal(string.Empty, stderr);
@@ -125,7 +127,7 @@ public class WorkflowCliListSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_JsonOutput_PreservesMultiLineDescription()
+    public async Task ProfileList_JsonOutput_PreservesMultiLineDescription()
     {
         const string multiLine = "Line one\nLine two\nLine three";
         var json = $$"""
@@ -139,7 +141,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list");
+        var (exitCode, stdout, _) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--project", DefaultProjectId);
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var parsed = JsonNode.Parse(stdout) as JsonArray;
@@ -151,7 +153,7 @@ public class WorkflowCliListSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_JsonOutput_IsDefaultValueComesFromServer()
+    public async Task ProfileList_JsonOutput_IsDefaultValueComesFromServer()
     {
         // Server returns isDefault=false for the default profile id.
         // The CLI must surface what the server says, not derive it locally.
@@ -166,7 +168,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list");
+        var (exitCode, stdout, _) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--project", DefaultProjectId);
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var parsed = JsonNode.Parse(stdout) as JsonArray;
@@ -179,7 +181,7 @@ public class WorkflowCliListSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_JsonOutput_IsSelfContained()
+    public async Task ProfileList_JsonOutput_IsSelfContained()
     {
         // The JSON output must contain only the documented fields per profile
         // and must not bleed in transient data like timestamps, paths, or env vars.
@@ -194,7 +196,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list");
+        var (exitCode, stdout, _) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--project", DefaultProjectId);
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var trimmed = stdout.Trim();
@@ -214,7 +216,7 @@ public class WorkflowCliListSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_CallsSystemTemplatesEndpoint()
+    public async Task ProfileList_CallsSystemTemplatesEndpoint()
     {
         const string json = """
             { "success": true, "data": [] }
@@ -222,25 +224,25 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, _, stderr) = await InvokeWorkflowAsync(http, "workflow", "list");
+        var (exitCode, _, stderr) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--project", DefaultProjectId);
 
         Assert.True(exitCode == 0, $"exit={exitCode} stderr:\n{stderr}");
         var req = Assert.Single(http.Requests);
         Assert.Equal(HttpMethod.Get, req.Method);
-        Assert.Equal("/api/workflow-templates/system", req.RequestUri!.PathAndQuery);
+        Assert.Equal($"/api/workflow-templates/system?project={DefaultProjectId}", req.RequestUri!.PathAndQuery);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_ServerNotRunning_ReportsStandardErrorAndExitsNonZero()
+    public async Task ProfileList_ServerNotRunning_ReportsStandardErrorAndExitsNonZero()
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(new FailingHandler()) { BaseAddress = new Uri("http://127.0.0.1:1") },
-            ["workflow", "list"],
+            ["project", "workflow", "profile", "list", "--project", DefaultProjectId],
             stdout,
             stderr,
             new FakeFileSystem(),
@@ -256,7 +258,7 @@ public class WorkflowCliListSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_UnexpectedResponseShape_PassesRawDataThrough()
+    public async Task ProfileList_UnexpectedResponseShape_PassesRawDataThrough()
     {
         // --output json does raw passthrough of the API response data field;
         // shape validation is not performed for consistency with other commands.
@@ -266,7 +268,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list");
+        var (exitCode, stdout, _) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--project", DefaultProjectId);
 
         Assert.Equal(0, exitCode);
         var parsed = JsonNode.Parse(stdout.Trim()) as JsonObject;
@@ -277,7 +279,7 @@ public class WorkflowCliListSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_Described_SeparatesMultipleProfilesWithBlankLine()
+    public async Task ProfileList_Described_SeparatesMultipleProfilesWithBlankLine()
     {
         const string json = """
             {
@@ -291,7 +293,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list", "--described");
+        var (exitCode, stdout, _) = await InvokeProfileAsync(http, "project", "workflow", "profile", "list", "--described", "--project", DefaultProjectId);
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var text = stdout.Replace("\r\n", "\n");
@@ -321,7 +323,7 @@ public class WorkflowCliListSpecs
         return stdout.ToString();
     }
 
-    private static Task<(int ExitCode, string Stdout, string Stderr)> InvokeWorkflowAsync(
+    private static Task<(int ExitCode, string Stdout, string Stderr)> InvokeProfileAsync(
         HttpMessageHandler handler,
         params string[] args)
     {
