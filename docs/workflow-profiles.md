@@ -34,8 +34,9 @@ stages:
       - id: self-review
         # ...
     checks:
-      - name: proposal-complete
-        # ...
+      - name: plan-artifacts     # 验证 proposal.md / specs / design.md / tasks.json 全部就位
+        with:
+          changeDir: ${{ openspecChangeDir }}
 
   - stage: build
     requiresApproval: false      # 默认 build 不审批
