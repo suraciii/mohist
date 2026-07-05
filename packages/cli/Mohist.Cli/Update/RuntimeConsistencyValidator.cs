@@ -221,23 +221,83 @@ internal sealed class RuntimeConsistencyValidator
 
     private async Task<RunnerIdentitySnapshot?> PollForRunnerIdentityAsync(CancellationToken token)
     {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        using var timeoutTimer = StartRunnerIdentityTimeoutTimer(timeoutCts, _runnerIdentityTimeout);
+        var waitToken = timeoutCts.Token;
         var deadline = _timeProvider.GetUtcNow() + _runnerIdentityTimeout;
-        while (true)
+        while (!waitToken.IsCancellationRequested && _timeProvider.GetUtcNow() < deadline)
         {
-            var identity = await TryGetRunnerIdentityAsync(token);
+            var identity = await TryGetRunnerIdentityWithinWindowAsync(deadline, waitToken, token);
+            token.ThrowIfCancellationRequested();
             if (identity is not null)
                 return identity;
 
+            if (waitToken.IsCancellationRequested)
+                break;
+
             var now = _timeProvider.GetUtcNow();
             if (now >= deadline)
-                return null;
+                break;
 
             var remaining = deadline - now;
             var delay = remaining < _runnerIdentityPollInterval
                 ? remaining
                 : _runnerIdentityPollInterval;
-            await Task.Delay(delay, _timeProvider, token);
+            try
+            {
+                await Task.Delay(delay, _timeProvider, waitToken);
+            }
+            catch (OperationCanceledException) when (waitToken.IsCancellationRequested)
+            {
+                break;
+            }
         }
+
+        token.ThrowIfCancellationRequested();
+        return null;
+    }
+
+    private async Task<RunnerIdentitySnapshot?> TryGetRunnerIdentityWithinWindowAsync(
+        DateTimeOffset deadline,
+        CancellationToken waitToken,
+        CancellationToken callerToken)
+    {
+        var remaining = deadline - _timeProvider.GetUtcNow();
+        if (remaining <= TimeSpan.Zero)
+            return null;
+
+        using var attemptWaitCts = CancellationTokenSource.CreateLinkedTokenSource(waitToken);
+        var identityTask = TryGetRunnerIdentityAsync(waitToken);
+        var timeoutTask = Task.Delay(remaining, _timeProvider, attemptWaitCts.Token);
+        var completed = await Task.WhenAny(identityTask, timeoutTask);
+        if (completed == identityTask)
+        {
+            attemptWaitCts.Cancel();
+            return await identityTask;
+        }
+
+        callerToken.ThrowIfCancellationRequested();
+        return null;
+    }
+
+    private ITimer? StartRunnerIdentityTimeoutTimer(CancellationTokenSource cts, TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            cts.Cancel();
+            return null;
+        }
+
+        return _timeProvider.CreateTimer(static state =>
+        {
+            try
+            {
+                ((CancellationTokenSource)state!).Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }, cts, timeout, Timeout.InfiniteTimeSpan);
     }
 
     internal async Task<RuntimeCheckResult> CheckManagedSkillAssetsAsync(UpdateContext context, CancellationToken token)

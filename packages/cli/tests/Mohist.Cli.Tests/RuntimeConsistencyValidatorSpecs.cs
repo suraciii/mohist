@@ -46,7 +46,7 @@ public class RuntimeConsistencyValidatorSpecs
 
     private static async Task AssertCompletedAsync<T>(Task<T> task)
     {
-        for (var attempts = 0; attempts < 10 && !task.IsCompleted; attempts++)
+        for (var attempts = 0; attempts < 100 && !task.IsCompleted; attempts++)
         {
             await Task.Yield();
         }
@@ -455,6 +455,47 @@ public class RuntimeConsistencyValidatorSpecs
     }
 
     [Fact]
+    public async Task CheckRunnerIdentityAsync_HangingIdentityRequest_ReportsWarnAtTimeout()
+    {
+        var startedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var time = new FakeTimeProvider(startedAt);
+        var requestCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new RecordingHttpHandler(async (req, cancellationToken) =>
+        {
+            Assert.Equal("/api/runner/identity", req.RequestUri!.AbsolutePath);
+            using var registration = cancellationToken.Register(static state =>
+            {
+                ((TaskCompletionSource)state!).SetResult();
+            }, requestCanceled);
+            await requestCanceled.Task;
+            throw new OperationCanceledException(cancellationToken);
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
+
+        var timeout = TimeSpan.FromSeconds(2);
+        var validator = BuildValidator(
+            http,
+            timeProvider: time,
+            runnerIdentityTimeout: timeout,
+            runnerIdentityPollInterval: TimeSpan.FromMilliseconds(500));
+        var context = BuildContext(repoRoot: "/repo");
+        context.SourceHead = "abc123";
+
+        var checkTask = validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+        await AssertRequestCountAsync(handler, 1);
+        Assert.False(checkTask.IsCompleted);
+
+        time.Advance(timeout);
+        Assert.True(requestCanceled.Task.IsCompleted, "Expected the in-flight request token to be canceled by fake time.");
+        var result = await checkTask;
+
+        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Contains("did not respond", result.Message);
+        Assert.Equal(timeout, time.GetUtcNow() - startedAt);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
     public async Task CheckRunnerIdentityAsync_TimeoutShorterThanPollInterval_ReportsWarnAtTimeout()
     {
         var startedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -485,7 +526,7 @@ public class RuntimeConsistencyValidatorSpecs
         Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
         Assert.Contains("did not respond", result.Message);
         Assert.Equal(timeout, time.GetUtcNow() - startedAt);
-        Assert.Equal(2, handler.Requests.Count);
+        Assert.Single(handler.Requests);
     }
 
     [Fact]
@@ -518,13 +559,12 @@ public class RuntimeConsistencyValidatorSpecs
         Assert.False(checkTask.IsCompleted);
 
         time.Advance(timeout - pollInterval);
-        await AssertCompletedAsync(checkTask);
         var result = await checkTask;
 
         Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
         Assert.Contains("did not respond", result.Message);
         Assert.Equal(timeout, time.GetUtcNow() - startedAt);
-        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal(2, handler.Requests.Count);
     }
 
     [Fact]

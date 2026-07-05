@@ -23,7 +23,7 @@
       "type": "WRITE",
       "output": "Modified packages/cli/Mohist.Cli/Update/RuntimeConsistencyValidator.cs (poll loop + constructor params), unchanged-but-verified construction sites in MohistCliCommands.cs / MohistCliCommands.Update.cs / Program.cs, and extended packages/cli/tests/Mohist.Cli.Tests/RuntimeConsistencyValidatorSpecs.cs with three new timing specs.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Do NOT touch RunnerRefreshVerifier, RestoreRunner's systemd gate, the mo update stage machine, the /api/runner/identity API contract, runner registration, the WebSocket handshake, or the buildGitHash comparison logic. Reuse TryGetRunnerIdentityAsync as the per-attempt probe unchanged. Optional constructor params keep the three production call sites compiling without edits."
     }
   ]

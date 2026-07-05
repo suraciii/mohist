@@ -1,6 +1,7 @@
 using System.Net;
 using System.Reflection;
 using EnvironmentAbstractions.TestHelpers;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Cli.Tests.Support;
 using Xunit;
 
@@ -92,6 +93,21 @@ public class SourceCodeUpdaterVerifyRuntimeSpecs
         return await task;
     }
 
+    private static async Task AssertRequestCountAsync(RecordingHttpHandler handler, string path, int expected)
+    {
+        for (var attempts = 0; attempts < 20 && CountRequests(handler, path) < expected; attempts++)
+        {
+            await Task.Yield();
+        }
+
+        Assert.Equal(expected, CountRequests(handler, path));
+    }
+
+    private static int CountRequests(RecordingHttpHandler handler, string path)
+    {
+        return handler.Requests.Count(r => r.RequestUri?.AbsolutePath == path);
+    }
+
     [Fact]
     public async Task VerifyRuntime_AllChecksPass_IncludesRunnerIdentityLineInOrder()
     {
@@ -126,6 +142,100 @@ public class SourceCodeUpdaterVerifyRuntimeSpecs
         Assert.True(connectionIndex < identityIndex, "Runner identity should follow Runner connection");
         Assert.True(identityIndex < assetsIndex, "Managed skill assets should follow Runner identity");
         Assert.Contains("[ok] Runner identity:", lines[identityIndex]);
+    }
+
+    [Fact]
+    public async Task VerifyRuntime_DelayedRunnerIdentityViaDefaultFactory_ReportsOkWithoutRealTime()
+    {
+        var sourceHead = "abc123";
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var pollInterval = TimeSpan.FromMilliseconds(500);
+        var runnerIdentityAttempts = 0;
+        var handler = new RecordingHttpHandler((req, _) =>
+        {
+            var path = req.RequestUri!.AbsolutePath;
+            if (path == "/api/system/info")
+            {
+                var body = $"{{\"running\":{{\"gitHash\":\"{sourceHead}\"}},\"services\":{{\"runner\":\"active\"}}}}";
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
+
+            if (path == "/")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "<html><head><script src=\"/assets/index-abc.js\"></script></head></html>",
+                        System.Text.Encoding.UTF8,
+                        "text/html"),
+                });
+            }
+
+            if (path == "/assets/index-abc.js")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("// bundle"),
+                });
+            }
+
+            if (path == "/api/runner/identity")
+            {
+                var attempt = Interlocked.Increment(ref runnerIdentityAttempts);
+                if (attempt < 3)
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
+                var body = $"{{\"data\":{{\"buildGitHash\":\"{sourceHead}\"}}}}";
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
+        var commands = new ScriptedCommandExecutor();
+        commands.Queue("/usr/bin/mo", 0, "mo 1.2.3\n");
+        var fs = new FakeFileSystem();
+        var assetRoot = Path.Combine("/home/test", ".mohist", "cli", "skill-data");
+        var skillDir = Path.Combine(assetRoot, "my-skill");
+        fs.CreateDirectory(assetRoot);
+        fs.CreateDirectory(skillDir);
+        fs.AddFile(Path.Combine(skillDir, "SKILL.md"), "# Skill");
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var updater = SourceCodeUpdater.CreateWithDefaults(
+            output,
+            error,
+            new FakeServiceInstaller(),
+            commands,
+            fileSystem: fs,
+            environment: new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false),
+            http: http,
+            getUserHome: () => "/home/test",
+            runnerIdentityTimeout: TimeSpan.FromSeconds(2),
+            runnerIdentityPollInterval: pollInterval,
+            timeProvider: time);
+        var context = BuildContext(output, sourceHead: sourceHead);
+
+        var verifyTask = InvokeVerifyRuntimeStageAsync(updater, context);
+        await AssertRequestCountAsync(handler, "/api/runner/identity", 1);
+        time.Advance(pollInterval);
+        await AssertRequestCountAsync(handler, "/api/runner/identity", 2);
+        time.Advance(pollInterval);
+        await AssertRequestCountAsync(handler, "/api/runner/identity", 3);
+        var exitCode = await verifyTask;
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(UpdateOutcome.Ready, context.Outcome);
+        Assert.Equal(3, runnerIdentityAttempts);
+        var lines = output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        var identityLine = Assert.Single(lines, l => l.Contains("Runner identity"));
+        Assert.Contains("[ok] Runner identity:", identityLine);
     }
 
     [Fact]
