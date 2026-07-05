@@ -2,7 +2,6 @@ import { existsSync as defaultExistsSync } from "node:fs"
 import { resolve, relative, isAbsolute } from "node:path"
 import * as signalR from "@microsoft/signalr"
 import type { ClientSideConnection } from "@agentclientprotocol/sdk"
-import type { JsonObject, RenderedWorkItem } from "../core/types.js"
 import { deleteDirectory, runCommand as defaultRunCommand, type CommandLineOptions } from "../system/process.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import { WorkspaceManager } from "../runtime/workspace.js"
@@ -644,83 +643,6 @@ export function resolveWorkspaceQuery(query: WorkspaceQuery | null | undefined):
   const head = query.branch ?? null
   if (!head) return null
   return { workDir: query.workspacePath, baseBranch: query.baseBranch, head }
-}
-
-export function normalizeMaterializePayload(payload: unknown): RenderedWorkItem {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("MaterializeWorkspace payload must be an object")
-  const source = payload as Record<string, unknown>
-  const workflowRunId = readString(source, "workflowRunId")
-  const workId = readString(source, "workId")
-  const workType = readString(source, "workType")
-  if (!workflowRunId || !workId || !workType) throw new Error("MaterializeWorkspace payload requires workflowRunId, workId, and workType")
-
-  return {
-    workflowRunId,
-    workId,
-    workType,
-    stage: readNullableString(source, "stage"),
-    title: readNullableString(source, "title"),
-    uses: readNullableString(source, "uses"),
-    with: parseJsonObject(source["with"], "with"),
-    variables: parseJsonObject(source["variables"], "variables"),
-    projectId: readNullableString(source, "projectId"),
-    issueNumber: readNullableNumber(source, "issueNumber") ?? undefined,
-    artifacts: parseJsonObject(source["artifacts"], "artifacts"),
-    setVars: parseSetVars(source["setVars"]),
-    outputs: parseOutputs(source["outputs"]),
-    ownerKind: readNullableString(source, "ownerKind") ?? undefined,
-    agentJobId: readNullableString(source, "agentJobId") ?? undefined,
-  }
-}
-
-function parseSetVars(value: unknown): Record<string, string> | null {
-  const parsed = parseJsonObject(value, "setVars")
-  if (parsed === null) return null
-  const result: Record<string, string> = {}
-  for (const [key, raw] of Object.entries(parsed)) {
-    if (typeof raw === "string") result[key] = raw
-    else if (raw === null || raw === undefined) result[key] = ""
-    else result[key] = typeof raw === "object" ? JSON.stringify(raw) : String(raw)
-  }
-  return result
-}
-
-function parseOutputs(value: unknown): Array<{ name: string; from: string }> | null {
-  if (value === undefined || value === null || value === "") return null
-  const parsed = typeof value === "string" ? JSON.parse(value) : value
-  if (!Array.isArray(parsed)) throw new Error("MaterializeWorkspace outputs must be an array")
-  return parsed.map((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("MaterializeWorkspace outputs entries must be objects")
-    const source = entry as Record<string, unknown>
-    const name = source["name"]
-    const from = source["from"]
-    if (typeof name !== "string" || name.length === 0 || typeof from !== "string" || from.length === 0) {
-      throw new Error("MaterializeWorkspace outputs entries require name and from")
-    }
-    return { name, from }
-  })
-}
-
-function parseJsonObject(value: unknown, field: string): JsonObject | null {
-  if (value === undefined || value === null || value === "") return null
-  const parsed = typeof value === "string" ? JSON.parse(value) : value
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`MaterializeWorkspace ${field} must be an object`)
-  return parsed as JsonObject
-}
-
-function readString(source: Record<string, unknown>, field: string): string | null {
-  const value = source[field]
-  return typeof value === "string" && value.length > 0 ? value : null
-}
-
-function readNullableString(source: Record<string, unknown>, field: string): string | null | undefined {
-  const value = source[field]
-  return value === undefined || value === null || typeof value === "string" ? value : undefined
-}
-
-function readNullableNumber(source: Record<string, unknown>, field: string): number | null | undefined {
-  const value = source[field]
-  return value === undefined || value === null || (typeof value === "number" && Number.isFinite(value)) ? value : undefined
 }
 
 async function isGitWorkTree(workDir: string, signal: AbortSignal): Promise<boolean> {

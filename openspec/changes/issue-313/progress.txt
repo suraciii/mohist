@@ -1,0 +1,18 @@
+## Codebase Patterns
+
+- `runner-signalr.ts` only imports test-facing setters (`setRunnerSignalRGitRunnerForTest` / `setRunnerSignalRExistsCheckerForTest`), `resolveWorkspaceQuery`/`isUnderRunnerRoot`, and `resolveSessionTarget` from outside the module. Tests in `tests/*.spec.ts` import via `from "../src/server/runner-signalr.js"` — design.md D4 says these should stay re-exported after refactor to keep test imports zero-diff.
+- `connection.ts` has a *different* local `readString(value, path: string[])` (path-array signature). It is NOT related to the deleted `readString(source, field)` from runner-signalr. rg for `readString` after deletion still hits `connection.ts` — expected and unrelated.
+- `runner-signalr.ts` uses `import type { JsonObject, RenderedWorkItem } from "../core/types.js"` — both types are *only* referenced by the dead `normalizeMaterializePayload` block. Deleting the block made the import unused; must be removed in the same edit (treat-warnings-as-errors would fail typecheck otherwise).
+
+## T-001 — 删除 normalizeMaterializePayload 死代码
+
+- Removed: `normalizeMaterializePayload` + 6 helpers (`parseSetVars`/`parseOutputs`/`parseJsonObject`/`readString`/`readNullableString`/`readNullableNumber`) from `packages/runner/src/server/runner-signalr.ts`.
+- Also removed: unused `import type { JsonObject, RenderedWorkItem } from "../core/types.js"` (was only consumed by the dead block).
+- File size: 850 → 772 lines (−78 lines, matches "约 75 行" estimate).
+- Verification:
+  - `rg -n "normalizeMaterializePayload|parseSetVars|parseOutputs|parseJsonObject|readString|readNullableString|readNullableNumber" packages/runner/src` → zero hits for the deleted symbols; only `readString` in `connection.ts` (different local function, unrelated).
+  - `npm run typecheck -w packages/runner` → clean.
+  - `npm test -w packages/runner` → 924 / 924 pass across 69 test files. `runner-signalr.spec.ts` / `runner-signalr-workflow-status.spec.ts` / `workspace-registry-integration.spec.ts` all pass with no test changes.
+- Zero behavior change: no SignalR contract, handler shape, hub URL, reconnect sequence, followup/cancel semantics, or test assertion touched.
+- For T-002 onwards: pure helpers `parseDiffFiles` / `splitDiffByFile` / `parseCommits` / `parseAheadBehind` / `parseNumstatTotal` / `isGitWorkTree` / `git` / `resolveWorkspaceQuery` / `isUnderRunnerRoot` / `resolveSessionTarget` / `WorkspaceQuery` / `ReceiveFollowup*` / `CancelAgent*` / `ReceiveWorkflowRunStatusPayload` remain in `runner-signalr.ts` for now; T-002–T-005 will extract them.
+- Note for downstream tasks: when extracting modules, the `import type { JsonObject, RenderedWorkItem }` was the only `core/types.js` import in `runner-signalr.ts`. Other type imports (`ClientSideConnection`, `WorkspaceRegistry`, `SessionTarget`, `ServerConnection`) remain.
