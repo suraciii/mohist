@@ -103,6 +103,37 @@ public class WorkflowRetrySessionHealthGuardSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task TaskFails_SessionContextAbove90Percent_RunScopedRetryReturnsSessionContextExhausted()
+    {
+        var (projectId, _, _, workflowRunId, sessionName) = await SeedProjectIssueWorkflowAsync();
+        var runnerId = $"retry-guard-run-{Guid.NewGuid():N}";
+        await RegisterRunnerAsync(runnerId, projectId);
+        try
+        {
+            var work = await PollForTaskAsync(runnerId, projectId, workflowRunId);
+            await OpenAndAttachSessionAsync(runnerId, projectId, workflowRunId, sessionName, work);
+            await PushContextUsageAsync(runnerId, projectId, workflowRunId, sessionName, contextWindowUsed: 960, contextWindowSize: 1000);
+            await ReportTaskFailedAsync(runnerId, workflowRunId, work.WorkId, "context exhausted");
+
+            var response = await _client.PostAsync($"/api/workflow-runs/{workflowRunId}/retry", null);
+
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("session_context_exhausted", payload.GetProperty("code").GetString());
+            var details = payload.GetProperty("details");
+            var actions = details.GetProperty("recoveryActions").EnumerateArray().Select(e => e.GetString()).ToArray();
+            Assert.Contains("compact", actions);
+            Assert.Contains("reset", actions);
+        }
+        finally
+        {
+            await _client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task TaskFails_SessionContextInWarnBand_RetrySucceedsAndStatusClears()
     {
         var (projectId, issueNumber, issueId, workflowRunId, sessionName) = await SeedProjectIssueWorkflowAsync();

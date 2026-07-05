@@ -302,7 +302,36 @@ public class PathContractRegressionSpecs
     [Fact]
     public async Task WorkflowEffectiveVariableKeyPath_ReturnsValueOrJsonNull()
     {
-        var workflowRunId = $"wr_keypath_{Guid.NewGuid():N}";
+        var name = $"keypath-{Guid.NewGuid():N}";
+        var project = await (await _client.PostAsJsonAsync("/api/projects", new { name }))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = project.GetProperty("data").GetProperty("id").GetString()!;
+        await _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/repositories",
+            new
+            {
+                name = "primary",
+                gitUrl = "git@example.com:keypath.git",
+                baseBranch = "main",
+                isDefault = true,
+            });
+        var issue = await (await _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues",
+            new { title = "Key path contract", projectId, isDraft = false }))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var issueNumber = issue.GetProperty("data").GetProperty("number").GetInt32();
+
+        using var startResponse = await _client.PostAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/start",
+            null);
+        Assert.Equal(System.Net.HttpStatusCode.OK, startResponse.StatusCode);
+
+        using var statusResponse = await _client.GetAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/status");
+        Assert.Equal(System.Net.HttpStatusCode.OK, statusResponse.StatusCode);
+        var statusJson = JsonDocument.Parse(await statusResponse.Content.ReadAsStringAsync()).RootElement;
+        var workflowRunId = statusJson.GetProperty("data").GetProperty("workflowRunId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(workflowRunId), "expected start to create a workflow run");
 
         using var putResponse = await _client.PutAsJsonAsync(
             $"/api/workflow-runs/{workflowRunId}/workflow-profile/variables",

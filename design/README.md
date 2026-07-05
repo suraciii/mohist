@@ -17,7 +17,7 @@ style: ["短索引，只说明入口。"]
 - [testing.md](testing.md) — 测试两条轨道（spec/unit）、外部依赖、时间依赖、fake 入口速查。
 - [eventbus.md](eventbus.md) — 事件总线边界和 CloudEvent 约定（as-is，当前运行时）。
 - [eventbus-v2.md](eventbus-v2.md) — 事件总线目标态：复用已落盘事件表 + 单分发器可靠 at-least-once 通知（设计已收敛，**未交付**，跟踪 epic #36）。
-- [agent-subscriptions.md](agent-subscriptions.md) — Agent 事件订阅（**WIP**）：Agent 监听 CloudEvent、按订阅响应提示词自动启动。归属 Agent 上下文，消费 PL；handler 只读信封、Agent 用 mo workflow get 自拉上下文；前置依赖 mo workflow 命令套件。
+- [agent-subscriptions.md](agent-subscriptions.md) — Agent 事件订阅（**WIP**）：Agent 监听 CloudEvent、按订阅响应提示词自动启动。归属 Agent 上下文，消费 PL；handler 只读信封、Agent 用 `mo workflow show <runId>` 自拉上下文；前置依赖 mo workflow 命令套件已由 issue #381 交付。
 
 ## Workflow 核心域
 
@@ -31,6 +31,7 @@ style: ["短索引，只说明入口。"]
 
 ## 支撑主题
 
+- [cli.md](cli.md) — `mo` 命令面的两条耐久原则：命名归属（顶层 `mo <noun>` 归核心域聚合根，子资源挂在父资源下）；输出格式 / 子资源 / 关联资源三类不可混用，输出格式绝不创造命令。任务注入（add-task）经 Tier 裁定后延后的结论与理由。
 - [issue-breakdown.md](issue-breakdown.md) — Issue 拆分 / sub-issue 方案（**WIP，暂不实现**）：与 Epic 重叠、#281 已列为 Non-Goal 的决策记录与开放问题。
 - [issue-templates.md](issue-templates.md) — 三类 issue 模板（Feature / Bug / Refactor）的 body 结构与设计依据。
 - [prompt-management.md](prompt-management.md) — project-scoped prompt 库和 workflow 的关系。

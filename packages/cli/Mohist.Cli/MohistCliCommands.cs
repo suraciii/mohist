@@ -58,10 +58,10 @@ internal static class MohistCliCommands
         return (project, projectId);
     }
 
-    internal static Option<string> OutputOption(string defaultValue = "json") =>
+    internal static Option<string> OutputOption(string defaultValue = "json", string formats = "table, json") =>
         new("--output", "-o")
         {
-            Description = "Output format (table, json)",
+            Description = $"Output format ({formats})",
             DefaultValueFactory = _ => defaultValue,
         };
 

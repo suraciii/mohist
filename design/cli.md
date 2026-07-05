@@ -1,20 +1,23 @@
 ---
-purpose: "命令面设计契约：CLI 命令的形状、命名、唯一入口与全局约定。"
+purpose: "命令面设计契约：CLI 命令的形状、命名、唯一入口、读命令数据归属与全局约定。"
 include:
   - "命令树形状与根命令层约束。"
-  - "资源命名与动词一致性原则。"
+  - "资源命名、命名归属与动词一致性原则。"
+  - "输出格式 / 子资源 / 关联资源三类边界。"
   - "唯一入口、复合与分拆、全局 flag 约定。"
+  - "任务注入（add-task）经 Tier 裁定后延后的结论与理由。"
 exclude:
   - "具体命令名、动词词表、flag 参数名（以代码与 docs/cli-reference.md 为准）。"
   - "现状偏差与整改项（落 issue）。"
+  - "HTTP 资源面与 grain 实现细节（见 architecture.md / conventions.md）。"
 style:
-  - "原则与约束，不写命令示例。"
+  - "原则与约束，少量规范性示例。"
   - "抽象概念表达，命令/动词/flag 名见产品 spec（docs/cli-reference.md）。"
 ---
 
 # CLI 命令面设计
 
-`mo` 是 Mohist 的命令行入口，面向脚本、自动化和远程 SSH 场景。命令面是稳定契约——它的形状会被脚本、外部 agent 和远程会话依赖，任何漂移都会直接破坏使用方。本规范定义命令面**该长什么样**，不枚举具体命令、动词或 flag（具体命令面见产品 spec [`docs/cli-reference.md`](../docs/cli-reference.md)）。
+`mo` 是 Mohist 的命令行入口，面向脚本、自动化和远程 SSH 场景。命令面是稳定契约——它的形状会被脚本、外部 agent 和远程会话依赖，任何漂移都会直接破坏使用方。本规范定义命令面**该长什么样**，不枚举完整命令、动词或 flag（具体命令面见产品 spec [`docs/cli-reference.md`](../docs/cli-reference.md)）。
 
 ## 与其他规范的关系
 
@@ -51,8 +54,16 @@ Rules:
 Rules:
 
 - 一个资源概念只有一个命令名。不为同一资源维持两套并行命令路径（例如一个顶层、一个嵌套在父资源下）——选一个，删另一个。
-- 子资源挂在**拥有它的父资源**之下，所有权反映在嵌套里，而不是在顶层复制一份。子资源出现独立的顶层入口即契约违背。
+- 顶层 `mo <noun>` 优先归独立领域聚合根；属于父资源的配置或子资源挂在**拥有它的父资源**之下，所有权反映在嵌套里，而不是在顶层复制一份。
 - 一个词不承载多个领域含义。已被某个资源占用的词，再用于另一个领域概念时必须换名或显式消歧——同一个词在不同层级指代不同领域对象，会让使用者无法从命令名推断语义。
+
+### 命名归属裁定
+
+`mo workflow` 归 WorkflowRun。WorkflowRun 是 workflow 核心域的聚合根，`workflowRunId` 是 agent 订阅链路和脚本自动化拿到的自然资源标识。
+
+WorkflowProfile 是 project 拥有的配置，归 `mo project workflow profile`，与 `mo project workflow template` / `mo project workflow config` 同层。旧 `mo workflow list` 让 `workflow` 一词承载 WorkflowProfile，挤占了 WorkflowRun 的顶层入口；issue #381 将它下沉到 `mo project workflow profile list`。
+
+未来如果再有命名冲突，先问这个 noun 是否是独立聚合根；如果不是，继续找拥有它的父资源，不占顶层命令组。
 
 ## 动词一致性
 
@@ -85,6 +96,27 @@ Rules:
 - 只有当变体的参数集或语义差异大到 flag 无法承载、或 flag 组合会严重损害可发现性时，才拆成独立命令。拆分必须给出理由，且不与既有同级命令的拆分风格冲突。
 - "少一个命令、多一个 flag"优于"多一个命令"——命令树的宽度比 flag 列表更昂贵。
 
+`mo workflow rerun --from-stage <stage>` 是这一规则的实例；`rerun-from-stage` 不单独造命令，而是 `rerun` 的一个 flag。
+
+## 读命令数据归属
+
+读命令返回的数据有三种归属，必须严格区分。
+
+| 类型 | 定义 | 形态 |
+|---|---|---|
+| 输出格式 | 同一资源的不同渲染 | `-o yaml` / `-o json` / `-o table` / `-o compact` |
+| 子资源 | 有独立资源路径、独立寻址的资源 | `mo <noun> <subresource>` 或明确的 subresource flag |
+| 关联资源 | 一对多子集合，如事件流、sessions、评论 | `mo <noun> <collection>` |
+
+Rules:
+
+- **输出格式不创造命令**。同一资源的不同渲染一律走 `-o <format>`，不为 yaml/json/table 单造平级命令。
+- **子资源不能伪装成输出格式**。子资源有独立资源路径与寻址语义，需要自己的命令或明确的 subresource flag。
+- **关联资源不能伪装成输出格式或子资源**。关联资源是一对多集合，需要自己的集合命令。
+- 三种类型不交叉。`-o sessions`、`-o variables` 这类把资源类别塞进输出格式的设计不成立。
+
+`mo workflow show <runId> -o yaml` 是输出格式规则的典型例子：它仍是在看同一个 WorkflowRun，只是以 YAML 渲染。`mo workflow variables <runId>` 是子资源；`mo workflow events <runId>` 和 `mo workflow list-sessions <runId>` 是关联资源。
+
 ## 全局约定
 
 全局 flag 是命令面一致性的横向约束。
@@ -105,3 +137,15 @@ Rules:
 - 高频命令可提供短别名以降低输入成本。
 - 别名与正名**必须同行为**。别名不是承载语义差异的地方——同一操作的两个名字做不同的事，是契约违背。
 - 别名是可选的便利层。任何使用者或脚本只用正名都必须能完成全部操作；别名失效不应影响可用性。
+
+## 任务注入延后裁定
+
+任务注入（`AddTask` / `AddTasks`，对应 `POST /api/workflow-runs/{id}/tasks[/batch]`）按 [`conventions.md`](conventions.md) Tier 节裁定属于 state-changing 能力，名义上需要 CLI 入口。
+
+issue #381 不交付 `mo workflow add-task` / `add-tasks`，延后到后续 issue 处理，理由是：
+
+- 当前端点没有与 workflow 控制动作同级的入场守卫；为无守卫的 state-changing 端点造 CLI 会放大既有守卫缺口。
+- add-task 是 stage 内部 work 协议，不是 run 生命周期上的状态裁判动作；把它塞进本次控制组会让控制语义膨胀。
+- agent 订阅的前置依赖是按 `workflowRunId` 拉取 run 详情并执行 run 级控制动作，不依赖任务注入。
+
+后续 issue 处理 add-task 时，需在同一单元里决定守卫模型并补上 CLI 命令。

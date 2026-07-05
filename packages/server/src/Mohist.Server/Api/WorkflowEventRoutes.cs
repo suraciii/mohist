@@ -28,8 +28,11 @@ public static class WorkflowEventRoutes
             return ApiResults.Ok(response);
         });
 
-        app.MapGet("/api/workflow-runs/{workflowRunId}/events", async (string workflowRunId, int? limit, WorkflowEventQuerier eventQuery) =>
+        app.MapGet("/api/workflow-runs/{workflowRunId}/events", async (string workflowRunId, int? limit, WorkflowQuerier workflowReader, WorkflowEventQuerier eventQuery) =>
         {
+            if (await WorkflowRoutes.EnsureWorkflowRunExistsAsync(workflowRunId, workflowReader) is { } failure)
+                return failure;
+
             var list = await eventQuery.ListWorkflowEventsAsync(workflowRunId, limit ?? 200);
             return ApiResults.Ok(list.Select(StoredCloudEventDto.From).ToList());
         });

@@ -126,7 +126,7 @@ Project-wide listing (use sparingly — the project group also exposes workflow
 template/config which is unrelated to epics):
 
 ```bash
-mo workflow list                   # 列出 workflow profile（注意：与 mo project workflow template/config 不同）
+mo project workflow profile list   # 列出 workflow profile
 mo label list                      # 当前 project 的可用标签
 ```
 

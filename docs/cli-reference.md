@@ -69,15 +69,19 @@ mo info         CLI 本地诊断（受控例外：跨资源只读，不归任一
 
 这些动作也可通过 issue 号触发（`mo issue approve <编号>`），issue 号是工作流执行的人类可读别名。直接寻址面向脚本与 agent 订阅场景——它们手里只有执行 ID。
 
+所有控制命令支持 `-o table|json` 和 `--dry-run`（打印请求体不发请求）。`rerun --from-stage` 等价旧 issue 快捷方式 `mo issue rerun-from-stage --stage <阶段>`；`pause` 可恢复，`stop` 是终态。
+
 ### 查询
 
 | 命令 | 作用 |
 |---|---|
-| `mo workflow get <runId>` `-o table\|json\|yaml` | 执行全貌（含状态、阶段进度、关联 issue、模板定义）。`-o yaml` 承载模板定义，不单造 `yaml` 命令 |
-| `mo workflow status <runId>` | 精简状态摘要（比 get 短） |
+| `mo workflow show <runId>` `-o table\|json\|yaml` | 执行全貌（含状态、阶段进度、关联 issue、模板定义）。`-o yaml` 承载模板定义，不单造 `yaml` 命令 |
+| `mo workflow status <runId>` | 精简状态摘要（比 show 短） |
 | `mo workflow variables <runId>` `[--stage <阶段>] [--key <键路径>]` | 生效变量（子资源，有独立寻址） |
 | `mo workflow events <runId>` `[--limit <n>]` | 事件流（关联资源） |
 | `mo workflow list-sessions <runId>` | 该执行的会话列表（关联资源，只列出） |
+
+`show` 的资源响应包含关联 issue 的 number 与 title，可直接用于把 run 关联回 issue，无需额外 lookup。单 session 子动作（get / transcript / compact / reset / followup）的 workflowRunId 直接入口不在本命令组，继续走 `mo issue session ...`。
 
 ## Workflow Profile（工作流运行配置）
 
@@ -92,6 +96,10 @@ mo project workflow profile preview <键>            预览渲染后的提示词
 mo project workflow profile enable                  启用 profile
 mo project workflow profile disable                 禁用 profile
 ```
+
+> **路径迁移**：旧 `mo workflow list`（WorkflowProfile）已下沉到 `mo project workflow profile list`。原路径不再可用——profile 归 `mo project workflow`，与 template / config 同层。
+
+`profile list` 支持 `-o table|json` 和 `--described`；同其他项目作用域命令一样，支持 `--project` / `--project-id`。无 project flag 但有 active project 时使用 active project；无可解析 project 时回退到未过滤列表并打印降级 stderr 提示。`--project` 与 `--project-id` 冲突时本地失败、不发请求。完整 flag 见 `mo project workflow profile list --help`。
 
 ## Workflow Template（工作流模板）
 
@@ -295,7 +303,6 @@ mo update runner                    仅升级执行器
 
 | 当前实装 | 本文 spec | 性质 |
 |---|---|---|
-| `mo workflow list`（WorkflowProfile） | `mo project workflow profile list` | 路径变更（profile 让位给 WorkflowRun） |
 | `mo project workflow config ...` | `mo project workflow profile ...` | 正名（config → profile） |
 | `mo repo ...`（顶层） | `mo project repo ...` | 双轨合并 |
 | `mo agent delete` | `mo agent archive` | 正名（delete → archive） |
@@ -324,7 +331,7 @@ mo issue list --output json | jq '.[] | select(.health=="blocked") | .number' | 
   while read n; do mo issue retry $n; done
 
 # 直接控制一个工作流执行（不通过 issue 号）
-mo workflow get wr_abc123 -o yaml
+mo workflow show wr_abc123 -o yaml
 mo workflow approve wr_abc123
 ```
 

@@ -53,7 +53,7 @@ Write the filled body to a temp file and hand it to `mo issue create <title> --b
 Before recommending a workflow, discover what is available:
 
 ```bash
-mo workflow list --described
+mo project workflow profile list --described
 ```
 
 This prints each enabled workflow profile's `id`, display name, and natural-language description, for example:
@@ -86,7 +86,7 @@ If workflow discovery is unavailable, stop before writing frontmatter and ask th
 
 - Default profile used: e.g. `Using the project's default workflow profile.` or `Selected the project's configured default workflow.`
 - Operator-chosen id: e.g. `Using mohist/github-pr per your instruction.` or `Selected mohist/github-pr as you requested for this issue.`
-- First-enabled fallback: e.g. `No project default is configured; using the first enabled workflow returned by mo workflow list --described.`
+- First-enabled fallback: e.g. `No project default is configured; using the first enabled workflow returned by mo project workflow profile list --described.`
 
 Keep it to one sentence. The YAML `|` block scalar is the right tool if the sentence wraps across two lines. Do not pad the reason with restatements of the profile's own description — the description already lives in the system, not the frontmatter.
 
@@ -108,7 +108,7 @@ Supported fields:
 
 | Field | Required | Description |
 |---|---|---|
-| `recommended_workflow` | yes | Profile id from `mo workflow list --described`, chosen by the default-or-operator rule above (or the first enabled profile as last resort). |
+| `recommended_workflow` | yes | Profile id from `mo project workflow profile list --described`, chosen by the default-or-operator rule above (or the first enabled profile as last resort). |
 | `recommended_workflow_reason` | yes | One short natural-language sentence explaining the choice (default, operator-chosen, or first-enabled fallback). Multi-line values use the YAML `\|` block scalar. |
 | `risk` | yes | One of `low`, `medium`, `high`. |
 
@@ -157,7 +157,7 @@ Never run `mo issue create --body-file` without confirmation. The body file is a
 - [ ] `mo issue template get <id>` was run; the per-section guidance comments were read and followed.
 - [ ] Each `<placeholder>` in the body is replaced by content from the `mohist-explore` clarification; no placeholder remains.
 - [ ] The body obeys the universal writing rules: literal, product source language, no source paths, planner-actionable.
-- [ ] `mo workflow list --described` was run and parsed.
+- [ ] `mo project workflow profile list --described` was run and parsed.
 - [ ] `recommended_workflow` is populated (project default, operator-chosen enabled id, or first enabled profile).
 - [ ] `recommended_workflow_reason` is one natural-language sentence explaining the choice (default, operator, or first-enabled fallback) — no tag citations.
 - [ ] `risk` is `low`, `medium`, or `high`, with the driver noted in the body.

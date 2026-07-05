@@ -805,6 +805,10 @@ internal sealed class MohistCliApi
         ProjectTemplateShow,
         ProjectWorkflowProfile,
         IssueArchiveCompleted,
+        WorkflowRunDetail,
+        WorkflowRunStatus,
+        WorkflowRunVariables,
+        WorkflowRunEvents,
     }
 
     internal static TableShape ParseTableShape(string? shape)
