@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   poll: vi.fn(),
   report: vi.fn(),
   uploadTaskLog: vi.fn(),
+  fetchConfig: vi.fn(async () => null),
   startSignalR: vi.fn(),
   stopSignalR: vi.fn(),
   getConnectionId: vi.fn(() => "conn-1"),
@@ -27,6 +28,7 @@ const {
   poll,
   report,
   uploadTaskLog,
+  fetchConfig,
   startSignalR,
   stopSignalR,
   getConnectionId,
@@ -46,7 +48,7 @@ vi.mock("../src/server/connection.js", () => ({
     poll = poll
     report = report
     uploadTaskLog = uploadTaskLog
-    getLastCleanupPolicy = () => null
+    fetchConfig = fetchConfig
   },
 }))
 

@@ -89,7 +89,7 @@ public static class RunnerRoutes
             return ApiResults.Ok(new RunnerSlotsPatchResponse(runnerId, req.Slots));
         });
 
-        group.MapPost("/poll", async (string runnerId, IGrainFactory grains, Microsoft.Extensions.Options.IOptions<CleanupPolicyOptions> cleanupPolicyOptions) =>
+        group.MapPost("/poll", async (string runnerId, IGrainFactory grains) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             var work = await runner.PollAsync();
@@ -112,8 +112,35 @@ public static class RunnerRoutes
                 work.OwnerKind,
                 work.AgentJobId,
                 AgentSessionId: work.AgentSessionId,
-                CleanupPolicy: ToCleanupPolicyDto(cleanupPolicyOptions.Value),
                 Recovery: work.Recovery));
+        });
+
+        // Dedicated runner config channel. Separate from /poll so runner-side
+        // configuration (e.g. cleanupPolicy) is reachable even when the
+        // system is idle and /poll returns 204 No Content. Plain periodic
+        // GET — no ETag, no version negotiation, no request body. The
+        // cleanupPolicy is a pure projection of the server's bound
+        // CleanupPolicyOptions through ToCleanupPolicyDto; the server
+        // remains the single source of truth (the runner never reads
+        // config.jsonc directly).
+        //
+        // Serialization uses a local JsonSerializerOptions that overrides
+        // the global WhenWritingNull policy so that unconfigured
+        // cleanupPolicy fields are emitted as explicit `null` rather than
+        // omitted. The "null means unlimited / disabled" contract is only
+        // meaningful end-to-end if the wire shape always carries every
+        // field — the runner's CleanupPolicy TS type tolerates either
+        // present-null or absent, but the spec (issue-359
+        // runner-config-endpoint) requires the present-null form so the
+        // response is self-describing. The override is local to this
+        // handler; /poll no longer carries CleanupPolicy (T-002 removed the
+        // field from WorkDispatchResponse atomically with the runner
+        // switch to /config).
+        group.MapGet("/config", (Microsoft.Extensions.Options.IOptions<CleanupPolicyOptions> cleanupPolicyOptions) =>
+        {
+            return Results.Json(
+                new RunnerConfigResponse(ToCleanupPolicyDto(cleanupPolicyOptions.Value)),
+                RunnerConfigJsonOptions);
         });
 
         group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains) =>
@@ -444,13 +471,14 @@ public static class RunnerRoutes
 
     /// <summary>
     /// Project the server's <see cref="CleanupPolicyOptions"/> into the
-    /// wire DTO that ships with every poll. Every field is nullable; a
-    /// fully-unconfigured policy is serialized as <c>{"retentionDays":null,...}</c>
-    /// — or omitted entirely when no field is set so the runner can rely on
-    /// "no fields configured ⇒ no eviction" without parsing nulls. The runner
-    /// never sees a sentinel that distinguishes "disabled" from "missing"
-    /// because the DTO uses null in both cases; that is the explicit
-    /// unlimited/disabled contract.
+    /// wire DTO returned by <c>GET /api/runner/{runnerId}/config</c>.
+    /// Every field is nullable; a fully-unconfigured policy is
+    /// serialized as <c>{"retentionDays":null,...}</c> so the runner
+    /// can rely on "no fields configured ⇒ no eviction" without
+    /// parsing nulls. The runner never sees a sentinel that
+    /// distinguishes "disabled" from "missing" because the DTO uses
+    /// null in both cases; that is the explicit unlimited/disabled
+    /// contract.
     /// </summary>
     internal static CleanupPolicyDto ToCleanupPolicyDto(CleanupPolicyOptions options)
     {
@@ -459,6 +487,23 @@ public static class RunnerRoutes
         var watermark = options.StorageTargetWatermarkBytes is > 0 ? options.StorageTargetWatermarkBytes : null;
         return new CleanupPolicyDto(retention, budget, watermark);
     }
+
+    /// <summary>
+    /// Per-endpoint JSON options for the runner config channel. Mirrors
+    /// <see cref="Mohist.Server.Infrastructure.JSON.Options"/> but flips
+    /// <c>DefaultIgnoreCondition</c> to <c>Never</c> so that
+    /// <c>cleanupPolicy</c> fields are always emitted, even when null.
+    /// The runner's <c>CleanupPolicy</c> TS type tolerates either
+    /// present-null or absent, but the spec (issue-359
+    /// runner-config-endpoint) requires the present-null form so the
+    /// response is self-describing: "null means unlimited / disabled"
+    /// reads the same on the wire as it does in the bound options. The
+    /// override is scoped to <c>GET /api/runner/{id}/config</c> only.
+    /// </summary>
+    internal static readonly System.Text.Json.JsonSerializerOptions RunnerConfigJsonOptions = new(JSON.Options)
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never,
+    };
 }
 
 public record RunnerRegisterRequest(
@@ -553,20 +598,32 @@ public record WorkDispatchResponse(
     /// raw-prompt-only AgentJob validation dispatches.
     /// </summary>
     string? AgentSessionId = null,
-    CleanupPolicyDto? CleanupPolicy = null,
     string? Recovery = null);
 
 /// <summary>
 /// Wire shape for the workspace cleanup policy that the server hands the
-/// runner on every poll. Each nullable field is an explicit
-/// unlimited/disabled sentinel — the runner treats <c>null</c> as
-/// "do not evict by this strategy". The server never scans runner
-/// filesystems; this DTO only describes policy, never actions.
+/// runner via <c>GET /api/runner/{runnerId}/config</c>. Each nullable
+/// field is an explicit unlimited/disabled sentinel — the runner treats
+/// <c>null</c> as "do not evict by this strategy". The server never
+/// scans runner filesystems; this DTO only describes policy, never
+/// actions.
 /// </summary>
 public record CleanupPolicyDto(
     int? RetentionDays = null,
     long? StorageBudgetBytes = null,
     long? StorageTargetWatermarkBytes = null);
+
+/// <summary>
+/// Body for <c>GET /api/runner/{runnerId}/config</c> — the dedicated
+/// runner config channel. Always returns <c>200 OK</c> with this body
+/// (never 204), independent of whether <c>POST /poll</c> currently has
+/// work to dispatch; the runner is expected to poll this endpoint on
+/// its own cadence and treat a missing body / 204 as "policy
+/// unavailable". The wrapper (rather than returning
+/// <see cref="CleanupPolicyDto"/> bare) leaves room for additional
+/// runner-facing config fields to be added additively.
+/// </summary>
+public record RunnerConfigResponse(CleanupPolicyDto? CleanupPolicy);
 
 /// <summary>
 /// Body for <c>POST /api/runner/{runnerId}/workflow-runs/status</c>. The

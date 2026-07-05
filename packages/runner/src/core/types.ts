@@ -91,20 +91,34 @@ export type WorkDispatchResponse = {
    * dispatches. Mirrors `WorkDispatch.AgentSessionId` on the server.
    */
   agentSessionId?: string | null
-  cleanupPolicy?: CleanupPolicy | null
   recovery?: string | null
 }
 
 /**
- * Workspace cleanup policy delivered by the server on every poll.
- * Each nullable field is an explicit unlimited/disabled sentinel — the
- * runner treats `null` as "do not evict by this strategy". The server
- * never scans runner filesystems; this is policy, not actions.
+ * Workspace cleanup policy delivered by the server. Each nullable
+ * field is an explicit unlimited/disabled sentinel — the runner treats
+ * `null` as "do not evict by this strategy". The server never scans
+ * runner filesystems; this is policy, not actions.
+ *
+ * Sourced via the dedicated config channel
+ * `GET /api/runner/{runnerId}/config` (issue-359); independent of
+ * work dispatch.
  */
 export interface CleanupPolicy {
   retentionDays?: number | null
   storageBudgetBytes?: number | null
   storageTargetWatermarkBytes?: number | null
+}
+
+/**
+ * Response body for `GET /api/runner/{runnerId}/config`. The runner
+ * fetches this on every cleanup-loop tick and passes the unwrapped
+ * `cleanupPolicy` into `cleanupLoop.runOnce`. Wrapper record (rather
+ * than bare `CleanupPolicyDto`) leaves room for additional
+ * runner-facing config fields to be added additively.
+ */
+export interface RunnerConfigResponse {
+  cleanupPolicy?: CleanupPolicy | null
 }
 
 /**

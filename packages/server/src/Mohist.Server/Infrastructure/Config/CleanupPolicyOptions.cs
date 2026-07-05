@@ -2,7 +2,7 @@ namespace Mohist.Server.Infrastructure.Config;
 
 /// <summary>
 /// Server-side workspace cleanup policy that is exposed to runners via the
-/// runner poll response. Cleanup execution is exclusively a runner-side
+/// dedicated runner config endpoint. Cleanup execution is exclusively a runner-side
 /// responsibility — the server never scans a runner filesystem, never
 /// schedules runner-side deletion, and never maintains a per-workspace
 /// cleanup queue. Each field is optional; a <c>null</c> value is an
