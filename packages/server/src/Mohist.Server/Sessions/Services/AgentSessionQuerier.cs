@@ -81,18 +81,18 @@ public class AgentSessionQuerier : IScopedService
             status: status,
             ct: ct);
         sessions = await ReconcileActiveSessionsAsync(db, sessions, ct);
-        var issueTitles = await LoadIssueTitlesAsync(db, projectId, sessions.Select(IssueNumber), ct);
+        var issueTitles = await LoadIssueTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
         var eventSummaries = await LoadEventSummariesAsync(db, sessions.Select(r => r.Session.Id), ct);
         return sessions.Select(record =>
         {
             var s = record.Session;
             var events = eventSummaries.GetValueOrDefault(s.Id);
             var usage = AgentSessionJsonHelper.Usage(s);
-            var issueNumber = IssueNumber(record);
+            var issueNumber = record.IssueNumber();
             return new AgentSessionInfoDto(
             issueNumber,
             IssueTitle(issueTitles, issueNumber),
-            Label(record, AgentSessionQueryMetadataKeys.Stage) ?? string.Empty,
+            record.Label(AgentSessionQueryMetadataKeys.Stage) ?? string.Empty,
             s.Id,
             AgentSessionJsonHelper.StatusName(s, Now()),
             s.Settings.Model,
@@ -190,8 +190,8 @@ public class AgentSessionQuerier : IScopedService
             var status = ResolveAgentSessionListStatus(record, fact);
             return new AgentSessionListItemDto(
                 s.Id,
-                Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty,
-                Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty,
+                record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty,
+                record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty,
                 status,
                 s.Status.CreatedAt.ToString("o"),
                 AgentSessionJsonHelper.LastActivityAt(s).ToString("o"),
@@ -256,8 +256,8 @@ public class AgentSessionQuerier : IScopedService
             var status = ResolveAgentSessionListStatus(record, fact);
             return new AgentSessionContextAssociationDto(
                 s.Id,
-                Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty,
-                Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty,
+                record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty,
+                record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty,
                 status,
                 s.Status.CreatedAt.ToString("o"),
                 $"/api/projects/{projectRef}/agent-sessions/{s.Id}");
@@ -314,14 +314,14 @@ public class AgentSessionQuerier : IScopedService
 
         var session = record.Session;
         var runnerId = record.Row.RunnerId;
-        var workflowRunId = Label(record, AgentSessionQueryMetadataKeys.WorkflowRunId);
+        var workflowRunId = record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId);
         if (string.IsNullOrWhiteSpace(runnerId) || string.IsNullOrWhiteSpace(workflowRunId))
             return null;
 
         return new FollowupTarget(
             runnerId,
             workflowRunId,
-            Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? sessionName,
+            record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? sessionName,
             AgentSessionJsonHelper.StatusName(session, Now()) == "active");
     }
 
@@ -352,7 +352,7 @@ public class AgentSessionQuerier : IScopedService
         var record = records.FirstOrDefault();
         if (record is null) return null;
 
-        var sessionProjectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId);
+        var sessionProjectId = record.Label(AgentSessionQueryMetadataKeys.ProjectId);
         if (!string.Equals(sessionProjectId, projectId, StringComparison.Ordinal))
             return null;
 
@@ -400,7 +400,7 @@ public class AgentSessionQuerier : IScopedService
         var record = records.FirstOrDefault();
         if (record is null) return null;
 
-        var sessionProjectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId);
+        var sessionProjectId = record.Label(AgentSessionQueryMetadataKeys.ProjectId);
         if (!string.Equals(sessionProjectId, projectId, StringComparison.Ordinal))
             return null;
 
@@ -517,8 +517,8 @@ public class AgentSessionQuerier : IScopedService
 
         return new GenericAgentSessionSummaryDto(
             session.Id,
-            Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty,
-            Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty,
+            record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty,
+            record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty,
             status,
             session.Status.CreatedAt.ToString("o"),
             AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
@@ -574,12 +574,12 @@ public class AgentSessionQuerier : IScopedService
 
         return new AgentSessionMetadataDto(
             domainSession.Id,
-            Label(session, AgentSessionQueryMetadataKeys.SessionName) ?? fallbackSessionName,
+            session.Label(AgentSessionQueryMetadataKeys.SessionName) ?? fallbackSessionName,
             domainSession.Status.AgentRuntimeSessionId ?? domainSession.Id,
             AgentSessionJsonHelper.StatusName(domainSession, Now()),
             domainSession.Settings.Model,
-            Label(session, AgentSessionQueryMetadataKeys.Stage),
-            Annotation(domainSession, AgentSessionQueryMetadataKeys.Title),
+            session.Label(AgentSessionQueryMetadataKeys.Stage),
+            domainSession.Metadata.Annotation(AgentSessionQueryMetadataKeys.Title),
             domainSession.Status.CreatedAt.ToString("o"),
             null,
             AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
@@ -618,8 +618,8 @@ public class AgentSessionQuerier : IScopedService
         var record = records.FirstOrDefault();
         if (record is null) return null;
 
-        return string.Equals(Label(record, AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal)
-            && string.Equals(Label(record, AgentSessionQueryMetadataKeys.SourceKind), "agent-launch", StringComparison.Ordinal)
+        return string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal)
+            && string.Equals(record.Label(AgentSessionQueryMetadataKeys.SourceKind), "agent-launch", StringComparison.Ordinal)
             ? record
             : null;
     }
@@ -681,17 +681,17 @@ public class AgentSessionQuerier : IScopedService
     private WorkflowSessionDto ToWorkflowDto(AgentSessionRecord record, TerminalFact? terminalFact = null)
     {
         var s = record.Session;
-        var issueNumber = IssueNumber(record);
+        var issueNumber = record.IssueNumber();
         var status = terminalFact?.Status ?? (AgentSessionJsonHelper.StatusName(s, Now()) == "active" ? "running" : "inactive");
         return new(
         s.Id,
-        Label(record, AgentSessionQueryMetadataKeys.WorkflowRunId) ?? string.Empty,
-        Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? string.Empty,
+        record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId) ?? string.Empty,
+        record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? string.Empty,
         s.Status.AgentRuntimeSessionId,
-        Label(record, AgentSessionQueryMetadataKeys.ProjectId),
+        record.Label(AgentSessionQueryMetadataKeys.ProjectId),
         issueNumber == 0 ? null : issueNumber,
         s.Runtime.RunnerId,
-        status, Label(record, AgentSessionQueryMetadataKeys.Stage), s.Settings.Model, s.Runtime.WorkDir, null,
+        status, record.Label(AgentSessionQueryMetadataKeys.Stage), s.Settings.Model, s.Runtime.WorkDir, null,
         s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
         terminalFact?.CompletedAt.ToString("o"), terminalFact?.FailureReason, terminalFact?.ExitCode,
         new AgentEventSummaryDto(null, null, null, null, null, null),
@@ -703,26 +703,16 @@ public class AgentSessionQuerier : IScopedService
         var s = record.Session;
         return new AgentSessionSummaryDto(
             s.Id,
-            Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? string.Empty,
+            record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? string.Empty,
             s.Status.AgentRuntimeSessionId ?? s.Id,
-            Label(record, AgentSessionQueryMetadataKeys.WorkId),
-            Annotation(s, AgentSessionQueryMetadataKeys.Title),
+            record.Label(AgentSessionQueryMetadataKeys.WorkId),
+            s.Metadata.Annotation(AgentSessionQueryMetadataKeys.Title),
             AgentSessionJsonHelper.StatusName(s, Now()), s.Status.CreatedAt.ToString("o"), null,
-            s.Settings.Model, null, Label(record, AgentSessionQueryMetadataKeys.Stage), Annotation(s, AgentSessionQueryMetadataKeys.Title),
+            s.Settings.Model, null, record.Label(AgentSessionQueryMetadataKeys.Stage), s.Metadata.Annotation(AgentSessionQueryMetadataKeys.Title),
             s.Status.LastDataAt?.ToString("o"), null, null, null,
             new AgentEventSummaryDto(null, null, null, null, null, null),
             AgentSessionDtoMapper.ToUsageDto(s));
     }
-
-    internal static string? Label(AgentSessionRecord record, string key) =>
-        record.Label(key) ?? record.Session.Metadata.Label(key);
-
-    internal static int IssueNumber(AgentSessionRecord record) =>
-        int.TryParse(Label(record, AgentSessionQueryMetadataKeys.IssueNumber), out var issueNumber)
-            ? issueNumber
-            : 0;
-
-    internal static string? Annotation(AgentSession session, string key) => session.Metadata.Annotation(key);
 
     private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;
 
@@ -784,7 +774,7 @@ public class AgentSessionQuerier : IScopedService
         var allowedSessionIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var activeSession in activeRows)
         {
-            var workflowRunId = Label(activeSession, AgentSessionQueryMetadataKeys.WorkflowRunId);
+            var workflowRunId = activeSession.Label(AgentSessionQueryMetadataKeys.WorkflowRunId);
             if (workflowRunId is null || !runsByWorkflow.TryGetValue(workflowRunId, out var run) || run is null)
             {
                 allowedSessionIds.Add(activeSession.Session.Id);
@@ -810,7 +800,7 @@ public class AgentSessionQuerier : IScopedService
         MohistDbContext db, List<AgentSessionRecord> sessions, CancellationToken ct)
     {
         var workflowIds = sessions
-            .Select(s => Label(s, AgentSessionQueryMetadataKeys.WorkflowRunId))
+            .Select(s => s.Label(AgentSessionQueryMetadataKeys.WorkflowRunId))
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id!)
             .Distinct(StringComparer.Ordinal)
@@ -851,7 +841,7 @@ public class AgentSessionQuerier : IScopedService
             .SelectMany(s => s.Tasks)
             .FirstOrDefault(t => t.Status == Workflow.Domain.Run.TaskRunStatus.Running);
 
-        return runningTask is null || string.Equals(runningTask.Id, Label(session, AgentSessionQueryMetadataKeys.WorkId), StringComparison.Ordinal);
+        return runningTask is null || string.Equals(runningTask.Id, session.Label(AgentSessionQueryMetadataKeys.WorkId), StringComparison.Ordinal);
     }
 
     private static bool IsActiveSession(AgentSessionRecord session) =>

@@ -78,3 +78,60 @@ T-001 (AgentSessionDtoMapper extraction) — completed.
   The three-scenario split maps to the three acceptance criteria in
   the agent-session-dto-mapping spec: same projection path
   byte-alignment, flag-null behaviour, and lineage byte-alignment.
+
+T-002 (record accessors + Annotation forwarder removal) — completed.
+
+## Codebase Patterns (T-002)
+
+- The record's existing `Label(string key)` instance method was upgraded to
+  perform the record-first-then-metadata fallback inline
+  (`Labels[key] ?? Session.Metadata.Label(key)`) — design Open Question 1
+  lean (a). Production records are built with `session.Metadata.Labels`
+  inside `AgentSessionQuery.ToRecords`, so the two dictionaries coincide
+  and the fallback is a defensive no-op; the only caller that observed
+  the fall-back semantics was `WorkflowActivityQuerier.cs:118-124`'s
+  private duplicate (now removed). `RunnerRoutes.cs:362-363` previously
+  read the record-only `Label(key)`; the new method returns the same
+  value for production records, verified via
+  `AgentSessionContextAssociationApiSpecs` (6 specs pass).
+- Method group context: `sessions.Select(AgentSessionQuerier.IssueNumber)`
+  became `sessions.Select(r => r.IssueNumber())` — the static-to-instance
+  shape change forced the lambda form. Lambdas are also future-proof if
+  the method gains parameters.
+
+## Gotchas (T-002)
+
+- The querier's `Label(record, key)` static and the
+  `WorkflowActivityQuerier.cs:118-124` private duplicate were
+  byte-for-byte identical. Re-targeting `WorkflowActivityQuerier` to
+  `record.Label(...)` removed a third copy of the fallback semantics
+  that the proposal did not enumerate.
+- `Annotation` was a pure forwarder (`=> session.Metadata.Annotation(key)`);
+  inlining `session.Metadata.Annotation(key)` at the three call sites
+  (`ToSummaryDto`, `BuildSessionMetadataDtoAsync` ×2) keeps zero behaviour
+  drift while shrinking the querier surface.
+- The `<c>AgentSessionQuerier.IssueNumber</c>` mention inside
+  `AgentSessionRecord.IssueNumber`'s XML doc is intentional — it links
+  the instance method to the spec section that pinned its semantics;
+  it's a `<c>` text reference, not a `<see cref>` cross-reference, so
+  no doc-repointing is required (per the T-002 notes).
+
+## Decisions (T-002)
+
+- Followed the design's additive-first sub-strategy: added the new
+  instance methods to `AgentSessionRecord` → swapped the four consumers
+  (`AgentSessionQuerier`, `AgentActivityFeedAssembler`,
+  `AgentSessionContextRefs`, `WorkflowActivityQuerier`) → inlined the
+  three `Annotation` call sites → removed the three statics
+  (`Label`, `IssueNumber`, `Annotation`) from `AgentSessionQuerier`.
+  Each sub-step left the build green.
+- `AgentSessionRecordAccessorSpecs.cs` is a focused unit spec that
+  exercises all three spec scenarios (record-precedence,
+  metadata-fallback, absent-returns-null) plus the issue-number parse
+  cases — numeric, empty/whitespace, non-numeric, decimal, alphanumeric.
+  13 facts total; all pass.
+- Followed the issue-370 design's "tuck the fallback XML doc on the
+  method" guidance: the `<summary>` documents the fallback semantics
+  explicitly and points the reader at the `AgentSessionQuery.ToRecords`
+  construction site where the production-dictionary-coincides invariant
+  holds.

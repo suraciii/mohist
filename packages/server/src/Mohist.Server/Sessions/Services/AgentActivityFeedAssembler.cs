@@ -85,7 +85,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         var sessionIds = sessions.Select(s => s.Session.Id).ToArray();
         var latestEvents = await LoadLatestEventsAsync(db, sessionIds, ct);
         var eventSummaries = await AgentSessionQuerier.LoadEventSummariesAsync(db, sessionIds, ct);
-        var issueTitles = await AgentSessionQuerier.LoadIssueTitlesAsync(db, projectId, sessions.Select(AgentSessionQuerier.IssueNumber), ct);
+        var issueTitles = await AgentSessionQuerier.LoadIssueTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
         var taskProgressMap = await BuildTaskProgressMapAsync(sessions, ct);
 
         var cards = sessions
@@ -93,7 +93,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
                 record,
                 latestEvents.GetValueOrDefault(record.Session.Id),
                 eventSummaries.GetValueOrDefault(record.Session.Id),
-                AgentSessionQuerier.IssueTitle(issueTitles, AgentSessionQuerier.IssueNumber(record)),
+                AgentSessionQuerier.IssueTitle(issueTitles, record.IssueNumber()),
                 taskProgressMap.GetValueOrDefault(record.Session.Id)))
             .ToList();
 
@@ -124,7 +124,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     {
         var result = new Dictionary<string, ActivityTaskProgressDto>(StringComparer.Ordinal);
         var workflowRunIds = sessions
-            .Select(s => AgentSessionQuerier.Label(s, AgentSessionQueryMetadataKeys.WorkflowRunId))
+            .Select(s => s.Label(AgentSessionQueryMetadataKeys.WorkflowRunId))
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id!)
             .Distinct(StringComparer.Ordinal)
@@ -141,7 +141,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
 
         foreach (var session in sessions)
         {
-            var workflowRunId = AgentSessionQuerier.Label(session, AgentSessionQueryMetadataKeys.WorkflowRunId);
+            var workflowRunId = session.Label(AgentSessionQueryMetadataKeys.WorkflowRunId);
             if (workflowRunId is null || !statusByWorkflow.TryGetValue(workflowRunId, out var status) || status is null)
                 continue;
 
@@ -183,18 +183,18 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     {
         var s = record.Session;
         var lastActivityAt = AgentSessionJsonHelper.LastActivityAt(s).ToString("o");
-        var issueNumber = AgentSessionQuerier.IssueNumber(record);
-        var projectId = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty;
-        var sessionName = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? s.Id;
-        var stage = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.Stage);
-        var workId = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.WorkId);
-        var workType = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.WorkType);
-        var sourceKind = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.SourceKind);
+        var issueNumber = record.IssueNumber();
+        var projectId = record.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty;
+        var sessionName = record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? s.Id;
+        var stage = record.Label(AgentSessionQueryMetadataKeys.Stage);
+        var workId = record.Label(AgentSessionQueryMetadataKeys.WorkId);
+        var workType = record.Label(AgentSessionQueryMetadataKeys.WorkType);
+        var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
 
         if (string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
         {
-            var agentId = AgentSessionQuerier.Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty;
-            var agentName = AgentSessionQuerier.Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty;
+            var agentId = record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty;
+            var agentName = record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty;
             return new ActivityCardDto(
                 $"agent_{agentId}",
                 issueNumber,
