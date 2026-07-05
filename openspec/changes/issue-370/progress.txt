@@ -1,0 +1,80 @@
+issue-370 progress notes
+========================
+
+T-001 (AgentSessionDtoMapper extraction) — completed.
+
+## Codebase Patterns
+
+- `internal static class` mappers in `Sessions/Services/` are the established
+  precedent (`AgentSessionJsonHelper`, `ContextHealthClassifier`,
+  `ContextExhaustionClassifier`, `TranscriptEventSummaryProjector`). Same
+  namespace + `internal` visibility + `Mohist.Server.Tests` via
+  `InternalsVisibleTo` — `AgentSessionDtoMapper` follows the same pattern.
+- `IssueRowMapper` / `WorkflowStatusMapper` are the explicit precedent for
+  *pure static* type-as-mapper (no DI, no clock, no DB). `AgentSessionDtoMapper`
+  matches: every member is a pure function from a session / summary / part row
+  into a DTO. `ToUsageDto(AgentSession)` takes the session and resolves the
+  usage summary + history via the existing `AgentSessionJsonHelper` / its own
+  `BuildUsageHistoryDto`, so it stays a one-input, side-effect-free projection.
+- Test re-targeting pattern: pre-existing specs that called
+  `AgentSessionQuerier.X` directly are renamed to `AgentSessionDtoMapper.X`
+  with assertion text preserved verbatim (the rename is the entire diff).
+  `AgentSessionRecoveryDomainSpecs.cs` had 8 such calls (BuildLineageDto ×3,
+  BuildUsageHistoryDto ×3, ToUsageDto ×2) — all re-targeted, all 27 specs
+  in that file still pass with no assertion change.
+- The "byte-alignment" invariant between the three consumers (querier
+  workflow / current / metadata / generic-summary paths, activity feed
+  assembler, generic summary) used to live in prose comments; the new
+  cross-consumer identity specs assert it via property-by-property
+  equality (`AssertUsageDtoEqual` / `AssertEventSummaryDtoEqual` /
+  `AssertLineageDtoListEqual`) because the `record.Equals` path doesn't
+  propagate cleanly through `IReadOnlyList<...Dto>` constructed by
+  `.ToList()` on a type where the runtime list element is the same but
+  the property type widens. Field-by-field comparison keeps the assertion
+  deterministic and explicit about which fields must agree.
+
+## Gotchas
+
+- `AgentSessionQuerier` is in `Mohist.Server.Sessions.Services`, but the
+  DTOs (`AgentUsageDto`, `AgentEventSummaryDto`,
+  `RuntimeSessionLineageEntryDto`) are in `Mohist.Server.Sessions`. The
+  test file `AgentSessionDtoMapperCrossConsumerIdentitySpecs.cs` needs
+  `using Mohist.Server.Sessions;` to reference the DTOs in its assertion
+  helpers — caught on first build with `CS0246`.
+- `IssueWorkflowProfileStorageIntegritySpecs.DefensiveCopyVariables_AfterCommit_VerificationReportsReachable`
+  flaked once during the full `npm test` run (failed in parallel, passes
+  in isolation on both pre-change and post-change trees). Pre-existing
+  flake, unrelated to this task. Full re-run is green (3808 passed,
+  13 skipped, 0 failed).
+- The `AgentSessionQuerier.ReconcileActiveSessionsAsync` /
+  `LoadEventSummariesAsync` / `LoadIssueTitlesAsync` / `IssueTitle` /
+  `Label` / `IssueNumber` / `Annotation` statics remain on the querier
+  for now — those are owned by T-002, T-003, T-004. This task only
+  removed the six DTO-projection statics + the duplicate `Labels`.
+- `ToUsageDto(AgentSession)` on the new mapper is `internal static`,
+  matching the visibility of the original. `IssueRowMapper` is
+  `internal static` for the same reason (test assembly is the only
+  out-of-assembly caller via `InternalsVisibleTo`).
+
+## Decisions
+
+- Followed the design's additive-first sub-strategy: introduced
+  `AgentSessionDtoMapper` (with `Labels` authoritative) → swapped the
+  three consumers (`AgentSessionQuerier` private helpers,
+  `AgentActivityFeedAssembler`, `AgentUsageReporter`) → deleted the
+  duplicate `Labels` at `AgentActivityFeedAssembler.cs:302-311` →
+  removed the six DTO statics from `AgentSessionQuerier` → re-targeted
+  the 8 spec calls → added the three cross-consumer identity specs.
+  Each sub-step left the build green.
+- `AgentSessionDtoMapper` is `internal static` matching the design
+  decision (D1) and the `IssueRowMapper` precedent. No DI registration
+  change needed.
+- The cross-consumer identity spec file uses four facts instead of
+  the "three" called out in the task description: one
+  usage-DTO-querier-vs-assembler, one event-summary-DTO-querier-vs-assembler,
+  one event-summary-DTO-non-exhaustion-flag-null (the
+  "flags remain null (not false) when unmatched" branch of the
+  byte-identity spec), and one lineage-DTO-metadata-vs-generic-summary.
+  The three-scenario split maps to the three acceptance criteria in
+  the agent-session-dto-mapping spec: same projection path
+  byte-alignment, flag-null behaviour, and lineage byte-alignment.

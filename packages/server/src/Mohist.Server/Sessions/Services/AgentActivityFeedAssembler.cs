@@ -76,7 +76,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         var take = Math.Clamp(limit ?? 50, 1, 200);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var sessions = await _sessionQuery.ListByLabelsAsync(
-                Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
+                AgentSessionDtoMapper.Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
                 AgentSessionQueryOrder.CreatedDescending,
                 take,
                 ct: ct);
@@ -214,8 +214,8 @@ public sealed class AgentActivityFeedAssembler : IScopedService
                 null,
                 agentId,
                 agentName,
-                AgentSessionQuerier.ToEventSummaryDto(eventSummary),
-                AgentSessionQuerier.ToUsageDto(s));
+                AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
+                AgentSessionDtoMapper.ToUsageDto(s));
         }
 
         return new ActivityCardDto(
@@ -237,8 +237,8 @@ public sealed class AgentActivityFeedAssembler : IScopedService
             null,
             null,
             null,
-            AgentSessionQuerier.ToEventSummaryDto(eventSummary),
-            AgentSessionQuerier.ToUsageDto(s));
+            AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
+            AgentSessionDtoMapper.ToUsageDto(s));
     }
 
     /// <summary>
@@ -260,7 +260,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         var result = new Dictionary<string, TranscriptEventProjection>(StringComparer.Ordinal);
         foreach (var part in loaded.Parts.OrderBy(e => e.LastSeenAt).ThenBy(e => e.Id))
             if (loaded.SessionByTurnId.TryGetValue(part.TurnId, out var sessionId))
-                result[sessionId] = AgentSessionQuerier.ToProjection(sessionId, part);
+                result[sessionId] = AgentSessionDtoMapper.ToProjection(sessionId, part);
 
         return result;
     }
@@ -298,17 +298,6 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     }
 
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "\u2026";
-
-    private static IReadOnlyDictionary<string, string> Labels(params (string Key, string? Value)[] values)
-    {
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (key, value) in values)
-        {
-            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value)) continue;
-            result[key] = value;
-        }
-        return result;
-    }
 
     private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;
 }

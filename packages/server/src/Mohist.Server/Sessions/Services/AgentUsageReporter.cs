@@ -55,7 +55,7 @@ public sealed class AgentUsageReporter : IScopedService
         var rangeFrom = rangeTo.AddDays(-days);
 
         var windowSessions = await _sessionQuery.ListByLabelsAsync(
-            AgentSessionQuerier.Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
+            AgentSessionDtoMapper.Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
             AgentSessionQueryOrder.CreatedAscending,
             from: rangeFrom,
             to: rangeTo,
@@ -200,7 +200,7 @@ public sealed class AgentUsageReporter : IScopedService
     public async Task<AgentCostRollupRawData> GetCostRollupAsync(string projectId, CancellationToken ct = default)
     {
         var allSessions = await _sessionQuery.ListByLabelsAsync(
-            AgentSessionQuerier.Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
+            AgentSessionDtoMapper.Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
             AgentSessionQueryOrder.CreatedAscending,
             ct: ct);
 
@@ -268,7 +268,7 @@ public sealed class AgentUsageReporter : IScopedService
         var previousTo = currentFrom;
 
         var sessions = await _sessionQuery.ListByLabelsAsync(
-            AgentSessionQuerier.Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
+            AgentSessionDtoMapper.Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
             AgentSessionQueryOrder.CreatedAscending,
             ct: ct);
 
