@@ -2,8 +2,7 @@ import { existsSync as defaultExistsSync } from "node:fs"
 import { resolve } from "node:path"
 import * as signalR from "@microsoft/signalr"
 import type { ClientSideConnection } from "@agentclientprotocol/sdk"
-import { deleteDirectory, runCommand as defaultRunCommand, type CommandLineOptions } from "../system/process.js"
-import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
+import { deleteDirectory } from "../system/process.js"
 import { WorkspaceManager } from "../runtime/workspace.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
 import { isTerminalWorkflowStatus } from "../runtime/workflow-terminal-status.js"
@@ -14,26 +13,21 @@ import {
   resolveWorkspaceQuery,
   type WorkspaceQuery,
 } from "../runtime/workspace-query.js"
+import { resolveSessionTarget, type CancelAgentSessionPayload, type CancelAgentSessionReply, type ReceiveFollowupPayload, type ReceiveWorkflowRunStatusPayload } from "./session-target.js"
+import { forceReconnect, notifyReconnected, probeLiveness } from "./liveness-probe.js"
 import {
-  parseAheadBehind,
-  parseCommits,
-  parseDiffFiles,
-  parseNumstatTotal,
-} from "./git-parsers.js"
-import {
-  resolveSessionTarget,
-  type CancelAgentSessionPayload,
-  type CancelAgentSessionReply,
-  type ReceiveFollowupPayload,
-  type ReceiveWorkflowRunStatusPayload,
-} from "./session-target.js"
-import {
-  forceReconnect,
-  notifyReconnected,
-  probeLiveness,
-} from "./liveness-probe.js"
+  registerWorkspaceGitHandlers,
+  setRunnerSignalRExistsCheckerForTest,
+  setRunnerSignalRGitRunnerForTest,
+} from "./workspace-git-handlers.js"
 
-export { isUnderRunnerRoot, resolveWorkspaceQuery, resolveSessionTarget }
+export {
+  isUnderRunnerRoot,
+  resolveWorkspaceQuery,
+  resolveSessionTarget,
+  setRunnerSignalRExistsCheckerForTest,
+  setRunnerSignalRGitRunnerForTest,
+}
 export type {
   CancelAgentSessionPayload,
   CancelAgentSessionReply,
@@ -66,17 +60,6 @@ export interface RunnerSignalRClientOptions {
   serverConnection?: ServerConnection | null
   followupTargetResolver?: FollowupTargetResolver | null
   registry?: WorkspaceRegistry | null
-}
-
-let runGitCommand: typeof defaultRunCommand = defaultRunCommand
-let pathExists: typeof defaultExistsSync = defaultExistsSync
-
-export function setRunnerSignalRGitRunnerForTest(runner: typeof defaultRunCommand | null) {
-  runGitCommand = runner ?? defaultRunCommand
-}
-
-export function setRunnerSignalRExistsCheckerForTest(checker: typeof defaultExistsSync | null) {
-  pathExists = checker ?? defaultExistsSync
 }
 
 export class RunnerSignalRClient {
@@ -141,131 +124,8 @@ export class RunnerSignalRClient {
   }
 
   private registerHandlers(): void {
-    this.connection.on("GetDiff", async (query: WorkspaceQuery) => {
-      const workspace = resolveWorkspaceQuery(query)
-      if (!workspace) return null
-      const ac = new AbortController()
-      if (!await isGitWorkTree(workspace.workDir, ac.signal)) return null
-
-      const branchExists = await git(workspace.workDir, ["rev-parse", "--verify", `refs/heads/${workspace.head}`], ac.signal)
-      if (branchExists.exitCode !== 0) return null
-
-      const [numstat, fullDiff, mergeBaseResult, aheadBehindResult, logResult] = await Promise.all([
-        git(workspace.workDir, ["diff", `${workspace.baseBranch}...${workspace.head}`, "--numstat"], ac.signal),
-        git(workspace.workDir, ["diff", `${workspace.baseBranch}...${workspace.head}`], ac.signal),
-        git(workspace.workDir, ["merge-base", workspace.baseBranch, workspace.head], ac.signal),
-        git(workspace.workDir, ["rev-list", "--left-right", "--count", `${workspace.baseBranch}...${workspace.head}`], ac.signal),
-        git(workspace.workDir, ["log", `${workspace.baseBranch}...${workspace.head}`, "--format=%H"], ac.signal),
-      ])
-
-      const files = parseDiffFiles(numstat.stdout, fullDiff.stdout)
-      const mergeBase = mergeBaseResult.exitCode === 0 ? mergeBaseResult.stdout.trim() : workspace.baseBranch
-      const commitCount = logResult.exitCode === 0 ? logResult.stdout.trim().split("\n").filter(Boolean).length : 0
-      const [ahead, behind] = parseAheadBehind(aheadBehindResult.stdout)
-
-      return {
-        base: workspace.baseBranch,
-        head: workspace.head,
-        mergeBase,
-        ahead,
-        behind,
-        commitCount,
-        totalAdditions: files.reduce((s, f) => s + f.additions, 0),
-        totalDeletions: files.reduce((s, f) => s + f.deletions, 0),
-        files,
-      }
-    })
-
-    this.connection.on("GetCommits", async (query: WorkspaceQuery) => {
-      const workspace = resolveWorkspaceQuery(query)
-      if (!workspace) return null
-      const ac = new AbortController()
-      if (!await isGitWorkTree(workspace.workDir, ac.signal)) return null
-
-      const [logResult, numstat, mergeBaseResult, aheadBehindResult] = await Promise.all([
-        git(workspace.workDir, ["log", `${workspace.baseBranch}...${workspace.head}`, "--format=%H\t%h\t%s\t%an\t%ad", "--date=iso"], ac.signal),
-        git(workspace.workDir, ["diff", `${workspace.baseBranch}...${workspace.head}`, "--numstat"], ac.signal),
-        git(workspace.workDir, ["merge-base", workspace.baseBranch, workspace.head], ac.signal),
-        git(workspace.workDir, ["rev-list", "--left-right", "--count", `${workspace.baseBranch}...${workspace.head}`], ac.signal),
-      ])
-
-      const commits = parseCommits(logResult.stdout)
-      const mergeBase = mergeBaseResult.exitCode === 0 ? mergeBaseResult.stdout.trim() : workspace.baseBranch
-      const [ahead, behind] = parseAheadBehind(aheadBehindResult.stdout)
-      const fileStats = parseNumstatTotal(numstat.stdout)
-
-      return {
-        base: workspace.baseBranch,
-        head: workspace.head,
-        mergeBase,
-        ahead,
-        behind,
-        filesChanged: fileStats.filesChanged,
-        totalAdditions: fileStats.additions,
-        totalDeletions: fileStats.deletions,
-        commits,
-      }
-    })
-
-    this.connection.on("GetCommitDiff", async (query: WorkspaceQuery, hash: string) => {
-      const workspace = resolveWorkspaceQuery(query)
-      if (!workspace) return null
-
-      const ac = new AbortController()
-      if (!await isGitWorkTree(workspace.workDir, ac.signal)) return null
-      const result = await git(workspace.workDir, ["show", "--format=", "--patch", hash], ac.signal)
-      if (result.exitCode !== 0) return null
-      return { diff: result.stdout }
-    })
-
-    this.connection.on("GetWorkspaceStatus", async (query: WorkspaceQuery) => {
-      const workspace = resolveWorkspaceQuery(query)
-      if (!workspace) return { exists: false }
-
-      const ac = new AbortController()
-      if (!await isGitWorkTree(workspace.workDir, ac.signal)) return { exists: false }
-
-      const branchExists = await git(workspace.workDir, ["rev-parse", "--verify", `refs/heads/${workspace.head}`], ac.signal)
-      if (branchExists.exitCode !== 0) return { exists: false }
-
-      const rebaseResult = await git(workspace.workDir, ["rebase", "--show-current-patch"], ac.signal)
-      const rebaseInProgress = rebaseResult.exitCode === 0
-
-      let conflictingFiles: string[] = []
-      if (rebaseInProgress) {
-        const statusResult = await git(workspace.workDir, ["diff", "--name-only", "--diff-filter=U"], ac.signal)
-        conflictingFiles = statusResult.stdout.trim().split("\n").filter(Boolean)
-      }
-
-      const baseStatus = { exists: true, branch: workspace.head, baseBranch: workspace.baseBranch, rebaseInProgress, conflictingFiles }
-
-      const fetchResult = await git(workspace.workDir, ["fetch", "origin", workspace.baseBranch], ac.signal, { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
-      if (fetchResult.exitCode !== 0) return { ...baseStatus, reason: "fetch_failed" }
-      if (rebaseInProgress) return { ...baseStatus, reason: "rebase_in_progress" }
-
-      const remoteRef = `origin/${workspace.baseBranch}`
-      const aheadBehindResult = await git(workspace.workDir, ["rev-list", "--left-right", "--count", `${remoteRef}...${workspace.head}`], ac.signal)
-      const [ahead, behind] = parseAheadBehind(aheadBehindResult.stdout)
-
-      return { ...baseStatus, ahead, behind }
-    })
-
-    this.connection.on("GetFileContent", async (query: WorkspaceQuery, path: string) => {
-      const workspace = resolveWorkspaceQuery(query)
-      if (!workspace) return { base: null, head: null }
-
-      const ac = new AbortController()
-      if (!await isGitWorkTree(workspace.workDir, ac.signal)) return { base: null, head: null }
-
-      const [baseResult, headResult] = await Promise.all([
-        git(workspace.workDir, ["show", `${workspace.baseBranch}:${path}`], ac.signal),
-        git(workspace.workDir, ["show", `${workspace.head}:${path}`], ac.signal),
-      ])
-
-      return {
-        base: baseResult.exitCode === 0 ? baseResult.stdout : null,
-        head: headResult.exitCode === 0 ? headResult.stdout : null,
-      }
+    registerWorkspaceGitHandlers(this.connection, {
+      resolveQuery: resolveWorkspaceQuery,
     })
 
     this.connection.on("RemoveWorkspace", async (query: WorkspaceQuery) => {
@@ -280,7 +140,7 @@ export class RunnerSignalRClient {
       // require `safeRemove` to tolerate already-missing directories —
       // the registry must stay consistent with disk reality).
       await this.dropRegistryEntryForPath(workspacePath)
-      if (!pathExists(workspacePath)) return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
+      if (!defaultExistsSync(workspacePath)) return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
       if (!isUnderRunnerRoot(this.runnerRoot, workspacePath)) {
         return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path is outside the runner-managed root")
       }
@@ -539,16 +399,6 @@ export class RunnerSignalRClient {
 
     return { state: "cancelled" }
   }
-}
-
-async function git(workDir: string, args: string[], signal: AbortSignal, options?: CommandLineOptions) {
-  return runGitCommand("git", args, workDir, signal, undefined, options)
-}
-
-async function isGitWorkTree(workDir: string, signal: AbortSignal): Promise<boolean> {
-  if (!pathExists(workDir)) return false
-  const result = await git(workDir, ["rev-parse", "--is-inside-work-tree"], signal)
-  return result.exitCode === 0 && result.stdout.trim() === "true"
 }
 
 function removal(removed: boolean, status: string, path: string | null, reason: string | null, message: string) {
