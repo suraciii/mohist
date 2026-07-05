@@ -101,6 +101,38 @@ public class IssueQuerier : IScopedService
         return row?.IssueId;
     }
 
+    /// <summary>
+    /// Reverse lookup that returns the human-numbered handle plus the
+    /// title of the in-progress issue bound to
+    /// <paramref name="workflowRunId"/>, or <c>null</c> when no
+    /// in-progress issue is bound. Used by
+    /// <c>GET /api/workflow-runs/{workflowRunId}</c> (issue-381 T-002) to
+    /// attach an issue ref to the read model without requiring the
+    /// caller to know an issue number. The result is intentionally
+    /// minimal — number + title only — so the read surface does not
+    /// grow into a full <see cref="IssueReadModel"/> companion.
+    /// <para>
+    /// Same status filter as
+    /// <see cref="GetIssueIdForWorkflowRunAsync"/>: a preserved
+    /// <c>WorkflowRunId</c> on <c>Done</c> issues is execution history,
+    /// not a stuck-run signal, so an unfiltered lookup could match a
+    /// stale binding.
+    /// </para>
+    /// </summary>
+    public async Task<WorkflowRunIssueRef?> GetIssueRefForWorkflowRunAsync(string workflowRunId)
+    {
+        var issueId = await GetIssueIdForWorkflowRunAsync(workflowRunId).ConfigureAwait(false);
+        if (issueId is null) return null;
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.Issues.AsNoTracking()
+            .Where(r => r.IssueId == issueId)
+            .Select(r => new { r.Number, r.Title })
+            .FirstOrDefaultAsync();
+        if (row is null || row.Number is null || row.Title is null) return null;
+        return new WorkflowRunIssueRef(row.Number.Value, row.Title);
+    }
+
     private static async Task<Domain.Issue?> LoadIssueAsync(MohistDbContext db, string projectId, int number)
     {
         var row = await db.Issues.AsNoTracking()

@@ -36,3 +36,18 @@
 - New spec: 27 tests, all pass.
 - Cross-region regression check (issue-scoped paths + Workflow Rerun/Retry/HealthGuard specs + Workflow CLI list specs): 29 (T-001 surface) + 3904 (full server test surface, excluding the pre-existing flaky transcript-axes test) all pass.
 - Pre-existing flaky test (`Sessions.GenericAgentSessionTranscriptAxisSpecs.GenericLaunch_PolledDispatch_CarriesMintedAgentSessionIdAndNoWorkflowRunId`) reproduces on `master` without my changes — not blocking for T-001.
+
+## T-002 decisions
+
+- Composition vs nesting: chose `WorkflowRunDetailDto(Status, IssueRef?)` (composition) over extending `WorkflowStatusView` with optional issue fields. The composition preserves the invariant enforced by `tests/.../Workflow/Grain/StatusSpecs.cs:129` that `WorkflowStatusView` does not carry any `Issue*`/`Worktree*`/`ChangeDir*` properties. The new `WorkflowRunDetailDto` is the HTTP-response shape for the bare GET; the view contract stays untouched for consumers that only read status.
+- File layout: API DTO `WorkflowRunDetailDto` in `Api/WorkflowRunDetailDto.cs`; the minimal associated-issue record `WorkflowRunIssueRef(Number, Title)` lives alongside the existing `WorkflowViews` records in `Workflow/Services/WorkflowViews.cs` so the lower-layer services (where `IssueQuerier.GetIssueRefForWorkflowRunAsync` lives) can use it without depending on the API namespace. Reversed from a first pass that put both in `Api/` — that import would have crossed the architecture boundary that issue-381/T-001 already nailed down.
+- Null-omit default: `JSON.Options` has `DefaultIgnoreCondition = WhenWritingNull`, so the `IssueRef?` field must carry `[property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]` to surface as an explicit `null` property when the join misses. Without it, "issue ref absent" is indistinguishable from "status-only" response.
+- Join via existing helper: `IssueQuerier.GetIssueRefForWorkflowRunAsync` is implemented in terms of `GetIssueIdForWorkflowRunAsync` (the existing indexed lookup) plus a single additional row read for number+title — no schema change, no extra index.
+- Spec placement: `packages/server/tests/Mohist.Server.Tests/Specs/Workflow/Api/WorkflowRunDetailApiSpecs.cs` — same collection (`MohistIntegration`) and same seed shape as `WorkflowRunControlApiSpecs`, so the two specs share fixture state cleanly.
+- Spec coverage: 6 tests — full-detail-with-issue, terminal-issue-row→null, detached-issue→null, unknown-run→404, view-shape-invariant (compile-time guard against accidental property additions that violate the `Issue*` ban), read-only-does-not-mutate. Mutation helpers go through `IssueStore.Deserialize/Serialize` raw JSON round-trip because `Issue.Status`/`Issue.WorkflowRunId` are init-only on the typed record.
+
+## Validation
+
+- `dotnet build Mohist.sln` clean (0 warnings, 0 errors — TreatWarningsAsErrors on).
+- New spec: 6 tests, all pass.
+- Regression: full server test surface, 3907 passed (excluding the pre-existing flaky transcript-axes test, which reproduces on master). New `WorkflowRunDetailApiSpecs` does not destabilize the existing `WorkflowRunControlApiSpecs` collection.
