@@ -1,7 +1,7 @@
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { booleanInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
-import { git as defaultGit, type GitOptions } from "./git.js"
+import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
@@ -9,6 +9,8 @@ type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?
   stderr: string
   exitCode: number
   combinedOutput: string
+  status?: "timeout"
+  timeoutMs?: number
 }>
 type GitResult = Awaited<ReturnType<GitRunner>>
 let git: GitRunner = defaultGit
@@ -30,6 +32,11 @@ function sinkOptions(context: ActionContext): GitOptions | undefined {
   return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
 }
 
+function networkOptions(context: ActionContext): GitOptions | undefined {
+  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { sink: { log: context.log, source: ACTION_SOURCE }, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+}
+
 export async function pushAction(context: ActionContext): Promise<ActionResult> {
   const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
   const target = stringInput(context.with, "target")
@@ -43,6 +50,7 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
   const refspec = `${source}:${target}`
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
   const opts = sinkOptions(context)
+  const networkOpts = networkOptions(context)
 
   const sourceResolve = await git(workDir, ["rev-parse", source], context.signal, opts)
   if (!sourceResolve.success) {
@@ -73,7 +81,7 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
     // Regular force-with-lease path: resolve the remote tip and use the
     // explicit lease form, which git trusts regardless of tracking-ref state.
     // If the probe itself fails, fall back to the bare form (best-effort).
-    const remoteTip = await resolveRemoteTip(workDir, remote, target, context.signal, opts)
+    const remoteTip = await resolveRemoteTip(workDir, remote, target, context.signal, networkOpts)
     if (remoteTip === null) {
       pushArgs.push("--force-with-lease")
     } else if (remoteTip) {
@@ -82,7 +90,7 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
     // remoteTip === "" → branch absent on remote; a plain push creates it, no force needed.
   }
   pushArgs.push(remote, refspec)
-  const push = await git(workDir, pushArgs, context.signal, opts)
+  const push = await git(workDir, pushArgs, context.signal, networkOpts)
   if (!push.success) {
     const failureKind = looksLikeNonFastForward(push.combinedOutput) ? "base-moved" : "retry-safe"
     return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, push.combinedOutput, failureKind, push.exitCode)

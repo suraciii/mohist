@@ -2,7 +2,7 @@ import { stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
-import { git as defaultGit, type GitOptions } from "./git.js"
+import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { resolveCreatePrText } from "./github-pr-issue-fields.js"
 import { combinedGhOutput, extractPrNumberFromUrl, parsePrListWithDraft } from "./github-pr-parse.js"
 import { classifyGhFailure } from "./github-pr-classify.js"
@@ -15,6 +15,8 @@ type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?
   stderr: string
   exitCode: number
   combinedOutput: string
+  status?: "timeout"
+  timeoutMs?: number
 }>
 type GhRunner = typeof runCommand
 
@@ -29,8 +31,18 @@ function sinkOptions(context: ActionContext): GitOptions | undefined {
   return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
 }
 
+function networkGitOptions(context: ActionContext): GitOptions | undefined {
+  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { sink: { log: context.log, source: ACTION_SOURCE }, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+}
+
 function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
   return context.log ? { onLine: (line) => context.log!.write(ACTION_SOURCE, line) } : undefined
+}
+
+function networkGhOptions(context: ActionContext): CommandLineOptions | undefined {
+  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
 export async function createGitHubPrAction(context: ActionContext): Promise<ActionResult> {
@@ -68,7 +80,7 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
     steps,
   })
 
-  const ghOpts = ghLineOptions(context)
+  const ghOpts = networkGhOptions(context)
   const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
   record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output)
   if (!ghPrecheck.ok) {
@@ -99,7 +111,7 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
     return fail(baseSha.failureKind, baseSha.message, { output: baseSha.output, branch: branchProbe.name })
   }
 
-  const pushResult = await git(workDir, ["push", "--force-with-lease", remote, branchProbe.name], context.signal, sinkOptions(context))
+  const pushResult = await git(workDir, ["push", "--force-with-lease", remote, branchProbe.name], context.signal, networkGitOptions(context))
   record("git-push", `push --force-with-lease ${remote} ${branchProbe.name}`, pushResult.exitCode, pushResult.combinedOutput)
   if (!pushResult.success) {
     return fail(
@@ -254,7 +266,8 @@ export async function resolveBaseSha(
   record: (name: string, command: string, exitCode: number, output: string) => void,
   opts?: GitOptions,
 ): Promise<BaseShaOk | BaseShaFailure> {
-  const fetch = await git(workDir, ["fetch", remote, target], signal, opts)
+  const networkOpts: GitOptions | undefined = opts ? { ...opts, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  const fetch = await git(workDir, ["fetch", remote, target], signal, networkOpts)
   record("git-fetch-base", `fetch ${remote} ${target}`, fetch.exitCode, fetch.combinedOutput)
   if (!fetch.success) {
     return { kind: "failure", failureKind: "retry-safe", message: `git fetch ${remote} ${target} failed: ${fetch.combinedOutput}`, output: fetch.combinedOutput }

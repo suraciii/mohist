@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { setIssueFieldCommandRunnerForTest } from "../src/actions/issue-fields.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
@@ -754,6 +755,112 @@ describe("mohist/rebase", () => {
       errorCode: null,
       rebaseLeftInProgress: false,
     })
+  })
+
+  it("NetworkFetch_ReceivesTimeoutMsAndLocalProbesDoNot", async () => {
+    type GitCall = { command: string; timeoutMs: number | undefined }
+    const calls: GitCall[] = []
+    setRebaseExistsCheckerForTest(() => false)
+    setRebaseGitRunnerForTest(async (_workDir, args, _signal, options) => {
+      const command = args.join(" ")
+      calls.push({ command, timeoutMs: options?.timeoutMs })
+      switch (command) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("baseSha\n")
+        case "status --porcelain":
+          return ok("")
+        case "rev-parse HEAD":
+          return ok("before\n")
+        case "rebase origin/master":
+          return ok("Successfully rebased")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
+
+    const fetchCall = calls.find((c) => c.command === "fetch origin master")
+    const revParseBase = calls.find((c) => c.command === "rev-parse origin/master")
+    const statusCall = calls.find((c) => c.command === "status --porcelain")
+    const revParseHead = calls.find((c) => c.command === "rev-parse HEAD")
+    const rebaseCall = calls.find((c) => c.command === "rebase origin/master")
+    expect(fetchCall?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+    expect(revParseBase?.timeoutMs).toBeUndefined()
+    expect(statusCall?.timeoutMs).toBeUndefined()
+    expect(revParseHead?.timeoutMs).toBeUndefined()
+    expect(rebaseCall?.timeoutMs).toBeUndefined()
+  })
+
+  it("FetchTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
+    setRebaseExistsCheckerForTest(() => false)
+    setRebaseGitRunnerForTest(async (_workDir, args) => {
+      const command = args.join(" ")
+      switch (command) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "fetch origin master":
+          return {
+            success: false,
+            stdout: "",
+            stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+            exitCode: 124,
+            combinedOutput: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+            status: "timeout" as const,
+            timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+          }
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await rebaseAction(context({ baseBranch: "master", remote: "origin" }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("retry-safe")
+    expect(output.output).toContain("timed out")
+  })
+
+  it("LocalBasePath_RebaseDoesNotCarryTimeoutMs", async () => {
+    type GitCall = { command: string; timeoutMs: number | undefined }
+    const calls: GitCall[] = []
+    setRebaseExistsCheckerForTest(() => false)
+    setRebaseGitRunnerForTest(async (_workDir, args, _signal, options) => {
+      const command = args.join(" ")
+      calls.push({ command, timeoutMs: options?.timeoutMs })
+      switch (command) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "rev-parse master":
+          return ok("baseSha\n")
+        case "status --porcelain":
+          return ok("")
+        case "rev-parse HEAD":
+          return ok(calls.filter((c) => c.command === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
+        case "rebase master":
+          return ok("Successfully rebased")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    await rebaseAction(context())
+
+    for (const call of calls) {
+      expect(call.timeoutMs).toBeUndefined()
+    }
+    expect(calls.some((c) => c.command.startsWith("fetch"))).toBe(false)
   })
 })
 

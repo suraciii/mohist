@@ -1,6 +1,18 @@
 import { runCommand } from "../system/process.js"
 import type { TaskLogger } from "../runtime/task-log.js"
 
+/**
+ * Single network default applied to every network-bound git/gh command
+ * (clone, fetch, ls-remote, push, gh pr list/edit/create, gh --version,
+ * gh auth status). Per design D2 the policy lives at the call site, not
+ * in the primitive — the primitive (`runCommand`) provides the knob
+ * (`CommandLineOptions.timeoutMs`), and each network call site opts in
+ * with this constant. There is intentionally no per-command budget
+ * table: a hung network command is a hung network command, regardless
+ * of which subcommand it was.
+ */
+export const NETWORK_COMMAND_TIMEOUT_MS = 120_000
+
 export interface GitSink {
   /**
    * Single sink for ops command output. When supplied, every line of
@@ -22,13 +34,21 @@ export interface GitSink {
 
 export interface GitOptions {
   sink?: GitSink | null
+  /**
+   * Per-command timeout in ms. Layered over the caller-supplied
+   * `AbortSignal` by `runCommand` (per design D5). Network-bound call
+   * sites pass `NETWORK_COMMAND_TIMEOUT_MS`; local-only probes omit
+   * it and run under the work-level signal only.
+   */
+  timeoutMs?: number
 }
 
 export async function git(workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) {
   const sink = options?.sink ?? null
   const result = await runCommand("git", args, workDir, signal, undefined, sink ? {
     onLine: (line) => sink.log.write(sink.source, line),
-  } : undefined)
+    timeoutMs: options?.timeoutMs,
+  } : { timeoutMs: options?.timeoutMs })
   return { ...result, success: result.exitCode === 0, combinedOutput: combinedOutput(result.stdout, result.stderr) }
 }
 

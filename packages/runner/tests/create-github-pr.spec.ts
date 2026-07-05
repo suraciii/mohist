@@ -2,14 +2,17 @@ import { afterEach, describe, expect, it } from "vitest"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { setIssueFieldCommandRunnerForTest } from "../src/actions/issue-fields.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import {
   createGitHubPrAction,
   setGitHubPrGhRunnerForTest,
   setGitHubPrGitRunnerForTest,
 } from "../src/actions/github-pr.js"
 
-type CommandResult = { exitCode: number; stdout: string; stderr: string }
-type GitResponse = { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }
+type CommandResult = { exitCode: number; stdout: string; stderr: string; status?: "timeout"; timeoutMs?: number }
+type GitResponse = { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string; status?: "timeout"; timeoutMs?: number }
+type GitCall = { command: string; timeoutMs: number | undefined }
+type GhCall = { command: string; timeoutMs: number | undefined }
 
 const WORKSPACE_PATH = "/workspace"
 const PROJECT_PATH = "/project"
@@ -18,6 +21,8 @@ afterEach(() => {
   setGitHubPrGitRunnerForTest(null)
   setGitHubPrGhRunnerForTest(null)
   setIssueFieldCommandRunnerForTest(null)
+  gitCalls.length = 0
+  ghCalls.length = 0
 })
 
 function ok(stdout: string): GitResponse {
@@ -70,12 +75,23 @@ function withLog(ctx: ActionContext, writes: Array<{ source: string; text: strin
   }
 }
 
+const gitCalls: GitCall[] = []
+const ghCalls: GhCall[] = []
+
 function installGit(respond: (workDir: string, args: string[], signal: AbortSignal) => GitResponse | Promise<GitResponse>) {
-  setGitHubPrGitRunnerForTest(async (workDir, args, signal) => await respond(workDir, args, signal))
+  setGitHubPrGitRunnerForTest(async (workDir, args, signal, options) => {
+    const recorded: GitCall = { command: args.join(" "), timeoutMs: options?.timeoutMs }
+    gitCalls.push(recorded)
+    return await respond(workDir, args, signal)
+  })
 }
 
 function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
-  setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal) => await respond(cmd, args, cwd))
+  setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
+    const recorded: GhCall = { command: [cmd, ...args].join(" "), timeoutMs: options?.timeoutMs }
+    ghCalls.push(recorded)
+    return await respond(cmd, args, cwd)
+  })
 }
 
 function installMoIssueShow(title = "Use GitHub PR workflow", body = "Open, review, and merge a GitHub PR.") {
@@ -451,5 +467,177 @@ describe("mohist/create-github-pr action", () => {
       draft: false,
       operation: "created",
     })
+  })
+
+  it("NetworkCommands_AllReceiveTimeoutMs_LocalProbesDoNot", async () => {
+    installMoIssueShow()
+    installGit((_workDir, args) => {
+      const cmd = args.join(" ")
+      switch (cmd) {
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("base-sha-1\n")
+        case "push --force-with-lease origin mohist/run-wr-gh-pr-1":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${cmd}`)
+      }
+    })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+          return ghOk("gh version 2.0.0\n")
+        case "gh auth status":
+          return ghOk("Logged in\n")
+        case "gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft":
+          return ghOk("[]\n")
+        case "gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft":
+          return ghOk("https://github.com/example/repo/pull/42\n")
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    await createGitHubPrAction(context({
+      source: "mohist/run-wr-gh-pr-1",
+      target: "master",
+      remote: "origin",
+      titleFrom: "issue.title",
+      bodyFrom: "issue.body",
+    }))
+
+    // Network call sites: must all receive NETWORK_COMMAND_TIMEOUT_MS.
+    for (const command of [
+      "fetch origin master",
+      "push --force-with-lease origin mohist/run-wr-gh-pr-1",
+    ]) {
+      const call = gitCalls.find((c) => c.command === command)
+      expect(call?.timeoutMs, `git call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+    }
+    for (const command of [
+      "gh --version",
+      "gh auth status",
+      "gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft",
+      "gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft",
+    ]) {
+      const call = ghCalls.find((c) => c.command === command)
+      expect(call?.timeoutMs, `gh call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+    }
+
+    // Local probe: rev-parse must carry no per-command timeout.
+    const revParse = gitCalls.find((c) => c.command === "rev-parse origin/master")
+    expect(revParse?.timeoutMs).toBeUndefined()
+  })
+
+  it("GhPrCreateTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
+    installMoIssueShow()
+    installGit((_workDir, args) => {
+      const cmd = args.join(" ")
+      switch (cmd) {
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("base-sha-1\n")
+        case "push --force-with-lease origin mohist/run-wr-gh-pr-1":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${cmd}`)
+      }
+    })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+          return ghOk("gh version 2.0.0\n")
+        case "gh auth status":
+          return ghOk("Logged in\n")
+        case "gh pr list --head mohist/run-wr-gh-pr-1 --base master --state open --json number,url,isDraft":
+          return ghOk("[]\n")
+        case "gh pr create --head mohist/run-wr-gh-pr-1 --base master --title Use GitHub PR workflow --body Open, review, and merge a GitHub PR. --draft":
+          return {
+            exitCode: 124,
+            stdout: "",
+            stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+            status: "timeout" as const,
+            timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+          }
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await createGitHubPrAction(context({
+      source: "mohist/run-wr-gh-pr-1",
+      target: "master",
+      remote: "origin",
+      titleFrom: "issue.title",
+      bodyFrom: "issue.body",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("retry-safe")
+    expect(output.output).toContain("timed out")
+    // Step name + duration must be visible to downstream renderers via the
+    // existing structured `steps` array — no new transport field was added.
+    const ghPrCreateStep = output.steps.find((step: { name: string }) => step.name === "gh-pr-create")
+    expect(ghPrCreateStep).toBeDefined()
+    expect(ghPrCreateStep.output).toContain("timed out")
+    expect(ghPrCreateStep.exitCode).toBe(124)
+  })
+
+  it("PushTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
+    installMoIssueShow()
+    installGit((_workDir, args) => {
+      const cmd = args.join(" ")
+      switch (cmd) {
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("base-sha-1\n")
+        case "push --force-with-lease origin mohist/run-wr-gh-pr-1":
+          return {
+            success: false,
+            stdout: "",
+            stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+            exitCode: 124,
+            combinedOutput: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+            status: "timeout" as const,
+            timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+          }
+        default:
+          return fail(`unexpected git call: ${cmd}`)
+      }
+    })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+          return ghOk("gh version 2.0.0\n")
+        case "gh auth status":
+          return ghOk("Logged in\n")
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await createGitHubPrAction(context({
+      source: "mohist/run-wr-gh-pr-1",
+      target: "master",
+      remote: "origin",
+      titleFrom: "issue.title",
+      bodyFrom: "issue.body",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("retry-safe")
+    expect(output.output).toContain("timed out")
+    const gitPushStep = output.steps.find((step: { name: string }) => step.name === "git-push")
+    expect(gitPushStep).toBeDefined()
+    expect(gitPushStep.output).toContain("timed out")
+    expect(gitPushStep.exitCode).toBe(124)
   })
 })

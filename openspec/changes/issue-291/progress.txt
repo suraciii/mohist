@@ -60,3 +60,65 @@
 - **Test budget:** all 7 tests in `system-process-timeout.spec.ts`
   run in ~340 ms. Well under the 500 ms spec target. Total runner
   suite (931 tests) runs in ~8 s.
+## T-002 (2026-07-05) — Network-command-timeout policy + structured retry-safe failure path
+
+### What landed
+- `packages/runner/src/actions/git.ts` — exported `NETWORK_COMMAND_TIMEOUT_MS = 120_000` as the single source of the network default. Extended `GitOptions` with `timeoutMs?: number`; `git()` forwards it into `CommandLineOptions.timeoutMs` (works whether or not a sink is present).
+- `packages/runner/src/runtime/workspace.ts` — applied `timeoutMs: NETWORK_COMMAND_TIMEOUT_MS` to `cloneFresh` (`git clone`) and `verifyBaseBranch` (`git ls-remote`). All other workspace.ts runCommand call sites (rev-parse, checkout, rebase/merge/cherry-pick --abort, reset, fsck, cat-file, show-ref, ls-tree, remote get-url) keep NO timeoutMs — they are local-only and the design explicitly excludes them.
+- `packages/runner/src/actions/push.ts` — added `networkOptions(context)` helper that pairs the sink with `timeoutMs: NETWORK_COMMAND_TIMEOUT_MS`; applied to `push` and `resolveRemoteTip`'s `ls-remote` probe. `rev-parse` keeps NO timeoutMs.
+- `packages/runner/src/actions/rebase.ts` — same pattern: `networkOptions(context)` for the `fetch <remote> <baseBranch>` call only. All `rev-parse`, `rebase`, `status`, `add`, `commit`, `reset`, `diff`, `merge-base`, `branch` calls keep NO timeoutMs.
+- `packages/runner/src/actions/create-github-pr.ts` — applied network timeout to `push --force-with-lease`, `fetch <remote> <target>` (via `networkGitOptions` threaded into `resolveBaseSha`), and the entire gh precheck + `gh pr list` / `edit` / `create` chain (via `networkGhOptions`). `rev-parse <remote>/<target>` keeps NO timeoutMs.
+- `packages/runner/src/actions/{mark,merge}-github-pr.ts`, `github-pr-status.ts` — updated `ghLineOptions` to always include `timeoutMs: NETWORK_COMMAND_TIMEOUT_MS` since every gh call in these actions is a network call.
+- `packages/runner/src/actions/github-pr-runtime.ts` — unchanged in body; the precheck just forwards the caller-supplied options to `gh()`, so the network timeout flows through transparently when callers pass `networkGhOptions`.
+
+### Test additions (16 new tests across 7 spec files, all < 500 ms each)
+- `tests/push.spec.ts` — `NetworkCommands_ReceiveTimeoutMsAndLocalProbesDoNot`, `ForceWithLease_LsRemoteProbeAndPushReceiveNetworkTimeout`, `PushTimeout_ClassifiesAsRetrySafeAndSurfacesDuration` (D4-shaped fake result → `failureKind: "retry-safe"` with `output` carrying `timed out`).
+- `tests/rebase.spec.ts` — `NetworkFetch_ReceivesTimeoutMsAndLocalProbesDoNot` (asserts `fetch` gets the timeout; `rev-parse`/`status`/`rebase` do not), `FetchTimeout_ClassifiesAsRetrySafeAndSurfacesDuration`, `LocalBasePath_RebaseDoesNotCarryTimeoutMs` (whole pipeline stays timeout-free when no remote).
+- `tests/create-github-pr.spec.ts` — `NetworkCommands_AllReceiveTimeoutMs_LocalProbesDoNot` (fetch, push, all 4 gh calls get 120000; rev-parse gets undefined), `GhPrCreateTimeout_ClassifiesAsRetrySafeAndSurfacesDuration`, `PushTimeout_ClassifiesAsRetrySafeAndSurfacesDuration` (assert the structured failure surfaces `step name` + `output containing "timed out"` + `exitCode: 124`).
+- `tests/github-pr-status.spec.ts` — `NetworkGhPrView_ReceivesTimeoutMs`, `GhPrViewTimeout_SurfacesStepNameAndDuration` (the action's existing failure path — it does NOT call `classifyGhFailure` — surfaces the captured output and step in the JSON `steps` array).
+- `tests/mark-github-pr-ready.spec.ts` — `NetworkGhCalls_AllReceiveTimeoutMs` (all 4 gh calls get 120000), `GhPrReadyTimeout_ClassifiesAsRetrySafeAndSurfacesDuration`.
+- `tests/merge-github-pr.spec.ts` — `NetworkGhCalls_AllReceiveTimeoutMs` (precheck + pr view + statusCheckRollup + mergeStateStatus + pr merge + re-verify), `GhPrMergeTimeout_ClassifiesAsRetrySafeAndSurfacesDuration`.
+- `tests/workspace-prepare.spec.ts` + `tests/workspace-prepare-workflow.spec.ts` — `LocalProbes_NoCommandTimeoutIsApplied` (the entire workspace-prepare pipeline stays on the work-level signal only — none of the 7+ local probes carry a per-command timeout).
+
+### Gotchas worth recording
+
+- **`runCommand`'s 6th arg is `options`, NOT a separate `env` slot.** When writing fake
+  `GitRunner`s the signature is `(workDir, args, signal, options?)`. Earlier I wrote
+  `(workDir, args, signal, _env, options)` like the `GhRunner` — TypeScript accepts the
+  overload but `options?.timeoutMs` resolves to `undefined` because the fake receives
+  `undefined` for the 4th param (the actual `options`). Use the 4-arg form for `GitRunner`
+  fakes.
+- **`git.ts`'s runner contract widened to include `status?: "timeout"` and `timeoutMs?: number`**
+  on the return type. The existing `installGit` helpers in push.spec.ts / rebase.spec.ts
+  / create-github-pr.spec.ts use the seam type declared in each action file. Adding the
+  two new optional fields is backward-compatible: existing fakes that return
+  `{ success, stdout, stderr, exitCode, combinedOutput }` still type-check. The new
+  D4-shaped fakes that add `status: "timeout"` + `timeoutMs` exercise the classifier
+  path without invoking `runCommand`.
+- **`GitRunner` seam signature in `actions/push.ts` and `actions/rebase.ts` is a local
+  type, not derived from `typeof git()`**, so the return-type widening had to be done
+  in both files manually. `create-github-pr.ts` does the same.
+- **Test fake arrays are now module-scope (`gitCalls`, `ghCalls`)** in
+  `create-github-pr.spec.ts`, `github-pr-status.spec.ts`, `mark-github-pr-ready.spec.ts`,
+  `merge-github-pr.spec.ts` — `afterEach` clears them. Existing tests that declared
+  local `gitCalls: string[]` arrays still work because the variable shadowing is
+  per-block. The new tests assert against the module-scope arrays.
+- **`github-pr-status.ts` does not call `classifyGhFailure`** — its failure path surfaces
+  the raw gh output directly. A timeout test for this action therefore asserts the
+  captured stderr contains `timed out` and the existing `steps[]` entry carries the
+  right exit code, rather than asserting `failureKind`. The other delivery actions DO
+  call `classifyGhFailure` and pick up the unchanged `retry-safe` arm.
+- **Action-level seam type for `GhRunner` (`actions/github-pr-runtime.ts:6`,
+  `actions/github-pr-status.ts:6`) is `typeof runCommand`**, so the 6-arg signature is
+  `(command, args, workDir, signal, env?, options?)`. fakes that want to record
+  `options.timeoutMs` must take 6 args.
+- **No per-command budget table.** The acceptance criteria explicitly forbids it; one
+  shared constant covers clone/fetch/ls-remote/push/gh-pr-list/edit/create/precheck.
+  If clones regress on slow links, raise `NETWORK_COMMAND_TIMEOUT_MS` rather than add
+  a per-command knob (Non-Goal from the proposal).
+- **Test budget for the new tests:** all 16 new tests run in well under 500 ms each;
+  the full runner suite (948 tests, up from 931) completes in ~8.5 s.
+
+### Verification
+- `npm run typecheck -w packages/runner` passes.
+- `npm test -w packages/runner` — 948 / 948 pass.

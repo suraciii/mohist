@@ -2,6 +2,7 @@ import type { ActionContext, ActionResult } from "../core/types.js"
 import { numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:github-pr-status"
@@ -230,7 +231,8 @@ function evaluateExpectation(expectation: GitHubPrStatusExpectation, ctx: Expect
 }
 
 function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
-  return context.log ? { onLine: (line) => context.log!.write(ACTION_SOURCE, line) } : undefined
+  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
 function buildPrViewFields(expect: GitHubPrStatusExpectation[]): string[] {

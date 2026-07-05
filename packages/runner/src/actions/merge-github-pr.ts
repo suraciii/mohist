@@ -2,6 +2,7 @@ import { numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { resolveMergeSubject } from "./github-pr-issue-fields.js"
 import { combinedGhOutput, parsePrList } from "./github-pr-parse.js"
 import { classifyGhFailure } from "./github-pr-classify.js"
@@ -89,7 +90,8 @@ function createRecorder(steps: GitHubPrStep[]) {
 }
 
 function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
-  return context.log ? { onLine: (line) => context.log!.write(ACTION_SOURCE, line) } : undefined
+  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
 async function resolvePrNumberForMerge(

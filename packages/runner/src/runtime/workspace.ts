@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { JsonObject, RenderedWorkItem } from "../core/types.js"
 import { getSegments, stringAt } from "../core/json-path.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from "../system/process.js"
 import type { WorkspaceRegistry } from "./workspace-registry.js"
 import type { TaskLogger } from "./task-log.js"
@@ -196,7 +197,7 @@ export class WorkspaceManager {
     if (exists(workspacePath)) await deleteDirectory(workspacePath)
     await ensureDir(join(workspacePath, ".."))
     const sink = workspacePrepSink(log)
-    const result = await runCommand("git", ["clone", gitUrl, workspacePath], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
+    const result = await runCommand("git", ["clone", gitUrl, workspacePath], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
     if (result.exitCode !== 0) {
       // Drop any partial clone git left behind so a retry starts clean.
       await deleteDirectory(workspacePath).catch(() => {})
@@ -220,7 +221,7 @@ export class WorkspaceManager {
   // its own error; only a reachable repo with an absent branch fails here.
   private async verifyBaseBranch(gitUrl: string, baseBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
     const sink = workspacePrepSink(log)
-    const result = await runCommand("git", ["ls-remote", "--heads", gitUrl, baseBranch], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
+    const result = await runCommand("git", ["ls-remote", "--heads", gitUrl, baseBranch], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
     if (result.exitCode === 0 && result.stdout.trim() === "") {
       throw new Error(`Configured base branch '${baseBranch}' cannot be resolved from repository gitUrl.`)
     }
