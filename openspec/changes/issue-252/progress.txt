@@ -1,0 +1,36 @@
+## Codebase Patterns
+
+- `ui/` directory pattern: one panel per file, peer imports (e.g. `TaskProgressPanel`/`RuntimeDecisionSurface` already consume `format`-style helpers from peers). Following this, `WorkflowView.tsx` is now composition-only and 7 new sibling files own their assigned symbols.
+- Verbatim code motion (no behavior change) is the right approach for these god-file decompositions. The oracle is `WorkflowView.test.tsx` (and later `derive-runtime-decision.test.ts`); modify tests only if they break for non-trivial reasons, otherwise treat breakage as a bug.
+- `npm install` is required on a fresh workspace before `npm run typecheck`/`test:run` works (no cached `tsc` binary otherwise).
+- `tsc -b` runs in `packages/web` and uses `TreatWarningsAsErrors`-equivalent strict mode (unused-import errors abort the build).
+
+## Discoveries / Gotchas
+
+- Original `WORKFLOW_STAGES` constant was only used in `StageBar.tsx` (and inline in `StepList` + the entry `WorkflowView`). Exported from `StageBar.tsx` so `WorkflowView` and `InlineApproval.tsx` (`StepList`) can both import from one owner — keeps the spec's one-symbol-one-file rule intact.
+- `workflowTimelineToStageStateMap` references `useWorkflowTimeline`'s data shape — that hook is imported from `../../../entities/issue` rather than redefined locally. Tried-and-failed pattern: do NOT add a stub `useWorkflowTimeline` shadow to make the type reference resolve; always import the real one.
+- `isDeliveryFailureTask` is private to `TaskItem.tsx`. It was already non-exported in the original. T-001 keeps it that way (it's not in the spec's prescribed owner table).
+- `isScriptHealthCheck` exists in two places per T-001 scope: `CheckItem.tsx` (the moved copy, `check.checkName === 'health'` shape) and `model/derive-runtime-decision.ts` (the canonical, slightly different signature). The view-side copy is intentionally retained for T-001 and cleaned up in T-002 per design D2.
+- `InlineApprovalControls`'s `getApproveLabel` is a tautology (returns `'Approve & Continue'` for all branches). Kept verbatim — the task is structural refactor only, no behavior change.
+- `StageBar.tsx` is the only file that needs `useIsMobile` for the stage bar's responsive layout. `StepList` doesn't use it.
+- The `workflowTimelineToStageStateMap` cast `stage.status as StageCheckState['status']` was originally `as StageStateRead['checks'][number]['status']`; using `StageCheckState` is equivalent (StageCheckState['status'] === StageStateRead['checks'][number]['status']) and imports a named type already in the entity barrel — small readability win, no behavior change.
+
+## Sequencing notes
+
+D5 sequencing (zero-risk first) was applied:
+1. `format.ts` + `StageStatusIcons.tsx` (zero behavioral surface)
+2. `StageBar.tsx` (peer subcomponent, no sibling deps)
+3. `failure-panels.tsx` (extracted before TaskItem since TaskItem imports `DeliveryFailureBanner`)
+4. `TaskItem.tsx`
+5. `CheckItem.tsx`
+6. `InlineApproval.tsx` (depends on TaskItem + CheckItem; extracted last)
+7. Slim WorkflowView.tsx to composition
+
+Final size: WorkflowView.tsx 1455 → 66 lines.
+
+## Verification
+
+- `npm run typecheck -w packages/web`: pass
+- `npm run test:run -w packages/web`: 295 files / 4407 tests pass, 1 skipped (unchanged from baseline)
+- `WorkflowView.test.tsx` unmodified (verified via `git diff --stat`)
+- Barrel `widgets/issue-workflow/index.ts` untouched (only internal file moves)
