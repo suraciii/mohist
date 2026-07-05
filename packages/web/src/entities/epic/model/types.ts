@@ -79,3 +79,16 @@ export interface EpicDetail extends Epic {
   linkedIssues: LinkedIssue[]
   progress: EpicProgress
 }
+
+export interface StoredCloudEventDto {
+  id: number
+  eventId: string
+  source: string
+  type: string
+  specVersion: string
+  subject: string | null
+  time: string
+  dataContentType: string | null
+  data: unknown
+  extensions: Record<string, string>
+}

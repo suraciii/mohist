@@ -42,5 +42,18 @@ public class RecordingEventStore : IEventStore
         }
     }
 
+    public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var source = $"/mohist/epics/{epicId}";
+            return Task.FromResult<IReadOnlyList<StoredCloudEvent>>(_events
+                .Where(e => e.Envelope.Source.ToString() == source)
+                .TakeLast(limit)
+                .Select((e, idx) => new StoredCloudEvent(idx + 1, e.Envelope))
+                .ToList());
+        }
+    }
+
     private sealed record RecordedEnvelope(CloudEvent Envelope);
 }

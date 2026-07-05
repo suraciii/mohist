@@ -5,13 +5,14 @@ export type PrimaryLifecycleAction =
   | { kind: 'pause-epic' }
   | { kind: 'resume-epic' }
   | { kind: 'mark-done' }
+  | { kind: 'reopen-epic' }
 
 export function primaryLifecycleAction(
   status: EpicStatus,
   readyToMarkDone: boolean,
 ): PrimaryLifecycleAction | null {
   if (status === EpicStatus.Done || status === EpicStatus.Closed) {
-    return null
+    return { kind: 'reopen-epic' }
   }
 
   if (status === EpicStatus.Paused) {

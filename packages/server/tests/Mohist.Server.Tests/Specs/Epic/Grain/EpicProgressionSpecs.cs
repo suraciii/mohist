@@ -563,6 +563,7 @@ public class EpicProgressionSpecs
                 _dbFactory,
                 this,
                 new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)),
+                new NoopEventStore(),
                 NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
 
         public IIssueGrain GetIssueGrain(string issueId) => new RecordingIssueGrain(this, issueId);
