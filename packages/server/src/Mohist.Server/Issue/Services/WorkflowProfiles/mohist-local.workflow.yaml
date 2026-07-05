@@ -88,26 +88,11 @@ stages:
           files:
             - path: ${{ openspecChangeDir }}/self-review.md
     checks:
-      - name: proposal-complete
-        title: Proposal complete
-        uses: core/artifact-exists
+      - name: plan-artifacts
+        title: Plan artifacts complete
+        uses: mohist/openspec-artifacts
         with:
-          path: ${{ openspecChangeDir }}/proposal.md
-      - name: specs-complete
-        title: Specs complete
-        uses: core/artifact-exists
-        with:
-          path: ${{ openspecChangeDir }}/specs
-      - name: design-complete
-        title: Design complete
-        uses: core/artifact-exists
-        with:
-          path: ${{ openspecChangeDir }}/design.md
-      - name: tasks-valid
-        title: Tasks valid
-        uses: core/artifact-exists
-        with:
-          path: ${{ openspecChangeDir }}/tasks.json
+          changeDir: ${{ openspecChangeDir }}
       - name: self-review-passed
         title: Self review passed
         uses: core/marker

@@ -121,8 +121,8 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
       uses: mohist/openspec-artifacts
       with:
         changeDir: ${{ openspecChangeDir }}
-      # proposal.md, design.md, tasks.json 是硬性要求。
-      # specs/ 可选——纯性能/重构 issue 无 spec 变更时合法缺失。
+      # proposal.md、specs/、design.md、tasks.json 都是硬性要求。
+      # specs/ 由 `specs` task 负责产出；缺它视为 plan artifacts 缺失。
   requiresApproval: true
 
 - stage: build

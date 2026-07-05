@@ -126,6 +126,7 @@ export async function openspecArtifactsAction(context: ActionContext): Promise<A
 
   const required: Array<{ path: string; kind: "file" | "directory" }> = [
     { path: join(changeDir, "proposal.md"), kind: "file" },
+    { path: join(changeDir, "specs"), kind: "directory" },
     { path: join(changeDir, "design.md"), kind: "file" },
     { path: join(changeDir, "tasks.json"), kind: "file" },
   ]
