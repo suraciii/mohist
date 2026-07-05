@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { useLogs } from '../model/useLogs'
-import type { ParsedLogEntry } from '../model/useLogs'
+import type { LogEntry } from '../model/api'
 import { LEVEL_COLORS, LEVEL_CHIP_COLORS, ALL_LEVELS, type LogLevel } from '../../../shared/lib/log-levels'
 import { formatLogTime } from '../../../shared/lib/format-time'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
-function LogRow({ entry }: { entry: ParsedLogEntry }) {
+function LogRow({ entry }: { entry: LogEntry }) {
   const levelColor = entry.level ? LEVEL_COLORS[entry.level] || 'text-gray-600 bg-gray-50' : 'text-gray-400 bg-gray-50'
 
   return (
@@ -25,7 +25,7 @@ function LogRow({ entry }: { entry: ParsedLogEntry }) {
 }
 
 export function LogsPage() {
-  const { entries, loading, error, truncated, file } = useLogs()
+  const { entries, loading, error, truncated, source, unavailable, expectedLocation, reason } = useLogs()
   const [enabledLevels, setEnabledLevels] = useState<Set<LogLevel>>(new Set(ALL_LEVELS))
   const [searchQuery, setSearchQuery] = useState('')
   const [autoFollow, setAutoFollow] = useState(true)
@@ -84,6 +84,8 @@ export function LogsPage() {
   }, [handleScroll])
 
   const handleExport = useCallback(() => {
+    if (unavailable || filtered.length === 0) return
+
     const text = filtered.map((e) => e.raw).join('\n')
     const blob = new Blob([text], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -94,7 +96,9 @@ export function LogsPage() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-  }, [filtered])
+  }, [filtered, unavailable])
+
+  const exportDisabled = unavailable || filtered.length === 0
 
   return (
     <div className="flex-1 flex flex-col bg-gray-50 overflow-hidden">
@@ -118,7 +122,7 @@ export function LogsPage() {
             </button>
             <button
               onClick={handleExport}
-              disabled={filtered.length === 0}
+              disabled={exportDisabled}
               className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm min-h-[36px]"
             >
               <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -179,13 +183,37 @@ export function LogsPage() {
         </div>
       )}
 
-      {file && (
+      {source && (
         <div className="shrink-0 bg-gray-100 border-b border-gray-200 px-4 md:px-6 py-1 text-xs text-gray-500 font-mono">
-          File: {file}
+          File: {source}
         </div>
       )}
 
-      {loading && entries.length === 0 ? (
+      {unavailable ? (
+        <div className="flex-1 flex items-center justify-center px-4 md:px-6">
+          <div
+            role="status"
+            data-testid="logs-unavailable"
+            className="max-w-xl rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+          >
+            <div className="font-semibold mb-1">Server logs are unavailable</div>
+            <div className="text-xs text-amber-800 mb-2">
+              The runtime log source is not currently being captured. The Logs page cannot tail server output until file logging is enabled.
+            </div>
+            {expectedLocation && (
+              <div className="text-xs text-amber-900">
+                <span className="font-semibold">Expected location:</span>{' '}
+                <code className="font-mono break-all">{expectedLocation}</code>
+              </div>
+            )}
+            {reason && (
+              <div className="text-xs text-amber-900 mt-1">
+                <span className="font-semibold">Reason:</span> {reason}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : loading && entries.length === 0 ? (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-gray-400 text-sm">Loading logs...</div>
         </div>
@@ -197,9 +225,7 @@ export function LogsPage() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-gray-400 text-sm">
-            {entries.length === 0 ? 'No logs available' : 'No matching logs'}
-          </div>
+          <div className="text-gray-400 text-sm">No matching logs</div>
         </div>
       ) : (
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-white">

@@ -22,6 +22,7 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
     private readonly EventPublishingWebApplicationFactory _factory;
     private readonly string _runnerRoot;
     private readonly string _systemUpdateStatePath;
+    private readonly string _logsPath;
     private readonly string _connectionString;
     private SqliteConnection _keeper = null!;
 
@@ -31,7 +32,8 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
         _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-evp-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_runnerRoot);
         _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-evp-{Guid.NewGuid():N}.json");
-        _factory = new EventPublishingWebApplicationFactory(_connectionString, _runnerRoot, _systemUpdateStatePath);
+        _logsPath = Path.Combine(Path.GetTempPath(), $"mohist-logs-evp-{Guid.NewGuid():N}");
+        _factory = new EventPublishingWebApplicationFactory(_connectionString, _runnerRoot, _systemUpdateStatePath, _logsPath);
     }
 
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
@@ -58,6 +60,8 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
             Directory.Delete(_runnerRoot, recursive: true);
         if (File.Exists(_systemUpdateStatePath))
             File.Delete(_systemUpdateStatePath);
+        if (!string.IsNullOrWhiteSpace(_logsPath) && Directory.Exists(_logsPath))
+            Directory.Delete(_logsPath, recursive: true);
         await Task.CompletedTask;
     }
 
@@ -66,8 +70,8 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
         public RecordingIEventPublisher RecordingPublisher { get; }
         public RecordingTranscriptEventPublisher RecordingTranscriptPublisher { get; }
 
-        public EventPublishingWebApplicationFactory(string connectionString, string runnerRoot, string systemUpdateStatePath)
-            : base(connectionString, runnerRoot, systemUpdateStatePath)
+        public EventPublishingWebApplicationFactory(string connectionString, string runnerRoot, string systemUpdateStatePath, string logsPath)
+            : base(connectionString, runnerRoot, systemUpdateStatePath, logsPath)
         {
             RecordingPublisher = new RecordingIEventPublisher(new NoopEventPublisher());
             RecordingTranscriptPublisher = new RecordingTranscriptEventPublisher();
