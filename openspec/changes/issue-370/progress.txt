@@ -275,3 +275,79 @@ T-004 (issue-title batch lookup relocation) — completed.
   reflection spec asserting the querier no longer exposes the statics.
   All 10 pass; full `npm test` is green (3831 passed, 13 skipped,
   0 failed on the server; 908 passed on web).
+
+T-005 (zero-statics verification gate) — completed.
+
+## Codebase Patterns (T-005)
+
+- The verification gates from the design (step 6) collapse to three
+  one-liner `rg` checks plus the existing test suite. The `rg "internal
+  static.*AgentSessionQuerier"` gate is the strongest invariant: it must
+  return zero non-doc-comment hits, and the only legitimate survivor is
+  the XML doc-comment phrase on `AgentSessionDtoMapper.cs:18` ("the
+  `<c>internal static</c>` on `<see cref="AgentSessionQuerier"/>` it
+  replaces") — that is a `<c>` text reference inside a doc block, not a
+  declaration or call.
+- The "removed-static references" `rg` gate stays at zero because the
+  three functional tasks (T-001/T-002/T-003/T-004) handled every
+  consumer swap before their respective static deletions, and T-003
+  repointed the assembler's XML doc references in lockstep with the
+  re-target. The only `<see cref="AgentSessionQuerier.*">` cross-refs
+  that survive are all to non-removed methods (`ListCurrentAsync`,
+  `GetGenericSessionSummaryAsync`, `BuildAgentSessionListContextRefs`,
+  `BuildGenericSessionSummaryContextRefs`,
+  `ResolveGenericFollowupTargetAsync`), which the task description
+  explicitly called out as "require no repointing".
+
+## Gotchas (T-005)
+
+- `rg "record.Label\(|Session.Metadata.Label\b|private static.*Labels\("`
+  produces 38 hits but they split into three legitimate categories and
+  zero duplicates: (a) 30 `record.Label(...)` callsite hits across
+  `AgentSessionQuerier.cs`, `AgentActivityFeedAssembler.cs`,
+  `AgentSessionContextRefs.cs`, `WorkflowActivityQuerier.cs`,
+  `RunnerRoutes.cs`, and a tiny number inside the T-001 mapper / T-003
+  reductions — all are uses of the now-authoritative instance method
+  (T-002's home); (b) 1 `Session.Metadata.Label(key)` hit at
+  `AgentSessionQuery.cs:182` inside `AgentSessionRecord.Label(string)`
+  — the fallback body, designed exactly that way; (c) 2 false-positive
+  method-name suffix hits: `QueryRowsByLabels` at
+  `AgentSessionQuery.cs:94` (the unrelated EF Where-clause builder) and
+  `CreateAgentSessionLabels` at the 20260612 migration
+  (`/Infrastructure/Data/Migrations/20260612154500_SimplifyAgentSessionTranscriptModel.cs:132`,
+  the column-creation helper). Neither is a duplicate of the removed
+  `Labels(params ...)` builder. No undiscovered duplicates.
+- The dotnet test output during `npm test` is interleaved with
+  vitest/runner/web but `npm test` (which is `dotnet test && npm run
+  test:ci --workspaces`) returns exit 0; running each suite in
+  isolation (`dotnet test Mohist.sln` for server, vitest for web/runner)
+  shows the same numbers — server 3831/13/0, web 4295/1/0, runner
+  908/0/0. The flake-flagged `DefensiveCopyVariables_AfterCommit_*`
+  spec did not trip on this run.
+
+## Decisions (T-005)
+
+- Followed the design's verification gate order: zero-statics
+  declaration check → removed-static reference check → label/labels
+  duplicate check → doc-reference sweep → full test suite (server +
+  web typecheck + web tests). No code edits were needed — all four
+  prior tasks already left the surfaces in the right state; the gate's
+  job is to confirm that and record the evidence.
+- T-005 is a `REVIEW` task (no `WRITE` edits); only `progress.txt`
+  changes. The verification is captured by the appended entry above
+  rather than by a code diff.
+- Confirmed the global acceptance criterion from the issue body —
+  "AgentSessionQuerier 的 internal static 成员数降为零" — is now provably
+  true at the file level: `rg -n "internal static"
+  packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuerier.cs`
+  returns no matches. The querier still carries its real query
+  methods plus the few non-static helpers those methods need (e.g.
+  private instance helpers), which is exactly the design's intent
+  ("Don't split AgentSessionQuerier itself beyond removing statics; its
+  query methods stay co-located").
+- The full gating run is the final integration evidence for the
+  dependency chain: T-005 ran after T-001..T-004, and all four
+  acceptance criteria of T-005 hold simultaneously only because the
+  upstream tasks each kept the build + test suite green at every
+  sub-step. Issue-370 is ready to be merged.
+
