@@ -18,6 +18,15 @@
 - The `workflowTimelineToStageStateMap` cast `stage.status as StageCheckState['status']` was originally `as StageStateRead['checks'][number]['status']`; using `StageCheckState` is equivalent (StageCheckState['status'] === StageStateRead['checks'][number]['status']) and imports a named type already in the entity barrel — small readability win, no behavior change.
 - `isFailedCheck` (the helper used only by `findFailedScriptHealthCheck`) moved to `runtime-query-helpers.ts` as a module-private helper alongside `findFailedScriptHealthCheck`. It is intentionally NOT exported (not in the spec's prescribed six); kept co-located with its only caller.
 - The timeline parameter type on the exported query helpers is the literal `Pick<WorkflowTimeline, 'currentStage' | 'status' | 'stages' | 'pendingWork' | 'availableActions'>` (equivalent to the prior `RuntimeDecisionInput['timeline']` shape). Using the explicit `Pick<…>` rather than `RuntimeDecisionInput['timeline']` avoids a circular-import hazard (this module is imported *by* `derive-runtime-decision.ts`, which is where `RuntimeDecisionInput` lives).
+- T-003 added the per-summary restructure (per design D3/D4). The presentation table lives in `model/runtime-presentations.ts` and the orchestrator stays in `derive-runtime-decision.ts`; the file is small enough (306 lines) that no further split was needed.
+- The `RuntimeDecision`/`RuntimeSummary`/`RuntimeActionKind`/`RuntimeDecisionInput` interfaces stay in `derive-runtime-decision.ts` (the public barrel source). `runtime-presentations.ts` imports them via `import type` so no runtime cycle is created.
+- Reason strings in actions are **not** templated from labels — labels and reasons can diverge (e.g. label `'Rerun stage'`, reason `'Rerun is not currently offered by the backend projection.'`). Tempting approach `${label} is not currently offered…` would silently shift the rerun reason string. Per-action builders (`buildRetryAction`/`buildResumeAction`/`buildRerunAction`/`buildStopAction`/`buildStartNewWorkflowAction`) hardcode both label and reason verbatim.
+- Per design D4, `terminalActions(ctx, terminalKind)` is the shared failed/blocked prefix builder. It returns `[retry, resume, rerun, <terminal>, inspect]` where `<terminal>` is `Start new workflow` for `terminalKind: 'start'` and `Stop` for `terminalKind: 'stop'`. The failed/blocked entries each call it with their tail.
+- Cross-cutting fields (`waitReason` set on the `RuntimeDecision`, `blockedReason`, `approvalStage`) stay computed centrally in `deriveRuntimeDecision`. Only `stopRecoverable`, `driftNote`, `pickPrimaryAction`, `determineSummary`, `pickCurrentTask`, `buildWaitReason`, `buildDriftNote`, `isInterrupted`, and `hasRecoverableStop` are orchestrator-side. The presentation table consumes `currentTask`/`waitReason` from a shared context but does not re-derive them.
+- The dead-code `if (isBacklog) push start` fallback that originally sat at the bottom of `buildActions` (only reachable for an enum value that no longer exists in the union type) is intentionally NOT replicated in the new structure — under `Record<RuntimeSummary, …>` exhaustiveness, every state has exactly one entry, so the fallback becomes structurally impossible. The 6 typed values all have explicit entries; the test oracle confirms no observable diff.
+- `SummaryPresentationContext` is kept module-private (design Open Question). The orchestrator exposes `buildPresentationContext`/`resolveSummaryPresentation` as the only inter-module surface.
+- The `if (summary === 'failed')` inside `pickCurrentTask` is intentionally retained: it's classifier-input resolution (the failed summary prefers the failed check before checking running checks), not a per-builder walk over summaries for a presentation projection.
+- Compile-time exhaustiveness checked by temporarily deleting/misnaming a PRESENTATIONS key: `tsc -b` reports `Property 'done' is missing in type … but required in type 'Record<RuntimeSummary, SummaryPresentation>'`. Excess keys yield `Object literal may only specify known properties`. Both directions verified.
 
 ## Sequencing notes
 
@@ -30,10 +39,13 @@ D5 sequencing (zero-risk first) was applied:
 6. `InlineApproval.tsx` (depends on TaskItem + CheckItem; extracted last)
 7. Slim WorkflowView.tsx to composition
 
-T-002 (this task) added one more step after T-001's seven:
+T-002 added one more step after T-001's seven:
 8. `model/runtime-query-helpers.ts` (extracted query helpers, rewired `derive-runtime-decision.ts` and `CheckItem.tsx` to import from it; deleted both private duplicates)
 
-Final size: WorkflowView.tsx 1455 → 66 lines. `derive-runtime-decision.ts` 673 → 596 lines (six query helpers + isFailedCheck moved out).
+T-003 added the structural restructure after T-002:
+9. `model/runtime-presentations.ts` (per-summary `Record<RuntimeSummary, SummaryPresentation>` table with module-private `terminalActions` helper); orchestrator `derive-runtime-decision.ts` rebuilt to consume it.
+
+Final size: WorkflowView.tsx 1455 → 66 lines. `derive-runtime-decision.ts` 673 → 306 lines (presentation builders + allowed-actions/actionEnabled extracted to `runtime-presentations.ts` and `runtime-query-helpers.ts`). `runtime-presentations.ts` 357 lines, `runtime-query-helpers.ts` 90 lines.
 
 ## Verification
 
@@ -42,3 +54,4 @@ Final size: WorkflowView.tsx 1455 → 66 lines. `derive-runtime-decision.ts` 673
 - `WorkflowView.test.tsx` unmodified (verified via `git diff --stat`)
 - `derive-runtime-decision.test.ts` unmodified (verified via `git diff --stat`)
 - Barrel `widgets/issue-workflow/index.ts` untouched (only internal file moves)
+- T-003 exhaustiveness check: deleting a PRESENTATIONS key produces `Property '<key>' is missing ... but required in type 'Record<RuntimeSummary, SummaryPresentation>'`; renaming to an unknown key produces the symmetric excess-key error.
