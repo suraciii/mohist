@@ -9,7 +9,7 @@ The Session DTO projections — usage (`ToUsageDto` for both `AgentUsageSummary`
 
 ### Requirement: All consumers invoke the same mapper methods for identical projections
 
-The three consumers of Session DTO projections — the core query service (workflow session list/detail, current list, session metadata, generic session summary paths), the activity feed assembler, and the generic summary path — SHALL obtain their usage, event-summary, lineage, usage-history, and transcript-event projections by calling the same mapper method rather than each holding its own copy. The same input SHALL produce the same output across all consumers, preserving the byte-alignment invariant that previously lived only in prose comments.
+The consumers of Session DTO projections SHALL obtain each real shared projection by calling the same mapper method rather than each holding its own copy: the core query service and activity feed assembler share usage and event-summary projections, the session metadata path uses the shared lineage projection, and transcript-event callers use the shared transcript projection. The same input SHALL produce the same output across applicable consumer surfaces, preserving the byte-alignment invariant that previously lived only in prose comments.
 
 #### Scenario: Activity feed and core query share the usage projection
 
@@ -21,10 +21,10 @@ The three consumers of Session DTO projections — the core query service (workf
 - **WHEN** the activity feed assembler and the core query service each project an identical `AgentSessionTranscriptSummary`
 - **THEN** both SHALL produce an identical `AgentEventSummaryDto` by invoking the same mapper method, including resolved model, failure category, context-exhaustion flags, and tool call/error counts
 
-#### Scenario: Lineage projection is shared between metadata and generic summary paths
+#### Scenario: Metadata lineage projection matches the shared mapper
 
-- **WHEN** the session metadata builder and the generic session summary path each build the lineage projection for an identical `AgentSession`
-- **THEN** both SHALL produce an identical `RuntimeSessionLineageEntryDto` list (or `null`) by invoking the same mapper method, including the legacy single-binding synthesis fallback
+- **WHEN** the session metadata builder projects runtime lineage for an `AgentSession`
+- **THEN** it SHALL produce the same `RuntimeSessionLineageEntryDto` list (or `null`) as the shared mapper method, including the legacy single-binding synthesis fallback
 
 ### Requirement: DTO projection output is byte-identical to the pre-change output
 

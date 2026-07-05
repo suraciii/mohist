@@ -17,8 +17,8 @@ namespace Mohist.Server.Tests.Specs.Sessions;
 /// <summary>
 /// Codifies the byte-alignment invariant that issue-370 T-001 pins between
 /// the read-side consumers of <see cref="AgentSession"/> DTO projections.
-/// These specs call consumer APIs, not the mapper directly, so they fail when
-/// one consumer drifts away from <see cref="AgentSessionDtoMapper"/>.
+/// These specs call consumer APIs where a consumer path exists and pin the
+/// intentional current-list/activity-feed usage-history difference.
 /// </summary>
 [Collection("MohistDb")]
 public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
@@ -34,7 +34,7 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task UsageAndEventSummary_QuerierAndAssembler_ProduceIdenticalOutputForSameSession()
+    public async Task UsageAndEventSummary_QuerierAndAssembler_PreserveAlignedFieldsAndHistoryDifference()
     {
         using var scope = _fixture.Services.CreateScope();
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
@@ -56,7 +56,9 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
 
         Assert.Equal(fromQuerierPath.IssueNumber, fromAssemblerPath.IssueNumber);
         Assert.Equal(fromQuerierPath.IssueTitle, fromAssemblerPath.IssueTitle);
-        AssertUsageDtoEqual(fromQuerierPath.Usage, fromAssemblerPath.Usage);
+        AssertUsageDtoScalarFieldsEqual(fromQuerierPath.Usage, fromAssemblerPath.Usage);
+        Assert.Null(fromQuerierPath.Usage.ContextUsageHistory);
+        Assert.NotNull(fromAssemblerPath.Usage.ContextUsageHistory);
         AssertEventSummaryDtoEqual(fromQuerierPath.EventSummary, fromAssemblerPath.EventSummary);
         Assert.True(fromQuerierPath.EventSummary.ContextExhaustionSuspected);
         Assert.Null(fromQuerierPath.EventSummary.ContextExhaustion);
@@ -65,7 +67,7 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task Lineage_MetadataPath_DelegatesRuntimeLineageProjectionToSharedMapper()
+    public async Task Lineage_MetadataPath_ProducesSharedMapperProjection()
     {
         using var scope = _fixture.Services.CreateScope();
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
@@ -97,14 +99,30 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
                 Assert.Equal(CreatedAt.AddMinutes(15).ToString("o"), entry.BoundAt);
             });
 
-        var querierSource = File.ReadAllText(SourcePath(
-            "src",
-            "Mohist.Server",
-            "Sessions",
-            "Services",
-            "AgentSessionQuerier.cs"));
-        Assert.Contains("var lineage = AgentSessionDtoMapper.BuildLineageDto(domainSession);", querierSource);
-        Assert.DoesNotContain("new RuntimeSessionLineageEntryDto", querierSource);
+        Assert.Equal(AgentSessionDtoMapper.BuildLineageDto(session), lineage);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void Labels_SkipsBlankKeysAndValues_AndUsesOrdinalComparison()
+    {
+        var labels = AgentSessionDtoMapper.Labels(
+            (null!, "ignored-null-key"),
+            ("", "ignored-empty-key"),
+            ("   ", "ignored-whitespace-key"),
+            ("null-value", null),
+            ("empty-value", ""),
+            ("whitespace-value", "  "),
+            ("Project", "upper"),
+            ("project", "lower"));
+
+        Assert.Equal(2, labels.Count);
+        Assert.Equal("upper", labels["Project"]);
+        Assert.Equal("lower", labels["project"]);
+        Assert.False(labels.ContainsKey("null-value"));
+        Assert.False(labels.ContainsKey("empty-value"));
+        Assert.False(labels.ContainsKey("whitespace-value"));
     }
 
     private static async Task SeedGenericSessionWithUsageAndTranscriptAsync(
@@ -285,7 +303,7 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         await db.SaveChangesAsync();
     }
 
-    private static void AssertUsageDtoEqual(AgentUsageDto expected, AgentUsageDto actual)
+    private static void AssertUsageDtoScalarFieldsEqual(AgentUsageDto expected, AgentUsageDto actual)
     {
         Assert.Equal(expected.InputTokens, actual.InputTokens);
         Assert.Equal(expected.OutputTokens, actual.OutputTokens);
@@ -298,7 +316,6 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         Assert.Equal(expected.ContextWindowSize, actual.ContextWindowSize);
         Assert.Equal(expected.ContextUsagePercent, actual.ContextUsagePercent);
         Assert.Equal(expected.HealthStatus, actual.HealthStatus);
-        Assert.Equal(expected.ContextUsageHistory, actual.ContextUsageHistory);
     }
 
     private static void AssertEventSummaryDtoEqual(AgentEventSummaryDto expected, AgentEventSummaryDto actual)
@@ -311,14 +328,4 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         Assert.Equal(expected.ToolErrorCount, actual.ToolErrorCount);
     }
 
-    private static string SourcePath(params string[] segments) => Path.GetFullPath(Path.Combine(
-        [
-            AppContext.BaseDirectory,
-            "..",
-            "..",
-            "..",
-            "..",
-            "..",
-            .. segments,
-        ]));
 }

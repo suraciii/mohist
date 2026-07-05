@@ -100,7 +100,7 @@ public class AgentSessionQuerier : IScopedService
             null,
             AgentSessionJsonHelper.LastActivityAt(s).ToString("o"),
             AgentSessionDtoMapper.ToEventSummaryDto(events),
-            AgentSessionDtoMapper.ToUsageDto(s));
+            AgentSessionDtoMapper.ToUsageDto(AgentSessionJsonHelper.Usage(s)));
         }).ToList();
     }
 
