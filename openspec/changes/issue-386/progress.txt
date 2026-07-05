@@ -130,3 +130,104 @@ Manual smoke tests:
   reconciled by T-006 (gap-table cleanup) + the per-task docs updates that
   fall out of items 4-6 (when their corresponding tasks ship). Do NOT touch
   them in T-001.
+
+## T-002: Profile toggle (enable/disable) — code & test patterns
+
+### Code
+
+- `BuildProfileEnable` / `BuildProfileDisable` live in
+  `MohistCliCommands.ProjectWorkflow.cs` alongside the existing
+  `BuildProfileList`. Both are added to the `profile` subgroup in
+  `BuildProfile`.
+- Argument follows the `<run-id>` precedent from T-001: `Argument<string?>`
+  with `Arity.ZeroOrOne` + `DefaultValueFactory = _ => null`. Handler
+  checks `string.IsNullOrWhiteSpace(profileId)` and writes
+  `"<profile-id> is required"` to stderr. Without this `ZeroOrOne` arity
+  the SetAction would be unreachable because System.CommandLine's own
+  required-arg parse error would fire first.
+- Project scoping uses the standard `--project` / `--project-id` pair from
+  `MohistCliCommands.ProjectRefOption()`. Unresolvable project fails locally
+  via the existing `api.ResolveProject(project, projectId)` path — no extra
+  guard needed, the conflict-msg / no-active-project stderr already covers
+  the acceptance criteria.
+- Bodies are `new { profileId }`. URL is built from
+  `ProjectWorkflowProfilePath(resolvedProjectId, "/enable")` /
+  `"/disable"` (already a private helper at the top of the file, used by
+  `BuildConfigGet` etc.).
+- Wire call goes through `api.PrintPostAsync` (not `PrintPostWithOutputAsync`)
+  because there's no body / table to render — endpoint returns `200 OK` with
+  empty payload. This keeps the existing success-path of
+  `PrintResponseAsync` (writes `"OK"` to stdout) and the existing
+  error-path (writes `error (code)` to stderr + returns
+  `FailureExitCode(status)` — 4 for 404, 1 for everything else). That
+  faithfully surfaces the verbatim server error per the spec scenario
+  "Unknown profile on disable surfaces the server error" with no
+  CLI-side translation.
+- Description for `disable` mentions the `last_enabled_workflow_profile`
+  guard so `--help` advertises the contract.
+
+### Tests (`CliProjectWorkflowProfileSpecs.cs`)
+
+Added 12 tests covering the acceptance criteria:
+
+- `ProfileEnable_PostsProfileIdToEnableEndpoint` — happy-path POST shape
+  (`{"profileId":"<profileId>"}` body + correct URL).
+- `ProfileDisable_PostsProfileIdToDisableEndpoint` — disable counterpart.
+- `ProfileEnable_MissingProfileId_FailsLocallyWithoutHttp` / `...Disable...`
+  — assert `Assert.Empty(handler.Requests)` (no HTTP) + exit code 1 +
+  stderr contains `"<profile-id> is required"`.
+- `ProfileEnable_HonorsProjectIdFlag` / `ProfileDisable_HonorsProjectFlag`
+  — verify `--project-id` and `--project` route to the right
+  `/api/projects/<id>/workflow-profile/{enable,disable}` URL. Same parser
+  path as other project-scoped commands — the existing
+  `ResolveProject(project, projectId)` does the merge.
+- `ProfileEnable_UnknownProfileServerError_SurfacesCodeAndMessage` /
+  `...Disable...` — server returns `400` + `{ success:false, error, code:
+  "unknown_workflow_profile" }`; assert the message and code both end up
+  in stderr and exit code is 1.
+- `ProfileDisable_LastEnabledProfileServerError_SurfacesCodeAndMessage` —
+  the `last_enabled_workflow_profile` 400 path on disable.
+- `ProfileEnable_NoProjectResolvable_FailsLocallyWithoutHttp` — covers the
+  acceptance criteria's "unresolvable project fails locally" via the
+  existing `CliTestHarness.CreateSync(activeProjectId: null)` setup; assert
+  `Assert.Empty(handler.Requests)` and stderr contains the standard
+  "Run 'mo project use ...'" hint.
+- `ProfileEnable_ConflictingProjectFlags_FailsLocallyWithoutHttp` — covers
+  the `--project`/`--project-id` conflict case (out of the spec's explicit
+  list but a real failure path worth pinning).
+- `Profile_HelpAdvertisesEnableAndDisableSubcommands` — `--help` shows
+  both new subcommands (a safety net against future regressions where
+  someone adds another `profile` subcommand and accidentally shadows).
+
+### Verification
+
+`dotnet test packages/cli/tests/Mohist.Cli.Tests`:
+
+- Before task: 729 pass, 3 fail (pre-existing `CliReferenceDocsSpecs`
+  failures from master; T-006 scope).
+- After task: 741 pass, 3 fail (same 3 pre-existing — `CliReferenceDocsSpecs`
+  unrelated to this task). Net: +12 tests, all green.
+
+`CliProjectWorkflowProfileSpecs`: 26/26 pass (14 pre-existing + 12 new).
+
+### Gotchas for next tasks
+
+- The `ProfileEnable_UnknownProfileServerError_SurfacesCodeAndMessage`
+  test asserts the literal `unknown_workflow_profile` string in stderr.
+  If the server renames the code, this breaks — that's intentional per
+  D4's risk call (server contract change is itself a coordinated change).
+- The new `enable` / `disable` commands do not declare an `-o` option —
+  they hit `PrintPostAsync` (no output mode plumbing). The success path
+  therefore always writes the JSON envelope (or `"OK"` when no data) to
+  stdout. Adding `-o table` would be nice-to-have but out of scope for
+  the additive caller; the server returns no meaningful body to render.
+- The `disable` command description explicitly names
+  `last_enabled_workflow_profile` so the guard is discoverable from
+  `--help`. If a future server adds more guards on these endpoints,
+  update the description in lockstep.
+- The `profile` subgroup's `--help` test (`Profile_HelpAdvertises...`)
+  relies on System.CommandLine's default help-text rendering; no custom
+  help writer is in play. Watch for changes to that renderer if you
+  add more subcommands — the assertion is on substring presence of
+  `enable` and `disable`, which the renderer emits as part of the
+  subcommand listing.
