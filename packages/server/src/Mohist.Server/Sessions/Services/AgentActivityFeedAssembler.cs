@@ -4,6 +4,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Domain;
@@ -28,8 +29,8 @@ namespace Mohist.Server.Sessions.Services;
 /// <remarks>
 /// Previously these methods (and their private helpers
 /// <c>ToActivityCard</c>, <c>BuildTaskProgressMapAsync</c>,
-/// <c>LoadIssueTitlesAsync</c>, <c>ToPreview</c>, <c>ExtractPreviewText</c>,
-/// <c>Truncate</c>, <c>IssueTitle</c>, <c>LoadLatestEventsAsync</c>) lived
+/// <c>ToPreview</c>, <c>ExtractPreviewText</c>,
+/// <c>Truncate</c>, <c>LoadLatestEventsAsync</c>) lived
 /// on the core <see cref="AgentSessionQuerier"/> together with five
 /// unrelated concerns. Splitting the activity-feed projection out keeps
 /// the core querier a pure query service and gives the assembly logic a
@@ -37,7 +38,13 @@ namespace Mohist.Server.Sessions.Services;
 /// <see cref="Mohist.Server.Workflow.Services.WorkflowQuerier"/>
 /// dependency moved from the core querier here (it was only consumed by
 /// the task-progress map) and the core querier constructor signature
-/// dropped that argument.
+/// dropped that argument. The issue-title batch lookup and the
+/// <c>Issue #{number}</c> fallback resolver moved to
+/// <see cref="IssueTitleLookup"/> on the Issue read side
+/// (issue-370 T-004 / design D5), so the assembler now reads the
+/// same <c>(project, numbers)</c> tuple as
+/// <see cref="AgentSessionQuerier.ListCurrentAsync"/> without going
+/// through the core querier.
 /// </remarks>
 public sealed class AgentActivityFeedAssembler : IScopedService
 {
@@ -86,7 +93,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         var sessionIds = sessions.Select(s => s.Session.Id).ToArray();
         var latestEvents = await LoadLatestEventsAsync(db, sessionIds, ct);
         var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessionIds, ct);
-        var issueTitles = await AgentSessionQuerier.LoadIssueTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
+        var issueTitles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
         var taskProgressMap = await BuildTaskProgressMapAsync(sessions, ct);
 
         var cards = sessions
@@ -94,7 +101,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
                 record,
                 latestEvents.GetValueOrDefault(record.Session.Id),
                 eventSummaries.GetValueOrDefault(record.Session.Id),
-                AgentSessionQuerier.IssueTitle(issueTitles, record.IssueNumber()),
+                IssueTitleLookup.Resolve(issueTitles, record.IssueNumber()),
                 taskProgressMap.GetValueOrDefault(record.Session.Id)))
             .ToList();
 

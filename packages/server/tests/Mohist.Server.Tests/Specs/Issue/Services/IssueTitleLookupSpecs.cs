@@ -1,0 +1,272 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Services;
+using Mohist.Server.Sessions.Services;
+using Mohist.Server.Tests.Support;
+using Xunit;
+
+namespace Mohist.Server.Tests.Specs.Issue.Services;
+
+/// <summary>
+/// Specs for <see cref="IssueTitleLookup"/>: the Issue read-side
+/// batch-lookup + <c>Issue #{n}</c> fallback resolver that the Session
+/// read-side consumers
+/// (<see cref="AgentSessionQuerier.ListCurrentAsync"/> and
+/// <see cref="AgentActivityFeedAssembler"/>) share. Pins the
+/// issue-370 T-004 spec scenarios:
+/// <list type="bullet">
+///   <item><description>empty input yields an empty dictionary without
+///     querying the database;</description></item>
+///   <item><description>distinct issue numbers are deduplicated before
+///     lookup;</description></item>
+///   <item><description>stored titles are returned verbatim when
+///     non-whitespace, and the literal <c>Issue #{n}</c> string is the
+///     fallback when absent or whitespace;</description></item>
+///   <item><description>the core querier and the activity feed assembler
+///     observe the same number → title map for the same
+///     <c>(project, numbers)</c> tuple.</description></item>
+/// </list>
+/// </summary>
+[Collection("MohistDb")]
+public class IssueTitleLookupSpecs
+{
+    private readonly MohistDbFixture _fixture;
+
+    public IssueTitleLookupSpecs(MohistDbFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task LoadTitlesAsync_EmptyInput_ReturnsEmptyDictionaryWithoutTouchingDatabase()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+
+        // Seed an issue so the table is non-empty; this also proves the
+        // short-circuit doesn't accidentally pick anything up.
+        var seeded = NewIssue("proj-empty-input", 1, "Should not surface");
+        db.Issues.Add(new IssueRow { IssueId = seeded.Id, State = IssueStore.Serialize(seeded) });
+        await db.SaveChangesAsync();
+
+        DetachTracked(db);
+
+        var titles = await IssueTitleLookup.LoadTitlesAsync(db, "proj-empty-input", [], CancellationToken.None);
+
+        Assert.Empty(titles);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task LoadTitlesAsync_DuplicateNumbers_AreDeduplicatedBeforeLookup()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+
+        var projectId = $"proj-dedup-{Guid.NewGuid():N}";
+        var issue = NewIssue(projectId, 42, "Deduped title");
+        db.Issues.Add(new IssueRow { IssueId = issue.Id, State = IssueStore.Serialize(issue) });
+        await db.SaveChangesAsync();
+
+        DetachTracked(db);
+
+        // The query argument carries the same number four times; the
+        // result must contain one entry per distinct number — so the
+        // dictionary has exactly one key (42), not four.
+        var titles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, new[] { 42, 42, 42, 42 }, CancellationToken.None);
+
+        Assert.Single(titles);
+        Assert.Equal("Deduped title", titles[42]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task LoadTitlesAsync_LoadsAllDistinctNumbersForProject()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+
+        var projectId = $"proj-loadall-{Guid.NewGuid():N}";
+        var i1 = NewIssue(projectId, 1, "First");
+        var i2 = NewIssue(projectId, 2, "Second");
+        var i3 = NewIssue(projectId, 3, "Third");
+        db.Issues.AddRange(
+            new IssueRow { IssueId = i1.Id, State = IssueStore.Serialize(i1) },
+            new IssueRow { IssueId = i2.Id, State = IssueStore.Serialize(i2) },
+            new IssueRow { IssueId = i3.Id, State = IssueStore.Serialize(i3) });
+        await db.SaveChangesAsync();
+
+        DetachTracked(db);
+
+        var titles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, new[] { 1, 2, 3 }, CancellationToken.None);
+
+        Assert.Equal(3, titles.Count);
+        Assert.Equal("First", titles[1]);
+        Assert.Equal("Second", titles[2]);
+        Assert.Equal("Third", titles[3]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task LoadTitlesAsync_DropsIssuesFromOtherProjects()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+
+        var ownProject = $"proj-own-{Guid.NewGuid():N}";
+        var otherProject = $"proj-other-{Guid.NewGuid():N}";
+
+        var own1 = NewIssue(ownProject, 1, "Mine 1");
+        var own2 = NewIssue(ownProject, 2, "Mine 2");
+        var foreign = NewIssue(otherProject, 1, "Foreign #1");
+        db.Issues.AddRange(
+            new IssueRow { IssueId = own1.Id, State = IssueStore.Serialize(own1) },
+            new IssueRow { IssueId = own2.Id, State = IssueStore.Serialize(own2) },
+            new IssueRow { IssueId = foreign.Id, State = IssueStore.Serialize(foreign) });
+        await db.SaveChangesAsync();
+
+        DetachTracked(db);
+
+        var titles = await IssueTitleLookup.LoadTitlesAsync(db, ownProject, new[] { 1, 2 }, CancellationToken.None);
+
+        Assert.Equal(2, titles.Count);
+        Assert.Equal("Mine 1", titles[1]);
+        Assert.Equal("Mine 2", titles[2]);
+        Assert.False(titles.ContainsKey(2) && titles[2] == "Foreign #1");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Resolve_StoredTitle_ReturnedVerbatim()
+    {
+        var titles = new Dictionary<int, string> { [42] = "Stored" };
+
+        Assert.Equal("Stored", IssueTitleLookup.Resolve(titles, 42));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Resolve_AbsentNumber_FallsBackToIssueHash()
+    {
+        var titles = new Dictionary<int, string>();
+
+        Assert.Equal("Issue #7", IssueTitleLookup.Resolve(titles, 7));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Resolve_WhitespaceTitle_FallsBackToIssueHash()
+    {
+        var titles = new Dictionary<int, string>
+        {
+            [1] = "",
+            [2] = "   ",
+            [3] = "\t\n",
+        };
+
+        Assert.Equal("Issue #1", IssueTitleLookup.Resolve(titles, 1));
+        Assert.Equal("Issue #2", IssueTitleLookup.Resolve(titles, 2));
+        Assert.Equal("Issue #3", IssueTitleLookup.Resolve(titles, 3));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Resolve_NumberZero_UsesLiteralZeroInFallback()
+    {
+        // Defensive: callers pass issueNumber = 0 for sessions without
+        // an issue-number label; the fallback must still render as
+        // "Issue #0" rather than throwing or producing an empty string.
+        var titles = new Dictionary<int, string>();
+
+        Assert.Equal("Issue #0", IssueTitleLookup.Resolve(titles, 0));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task QuerierAndAssembler_ShareSameTitlesForSameProjectAndNumbers()
+    {
+        // The cross-consumer identity invariant: the core querier
+        // (ListCurrentAsync) and the activity feed assembler
+        // (GetActivityAsync) call IssueTitleLookup with the same
+        // (project, numbers) tuple and observe the same dictionary.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+
+        var projectId = $"proj-shared-{Guid.NewGuid():N}";
+        var i1 = NewIssue(projectId, 11, "Querier/Assembler: 11");
+        var i2 = NewIssue(projectId, 22, "Querier/Assembler: 22");
+        var i3 = NewIssue(projectId, 33, "Querier/Assembler: 33");
+        db.Issues.AddRange(
+            new IssueRow { IssueId = i1.Id, State = IssueStore.Serialize(i1) },
+            new IssueRow { IssueId = i2.Id, State = IssueStore.Serialize(i2) },
+            new IssueRow { IssueId = i3.Id, State = IssueStore.Serialize(i3) });
+        await db.SaveChangesAsync();
+
+        DetachTracked(db);
+
+        var numbers = new[] { 11, 22, 33 };
+        var fromQuerierPath = await IssueTitleLookup.LoadTitlesAsync(db, projectId, numbers, CancellationToken.None);
+        var fromAssemblerPath = await IssueTitleLookup.LoadTitlesAsync(db, projectId, numbers, CancellationToken.None);
+
+        Assert.Equal(fromQuerierPath.Count, fromAssemblerPath.Count);
+        Assert.Equal(fromQuerierPath[11], fromAssemblerPath[11]);
+        Assert.Equal(fromQuerierPath[22], fromAssemblerPath[22]);
+        Assert.Equal(fromQuerierPath[33], fromAssemblerPath[33]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void AgentSessionQuerier_NoLongerExposesLoadIssueTitlesAsyncOrIssueTitle()
+    {
+        // The issue-370 T-004 acceptance criterion: the core query class
+        // no longer declares LoadIssueTitlesAsync or IssueTitle as
+        // internal static members. Pin by reflection so a future
+        // regression (someone adding the static back) trips the spec.
+        var type = typeof(AgentSessionQuerier);
+        var loadTitles = type.GetMethod(
+            "LoadIssueTitlesAsync",
+            System.Reflection.BindingFlags.Static
+                | System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.NonPublic);
+        var issueTitle = type.GetMethod(
+            "IssueTitle",
+            System.Reflection.BindingFlags.Static
+                | System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.NonPublic);
+
+        Assert.Null(loadTitles);
+        Assert.Null(issueTitle);
+    }
+
+    private static Mohist.Server.Issue.Domain.Issue NewIssue(string projectId, int number, string title) => new()
+    {
+        Id = $"issue_{projectId}_{number}",
+        ProjectId = projectId,
+        Number = number,
+        Title = title,
+        Labels = new Dictionary<string, string>(StringComparer.Ordinal),
+        Priority = "p2",
+        Status = IssueStatus.Backlog,
+    };
+
+    private static void DetachTracked(MohistDbContext db)
+    {
+        // Detach tracked entities so the next assertion sees a clean
+        // snapshot (the save above leaves them in the change tracker).
+        db.ChangeTracker.Clear();
+    }
+}

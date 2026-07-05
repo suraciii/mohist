@@ -81,7 +81,7 @@ public class AgentSessionQuerier : IScopedService
             status: status,
             ct: ct);
         sessions = await TranscriptReductions.ReconcileActiveSessionsAsync(db, sessions, ct);
-        var issueTitles = await LoadIssueTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
+        var issueTitles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
         var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessions.Select(r => r.Session.Id), ct);
         return sessions.Select(record =>
         {
@@ -91,7 +91,7 @@ public class AgentSessionQuerier : IScopedService
             var issueNumber = record.IssueNumber();
             return new AgentSessionInfoDto(
             issueNumber,
-            IssueTitle(issueTitles, issueNumber),
+            IssueTitleLookup.Resolve(issueTitles, issueNumber),
             record.Label(AgentSessionQueryMetadataKeys.Stage) ?? string.Empty,
             s.Id,
             AgentSessionJsonHelper.StatusName(s, Now()),
@@ -623,45 +623,6 @@ public class AgentSessionQuerier : IScopedService
             ? record
             : null;
     }
-
-    /// <summary>
-    /// Loads the issue titles for the given (project, issue-numbers) batch.
-    /// Shared between the core querier's <see cref="ListCurrentAsync"/>
-    /// projection and the activity feed card projection
-    /// (<see cref="AgentActivityFeedAssembler"/>, issue-327 T-003 / design
-    /// D2). Internal so the assembler can call through without taking on
-    /// the DB connection itself; the (project, numbers) tuple is the
-    /// natural shared boundary because both projections need exactly the
-    /// same titles for the same set of sessions.
-    /// </summary>
-    internal static async Task<Dictionary<int, string>> LoadIssueTitlesAsync(
-        MohistDbContext db,
-        string projectId,
-        IEnumerable<int> issueNumbers,
-        CancellationToken ct)
-    {
-        var numbers = issueNumbers.Distinct().ToArray();
-        if (numbers.Length == 0) return [];
-
-        var rows = await db.Issues.AsNoTracking()
-            .Where(row => row.ProjectId == projectId && row.Number != null && numbers.Contains(row.Number.Value))
-            .ToListAsync(ct);
-
-        return IssueRowMapper.ByNumber(rows, projectId, numbers)
-            .ToDictionary(kv => kv.Key, kv => kv.Value.Title);
-    }
-
-    /// <summary>
-    /// Resolves a single issue title with the "Issue #{number}" fallback.
-    /// Shared between the core querier's <see cref="ListCurrentAsync"/>
-    /// projection and the activity feed card projection
-    /// (<see cref="AgentActivityFeedAssembler"/>), identical fallback
-    /// semantics — keep the two projections byte-aligned (issue-327 T-003).
-    /// </summary>
-    internal static string IssueTitle(IReadOnlyDictionary<int, string> titles, int issueNumber) =>
-        titles.TryGetValue(issueNumber, out var title) && !string.IsNullOrWhiteSpace(title)
-            ? title
-            : $"Issue #{issueNumber}";
 
     private WorkflowSessionDto ToWorkflowDto(AgentSessionRecord record, TerminalFact? terminalFact = null)
     {

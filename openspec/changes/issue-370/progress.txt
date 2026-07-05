@@ -202,3 +202,76 @@ T-003 (transcript reductions relocation) — completed.
   reductions take `MohistDbContext` as a parameter, which is sufficient
   to keep them testable via the in-memory test DB factory the existing
   `AgentActivityFeedAssemblerSpecs` already exercises end-to-end.
+
+T-004 (issue-title batch lookup relocation) — completed.
+
+## Codebase Patterns (T-004)
+
+- `internal static` for cross-domain read queries that take
+  `MohistDbContext` as a parameter (no DI, no clock) matches the
+  `TranscriptReductions` precedent set in T-003 and the `IssueRowMapper` /
+  `AgentSessionDtoMapper` mapper precedent. `IssueTitleLookup` is the
+  natural home: it sits on the Issue read side because both inputs
+  (`db.Issues` + `IssueRowMapper.ByNumber`) are Issue-domain data, so
+  Session callers read it directly with the `(project, numbers)` tuple
+  instead of going through `AgentSessionQuerier`.
+- Re-target pattern: each call site swap is a one-token rename
+  (`AgentSessionQuerier.LoadIssueTitlesAsync` →
+  `IssueTitleLookup.LoadTitlesAsync` and `AgentSessionQuerier.IssueTitle` →
+  `IssueTitleLookup.Resolve`). Two call sites — one in
+  `AgentSessionQuerier.ListCurrentAsync` (querier path) and one in
+  `AgentActivityFeedAssembler.GetActivityAsync` (assembler path) — were
+  renamed in lockstep, satisfying the cross-consumer identity invariant
+  the spec requires ("both consumers obtain identical number→title maps
+  by invoking the same Issue read-side capability").
+- The assembler's `<remarks>` was updated to reference
+  `IssueTitleLookup` alongside the existing references to
+  `TranscriptReductions` / `TranscriptPartLoader`, so the activity-feed
+  assembler's read-side dependency list (loader + reductions + issue-side
+  capability) is now co-located in one block.
+
+## Gotchas (T-004)
+
+- `IssueTitleLookup` is the final cross-domain lookup that was still
+  living on `AgentSessionQuerier` after T-001/T-002/T-003; with it gone,
+  the querier's `internal static` member count is now zero (the global
+  acceptance criterion for the issue). T-005's verification gate
+  `rg "internal static.*AgentSessionQuerier\b"` should now return zero
+  matches on `packages/server/src`.
+- The `Resolve` method's pre-change fallback string `$"Issue #{number}"`
+  is byte-identical in the new home — the unit spec exercises
+  absent / empty / whitespace / zero cases so a future regression that
+  changed the literal format (e.g. trimmed whitespace) trips an
+  assertion.
+- The existing `AgentSessionQuerier.IssueTitle` / `LoadIssueTitlesAsync`
+  callers were all internal to the Session namespace
+  (`AgentSessionQuerier.cs`, `AgentActivityFeedAssembler.cs`); no test
+  called the statics directly, so no test re-targeting was needed — only
+  the new `IssueTitleLookupSpecs` was added to cover the spec scenarios.
+
+## Decisions (T-004)
+
+- Followed the design's additive-first sub-strategy: introduced
+  `IssueTitleLookup` (with both `LoadTitlesAsync` and `Resolve`) →
+  swapped the two call sites (`AgentSessionQuerier.ListCurrentAsync`,
+  `AgentActivityFeedAssembler.GetActivityAsync`) → updated the assembler's
+  `<remarks>` to reference the new home → removed the two members
+  (`LoadIssueTitlesAsync`, `IssueTitle`) from `AgentSessionQuerier`.
+  Each sub-step left the build green and the 324 Sessions specs passing.
+- `IssueTitleLookup` is `internal static` matching design D5 and the
+  `IssueRowMapper` / `TranscriptReductions` precedent. No DI
+  registration change needed; the test assembly's `InternalsVisibleTo`
+  makes `IssueTitleLookup` directly accessible from the new spec file.
+- `IssueTitleLookupSpecs` is a service-tier spec (uses `MohistDbFixture`)
+  for the DB-touching scenarios (empty / dedup / project-filter /
+  cross-consumer) and a unit-tier spec for the pure
+  `Resolve(titles, number)` function. The acceptance criterion "internal
+  static 成员数降为零" for the querier is pinned by a reflection-based
+  spec (`AgentSessionQuerier_NoLongerExposesLoadIssueTitlesAsyncOrIssueTitle`)
+  so any future regression that adds the statics back trips the test.
+- 10 new facts total: 4 DB scenarios (empty input, dedup, load-all,
+  cross-project drop) + 4 `Resolve` scenarios (stored title, absent,
+  whitespace ×3 sub-cases, zero) + 1 cross-consumer identity spec + 1
+  reflection spec asserting the querier no longer exposes the statics.
+  All 10 pass; full `npm test` is green (3831 passed, 13 skipped,
+  0 failed on the server; 908 passed on web).
