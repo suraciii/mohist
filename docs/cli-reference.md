@@ -69,7 +69,7 @@ mo info         CLI 本地诊断（受控例外：跨资源只读，不归任一
 
 这些动作也可通过 issue 号触发（`mo issue approve <编号>`），issue 号是工作流执行的人类可读别名。直接寻址面向脚本与 agent 订阅场景——它们手里只有执行 ID。
 
-所有控制命令支持 `-o table|json` 和 `--dry-run`（打印请求体不发请求）。`rerun --from-stage` 等价旧 issue 快捷方式 `mo issue rerun-from-stage --stage <阶段>`；`pause` 可恢复，`stop` 是终态。
+所有控制命令支持 `-o table|json` 和 `--dry-run`（打印请求体不发请求）。issue 快捷方式同样使用 `mo issue rerun <编号> --from-stage <阶段>`；`pause` 可恢复，`stop` 是终态。
 
 ### 查询
 
@@ -92,8 +92,8 @@ mo project workflow profile get                     查看 profile 全貌（默�
 mo project workflow profile set [flags]             复合写入（默认模板/变量/提示词）
 mo project workflow profile clear [flags]           复合清除
 mo project workflow profile preview <键>            预览渲染后的提示词
-mo project workflow profile enable                  启用 profile
-mo project workflow profile disable                 禁用 profile
+mo project workflow profile enable <profile-id>     启用 profile
+mo project workflow profile disable <profile-id>    禁用 profile
 ```
 
 > **路径迁移**：旧 `mo workflow list`（WorkflowProfile）已下沉到 `mo project workflow profile list`。原路径不再可用——profile 归 `mo project workflow`，与 template / config 同层。

@@ -13,11 +13,32 @@ public class CliReferenceDocsSpecs
         Assert.Contains("mo issue prereq add <number> <prereq-number>", doc);
         Assert.Contains("mo issue prereq remove <number> <prereq-number>", doc);
         Assert.Contains("mo issue reject <number> --message <message>", doc);
-        Assert.Contains("mo issue rerun-from-stage <number> --stage <stage>", doc);
+        Assert.Contains("mo issue rerun <number> --from-stage <stage>", doc);
 
         Assert.DoesNotContain("mo issue comment <number> <body>", doc);
         Assert.DoesNotContain("prerequisite-add", doc);
         Assert.DoesNotContain("prerequisite-remove", doc);
+    }
+
+    [Fact]
+    public void CliReference_DocumentsWorkflowProfileToggleProfileIdArgument()
+    {
+        var doc = ReadRepoText("docs/cli-reference.md");
+
+        Assert.Contains("mo project workflow profile enable <profile-id>", doc);
+        Assert.Contains("mo project workflow profile disable <profile-id>", doc);
+        Assert.DoesNotContain("mo project workflow profile enable                  启用 profile", doc);
+        Assert.DoesNotContain("mo project workflow profile disable                 禁用 profile", doc);
+    }
+
+    [Fact]
+    public void CliReference_DocumentsCanonicalIssueRerunFromStageFlag()
+    {
+        var doc = ReadRepoText("docs/cli-reference.md");
+
+        Assert.Contains("mo issue rerun <编号> --from-stage <阶段>", doc);
+        Assert.DoesNotContain("mo issue rerun-from-stage <编号> --stage <阶段>", doc);
+        Assert.DoesNotContain("mo issue rerun-from-stage --stage", doc);
     }
 
     [Fact]
@@ -30,7 +51,7 @@ public class CliReferenceDocsSpecs
         Assert.Contains("mo issue prereq add <number> <prereq-number>", doc);
         Assert.Contains("mo issue prereq remove <number> <prereq-number>", doc);
         Assert.Contains("mo issue reject <number> --message <message>", doc);
-        Assert.Contains("mo issue rerun-from-stage <number> --stage <stage>", doc);
+        Assert.Contains("mo issue rerun <number> --from-stage <stage>", doc);
 
         Assert.DoesNotContain("prerequisite-add", doc);
         Assert.DoesNotContain("prerequisite-remove", doc);
@@ -90,7 +111,7 @@ public class CliReferenceDocsSpecs
             "mo skills path <name>",
             "mo skills sync",
             "mo agent session launch",
-            "mo label remove <key>",
+            "mo label delete <key>",
             "mo otel status",
             "mo otel query <sql>"
         ];

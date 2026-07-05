@@ -20,7 +20,7 @@
       "type": "WRITE",
       "output": "Updated MohistCliCommands.Workflow.Reads.cs + MohistCliCommands.Workflow.cs; extended packages/cli/tests/Mohist.Cli.Tests/CliWorkflowReads.cs",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Alias strategy D1: renames keep the old name as a transitional alias. status removal is BREAKING but recency-narrow (#381)."
     },
     {
@@ -41,7 +41,7 @@
       "type": "WRITE",
       "output": "Updated packages/cli/Mohist.Cli/MohistCliCommands.ProjectWorkflow.cs; extended packages/cli/tests/Mohist.Cli.Tests/CliProjectWorkflowProfileSpecs.cs",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "D4: additive callers of existing endpoints; no server change. Closes the conventions.md Tier 2 gap."
     },
     {
@@ -62,7 +62,7 @@
       "type": "WRITE",
       "output": "Updated packages/cli/Mohist.Cli/MohistCliCommands.Issue.cs + MohistCliCommands.Issue.Lifecycle.cs; extended packages/cli/tests/Mohist.Cli.Tests/CliIssueRerunFromStageSpecs.cs",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "D2/D3: mirrors workflow rerun --from-stage (#381 precedent). Peer command kept because System.CommandLine name-alias shares one option set and cannot honor both --stage and --from-stage."
     },
     {
@@ -81,7 +81,7 @@
       "type": "WRITE",
       "output": "Updated packages/cli/Mohist.Cli/MohistCliCommands.Agent.cs; extended packages/cli/tests/Mohist.Cli.Tests/CliAgentCommandSpecs.cs",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "D1: rename keeps old name as transitional alias. Name-only flip, no semantic change."
     },
     {
@@ -100,7 +100,7 @@
       "type": "WRITE",
       "output": "Updated packages/cli/Mohist.Cli/MohistCliCommands.Label.cs; extended packages/cli/tests/Mohist.Cli.Tests/CliLabelCatalogSpecs.cs",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "D1: rename keeps old names as transitional aliases. Canonical/alias flip, no semantic change."
     },
     {
@@ -119,7 +119,7 @@
       "type": "CONFIG",
       "output": "Updated docs/cli-reference.md gap table; issue comment on #386 with alias decision + inventory",
       "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005"],
-      "passes": false,
+      "passes": true,
       "notes": "Comment can be posted via `mo issue comment 386 --project-id <id>`. Decision text already in design.md D1 — this is cross-referencing for the cleanup inventory."
     }
   ]
