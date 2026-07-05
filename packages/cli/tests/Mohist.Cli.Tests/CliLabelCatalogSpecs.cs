@@ -494,4 +494,185 @@ public class CliLabelCatalogSpecs
         Assert.NotEqual(0, exitCode);
         Assert.Contains("refactor", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task LabelDelete_DeletesDefinition()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        handler.SetResponder(async (req, _) =>
+        {
+            if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+            return RecordingHttpHandler.Json(new { success = true, data = new { } });
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "delete", "module"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var req = handler.Requests.Last();
+        Assert.Equal(HttpMethod.Delete, req.Method);
+        Assert.Equal("/api/projects/proj_abc/labels/catalog/module", req.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task LabelDelete_ProjectIdFlag_RoutesCorrectly()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        handler.SetResponder(async (req, _) =>
+        {
+            if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+            return RecordingHttpHandler.Json(new { success = true, data = new { } });
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "delete", "module", "--project-id", "proj_other"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var req = handler.Requests.Last();
+        Assert.Equal(HttpMethod.Delete, req.Method);
+        Assert.Equal("/api/projects/proj_other/labels/catalog/module", req.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task LabelDelete_RemoveAlias_ProducesIdenticalRequestAndOutput()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        handler.SetResponder(async (req, _) =>
+        {
+            if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+            return RecordingHttpHandler.Json(new { success = true, data = new { } });
+        });
+
+        var canonicalExit = await MohistCliCommands.RunAsync(
+            http, ["label", "delete", "module", "--project-id", "proj_other"], output, error, fs, executor);
+        var canonicalStdout = output.ToString();
+        var canonicalStderr = error.ToString();
+        var canonicalRequests = handler.Requests.ToList();
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+
+        var aliasExit = await MohistCliCommands.RunAsync(
+            http, ["label", "remove", "module", "--project-id", "proj_other"], output, error, fs, executor);
+        var aliasStdout = output.ToString();
+        var aliasStderr = error.ToString();
+        var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();
+
+        Assert.Equal(canonicalExit, aliasExit);
+        Assert.Equal(canonicalStdout, aliasStdout);
+        Assert.Equal(canonicalStderr, aliasStderr);
+        Assert.Equal(canonicalRequests.Count, aliasRequests.Count);
+        for (var i = 0; i < canonicalRequests.Count; i++)
+        {
+            Assert.Equal(canonicalRequests[i].Method, aliasRequests[i].Method);
+            Assert.Equal(canonicalRequests[i].RequestUri, aliasRequests[i].RequestUri);
+        }
+    }
+
+    [Fact]
+    public async Task LabelDelete_RmAlias_ProducesIdenticalRequestAndOutput()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        handler.SetResponder(async (req, _) =>
+        {
+            if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+            return RecordingHttpHandler.Json(new { success = true, data = new { } });
+        });
+
+        var canonicalExit = await MohistCliCommands.RunAsync(
+            http, ["label", "delete", "module", "--project-id", "proj_other"], output, error, fs, executor);
+        var canonicalStdout = output.ToString();
+        var canonicalStderr = error.ToString();
+        var canonicalRequests = handler.Requests.ToList();
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+
+        var aliasExit = await MohistCliCommands.RunAsync(
+            http, ["label", "rm", "module", "--project-id", "proj_other"], output, error, fs, executor);
+        var aliasStdout = output.ToString();
+        var aliasStderr = error.ToString();
+        var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();
+
+        Assert.Equal(canonicalExit, aliasExit);
+        Assert.Equal(canonicalStdout, aliasStdout);
+        Assert.Equal(canonicalStderr, aliasStderr);
+        Assert.Equal(canonicalRequests.Count, aliasRequests.Count);
+        for (var i = 0; i < canonicalRequests.Count; i++)
+        {
+            Assert.Equal(canonicalRequests[i].Method, aliasRequests[i].Method);
+            Assert.Equal(canonicalRequests[i].RequestUri, aliasRequests[i].RequestUri);
+        }
+    }
+
+    [Fact]
+    public async Task LabelDelete_ProjectFlag_RoutesCorrectly()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        handler.SetResponder(async (req, _) =>
+        {
+            if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+            return RecordingHttpHandler.Json(new { success = true, data = new { } });
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "delete", "module", "--project", "proj_via_name"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var req = handler.Requests.Last();
+        Assert.Equal(HttpMethod.Delete, req.Method);
+        Assert.Equal("/api/projects/proj_via_name/labels/catalog/module", req.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task LabelDelete_RemoveAlias_ExitsWithErrorOnSystemKey()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        handler.SetResponder(async (req, _) =>
+        {
+            if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
+            {
+                return RecordingHttpHandler.JsonError(
+                    "System definition 'refactor' is immutable and cannot be removed.",
+                    "conflict",
+                    HttpStatusCode.Conflict);
+            }
+            return RecordingHttpHandler.Json(new { success = true, data = new { } });
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "delete", "refactor"], output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("refactor", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Label_HelpAdvertisesDeleteWithRemoveAndRmAliases()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("delete, remove, rm <key>", text);
+        Assert.DoesNotContain("remove, rm <key>", text.Replace("delete, remove, rm <key>", ""));
+    }
 }

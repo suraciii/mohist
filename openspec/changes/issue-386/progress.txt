@@ -435,3 +435,96 @@ canonical). This is the same assertion pattern T-001 used for
   - `label remove` / `label rm` (aliases of `delete`, T-005)
   T-006 should consolidate this inventory in an issue comment.
 
+## T-005: Label remove->delete — code & test patterns
+
+### Code
+
+- `BuildRemove` in `MohistCliCommands.Label.cs` was renamed to
+  `BuildDelete`: `new Command("delete", "Delete a label definition
+  from the project catalog")` with `cmd.Aliases.Add("remove")` and
+  `cmd.Aliases.Add("rm")` (the existing `rm` alias was kept; `remove`
+  was added as a new alias). Inner closure renamed `RemoveAsync` →
+  `DeleteAsync` for symmetry. The wire call still hits `DELETE
+  /api/projects/{projectId}/labels/catalog/{key}` via
+  `api.PrintDeleteAsync(path)` — same behavior, name-only flip.
+- The group registration `label.Subcommands.Add(BuildRemove(api))` in
+  `Build(MohistCliApi api)` was updated to
+  `BuildDelete(api)`. No other call sites reference `BuildRemove`.
+- Command description updated from "Remove" to "Delete" to match the
+  canonical verb. The arg description "Label key to remove" was
+  changed to "Label key to delete" for consistency. No semantic
+  difference — purely surface text.
+
+### Tests (`CliLabelCatalogSpecs.cs`)
+
+Added 7 tests on top of the existing 23 (which all still pass — the
+existing `LabelRemove_*` tests now exercise the `remove`/`rm`
+transitional aliases via System.CommandLine's automatic alias
+dispatch; no changes needed in those tests):
+
+- `LabelDelete_DeletesDefinition` — canonical `delete` DELETEs
+  `/api/projects/{projectId}/labels/catalog/{key}` (acceptance #1).
+- `LabelDelete_ProjectIdFlag_RoutesCorrectly` — `--project-id
+  proj_other` reroutes to `/api/projects/proj_other/labels/catalog/...
+  ` (acceptance #3).
+- `LabelDelete_ProjectFlag_RoutesCorrectly` — `--project proj_via_name`
+  reroutes to `/api/projects/proj_via_name/labels/catalog/...`
+  (acceptance #3 — the `--project` half of the spec's project-scoping
+  requirement).
+- `LabelDelete_RemoveAlias_ProducesIdenticalRequestAndOutput` —
+  parity test. Runs `delete` then `remove` back-to-back against the
+  same harness, capturing `canonicalRequests.Count` then
+  `handler.Requests.Skip(...)` for the alias's requests, and diffing
+  method+URI per index. Also asserts stdout/stderr/exit-code equality
+  (acceptance #2).
+- `LabelDelete_RmAlias_ProducesIdenticalRequestAndOutput` — same
+  parity test for the `rm` alias (acceptance #2 — covers all three
+  names).
+- `LabelDelete_RemoveAlias_ExitsWithErrorOnSystemKey` — uses
+  `delete` against an immutable system key to assert the JSON-error
+  surfacing path stays intact after the rename (defensive: pins the
+  server-side conflict handling still works through the canonical).
+- `Label_HelpAdvertisesDeleteWithRemoveAndRmAliases` — runs
+  `mo label --help` and asserts the canonical row reads
+  `delete, remove, rm <key>` (System.CommandLine's alias-collapse
+  rendering). Asserts the bare `remove, rm <key>` row is NOT present
+  separately — same pattern as `AgentHelp_ListsSubcommands` from
+  T-004. Future cleanup of the `remove`/`rm` aliases will fail this
+  test, which is the audit point for T-006's alias inventory.
+
+The existing `LabelRemove_RemovesDefinition`,
+`LabelRemove_MissingKey_Succeeds`, `LabelRemove_SystemKey_Fails`,
+and `LabelRemove_Alias_Rm_Works` tests now exercise the alias path
+under System.CommandLine's automatic alias dispatch — kept intact
+(they still pass unchanged, proving the aliases wire to the same
+handler).
+
+### Verification
+
+`dotnet test packages/cli/tests/Mohist.Cli.Tests`:
+- Before T-005: 753 pass, 3 fail (same 3 pre-existing
+  `CliReferenceDocsSpecs` failures from T-006 scope).
+- After T-005: 760 pass, 3 fail. Net: +7 tests, all green.
+
+`CliLabelCatalogSpecs`: 30/30 pass (23 pre-existing + 7 new).
+
+`npm run build`: clean (.NET + Web + Runner).
+
+### Gotchas for next tasks (T-006 docs)
+
+- The `--help` row for the `label` group emits `delete, remove, rm
+  <key>` exactly the way T-004's `archive, delete <name-or-id>` does
+  — same transitive property of System.CommandLine's
+  `cmd.Aliases.Add` pattern. The label test
+  (`Label_HelpAdvertisesDeleteWithRemoveAndRmAliases`) pins this
+  collapse so T-006 can grep for `delete, remove, rm` as the alias
+  audit signal.
+- The transitional aliases introduced across this issue are now
+  complete:
+  - `workflow show` (alias of `get`, T-001)
+  - `issue rerun-from-stage --stage` (peer of `rerun --from-stage`,
+    T-003 — peer not alias because flag name differs)
+  - `agent delete` (alias of `archive`, T-004)
+  - `label remove` / `label rm` (aliases of `delete`, T-005)
+  T-006 should consolidate this inventory in an issue comment.
+
