@@ -182,3 +182,5 @@ Examples:
   prerequisite linking, and confirmation gates worth encoding as a methodology.
 - `mohist-create-epic` skill → tier 3, epic scaffolding has description shape,
   prerequisite linking, and autopilot framing worth encoding as a methodology.
+
+Tier 节决定一个能力**该不该**进 CLI。一旦进了 CLI，命令的形状、命名、唯一入口与全局约定见 [`cli.md`](cli.md)。
