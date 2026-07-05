@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Api;
 
@@ -7,8 +8,13 @@ public static class WorkflowSessionRoutes
 {
     public static WebApplication MapWorkflowSessionRoutes(this WebApplication app)
     {
-        app.MapGet("/api/workflow-runs/{workflowRunId}/sessions", async (string workflowRunId, AgentSessionQuerier sessions) =>
-            ApiResults.Ok(await sessions.ListByWorkflowAsync(workflowRunId)));
+        app.MapGet("/api/workflow-runs/{workflowRunId}/sessions", async (string workflowRunId, AgentSessionQuerier sessions, WorkflowQuerier workflowReader) =>
+        {
+            if (await WorkflowRoutes.EnsureWorkflowRunExistsAsync(workflowRunId, workflowReader) is { } failure)
+                return failure;
+
+            return ApiResults.Ok(await sessions.ListByWorkflowAsync(workflowRunId));
+        });
 
         app.MapGet("/api/workflow-runs/{workflowRunId}/sessions/{sessionName}", async (string workflowRunId, string sessionName, AgentSessionQuerier sessions) =>
         {

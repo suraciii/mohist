@@ -237,6 +237,35 @@ public class CliWorkflowReads
     }
 
     [Fact]
+    public async Task ShowHelp_DocumentsYamlOutputFormat()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["workflow", "show", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("table, json, yaml", stdout);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task StatusHelp_DoesNotDocumentYamlOutputFormat()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["workflow", "status", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("table, json", stdout);
+        Assert.DoesNotContain("table, json, yaml", stdout);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task Show_Yaml_OnMissingRun_SurfacesServerErrorToStderr()
     {
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>

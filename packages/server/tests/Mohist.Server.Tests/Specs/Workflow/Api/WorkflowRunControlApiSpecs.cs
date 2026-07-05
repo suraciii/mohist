@@ -71,6 +71,45 @@ public class WorkflowRunControlApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task Approve_OnAwaitingApprovalRun_ApprovesStageAndAdvances()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceAwaitingApprovalAsync(wrId);
+
+        var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/approve", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        var plan = run!.Stages.Single(s => s.Id == "plan");
+        Assert.Equal("approved", plan.ApprovalStatus?.Result);
+        Assert.Equal(StageRunStatus.Completed, plan.Status);
+        Assert.Equal("build", run.CurrentStageId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task Reject_OnAwaitingApprovalRun_RecordsFeedbackAndSchedulesFeedbackTask()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceAwaitingApprovalAsync(wrId);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/reject",
+            new { message = "add more detail" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.Single(run!.Feedback);
+        Assert.Equal("add more detail", run.Feedback[0].Body);
+        var plan = run.Stages.Single(s => s.Id == "plan");
+        Assert.Equal(StageRunStatus.Running, plan.Status);
+        Assert.Contains(plan.Tasks, t => t.DefinitionId == WorkflowRunExtensions.DefaultFeedbackTaskId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task Pause_OnActiveRun_TransitionsToPaused()
     {
         var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
@@ -245,6 +284,43 @@ public class WorkflowRunControlApiSpecs
         var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content: null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.NotEqual(WorkflowRunStatus.Failed, run!.Status);
+        Assert.Null(run.Failure);
+        var plan = run.Stages.Single(s => s.Id == "plan");
+        Assert.Null(plan.Failure);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task RerunFromStage_WithUnreachedStage_Returns400WithStageNotReachedCode()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/rerun-from-stage",
+            new { stage = "build" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("stage_not_reached", payload.GetProperty("code").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task RerunFromStage_WithActiveWorkInRange_Returns409WithActiveWorkCode()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/rerun-from-stage",
+            new { stage = "plan" });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("active_work_in_range", payload.GetProperty("code").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -519,5 +595,49 @@ public class WorkflowRunControlApiSpecs
         }
         row.State = JsonSerializer.Serialize(state, JSON.Options);
         await db.SaveChangesAsync();
+    }
+
+    private async Task ForceAwaitingApprovalAsync(string wrId)
+    {
+        var wfGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
+        await wfGrain.DeactivateForTestAsync();
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+        await using var db = new MohistDbContext(options);
+        var row = await db.WorkflowRuns.FindAsync(wrId)
+            ?? throw new InvalidOperationException($"Workflow run {wrId} not found in store");
+        using var doc = JsonDocument.Parse(row.State);
+        var state = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(doc.RootElement.GetRawText())!;
+        state["status"] = JsonSerializer.SerializeToElement("AwaitingApproval", JSON.Options);
+        state["currentStageId"] = JsonSerializer.SerializeToElement("plan", JSON.Options);
+        if (state.TryGetValue("stages", out var stagesEl) && stagesEl.ValueKind == JsonValueKind.Array)
+        {
+            var stages = stagesEl.EnumerateArray().ToList();
+            for (var i = 0; i < stages.Count; i++)
+            {
+                var stage = stages[i].Deserialize<Dictionary<string, JsonElement>>()!;
+                if (string.Equals(stage["id"].GetString(), "plan", StringComparison.Ordinal))
+                {
+                    stage["status"] = JsonSerializer.SerializeToElement("AwaitingApproval", JSON.Options);
+                    stage["initialized"] = JsonSerializer.SerializeToElement(true, JSON.Options);
+                    stage["requiresApproval"] = JsonSerializer.SerializeToElement(true, JSON.Options);
+                    stage["tasks"] = JsonSerializer.SerializeToElement(Array.Empty<object>(), JSON.Options);
+                    stage["checks"] = JsonSerializer.SerializeToElement(Array.Empty<object>(), JSON.Options);
+                    stage["approvalStatus"] = JsonSerializer.SerializeToElement(new
+                    {
+                        result = (string?)null,
+                        requestedAt = DateTimeOffset.UtcNow.ToString("O"),
+                        respondedAt = (string?)null,
+                    }, JSON.Options);
+                }
+                stages[i] = JsonSerializer.SerializeToElement(stage, JSON.Options);
+            }
+            state["stages"] = JsonSerializer.SerializeToElement(stages, JSON.Options);
+        }
+        row.State = JsonSerializer.Serialize(state, JSON.Options);
+        await db.SaveChangesAsync();
+        await wfGrain.DeactivateForTestAsync();
     }
 }

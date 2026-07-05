@@ -27,8 +27,8 @@ namespace Mohist.Server.Tests.Specs.Workflow.Api;
 /// Covers:
 /// <list type="bullet">
 ///   <item><description>Detail field completeness: run identity, status, stage progress, approval state, workflow-definition metadata, and the composed issue reference.</description></item>
-///   <item><description>Associated-issue join hit: when the in-progress issue row exists, <c>issueRef</c> carries <c>number</c>+<c>title</c>.</description></item>
-///   <item><description>Associated-issue join miss: when no in-progress issue is bound (transient gap / not yet seeded / already terminal), <c>issueRef</c> is <c>null</c> and the run identity / status remain authoritative (404 only when the run itself is missing).</description></item>
+///   <item><description>Associated-issue join hit: when the issue row exists, including a terminal issue row, <c>issueRef</c> carries <c>number</c>+<c>title</c>.</description></item>
+///   <item><description>Associated-issue join miss: when no issue row is bound (transient gap / not yet seeded), <c>issueRef</c> is <c>null</c> and the run identity / status remain authoritative (404 only when the run itself is missing).</description></item>
 ///   <item><description>Invariant: <see cref="WorkflowStatusView"/> does not carry issue fields (the read model composes the view rather than extending it, so the
 /// <c>tests/.../Workflow/Grain/StatusSpecs.cs:129</c> invariant is preserved).</description></item>
 ///   <item><description>Read-only semantics: a GET does not invoke any grain mutator and does not transition the run.</description></item>
@@ -89,9 +89,9 @@ public class WorkflowRunDetailApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task Get_WhenIssueRowIsTerminal_IssueRefIsNull()
+    public async Task Get_WhenIssueRowIsTerminal_IssueRefStillCarriesCorrelationContext()
     {
-        var (_, _, _, _, wrId) = await SeedActiveWorkflowAsync();
+        var (_, _, _, issueNumber, wrId) = await SeedActiveWorkflowAsync();
         await ForceIssueStatusAsync(wrId, terminal: true);
 
         var response = await _client.GetAsync($"/api/workflow-runs/{wrId}");
@@ -101,11 +101,15 @@ public class WorkflowRunDetailApiSpecs
         Assert.True(payload.GetProperty("success").GetBoolean());
 
         var data = payload.GetProperty("data");
-        // The run itself still exists; status remains "pending" until the
-        // grain advances it. The associated-issue join is filtered to
-        // in-progress issues, so the ref is null.
+        // The run itself still exists and the issue correlation remains useful
+        // after the issue leaves in-progress status. Completion-handler lookups
+        // keep their in-progress filter, but the detail read model is a
+        // workflowRunId -> issue context join for agents and scripts.
         Assert.Equal(wrId, data.GetProperty("status").GetProperty("workflowRunId").GetString());
-        Assert.Equal(JsonValueKind.Null, data.GetProperty("issueRef").ValueKind);
+        var issueRef = data.GetProperty("issueRef");
+        Assert.Equal(JsonValueKind.Object, issueRef.ValueKind);
+        Assert.Equal(issueNumber, issueRef.GetProperty("number").GetInt32());
+        Assert.Equal("Workflow control test", issueRef.GetProperty("title").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -135,6 +139,24 @@ public class WorkflowRunDetailApiSpecs
     public async Task Get_OnUnknownWorkflowRun_Returns404()
     {
         var response = await _client.GetAsync("/api/workflow-runs/wr_does_not_exist");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>(ReadJsonOptions);
+        Assert.Equal("not_found", payload.GetProperty("code").GetString());
+        Assert.Contains("wr_does_not_exist", payload.GetProperty("error").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Theory]
+    [InlineData("/api/workflow-runs/wr_does_not_exist/yaml")]
+    [InlineData("/api/workflow-runs/wr_does_not_exist/variables/effective")]
+    [InlineData("/api/workflow-runs/wr_does_not_exist/variables/effective/some.key")]
+    [InlineData("/api/workflow-runs/wr_does_not_exist/events")]
+    [InlineData("/api/workflow-runs/wr_does_not_exist/sessions")]
+    public async Task RunScopedReadSubresources_OnUnknownWorkflowRun_Return404(string path)
+    {
+        var response = await _client.GetAsync(path);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>(ReadJsonOptions);

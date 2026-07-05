@@ -103,30 +103,27 @@ public class IssueQuerier : IScopedService
 
     /// <summary>
     /// Reverse lookup that returns the human-numbered handle plus the
-    /// title of the in-progress issue bound to
-    /// <paramref name="workflowRunId"/>, or <c>null</c> when no
-    /// in-progress issue is bound. Used by
+    /// title of the issue bound to <paramref name="workflowRunId"/>, or
+    /// <c>null</c> when no issue row is bound. Used by
     /// <c>GET /api/workflow-runs/{workflowRunId}</c> (issue-381 T-002) to
     /// attach an issue ref to the read model without requiring the
     /// caller to know an issue number. The result is intentionally
     /// minimal — number + title only — so the read surface does not
     /// grow into a full <see cref="IssueReadModel"/> companion.
     /// <para>
-    /// Same status filter as
-    /// <see cref="GetIssueIdForWorkflowRunAsync"/>: a preserved
-    /// <c>WorkflowRunId</c> on <c>Done</c> issues is execution history,
-    /// not a stuck-run signal, so an unfiltered lookup could match a
-    /// stale binding.
+    /// Unlike <see cref="GetIssueIdForWorkflowRunAsync"/>, this lookup is
+    /// intentionally status-independent: the detail read model is
+    /// correlation context for scripts and agents, so completed issues with
+    /// preserved run history still need to resolve to their issue handle.
     /// </para>
     /// </summary>
     public async Task<WorkflowRunIssueRef?> GetIssueRefForWorkflowRunAsync(string workflowRunId)
     {
-        var issueId = await GetIssueIdForWorkflowRunAsync(workflowRunId).ConfigureAwait(false);
-        if (issueId is null) return null;
+        if (string.IsNullOrWhiteSpace(workflowRunId)) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.Issues.AsNoTracking()
-            .Where(r => r.IssueId == issueId)
+            .Where(r => r.WorkflowRunId == workflowRunId)
             .Select(r => new { r.Number, r.Title })
             .FirstOrDefaultAsync();
         if (row is null || row.Number is null || row.Title is null) return null;

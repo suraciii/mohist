@@ -29,7 +29,7 @@ internal static partial class WorkflowCommands
             "show",
             "Show full workflow run resource (status, stages, approval state, associated issue). Use -o yaml to render the workflow template definition.");
         var runIdArg = RunIdArg();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(formats: "table, json, yaml");
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>

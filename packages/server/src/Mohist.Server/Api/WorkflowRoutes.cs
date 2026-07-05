@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
@@ -13,6 +14,9 @@ public static partial class WorkflowRoutes
             string workflowRunId,
             WorkflowQuerier reader) =>
         {
+            if (await EnsureWorkflowRunExistsAsync(workflowRunId, reader) is { } failure)
+                return failure;
+
             var yaml = await reader.GetDefinitionYamlAsync(workflowRunId);
             return yaml is null
                 ? ApiResults.NotFound("Workflow definition not found")
@@ -24,6 +28,9 @@ public static partial class WorkflowRoutes
             string? stage,
             WorkflowQuerier reader) =>
         {
+            if (await EnsureWorkflowRunExistsAsync(workflowRunId, reader) is { } failure)
+                return failure;
+
             return ApiResults.Ok(await reader.GetEffectiveVariablesAsync(workflowRunId, stage));
         });
 
@@ -33,6 +40,9 @@ public static partial class WorkflowRoutes
             string? stage,
             WorkflowQuerier reader) =>
         {
+            if (await EnsureWorkflowRunExistsAsync(workflowRunId, reader) is { } failure)
+                return failure;
+
             return ApiResults.Ok(await reader.GetEffectiveVariableAsync(workflowRunId, keyPath, stage));
         });
 
@@ -115,4 +125,12 @@ public static partial class WorkflowRoutes
     public sealed record AddTaskRequestDto(string? Id, string? Title, string? Uses, JsonElement? With, string? Stage, bool InvalidateChecks = false);
     public sealed record AddTasksRequestDto(IReadOnlyList<AddTasksRequestTaskDto>? Tasks);
     public sealed record AddTasksRequestTaskDto(string? Id, string? Title, string? Uses, JsonElement? With);
+
+    internal static async Task<IResult?> EnsureWorkflowRunExistsAsync(string workflowRunId, WorkflowQuerier reader)
+    {
+        var status = await reader.GetStatusAsync(workflowRunId);
+        return status is null
+            ? ApiResults.NotFound($"Workflow run '{workflowRunId}' not found")
+            : null;
+    }
 }

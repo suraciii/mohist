@@ -21,7 +21,7 @@
       "type": "WRITE",
       "output": "新增 WorkflowRun 控制路由文件（或 WorkflowRoutes.cs 扩展）+ 提取后的共享 WorkflowControlAction 守卫 helper + Specs/Workflow/Api/ 下新增 spec",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "对应 design.md Decision 1。注意 server 保留 rerun / rerun-from-stage 两个端点（rerun --from-stage 收敛是 CLI 层 Decision 4）。"
     },
     {
@@ -43,7 +43,7 @@
       "type": "WRITE",
       "output": "WorkflowRunDetailDto + GET /api/workflow-runs/{id} 路由 + Specs/Workflow/Api/ 下新增 spec",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "对应 design.md Decision 2 与 Decision 3。是关闭 agent-subscriptions.md 'mo workflow get <runId> 含关联 issue' 前置依赖的服务端基础。"
     },
     {
@@ -67,7 +67,7 @@
       "type": "MIGRATE",
       "output": "MohistCliCommands.Workflow.cs（移除 BuildList）+ MohistCliCommands.ProjectWorkflow.cs 新增 BuildProfile 子组 + 迁移后的 CLI spec",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "对应 design.md Decision 6。这是本变更唯一的命令路径破坏点，需在 release/changelog 提示（写入 T-006 文档任务）。不提供别名以彻底消除 workflow 语义过载。"
     },
     {
@@ -92,7 +92,7 @@
       "type": "WRITE",
       "output": "MohistCliCommands.Workflow.cs 控制动词 + WorkflowRunPath(runId, suffix) 路径 helper + 新增 CliWorkflowControl spec",
       "dependsOn": ["T-001", "T-003"],
-      "passes": false,
+      "passes": true,
       "notes": "依赖 T-001（server 控制端点）与 T-003（顶层 mo workflow 让位给 WorkflowRun）。对应 design.md Decision 1、Decision 4、Decision 8。"
     },
     {
@@ -119,7 +119,7 @@
       "type": "WRITE",
       "output": "MohistCliCommands.Workflow.cs 读命令 + WorkflowRunDetail TableShape + 新增 CliWorkflowReads spec",
       "dependsOn": ["T-002", "T-003"],
-      "passes": false,
+      "passes": true,
       "notes": "依赖 T-002（server 详情 GET + issue join）与 T-003。对应 design.md Decision 2、Decision 3、Decision 8。show 命令关闭 agent-subscriptions.md 的 'mo workflow get <runId>' 前置依赖（在 T-006 显式标记）。"
     },
     {
@@ -143,7 +143,7 @@
       "type": "WRITE",
       "output": "design/cli.md（新增）+ 更新 design/README.md、docs/cli-reference.md、docs/agent-subscriptions.md + release/changelog 迁移提示",
       "dependsOn": ["T-003", "T-004", "T-005"],
-      "passes": false,
+      "passes": true,
       "notes": "依赖 CLI 任务落地，确保文档反映已交付行为。对应 design.md Decision 5（任务注入延后结论）与 Decision 7（design/cli.md 两条原则）。docs/ 用产品+领域语言，禁止技术语言（源码路径/字段名）；design/ 可混合三层语言。"
     }
   ]
