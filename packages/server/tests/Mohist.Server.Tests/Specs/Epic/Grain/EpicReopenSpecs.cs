@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Epic.Domain;
@@ -12,6 +13,8 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Tests.Support;
+using System.Data.Common;
+using System.Threading;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Epic.Grain;
@@ -147,6 +150,42 @@ public class EpicReopenSpecs
             .Where(l => l.ProjectId == ProjectId && l.EpicId == "epic_1")
             .ToListAsync();
         Assert.Equal(2, links.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ReopenAsync_WhenActiveMembershipInsertFails_RollsBackStatusAndCanRetry()
+    {
+        var interceptor = new FailEpicActiveIssueInsertInterceptor();
+        var database = CreateDatabase(interceptor);
+        await SeedEpicAsync(database, status: "closed");
+        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1);
+        await SeedLinkAsync(database, "issue_1", 1);
+        interceptor.Enabled = true;
+        var failingGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_1");
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => failingGrain.ReopenAsync());
+
+        await using (var verify = database.CreateDbContext())
+        {
+            var row = await verify.Epics.AsNoTracking().SingleAsync(e => e.Id == "epic_1");
+            Assert.Equal("closed", row.Status);
+            Assert.Empty(await verify.EpicActiveIssues.AsNoTracking().ToListAsync());
+        }
+
+        var retryOptions = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(database.Connection)
+            .Options;
+        var retryGrain = CreateGrain(new TestDbContextFactory(retryOptions), $"{ProjectId}:epic_1");
+
+        var dto = await retryGrain.ReopenAsync();
+
+        Assert.Equal("idle", dto.Status);
+        await using var retryVerify = new MohistDbContext(retryOptions);
+        var active = await retryVerify.EpicActiveIssues.AsNoTracking().SingleAsync();
+        Assert.Equal("epic_1", active.EpicId);
+        Assert.Equal("issue_1", active.IssueId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -348,13 +387,14 @@ public class EpicReopenSpecs
         await db.SaveChangesAsync();
     }
 
-    private static TestDatabase CreateDatabase()
+    private static TestDatabase CreateDatabase(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
+        var builder = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null) builder.AddInterceptors(interceptor);
+        var options = builder.Options;
         var factory = new TestDbContextFactory(options);
         using (var db = factory.CreateDbContext())
             GrainTestConfig.MigrateWithSchemaFix(db);
@@ -368,8 +408,11 @@ public class EpicReopenSpecs
         public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
         {
             _connection = connection;
+            Connection = connection;
             Factory = factory;
         }
+
+        public SqliteConnection Connection { get; }
 
         public TestDbContextFactory Factory { get; }
 
@@ -385,6 +428,57 @@ public class EpicReopenSpecs
         public DbContextOptions<MohistDbContext> Options { get; }
 
         public MohistDbContext CreateDbContext() => new(Options);
+    }
+
+    private sealed class FailEpicActiveIssueInsertInterceptor : DbCommandInterceptor
+    {
+        public bool Enabled { get; set; }
+
+        public override InterceptionResult<int> NonQueryExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result)
+        {
+            ThrowIfEpicActiveIssueInsert(command, Enabled);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfEpicActiveIssueInsert(command, Enabled);
+            return ValueTask.FromResult(result);
+        }
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            ThrowIfEpicActiveIssueInsert(command, Enabled);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfEpicActiveIssueInsert(command, Enabled);
+            return ValueTask.FromResult(result);
+        }
+
+        private static void ThrowIfEpicActiveIssueInsert(DbCommand command, bool enabled)
+        {
+            if (enabled
+                && command.CommandText.Contains("INSERT", StringComparison.OrdinalIgnoreCase)
+                && command.CommandText.Contains("EpicActiveIssues", StringComparison.Ordinal))
+                throw new InvalidOperationException("Injected active-membership insert failure");
+        }
     }
 
     /// <summary>

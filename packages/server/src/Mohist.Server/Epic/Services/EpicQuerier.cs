@@ -59,7 +59,7 @@ public class EpicQuerier : IScopedService
             LEFT JOIN "EpicIssues" li ON li."EpicId" = e."Id"
             LEFT JOIN "Issues" i ON i."IssueId" = li."IssueId"
             WHERE e."ProjectId" = @projectId
-            {{(normalizedSearch is null ? string.Empty : "AND LOWER(e.\"Title\") LIKE LOWER('%' || @search || '%')")}}
+            {{(normalizedSearch is null ? string.Empty : "AND LOWER(e.\"Title\") LIKE LOWER('%' || @search || '%') ESCAPE '\\'")}}
             ORDER BY {{orderBy}}
             """;
 
@@ -143,8 +143,14 @@ public class EpicQuerier : IScopedService
     {
         if (raw is null) return null;
         var trimmed = raw.Trim();
-        return trimmed.Length == 0 ? null : trimmed;
+        return trimmed.Length == 0 ? null : EscapeLikePattern(trimmed);
     }
+
+    private static string EscapeLikePattern(string value) =>
+        value
+            .Replace(@"\", @"\\")
+            .Replace("%", @"\%")
+            .Replace("_", @"\_");
 
     public async Task<EpicDetailDto?> GetAsync(string projectId, string epicId)
     {

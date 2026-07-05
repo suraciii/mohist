@@ -166,10 +166,9 @@ public class EpicBatchMembershipApiSpecs
         var epic = await CreateEpicAsync(project.Id, "dup-req");
         var issue = await CreateIssueAsync(project.Id, "only-once");
 
-        // Same identifier (the issue number) twice in one request — the
-        // HTTP layer dedups to one per unique identifier, the issue is
-        // linked at most once, and the response does not treat the
-        // duplicate as an error.
+        // Same identifier (the issue number) twice in one request: the
+        // issue is linked at most once, but the response still contains
+        // one non-error outcome for each requested token.
         var response = await _client.PostAsJsonAsync(
             $"/api/projects/{project.Id}/epics/{epic.Id}/issues:batch",
             new { issueIds = new[] { issue.Number.ToString(), issue.Number.ToString() } });
@@ -177,12 +176,11 @@ public class EpicBatchMembershipApiSpecs
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var envelope = await ReadEnvelopeAsync(response);
         var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
-        Assert.True(results.GetArrayLength() >= 1, "expected at least one outcome per resolved identifier");
-        Assert.All(results.EnumerateArray(), r =>
-            Assert.True(
-                r.GetProperty("status").GetString() == "linked"
-                || r.GetProperty("status").GetString() == "already-linked",
-                $"expected linked-or-already-linked, got {r.GetProperty("status").GetString()}"));
+        Assert.Equal(2, results.GetArrayLength());
+        var arr = results.EnumerateArray().ToArray();
+        Assert.Equal(new[] { issue.Number.ToString(), issue.Number.ToString() }, arr.Select(r => r.GetProperty("identifier").GetString()).ToArray());
+        Assert.Equal("linked", arr[0].GetProperty("status").GetString());
+        Assert.Equal("already-linked", arr[1].GetProperty("status").GetString());
 
         var detail = await _client.GetDataAsync<EpicDetailDtoLike>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.Single(detail.LinkedIssues);
@@ -270,6 +268,57 @@ public class EpicBatchMembershipApiSpecs
         var arr = results.EnumerateArray().ToArray();
         Assert.Equal("unlinked", arr[0].GetProperty("status").GetString());
         Assert.Equal("was-not-a-member", arr[1].GetProperty("status").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task BatchUnlink_UnknownIdentifier_ReportedAsWasNotAMember()
+    {
+        var project = await CreateProjectAsync();
+        var epic = await CreateEpicAsync(project.Id, "unlink-unknown");
+        var member = await CreateIssueAsync(project.Id, "member");
+        await LinkIssueAsync(project.Id, epic, member);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/epics/{epic.Id}/issues:batch-unlink",
+            new { issueIds = new[] { "99999", member.Number.ToString() } });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var envelope = await ReadEnvelopeAsync(response);
+        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
+        Assert.Equal(2, results.GetArrayLength());
+        var arr = results.EnumerateArray().ToArray();
+        Assert.Equal("99999", arr[0].GetProperty("identifier").GetString());
+        Assert.Equal("was-not-a-member", arr[0].GetProperty("status").GetString());
+        Assert.Equal("unlinked", arr[1].GetProperty("status").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task BatchUnlink_DuplicateIdentifier_ReturnsOutcomePerRequestedIdentifier()
+    {
+        var project = await CreateProjectAsync();
+        var epic = await CreateEpicAsync(project.Id, "unlink-dup");
+        var issue = await CreateIssueAsync(project.Id, "member");
+        await LinkIssueAsync(project.Id, epic, issue);
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/epics/{epic.Id}/issues:batch-unlink",
+            new { issueIds = new[] { issue.Number.ToString(), issue.Number.ToString() } });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var envelope = await ReadEnvelopeAsync(response);
+        var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
+        Assert.Equal(2, results.GetArrayLength());
+        var arr = results.EnumerateArray().ToArray();
+        Assert.Equal(new[] { issue.Number.ToString(), issue.Number.ToString() }, arr.Select(r => r.GetProperty("identifier").GetString()).ToArray());
+        Assert.Equal("unlinked", arr[0].GetProperty("status").GetString());
+        Assert.Equal("was-not-a-member", arr[1].GetProperty("status").GetString());
+
+        var detail = await _client.GetDataAsync<EpicDetailDtoLike>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.Empty(detail.LinkedIssues);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

@@ -951,6 +951,17 @@ describe('EpicListPage search and sort controls', () => {
     expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: undefined, dir: undefined })
   })
 
+  it('renders a no-results state instead of project-empty copy for empty filtered results', () => {
+    mocks.useEpics.mockReturnValue({ data: [], isLoading: false })
+    renderPage()
+
+    fireEvent.change(screen.getByTestId('epic-search-input'), { target: { value: 'missing' } })
+
+    expect(screen.getByText('No epics match this view')).toBeTruthy()
+    expect(screen.queryByText('No epics yet')).toBeNull()
+    expect(screen.queryByText('Create your first Epic')).toBeNull()
+  })
+
   it('renders sort field and direction selectors with default = no override', () => {
     mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
     renderPage()

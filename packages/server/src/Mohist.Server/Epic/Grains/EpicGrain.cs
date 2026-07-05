@@ -506,22 +506,11 @@ public class EpicGrain : Grain, IEpicGrain
         domain.Reopen(now.UtcDateTime);
         MapToRow(domain, row, now);
 
-        // Commit the EpicRow state change first. After this, the epic
-        // is non-terminal in the DB so any subsequent link/unlink on
-        // the active-membership invariant will see us as a valid
-        // re-claim candidate.
-        var pending = DrainPendingEvents(domain);
-        await db.SaveChangesAsync();
-
-        // Re-establish active memberships for each linked issue. The
-        // invariant — at most one non-terminal epic actively owns an
-        // issue — is enforced by GetActiveMembershipOwnerAsync. A
-        // linked issue that was re-homed to another non-terminal epic
-        // during the terminal period is silently skipped: its link
-        // record stays, the issue is not re-claimed, and reopen does
-        // not fail. Each insert is its own save so a duplicate-key
-        // race against a concurrent claim surfaces as a per-issue
-        // skip rather than rolling back the rest of the re-claim.
+        // Re-establish active memberships in the same database commit
+        // as the terminal-to-idle transition. If that commit fails, the
+        // epic remains terminal and a retry can perform the full reopen
+        // again instead of getting stuck in an idle-without-active-rows
+        // partial state.
         foreach (var link in links)
         {
             var owner = await GetActiveMembershipOwnerAsync(db, projectId, link.IssueId, epicId);
@@ -534,19 +523,10 @@ public class EpicGrain : Grain, IEpicGrain
                 EpicId = epicId,
                 IssueNumber = link.IssueNumber,
             });
-            try
-            {
-                await db.SaveChangesAsync();
-            }
-            catch (DbUpdateException)
-            {
-                // A concurrent claim won the race; drop the queued
-                // row and move on so the remaining issues still
-                // re-claim and the reopen call returns successfully.
-                db.ChangeTracker.Clear();
-            }
         }
 
+        var pending = DrainPendingEvents(domain);
+        await db.SaveChangesAsync();
         await PersistEpicEventsAsync(domain, pending, now);
         return ToDto(row);
     }

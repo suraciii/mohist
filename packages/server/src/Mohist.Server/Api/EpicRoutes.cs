@@ -297,20 +297,18 @@ public static class EpicRoutes
             return ApiResults.Ok(new BatchMembershipResponse(Array.Empty<BatchMembershipOutcome>()));
 
         var issues = await issuesQuery.ListAsync(pid, all: true);
-        // Resolve each unique identifier exactly the way the single-issue
+        // Resolve each identifier exactly the way the single-issue
         // route does today: by exact internal-id match, or by issue-number
         // string match. Unresolved identifiers flow through as not-found
-        // outcomes. The response carries one outcome per unique requested
-        // identifier (duplicate identifier strings in the request are
-        // de-duplicated — the issue is linked at most once and the
-        // duplicate is not an error).
+        // outcomes. The grain receives each resolved issue at most once;
+        // MergeBatchOutcomes expands the result back to one outcome per
+        // requested identifier.
         var resolvedItems = new List<BatchMembershipRequestItem>(req.IssueIds.Count);
         var perIdentifier = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
-        var seenIdentifiers = new HashSet<string>(StringComparer.Ordinal);
+        var seenIssueIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var identifier in req.IssueIds)
         {
             if (string.IsNullOrWhiteSpace(identifier)) continue;
-            if (!seenIdentifiers.Add(identifier)) continue;
             var match = issues.FirstOrDefault(i =>
                 i.Id == identifier || i.Number.ToString() == identifier);
             if (match is null)
@@ -322,7 +320,7 @@ public static class EpicRoutes
             var item = new BatchMembershipRequestItem(
                 Identifier: identifier, IssueId: match.Id, IssueNumber: match.Number);
             perIdentifier[identifier] = item;
-            resolvedItems.Add(item);
+            if (seenIssueIds.Add(match.Id)) resolvedItems.Add(item);
         }
 
         var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
@@ -336,7 +334,7 @@ public static class EpicRoutes
             return ApiResults.NotFound(ex.Message);
         }
 
-        var outcomes = MergeBatchOutcomes(req.IssueIds, perIdentifier, grainOutcomes);
+        var outcomes = MergeBatchOutcomes(req.IssueIds, perIdentifier, grainOutcomes, isUnlink: false);
         return ApiResults.Ok(new BatchMembershipResponse(outcomes));
     }
 
@@ -361,11 +359,10 @@ public static class EpicRoutes
         var issues = await issuesQuery.ListAsync(pid, all: true);
         var resolvedItems = new List<BatchMembershipRequestItem>(req.IssueIds.Count);
         var perIdentifier = new Dictionary<string, BatchMembershipRequestItem>(StringComparer.Ordinal);
-        var seenIdentifiers = new HashSet<string>(StringComparer.Ordinal);
+        var seenIssueIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var identifier in req.IssueIds)
         {
             if (string.IsNullOrWhiteSpace(identifier)) continue;
-            if (!seenIdentifiers.Add(identifier)) continue;
             var match = issues.FirstOrDefault(i =>
                 i.Id == identifier || i.Number.ToString() == identifier);
             if (match is null)
@@ -377,7 +374,7 @@ public static class EpicRoutes
             var item = new BatchMembershipRequestItem(
                 Identifier: identifier, IssueId: match.Id, IssueNumber: match.Number);
             perIdentifier[identifier] = item;
-            resolvedItems.Add(item);
+            if (seenIssueIds.Add(match.Id)) resolvedItems.Add(item);
         }
 
         var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
@@ -391,14 +388,15 @@ public static class EpicRoutes
             return ApiResults.NotFound(ex.Message);
         }
 
-        var outcomes = MergeBatchOutcomes(req.IssueIds, perIdentifier, grainOutcomes);
+        var outcomes = MergeBatchOutcomes(req.IssueIds, perIdentifier, grainOutcomes, isUnlink: true);
         return ApiResults.Ok(new BatchMembershipResponse(outcomes));
     }
 
     private static IReadOnlyList<BatchMembershipOutcome> MergeBatchOutcomes(
         IReadOnlyList<string> requestedIdentifiers,
         IReadOnlyDictionary<string, BatchMembershipRequestItem> resolvedItems,
-        IReadOnlyList<BatchMembershipOutcome> grainOutcomes)
+        IReadOnlyList<BatchMembershipOutcome> grainOutcomes,
+        bool isUnlink)
     {
         var byIssueId = grainOutcomes
             .Where(o => !string.IsNullOrEmpty(o.IssueId))
@@ -409,39 +407,58 @@ public static class EpicRoutes
             .GroupBy(o => o.Identifier, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
-        var seenIdentifiers = new HashSet<string>(StringComparer.Ordinal);
+        var seenIssueIds = new HashSet<string>(StringComparer.Ordinal);
         var results = new List<BatchMembershipOutcome>(requestedIdentifiers.Count);
         foreach (var identifier in requestedIdentifiers)
         {
             if (string.IsNullOrWhiteSpace(identifier)) continue;
-            if (!seenIdentifiers.Add(identifier)) continue;
-            // Unresolved identifier: surface as not-found.
+            // Unresolved identifier: link reports not-found; unlink is
+            // idempotent and reports was-not-a-member per the unlink contract.
             if (!resolvedItems.TryGetValue(identifier, out var item) || string.IsNullOrEmpty(item.IssueId))
             {
-                if (notFoundByIdentifier.TryGetValue(identifier, out var nfe))
+                if (!isUnlink && notFoundByIdentifier.TryGetValue(identifier, out var nfe))
                 {
                     results.Add(nfe);
                 }
                 else
                 {
-                    results.Add(BatchMembershipOutcome.NotFound(identifier));
+                    results.Add(isUnlink
+                        ? new BatchMembershipOutcome(identifier, "was-not-a-member")
+                        : BatchMembershipOutcome.NotFound(identifier));
                 }
                 continue;
             }
 
             if (byIssueId.TryGetValue(item.IssueId, out var outcome))
             {
-                results.Add(outcome with { Identifier = identifier });
+                results.Add(seenIssueIds.Add(item.IssueId)
+                    ? outcome with { Identifier = identifier }
+                    : DuplicateOutcome(identifier, item, outcome, isUnlink));
             }
             else
             {
                 // Resolved issue that the grain dropped (only possible if
                 // the grain returned no entry for it — defensive fallback).
-                results.Add(BatchMembershipOutcome.NotFound(identifier));
+                results.Add(isUnlink
+                    ? BatchMembershipOutcome.WasNotAMember(identifier, item.IssueId, item.IssueNumber)
+                    : BatchMembershipOutcome.NotFound(identifier));
             }
         }
 
         return results;
+    }
+
+    private static BatchMembershipOutcome DuplicateOutcome(
+        string identifier,
+        BatchMembershipRequestItem item,
+        BatchMembershipOutcome firstOutcome,
+        bool isUnlink)
+    {
+        if (isUnlink)
+            return BatchMembershipOutcome.WasNotAMember(identifier, item.IssueId, item.IssueNumber);
+        return firstOutcome.Status == "conflict"
+            ? firstOutcome with { Identifier = identifier }
+            : BatchMembershipOutcome.AlreadyLinked(identifier, item.IssueId, item.IssueNumber);
     }
 
     private static async Task<BatchMembershipRequest?> ReadBatchRequestAsync(HttpContext context)

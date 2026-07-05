@@ -379,6 +379,7 @@ export function EpicListPage() {
   const [sortDir, setSortDir] = useState<EpicSortDir | null>(null)
   const trimmedSearch = searchInput.trim()
   const effectiveSortDir = sortField ? (sortDir ?? 'asc') : sortDir
+  const hasActiveQuery = trimmedSearch.length > 0 || sortField !== null || sortDir !== null
   const { data: epics, isLoading } = useEpics({
     search: trimmedSearch || undefined,
     sort: sortField ?? undefined,
@@ -509,12 +510,18 @@ export function EpicListPage() {
         </div>
       ) : epics && epics.length === 0 ? (
         <div className="text-center py-12">
-          <div className="text-muted-foreground text-lg mb-4">No epics yet</div>
-          <Button
-            onClick={() => setShowCreate(true)}
-          >
-            Create your first Epic
-          </Button>
+          {hasActiveQuery ? (
+            <div className="text-muted-foreground text-lg mb-4">No epics match this view</div>
+          ) : (
+            <>
+              <div className="text-muted-foreground text-lg mb-4">No epics yet</div>
+              <Button
+                onClick={() => setShowCreate(true)}
+              >
+                Create your first Epic
+              </Button>
+            </>
+          )}
         </div>
       ) : (
         <div className="space-y-8">

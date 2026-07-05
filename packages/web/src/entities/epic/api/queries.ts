@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import type { Epic, EpicDetail, EpicWithProgress, StoredCloudEventDto } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
 import { startIssue } from '../../issue'
-import { addEpicIssue, closeEpic, createEpic, getEpic, getEpicEvents, getEpics, markEpicDone, pauseEpic, removeEpicIssue, reopenEpic, resumeEpic, startEpic, updateEpic, type UpdateEpicInput } from './client'
+import { addEpicIssue, batchAddEpicIssues, batchRemoveEpicIssues, closeEpic, createEpic, getEpic, getEpicEvents, getEpics, markEpicDone, pauseEpic, removeEpicIssue, reopenEpic, resumeEpic, startEpic, updateEpic, type BatchMembershipResponse, type UpdateEpicInput } from './client'
 
 export interface UseEpicsParams {
   search?: string
@@ -71,6 +71,40 @@ export function useRemoveEpicIssue() {
       queryClient.invalidateQueries({ queryKey: ['epics', variables.epicId] })
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       toast.success('Issue removed from Epic')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useBatchAddEpicIssues() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<BatchMembershipResponse, Error, { epicId: string; issueIds: string[] }>({
+    mutationFn: ({ epicId, issueIds }) => batchAddEpicIssues(epicId, issueIds, projectId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['epics'] })
+      queryClient.invalidateQueries({ queryKey: ['epics', variables.epicId] })
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      toast.success('Issues added to Epic')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useBatchRemoveEpicIssues() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<BatchMembershipResponse, Error, { epicId: string; issueIds: string[] }>({
+    mutationFn: ({ epicId, issueIds }) => batchRemoveEpicIssues(epicId, issueIds, projectId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['epics'] })
+      queryClient.invalidateQueries({ queryKey: ['epics', variables.epicId] })
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      toast.success('Issues removed from Epic')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')

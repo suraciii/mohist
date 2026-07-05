@@ -71,9 +71,30 @@ public class EpicQuerierListAsyncQuerySpecs
         await querier.ListAsync("proj_1", search: "Auth");
 
         var only = Assert.Single(commands, c => c.Contains("SELECT", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains("LOWER(e.\"Title\") LIKE LOWER('%' || @search || '%')", only);
+        Assert.Contains("LOWER(e.\"Title\") LIKE LOWER('%' || @search || '%') ESCAPE '\\'", only);
         Assert.Contains("@search", only);
         Assert.Contains("@projectId", only);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ListAsync_SearchTreatsPercentAndUnderscoreAsLiteralText()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, "proj_1", "epic_percent", 1, title: "Discount 100% ready");
+        await SeedEpicAsync(database, "proj_1", "epic_underscore", 2, title: "Auth_token cleanup");
+        await SeedEpicAsync(database, "proj_1", "epic_unrelated", 3, title: "Plain unrelated title");
+
+        var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
+
+        var percentResult = await querier.ListAsync("proj_1", search: "%");
+        Assert.Single(percentResult);
+        Assert.Equal("epic_percent", percentResult[0].Id);
+
+        var underscoreResult = await querier.ListAsync("proj_1", search: "_");
+        Assert.Single(underscoreResult);
+        Assert.Equal("epic_underscore", underscoreResult[0].Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

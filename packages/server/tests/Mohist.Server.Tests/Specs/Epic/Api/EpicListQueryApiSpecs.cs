@@ -149,6 +149,25 @@ public class EpicListQueryApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task ListWithSearch_WildcardCharactersAreLiteralTitleSubstrings()
+    {
+        var project = await CreateProjectAsync();
+        var percent = await CreateEpicAsync(project.Id, "Progress 100%", "p2");
+        var underscore = await CreateEpicAsync(project.Id, "Auth_token", "p2");
+        await CreateEpicAsync(project.Id, "Plain title", "p2");
+
+        var percentMatches = await _client.GetDataAsync<EpicRowDto[]>($"/api/projects/{project.Id}/epics?search=%25");
+        Assert.Single(percentMatches);
+        Assert.Equal(percent.Id, percentMatches[0].Id);
+
+        var underscoreMatches = await _client.GetDataAsync<EpicRowDto[]>($"/api/projects/{project.Id}/epics?search=_");
+        Assert.Single(underscoreMatches);
+        Assert.Equal(underscore.Id, underscoreMatches[0].Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task ListWithEmptyStringSearch_ReturnsAllEpics()
     {
         var project = await CreateProjectAsync();
