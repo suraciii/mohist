@@ -2,7 +2,6 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Orleans;
-using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 
@@ -235,7 +234,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run.Status is not (WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
-// Flip the run status to Stopped before clearing executable state so the
+        // Flip the run status to Stopped before clearing executable state so the
         // TaskFailed event handler observes a terminal status and short-circuits.
         _ = _run.Stop();
 
