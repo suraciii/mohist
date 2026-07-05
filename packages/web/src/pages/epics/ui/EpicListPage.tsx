@@ -348,13 +348,12 @@ function EpicSection({
   )
 }
 
-type EpicSortField = 'priority' | 'updated' | 'created'
+type EpicSortField = 'priority' | 'updated'
 type EpicSortDir = 'asc' | 'desc'
 
 const EPIC_SORT_OPTIONS: { value: EpicSortField; label: string }[] = [
   { value: 'priority', label: 'Priority' },
   { value: 'updated', label: 'Updated' },
-  { value: 'created', label: 'Created' },
 ]
 
 const EPIC_DIR_OPTIONS: { value: EpicSortDir; label: string }[] = [
@@ -379,21 +378,26 @@ export function EpicListPage() {
   const [sortField, setSortField] = useState<EpicSortField | null>(null)
   const [sortDir, setSortDir] = useState<EpicSortDir | null>(null)
   const trimmedSearch = searchInput.trim()
+  const effectiveSortDir = sortField ? (sortDir ?? 'asc') : sortDir
   const { data: epics, isLoading } = useEpics({
     search: trimmedSearch || undefined,
     sort: sortField ?? undefined,
-    dir: sortDir ?? undefined,
+    dir: effectiveSortDir ?? undefined,
   })
   const startIssue = useStartIssue()
   const [pendingStartIssueNumber, setPendingStartIssueNumber] = useState<number | null>(null)
   const [showCreate, setShowCreate] = useState(false)
 
   function handleSortFieldChange(next: string) {
-    setSortField(normalizeSort(next))
+    const normalized = normalizeSort(next)
+    setSortField(normalized)
+    if (!normalized) setSortDir(null)
   }
 
   function handleSortDirChange(next: string) {
-    setSortDir(normalizeDir(next))
+    const normalized = normalizeDir(next)
+    setSortDir(normalized)
+    if (normalized && !sortField) setSortField('priority')
   }
 
   const activeEpics = epics?.filter(e => e.status === EpicStatus.Idle || e.status === EpicStatus.Running) ?? []
@@ -484,7 +488,7 @@ export function EpicListPage() {
           </label>
           <select
             id="epic-sort-dir"
-            value={sortDir ?? ''}
+            value={effectiveSortDir ?? ''}
             onChange={(event) => handleSortDirChange(event.target.value)}
             data-testid="epic-sort-dir"
             className="rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"

@@ -960,6 +960,21 @@ describe('EpicListPage search and sort controls', () => {
     expect(sortDir).toBeTruthy()
     expect(sortField.value).toBe('')
     expect(sortDir.value).toBe('')
+    expect(screen.queryByRole('option', { name: 'Created' })).toBeNull()
+  })
+
+  it('forwards a default ascending direction when only the sort field changes', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    fireEvent.change(screen.getByTestId('epic-sort-field'), { target: { value: 'updated' } })
+    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: 'updated', dir: 'asc' })
+  })
+
+  it('forwards priority sorting when only the direction changes', () => {
+    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+    renderPage()
+    fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'desc' } })
+    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: 'priority', dir: 'desc' })
   })
 
   it('forwards sort=priority and dir=asc to useEpics when selected', () => {
@@ -981,6 +996,7 @@ describe('EpicListPage search and sort controls', () => {
   it('rejects unknown sort field values by falling back to default ordering', () => {
     mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
     renderPage()
+    fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'desc' } })
     fireEvent.change(screen.getByTestId('epic-sort-field'), { target: { value: 'garbage-payload' } })
     expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: undefined, dir: undefined })
   })

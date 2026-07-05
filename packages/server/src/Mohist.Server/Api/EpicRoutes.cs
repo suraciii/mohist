@@ -431,7 +431,7 @@ public static class EpicRoutes
 
             if (byIssueId.TryGetValue(item.IssueId, out var outcome))
             {
-                results.Add(outcome);
+                results.Add(outcome with { Identifier = identifier });
             }
             else
             {

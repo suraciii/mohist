@@ -239,7 +239,6 @@ public class EpicGrain : Grain, IEpicGrain
                 {
                     outcomes.Add(BatchMembershipOutcome.Conflict(
                         item.Identifier, item.IssueId, item.IssueNumber, owner.EpicId, owner.Title));
-                    await PersistEpicEventsAsync(domain, pending, now);
                     continue;
                 }
                 outcomes.Add(BatchMembershipOutcome.Conflict(

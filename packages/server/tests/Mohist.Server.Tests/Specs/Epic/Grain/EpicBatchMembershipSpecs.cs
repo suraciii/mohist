@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Epic.Domain;
@@ -14,6 +15,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Tests.Support;
+using System.Data;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Epic.Grain;
@@ -286,6 +288,45 @@ public class EpicBatchMembershipSpecs
         Assert.Equal(time.GetUtcNow(), evt.Envelope.Time);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssuesAsync_WhenActiveMembershipInsertFails_DoesNotPersistIssueLinkedEvent()
+    {
+        var store = new RecordingEventStore();
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_target", status: "idle", number: 1);
+        await SeedEpicAsync(database, epicId: "epic_owner", status: "idle", number: 2);
+        await SeedIssueAsync(database, issueId: "issue_race", issueNumber: 1);
+
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero));
+        var grain = new EpicGrain(
+            database.CreateFactory(new InsertConflictingActiveIssueBeforeSaveInterceptor(ProjectId, "issue_race", "epic_owner", 1)),
+            new NullGrainFactory(),
+            time,
+            store,
+            NullLogger<EpicGrain>.Instance)
+        {
+            GrainKeyForTest = $"{ProjectId}:epic_target",
+        };
+
+        var outcomes = await grain.LinkIssuesAsync(
+            [new BatchMembershipRequestItem("1", "issue_race", 1)], ProjectId);
+
+        var outcome = Assert.Single(outcomes);
+        Assert.Equal("conflict", outcome.Status);
+        Assert.Equal("epic_owner", outcome.OwningEpicId);
+
+        var stored = await store.ListEpicEventsAsync("epic_target");
+        Assert.Empty(stored);
+
+        await using var verify = database.CreateDbContext();
+        var targetLinks = await verify.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == ProjectId && link.EpicId == "epic_target" && link.IssueId == "issue_race")
+            .ToListAsync();
+        Assert.Empty(targetLinks);
+    }
+
     private static EpicGrain CreateGrain(TestDbContextFactory factory, string grainKey) =>
         new(
             factory,
@@ -378,7 +419,74 @@ public class EpicBatchMembershipSpecs
 
         public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
 
+        public TestDbContextFactory CreateFactory(params IInterceptor[] interceptors)
+        {
+            var builder = new DbContextOptionsBuilder<MohistDbContext>()
+                .UseSqlite(_connection);
+            if (interceptors.Length > 0) builder.AddInterceptors(interceptors);
+            return new TestDbContextFactory(builder.Options);
+        }
+
         public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
+    }
+
+    private sealed class InsertConflictingActiveIssueBeforeSaveInterceptor(
+        string projectId,
+        string issueId,
+        string ownerEpicId,
+        int issueNumber) : SaveChangesInterceptor
+    {
+        private bool _inserted;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_inserted || eventData.Context is not MohistDbContext db)
+                return result;
+
+            var claimsTargetIssue = db.ChangeTracker.Entries<EpicActiveIssueRow>()
+                .Any(entry => entry.State == EntityState.Added
+                    && entry.Entity.ProjectId == projectId
+                    && entry.Entity.IssueId == issueId
+                    && entry.Entity.EpicId != ownerEpicId);
+            if (!claimsTargetIssue)
+                return result;
+
+            _inserted = true;
+            var connection = db.Database.GetDbConnection();
+            var shouldClose = connection.State != ConnectionState.Open;
+            if (shouldClose) await connection.OpenAsync(cancellationToken);
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO "EpicActiveIssues" ("ProjectId", "IssueId", "EpicId", "IssueNumber", "CreatedAt")
+                    VALUES ($projectId, $issueId, $epicId, $issueNumber, $createdAt)
+                    """;
+                AddParameter(command, "$projectId", projectId);
+                AddParameter(command, "$issueId", issueId);
+                AddParameter(command, "$epicId", ownerEpicId);
+                AddParameter(command, "$issueNumber", issueNumber);
+                AddParameter(command, "$createdAt", new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero));
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+            finally
+            {
+                if (shouldClose) await connection.CloseAsync();
+            }
+
+            return result;
+        }
+
+        private static void AddParameter(System.Data.Common.DbCommand command, string name, object value)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value;
+            command.Parameters.Add(parameter);
+        }
     }
 
     private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>

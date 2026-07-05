@@ -237,6 +237,15 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal(EpicQuerier.DefaultOrderBy, dirOnly);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void ListAsync_CreatedSortIsNotPartOfIssue94Contract()
+    {
+        Assert.Equal(EpicQuerier.DefaultOrderBy, EpicQuerier.ResolveOrderBy("created", "asc"));
+        Assert.Equal(EpicQuerier.DefaultOrderBy, EpicQuerier.ResolveOrderBy("created", "desc"));
+    }
+
     private static (EpicQuerier Querier, List<string> Commands) CreateCountingQuerier(TestDatabase database)
     {
         // Eagerly migrate the shared in-memory connection before the

@@ -120,8 +120,6 @@ public class EpicQuerier : IScopedService
             [("priority", "desc")] = "e.\"Priority\" DESC, e.\"UpdatedAt\" DESC, li.\"CreatedAt\"",
             [("updated", "asc")] = "e.\"UpdatedAt\" ASC, e.\"Priority\" ASC, li.\"CreatedAt\"",
             [("updated", "desc")] = "e.\"UpdatedAt\" DESC, e.\"Priority\" ASC, li.\"CreatedAt\"",
-            [("created", "asc")] = "e.\"CreatedAt\" ASC, e.\"Priority\" ASC, li.\"CreatedAt\"",
-            [("created", "desc")] = "e.\"CreatedAt\" DESC, e.\"Priority\" ASC, li.\"CreatedAt\"",
         };
 
     internal static string ResolveOrderBy(string? sortBy, string? sortDir)

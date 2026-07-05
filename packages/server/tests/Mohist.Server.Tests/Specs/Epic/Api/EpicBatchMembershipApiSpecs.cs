@@ -209,6 +209,7 @@ public class EpicBatchMembershipApiSpecs
         var results = Assert.IsType<JsonElement>(envelope.GetProperty("data")).GetProperty("results");
         Assert.Equal(2, results.GetArrayLength());
         var arr = results.EnumerateArray().ToArray();
+        Assert.Equal(new[] { issue.Number.ToString(), issue.Id }, arr.Select(r => r.GetProperty("identifier").GetString()).ToArray());
         var byStatus = arr.Select(r => r.GetProperty("status").GetString()).ToArray();
         // At least one linked and the second is either linked or
         // already-linked; the duplicate is not an error.
