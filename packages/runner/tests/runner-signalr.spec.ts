@@ -7,6 +7,7 @@ import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 
 interface CapturedBuilder {
   url?: string
+  reconnectPolicy?: number[]
   handlers: Map<string, (...args: unknown[]) => unknown>
   connection: FakeConnection
 }
@@ -79,7 +80,9 @@ vi.mock("@microsoft/signalr", () => {
         builders.push({ url, handlers: this._handlers, connection: this._connection })
         return this
       }
-      withAutomaticReconnect() {
+      withAutomaticReconnect(reconnectPolicy: number[]) {
+        const builder = builders.at(-1)
+        if (builder) builder.reconnectPolicy = reconnectPolicy
         return this
       }
       build() {
@@ -270,6 +273,13 @@ describe("RunnerSignalRClient handshake", () => {
     new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects")
     const last = builders.at(-1)
     expect(last?.url).toBe("http://localhost:3456/hubs/runner?runnerId=runner-1")
+  })
+
+  it("ConfiguresFixedAutomaticReconnectIntervals", () => {
+    builders.length = 0
+    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
+    const last = builders.at(-1)
+    expect(last?.reconnectPolicy).toEqual([0, 2000, 5000, 10000, 30000])
   })
 })
 

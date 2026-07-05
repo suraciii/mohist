@@ -5,10 +5,13 @@
 // workspace-removal handler can be exercised independently from the
 // connection lifecycle / other push handlers.
 //
-// Behaviour is byte-identical to the inline implementation:
+// Behaviour preserves the SignalR reply contract while enforcing the
+// issue-313 registry-safety invariant:
 //   - runner-root containment check (rejects `workspace_cleanup_refused`)
-//   - registry entry drop before disk deletion (so the registry tracks
-//     disk reality: dropped regardless of whether the directory exists)
+//   - paths outside runnerRoot never mutate the registry
+//   - for in-root paths, registry entry drop before disk deletion (so the
+//     registry tracks disk reality: dropped regardless of whether the
+//     directory exists)
 //   - `workspace_missing` reply when the directory was already absent
 //   - `workspace_cleanup_failed` reply carrying the error message on
 //     delete failure
@@ -44,16 +47,15 @@ export function registerWorkspaceRemovalHandler(
       return removal(false, "missing", query?.workspacePath ?? null, "workspace_missing", "Workspace already removed")
     }
     const workspacePath = resolve(query.workspacePath)
-    // Pre-resolve any matching registry entry up front. When the path
-    // exists on disk we still drop the entry after a successful delete;
-    // when it is missing we still drop the entry (the task notes
-    // require `safeRemove` to tolerate already-missing directories —
-    // the registry must stay consistent with disk reality).
-    await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
-    if (!pathExists(workspacePath)) return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
     if (!isUnderRunnerRoot(deps.runnerRoot, workspacePath)) {
       return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path is outside the runner-managed root")
     }
+    // Pre-resolve any matching registry entry after the containment
+    // check. In-root missing directories still drop their registry entry
+    // so the registry stays consistent with disk reality, while refused
+    // outside-root paths leave registry state untouched.
+    await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
+    if (!pathExists(workspacePath)) return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
     try {
       await deleteDirectory(workspacePath)
       return removal(true, "removed", workspacePath, null, "Workspace removed")

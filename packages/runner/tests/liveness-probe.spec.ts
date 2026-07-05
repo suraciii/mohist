@@ -302,18 +302,14 @@ describe("forceReconnect", () => {
     triggerStart()
   })
 
-  it("does not short-circuit start when the abort signal fires before stop is even invoked", async () => {
+  it("starts after stop when the abort signal remains active", async () => {
     const conn = makeConnection({
       state: signalR.HubConnectionState.Connected,
     })
     const ac = new AbortController()
 
-    // Pre-aborting before the call matches design intent for the
-    // "post-stop abort short-circuit" scenario only when stop has
-    // completed. If abort fires before stop, the spec allows the full
-    // stop→start sequence (the only short-circuit is the in-between
-    // window). Verify the documented invariant is upheld either way by
-    // asserting start runs at the end of the normal path.
+    // This is the normal stop-to-start path; the short-circuit branch is
+    // covered by the previous test where the signal aborts after stop.
     await forceReconnect(conn as unknown as signalR.HubConnection, undefined, ac.signal)
     expect(conn.stop).toHaveBeenCalledTimes(1)
     expect(conn.start).toHaveBeenCalledTimes(1)
