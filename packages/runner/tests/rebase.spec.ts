@@ -828,6 +828,16 @@ describe("mohist/rebase", () => {
     expect(result.status).toBe("failure")
     expect(output.errorCode).toBe("retry-safe")
     expect(output.output).toContain("timed out")
+    expect(output.steps).toEqual([
+      {
+        name: "git-fetch-base",
+        command: "fetch origin master",
+        exitCode: 124,
+        output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+        status: "timeout",
+        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+      },
+    ])
   })
 
   it("LocalBasePath_RebaseDoesNotCarryTimeoutMs", async () => {

@@ -450,6 +450,7 @@ async function runGhReadWithRetry(
   for (;;) {
     const result = await gh("gh", args, workDir, signal, undefined, options)
     const transient = result.exitCode !== 0
+      && result.status !== "timeout"
       && attempt < ghTransientRetryLimit
       && looksLikeRetrySafe(`${result.stdout}\n${result.stderr}`)
     if (!transient) {

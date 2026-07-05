@@ -684,4 +684,44 @@ describe("mohist/push", () => {
     ])
     expect(result.message).not.toContain("base branch moved")
   })
+
+  it("ForceWithLease_LsRemoteTimeoutFailsRetrySafeAndSurfacesDuration", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("rewritten-sha\n")
+        case "ls-remote origin refs/heads/master":
+          return {
+            success: false,
+            stdout: "",
+            stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+            exitCode: 124,
+            combinedOutput: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+            status: "timeout" as const,
+            timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+          }
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context({ forceWithLease: true }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.failureKind).toBe("retry-safe")
+    expect(output.output).toContain("timed out")
+    expect(calls.some((call) => call.args[0] === "push")).toBe(false)
+    expect(output.steps).toEqual([
+      {
+        name: "git-ls-remote",
+        command: "ls-remote origin refs/heads/master",
+        exitCode: 124,
+        output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+        status: "timeout",
+        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+      },
+    ])
+  })
 })

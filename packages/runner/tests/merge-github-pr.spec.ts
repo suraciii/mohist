@@ -36,6 +36,16 @@ function ghFail(stderr: string, stdout = "", exitCode = 1): CommandResult {
   return { exitCode, stdout, stderr }
 }
 
+function ghTimeout(): CommandResult {
+  return {
+    exitCode: 124,
+    stdout: "",
+    stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+    status: "timeout",
+    timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+  }
+}
+
 function checksRollup(checks: unknown[]): string {
   return JSON.stringify({ statusCheckRollup: checks })
 }
@@ -1070,5 +1080,41 @@ describe("mohist/merge-github-pr action", () => {
     expect(mergeStep).toBeDefined()
     expect(mergeStep.output).toContain("timed out")
     expect(mergeStep.exitCode).toBe(124)
+  })
+
+  it("GhPrViewTimeout_IsNotRetriedAndSurfacesDuration", async () => {
+    installMoIssueShow()
+    installGit(() => { throw new Error("git should not be called") })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
+          return ghTimeout()
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await mergeGitHubPrAction(context({
+      prNumber: 42,
+      method: "squash",
+      subjectFrom: "issue.title",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("retry-safe")
+    expect(ghCalls.filter((c) => c.command === "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus")).toHaveLength(1)
+    const viewStep = output.steps.find((step: { name: string }) => step.name === "gh-pr-view")
+    expect(viewStep).toMatchObject({
+      command: "pr view 42 --json state,mergeCommit,url,number,mergeStateStatus",
+      exitCode: 124,
+      status: "timeout",
+      timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+    })
+    expect(viewStep.output).toContain("timed out")
   })
 })

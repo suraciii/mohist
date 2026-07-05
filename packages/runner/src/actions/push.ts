@@ -84,12 +84,16 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
     // explicit lease form, which git trusts regardless of tracking-ref state.
     // If the probe itself fails, fall back to the bare form (best-effort).
     const remoteTip = await resolveRemoteTip(workDir, remote, target, context.signal, networkOpts)
-    if (remoteTip === null) {
-      pushArgs.push("--force-with-lease")
-    } else if (remoteTip) {
-      pushArgs.push(`--force-with-lease=${target}:${remoteTip}`)
+    if (remoteTip.kind === "timeout") {
+      steps.push({ name: "git-ls-remote", command: remoteTip.command, exitCode: remoteTip.result.exitCode, output: remoteTip.result.combinedOutput, ...timeoutStepMetadata(remoteTip.result) })
+      return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, remoteTip.result.combinedOutput, "retry-safe", remoteTip.result.exitCode, steps)
     }
-    // remoteTip === "" → branch absent on remote; a plain push creates it, no force needed.
+    if (remoteTip.kind === "failed") {
+      pushArgs.push("--force-with-lease")
+    } else if (remoteTip.tip) {
+      pushArgs.push(`--force-with-lease=${target}:${remoteTip.tip}`)
+    }
+    // remoteTip.tip === "" → branch absent on remote; a plain push creates it, no force needed.
   }
   pushArgs.push(remote, refspec)
   const push = await git(workDir, pushArgs, context.signal, networkOpts)
@@ -163,11 +167,20 @@ function looksLikeNonFastForward(text: string) {
  * Resolves the current tip of `target` on `remote` via `ls-remote`.
  *   - tip sha when the branch exists on the remote,
  *   - "" when the branch is absent (a plain push creates it, no force needed),
- *   - null when the probe itself failed (caller falls back to bare --force-with-lease).
+ *   - failed when the probe itself failed (caller falls back to bare --force-with-lease),
+ *   - timeout when the probe hung and must be surfaced instead of disappearing.
  */
-async function resolveRemoteTip(workDir: string, remote: string, target: string, signal: AbortSignal, opts?: GitOptions): Promise<string | null> {
-  const probe = await git(workDir, ["ls-remote", remote, `refs/heads/${target}`], signal, opts)
-  if (!probe.success) return null
+async function resolveRemoteTip(workDir: string, remote: string, target: string, signal: AbortSignal, opts?: GitOptions): Promise<
+  | { kind: "resolved"; tip: string }
+  | { kind: "failed" }
+  | { kind: "timeout"; command: string; result: GitResult }
+> {
+  const args = ["ls-remote", remote, `refs/heads/${target}`]
+  const probe = await git(workDir, args, signal, opts)
+  if (!probe.success) {
+    if (probe.status === "timeout") return { kind: "timeout", command: args.join(" "), result: probe }
+    return { kind: "failed" }
+  }
   const firstLine = probe.stdout.split(/\r?\n/)[0] ?? ""
-  return firstLine.trim().split(/\s+/)[0] ?? ""
+  return { kind: "resolved", tip: firstLine.trim().split(/\s+/)[0] ?? "" }
 }
