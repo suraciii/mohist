@@ -35,11 +35,11 @@ internal static class AgentSessionContextRefs
     /// </summary>
     public static ContextRefs? TryBuild(AgentSessionRecord record)
     {
-        var issueNumberText = AgentSessionQuerier.Label(record, GenericAgentSessionMetadata.IssueNumber);
+        var issueNumberText = record.Label(GenericAgentSessionMetadata.IssueNumber);
         var issueNumber = int.TryParse(issueNumberText, out var parsed) ? parsed : (int?)null;
-        var epicNumber = AgentSessionQuerier.Label(record, GenericAgentSessionMetadata.EpicNumber);
-        var repository = AgentSessionQuerier.Label(record, GenericAgentSessionMetadata.Repository);
-        var workspacePath = AgentSessionQuerier.Label(record, GenericAgentSessionMetadata.WorkspacePath);
+        var epicNumber = record.Label(GenericAgentSessionMetadata.EpicNumber);
+        var repository = record.Label(GenericAgentSessionMetadata.Repository);
+        var workspacePath = record.Label(GenericAgentSessionMetadata.WorkspacePath);
 
         if (issueNumber is null && string.IsNullOrWhiteSpace(epicNumber)
             && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))

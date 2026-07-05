@@ -163,5 +163,34 @@ public sealed record AgentSessionRecord(
     AgentSession Session,
     IReadOnlyDictionary<string, string> Labels)
 {
-    public string? Label(string key) => Labels.TryGetValue(key, out var value) ? value : null;
+    /// <summary>
+    /// Resolves a label value with the record-first-then-metadata fallback:
+    /// the record's own <see cref="Labels"/> is consulted first, and when the
+    /// key is absent the session's <see cref="AgentSessionMetadata.Labels"/>
+    /// is consulted as a defensive fallback.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AgentSessionQuery.ToRecords"/> constructs every production
+    /// record with <c>session.Metadata.Labels</c> (so the two dictionaries
+    /// coincide in production); the fallback exists for synthetic records
+    /// built directly via the constructor with a hand-crafted label
+    /// dictionary (tests / fakes). Returns <c>null</c> when the key is
+    /// absent from both sources.
+    /// </remarks>
+    public string? Label(string key) => Labels.TryGetValue(key, out var value)
+        ? value
+        : Session.Metadata.Label(key);
+
+    /// <summary>
+    /// Reads the issue-number label (with record-first-then-metadata
+    /// fallback via <see cref="Label(string)"/>) and parses it as an
+    /// <see cref="int"/>. Returns <c>0</c> when the label is absent,
+    /// empty, whitespace, or non-numeric — matching the prior
+    /// <c>AgentSessionQuerier.IssueNumber</c> semantics (now an
+    /// instance method, no longer a querier static).
+    /// </summary>
+    public int IssueNumber() =>
+        int.TryParse(Label(AgentSessionQueryMetadataKeys.IssueNumber), out var issueNumber)
+            ? issueNumber
+            : 0;
 }

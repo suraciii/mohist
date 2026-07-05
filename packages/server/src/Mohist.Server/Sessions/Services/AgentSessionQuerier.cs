@@ -38,7 +38,7 @@ public class AgentSessionQuerier : IScopedService
     public async Task<IReadOnlyList<WorkflowSessionDto>> ListByWorkflowAsync(string workflowRunId, CancellationToken ct = default)
     {
         var sessions = await _sessionQuery.ListByLabelsAsync(
-            Labels((AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)),
+            AgentSessionDtoMapper.Labels((AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)),
             ct: ct);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var terminalFacts = await LoadTerminalFactsAsync(db, sessions.Select(r => r.Session.Id), ct);
@@ -48,7 +48,7 @@ public class AgentSessionQuerier : IScopedService
     public async Task<WorkflowSessionDetailDto?> GetByWorkflowAsync(string workflowRunId, string sessionName, CancellationToken ct = default)
     {
         var session = await _sessionQuery.FirstByLabelsAsync(
-            Labels(
+            AgentSessionDtoMapper.Labels(
                 (AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId),
                 (AgentSessionQueryMetadataKeys.SessionName, sessionName)),
             ct: ct);
@@ -62,7 +62,7 @@ public class AgentSessionQuerier : IScopedService
     public async Task<IReadOnlyList<WorkflowSessionDto>> ListByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
     {
         var sessions = await _sessionQuery.ListByLabelsAsync(
-            Labels(
+            AgentSessionDtoMapper.Labels(
                 (AgentSessionQueryMetadataKeys.ProjectId, projectId),
                 (AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())),
             ct: ct);
@@ -75,24 +75,23 @@ public class AgentSessionQuerier : IScopedService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var sessions = await _sessionQuery.ListByLabelsAsync(
-            Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
+            AgentSessionDtoMapper.Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
             AgentSessionQueryOrder.CreatedDescending,
             limit,
             status: status,
             ct: ct);
-        sessions = await ReconcileActiveSessionsAsync(db, sessions, ct);
-        var issueTitles = await LoadIssueTitlesAsync(db, projectId, sessions.Select(IssueNumber), ct);
-        var eventSummaries = await LoadEventSummariesAsync(db, sessions.Select(r => r.Session.Id), ct);
+        sessions = await TranscriptReductions.ReconcileActiveSessionsAsync(db, sessions, ct);
+        var issueTitles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
+        var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessions.Select(r => r.Session.Id), ct);
         return sessions.Select(record =>
         {
             var s = record.Session;
             var events = eventSummaries.GetValueOrDefault(s.Id);
-            var usage = AgentSessionJsonHelper.Usage(s);
-            var issueNumber = IssueNumber(record);
+            var issueNumber = record.IssueNumber();
             return new AgentSessionInfoDto(
             issueNumber,
-            IssueTitle(issueTitles, issueNumber),
-            Label(record, AgentSessionQueryMetadataKeys.Stage) ?? string.Empty,
+            IssueTitleLookup.Resolve(issueTitles, issueNumber),
+            record.Label(AgentSessionQueryMetadataKeys.Stage) ?? string.Empty,
             s.Id,
             AgentSessionJsonHelper.StatusName(s, Now()),
             s.Settings.Model,
@@ -100,15 +99,15 @@ public class AgentSessionQuerier : IScopedService
             s.Status.CreatedAt.ToString("o"),
             null,
             AgentSessionJsonHelper.LastActivityAt(s).ToString("o"),
-            ToEventSummaryDto(events),
-            ToUsageDto(usage));
+            AgentSessionDtoMapper.ToEventSummaryDto(events),
+            AgentSessionDtoMapper.ToUsageDto(AgentSessionJsonHelper.Usage(s)));
         }).ToList();
     }
 
     public async Task<IReadOnlyList<AgentSessionSummaryDto>> ListSummariesByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
     {
         var sessions = await _sessionQuery.ListByLabelsAsync(
-            Labels(
+            AgentSessionDtoMapper.Labels(
                 (AgentSessionQueryMetadataKeys.ProjectId, projectId),
                 (AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())),
             ct: ct);
@@ -180,7 +179,7 @@ public class AgentSessionQuerier : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var sessionIds = records.Select(r => r.Session.Id).ToArray();
         var terminalFacts = await LoadTerminalFactsAsync(db, sessionIds, ct);
-        var eventSummaries = await LoadEventSummariesAsync(db, sessionIds, ct);
+        var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessionIds, ct);
 
         var items = records.Select(record =>
         {
@@ -190,8 +189,8 @@ public class AgentSessionQuerier : IScopedService
             var status = ResolveAgentSessionListStatus(record, fact);
             return new AgentSessionListItemDto(
                 s.Id,
-                Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty,
-                Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty,
+                record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty,
+                record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty,
                 status,
                 s.Status.CreatedAt.ToString("o"),
                 AgentSessionJsonHelper.LastActivityAt(s).ToString("o"),
@@ -256,8 +255,8 @@ public class AgentSessionQuerier : IScopedService
             var status = ResolveAgentSessionListStatus(record, fact);
             return new AgentSessionContextAssociationDto(
                 s.Id,
-                Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty,
-                Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty,
+                record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty,
+                record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty,
                 status,
                 s.Status.CreatedAt.ToString("o"),
                 $"/api/projects/{projectRef}/agent-sessions/{s.Id}");
@@ -314,14 +313,14 @@ public class AgentSessionQuerier : IScopedService
 
         var session = record.Session;
         var runnerId = record.Row.RunnerId;
-        var workflowRunId = Label(record, AgentSessionQueryMetadataKeys.WorkflowRunId);
+        var workflowRunId = record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId);
         if (string.IsNullOrWhiteSpace(runnerId) || string.IsNullOrWhiteSpace(workflowRunId))
             return null;
 
         return new FollowupTarget(
             runnerId,
             workflowRunId,
-            Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? sessionName,
+            record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? sessionName,
             AgentSessionJsonHelper.StatusName(session, Now()) == "active");
     }
 
@@ -352,7 +351,7 @@ public class AgentSessionQuerier : IScopedService
         var record = records.FirstOrDefault();
         if (record is null) return null;
 
-        var sessionProjectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId);
+        var sessionProjectId = record.Label(AgentSessionQueryMetadataKeys.ProjectId);
         if (!string.Equals(sessionProjectId, projectId, StringComparison.Ordinal))
             return null;
 
@@ -400,7 +399,7 @@ public class AgentSessionQuerier : IScopedService
         var record = records.FirstOrDefault();
         if (record is null) return null;
 
-        var sessionProjectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId);
+        var sessionProjectId = record.Label(AgentSessionQueryMetadataKeys.ProjectId);
         if (!string.Equals(sessionProjectId, projectId, StringComparison.Ordinal))
             return null;
 
@@ -517,8 +516,8 @@ public class AgentSessionQuerier : IScopedService
 
         return new GenericAgentSessionSummaryDto(
             session.Id,
-            Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty,
-            Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty,
+            record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty,
+            record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty,
             status,
             session.Status.CreatedAt.ToString("o"),
             AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
@@ -527,7 +526,7 @@ public class AgentSessionQuerier : IScopedService
             summary.ToolCallCount,
             summary.ToolErrorCount,
             BuildGenericSessionSummaryContextRefs(record),
-            ToUsageDto(usage));
+            AgentSessionDtoMapper.ToUsageDto(usage));
     }
 
     public async Task<AgentSessionTranscriptResponse?> GetGenericSessionTranscriptAsync(string projectId, string sessionId, CancellationToken ct = default)
@@ -570,57 +569,22 @@ public class AgentSessionQuerier : IScopedService
             transcriptEvents.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson)));
         var toolCount = eventSummary.ToolCallCount ?? 0;
         var usage = AgentSessionJsonHelper.Usage(domainSession);
-        var lineage = BuildLineageDto(domainSession);
+        var lineage = AgentSessionDtoMapper.BuildLineageDto(domainSession);
 
         return new AgentSessionMetadataDto(
             domainSession.Id,
-            Label(session, AgentSessionQueryMetadataKeys.SessionName) ?? fallbackSessionName,
+            session.Label(AgentSessionQueryMetadataKeys.SessionName) ?? fallbackSessionName,
             domainSession.Status.AgentRuntimeSessionId ?? domainSession.Id,
             AgentSessionJsonHelper.StatusName(domainSession, Now()),
             domainSession.Settings.Model,
-            Label(session, AgentSessionQueryMetadataKeys.Stage),
-            Annotation(domainSession, AgentSessionQueryMetadataKeys.Title),
+            session.Label(AgentSessionQueryMetadataKeys.Stage),
+            domainSession.Metadata.Annotation(AgentSessionQueryMetadataKeys.Title),
             domainSession.Status.CreatedAt.ToString("o"),
             null,
-            ToEventSummaryDto(eventSummary),
-            ToUsageDto(usage),
+            AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
+            AgentSessionDtoMapper.ToUsageDto(usage),
             new AgentSessionMetadataCounts(partCount, toolCount),
             lineage);
-    }
-
-    /// <summary>
-    /// Builds the <see cref="RuntimeSessionLineageEntryDto"/> projection
-    /// from <see cref="AgentSession.Status.RuntimeSessionLineage"/>. When
-    /// the grain hasn't yet recorded an explicit lineage (legacy
-    /// rehydration) but the session is currently bound, a single entry is
-    /// synthesized so the UI can still distinguish "no chain at all"
-    /// (historical single binding) from "real chain" (>=2 entries).
-    /// Returns <c>null</c> only when there is truly nothing to surface.
-    /// </summary>
-    internal static IReadOnlyList<RuntimeSessionLineageEntryDto>? BuildLineageDto(AgentSession domainSession)
-    {
-        var lineage = domainSession.Status.RuntimeSessionLineage;
-        if (lineage is not null && lineage.Count > 0)
-        {
-            return lineage
-                .Select(e => new RuntimeSessionLineageEntryDto(
-                    e.AgentRuntimeSessionId,
-                    e.BoundAt.ToString("o")))
-                .ToList();
-        }
-
-        if (!string.IsNullOrEmpty(domainSession.Status.AgentRuntimeSessionId))
-        {
-            var boundAt = domainSession.Status.BoundAt ?? domainSession.Status.CreatedAt;
-            return
-            [
-                new RuntimeSessionLineageEntryDto(
-                    domainSession.Status.AgentRuntimeSessionId,
-                    boundAt.ToString("o"))
-            ];
-        }
-
-        return null;
     }
 
     private async Task<AgentSessionRecord?> FindCurrentSessionAsync(
@@ -639,7 +603,7 @@ public class AgentSessionQuerier : IScopedService
         if (workflowRunId is null) return null;
 
         return await _sessionQuery.FirstByLabelsAsync(
-            Labels(
+            AgentSessionDtoMapper.Labels(
                 (AgentSessionQueryMetadataKeys.ProjectId, projectId),
                 (AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString()),
                 (AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId),
@@ -653,84 +617,30 @@ public class AgentSessionQuerier : IScopedService
         var record = records.FirstOrDefault();
         if (record is null) return null;
 
-        return string.Equals(Label(record, AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal)
-            && string.Equals(Label(record, AgentSessionQueryMetadataKeys.SourceKind), "agent-launch", StringComparison.Ordinal)
+        return string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal)
+            && string.Equals(record.Label(AgentSessionQueryMetadataKeys.SourceKind), "agent-launch", StringComparison.Ordinal)
             ? record
             : null;
     }
 
-    internal static async Task<Dictionary<string, AgentSessionTranscriptSummary>> LoadEventSummariesAsync(
-        MohistDbContext db, IEnumerable<string> sessionIds, CancellationToken ct)
-    {
-        var loaded = await TranscriptPartLoader.LoadAsync(db, sessionIds, ct: ct);
-        if (loaded.Parts.Count == 0) return [];
-
-        return loaded.Parts
-            .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
-            .Select(part => ToProjection(loaded.SessionByTurnId[part.TurnId], part))
-            .OrderBy(e => e.Sequence)
-            .GroupBy(e => e.SessionId, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => TranscriptEventSummaryProjector.Summarize(
-                g.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson))), StringComparer.Ordinal);
-    }
-
-    /// <summary>
-    /// Loads the issue titles for the given (project, issue-numbers) batch.
-    /// Shared between the core querier's <see cref="ListCurrentAsync"/>
-    /// projection and the activity feed card projection
-    /// (<see cref="AgentActivityFeedAssembler"/>, issue-327 T-003 / design
-    /// D2). Internal so the assembler can call through without taking on
-    /// the DB connection itself; the (project, numbers) tuple is the
-    /// natural shared boundary because both projections need exactly the
-    /// same titles for the same set of sessions.
-    /// </summary>
-    internal static async Task<Dictionary<int, string>> LoadIssueTitlesAsync(
-        MohistDbContext db,
-        string projectId,
-        IEnumerable<int> issueNumbers,
-        CancellationToken ct)
-    {
-        var numbers = issueNumbers.Distinct().ToArray();
-        if (numbers.Length == 0) return [];
-
-        var rows = await db.Issues.AsNoTracking()
-            .Where(row => row.ProjectId == projectId && row.Number != null && numbers.Contains(row.Number.Value))
-            .ToListAsync(ct);
-
-        return IssueRowMapper.ByNumber(rows, projectId, numbers)
-            .ToDictionary(kv => kv.Key, kv => kv.Value.Title);
-    }
-
-    /// <summary>
-    /// Resolves a single issue title with the "Issue #{number}" fallback.
-    /// Shared between the core querier's <see cref="ListCurrentAsync"/>
-    /// projection and the activity feed card projection
-    /// (<see cref="AgentActivityFeedAssembler"/>), identical fallback
-    /// semantics — keep the two projections byte-aligned (issue-327 T-003).
-    /// </summary>
-    internal static string IssueTitle(IReadOnlyDictionary<int, string> titles, int issueNumber) =>
-        titles.TryGetValue(issueNumber, out var title) && !string.IsNullOrWhiteSpace(title)
-            ? title
-            : $"Issue #{issueNumber}";
-
     private WorkflowSessionDto ToWorkflowDto(AgentSessionRecord record, TerminalFact? terminalFact = null)
     {
         var s = record.Session;
-        var issueNumber = IssueNumber(record);
+        var issueNumber = record.IssueNumber();
         var status = terminalFact?.Status ?? (AgentSessionJsonHelper.StatusName(s, Now()) == "active" ? "running" : "inactive");
         return new(
         s.Id,
-        Label(record, AgentSessionQueryMetadataKeys.WorkflowRunId) ?? string.Empty,
-        Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? string.Empty,
+        record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId) ?? string.Empty,
+        record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? string.Empty,
         s.Status.AgentRuntimeSessionId,
-        Label(record, AgentSessionQueryMetadataKeys.ProjectId),
+        record.Label(AgentSessionQueryMetadataKeys.ProjectId),
         issueNumber == 0 ? null : issueNumber,
         s.Runtime.RunnerId,
-        status, Label(record, AgentSessionQueryMetadataKeys.Stage), s.Settings.Model, s.Runtime.WorkDir, null,
+        status, record.Label(AgentSessionQueryMetadataKeys.Stage), s.Settings.Model, s.Runtime.WorkDir, null,
         s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
         terminalFact?.CompletedAt.ToString("o"), terminalFact?.FailureReason, terminalFact?.ExitCode,
         new AgentEventSummaryDto(null, null, null, null, null, null),
-        ToUsageDto(s));
+        AgentSessionDtoMapper.ToUsageDto(s));
     }
 
     private AgentSessionSummaryDto ToSummaryDto(AgentSessionRecord record)
@@ -738,91 +648,18 @@ public class AgentSessionQuerier : IScopedService
         var s = record.Session;
         return new AgentSessionSummaryDto(
             s.Id,
-            Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? string.Empty,
+            record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? string.Empty,
             s.Status.AgentRuntimeSessionId ?? s.Id,
-            Label(record, AgentSessionQueryMetadataKeys.WorkId),
-            Annotation(s, AgentSessionQueryMetadataKeys.Title),
+            record.Label(AgentSessionQueryMetadataKeys.WorkId),
+            s.Metadata.Annotation(AgentSessionQueryMetadataKeys.Title),
             AgentSessionJsonHelper.StatusName(s, Now()), s.Status.CreatedAt.ToString("o"), null,
-            s.Settings.Model, null, Label(record, AgentSessionQueryMetadataKeys.Stage), Annotation(s, AgentSessionQueryMetadataKeys.Title),
+            s.Settings.Model, null, record.Label(AgentSessionQueryMetadataKeys.Stage), s.Metadata.Annotation(AgentSessionQueryMetadataKeys.Title),
             s.Status.LastDataAt?.ToString("o"), null, null, null,
             new AgentEventSummaryDto(null, null, null, null, null, null),
-            ToUsageDto(s));
+            AgentSessionDtoMapper.ToUsageDto(s));
     }
-
-    internal static string? Label(AgentSessionRecord record, string key) =>
-        record.Label(key) ?? record.Session.Metadata.Label(key);
-
-    internal static int IssueNumber(AgentSessionRecord record) =>
-        int.TryParse(Label(record, AgentSessionQueryMetadataKeys.IssueNumber), out var issueNumber)
-            ? issueNumber
-            : 0;
-
-    internal static string? Annotation(AgentSession session, string key) => session.Metadata.Annotation(key);
 
     private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;
-
-    /// <summary>
-    /// Same overload as <see cref="ToUsageDto(AgentUsageSummary)"/> but reads
-    /// the session's bounded <c>ContextUsageHistory</c> so the activity DTO
-    /// can carry the trend data (issue-245 T-002 / design D5). Internal so
-    /// the Fake tests can exercise the same projection path that builds
-    /// <c>ActivityCardDto.Usage</c> on the wire.
-    /// </summary>
-    internal static AgentUsageDto ToUsageDto(AgentSession s) =>
-        ToUsageDto(AgentSessionJsonHelper.Usage(s), BuildUsageHistoryDto(s));
-
-    private static AgentUsageDto ToUsageDto(AgentUsageSummary u) =>
-        new(u.InputTokens, u.OutputTokens, u.TotalTokens, u.CachedReadTokens, u.ThoughtTokens,
-            u.CostAmount, u.CostCurrency, u.ContextWindowUsed, u.ContextWindowSize,
-            AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize),
-            ContextHealthClassifier.Classify(AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize)));
-
-    private static AgentUsageDto ToUsageDto(AgentUsageSummary u, IReadOnlyList<ContextUsageHistoryEntryDto>? history) =>
-        new(u.InputTokens, u.OutputTokens, u.TotalTokens, u.CachedReadTokens, u.ThoughtTokens,
-            u.CostAmount, u.CostCurrency, u.ContextWindowUsed, u.ContextWindowSize,
-            AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize),
-            ContextHealthClassifier.Classify(AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize)),
-            history);
-
-    /// <summary>
-    /// Builds the <see cref="ContextUsageHistoryEntryDto"/> projection from
-    /// <see cref="AgentSession.Status.ContextUsageHistory"/>. Returns
-    /// <c>null</c> when the session has not yet recorded any usage
-    /// (grain never thinned a sample) so the wire stays quiet for
-    /// historical/legacy sessions. An empty list is projected as
-    /// <c>null</c> for the same reason (issue-245 T-002 / design D5).
-    /// </summary>
-    internal static IReadOnlyList<ContextUsageHistoryEntryDto>? BuildUsageHistoryDto(AgentSession domainSession)
-    {
-        var history = domainSession.Status.ContextUsageHistory;
-        if (history is null || history.Count == 0) return null;
-
-        return history
-            .Select(e => new ContextUsageHistoryEntryDto(e.At.ToString("o"), e.Percent))
-            .ToList();
-    }
-
-    internal static AgentEventSummaryDto ToEventSummaryDto(AgentSessionTranscriptSummary? s) =>
-        s is null
-            ? new AgentEventSummaryDto(null, null, null, null, null, null)
-            : new(
-                s.ResolvedModel,
-                s.FailureCategory,
-                string.Equals(s.FailureCategory, ContextExhaustionClassifier.ContextExhaustionCategory, StringComparison.Ordinal) ? true : null,
-                string.Equals(s.FailureCategory, ContextExhaustionClassifier.SuspectedContextExhaustionCategory, StringComparison.Ordinal) ? true : null,
-                s.ToolCallCount,
-                s.ToolErrorCount);
-
-    internal static IReadOnlyDictionary<string, string> Labels(params (string Key, string? Value)[] values)
-    {
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (key, value) in values)
-        {
-            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value)) continue;
-            result[key] = value;
-        }
-        return result;
-    }
 
     private static async Task<AgentSessionTranscriptData> LoadTranscriptAsync(MohistDbContext db, string sessionId, CancellationToken ct)
     {
@@ -856,116 +693,13 @@ public class AgentSessionQuerier : IScopedService
         return result;
     }
 
-    internal static TranscriptEventProjection ToProjection(string sessionId, AgentSessionTranscriptPartRow part) => new()
-    {
-        Id = part.Id,
-        SessionId = sessionId,
-        Sequence = part.Sequence,
-        Type = part.Type,
-        PayloadJson = part.Type is "text" or "reasoning"
-            ? JSON.Serialize(new { text = part.Text })
-            : part.PayloadJson,
-        CreatedAt = part.LastSeenAt,
-    };
-
     private static IReadOnlyList<TranscriptEventProjection> ToTranscriptProjectionsInSequenceOrder(TranscriptPartLoaderResult loaded) =>
         loaded.Parts
             .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
             .OrderBy(part => part.Sequence)
             .ThenBy(part => part.Id)
-            .Select(part => ToProjection(loaded.SessionByTurnId[part.TurnId], part))
+            .Select(part => AgentSessionDtoMapper.ToProjection(loaded.SessionByTurnId[part.TurnId], part))
             .ToList();
-
-    internal static async Task<IReadOnlyList<AgentSessionRecord>> ReconcileActiveSessionsAsync(
-        MohistDbContext db,
-        IReadOnlyList<AgentSessionRecord> sessions,
-        CancellationToken ct)
-    {
-        if (sessions.Count == 0) return sessions;
-
-        var activeRows = sessions
-            .Where(IsActiveSession)
-            .ToList();
-        if (activeRows.Count == 0) return sessions;
-
-        var runsByWorkflow = await LoadWorkflowRunsForReconciliationAsync(db, activeRows, ct);
-        if (runsByWorkflow.Count == 0) return sessions;
-
-        var allowedSessionIds = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var activeSession in activeRows)
-        {
-            var workflowRunId = Label(activeSession, AgentSessionQueryMetadataKeys.WorkflowRunId);
-            if (workflowRunId is null || !runsByWorkflow.TryGetValue(workflowRunId, out var run) || run is null)
-            {
-                allowedSessionIds.Add(activeSession.Session.Id);
-                continue;
-            }
-
-            if (IsSessionAssociatedWithRun(run, activeSession))
-                allowedSessionIds.Add(activeSession.Session.Id);
-        }
-
-        return sessions
-            .Where(s => !IsActiveSession(s) || allowedSessionIds.Contains(s.Session.Id))
-            .ToList();
-    }
-
-    private static Mohist.Server.Workflow.Domain.Run.WorkflowRun? DeserializeWorkflowRun(string json)
-    {
-        try { return JsonSerializer.Deserialize<Mohist.Server.Workflow.Domain.Run.WorkflowRun>(json, Infrastructure.Data.Sessions.AgentSessionJson.JsonOptions); }
-        catch { return null; }
-    }
-
-    private static async Task<Dictionary<string, Mohist.Server.Workflow.Domain.Run.WorkflowRun?>> LoadWorkflowRunsForReconciliationAsync(
-        MohistDbContext db, List<AgentSessionRecord> sessions, CancellationToken ct)
-    {
-        var workflowIds = sessions
-            .Select(s => Label(s, AgentSessionQueryMetadataKeys.WorkflowRunId))
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Select(id => id!)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        var rows = await db.WorkflowRuns.AsNoTracking()
-            .Where(r => workflowIds.Contains(r.WorkflowRunId))
-            .ToListAsync(ct);
-
-        var runs = new Dictionary<string, Mohist.Server.Workflow.Domain.Run.WorkflowRun?>(StringComparer.Ordinal);
-        foreach (var row in rows)
-            runs[row.WorkflowRunId] = DeserializeWorkflowRun(row.State);
-        return runs;
-    }
-
-    /// <summary>
-    /// Determines whether <paramref name="session"/> is associated with <paramref name="run"/>
-    /// by reference through a <see cref="Mohist.Server.Workflow.Domain.Run.TaskRun"/>, not by ownership.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="AgentSession"/> is a peer aggregate, never owned by <see cref="Mohist.Server.Workflow.Domain.Run.WorkflowRun"/>.
-    /// The association is established through a <see cref="Mohist.Server.Workflow.Domain.Run.TaskRun"/> session reference and
-    /// relies on the single-runner assignment invariant: if the run is assigned, the session MUST
-    /// belong to the same runner (<see cref="WorkflowAssignmentInfo.RunnerId"/> == session.RunnerId)
-    /// and the task identified by <see cref="AgentSessionQueryMetadataKeys.WorkId"/> (if running)
-    /// MUST match the session's work item (the task whose reference links them).
-    /// When the run has no assignment yet (<see cref="Mohist.Server.Workflow.Domain.Run.WorkflowRun.AssignedTo"/> is null), any active
-    /// session known by workflow-run-id is provisionally accepted.
-    /// </remarks>
-    private static bool IsSessionAssociatedWithRun(Mohist.Server.Workflow.Domain.Run.WorkflowRun run, AgentSessionRecord session)
-    {
-        if (run.AssignedTo is null) return true;
-
-        if (!string.Equals(run.AssignedTo, session.Row.RunnerId, StringComparison.Ordinal))
-            return false;
-
-        var runningTask = run.Stages
-            .SelectMany(s => s.Tasks)
-            .FirstOrDefault(t => t.Status == Workflow.Domain.Run.TaskRunStatus.Running);
-
-        return runningTask is null || string.Equals(runningTask.Id, Label(session, AgentSessionQueryMetadataKeys.WorkId), StringComparison.Ordinal);
-    }
-
-    private static bool IsActiveSession(AgentSessionRecord session) =>
-        session.Row.AgentSessionId is not null;
 }
 
 internal sealed record TranscriptEventProjection

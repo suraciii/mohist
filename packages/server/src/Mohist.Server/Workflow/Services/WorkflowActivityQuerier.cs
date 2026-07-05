@@ -38,19 +38,19 @@ public class WorkflowActivityQuerier : IScopedService
         foreach (var record in sessions.Where(IsActive))
         {
             var session = record.Session;
-            var sourceKind = Label(record, AgentSessionQueryMetadataKeys.SourceKind);
-            var workflowRunId = Label(record, AgentSessionQueryMetadataKeys.WorkflowRunId);
-            var workId = Label(record, AgentSessionQueryMetadataKeys.WorkId);
-            var recordProjectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty;
-            var issueNumber = IssueNumber(record);
-            var workType = Label(record, AgentSessionQueryMetadataKeys.WorkType) ?? string.Empty;
-            var stage = Label(record, AgentSessionQueryMetadataKeys.Stage);
+            var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
+            var workflowRunId = record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId);
+            var workId = record.Label(AgentSessionQueryMetadataKeys.WorkId);
+            var recordProjectId = record.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty;
+            var issueNumber = record.IssueNumber();
+            var workType = record.Label(AgentSessionQueryMetadataKeys.WorkType) ?? string.Empty;
+            var stage = record.Label(AgentSessionQueryMetadataKeys.Stage);
             var lastActivity = LastActivityAt(session).ToString("o");
 
             if (string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
             {
-                var agentId = Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty;
-                var agentName = Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty;
+                var agentId = record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty;
+                var agentName = record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty;
                 result.Add(new ActiveAgentDto(
                     session.Runtime.RunnerId,
                     $"agent_{agentId}",
@@ -114,14 +114,6 @@ public class WorkflowActivityQuerier : IScopedService
         session.Status.LastDataAt ?? session.Status.BoundAt ?? session.Status.CreatedAt;
 
     private static bool IsActive(AgentSessionRecord record) => record.Row.AgentSessionId is not null;
-
-    private static string? Label(AgentSessionRecord record, string key) =>
-        record.Label(key) ?? record.Session.Metadata.Label(key);
-
-    private static int IssueNumber(AgentSessionRecord record) =>
-        int.TryParse(Label(record, AgentSessionQueryMetadataKeys.IssueNumber), out var issueNumber)
-            ? issueNumber
-            : 0;
 
     private static async Task<IReadOnlyList<AgentSessionRecord>> ListAllSessionsAsync(MohistDbContext db, CancellationToken ct)
     {
