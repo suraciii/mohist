@@ -1,12 +1,11 @@
 import { hostname } from "node:os"
-import type { CleanupPolicy, JsonObject, RenderedWorkItem, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItemResult } from "../core/types.js"
+import type { CleanupPolicy, JsonObject, RenderedWorkItem, RunnerConfigResponse, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItemResult } from "../core/types.js"
 import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
 import type { TaskLogBatch } from "../runtime/task-log.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
-  private lastCleanupPolicy: CleanupPolicy | null = null
 
   constructor(private readonly options: RunnerOptions, buildGitHash: string | null = null) {
     this.buildGitHash = buildGitHash
@@ -29,12 +28,14 @@ export class ServerConnection {
     if (response.status === 204) return null
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
     const dispatch = (await response.json()) as WorkDispatchResponse
-    this.lastCleanupPolicy = dispatch.cleanupPolicy ?? null
     return toWorkItem(dispatch)
   }
 
-  getLastCleanupPolicy(): CleanupPolicy | null {
-    return this.lastCleanupPolicy
+  async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
+    const response = await fetch(this.url("config"), { method: "GET", signal })
+    if (!response.ok) throw new Error(`fetchConfig failed: ${response.status} ${await response.text()}`)
+    const payload = (await response.json()) as RunnerConfigResponse
+    return payload.cleanupPolicy ?? null
   }
 
   async workflowRunsStatus(workflowRunIds: string[], signal: AbortSignal): Promise<Record<string, string>> {

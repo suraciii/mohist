@@ -26,6 +26,7 @@ const stopSignalR = vi.fn()
 const getConnectionId = vi.fn(() => "conn-1")
 const probeLiveness = vi.fn(async () => true)
 const workflowRunsStatus = vi.fn()
+const fetchConfig = vi.fn(async () => null)
 
 // Capture the onReconnected callback that RunnerHost passes into the
 // RunnerSignalRClient constructor. Each new RunnerSignalRClient instance
@@ -43,7 +44,7 @@ vi.mock("../src/server/connection.js", () => ({
     disconnect = disconnect
     poll = poll
     workflowRunsStatus = workflowRunsStatus
-    getLastCleanupPolicy = () => null
+    fetchConfig = fetchConfig
   },
 }))
 

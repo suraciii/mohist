@@ -172,7 +172,7 @@ export class RunnerHost {
 
   private async runCleanupOnce(signal: AbortSignal): Promise<void> {
     try {
-      const policy = this.connection.getLastCleanupPolicy()
+      const policy = await this.connection.fetchConfig(signal)
       const result = await this.cleanupLoop.runOnce(policy, signal)
       if (result.retentionRemoved > 0 || result.budgetRemoved > 0 || result.guardAborted > 0) {
         console.log(
@@ -180,7 +180,9 @@ export class RunnerHost {
         )
       }
     } catch (error) {
-      // Cleanup is best-effort; the next tick retries.
+      // Cleanup is best-effort; the next tick retries. fetchConfig failures
+      // (network blip, server restart) flow through this same catch so the
+      // loop stays resilient without a stale-policy fallback (issue-359 D4).
       console.error("workspace cleanup loop failed:", error)
     }
   }
