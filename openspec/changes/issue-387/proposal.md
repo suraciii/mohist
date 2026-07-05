@@ -23,7 +23,7 @@
 - `system-logs`: `mo system logs` 复刻原 `mo logs` 行为——打 `/api/logs/tail`，输出与原命令一致；属 system 资源组。与 `mo server logs`（运维日志）的内容差异由命令组说明承载。
 - `project-use-single-entry`: `mo use` 删除后，`mo project use <名或id>` 是设置当前项目的唯一入口（行为不变，仍调 `UseProjectAsync`）。
 - `notification-setup`: `mo notification setup` 复刻原 `mo notify setup` 行为——probe Hermes 健康、生成签名密钥、写 Mohist 出站 Hermes 配置、打印 hermes 订阅命令；flags（`--health-base` / `--webhook-url` / `--platform` / `--deliver-chat-id`）不变。`notification` 升格为根资源组。
-- `server-info`: `mo server info` 复刻原 `mo system info` 行为——服务端系统诊断（identity / source / install / update / services / paths），仍调 `PrintSystemInfoAsync`，支持 `-o table|json|yaml`；归 server 资源组，与 `mo info`（CLI 本地）消歧。
+- `server-info`: `mo server info` 复刻原 `mo system info` 行为——服务端系统诊断（identity / source / install / update / services / paths），仍调 `PrintSystemInfoAsync`，支持 `-o table|json`；归 server 资源组，与 `mo info`（CLI 本地）消歧。
 - `root-command-shape`: 根命令层契约的收敛——根直接子命令只剩资源/资源组与受控例外 `mo info`，五个裸动词全部从根移除；旧路径别名策略（统一保留或统一删除）在这项 capability 里裁定。
 
 ## Impact
