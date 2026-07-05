@@ -12,7 +12,7 @@ internal static class LabelCommands
         label.Subcommands.Add(BuildList(api));
         label.Subcommands.Add(BuildAdd(api));
         label.Subcommands.Add(BuildUpdate(api));
-        label.Subcommands.Add(BuildRemove(api));
+        label.Subcommands.Add(BuildDelete(api));
 
         return label;
     }
@@ -201,11 +201,12 @@ internal static class LabelCommands
         return cmd;
     }
 
-    private static Command BuildRemove(MohistCliApi api)
+    private static Command BuildDelete(MohistCliApi api)
     {
-        var cmd = new Command("remove", "Remove a label definition from the project catalog");
+        var cmd = new Command("delete", "Delete a label definition from the project catalog");
+        cmd.Aliases.Add("remove");
         cmd.Aliases.Add("rm");
-        var keyArg = new Argument<string>("key") { Description = "Label key to remove" };
+        var keyArg = new Argument<string>("key") { Description = "Label key to delete" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
 
         cmd.Arguments.Add(keyArg);
@@ -217,9 +218,9 @@ internal static class LabelCommands
             var key = ctx.GetValue(keyArg);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
-            return RemoveAsync();
+            return DeleteAsync();
 
-            async Task<int> RemoveAsync()
+            async Task<int> DeleteAsync()
             {
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
 

@@ -6,39 +6,46 @@ namespace Mohist.Cli;
 // Read commands under `mo workflow`. Each command targets a WorkflowRun
 // directly by `workflowRunId` and never asks for an issue number or project
 // ref — those concerns belong to the issue-scoped shortcuts under
-// `mo issue ...`. The five reads follow the strict three-way distinction
+// `mo issue ...`. The four reads follow the strict three-way distinction
 // (output-format / subresource / associated-resource) recorded in
 // design/cli.md:
 //
-//   * show     — full resource; -o yaml renders the workflow template
+//   * get     — full resource; -o yaml renders the workflow template
 //                definition by hitting GET .../yaml (no `mo workflow yaml`
 //                command — output format never creates a command).
-//   * status   — compact projection of the same GET, rendering only the
-//                current stage / status / progress table.
+//                `show` is kept as a transitional name alias of `get` so
+//                scripts written against the previously-landed surface
+//                (see #381 / issue-386 D5) keep working. The alias shares
+//                the same handler by construction and cannot diverge.
 //   * variables — subresource (own resource path: .../variables/effective);
-//                 NOT reachable via `-o` on `show` — it has its own command.
+//                 NOT reachable via `-o` on `get` — it has its own command.
 //   * events    — associated resource (read-only CloudEvent stream) with
 //                 --limit to bound the result.
 //   * list-sessions — associated resource (sessions list only); single
 //                 session sub-actions stay under `mo issue session ...`.
+//
+// (The `status` command once rendered a strict compact subset of the same
+// payload `get` reads; it was removed because `get`'s default table output
+// already is the summary view — see workflow-run-reads spec.)
 internal static partial class WorkflowCommands
 {
-    private static Command BuildShow(MohistCliApi api)
+    private static Command BuildGet(MohistCliApi api)
     {
         var cmd = new Command(
-            "show",
-            "Show full workflow run resource (status, stages, approval state, associated issue). Use -o yaml to render the workflow template definition.");
+            "get",
+            "Show full workflow run resource (status, stages, approval state, associated issue). Default table renders the summary view; use -o json for the full read model and -o yaml for the workflow template definition.");
+        cmd.Aliases.Add("show");
         var runIdArg = RunIdArg();
-        var outputOpt = MohistCliCommands.OutputOption(formats: "table, json, yaml");
+        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table", formats: "table, json, yaml");
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var runId = ctx.GetValue(runIdArg);
             var output = ctx.GetValue(outputOpt);
-            return ShowAsync();
+            return GetAsync();
 
-            async Task<int> ShowAsync()
+            async Task<int> GetAsync()
             {
                 if (string.IsNullOrWhiteSpace(runId))
                 {
@@ -51,7 +58,7 @@ internal static partial class WorkflowCommands
                 // not the right shape for it. The canonical rule "output
                 // format never creates a command" (design/cli.md) is honored
                 // here by reusing the existing GET .../yaml endpoint behind
-                // the same `show -o yaml` switch instead of minting a new
+                // the same `get -o yaml` switch instead of minting a new
                 // command.
                 if (string.Equals(output, "yaml", StringComparison.OrdinalIgnoreCase))
                 {
@@ -64,40 +71,6 @@ internal static partial class WorkflowCommands
                     WorkflowRunPath(runId!, ""),
                     mode,
                     nameof(MohistCliApi.TableShape.WorkflowRunDetail));
-            }
-        });
-        return cmd;
-    }
-
-    private static Command BuildStatus(MohistCliApi api)
-    {
-        var cmd = new Command(
-            "status",
-            "Show compact workflow run status (current stage, status, stage progress). Same data as 'show' rendered as a strict compact subset.");
-        var runIdArg = RunIdArg();
-        var outputOpt = MohistCliCommands.OutputOption();
-        cmd.Arguments.Add(runIdArg);
-        cmd.Options.Add(outputOpt);
-        cmd.SetAction(ctx =>
-        {
-            var runId = ctx.GetValue(runIdArg);
-            var output = ctx.GetValue(outputOpt);
-            return StatusAsync();
-
-            async Task<int> StatusAsync()
-            {
-                if (string.IsNullOrWhiteSpace(runId))
-                {
-                    api.Error.WriteLine("<run-id> is required");
-                    return 1;
-                }
-
-                var (mode, exit) = api.ResolveOutputMode(output);
-                if (exit != 0) return exit;
-                return await api.PrintWithOutputAsync(
-                    WorkflowRunPath(runId!, ""),
-                    mode,
-                    nameof(MohistCliApi.TableShape.WorkflowRunStatus));
             }
         });
         return cmd;

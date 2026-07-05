@@ -203,7 +203,7 @@ mo issue reopen 42
 | Issue blocked，想重试当前阶段 | `mo issue retry 42` |
 | Issue interrupted（进程崩了），从断点继续 | `mo issue resume 42` |
 | 想完全重做当前阶段（丢弃产物） | `mo issue rerun 42` |
-| 想从指定阶段重做（丢弃该阶段及之后产物） | `mo issue rerun-from-stage 42 --stage build` |
+| 想从指定阶段重做（丢弃该阶段及之后产物） | `mo issue rerun 42 --from-stage build` |
 | Base branch drift 了，rebase issue 分支 | `mo issue rebase 42` |
 
 ## 归档
@@ -245,7 +245,7 @@ mo issue close <number>
 mo issue reopen <number>
 mo issue retry <number>
 mo issue rerun <number>
-mo issue rerun-from-stage <number> --stage <stage>
+mo issue rerun <number> --from-stage <stage>
 mo issue force-stop <number>
 mo issue resume <number>
 mo issue stop <number>

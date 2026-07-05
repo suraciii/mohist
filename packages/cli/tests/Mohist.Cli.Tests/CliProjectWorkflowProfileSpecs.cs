@@ -356,4 +356,256 @@ public class CliProjectWorkflowProfileSpecs
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
     }
+
+    [Fact]
+    public async Task ProfileEnable_PostsProfileIdToEnableEndpoint()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post
+                && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/enable")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "enable", "mohist/github-pr"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var postReq = Assert.Single(handler.Requests, r => r.Method == HttpMethod.Post);
+        Assert.Equal("/api/projects/proj_abc/workflow-profile/enable", postReq.RequestUri?.PathAndQuery);
+        var body = JsonNode.Parse(postReq.Body!)!;
+        Assert.Equal("mohist/github-pr", body["profileId"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ProfileDisable_PostsProfileIdToDisableEndpoint()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post
+                && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/disable")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "disable", "mohist/github-pr"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var postReq = Assert.Single(handler.Requests, r => r.Method == HttpMethod.Post);
+        Assert.Equal("/api/projects/proj_abc/workflow-profile/disable", postReq.RequestUri?.PathAndQuery);
+        var body = JsonNode.Parse(postReq.Body!)!;
+        Assert.Equal("mohist/github-pr", body["profileId"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ProfileEnable_MissingProfileId_FailsLocallyWithoutHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "enable"],
+            output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("<profile-id> is required", error.ToString());
+    }
+
+    [Fact]
+    public async Task ProfileDisable_MissingProfileId_FailsLocallyWithoutHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "disable"],
+            output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("<profile-id> is required", error.ToString());
+    }
+
+    [Fact]
+    public async Task ProfileEnable_HonorsProjectIdFlag()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post
+                && req.RequestUri?.PathAndQuery == "/api/projects/proj_xyz/workflow-profile/enable")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "enable", "mohist/local", "--project-id", "proj_xyz"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var postReq = Assert.Single(handler.Requests, r => r.Method == HttpMethod.Post);
+        Assert.Equal("/api/projects/proj_xyz/workflow-profile/enable", postReq.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task ProfileDisable_HonorsProjectFlag()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post
+                && req.RequestUri?.PathAndQuery == "/api/projects/proj_xyz/workflow-profile/disable")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "disable", "mohist/local", "--project", "proj_xyz"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var postReq = Assert.Single(handler.Requests, r => r.Method == HttpMethod.Post);
+        Assert.Equal("/api/projects/proj_xyz/workflow-profile/disable", postReq.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task ProfileEnable_UnknownProfileServerError_SurfacesCodeAndMessage()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post)
+            {
+                return RecordingHttpHandler.Json(
+                    new { success = false, error = "Profile 'mohist/ghost' not found", code = "unknown_workflow_profile" },
+                    HttpStatusCode.BadRequest);
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "enable", "mohist/ghost"],
+            output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        var stderr = error.ToString();
+        Assert.Contains("Profile 'mohist/ghost' not found", stderr);
+        Assert.Contains("unknown_workflow_profile", stderr);
+    }
+
+    [Fact]
+    public async Task ProfileDisable_UnknownProfileServerError_SurfacesCodeAndMessage()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post)
+            {
+                return RecordingHttpHandler.Json(
+                    new { success = false, error = "Profile 'mohist/ghost' not found", code = "unknown_workflow_profile" },
+                    HttpStatusCode.BadRequest);
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "disable", "mohist/ghost"],
+            output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        var stderr = error.ToString();
+        Assert.Contains("Profile 'mohist/ghost' not found", stderr);
+        Assert.Contains("unknown_workflow_profile", stderr);
+    }
+
+    [Fact]
+    public async Task ProfileDisable_LastEnabledProfileServerError_SurfacesCodeAndMessage()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post)
+            {
+                return RecordingHttpHandler.Json(
+                    new
+                    {
+                        success = false,
+                        error = "Cannot disable the last enabled profile for the project",
+                        code = "last_enabled_workflow_profile",
+                    },
+                    HttpStatusCode.BadRequest);
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "disable", "mohist/local"],
+            output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        var stderr = error.ToString();
+        Assert.Contains("Cannot disable the last enabled profile", stderr);
+        Assert.Contains("last_enabled_workflow_profile", stderr);
+    }
+
+    [Fact]
+    public async Task ProfileEnable_NoProjectResolvable_FailsLocallyWithoutHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "enable", "mohist/local"],
+            output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("mo project use", error.ToString());
+    }
+
+    [Fact]
+    public async Task ProfileEnable_ConflictingProjectFlags_FailsLocallyWithoutHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "enable", "mohist/local", "--project", "proj_a", "--project-id", "proj_b"],
+            output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--project and --project-id resolve to different values", error.ToString());
+    }
+
+    [Fact]
+    public async Task Profile_HelpAdvertisesEnableAndDisableSubcommands()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "--help"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("enable", stdout);
+        Assert.Contains("disable", stdout);
+    }
 }

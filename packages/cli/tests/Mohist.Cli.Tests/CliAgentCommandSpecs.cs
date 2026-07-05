@@ -17,11 +17,19 @@ public class CliAgentCommandSpecs
         var exitCode = await RunAsync(handler, ["agent", "--help"], output, error);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("create", output.ToString());
-        Assert.Contains("list", output.ToString());
-        Assert.Contains("show", output.ToString());
-        Assert.Contains("update", output.ToString());
-        Assert.Contains("delete", output.ToString());
+        var stdout = output.ToString();
+        Assert.Contains("create", stdout);
+        Assert.Contains("list", stdout);
+        Assert.Contains("show", stdout);
+        Assert.Contains("update", stdout);
+        // `archive` is the canonical command, `delete` is a transitional name
+        // alias of it — System.CommandLine emits both on the canonical row.
+        Assert.Contains("archive, delete <name-or-id>", stdout);
+        var subcommandLines = stdout
+            .Split('\n')
+            .Where(line => line.StartsWith("  ", StringComparison.Ordinal))
+            .ToList();
+        Assert.DoesNotContain(subcommandLines, line => line.TrimStart().StartsWith("delete ", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -243,8 +251,134 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
-    public async Task AgentDelete_ArchivesByResolvedName()
+    public async Task AgentArchive_ResolvesByIdAndDeletes()
     {
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = Agent("agent_123", "reviewer", status: "archived"),
+        })));
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "archive", "agent_123"], output: output, fileSystem: FileSystemWithProject());
+
+        Assert.Equal(0, exitCode);
+        // Resolving an `agent_` id fetches the agent once (to read the name)
+        // and then DELETEs; resolution does not fall through to the list endpoint.
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal("/api/projects/proj_123/agents/agent_123", handler.Requests[0].RequestUri?.PathAndQuery);
+        Assert.Equal("/api/projects/proj_123/agents/agent_123", handler.Requests[1].RequestUri?.PathAndQuery);
+        Assert.Equal(HttpMethod.Delete, handler.Requests[1].Method);
+        Assert.Contains("Agent reviewer (agent_123) archived", output.ToString());
+    }
+
+    [Fact]
+    public async Task AgentArchive_ResolvesByNameAndDeletes()
+    {
+        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = request.Method == HttpMethod.Get
+                ? new[] { Agent("agent_123", "reviewer") }
+                : Agent("agent_123", "reviewer", status: "archived"),
+        })));
+        var output = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "archive", "reviewer"], output: output, fileSystem: FileSystemWithProject());
+
+        Assert.Equal(0, exitCode);
+        // Name resolve path: first request is the list lookup, second is the DELETE.
+        Assert.Equal("/api/projects/proj_123/agents?all=true", handler.Requests[0].RequestUri?.PathAndQuery);
+        Assert.Equal(HttpMethod.Delete, handler.Requests[1].Method);
+        Assert.Equal("/api/projects/proj_123/agents/agent_123", handler.Requests[1].RequestUri?.PathAndQuery);
+        Assert.Contains("Agent reviewer (agent_123) archived", output.ToString());
+    }
+
+    [Fact]
+    public async Task AgentArchive_UnresolvedFailsLocallyWithoutHttp()
+    {
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = Array.Empty<object>(),
+        })));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(handler, ["agent", "archive", "missing"], error: error, fileSystem: FileSystemWithProject());
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Agent 'missing' not found", error.ToString());
+        // Name resolution hits the list once, then fails locally — no DELETE is sent.
+        Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
+    }
+
+    [Fact]
+    public async Task AgentArchive_DeleteAlias_ProducesIdenticalRequestAndOutput()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+            (request, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = request.Method == HttpMethod.Get
+                    ? new[] { Agent("agent_123", "reviewer") }
+                    : Agent("agent_123", "reviewer", status: "archived"),
+            })),
+            "proj_123");
+
+        var canonicalExit = await MohistCliCommands.RunAsync(
+            http, ["agent", "archive", "reviewer", "--project-id", "proj_123"], output, error, fs, executor);
+        var canonicalStdout = output.ToString();
+        var canonicalStderr = error.ToString();
+        var canonicalRequests = handler.Requests.ToList();
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+
+        var aliasExit = await MohistCliCommands.RunAsync(
+            http, ["agent", "delete", "reviewer", "--project-id", "proj_123"], output, error, fs, executor);
+        var aliasStdout = output.ToString();
+        var aliasStderr = error.ToString();
+        var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();
+
+        Assert.Equal(canonicalExit, aliasExit);
+        Assert.Equal(canonicalStdout, aliasStdout);
+        Assert.Equal(canonicalStderr, aliasStderr);
+        Assert.Equal(canonicalRequests.Count, aliasRequests.Count);
+        for (var i = 0; i < canonicalRequests.Count; i++)
+        {
+            Assert.Equal(canonicalRequests[i].Method, aliasRequests[i].Method);
+            Assert.Equal(canonicalRequests[i].RequestUri, aliasRequests[i].RequestUri);
+        }
+    }
+
+    [Fact]
+    public async Task AgentArchive_AliasDelete_HonorsProjectIdFlag()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = Agent("agent_123", "reviewer", status: "archived"),
+            })),
+            "proj_default");
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "delete", "agent_123", "--project-id", "proj_other"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("/api/projects/proj_other/agents/agent_123", handler.Requests[0].RequestUri?.PathAndQuery);
+        Assert.Contains("Agent reviewer (agent_123) archived", output.ToString());
+    }
+
+    [Fact]
+    public async Task AgentDelete_ArchivesByResolvedName_LegacyDeleteVerbStillWorks()
+    {
+        // The transitional `delete` verb still works as a name alias of
+        // `archive` — pin this legacy entry point separately so the
+        // alias-parity contract in the new specs has a single owner and
+        // any future drift in `delete` (e.g. an accidental hard-removal)
+        // is caught here.
         var handler = new RecordingHttpHandler((request, _) => Task.FromResult(RecordingHttpHandler.Json(new
         {
             success = true,
@@ -259,7 +393,7 @@ public class CliAgentCommandSpecs
         Assert.Equal(0, exitCode);
         Assert.Equal(HttpMethod.Delete, handler.Requests[1].Method);
         Assert.Equal("/api/projects/proj_123/agents/agent_123", handler.Requests[1].RequestUri?.PathAndQuery);
-        Assert.Contains("archived", output.ToString());
+        Assert.Contains("Agent reviewer (agent_123) archived", output.ToString());
     }
 
     [Fact]

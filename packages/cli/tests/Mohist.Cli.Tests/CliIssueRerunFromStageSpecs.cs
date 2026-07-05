@@ -99,4 +99,154 @@ public class CliIssueRerunFromStageSpecs
         Assert.Contains("stage_not_reached", stderr);
         Assert.Contains("Stage not reached", stderr);
     }
+
+    [Fact]
+    public async Task IssueRerun_NoFromStage_PostsEmptyBodyToRerunEndpoint()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/rerun")
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "rerun", "42"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var postReq = handler.Requests.Single(r => r.Method == HttpMethod.Post);
+        Assert.Equal("/api/projects/proj_abc/issues/42/rerun", postReq.RequestUri?.PathAndQuery);
+        var body = JsonNode.Parse(postReq.Body!) as JsonObject;
+        Assert.NotNull(body);
+        Assert.Empty(body!);
+    }
+
+    [Fact]
+    public async Task IssueRerun_WithFromStage_PostsStageBodyToRerunFromStageEndpoint()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/rerun-from-stage")
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "rerun", "42", "--from-stage", "build"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var postReq = handler.Requests.Single(r => r.Method == HttpMethod.Post);
+        Assert.Equal("/api/projects/proj_abc/issues/42/rerun-from-stage", postReq.RequestUri?.PathAndQuery);
+        var body = JsonNode.Parse(postReq.Body!)!;
+        Assert.Equal("build", body["stage"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task IssueRerun_EmptyFromStage_FailsLocallyWithoutHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "rerun", "42", "--from-stage", ""], output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(handler.Requests);
+        var stderr = error.ToString();
+        Assert.Contains("--from-stage is required and must not be empty", stderr);
+    }
+
+    [Fact]
+    public async Task IssueRerun_BlankFromStage_FailsLocallyWithoutHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "rerun", "42", "--from-stage", "   "], output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(handler.Requests);
+        var stderr = error.ToString();
+        Assert.Contains("--from-stage is required and must not be empty", stderr);
+    }
+
+    [Fact]
+    public async Task IssueRerun_NoFromStage_HonorsProjectIdFlag()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_xyz/issues/42/rerun")
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["issue", "rerun", "42", "--project-id", "proj_xyz"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var postReq = handler.Requests.Single(r => r.Method == HttpMethod.Post);
+        Assert.Equal("/api/projects/proj_xyz/issues/42/rerun", postReq.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task IssueRerun_WithFromStage_HonorsProjectIdFlag()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_xyz/issues/42/rerun-from-stage")
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["issue", "rerun", "42", "--from-stage", "build", "--project-id", "proj_xyz"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var postReq = handler.Requests.Single(r => r.Method == HttpMethod.Post);
+        Assert.Equal("/api/projects/proj_xyz/issues/42/rerun-from-stage", postReq.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task IssueRerun_FromStageAlias_PostsSameRequestAsRerunFromStagePeer()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Post
+                && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/rerun-from-stage")
+            {
+                return RecordingHttpHandler.Json(new { success = true, data = new { } });
+            }
+            return null!;
+        });
+
+        var rerunFromStageExit = await MohistCliCommands.RunAsync(
+            http,
+            ["issue", "rerun-from-stage", "42", "--stage", "build"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, rerunFromStageExit);
+        var rerunFromStageRequests = handler.Requests.ToList();
+        var rerunFromStagePost = rerunFromStageRequests.Single(r => r.Method == HttpMethod.Post);
+        Assert.Equal("/api/projects/proj_abc/issues/42/rerun-from-stage", rerunFromStagePost.RequestUri?.PathAndQuery);
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+
+        var rerunExit = await MohistCliCommands.RunAsync(
+            http,
+            ["issue", "rerun", "42", "--from-stage", "build"],
+            output, error, fs, executor);
+
+        var rerunPost = handler.Requests
+            .Skip(rerunFromStageRequests.Count)
+            .Single(r => r.Method == HttpMethod.Post);
+
+        Assert.Equal(rerunFromStageExit, rerunExit);
+        Assert.Equal(rerunFromStagePost.Method, rerunPost.Method);
+        Assert.Equal(rerunFromStagePost.RequestUri, rerunPost.RequestUri);
+        Assert.Equal(rerunFromStagePost.Body, rerunPost.Body);
+    }
 }

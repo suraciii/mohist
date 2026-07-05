@@ -23,7 +23,7 @@ internal static class AgentCommands
         agent.Subcommands.Add(BuildList(api));
         agent.Subcommands.Add(BuildShow(api));
         agent.Subcommands.Add(BuildUpdate(api));
-        agent.Subcommands.Add(BuildDelete(api));
+        agent.Subcommands.Add(BuildArchive(api));
         agent.Subcommands.Add(BuildSession(api));
 
         return agent;
@@ -310,9 +310,10 @@ internal static class AgentCommands
         if (provided) body[property] = value;
     }
 
-    private static Command BuildDelete(MohistCliApi api)
+    private static Command BuildArchive(MohistCliApi api)
     {
-        var cmd = new Command("delete", "Archive an agent");
+        var cmd = new Command("archive", "Archive an agent");
+        cmd.Aliases.Add("delete");
         var nameOrIdArg = NameOrIdArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
 
@@ -324,9 +325,9 @@ internal static class AgentCommands
             var nameOrId = ctx.GetValue(nameOrIdArg);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
-            return DeleteAsync();
+            return ArchiveAsync();
 
-            async Task<int> DeleteAsync()
+            async Task<int> ArchiveAsync()
             {
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
 
