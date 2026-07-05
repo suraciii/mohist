@@ -372,6 +372,40 @@ public class WorkflowRunControlApiSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Theory]
+    [InlineData("rerun", false)]
+    [InlineData("rerun-from-stage", true)]
+    public async Task CrossPath_RerunWithCorruptedState_RecoversByStartingNewWorkflow(string verb, bool fromStage)
+    {
+        var (issueProjectId, issueNumber, _, issueWrId) = await SeedActiveWorkflowAsync();
+        await CorruptWorkflowRunStateAsync(issueWrId);
+
+        var issueResponse = fromStage
+            ? await _client.PostAsJsonAsync($"/api/projects/{issueProjectId}/issues/{issueNumber}/{verb}", new { stage = "plan" })
+            : await _client.PostAsync($"/api/projects/{issueProjectId}/issues/{issueNumber}/{verb}", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, issueResponse.StatusCode);
+        var recoveredIssueWrId = await GetIssueWorkflowRunIdAsync(issueProjectId, issueNumber);
+        Assert.NotNull(recoveredIssueWrId);
+        Assert.NotEqual(issueWrId, recoveredIssueWrId);
+        Assert.NotNull(await LoadRunAsync(recoveredIssueWrId!));
+
+        var (runProjectId, runIssueNumber, _, runWrId) = await SeedActiveWorkflowAsync();
+        await CorruptWorkflowRunStateAsync(runWrId);
+
+        var runResponse = fromStage
+            ? await _client.PostAsJsonAsync($"/api/workflow-runs/{runWrId}/{verb}", new { stage = "plan" })
+            : await _client.PostAsync($"/api/workflow-runs/{runWrId}/{verb}", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
+        var recoveredRunWrId = await GetIssueWorkflowRunIdAsync(runProjectId, runIssueNumber);
+        Assert.NotNull(recoveredRunWrId);
+        Assert.NotEqual(runWrId, recoveredRunWrId);
+        Assert.NotNull(await LoadRunAsync(recoveredRunWrId!));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CrossPath_RetryOnFailedRun_BothRoutesAdmitGuard()
     {
@@ -542,6 +576,28 @@ public class WorkflowRunControlApiSpecs
         var issues = scope.ServiceProvider.GetRequiredService<Mohist.Server.Issue.Services.IssueQuerier>();
         var info = await issues.GetInfoAsync(projectId, issueNumber);
         return info?.Status;
+    }
+
+    private async Task<string?> GetIssueWorkflowRunIdAsync(string projectId, int issueNumber)
+    {
+        using var scope = _services.CreateScope();
+        var issues = scope.ServiceProvider.GetRequiredService<Mohist.Server.Issue.Services.IssueQuerier>();
+        var info = await issues.GetInfoAsync(projectId, issueNumber);
+        return info?.WorkflowRunId;
+    }
+
+    private async Task CorruptWorkflowRunStateAsync(string wrId)
+    {
+        await _grains.GetGrain<IWorkflowGrain>(wrId).DeactivateForTestAsync();
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+        await using var db = new MohistDbContext(options);
+        var row = await db.WorkflowRuns.FindAsync(wrId)
+            ?? throw new InvalidOperationException($"Workflow run {wrId} not found in store");
+        row.State = "{}";
+        await db.SaveChangesAsync();
     }
 
     private async Task ForceFailedStatusAsync(string wrId)

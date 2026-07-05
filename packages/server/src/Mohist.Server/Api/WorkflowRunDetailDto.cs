@@ -7,10 +7,10 @@ namespace Mohist.Server.Api;
 /// Read model returned by <c>GET /api/workflow-runs/{workflowRunId}</c>.
 /// <para>
 /// Composes the existing <see cref="WorkflowStatusView"/> with an optional
-/// reference to the in-progress issue bound to the run. The issue ref is
+/// reference to the issue associated with the run. The issue ref is
 /// reverse-resolved by
 /// <see cref="Mohist.Server.Issue.Services.IssueQuerier.GetIssueRefForWorkflowRunAsync"/>;
-/// <c>IssueRef</c> is <c>null</c> when no in-progress issue is bound —
+/// <c>IssueRef</c> is <c>null</c> when no issue row is bound —
 /// the run identity and status remain authoritative, so the endpoint
 /// still returns the full status when the issue row is transiently
 /// missing.
@@ -29,4 +29,3 @@ public sealed record WorkflowRunDetailDto(
     WorkflowStatusView Status,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     WorkflowRunIssueRef? IssueRef);
-

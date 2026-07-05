@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 
@@ -76,35 +77,51 @@ public static partial class WorkflowRoutes
         app.MapPost("/api/workflow-runs/{workflowRunId}/rerun", async (
             string workflowRunId,
             IGrainFactory grains,
-            WorkflowQuerier reader) =>
+            WorkflowQuerier reader,
+            IssueQuerier issuesQuery) =>
         {
-            if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.RetryOrRerun) is { } failure)
-                return failure;
-            await grains.GetGrain<IWorkflowGrain>(workflowRunId).RerunAsync();
-            return ApiResults.Ok();
+            try
+            {
+                if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.RetryOrRerun) is { } failure)
+                    return failure;
+                await grains.GetGrain<IWorkflowGrain>(workflowRunId).RerunAsync();
+                return ApiResults.Ok();
+            }
+            catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
+            {
+                return await WorkflowControlRecovery.RecoverWorkflowRunScopedRerunAsync(grains, issuesQuery, workflowRunId);
+            }
         });
 
         app.MapPost("/api/workflow-runs/{workflowRunId}/rerun-from-stage", async (
             string workflowRunId,
             RerunFromStageRequest? req,
             IGrainFactory grains,
-            WorkflowQuerier reader) =>
+            WorkflowQuerier reader,
+            IssueQuerier issuesQuery) =>
         {
-            if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.RetryOrRerun) is { } failure)
-                return failure;
             if (string.IsNullOrWhiteSpace(req?.Stage))
                 return ApiResults.BadRequest("Stage is required for rerun-from-stage");
-            var result = await grains.GetGrain<IWorkflowGrain>(workflowRunId).RerunFromStageAsync(req.Stage);
-            if (!result.Success)
+            try
             {
-                return result.Code switch
+                if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.RetryOrRerun) is { } failure)
+                    return failure;
+                var result = await grains.GetGrain<IWorkflowGrain>(workflowRunId).RerunFromStageAsync(req.Stage);
+                if (!result.Success)
                 {
-                    "unknown_stage" or "stage_not_reached" => ApiResults.BadRequest(result.Error ?? "Workflow control rejected", result.Code, result.Details),
-                    "active_work_in_range" => ApiResults.Conflict(result.Error ?? "Workflow control rejected", result.Code, result.Details),
-                    _ => ApiResults.BadRequest(result.Error ?? "Workflow control rejected", result.Code, result.Details),
-                };
+                    return result.Code switch
+                    {
+                        "unknown_stage" or "stage_not_reached" => ApiResults.BadRequest(result.Error ?? "Workflow control rejected", result.Code, result.Details),
+                        "active_work_in_range" => ApiResults.Conflict(result.Error ?? "Workflow control rejected", result.Code, result.Details),
+                        _ => ApiResults.BadRequest(result.Error ?? "Workflow control rejected", result.Code, result.Details),
+                    };
+                }
+                return ApiResults.Ok();
             }
-            return ApiResults.Ok();
+            catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
+            {
+                return await WorkflowControlRecovery.RecoverWorkflowRunScopedRerunAsync(grains, issuesQuery, workflowRunId);
+            }
         });
 
         app.MapPost("/api/workflow-runs/{workflowRunId}/pause", async (

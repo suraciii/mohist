@@ -215,6 +215,49 @@ public class CliProjectWorkflowProfileSpecs
     }
 
     [Fact]
+    public async Task ProfileList_PlainJson_UsesSharedOutputOption()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/workflow-templates/system?project=proj_abc")
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new[] { SampleTemplateInfo("mohist/local") },
+                });
+            }
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "list", "--project", "proj_abc", "-o", "json"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var getReq = handler.Requests.Last(r => r.Method == HttpMethod.Get);
+        Assert.Equal("/api/workflow-templates/system?project=proj_abc", getReq.RequestUri?.PathAndQuery);
+        Assert.Contains("mohist/local", output.ToString());
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task ProfileList_JsonFlagIsNotACompatibilityAlias()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "profile", "list", "--json"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("Unrecognized command or argument '--json'", error.ToString());
+    }
+
+    [Fact]
     public async Task ProfileList_PlainWithActiveProject_SendsProjectQueryParam()
     {
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
