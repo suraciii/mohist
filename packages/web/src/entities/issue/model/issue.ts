@@ -61,6 +61,7 @@ export interface IssuePrerequisiteSummary {
   number: number
   title: string
   completed: boolean
+  stage?: string
   status: IssueStatus
   health: IssueHealth
 }
@@ -109,6 +110,7 @@ export interface Issue {
   completedAt?: string
   archivedAt?: string
   blockedReason?: string
+  prerequisiteNumbers?: number[]
   prerequisites?: IssuePrerequisiteSummary[]
   isDraft: boolean
   canStart: boolean

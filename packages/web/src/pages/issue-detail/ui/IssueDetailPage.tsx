@@ -473,7 +473,8 @@ export function IssueDetailPage() {
                 summary={issue.model ?? 'default model'}
               >
                 <IssueConfigurationCard
-                  issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prerequisites, isBacklog }}
+                  issue={{ number: issue.number, model: issue.model, stageModels: issue.stageModels, prerequisites: issue.prerequisites, canStart: issue.canStart, blocker: issue.blocker, isBacklog }}
+                  projectId={issueProjectId}
                   mutations={{ addPrerequisiteMutation, removePrerequisiteMutation }}
                   unframed
                 />

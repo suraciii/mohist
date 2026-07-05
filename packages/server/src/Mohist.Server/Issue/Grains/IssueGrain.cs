@@ -493,38 +493,73 @@ public class IssueGrain : Grain, IIssueGrain
             wfStatus);
     }
 
-public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null)
-{
-    if (_issue is not null)
-        throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
-
-    var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
-    var resolvedIssueId = issueId ?? $"issue_{Guid.NewGuid():N}";
-    await _attachmentService.ValidateIssueBindAsync(projectId, resolvedIssueId, attachmentIds);
-
-    if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
+    public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null)
     {
-        throw new UnknownWorkflowProfileException(workflowProfileId);
+        if (_issue is not null)
+            throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
+
+        var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
+        var resolvedIssueId = issueId ?? $"issue_{Guid.NewGuid():N}";
+        await _attachmentService.ValidateIssueBindAsync(projectId, resolvedIssueId, attachmentIds);
+
+        if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
+        {
+            throw new UnknownWorkflowProfileException(workflowProfileId);
+        }
+
+        var issue = Domain.Issue.Create(
+            resolvedIssueId,
+            projectId,
+            number,
+            title,
+            body,
+            labels,
+            priority ?? "p2",
+            resolvedRef,
+            risk,
+            isDraft,
+            workflowProfileId);
+
+        // Stage the in-memory aggregate so LoadIssueSummaryAsync can resolve
+        // the project id from _issue.ProjectId during prerequisite existence
+        // validation. The aggregate has not yet been persisted (SaveIssueAsync
+        // below is the only place this issue touches the store). On a
+        // validation failure we restore _issue to null, which means a
+        // subsequent retry on the same grain sees a clean slate, identical
+        // to the branch where prerequisites are absent.
+        _issue = issue;
+
+        // Create-time prerequisite application: validate every unique number
+        // against the project, reject self-reference against the newly allocated
+        // number, and apply idempotently before the single SaveIssueAsync so
+        // that a validation failure leaves nothing persisted. Mirrors the
+        // single-add path by reusing LoadIssueSummaryAsync verbatim.
+        try
+        {
+            if (prerequisiteNumbers is { Length: > 0 })
+            {
+                foreach (var prerequisiteNumber in prerequisiteNumbers.Distinct())
+                {
+                    if (prerequisiteNumber == number)
+                        throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
+                    if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
+                        throw PrerequisiteValidationException.NotFound(prerequisiteNumber);
+                    if (await WouldCreatePrerequisiteCycleAsync(prerequisiteNumber))
+                        throw PrerequisiteValidationException.SelfReference(prerequisiteNumber);
+                    _issue!.AddPrerequisite(prerequisiteNumber);
+                }
+            }
+        }
+        catch
+        {
+            _issue = null;
+            throw;
+        }
+
+        await SaveIssueAsync();
+        await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
+        return issue.Id;
     }
-
-    var issue = Domain.Issue.Create(
-        resolvedIssueId,
-        projectId,
-        number,
-        title,
-        body,
-        labels,
-        priority ?? "p2",
-        resolvedRef,
-        risk,
-        isDraft,
-        workflowProfileId);
-
-    _issue = issue;
-    await SaveIssueAsync();
-    await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
-    return issue.Id;
-}
 
     public async Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber)
     {
@@ -534,6 +569,8 @@ public async Task<string> CreateAsync(string projectId, int number, string title
             return IssuePrerequisiteResult.Circular();
         if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
             return IssuePrerequisiteResult.PrerequisiteNotFound(prerequisiteNumber);
+        if (await WouldCreatePrerequisiteCycleAsync(prerequisiteNumber))
+            return IssuePrerequisiteResult.Circular("Circular prerequisite: this would create a cycle");
 
         _issue.AddPrerequisite(prerequisiteNumber);
         await SaveIssueAsync();
@@ -666,6 +703,42 @@ public async Task<string> CreateAsync(string projectId, int number, string title
         }
     }
 
+    private async Task<bool> WouldCreatePrerequisiteCycleAsync(int prerequisiteNumber)
+    {
+        if (_issue is null) return false;
+        var visited = new HashSet<int>();
+        var pending = new Stack<int>();
+        pending.Push(prerequisiteNumber);
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            if (!visited.Add(current)) continue;
+            if (current == _issue.Number) return true;
+
+            var currentIssue = await LoadIssueByNumberAsync(current);
+            if (currentIssue is null) continue;
+            foreach (var next in currentIssue.PrerequisiteNumbers)
+                pending.Push(next);
+        }
+
+        return false;
+    }
+
+    private async Task<Domain.Issue?> LoadIssueByNumberAsync(int issueNumber)
+    {
+        if (_issue is null) return null;
+        try
+        {
+            var issueId = await _identityResolver.GetIdAsync(_issue.ProjectId, issueNumber);
+            return issueId is null ? null : await _issueStore.LoadAsync(issueId);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     public async Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null)
     {
         if (_issue is null) throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
@@ -694,7 +767,7 @@ public async Task<string> CreateAsync(string projectId, int number, string title
 public record UpdateIssueData(
     [property: Id(0)] string? Title = null,
     [property: Id(1)] string? Body = null,
-[property: Id(2)] IReadOnlyDictionary<string, string>? Labels = null,
+    [property: Id(2)] IReadOnlyDictionary<string, string>? Labels = null,
     [property: Id(3)] string? Priority = null,
     [property: Id(4)] bool? IsDraft = null,
     [property: Id(5)] string[]? AttachmentIds = null,

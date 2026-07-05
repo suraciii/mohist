@@ -45,7 +45,7 @@ public class EpicQuerierExternalPrerequisitesSpecs
         Assert.Equal(42, ghost.Number);
         Assert.Equal("External upstream", ghost.Title);
         Assert.Equal("in_progress", ghost.Stage);
-        Assert.Equal("active", ghost.Status);
+        Assert.Equal("in_progress", ghost.Status);
     }
 
     [Fact]

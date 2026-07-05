@@ -6,7 +6,7 @@ namespace Mohist.Server.Issue.Grains;
 
 public interface IIssueGrain : IGrainWithStringKey
 {
-Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null);
+    Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
     Task CompleteWorkAsync(string workflowRunId);
     Task CancelAsync();
@@ -52,7 +52,7 @@ public sealed record IssuePrerequisiteResult(
     public static IssuePrerequisiteResult Added() => new(true, "ok", "Prerequisite added");
     public static IssuePrerequisiteResult IssueNotFound() => new(false, "issue_not_found", "Issue not found");
     public static IssuePrerequisiteResult PrerequisiteNotFound(int number) => new(false, "prerequisite_not_found", $"Issue #{number} not found");
-    public static IssuePrerequisiteResult Circular() => new(false, "circular_prerequisite", "Issue cannot depend on itself");
+    public static IssuePrerequisiteResult Circular(string? message = null) => new(false, "circular_prerequisite", message ?? "Issue cannot depend on itself");
 }
 
 [GenerateSerializer]
