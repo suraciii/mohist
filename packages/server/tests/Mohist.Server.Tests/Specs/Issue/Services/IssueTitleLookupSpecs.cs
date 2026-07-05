@@ -144,7 +144,7 @@ public class IssueTitleLookupSpecs
         Assert.Equal(2, titles.Count);
         Assert.Equal("Mine 1", titles[1]);
         Assert.Equal("Mine 2", titles[2]);
-        Assert.False(titles.ContainsKey(2) && titles[2] == "Foreign #1");
+        Assert.DoesNotContain(titles, pair => pair.Value == "Foreign #1");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
