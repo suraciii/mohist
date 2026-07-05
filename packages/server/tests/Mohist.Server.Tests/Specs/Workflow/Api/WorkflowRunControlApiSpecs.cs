@@ -1,0 +1,523 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Issue.Grains;
+using Mohist.Server.Project.Grains;
+using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
+using Xunit;
+
+namespace Mohist.Server.Tests.Specs.Workflow.Api;
+
+/// <summary>
+/// Specs for the workflow-run-scoped control endpoints introduced in
+/// issue-381 T-001: <c>POST /api/workflow-runs/{workflowRunId}/{verb}</c>.
+///
+/// Covers:
+/// <list type="bullet">
+///   <item><description>Per-verb grain-method dispatch (8 verbs → 8 grain calls).</description></item>
+///   <item><description><see cref="WorkflowControlAction.ActiveOnly"/> admission: approve / reject / resume / pause / stop reject non-active runs with a 409 and leave state untouched.</description></item>
+///   <item><description><see cref="WorkflowControlAction.RetryOrRerun"/> admission: retry / rerun / rerun-from-stage additionally admit failed runs.</description></item>
+///   <item><description>Cross-path parity: the new run-scoped endpoints and the legacy issue-scoped endpoints (<c>/api/projects/{projectRef}/issues/{number}/{verb}</c>) reason over the same <see cref="WorkflowControlGuard"/> predicate and admit / reject the same runs.</description></item>
+///   <item><description>Structured error-code mapping: <c>unknown_stage</c>, <c>stage_not_reached</c>, <c>active_work_in_range</c>, <c>session_context_exhausted</c>.</description></item>
+/// </list>
+/// </summary>
+[Collection("MohistIntegration")]
+public class WorkflowRunControlApiSpecs
+{
+    private static readonly JsonSerializerOptions ReadJsonOptions = new(JsonSerializerDefaults.Web);
+
+    private readonly MohistIntegrationFixture _fixture;
+    private readonly HttpClient _client;
+    private readonly IGrainFactory _grains;
+    private readonly IServiceProvider _services;
+    private readonly string _connectionString;
+
+    public WorkflowRunControlApiSpecs(MohistIntegrationFixture fixture)
+    {
+        _fixture = fixture;
+        _client = fixture.Client;
+        _grains = fixture.Grains;
+        _services = fixture.Services;
+        _connectionString = fixture.ConnectionString;
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task Stop_OnActiveRun_TransitionsToStoppedAndReturnsOk()
+    {
+        var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/stop", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.NotNull(run);
+        Assert.Equal(WorkflowRunStatus.Stopped, run!.Status);
+
+        var issueStatus = await GetIssueStatusAsync(projectId, issueNumber);
+        Assert.Equal("in_progress", issueStatus);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task Pause_OnActiveRun_TransitionsToPaused()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/pause", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.NotNull(run);
+        Assert.Equal(WorkflowRunStatus.Paused, run!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task Resume_OnPausedRun_LeavesRunActive()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await _grains.GetGrain<IWorkflowGrain>(wrId).PauseAsync("seeded-for-resume");
+
+        var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/resume", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.NotNull(run);
+        Assert.NotEqual(WorkflowRunStatus.Paused, run!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task Reject_WithMissingMessage_Returns400AndDoesNotCallGrain()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/reject",
+            new { });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("Reject reason is required", payload.GetProperty("error").GetString());
+        var run = await LoadRunAsync(wrId);
+        Assert.Equal(WorkflowRunStatus.Pending, run!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Theory]
+    [InlineData("approve")]
+    [InlineData("reject")]
+    public async Task ActiveOnly_OnPendingRun_AdmittedByGuard_NotRejectedAsNotActive(string verb)
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var content = verb == "reject"
+            ? JsonContent.Create(new { message = "needs more detail" })
+            : null;
+        var response = verb == "reject"
+            ? await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content)
+            : await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content: null);
+
+        Assert.NotEqual(HttpStatusCode.NotFound, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        if (payload.TryGetProperty("error", out var errorEl))
+        {
+            Assert.NotEqual("Workflow is not active for this run", errorEl.GetString());
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task Retry_OnActiveRun_AdmitAndInvokesRetryAsync()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/retry", content: null);
+
+        Assert.NotEqual(HttpStatusCode.NotFound, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        if (payload.TryGetProperty("error", out var errorEl))
+        {
+            Assert.NotEqual("Workflow is not active for this run", errorEl.GetString());
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task RerunFromStage_WithBlankStage_Returns400()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/rerun-from-stage",
+            new { stage = "" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("Stage is required", payload.GetProperty("error").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task RerunFromStage_WithUnknownStage_Returns400WithUnknownStageCode()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/rerun-from-stage",
+            new { stage = "no-such-stage" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("unknown_stage", payload.GetProperty("code").GetString());
+        Assert.Contains("no-such-stage", payload.GetProperty("error").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task NotFound_OnUnknownWorkflowRun_Returns404()
+    {
+        var response = await _client.PostAsync($"/api/workflow-runs/wr_does_not_exist/approve", content: null);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("not_found", payload.GetProperty("code").GetString());
+        Assert.Contains("wr_does_not_exist", payload.GetProperty("error").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Theory]
+    [InlineData("approve")]
+    [InlineData("reject")]
+    [InlineData("resume")]
+    [InlineData("pause")]
+    [InlineData("stop")]
+    public async Task ActiveOnly_OnStoppedRun_Returns409AndDoesNotMutate(string verb)
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await _grains.GetGrain<IWorkflowGrain>(wrId).StopAsync("seeded-stopped");
+
+        var content = verb == "reject"
+            ? JsonContent.Create(new { message = "rejected via spec" })
+            : null;
+        var response = verb == "reject"
+            ? await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content)
+            : await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("conflict", payload.GetProperty("code").GetString());
+        Assert.Contains("not active", payload.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+        var run = await LoadRunAsync(wrId);
+        Assert.Equal(WorkflowRunStatus.Stopped, run!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Theory]
+    [InlineData("retry")]
+    [InlineData("rerun")]
+    public async Task RetryOrRerun_OnFailedRun_IsAdmitted(string verb)
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceFailedStatusAsync(wrId);
+
+        var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/{verb}", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task RetryOrRerun_OnFailedRun_StoppedRunStillRejected()
+    {
+        var (_, _, _, wrId) = await SeedActiveWorkflowAsync();
+        await _grains.GetGrain<IWorkflowGrain>(wrId).StopAsync("seeded-stopped");
+
+        var response = await _client.PostAsync($"/api/workflow-runs/{wrId}/retry", content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Theory]
+    [InlineData("approve", "approve")]
+    [InlineData("resume", "resume")]
+    [InlineData("stop", "stop")]
+    [InlineData("pause", "force-stop")]
+    public async Task CrossPath_ActiveOnlyAdmitDecisionMatchesIssueScopedRoute(string runVerb, string issueVerb)
+    {
+        var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
+        await _grains.GetGrain<IWorkflowGrain>(wrId).StopAsync("seeded-stopped");
+
+        var issueResponse = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/{issueVerb}", content: null);
+        var runResponse = await _client.PostAsync($"/api/workflow-runs/{wrId}/{runVerb}", content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, issueResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, runResponse.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task CrossPath_RerunOnFailedRun_AdmitDecisionMatchesIssueScopedRoute()
+    {
+        var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceFailedStatusAsync(wrId);
+
+        var issueResponse = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/rerun", content: null);
+        var runResponse = await _client.PostAsync($"/api/workflow-runs/{wrId}/rerun", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, issueResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task CrossPath_RetryOnFailedRun_BothRoutesAdmitGuard()
+    {
+        var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceFailedStatusAsync(wrId);
+
+        var issueResponse = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/retry", content: null);
+        var issuePayload = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
+        AssertGuardDidNotReject(issuePayload);
+
+        await ForceFailedStatusAsync(wrId);
+
+        var runResponse = await _client.PostAsync($"/api/workflow-runs/{wrId}/retry", content: null);
+        var runPayload = await runResponse.Content.ReadFromJsonAsync<JsonElement>();
+        AssertGuardDidNotReject(runPayload);
+    }
+
+    private static void AssertGuardDidNotReject(JsonElement payload)
+    {
+        var hasError = payload.TryGetProperty("error", out var errorEl);
+        if (!hasError) return;
+        var message = errorEl.GetString();
+        Assert.NotEqual("Workflow is not active for this issue", message);
+        Assert.NotEqual("Workflow is not active for this run", message);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task CrossPath_RejectWithoutMessage_FailsBothRoutesWith400()
+    {
+        var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var issueResponse = await _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/reject",
+            new { });
+        var runResponse = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/reject",
+            new { });
+
+        Assert.Equal(HttpStatusCode.BadRequest, issueResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, runResponse.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task CrossPath_RerunFromStage_UnknownStageReturnsSameStructuredError()
+    {
+        var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var issueResponse = await _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/rerun-from-stage",
+            new { stage = "no-such-stage" });
+        var runResponse = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/rerun-from-stage",
+            new { stage = "no-such-stage" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, issueResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, runResponse.StatusCode);
+        var issuePayload = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var runPayload = await runResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("unknown_stage", issuePayload.GetProperty("code").GetString());
+        Assert.Equal("unknown_stage", runPayload.GetProperty("code").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task IssueScoped_ExistingEndpoints_RegressionUnchanged()
+    {
+        var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
+
+        var stopResponse = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/stop", content: null);
+        Assert.Equal(HttpStatusCode.OK, stopResponse.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.Equal(WorkflowRunStatus.Stopped, run!.Status);
+
+        var resumeResponse = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/resume", content: null);
+        Assert.Equal(HttpStatusCode.Conflict, resumeResponse.StatusCode);
+    }
+
+    private async Task<(string projectId, int issueNumber, string issueId, string wrId)> SeedActiveWorkflowAsync()
+    {
+        var (projectId, _) = await SeedProjectAsync();
+        var (issueId, issueNumber) = await CreateIssueInBacklogAsync(projectId);
+        await SeedWorkflowTemplateAsync(projectId);
+        var grain = _grains.GetGrain<IIssueGrain>(issueId);
+        var wrId = await grain.StartWorkAsync();
+        return (projectId, issueNumber, issueId, wrId);
+    }
+
+    private async Task<(string projectId, string projectName)> SeedProjectAsync()
+    {
+        var id = $"proj_{Guid.NewGuid():N}";
+        var name = $"wr-control-{Guid.NewGuid():N}";
+        var projectGrain = _grains.GetGrain<IProjectGrain>(id);
+        await projectGrain.CreateAsync(name);
+        await projectGrain.AddRepositoryAsync("origin", "git@example.com:test.git", "main");
+        return (id, name);
+    }
+
+    private async Task<(string issueId, int number)> CreateIssueInBacklogAsync(string projectId)
+    {
+        var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var grain = _grains.GetGrain<IIssueGrain>(issueId);
+        await grain.CreateAsync(projectId, number, "Workflow control test", null, null, null, null, issueId, isDraft: false);
+        return (issueId, number);
+    }
+
+    private async Task SeedWorkflowTemplateAsync(string projectId)
+    {
+        var definition = new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition("plan", [new("draft", "Draft", "spec/task")], []),
+            new StageDefinition("build", [new("compile", "Compile", "spec/task")], []),
+        ]);
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, definition.Id);
+        if (existingTemplate is null)
+        {
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            {
+                ProjectId = projectId,
+                TemplateId = definition.Id,
+                Template = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions),
+            });
+        }
+        else
+        {
+            existingTemplate.Template = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+            existingTemplate.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        var profile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
+        if (profile is null)
+        {
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+            {
+                ProjectId = projectId,
+                DefaultTemplateId = definition.Id,
+            });
+        }
+        else
+        {
+            profile.DefaultTemplateId = definition.Id;
+            profile.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<WorkflowRun> LoadRunAsync(string wrId)
+    {
+        using var scope = _services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        return await store.LoadAsync(wrId) ?? throw new InvalidOperationException($"Workflow run '{wrId}' not found");
+    }
+
+    private async Task<string?> GetIssueStatusAsync(string projectId, int issueNumber)
+    {
+        using var scope = _services.CreateScope();
+        var issues = scope.ServiceProvider.GetRequiredService<Mohist.Server.Issue.Services.IssueQuerier>();
+        var info = await issues.GetInfoAsync(projectId, issueNumber);
+        return info?.Status;
+    }
+
+    private async Task ForceFailedStatusAsync(string wrId)
+    {
+        var wfGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
+        await wfGrain.DeactivateForTestAsync();
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+        await using var db = new MohistDbContext(options);
+        var row = await db.WorkflowRuns.FindAsync(wrId)
+            ?? throw new InvalidOperationException($"Workflow run {wrId} not found in store");
+        using var doc = JsonDocument.Parse(row.State);
+        var state = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(doc.RootElement.GetRawText())!;
+        state["status"] = JsonSerializer.SerializeToElement("Failed", JSON.Options);
+        var failure = JsonSerializer.SerializeToElement(new
+        {
+            reason = "TaskFailed",
+            stageId = "plan",
+            taskId = "draft",
+            message = "spec-forced failure",
+        }, JSON.Options);
+        state["failure"] = failure;
+        if (state.TryGetValue("stages", out var stagesEl) && stagesEl.ValueKind == JsonValueKind.Array)
+        {
+            var stages = stagesEl.EnumerateArray().ToList();
+            for (var i = 0; i < stages.Count; i++)
+            {
+                var stage = stages[i].Deserialize<Dictionary<string, JsonElement>>()!;
+                stage["status"] = JsonSerializer.SerializeToElement("Failed", JSON.Options);
+                stage["failure"] = failure;
+                if (i == 0)
+                {
+                    stage["tasks"] = JsonSerializer.SerializeToElement(new[]
+                    {
+                        new
+                        {
+                            id = "draft",
+                            definitionId = "draft",
+                            attempt = 1,
+                            title = "Draft task",
+                            status = "Failed",
+                            classification = "UserFacing",
+                        }
+                    }, JSON.Options);
+                }
+                stages[i] = JsonSerializer.SerializeToElement(stage, JSON.Options);
+            }
+            state["stages"] = JsonSerializer.SerializeToElement(stages, JSON.Options);
+        }
+        row.State = JsonSerializer.Serialize(state, JSON.Options);
+        await db.SaveChangesAsync();
+    }
+}

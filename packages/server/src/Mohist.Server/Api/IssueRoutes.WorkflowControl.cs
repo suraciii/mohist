@@ -227,13 +227,7 @@ public static partial class IssueRoutes
     }
 
     private static bool IsWorkflowControllableForAction(string? workflowStatus, WorkflowControlAction action) =>
-        workflowStatus switch
-        {
-            "stopped" or "completed" => false,
-            "failed" => action == WorkflowControlAction.RetryOrRerun,
-            null => false,
-            _ => true,
-        };
+        WorkflowControlGuard.IsWorkflowControllableForAction(workflowStatus, action);
 
     private static bool IsWorkflowRunStateCorruption(Exception ex)
     {
@@ -251,10 +245,4 @@ public static partial class IssueRoutes
     internal sealed record RerunFromStageRequest(string? Stage);
 
     private sealed record WorkflowControlResolution(string? WorkflowRunId, IResult? Result);
-
-    private enum WorkflowControlAction
-    {
-        ActiveOnly,
-        RetryOrRerun,
-    }
 }

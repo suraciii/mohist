@@ -5,7 +5,7 @@ using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Api;
 
-public static class WorkflowRoutes
+public static partial class WorkflowRoutes
 {
     public static WebApplication MapWorkflowTaskRoutes(this WebApplication app)
     {
