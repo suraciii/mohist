@@ -15,6 +15,8 @@ internal sealed class RuntimeConsistencyValidator
     private static readonly Regex AssetPathRegex = new(
         """(?:src|href)=["'](?<path>/assets/[^"']+)["']""",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly TimeSpan DefaultRunnerIdentityTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan DefaultRunnerIdentityPollInterval = TimeSpan.FromMilliseconds(500);
 
     private readonly HttpClient _http;
     private readonly ICommandExecutor _commandExecutor;
@@ -22,6 +24,9 @@ internal sealed class RuntimeConsistencyValidator
     private readonly IEnvironmentVariableProvider _environment;
     private readonly Func<string?>? _getUserHome;
     private readonly TextWriter _out;
+    private readonly TimeProvider _timeProvider;
+    private readonly TimeSpan _runnerIdentityTimeout;
+    private readonly TimeSpan _runnerIdentityPollInterval;
 
     public RuntimeConsistencyValidator(
         HttpClient http,
@@ -29,7 +34,10 @@ internal sealed class RuntimeConsistencyValidator
         IFileSystem fileSystem,
         IEnvironmentVariableProvider environment,
         TextWriter output,
-        Func<string?>? getUserHome = null)
+        Func<string?>? getUserHome = null,
+        TimeProvider? timeProvider = null,
+        TimeSpan? runnerIdentityTimeout = null,
+        TimeSpan? runnerIdentityPollInterval = null)
     {
         _http = http;
         _commandExecutor = commandExecutor;
@@ -37,6 +45,9 @@ internal sealed class RuntimeConsistencyValidator
         _environment = environment;
         _getUserHome = getUserHome;
         _out = output;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _runnerIdentityTimeout = runnerIdentityTimeout ?? DefaultRunnerIdentityTimeout;
+        _runnerIdentityPollInterval = runnerIdentityPollInterval ?? DefaultRunnerIdentityPollInterval;
     }
 
     internal async Task<RuntimeCheckResult> CheckCliBinaryAsync(UpdateContext context, CancellationToken token)
@@ -184,7 +195,7 @@ internal sealed class RuntimeConsistencyValidator
                 "Source HEAD could not be determined; skipping identity check");
         }
 
-        var identity = await TryGetRunnerIdentityAsync(token);
+        var identity = await PollForRunnerIdentityAsync(token);
         if (identity is null)
         {
             return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
@@ -206,6 +217,87 @@ internal sealed class RuntimeConsistencyValidator
 
         return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Pass,
             $"Runner identity matches source HEAD '{sourceHead}'");
+    }
+
+    private async Task<RunnerIdentitySnapshot?> PollForRunnerIdentityAsync(CancellationToken token)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        using var timeoutTimer = StartRunnerIdentityTimeoutTimer(timeoutCts, _runnerIdentityTimeout);
+        var waitToken = timeoutCts.Token;
+        var deadline = _timeProvider.GetUtcNow() + _runnerIdentityTimeout;
+        while (!waitToken.IsCancellationRequested && _timeProvider.GetUtcNow() < deadline)
+        {
+            var identity = await TryGetRunnerIdentityWithinWindowAsync(deadline, waitToken, token);
+            token.ThrowIfCancellationRequested();
+            if (identity is not null)
+                return identity;
+
+            if (waitToken.IsCancellationRequested)
+                break;
+
+            var now = _timeProvider.GetUtcNow();
+            if (now >= deadline)
+                break;
+
+            var remaining = deadline - now;
+            var delay = remaining < _runnerIdentityPollInterval
+                ? remaining
+                : _runnerIdentityPollInterval;
+            try
+            {
+                await Task.Delay(delay, _timeProvider, waitToken);
+            }
+            catch (OperationCanceledException) when (waitToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+
+        token.ThrowIfCancellationRequested();
+        return null;
+    }
+
+    private async Task<RunnerIdentitySnapshot?> TryGetRunnerIdentityWithinWindowAsync(
+        DateTimeOffset deadline,
+        CancellationToken waitToken,
+        CancellationToken callerToken)
+    {
+        var remaining = deadline - _timeProvider.GetUtcNow();
+        if (remaining <= TimeSpan.Zero)
+            return null;
+
+        using var attemptWaitCts = CancellationTokenSource.CreateLinkedTokenSource(waitToken);
+        var identityTask = TryGetRunnerIdentityAsync(waitToken);
+        var timeoutTask = Task.Delay(remaining, _timeProvider, attemptWaitCts.Token);
+        var completed = await Task.WhenAny(identityTask, timeoutTask);
+        if (completed == identityTask)
+        {
+            attemptWaitCts.Cancel();
+            return await identityTask;
+        }
+
+        callerToken.ThrowIfCancellationRequested();
+        return null;
+    }
+
+    private ITimer? StartRunnerIdentityTimeoutTimer(CancellationTokenSource cts, TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            cts.Cancel();
+            return null;
+        }
+
+        return _timeProvider.CreateTimer(static state =>
+        {
+            try
+            {
+                ((CancellationTokenSource)state!).Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }, cts, timeout, Timeout.InfiniteTimeSpan);
     }
 
     internal async Task<RuntimeCheckResult> CheckManagedSkillAssetsAsync(UpdateContext context, CancellationToken token)

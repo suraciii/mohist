@@ -151,6 +151,7 @@ internal sealed partial class SourceCodeUpdater
         TimeSpan? serverReadyTimeout = null,
         Func<string?>? getUserHome = null,
         TimeSpan? runnerIdentityTimeout = null,
+        TimeSpan? runnerIdentityPollInterval = null,
         Func<string?>? getLocalHostname = null,
         string? unitDir = null,
         TimeProvider? timeProvider = null)
@@ -163,7 +164,16 @@ internal sealed partial class SourceCodeUpdater
             Timeout = TimeSpan.FromSeconds(5),
         };
         var operations = new UpdateOperations(output, error, systemd, commandExecutor, fs, env, unitDir, getUserHome);
-        var validator = new RuntimeConsistencyValidator(httpClient, commandExecutor, fs, env, output, getUserHome);
+        var validator = new RuntimeConsistencyValidator(
+            httpClient,
+            commandExecutor,
+            fs,
+            env,
+            output,
+            getUserHome,
+            timeProvider,
+            runnerIdentityTimeout,
+            runnerIdentityPollInterval);
         var readinessProbe = new ServiceReadinessProbe(httpClient, output, timeProvider);
         var runnerRefreshVerifier = new RunnerRefreshVerifier(
             httpClient,
