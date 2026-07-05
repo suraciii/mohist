@@ -417,4 +417,264 @@ internal sealed partial class TableRenderer
             _out.WriteLine($"skipped:  {skipped}");
         }
     }
+
+    // Renders the full WorkflowRunDetailDto payload from
+    // GET /api/workflow-runs/{workflowRunId}: composes the WorkflowStatusView
+    // (under `status`) with the associated-issue reference (under `issueRef`).
+    // This is the table shape for `mo workflow show <runId> -o table`. The
+    // shape is intentionally broader than the `WorkflowRunStatus` compact view
+    // so `show` is a strict superset of `status` (per design.md Decision 3 and
+    // workflow-run-reads/spec.md#status-is-more-compact-than-show).
+    private void RenderWorkflowRunDetail(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var status = data["status"] as JsonObject;
+        var issueRef = data["issueRef"] as JsonObject;
+
+        var runId = StringOf(status, "workflowRunId");
+        var runStatus = StringOf(status, "status");
+        var currentStage = StringOf(status, "currentStage");
+        var assignedTo = StringOf(status, "assignedTo");
+
+        _out.WriteLine($"run id:        {runId}");
+        _out.WriteLine($"status:        {runStatus}");
+        _out.WriteLine($"current stage: {currentStage}");
+        if (!string.IsNullOrEmpty(assignedTo))
+            _out.WriteLine($"assigned to:   {assignedTo}");
+
+        if (issueRef is not null)
+        {
+            var issueNumber = NumberOf(issueRef, "number");
+            var issueTitle = StringOf(issueRef, "title");
+            _out.WriteLine($"issue:         #{issueNumber} {issueTitle}");
+        }
+        else
+        {
+            _out.WriteLine("issue:         (none)");
+        }
+
+        RenderWorkflowRunMetadata(status);
+        RenderWorkflowRunFailure(status?["failure"]);
+
+        var stages = status?["stages"] as JsonArray;
+        if (stages is not null)
+        {
+            RenderWorkflowRunStages(stages);
+        }
+    }
+
+    // Renders the compact subset of WorkflowRunDetailDto for
+    // `mo workflow status <runId> -o table`. The same data is read by
+    // `WorkflowRunDetail`, but this view deliberately omits the associated
+    // issue ref, metadata, and pending-work detail — only the run status,
+    // current stage, stage progress table, and failure (when present) are
+    // surfaced. The shape is the rendering answer to
+    // workflow-run-reads/spec.md#status-is-more-compact-than-show.
+    private void RenderWorkflowRunStatus(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var status = data["status"] as JsonObject;
+        var runId = StringOf(status, "workflowRunId");
+        var runStatus = StringOf(status, "status");
+        var currentStage = StringOf(status, "currentStage");
+
+        _out.WriteLine($"run id:        {runId}");
+        _out.WriteLine($"status:        {runStatus}");
+        _out.WriteLine($"current stage: {currentStage}");
+
+        RenderWorkflowRunFailure(status?["failure"]);
+
+        var stages = status?["stages"] as JsonArray;
+        if (stages is not null)
+        {
+            RenderWorkflowRunStages(stages);
+        }
+    }
+
+    private void RenderWorkflowRunMetadata(JsonNode? status)
+    {
+        if (status is null) return;
+        var metadata = status["metadata"] as JsonObject;
+        if (metadata is null) return;
+
+        var name = StringOf(metadata, "name");
+        var createdAt = StringOf(metadata, "createdAt");
+        if (!string.IsNullOrEmpty(name))
+            _out.WriteLine($"name:          {name}");
+        if (!string.IsNullOrEmpty(createdAt))
+            _out.WriteLine($"created:       {createdAt}");
+
+        var labels = metadata["labels"] as JsonObject;
+        if (labels is not null && labels.Count > 0)
+        {
+            var joined = string.Join(", ", labels.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv => $"{kv.Key}={kv.Value}"));
+            _out.WriteLine($"labels:        {joined}");
+        }
+    }
+
+    // Surface a run-level failure (reason + message + failing stage/task/check)
+    // when present. Stage-level failures are surfaced through the stage table's
+    // individual rows instead of being printed here — keeping this helper
+    // scoped to the run-level failure field of WorkflowStatusView.
+    private void RenderWorkflowRunFailure(JsonNode? failureNode)
+    {
+        if (failureNode is not JsonObject failure) return;
+        var reason = StringOf(failure, "reason");
+        var message = StringOf(failure, "message");
+        var stage = StringOf(failure, "stage");
+        var taskId = StringOf(failure, "taskId");
+        var checkName = StringOf(failure, "checkName");
+
+        if (string.IsNullOrEmpty(reason)
+            && string.IsNullOrEmpty(message)
+            && string.IsNullOrEmpty(stage)
+            && string.IsNullOrEmpty(taskId)
+            && string.IsNullOrEmpty(checkName))
+            return;
+
+        _out.WriteLine("");
+        _out.WriteLine("failure:");
+        if (!string.IsNullOrEmpty(reason))
+            _out.WriteLine($"  reason:    {reason}");
+        if (!string.IsNullOrEmpty(message))
+            _out.WriteLine($"  message:   {message}");
+        if (!string.IsNullOrEmpty(stage))
+            _out.WriteLine($"  stage:     {stage}");
+        if (!string.IsNullOrEmpty(taskId))
+            _out.WriteLine($"  task id:   {taskId}");
+        if (!string.IsNullOrEmpty(checkName))
+            _out.WriteLine($"  check:     {checkName}");
+    }
+
+    private void RenderWorkflowRunStages(JsonArray stages)
+    {
+        if (stages.Count == 0) return;
+
+        _out.WriteLine("");
+        var headers = new[] { "stage", "status", "tasks", "approval" };
+        var widths = new[] { 16, 12, 8, TitleSoftCap };
+        var cells = new List<string[]>();
+        foreach (var stageNode in stages)
+        {
+            if (stageNode is not JsonObject stageObj) continue;
+            var stageName = StringOf(stageObj, "stage");
+            var stageStatus = StringOf(stageObj, "status");
+            var tasks = stageObj["tasks"] as JsonArray;
+            var taskStates = tasks is null
+                ? ""
+                : string.Join(",", tasks.Select(t => t is JsonObject to ? StringOf(to, "status") : ""));
+            var approval = stageObj["approvalStatus"] as JsonObject;
+            var waiting = approval is null ? "" : StringOf(approval, "result");
+            cells.Add(new[]
+            {
+                Truncate(stageName, 16),
+                Truncate(stageStatus, 12),
+                Truncate(taskStates, 8),
+                Truncate(waiting, TitleSoftCap),
+            });
+        }
+        WriteTable(headers, widths, cells);
+    }
+
+    // Renders the effective-variables payload from
+    // GET /api/workflow-runs/{id}/variables/effective[/{keyPath}].
+    // The response is a flat object of merged variable values (top-level +
+    // stage overrides resolved by the server). For `mo workflow variables
+    // --key <path>`, the response is the single value at that path — printed
+    // as one line. For the unscoped / --stage-scoped calls, the response is
+    // an object we render as a key → value list (nested objects shown as a
+    // single JSON line per top-level key). The endpoint is the run-scoped
+    // effective-variables subresource (own resource path), distinct from the
+    // WorkflowVariables shape used by the issue-scoped config bundle.
+    private void RenderWorkflowRunVariables(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        if (data is JsonValue value)
+        {
+            if (value.TryGetValue<string>(out var s))
+                _out.WriteLine(s);
+            else
+                _out.WriteLine(data.ToJsonString(MohistCliApi.JsonOutputOptions));
+            return;
+        }
+
+        if (data is JsonArray array)
+        {
+            _out.WriteLine(data.ToJsonString(MohistCliApi.JsonOutputOptions));
+            return;
+        }
+
+        if (data is not JsonObject obj || obj.Count == 0)
+        {
+            _out.WriteLine("(no variables)");
+            return;
+        }
+
+        var headers = new[] { "key", "value" };
+        var widths = new[] { 24, TitleSoftCap };
+        var cells = new List<string[]>();
+        foreach (var kvp in obj.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            var display = kvp.Value is JsonValue jv
+                ? (jv.TryGetValue<string>(out var s) ? s : jv.ToJsonString())
+                : kvp.Value?.ToJsonString(MohistCliApi.JsonOutputOptions) ?? "<null>";
+            cells.Add(new[]
+            {
+                Truncate(kvp.Key, widths[0]),
+                Truncate(display, widths[1]),
+            });
+        }
+        WriteTable(headers, widths, cells);
+    }
+
+    // Renders the CloudEvent stream associated with the run (a list of
+    // CloudEvent envelopes). For each event, we surface type, source, time,
+    // and subject — enough to scan the stream without dumping the full data
+    // payload. The endpoint is the run-scoped associated-resource equivalent
+    // of `mo issue events`; both are read against the same event store.
+    private void RenderWorkflowRunEvents(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No events");
+            return;
+        }
+
+        var headers = new[] { "type", "source", "time", "subject" };
+        var widths = new[] { IdSoftCap, IdSoftCap, 28, TitleSoftCap };
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            if (row is not JsonObject obj) continue;
+            var type = StringOf(obj, "type");
+            var source = StringOf(obj, "source");
+            var time = StringOf(obj, "time");
+            var subject = StringOf(obj, "subject");
+            cells.Add(new[]
+            {
+                Truncate(type, IdSoftCap),
+                Truncate(source, IdSoftCap),
+                Truncate(time, 28),
+                Truncate(subject, TitleSoftCap),
+            });
+        }
+        WriteTable(headers, widths, cells);
+    }
 }

@@ -44,13 +44,13 @@ public class CliReferenceDocsSpecs
 
         Assert.Contains("`list`、`show` 和 session 子命令支持 `-o table|json`", doc);
         Assert.Contains("`list` 支持 `-o table|json`；所有子命令支持 `--project`/`--project-id`", doc);
-        Assert.Contains("顶层 `mo workflow` 不接受 `--project`/`--project-id`", doc);
         Assert.Contains("项目作用域命令通常接受 `--project <name>` 和 `--project-id <id>`", doc);
 
         Assert.DoesNotContain("所有命令都接受 `--project <name>` 和 `--project-id <id>`", doc);
         Assert.DoesNotContain("所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo agent", doc);
         Assert.DoesNotContain("所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo label", doc);
         Assert.DoesNotContain("所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。完整 flag 见 `mo workflow", doc);
+        Assert.DoesNotContain("顶层 `mo workflow list`", doc);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class CliReferenceDocsSpecs
             "mo install server",
             "mo update",
             "mo skills list",
-            "mo workflow list",
+            "mo project workflow profile list",
             "mo use <project>",
             "mo project create",
             "mo repo list",

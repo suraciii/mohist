@@ -8,14 +8,16 @@ using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Api;
 
-public class WorkflowCliSpecs
+public class WorkflowCliProfileSpecs
 {
+    private const string DefaultProjectId = "proj_abc";
+
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public void WorkflowList_Help_ListsDescribedOption()
+    public void ProfileList_Help_ListsDescribedOption()
     {
-        var help = RenderHelp(["workflow", "list", "--help"]);
+        var help = RenderHelp(["project", "workflow", "profile", "list", "--help"]);
 
         Assert.Contains("--described", help);
     }
@@ -23,7 +25,7 @@ public class WorkflowCliSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task WorkflowList_Described_RoutesToWorkflowProfilesEndpoint()
+    public async Task ProfileList_Described_RoutesToWorkflowProfilesEndpoint()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -35,7 +37,7 @@ public class WorkflowCliSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["workflow", "list", "--described"],
+            ["project", "workflow", "profile", "list", "--described", "--project", DefaultProjectId],
             output,
             error,
             new FakeFileSystem(),
@@ -44,13 +46,13 @@ public class WorkflowCliSpecs
         Assert.Equal(0, exitCode);
         var req = http.Requests.Single();
         Assert.Equal(HttpMethod.Get, req.Method);
-        Assert.Equal("/api/workflow-profiles", req.RequestUri!.PathAndQuery);
+        Assert.Equal($"/api/workflow-profiles?project={DefaultProjectId}", req.RequestUri!.PathAndQuery);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task WorkflowList_Described_FormatsHumanReadableOutput()
+    public async Task ProfileList_Described_FormatsHumanReadableOutput()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -62,7 +64,7 @@ public class WorkflowCliSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["workflow", "list", "--described"],
+            ["project", "workflow", "profile", "list", "--described", "--project", DefaultProjectId],
             output,
             error,
             new FakeFileSystem(),
@@ -80,7 +82,7 @@ public class WorkflowCliSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task WorkflowList_Described_DescriptionIsShownAndNoSuitableForLineIsEmitted()
+    public async Task ProfileList_Described_DescriptionIsShownAndNoSuitableForLineIsEmitted()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -92,7 +94,7 @@ public class WorkflowCliSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["workflow", "list", "--described"],
+            ["project", "workflow", "profile", "list", "--described", "--project", DefaultProjectId],
             output,
             error,
             new FakeFileSystem(),
@@ -108,7 +110,7 @@ public class WorkflowCliSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task WorkflowList_WithoutDescribed_RoutesToExistingEndpoint()
+    public async Task ProfileList_WithoutDescribed_RoutesToExistingEndpoint()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -120,7 +122,7 @@ public class WorkflowCliSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["workflow", "list"],
+            ["project", "workflow", "profile", "list", "--project", DefaultProjectId],
             output,
             error,
             new FakeFileSystem(),
@@ -129,7 +131,7 @@ public class WorkflowCliSpecs
         Assert.Equal(0, exitCode);
         var req = http.Requests.Single();
         Assert.Equal(HttpMethod.Get, req.Method);
-        Assert.Equal("/api/workflow-templates/system", req.RequestUri!.PathAndQuery);
+        Assert.Equal($"/api/workflow-templates/system?project={DefaultProjectId}", req.RequestUri!.PathAndQuery);
     }
 
     private static string RenderHelp(string[] args)

@@ -144,6 +144,18 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.IssueArchiveCompleted:
                 RenderIssueArchiveCompleted(data);
                 break;
+            case MohistCliApi.TableShape.WorkflowRunDetail:
+                RenderWorkflowRunDetail(data);
+                break;
+            case MohistCliApi.TableShape.WorkflowRunStatus:
+                RenderWorkflowRunStatus(data);
+                break;
+            case MohistCliApi.TableShape.WorkflowRunVariables:
+                RenderWorkflowRunVariables(data);
+                break;
+            case MohistCliApi.TableShape.WorkflowRunEvents:
+                RenderWorkflowRunEvents(data);
+                break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
                 break;

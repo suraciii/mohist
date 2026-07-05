@@ -104,18 +104,16 @@ public static partial class IssueRoutes
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.RetryOrRerun);
-            if (control.Result is not null) return control.Result;
-            var wrId = control.WorkflowRunId!;
             try
             {
+                var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.RetryOrRerun);
+                if (control.Result is not null) return control.Result;
+                var wrId = control.WorkflowRunId!;
                 await grains.GetGrain<IWorkflowGrain>(wrId).RerunAsync();
             }
-            catch (Exception ex) when (IsWorkflowRunStateCorruption(ex))
+            catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
             {
-                var issueGrain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
-                if (issueGrain is null) return ApiResults.NotFound($"Issue #{number} not found");
-                await issueGrain.StartWorkAsync();
+                return await WorkflowControlRecovery.RecoverIssueScopedRerunAsync(grains, issueIdentityResolver, project.Id, number);
             }
             return ApiResults.Ok();
         });
@@ -130,13 +128,13 @@ public static partial class IssueRoutes
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.RetryOrRerun);
-            if (control.Result is not null) return control.Result;
-            var wrId = control.WorkflowRunId!;
             if (string.IsNullOrWhiteSpace(req?.Stage))
                 return ApiResults.BadRequest("Stage is required for rerun-from-stage");
             try
             {
+                var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.RetryOrRerun);
+                if (control.Result is not null) return control.Result;
+                var wrId = control.WorkflowRunId!;
                 var result = await grains.GetGrain<IWorkflowGrain>(wrId).RerunFromStageAsync(req.Stage);
                 if (!result.Success)
                 {
@@ -148,11 +146,9 @@ public static partial class IssueRoutes
                     };
                 }
             }
-            catch (Exception ex) when (IsWorkflowRunStateCorruption(ex))
+            catch (Exception ex) when (WorkflowControlRecovery.IsWorkflowRunStateCorruption(ex))
             {
-                var issueGrain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
-                if (issueGrain is null) return ApiResults.NotFound($"Issue #{number} not found");
-                await issueGrain.StartWorkAsync();
+                return await WorkflowControlRecovery.RecoverIssueScopedRerunAsync(grains, issueIdentityResolver, project.Id, number);
             }
             return ApiResults.Ok();
         });
@@ -227,34 +223,10 @@ public static partial class IssueRoutes
     }
 
     private static bool IsWorkflowControllableForAction(string? workflowStatus, WorkflowControlAction action) =>
-        workflowStatus switch
-        {
-            "stopped" or "completed" => false,
-            "failed" => action == WorkflowControlAction.RetryOrRerun,
-            null => false,
-            _ => true,
-        };
-
-    private static bool IsWorkflowRunStateCorruption(Exception ex)
-    {
-        for (var current = ex; current is not null; current = current.InnerException)
-        {
-            if (current is InvalidOperationException
-                && current.Message.Contains("Failed to deserialize workflow run state", StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
-    }
+        WorkflowControlGuard.IsWorkflowControllableForAction(workflowStatus, action);
 
     internal sealed record RejectRequest(string? Message);
     internal sealed record RerunFromStageRequest(string? Stage);
 
     private sealed record WorkflowControlResolution(string? WorkflowRunId, IResult? Result);
-
-    private enum WorkflowControlAction
-    {
-        ActiveOnly,
-        RetryOrRerun,
-    }
 }
