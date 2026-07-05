@@ -41,6 +41,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private readonly WorkflowReadModel _readModel;
     private readonly WorkflowStageLockCoordinator _stageLockCoordinator;
     private readonly WorkflowStageInitializer _stageInitializer;
+    private readonly WorkflowOutcomeProcessor _outcomeProcessor;
 
     /// <summary>
     /// Internal accessor exposing the in-memory run to grain-composed helpers
@@ -77,6 +78,64 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     /// </summary>
     internal IGrainFactory GrainFactoryAccess => GrainFactory;
 
+    /// <summary>
+    /// Internal accessor exposing the grain's <see cref="WorkflowSessionHealthService"/>
+    /// to <see cref="WorkflowOutcomeProcessor"/>, which forwards the
+    /// session-health gate call from <c>MarkTaskRunningAsync</c>.
+    /// </summary>
+    internal WorkflowSessionHealthService SessionHealthGate => _sessionHealth;
+
+    /// <summary>
+    /// Internal accessor exposing the grain's <see cref="ILogger"/> to
+    /// <see cref="WorkflowOutcomeProcessor"/>, which logs at the same
+    /// level / category the grain used before the outcome cluster was
+    /// extracted. The processor logs informational lines that were
+    /// previously inline in the grain's outcome methods.
+    /// </summary>
+    internal ILogger<WorkflowGrain> Log => _log;
+
+    /// <summary>
+    /// Internal setter for <c>_lastKnownRunnerId</c>. The cache is
+    /// grain infrastructure state (not part of the run aggregate), so the
+    /// outcome processor writes it via this accessor instead of holding
+    /// a reference to the field.
+    /// </summary>
+    internal void SetLastKnownRunnerId(string? runnerId) => _lastKnownRunnerId = runnerId;
+
+    /// <summary>
+    /// Internal save accessor used by <see cref="WorkflowOutcomeProcessor"/>.
+    /// Persists the current run without publishing events; preserves the
+    /// ETag conflict → <c>DeactivateOnIdle()</c> reload path.
+    /// </summary>
+    internal Task SaveAsync() => SaveRunAsync();
+
+    /// <summary>
+    /// Internal save accessor used by <see cref="WorkflowOutcomeProcessor"/>.
+    /// Persists the current run with the given events (which the store
+    /// also publishes to the bus). Preserves the ETag conflict →
+    /// <c>DeactivateOnIdle()</c> reload path.
+    /// </summary>
+    internal Task SaveAsyncWithEvents(IReadOnlyList<WorkflowEvent> events) => SaveRunAsync(events);
+
+    /// <summary>
+    /// Internal event-dispatch accessor used by
+    /// <see cref="WorkflowOutcomeProcessor"/> after
+    /// <see cref="WorkflowRunExtensions.StartTask"/>. Forwards to the
+    /// grain's <c>On()</c> dispatcher so any grain-side reactions
+    /// observe the new event with the same semantics as the pre-extraction
+    /// inline path.
+    /// </summary>
+    internal Task DispatchEvent(WorkflowEvent e) => On(e);
+
+    /// <summary>
+    /// Internal accessor exposing the grain's release-current-stage-lock
+    /// path to <see cref="WorkflowOutcomeProcessor.ClearExecutableStateAsync"/>.
+    /// Delegates to the T-001 <see cref="WorkflowStageLockCoordinator"/>
+    /// so all lock-touching logic stays in one composed service.
+    /// </summary>
+    internal Task ReleaseCurrentStageLocks(string reason) =>
+        _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
+
     public WorkflowGrain(
         IWorkflowRunStore runStore,
         WorkflowProfileManager profileManager,
@@ -90,6 +149,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _readModel = new WorkflowReadModel(this);
         _stageLockCoordinator = new WorkflowStageLockCoordinator(this);
         _stageInitializer = new WorkflowStageInitializer(this);
+        _outcomeProcessor = new WorkflowOutcomeProcessor(this);
     }
 
     public override async Task OnActivateAsync(CancellationToken ct)
@@ -177,10 +237,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
 // Flip the run status to Stopped before clearing executable state so the
         // TaskFailed event handler observes a terminal status and short-circuits.
-        var stopEvents = _run.Stop();
+        _ = _run.Stop();
 
-        await ClearExecutableStateAsync(reason ?? "stopped");
-        var events = new List<WorkflowEvent>(stopEvents);
+        await _outcomeProcessor.ClearExecutableStateAsync(_run!, reason ?? "stopped");
 
         await SaveRunAsync();
 
@@ -239,7 +298,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
 
         await ReleaseCurrentStageLocksAsync("retried");
-        var events = await TryScheduleRequestedCheckRepairAsync() ?? _run.Retry();
+        var events = await _outcomeProcessor.TryScheduleRequestedCheckRepairAsync(_run!) ?? _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
     }
@@ -335,7 +394,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (!_run.IsAssignedTo(runnerId))
             return null;
 
-        var active = TryBuildActiveWorkItem(runnerId);
+        var active = _outcomeProcessor.TryBuildActiveWorkItem(_run!, runnerId);
         if (active is not null)
             return active;
 
@@ -349,116 +408,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (!await AcquireStageLocksIfNeededAsync(work.Stage))
             return null;
 
-        var item = await ToWorkItemAsync(work, runnerId);
+        var item = await _outcomeProcessor.ToWorkItemAsync(_run!, work, runnerId, events => CommitAsync(events));
         if (item is null)
             return null;
 
         await SaveRunAsync();
         return item;
-    }
-
-    private WorkItem? TryBuildActiveWorkItem(string runnerId)
-    {
-        var run = _run!;
-        var currentStage = run.CurrentStage();
-        var runningTask = currentStage.RunningTask;
-        if (runningTask is not null)
-        {
-            if (!string.Equals(runningTask.RunnerId, runnerId, StringComparison.Ordinal))
-                return null;
-
-            return WorkItem.Task(
-                stage: currentStage.Id,
-                id: runningTask.WorkId ?? runningTask.Id,
-                title: runningTask.Title,
-                uses: runningTask.Uses,
-                with: runningTask.WithInput,
-                artifacts: runningTask.Artifacts,
-                setVars: runningTask.SetVars);
-        }
-
-        var checksWorkId = currentStage.ChecksWorkId;
-        if (checksWorkId is null)
-            return null;
-
-        var pendingChecks = currentStage.Checks
-            .Where(c => c.Status == StageCheckStatus.Pending)
-            .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
-            .ToList();
-        return WorkItem.Checks(currentStage.Id, checksWorkId, pendingChecks);
-    }
-
-    private async Task<WorkItem?> ToWorkItemAsync(WorkflowWork work, string runnerId)
-    {
-        switch (work.WorkType)
-        {
-            case "task":
-            {
-                var t = (WorkflowWork.TaskData)work.Data;
-                var workId = await MarkTaskRunningAsync(t.Id, runnerId);
-                if (workId is null) return null;
-                return WorkItem.Task(
-                    stage: work.Stage,
-                    id: workId,
-                    title: t.Title,
-                    uses: t.Uses,
-                    with: t.With,
-                    artifacts: t.Artifacts,
-                    setVars: t.SetVars,
-                    recovery: t.Recovery);
-            }
-            case "checks":
-            {
-                var ch = (WorkflowWork.ChecksData)work.Data;
-                var checksWorkId = MarkChecksRunning(work.Stage, ch.Items);
-                return WorkItem.Checks(work.Stage, checksWorkId, ch.Items);
-            }
-            default:
-                return null;
-        }
-    }
-
-    private async Task<string?> MarkTaskRunningAsync(string logicalTaskId, string runnerId)
-    {
-        var current = _run!.CurrentStage();
-        await _sessionHealth.CheckAndEnforceAsync(
-            logicalTaskId, current.Id, GrainKey, _run!,
-            events => CommitAsync(events), "dispatch", default);
-
-        var currentTask = current.Tasks.FirstOrDefault(t => t.Id == logicalTaskId);
-        if (currentTask?.Status == TaskRunStatus.Running)
-        {
-            _lastKnownRunnerId = runnerId;
-            return currentTask.WorkId ?? logicalTaskId;
-        }
-
-        var workId = logicalTaskId;
-        var events = _run!.StartTask(workId, runnerId);
-        await SaveRunAsync(events);
-        foreach (var e in events)
-            await On(e);
-
-        _lastKnownRunnerId = runnerId;
-        return workId;
-    }
-
-    private string MarkChecksRunning(string stage, IReadOnlyList<CheckItem> items)
-    {
-        var checksWorkId = $"checks-{stage}:{Guid.NewGuid():N}";
-        var currentStage = _run!.CurrentStage();
-        currentStage.ChecksWorkId = checksWorkId;
-        var now = DateTimeOffset.UtcNow;
-        foreach (var item in items)
-        {
-            var check = currentStage.Checks.FirstOrDefault(c => c.Name == item.Name);
-            if (check is not null)
-            {
-                check.Status = StageCheckStatus.Running;
-                check.StartedAt = now;
-            }
-        }
-        _run!.Status = WorkflowRunStatus.Running;
-        return checksWorkId;
     }
 
     public async Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)
@@ -506,7 +461,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} received task outcome for {WorkId}: {Status} detail={Detail}",
             GrainKey, workId, outcome.Status, outcome.Detail ?? "(none)");
 
-        var events = await ProcessTaskOutcomeAsync(outcome, activeTask.Id, workId);
+        var events = await _outcomeProcessor.ProcessTaskOutcomeAsync(_run!, outcome, activeTask.Id, workId);
 
         await CommitAsync(events);
     }
@@ -521,13 +476,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} received check outcome for stage {Stage}: {Count} results",
             GrainKey, outcome.Stage, outcome.Results.Count);
 
-        var events = await ProcessCheckOutcomeAsync(outcome);
-        currentStage.ChecksWorkId = null;
-        foreach (var ch in currentStage.Checks.Where(c => c.Status == StageCheckStatus.Running))
-        {
-            ch.Status = StageCheckStatus.Pending;
-            ch.StartedAt = null;
-        }
+        var events = await _outcomeProcessor.ProcessCheckOutcomeAsync(_run!, outcome);
+        _outcomeProcessor.ResetChecksRunningState(_run!);
 
         await CommitAsync(events);
     }
@@ -609,163 +559,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     /// </summary>
     public Task ReleaseStageLocksAsync(string stage, string reason) =>
         _stageLockCoordinator.ReleaseStageLocksAsync(stage, reason);
-
-    private async Task<IReadOnlyList<WorkflowEvent>> ProcessTaskOutcomeAsync(
-        TaskOutcome outcome, string taskRunId, string workId)
-    {
-        var run = _run!;
-        var currentStage = run.CurrentStage();
-        var currentTask = currentStage?.Tasks.FirstOrDefault(t => t.Id == taskRunId);
-        var events = new List<WorkflowEvent>();
-
-        if (outcome.Artifacts is { Count: > 0 })
-        {
-            // The translator already bound artifact uploads; surface each
-            // reference as a recorded event so the run history sees it.
-            foreach (var a in outcome.Artifacts)
-            {
-                events.Add(new WorkflowArtifactRecorded(GrainKey, taskRunId, a.Path, DateTimeOffset.UtcNow));
-            }
-        }
-
-        if (outcome.Status == OutcomeStatus.Passed)
-        {
-            if (currentTask is not null)
-                currentTask.Output = ParseOutputToJsonElement(outcome.Output);
-            if (currentTask?.CausedByFeedbackId is { } feedbackId)
-            {
-                var resolved = run.ResolveFeedback(feedbackId, currentTask.Id, outcome.Output);
-                if (resolved is not null)
-                {
-                    _log.LogInformation(
-                        "Workflow {Id} resolved feedback {FeedbackId} via task {TaskId}",
-                        GrainKey, feedbackId, currentTask.Id);
-                }
-            }
-            events.AddRange(run.CompleteTask());
-
-            if (outcome.AddTasks is { Count: > 0 } addTasks)
-            {
-                var current = run.CurrentStage();
-                var taskDefs = addTasks.Select(t =>
-                {
-                    var with = WorkflowDispatchHelpers.ParseWith(t.With);
-                    return new TaskDefinition(t.Id, t.Title, t.Uses, with, Recovery: t.Recovery);
-                }).ToList();
-                var recoveryEvents = run.AddRuntimeTasks(taskDefs);
-                events.AddRange(recoveryEvents);
-                _log.LogInformation(
-                    "Workflow {Id} task {TaskId} produced {Count} recovery tasks",
-                    GrainKey, taskRunId, addTasks.Count);
-            }
-        }
-        else
-        {
-            if (currentTask is not null) currentTask.Output = ParseOutputToJsonElement(outcome.Output);
-            var taskResult = new TaskResult("failed", outcome.Detail ?? outcome.Output);
-            events.AddRange(run.FailTask(taskResult));
-        }
-
-        return events;
-    }
-
-    private async Task<IReadOnlyList<WorkflowEvent>> ProcessCheckOutcomeAsync(CheckOutcome outcome)
-    {
-        var stage = _run!.CurrentStageId!;
-        var stageDef = await _profileManager.LoadStageSpecsAsync(GrainKey, stage);
-        var actions = new List<CheckResultAction>(outcome.Results.Count);
-
-        foreach (var cr in outcome.Results)
-        {
-            if (cr.Status == "pass")
-            {
-                actions.Add(new(cr, "pass"));
-            }
-            else if (cr.Status == "pending")
-            {
-                actions.Add(new(cr, "pending"));
-            }
-            else
-            {
-                var repairTasks = ResolveRepairTasks(stageDef, cr.Name, cr);
-                actions.Add(repairTasks is not null
-                    ? new(cr, "repair", repairTasks)
-                    : new(cr, "fail"));
-                if (repairTasks is not null)
-                    break;
-            }
-        }
-
-        return _run!.ProcessCheckResults(actions);
-    }
-
-    private IReadOnlyList<TaskDefinition>? ResolveRepairTasks(
-        StageDefinition? stageDef,
-        string checkName,
-        CheckResult? result = null,
-        bool enforceLimit = true)
-    {
-        var checkDef = stageDef?.Checks.Find(c => c.Name == checkName);
-        if (checkDef?.OnFailure?.Repair is not { } repair) return null;
-
-        if (enforceLimit)
-        {
-            var repairCount = _run!.GetRepairCount(checkName);
-            if (repairCount >= repair.Limit) return null;
-        }
-
-        return _run!.BuildRepairTasks(checkName, repair, result);
-    }
-
-    private async Task<IReadOnlyList<WorkflowEvent>?> TryScheduleRequestedCheckRepairAsync()
-    {
-        if (_run?.Status != WorkflowRunStatus.Failed)
-            return null;
-
-        var failure = _run.Failure;
-        if (failure?.Reason != FailureReason.CheckUnrepaired || string.IsNullOrWhiteSpace(failure.CheckName))
-            return null;
-
-        var stageDef = await _profileManager.LoadStageSpecsAsync(GrainKey, failure.Stage);
-        var repairTasks = ResolveRepairTasks(stageDef, failure.CheckName, enforceLimit: false);
-        if (repairTasks is null)
-            return null;
-
-        var currentStage = _run.CurrentStage();
-        currentStage.ChecksWorkId = null;
-        foreach (var ch in currentStage.Checks.Where(c => c.Status == StageCheckStatus.Running))
-        {
-            ch.Status = StageCheckStatus.Pending;
-            ch.StartedAt = null;
-        }
-        return _run.ScheduleCheckRepair(failure.CheckName, repairTasks, failure.Message);
-    }
-
-    private async Task ClearExecutableStateAsync(string reason)
-    {
-        await ReleaseCurrentStageLocksAsync(reason);
-
-        var currentStage = _run?.CurrentStage();
-        if (currentStage is not null)
-        {
-            currentStage.ChecksWorkId = null;
-            foreach (var ch in currentStage.Checks.Where(c => c.Status == StageCheckStatus.Running))
-            {
-                ch.Status = StageCheckStatus.Pending;
-                ch.StartedAt = null;
-            }
-        }
-
-        var runningTask = _run?.CurrentStage().RunningTask;
-        if (runningTask is not null)
-        {
-            var events = _run!.FailTaskForStopped(reason);
-            await SaveRunAsync(events);
-            return;
-        }
-
-        await SaveRunAsync();
-    }
 
     [MemberNotNull(nameof(_run))]
     private void EnsureRun()
@@ -852,21 +645,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         if (input is null) return null;
         return new WorkflowRunMetadata(input.Name, DateTimeOffset.UtcNow, input.Labels, input.Annotations);
-    }
-
-    private static JsonElement? ParseOutputToJsonElement(string? output)
-    {
-        if (string.IsNullOrWhiteSpace(output)) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(output);
-            return doc.RootElement.Clone();
-        }
-        catch
-        {
-            var wrapped = JsonSerializer.SerializeToElement(output);
-            return wrapped;
-        }
     }
 
     private async Task SaveRunAsync()
