@@ -1,4 +1,4 @@
-import { isUnderRunnerRoot } from "../server/runner-signalr.js"
+import { isUnderRunnerRoot } from "./workspace-query.js"
 import { readMarkerWorkflowRunId } from "./workspace.js"
 import { deleteDirectory } from "../system/process.js"
 import type { CleanupPolicy } from "../core/types.js"

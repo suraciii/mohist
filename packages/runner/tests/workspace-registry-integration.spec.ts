@@ -311,4 +311,27 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     // still exists.
     expect(exists(info.path)).toBe(true)
   })
+
+  it("ManualRemoveWorkspace_OutsideRootRegistryEntry_IsRefusedAndPreserved", async () => {
+    const runnerRoot = join(root, "runner")
+    const registry = new WorkspaceRegistry(runnerRoot)
+    await registry.load()
+    const outsidePath = join(root, "outside-root-workspace")
+    await mkdir(outsidePath, { recursive: true })
+    await registry.register({
+      issueId: "issue-outside",
+      issueNumber: 4,
+      workflowRunId: "wr-outside-entry",
+      workspacePath: outsidePath,
+    })
+
+    void new RunnerSignalRClient("http://localhost:0", "runner-test", runnerRoot, null, { registry })
+    const removeHandler = builders.at(-1)!.handlers.get("RemoveWorkspace")!
+
+    const result = await (removeHandler as (query: unknown) => Promise<unknown>)({ workspacePath: outsidePath })
+
+    expect(result).toMatchObject({ removed: false, status: "failed", reason: "workspace_cleanup_refused" })
+    expect(registry.get("wr-outside-entry")).toMatchObject({ workspacePath: outsidePath })
+    expect(exists(outsidePath)).toBe(true)
+  })
 })

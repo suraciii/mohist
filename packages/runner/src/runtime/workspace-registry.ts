@@ -1,5 +1,5 @@
 import { mkdir, rename, writeFile } from "node:fs/promises"
-import { dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { exists, readText } from "../system/process.js"
 
 // Runner-local registry of workspaces this runner has materialized. The
@@ -266,15 +266,4 @@ export class WorkspaceRegistry {
 // instantiating a registry.
 export function defaultWorkspaceRegistryFilePath(runnerRoot: string): string {
   return resolve(join(runnerRoot, DEFAULT_WORKSPACE_REGISTRY_FILE))
-}
-
-// Re-export containment check from `runner-signalr.ts` would create a
-// circular import at module load time; the registry operates on
-// already-resolved paths and defers the runner-root containment check
-// to the cleanup loop. Kept here for completeness of the public API.
-export function isPathUnder(parent: string, candidate: string): boolean {
-  const parentPath = resolve(parent)
-  const target = resolve(candidate)
-  const rel = relative(parentPath, target)
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
 }
