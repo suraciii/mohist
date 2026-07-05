@@ -13,7 +13,7 @@ style: ["短索引，只说明入口。"]
 - [domain-analysis.md](domain-analysis.md) — 问题空间和子域划分。
 - [context-map.md](context-map.md) — 限界上下文和模型依赖方向。
 - [conventions.md](conventions.md) — 命名、分层、变量等约定。
-- [cli.md](cli.md) — 命令面设计契约：命令树形状、资源命名、动词一致性、唯一入口与全局 flag 约定。
+- [cli.md](cli.md) — 命令面设计契约：句法（资源在前）、命令树形状、资源命名（作用域用 flag、子资源挂父资源下）、动词一致性、唯一入口与全局 flag 约定。
 - [testing.md](testing.md) — 测试两条轨道（spec/unit）、外部依赖、时间依赖、fake 入口速查。
 - [eventbus.md](eventbus.md) — 事件总线边界和 CloudEvent 约定（as-is，当前运行时）。
 - [eventbus-v2.md](eventbus-v2.md) — 事件总线目标态：复用已落盘事件表 + 单分发器可靠 at-least-once 通知（设计已收敛，**未交付**，跟踪 epic #36）。
@@ -31,9 +31,9 @@ style: ["短索引，只说明入口。"]
 
 ## 支撑主题
 
-- [cli.md](cli.md) — `mo` 命令面的两条耐久原则：命名归属（顶层 `mo <noun>` 归核心域聚合根，子资源挂在父资源下）；输出格式 / 子资源 / 关联资源三类不可混用，输出格式绝不创造命令。任务注入（add-task）经 Tier 裁定后延后的结论与理由。
 - [issue-breakdown.md](issue-breakdown.md) — Issue 拆分 / sub-issue 方案（**WIP，暂不实现**）：与 Epic 重叠、#281 已列为 Non-Goal 的决策记录与开放问题。
 - [issue-templates.md](issue-templates.md) — 三类 issue 模板（Feature / Bug / Refactor）的 body 结构与设计依据。
+- [mobile-pwa.md](mobile-pwa.md) — 移动端 PWA + 推送（**WIP，暂不实现**）：self-host 自治系统的移动端 promise，原 #106 关闭后的方案记录。
 - [prompt-management.md](prompt-management.md) — project-scoped prompt 库和 workflow 的关系。
 - [runner.md](runner.md) — Runner 聚合信息结构与自报 status。
 - [task-log.md](task-log.md) — task 执行日志的采集管道、上报通道与存储归属。
