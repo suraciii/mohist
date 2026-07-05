@@ -27,6 +27,11 @@ import {
   type ReceiveFollowupPayload,
   type ReceiveWorkflowRunStatusPayload,
 } from "./session-target.js"
+import {
+  forceReconnect,
+  notifyReconnected,
+  probeLiveness,
+} from "./liveness-probe.js"
 
 export { isUnderRunnerRoot, resolveWorkspaceQuery, resolveSessionTarget }
 export type {
@@ -122,62 +127,17 @@ export class RunnerSignalRClient {
   }
 
   async probeLiveness(signal: AbortSignal): Promise<boolean> {
-    if (this.connection.state !== signalR.HubConnectionState.Connected) {
-      return false
-    }
-    return await new Promise<boolean>((resolve) => {
-      let settled = false
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const finish = (result: boolean) => {
-        if (settled) return
-        settled = true
-        if (timer) clearTimeout(timer)
-        if (signal) signal.removeEventListener("abort", onAbort)
-        resolve(result)
-      }
-      const onAbort = () => finish(false)
-      timer = setTimeout(() => finish(false), this.probeTimeoutMs)
-      if (signal.aborted) {
-        finish(false)
-        return
-      }
-      signal.addEventListener("abort", onAbort, { once: true })
-      this.connection
-        .invoke("Ping")
-        .then(() => finish(true))
-        .catch(() => finish(false))
-    })
+    return probeLiveness(this.connection, this.probeTimeoutMs, signal)
   }
 
   async forceReconnect(signal: AbortSignal): Promise<void> {
-    if (this.connection.state === signalR.HubConnectionState.Disconnected) {
-      await this.connection.start()
-      this.notifyReconnected()
-      return
-    }
-    try {
-      await this.connection.stop()
-    } catch {
-      // best effort — a half-open socket may throw on stop; the start() below
-      // will surface the real state.
-    }
-    if (signal.aborted) return
-    await this.connection.start()
-    this.notifyReconnected()
+    return forceReconnect(this.connection, this.onReconnected, signal)
   }
 
   private registerLifecycleCallbacks(): void {
     this.connection.onreconnected((connectionId) => {
-      this.notifyReconnected(connectionId)
+      notifyReconnected(this.connection, this.onReconnected, connectionId)
     })
-  }
-
-  private notifyReconnected(connectionId?: string): void {
-    if (!this.onReconnected) return
-    const id = typeof connectionId === "string" && connectionId.length > 0
-      ? connectionId
-      : (this.connection.connectionId ?? "")
-    if (id) this.onReconnected(id)
   }
 
   private registerHandlers(): void {
