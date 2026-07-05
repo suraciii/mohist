@@ -75,13 +75,12 @@ mo info         CLI 本地诊断（受控例外：跨资源只读，不归任一
 
 | 命令 | 作用 |
 |---|---|
-| `mo workflow show <runId>` `-o table\|json\|yaml` | 执行全貌（含状态、阶段进度、关联 issue、模板定义）。`-o yaml` 承载模板定义，不单造 `yaml` 命令 |
-| `mo workflow status <runId>` | 精简状态摘要（比 show 短） |
+| `mo workflow get <runId>` `-o table\|json\|yaml` | 执行全貌（含状态、阶段进度、关联 issue、模板定义）。默认 table 是摘要视图，`-o json/yaml` 是全貌。`-o yaml` 承载模板定义，不单造 `yaml` 命令 |
 | `mo workflow variables <runId>` `[--stage <阶段>] [--key <键路径>]` | 生效变量（子资源，有独立寻址） |
 | `mo workflow events <runId>` `[--limit <n>]` | 事件流（关联资源） |
 | `mo workflow list-sessions <runId>` | 该执行的会话列表（关联资源，只列出） |
 
-`show` 的资源响应包含关联 issue 的 number 与 title，可直接用于把 run 关联回 issue，无需额外 lookup。单 session 子动作（get / transcript / compact / reset / followup）的 workflowRunId 直接入口不在本命令组，继续走 `mo issue session ...`。
+`get` 的资源响应包含关联 issue 的 number 与 title，可直接用于把 run 关联回 issue，无需额外 lookup。单 session 子动作（get / transcript / compact / reset / followup）的 workflowRunId 直接入口不在本命令组，继续走 `mo issue session ...`。
 
 ## Workflow Profile（工作流运行配置）
 
@@ -330,7 +329,7 @@ mo issue list --output json | jq '.[] | select(.health=="blocked") | .number' | 
   while read n; do mo issue retry $n; done
 
 # 直接控制一个工作流执行（不通过 issue 号）
-mo workflow show wr_abc123 -o yaml
+mo workflow get wr_abc123 -o yaml
 mo workflow approve wr_abc123
 ```
 
