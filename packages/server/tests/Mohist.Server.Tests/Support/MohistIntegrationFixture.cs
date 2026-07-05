@@ -90,6 +90,20 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         string connectionString,
         string runnerRoot,
         string systemUpdateStatePath,
+        FakeTimeProvider? timeProvider = null)
+        : this(
+            connectionString,
+            runnerRoot,
+            systemUpdateStatePath,
+            Path.Combine(Path.GetTempPath(), $"mohist-logs-{Guid.NewGuid():N}"),
+            timeProvider)
+    {
+    }
+
+    public MohistWebApplicationFactory(
+        string connectionString,
+        string runnerRoot,
+        string systemUpdateStatePath,
         string logsPath,
         FakeTimeProvider? timeProvider = null)
     {
