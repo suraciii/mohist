@@ -1,5 +1,5 @@
 import { existsSync as defaultExistsSync } from "node:fs"
-import { resolve, relative, isAbsolute } from "node:path"
+import { resolve } from "node:path"
 import * as signalR from "@microsoft/signalr"
 import type { ClientSideConnection } from "@agentclientprotocol/sdk"
 import { deleteDirectory, runCommand as defaultRunCommand, type CommandLineOptions } from "../system/process.js"
@@ -10,11 +10,19 @@ import { isTerminalWorkflowStatus } from "../runtime/workflow-terminal-status.js
 import type { ServerConnection } from "./connection.js"
 import type { SessionTarget } from "../runtime/acp-connection.js"
 import {
+  isUnderRunnerRoot,
+  resolveWorkspaceQuery,
+  type WorkspaceQuery,
+} from "../runtime/workspace-query.js"
+import {
   parseAheadBehind,
   parseCommits,
   parseDiffFiles,
   parseNumstatTotal,
 } from "./git-parsers.js"
+
+export { isUnderRunnerRoot, resolveWorkspaceQuery }
+export type { WorkspaceQuery }
 
 export interface FollowupTarget {
   readonly connection: ClientSideConnection
@@ -632,36 +640,10 @@ async function git(workDir: string, args: string[], signal: AbortSignal, options
   return runGitCommand("git", args, workDir, signal, undefined, options)
 }
 
-export interface WorkspaceQuery {
-  issueNumber?: number
-  workspacePath?: string | null
-  branch?: string | null
-  baseBranch?: string | null
-}
-
-export function resolveWorkspaceQuery(query: WorkspaceQuery | null | undefined): { workDir: string; baseBranch: string; head: string } | null {
-  if (!query?.workspacePath || !query.baseBranch) return null
-  // The legacy `mo/issue-{N}` worktree branch is no longer created by the
-  // runner. Callers MUST supply an explicit `branch` (the workspace's HEAD
-  // ref, e.g. `mohist/run-${workflowRunId}`). Returning null forces the
-  // server review APIs to surface `branch_missing` instead of a phantom
-  // `mo/issue-{N}` ref that would never resolve.
-  const head = query.branch ?? null
-  if (!head) return null
-  return { workDir: query.workspacePath, baseBranch: query.baseBranch, head }
-}
-
 async function isGitWorkTree(workDir: string, signal: AbortSignal): Promise<boolean> {
   if (!pathExists(workDir)) return false
   const result = await git(workDir, ["rev-parse", "--is-inside-work-tree"], signal)
   return result.exitCode === 0 && result.stdout.trim() === "true"
-}
-
-export function isUnderRunnerRoot(root: string, candidate: string): boolean {
-  const rootPath = resolve(root)
-  const target = resolve(candidate)
-  const rel = relative(rootPath, target)
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
 }
 
 function removal(removed: boolean, status: string, path: string | null, reason: string | null, message: string) {
