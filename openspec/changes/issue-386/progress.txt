@@ -327,3 +327,111 @@ Added 7 tests on top of the existing 4 (rerun-from-stage peer behavior):
   sibling `Command` instances). That's intentional per D3; the
   `[transitional alias ...]` description prefix is how `--help` users
   discover the relationship.
+
+## T-004: Agent delete->archive — code & test patterns
+
+### Code
+
+- `BuildDelete` in `MohistCliCommands.Agent.cs` was renamed to
+  `BuildArchive`: `new Command("archive", "Archive an agent")` with
+  `cmd.Aliases.Add("delete")`. Inner closure renamed `DeleteAsync` →
+  `ArchiveAsync` for symmetry. The `DeleteAgentAsync` helper that does
+  the actual `SendAsync(HttpMethod.Delete, ...)` call was kept intact
+  — it still wires `HttpMethod.Delete` to `/agents/<id>` on the wire.
+  The internal helper name is irrelevant to the wire/CLI surface; the
+  verb on the URL path is `/agents/{id}` (no `archive` segment — the
+  spec keeps the `ArchiveAsync` server method but it's still a `DELETE`
+  on the agent resource, mirroring issue archive which is also
+  POST-DELETE style).
+
+### Tests (`CliAgentCommandSpecs.cs`)
+
+Added 5 tests on top of the existing 16 (which all still pass):
+
+- `AgentArchive_ResolvesByIdAndDeletes` — covers the spec scenario
+  "Archive by id resolves and deletes". The id-form path issues TWO
+  requests: a `GET /agents/<id>` (to read the agent's name) then the
+  `DELETE /agents/<id>`. Test asserts both URIs are equal and the
+  second is a DELETE, plus the stdout contains `Agent reviewer
+  (agent_123) archived`.
+- `AgentArchive_ResolvesByNameAndDeletes` — covers "Archive by name
+  resolves via the agent list". First request is the `GET
+  /agents?all=true` list lookup, second is the `DELETE /agents/<id>`.
+- `AgentArchive_UnresolvedFailsLocallyWithoutHttp` — covers "Unresolved
+  agent fails locally". Name-lookup path: a single `GET` to the list
+  endpoint returns empty, then the CLI prints `Agent 'missing' not
+  found` to stderr and exits 1 WITHOUT sending a DELETE. Asserts
+  exactly 1 request in the handler (the listing GET only — proves
+  the failure path skips the DELETE).
+- `AgentArchive_DeleteAlias_ProducesIdenticalRequestAndOutput` — the
+  parity test. Runs `archive <name>` then `delete <name>` back-to-back
+  against a shared harness (clearing output/error buffers between
+  invocations). Captures the canonical request list after the first
+  invocation, then `handler.Requests.Skip(canonicalRequests.Count)`
+  for the alias's requests, and diffs method+URI per index. Asserts
+  stdout, stderr, exit code all equal. This is the exact `RunUnderBothNames`
+  pattern from T-001 generalized inline — `archive` and `delete` are
+  a true System.CommandLine `cmd.Aliases.Add` pair, so the parity is
+  enforced by construction; this test turns "cannot diverge" into a
+  behavioral assertion.
+- `AgentArchive_AliasDelete_HonorsProjectIdFlag` — covers "produces
+  same request/output/exit under any project scoping flags" by
+  invoking `delete agent_123 --project-id proj_other` and asserting
+  the URI is `/api/projects/proj_other/agents/agent_123` (proves the
+  `--project-id` flag flows through the alias correctly).
+
+Renamed the existing `AgentDelete_ArchivesByResolvedName` →
+`AgentDelete_ArchivesByResolvedName_LegacyDeleteVerbStillWorks`. Same
+body, pinned explicitly as the legacy entry-point contract.
+
+Updated `AgentHelp_ListsSubcommands`: now asserts the full
+`archive, delete <name-or-id>` row (canonical + alias annotation,
+matching System.CommandLine's emission) AND verifies there is no
+standalone `delete <name-or-id>` row (the alias collapses onto the
+canonical). This is the same assertion pattern T-001 used for
+`get, show <run-id>` in `CliWorkflowReads.cs`.
+
+### Verification
+
+`dotnet test packages/cli/tests/Mohist.Cli.Tests`:
+- Before T-004: 748 pass, 3 fail (same 3 pre-existing
+  `CliReferenceDocsSpecs` failures from T-006 scope).
+- After T-004: 753 pass, 3 fail. Net: +5 tests, all green.
+
+`CliAgentCommandSpecs`: 21/21 pass (16 pre-existing + 5 new).
+
+`npm run build`: clean (.NET + Web + Runner).
+
+### Gotchas for next tasks (T-005 label, T-006 docs)
+
+- The `archive` command's `--help` row emits `archive, delete
+  <name-or-id>` exactly the way T-001's `get, show <run-id>` does —
+  this is a transitive property of System.CommandLine's `cmd.Aliases.Add`
+  pattern, not per-command customization. T-005 should follow the
+  same pattern in `MohistCliCommands.Label.cs`: rename
+  `new Command("remove", ...)` to `new Command("delete", ...)`,
+  `cmd.Aliases.Add("remove")` and `cmd.Aliases.Add("rm")` together.
+  Both aliases collapse onto the canonical row — System.CommandLine
+  emits `delete, remove, rm <key>`.
+- The label spec already names `delete` as canonical and `rm`/`remove`
+  as aliases (per `docs/cli-reference.md:220`) — no spec movement
+  needed for T-005 other than the gap-table cleanup in T-006.
+- Test parity pattern for label will be a single harness with
+  three back-to-back invocations: `delete`, `remove`, `rm`. The
+  `handler.Requests.Skip(last.Count)` capture still works because the
+  recording handler is a `List<CapturedRequest>` that grows across
+  invocations on the same harness. The label spec text in
+  `specs/label-delete/spec.md` requires parity across all three names.
+- The `agent --help` test (`AgentHelp_ListsSubcommands`) now asserts
+  the full alias-collapse row `archive, delete <name-or-id>`. If a
+  future cleanup drops the `delete` alias, this test will fail with
+  the bare `archive <name-or-id>` row — that's the audit point for
+  T-006's alias inventory.
+- The transitional aliases introduced across this issue are (so far):
+  - `workflow show` (alias of `get`, T-001)
+  - `issue rerun-from-stage --stage` (peer of `rerun --from-stage`,
+    T-003 — peer not alias because flag name differs)
+  - `agent delete` (alias of `archive`, T-004)
+  - `label remove` / `label rm` (aliases of `delete`, T-005)
+  T-006 should consolidate this inventory in an issue comment.
+
