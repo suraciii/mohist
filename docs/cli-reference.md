@@ -1,380 +1,338 @@
 # CLI 参考
 
-`mo` 是 Mohist 的命令行入口，面向脚本、自动化和远程 SSH 场景。文档化 Mohist 的功能入口命令组；完整命令树以 `mo --help` 为准（本文未覆盖到的子命令请直接查 `--help`）。首次安装上手走 [快速上手](getting-started.md)；CLI 与 Web UI 各有分工，本文不主张二者等价或一一对应。
+`mo` 是 Mohist 的命令行入口，面向脚本、自动化和远程 SSH 场景。本文是 `mo` 命令面的**产品 spec**——命令面必须满足本文的命令、参数与命名约定。设计原则见 [`design/cli.md`](../design/cli.md)（面向开发者）。首次安装上手走 [快速上手](getting-started.md)。
 
-## 全局
+> 本文先于实现。命令面随各命令组的改进 issue 逐步对齐到本文；未对齐处以代码为实装事实，但本文是目标，实装去追赶 spec，而非相反。
 
-```bash
-mo --version
-mo --help
-mo status              # 当前 project 状态、agent 状态、runner 状态
-mo logs                # 最近日志
-mo info                # CLI 本地环境与安装来源概览
-mo use <project>       # 切换 active project
-```
+## 全局约定
 
-项目作用域命令通常接受 `--project <name>` 和 `--project-id <id>`，可在不切换 active project 的情况下指定目标 project；不依赖 project 的全局命令（如 `mo workflow list`、`mo info`）以各自 `--help` 为准。
+- **形状**：`mo <资源> <动词>`。资源是名词（issue、epic、workflow），动词是动作（create、get、start）。
+- **根命令层只有资源**：`mo` 直接子命令都是资源或资源组，没有裸动词（受控例外仅 `mo info` 一项，见「系统诊断」）。
+- **输出格式**：所有 get/list 类命令支持 `-o table|json|yaml|compact`。**输出格式不创造命令**——看资源 yaml 用 `mo <资源> get <id> -o yaml`，不存在 `mo <资源> yaml`。
+- **项目作用域**：项目内资源支持 `--project <名>` 与 `--project-id <id>` 两种形式，缺一不可。
+- **预演**：会改状态的控制类命令支持 `--dry-run`。
+- **别名**：高频命令提供短别名（`ls` = list、`rm` = delete），别名与正名同行为。
 
-## 输出格式
+## 动词词表（全命令面统一，不得跨资源自造同义词）
 
-大多数 list/show 命令支持 `--output` 选项：
-
-```bash
-mo issue list --output json       # JSON（脚本友好）
-mo issue list --output table      # 表格（默认，人读）
-mo issue list --output compact    # 紧凑表格
-```
-
-JSON 输出适合 piping 到 `jq`：
-
-```bash
-mo issue list --output json | jq '.[] | select(.status=="backlog") | .number'
-```
-
-## 项目管理
-
-```bash
-mo project create <name> --path <repo-path>
-mo project list
-mo project show <name-or-id>
-mo project use <name>              # 等同于 mo use
-mo project delete <name>
-mo project repo ...                # 仓库管理（见 Repository 管理）
-mo project workflow template ...   # Workflow 模板管理
-mo project workflow config ...     # Workflow 配置管理
-```
-
-### Workflow 模板管理
-
-```bash
-mo project workflow template list                      # 列出所有 workflow 模板
-mo project workflow template create --yaml <yaml|@file> # 创建 workflow 模板
-mo project workflow template show <template-id>         # 查看 workflow 模板详情
-mo project workflow template update <template-id> --yaml <yaml|@file> # 更新 workflow 模板
-mo project workflow template delete <template-id>       # 删除 workflow 模板
-```
-
-`--yaml` 接受 inline YAML 或 `@file`（从文件读取）。所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。
-
-### Workflow 配置管理
-
-```bash
-mo project workflow config get                               # 查看完整配置（默认模板、变量、提示词覆盖）
-mo project workflow config set [flags]                       # 复合写入（默认模板/变量/提示词）
-mo project workflow config clear [flags]                     # 复合清除（默认模板/变量/提示词）
-mo project workflow config preview <key>                     # 预览渲染后的提示词
-```
-
-`config set` 支持的 flags：
-
-| Flag | 含义 |
-|------|------|
-| `--default-template <id>` | 设置默认 workflow 模板（PUT /default-template） |
-| `--var <k=v>` | 增量设置顶层变量（可重复，PATCH /variables） |
-| `--stage-var <stage.k=v>` | 增量设置阶段变量（可重复，PATCH /variables） |
-| `--vars-file <file>` | 全量替换所有变量（PUT /variables，JSON 文件，与 `--var`/`--stage-var` 互斥） |
-| `--prompt <key=body\|@file>` | 设置提示词覆盖（可重复，PUT /prompts/{key}，`@file` 从文件读） |
-
-`config clear` 支持的 flags：
-
-| Flag | 含义 |
-|------|------|
-| `--default-template` | 清除默认模板（DELETE /default-template） |
-| `--var <k>` | 清除指定变量（可重复，PATCH /variables 设 null） |
-| `--prompt <key>` | 清除指定提示词覆盖（可重复，DELETE /prompts/{key}） |
-
-所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。
-
-## Issue 管理
-
-完整命令在 [Issue 管理](issues.md)。这里给速查表：
-
-```bash
-mo issue create <title> [options]
-mo issue list [options]
-mo issue show <number>
-mo issue update <number> [options]
-mo issue start <number>
-mo issue approve <number>
-mo issue reject <number> --message <message>
-mo issue close <number>
-mo issue reopen <number>
-mo issue retry <number>
-mo issue rerun <number>
-mo issue rerun-from-stage <number> --stage <stage>
-mo issue force-stop <number>
-mo issue resume <number>
-mo issue stop <number>
-mo issue rebase <number>
-mo issue archive <number>
-mo issue archive --all-completed [options]
-mo issue unarchive <number>
-mo issue comment add <number> [--body <text>|--body-file <path>]
-mo issue prereq add <number> <prereq-number>
-mo issue prereq remove <number> <prereq-number>
-mo issue logs <number>
-mo issue events <number>
-mo issue diff <number>
-mo issue commits <number>
-mo issue sessions <number>
-mo issue session show <number> <name>
-mo issue session transcript <number> <name>
-mo issue session compact <number> <name>
-mo issue session reset <number> <name>
-mo issue session followup <number> <name> [options]
-mo issue workflow [subcommand]
-```
-
-常用选项：
-
-| 选项 | 适用命令 | 含义 |
+| 动作类 | 规范动词 | 语义 |
 |---|---|---|
-| `--body <text>` | create, update | inline body |
-| `--body-file <path>` | create, update | body 从文件读（推荐长 body） |
-| `--body-stdin` | create, update | body 从 stdin 读 |
-| `--priority p0-p4` | create, update | 优先级 |
-| `--label <key=value>` | create, update | 标签：`key=value` 设置、`-key` 移除，可多次 |
-| `--model <id>` | create | 指定 AI 模型 |
-| `--workflow-profile <id>` | create | 指定 workflow profile |
-| `--all-completed` | archive | 批量归档所有已完成且未归档的 issue |
-| `--project <name>` | 所有 | 指定 project |
-| `--archived` | list | 看归档 |
-| `--all` | list | 看全部（含归档） |
+| 列表 | `list` | 列出资源的多个实例 |
+| 查单条 | `get` | 取一个资源的详情 |
+| 新增独立资源 | `create` | 造一个带身份的新资源（project/issue/epic/agent/template） |
+| 加集合成员 | `add` | 往现有宿主集合加一项（label 目录项/repo/comment/prereq） |
+| 改 | `update` | 修改资源字段 |
+| 删除（真删） | `delete` | 永久删除资源（project/repo/template） |
+| 归档（软删，可恢复） | `archive` | 归档资源，可逆（issue/agent） |
+| 键值查询/设置 | `get`/`set` | 仅 `mo config` 的 KV 范式 |
 
-Session 子命令：
+删除与归档是两个动作，不混用：真删除用 `delete`，归档（可恢复）用 `archive`。issue 与 agent 的"删除"实为归档，用 `archive`，不用 `delete`。
 
-```bash
-mo issue session show <number> <name>            # 查看 session 元数据
-mo issue session transcript <number> <name>      # 查看 session 对话摘要
-mo issue session compact <number> <name>         # 压缩 session 上下文
-mo issue session reset <number> <name>           # 重置 session 上下文
-mo issue session followup <number> <name> --text <text>  # 向运行中的 session 推送后续指令
+## 根命令层
+
+```
+mo project      项目
+mo issue        工作项
+mo epic         产品里程碑
+mo workflow     工作流执行（WorkflowRun）
+mo agent        智能体
+mo label        标签
+mo runner       执行器
+mo server       服务端
+mo notification 通知配置
+mo config       全局配置（键值）
+mo system       系统诊断
+mo otel         OpenTelemetry 查询
+mo opencode     OpenCode 模型
+mo skills       技能分发
+mo install      安装（动词根，装机用途）
+mo update       升级（动词根，装机用途）
+mo info         CLI 本地诊断（受控例外：跨资源只读，不归任一资源）
 ```
 
-`followup` 的文本源选项（三者选一）：
+## Workflow（工作流执行 / WorkflowRun）
 
-| 选项 | 含义 |
-|------|------|
-| `--text <text>` | inline 后续文本 |
-| `--text-file <path>` | 从 UTF-8 文件读取 |
-| `--text-stdin` | 从标准输入读取 |
+直接以工作流执行 ID（`workflowRunId`）寻址一次具体的工作流执行。这是核心域——驱动一个 issue 从 Draft 走到 Done 的生产线本身。
 
-## Epic 管理
+### 控制动作
 
-完整命令在 [用 Epic 规划](epics.md)。这里给速查表：
+| 命令 | 作用 |
+|---|---|
+| `mo workflow approve <runId>` | 通过审批门 |
+| `mo workflow reject <runId> --message <理由>` | 在审批门打回（理由必需） |
+| `mo workflow retry <runId>` | 失败后原地重试当前阶段 |
+| `mo workflow rerun <runId>` | 从头重跑 |
+| `mo workflow rerun <runId> --from-stage <阶段>` | 从指定阶段重跑（变体用 flag，不另造 `rerun-from-stage` 命令） |
+| `mo workflow resume <runId>` | 恢复暂停的执行 |
+| `mo workflow pause <runId>` | 暂停（可恢复） |
+| `mo workflow stop <runId>` | 终止（不可恢复） |
 
-```bash
-mo epic create <title> [options]
-mo epic list [options]
-mo epic show <epic-id-or-number>
-mo epic update <epic-id-or-number> [options]
-mo epic link <epic-id-or-number> <issue-id-or-number>
-mo epic unlink <epic-id-or-number> <issue-id>
-mo epic start <epic-id-or-number>
-mo epic pause <epic-id-or-number>
-mo epic resume <epic-id-or-number>
-mo epic done <epic-id-or-number>
-mo epic close <epic-id-or-number>
+这些动作也可通过 issue 号触发（`mo issue approve <编号>`），issue 号是工作流执行的人类可读别名。直接寻址面向脚本与 agent 订阅场景——它们手里只有执行 ID。
+
+### 查询
+
+| 命令 | 作用 |
+|---|---|
+| `mo workflow get <runId>` `-o table\|json\|yaml` | 执行全貌（含状态、阶段进度、关联 issue、模板定义）。`-o yaml` 承载模板定义，不单造 `yaml` 命令 |
+| `mo workflow status <runId>` | 精简状态摘要（比 get 短） |
+| `mo workflow variables <runId>` `[--stage <阶段>] [--key <键路径>]` | 生效变量（子资源，有独立寻址） |
+| `mo workflow events <runId>` `[--limit <n>]` | 事件流（关联资源） |
+| `mo workflow list-sessions <runId>` | 该执行的会话列表（关联资源，只列出） |
+
+## Workflow Profile（工作流运行配置）
+
+工作流运行配置 = 模板 + 变量 + 提示词覆盖。挂在 project 下（配置是项目拥有的）。统一到 `mo project workflow profile` 一个资源组，含启用/禁用入口。
+
+```
+mo project workflow profile list [--described]      列出 profile（含名称与描述）
+mo project workflow profile get                     查看 profile 全貌（默认模板/变量/提示词）
+mo project workflow profile set [flags]             复合写入（默认模板/变量/提示词）
+mo project workflow profile clear [flags]           复合清除
+mo project workflow profile preview <键>            预览渲染后的提示词
+mo project workflow profile enable                  启用 profile
+mo project workflow profile disable                 禁用 profile
 ```
 
-`start`、`pause`、`resume` 是幂等的 — 详情和生命周期语义见 [Epic 生命周期](epics.md#epic-的生命周期)。
+## Workflow Template（工作流模板）
 
-## Server 管理
+YAML 定义的模板，project 下管理。
 
-```bash
-mo server start              # 前台启动 server
-mo server stop               # 停止 server（如果 daemon）
-mo server status             # 检查 server 状态
+```
+mo project workflow template list                  列出模板
+mo project workflow template create --yaml <yaml|@file>
+mo project workflow template get <模板id>
+mo project workflow template update <模板id> --yaml <yaml|@file>
+mo project workflow template delete <模板id>
 ```
 
-详见 [Self-host 部署](self-host.md)。
+## Project（项目）
 
-## Runner 管理
-
-```bash
-mo runner start              # 前台启动 runner
-mo runner status             # 在线 runner 摘要（id、心跳、idle/busy）
-mo runner service-status     # runner 托管服务状态（systemd / Scheduled Task）
-mo runner list               # 当前 project 的 runner 详情列表
+```
+mo project create <名>
+mo project list
+mo project get <名或id>
+mo project use <名或id>            设置当前项目
+mo project delete <名或id>
+mo project status                  当前项目聚合状态
+mo project repo ...                仓库管理（见下）
+mo project workflow ...            工作流配置（template / profile，见上）
 ```
 
-详见 [Runner 指南](runner.md)。
+### Repository（仓库）
 
-## Agent 管理
+一个 project 可关联多个仓库（如 monorepo 多模块）。单一入口 `mo project repo`，无顶层 `mo repo`。
 
-```bash
-mo agent create [options]                       # 创建 agent
-mo agent list                                   # 列出 agent（别名 ls）
-mo agent show <name-or-id>                      # 查看 agent 详情
-mo agent update <name-or-id> [options]          # 更新 agent
-mo agent delete <name-or-id>                    # 归档 agent
-
-# 通用 AgentSession（与 issue 解耦的 agent 主动调用）
-mo agent session list <agent>                   # 列出 agent 的 session
-mo agent session show <session-id>              # 查看 session 摘要
-mo agent session transcript <session-id>        # 查看 session 对话摘要
-mo agent session launch <agent>                 # 从 agent profile 启动 session
-mo agent session followup <session-id>          # 向运行中的 session 推送后续指令
-mo agent session cancel <session-id>            # 请求取消运行中的 session
+```
+mo project repo list
+mo project repo add <名> --git-url <url> [--base-branch <分支>] [--set-default]
+mo project repo update <名> [flags]
+mo project repo set-default <名>
+mo project repo delete <名>
 ```
 
-`create`/`update` 常用选项：
+仓库是往项目集合加成员，用 `add`（不是 create）。
 
-| 选项 | 含义 |
-|------|------|
-| `--name <name>` | agent 名（update 时为新名） |
-| `--description <text>` | 描述（`--clear-description` 可清空） |
-| `--instructions <text\|@file\|-` | 指令正文 |
-| `--instructions-stdin` | 从 stdin 读指令 |
-| `--agent-config <json\|@file>` | agent config JSON（`--clear-agent-config` 可清空） |
-| `--skills <a,b,c>` | 启用 skill 列表（`--clear-skills` 可清空） |
-| `--max-concurrent-runs <n>` | 并发上限（`--clear-max-concurrent-runs` 可清空） |
+## Issue（工作项）
 
-`followup` 的文本源（与 issue session 一致）：`--text <text>` / `--text-file <path>` / `--text-stdin` 三选一。
-
-`list`、`show` 和 session 子命令支持 `-o table|json`；agent 子命令支持 `--project`/`--project-id`。完整 flag 见 `mo agent --help` / `mo agent <sub> --help`。
-
-## Label 管理
-
-```bash
-mo label list                    # 列出 project 的 label 目录（别名 ls）
-mo label add <key> [options]     # 向 project 目录新增一条 label 定义
-mo label update <key> [options]  # 更新 label 定义（partial update）
-mo label remove <key>            # 从目录删除一条 label 定义（别名 rm）
+```
+mo issue create <标题> [options]
+mo issue list [options]
+mo issue get <编号>
+mo issue update <编号> [options]
+mo issue start <编号>
+mo issue approve <编号>
+mo issue reject <编号> --message <理由>
+mo issue retry <编号>
+mo issue rerun <编号>
+mo issue rerun <编号> --from-stage <阶段>
+mo issue stop <编号>                            终止（不可恢复）
+mo issue force-stop <编号>                      暂停（可恢复）
+mo issue resume <编号>
+mo issue rebase <编号>
+mo issue close <编号>
+mo issue reopen <编号>
+mo issue archive <编号>                         归档（软删，可恢复）
+mo issue archive --all-completed [options]
+mo issue unarchive <编号>
+mo issue comment add <编号> [--body <文本>|--body-file <路径>]
+mo issue prereq add <编号> <前置编号>
+mo issue prereq remove <编号> <前置编号>
+mo issue logs <编号>
+mo issue events <编号> [--limit <n>]
+mo issue diff <编号>
+mo issue commits <编号>
+mo issue sessions <编号>
+mo issue session get <编号> <名称>
+mo issue session transcript <编号> <名称>
+mo issue session compact <编号> <名称>
+mo issue session reset <编号> <名称>
+mo issue session followup <编号> <名称> [--text <文本>|--text-file <路径>]
 ```
 
-`add`/`update` 选项：
+Issue 的工作流快捷方式（approve/retry/rerun/...）是对应 `mo workflow` 命令的人类便利别名，行为一致。
 
-| 选项 | 含义 |
-|------|------|
-| `--description <text>` | 何时使用该 label |
-| `--supported-values <v1,v2,...>` | 推荐的取值列表 |
+## Epic（产品里程碑）
 
-`list` 支持 `-o table|json`；所有子命令支持 `--project`/`--project-id`。完整 flag 见 `mo label --help` / `mo label <sub> --help`。
-
-## Workflow 管理
-
-```bash
-mo workflow list                 # 列出 workflow profile（别名 ls）
+```
+mo epic create <标题> [--description <描述>] [--priority p0-p3]
+mo epic list
+mo epic get <id或编号>
+mo epic update <id或编号> [options]
+mo epic link <epic> <issue>
+mo epic unlink <epic> <issue>
+mo epic start <id或编号>            开始自动推进
+mo epic pause <id或编号>            暂停自动推进
+mo epic resume <id或编号>
+mo epic done <id或编号>             标记里程碑完成
+mo epic close <id或编号>            放弃里程碑
 ```
 
-这是顶层 `mo workflow`，管理 workflow profile（profile 即 issue 创建时绑定的运行配置）。它**不同于** `mo project workflow template` / `mo project workflow config`（模板与运行时配置，见 [项目管理](#项目管理)）。
+epic 无 delete——里程碑用 done（完成）或 close（放弃）收尾，不删除。
 
-`list` 支持 `-o table|json` 和 `--described`；顶层 `mo workflow` 不接受 `--project`/`--project-id`。完整 flag 见 `mo workflow --help` / `mo workflow list --help`。
+## Agent（智能体）
 
-## OTel 管理
-
-```bash
-mo otel query <sql>              # 直接查询 otel.db（无需 server）
-mo otel status                   # OTel collector 状态与数据库统计（需 server）
+```
+mo agent create [options]
+mo agent list
+mo agent get <名或id>
+mo agent update <名或id> [options]
+mo agent archive <名或id>           归档（软删，可恢复）
+mo agent session list <agent>
+mo agent session get <会话id>
+mo agent session transcript <会话id>
+mo agent session launch <agent> [--prompt <文本>|--prompt-file <路径>]
+mo agent session followup <会话id> [--text <文本>|--text-file <路径>]
+mo agent session cancel <会话id>
 ```
 
-`query` 选项：
+## Label（标签）
 
-| 选项 | 含义 |
-|------|------|
-| `-d, --db <path>` | otel.db 文件路径（默认 `~/.mohist/otel.db`） |
-
-典型查询：
-
-```bash
-mo otel query "SELECT COUNT(*) FROM traces"
-mo otel query "SELECT name, COUNT(*) FROM spans GROUP BY name ORDER BY 2 DESC LIMIT 10"
+```
+mo label list                       标签目录
+mo label add <键> [--description <文本>] [--supported-values <v1,v2>]
+mo label update <键> [options]
+mo label delete <键>                delete 为正名，remove/rm 为别名
 ```
 
-`status` 需 server 在跑。完整 flag 见 `mo otel --help` / `mo otel <sub> --help`。
+label 是往项目标签目录加定义，用 `add`（不是 create）。
 
-## 只读诊断
+## Runner（执行器）
 
-```bash
-mo info                    # CLI 本地环境与安装来源概览
-mo info --verbose          # 追加 skills、git remote、opencode、env、OS、capacity、disk 等诊断
-mo info --json             # 机器可读 JSON
-mo system info               # 服务端系统诊断（identity/source/install/update/services/paths）
-mo opencode models           # 当前 project 可用 coder 模型 ID，每行一个
+```
+mo runner list [--scope all|global|project]
+mo runner get <执行器id>
+mo runner status                    在线执行器摘要
 ```
 
-`mo info` 是 CLI 本地诊断；`mo system info` 是服务端系统诊断。`mo system info` 和 `mo opencode models` 支持 `-o table|json`。
+执行器的安装/启停见「安装与升级」。
 
-## Repository 管理
+## Server（服务端）
 
-```bash
-mo repo list                 # 当前 project 的仓库列表
-mo repo add <name> --git-url <url> --base-branch <branch>
-mo repo remove <name>
-mo repo set-default <name>
+```
+mo server health                    健康检查
+mo server info                      服务端系统诊断
+mo server status                    服务状态
+mo server logs                      服务日志（受管服务的运维日志）
 ```
 
-一个 project 可以关联多个 repo（如 monorepo 多模块）。Issue 时指定 repo。
+`mo system logs`（应用日志）与 `mo server logs`（运维日志）内容不同：前者是应用输出，后者是 systemd/计划任务层日志。
 
-## 配置
+## 系统诊断（只读）
 
-```bash
-mo config get <key>
-mo config set <key> <value>
+```
+mo info                             CLI 本地环境与安装来源（受控例外：跨资源只读）
+mo system logs                      应用日志
+mo otel query <sql> [--db <路径>]   直接查询 OpenTelemetry 数据库（无需服务端）
+mo otel status                      OpenTelemetry 采集器状态（需服务端）
+mo opencode models                  当前项目可用模型
+```
+
+## Notification（通知配置）
+
+```
+mo notification setup               通知平台配置向导
+```
+
+## 配置（键值）
+
+```
 mo config list
+mo config get <键>
+mo config set <键> <值>
 ```
 
-详见 `mo config --help`。
+`mo config get/set` 是键值范式，与资源 `get` 语义不同但词相同——KV 查询是 CLI 通用惯例（如 git config），保留。
 
-## Skills
+## 技能分发
 
-```bash
-mo skills list               # 列出可分发 skill
-mo skills install            # 安装/更新 skill 到外部 agent
-mo skills get <name>         # 获取 skill 的完整内容
-mo skills path <name>        # 输出内置 skill 的打包路径
-mo skills sync               # 将工作树 skill-data 同步到托管缓存
+```
+mo skills list
+mo skills install
+mo skills get <名>
+mo skills path <名>
+mo skills sync
 ```
 
-`sync` 用于本仓库开发：编辑 `packages/cli/Mohist.Cli/skill-data/` 后运行它，让托管缓存与工作树一致，随后 `mo skills get <name>` 会反映本地改动。
+`mo skills` 的输出格式统一走 `-o`，不用 `--json` 布尔开关。
 
-详见 [Skill 机制](skills.md)。
+## 安装与升级（动词根集中）
 
-## 安装与更新
+单一归属：动词根 `mo install` / `mo update`，无 `mo server install/update`、`mo runner install/update` 并存。
 
-```bash
-# 安装为受管理服务（Linux: systemd user service；Windows: 计划任务）
-mo install server            # 写 unit、enable、启动、enable-linger
-mo install runner
+```
+mo install server                   安装服务端为受管服务
+mo install runner                   安装执行器为受管服务
 
-# 从源码更新（重建并以受管理方式重启）
-mo update                    # 更新全部（CLI + server + runner）
-mo update server             # 只更新 server
-mo update runner             # 只更新 runner
-mo update cli                # 只更新 mo CLI
+mo update                           升级全部（CLI + 服务端 + 执行器）
+mo update cli                       仅升级 mo CLI
+mo update server                    仅升级服务端
+mo update runner                    仅升级执行器
 ```
 
-首次安装 `mo` 本身：仓库内 `bash scripts/install-mo.sh`。详见 [Self-host 部署](self-host.md)。
+## 实装差距（命令面收敛中）
+
+命令面随各命令组改进 issue 逐步对齐到本文。当前实装与本文的已知差距：
+
+| 当前实装 | 本文 spec | 性质 |
+|---|---|---|
+| `mo workflow list`（WorkflowProfile） | `mo project workflow profile list` | 路径变更（profile 让位给 WorkflowRun） |
+| `mo project workflow config ...` | `mo project workflow profile ...` | 正名（config → profile） |
+| `mo repo ...`（顶层） | `mo project repo ...` | 双轨合并 |
+| `mo agent delete` | `mo agent archive` | 正名（delete → archive） |
+| `mo label remove` | `mo label delete`（remove 转别名） | 词表统一 |
+| `mo server install/update`、`mo runner install/update` | `mo install/update` | 双入口合并 |
+| `mo issue rerun-from-stage` | `mo issue rerun --from-stage` | 命令收敛为 flag |
+| `mo status` | `mo project status` | 裸动词归位 |
+| `mo logs` | `mo system logs` | 裸动词归位 |
+| `mo use` | （删除，留 `mo project use`） | 重复入口删除 |
+| `mo notify setup` | `mo notification setup` | 资源化 |
+| `mo system info` | `mo server info` | 消歧（与 `mo info` 区分） |
+| `mo <资源> show` | `mo <资源> get` | 词表统一（show → get） |
+| `mo workflow <control/read> <runId>` | （本文已列） | 新增，待实装 |
+| `mo project workflow profile enable/disable` | （本文已列） | 新增，待实装 |
+
+未对齐处以代码为实装事实，但本文是目标。各差距对应 epic #40 下的子 issue。
 
 ## 典型工作流脚本
 
-### "睡前丢 10 个 backlog 进去"
-
 ```bash
-for n in 42 43 44 45 46 47 48 49 50 51; do
-  mo issue start $n
-done
-```
+# 批量启动 backlog
+for n in 42 43 44 45 46; do mo issue start $n; done
 
-### "把所有 blocked 的 issue 重试一遍"
-
-```bash
+# 重试所有 blocked 的 issue
 mo issue list --output json | jq '.[] | select(.health=="blocked") | .number' | \
   while read n; do mo issue retry $n; done
-```
 
-### "看今天 delivered 了哪些"
-
-```bash
-mo issue list --output json | \
-  jq '.[] | select(.status=="done" and .updatedAt >= "'$(date -u +%Y-%m-%dT00:00:00Z)'")'
+# 直接控制一个工作流执行（不通过 issue 号）
+mo workflow get wr_abc123 -o yaml
+mo workflow approve wr_abc123
 ```
 
 ## 命令找不到？
 
 - 看完整命令树：`mo --help`
-- 看子命令选项：`mo <command> --help`
+- 看子命令选项：`mo <命令> --help`
+- 本文是 spec，不是实装清单——某命令在本文出现但 `mo --help` 没有，说明该命令面改进尚未落地，查对应 issue。
 
 ## 退出码
 
