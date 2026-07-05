@@ -95,7 +95,7 @@ public class IssueMetricsApiSpecs
         // The completion event is in week 1 (early June 2026).
         await SeedEventAsync(
             issue.Id,
-            IssueMetricsQuerier.WorkCompletedType,
+            EventCatalog.ReverseDns.IssueCompleted,
             new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
 
         // The issue's `updatedAt` is in week 2 (a later edit touched
@@ -126,8 +126,8 @@ public class IssueMetricsApiSpecs
         var issueA = await CreateIssueAsync(projectA.Id, "A issue");
         var issueB = await CreateIssueAsync(projectB.Id, "B issue");
 
-        await SeedEventAsync(issueA.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(issueB.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 9, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(issueA.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(issueB.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 9, 0, 0, TimeSpan.Zero));
 
         using var responseA = await _client.GetAsync(
             $"/api/projects/{projectA.Id}/issues/metrics/completion?bucket=day");
@@ -155,8 +155,8 @@ public class IssueMetricsApiSpecs
 
         // Two same-type terminal events for the same issue on the
         // same day: must count as 1, not 2.
-        await SeedEventAsync(issue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(issue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 16, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(issue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(issue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 16, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -175,9 +175,9 @@ public class IssueMetricsApiSpecs
         var project = await CreateProjectAsync($"metrics-recomplete-{Guid.NewGuid():N}");
         var issue = await CreateIssueAsync(project.Id, "Recompleted");
 
-        await SeedEventAsync(issue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(issue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
         await SeedEventAsync(issue.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 18, 8, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(issue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 19, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(issue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 19, 8, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -203,8 +203,8 @@ public class IssueMetricsApiSpecs
         var currentIssue = await CreateIssueAsync(project.Id, "Current window issue");
         var previousIssue = await CreateIssueAsync(project.Id, "Previous window issue");
 
-        await SeedEventAsync(currentIssue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(previousIssue.Id, IssueMetricsQuerier.ClosedType, new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(currentIssue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(previousIssue.Id, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 5, 20, 9, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -239,7 +239,7 @@ public class IssueMetricsApiSpecs
         // genuine zero-completion window.
         var project = await CreateProjectAsync($"metrics-empty-prev-{Guid.NewGuid():N}");
         var currentIssue = await CreateIssueAsync(project.Id, "Current only");
-        await SeedEventAsync(currentIssue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(currentIssue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -263,8 +263,8 @@ public class IssueMetricsApiSpecs
         var project = await CreateProjectAsync($"metrics-zero-prev-{Guid.NewGuid():N}");
         var p1 = await CreateIssueAsync(project.Id, "Cancelled prev 1");
         var p2 = await CreateIssueAsync(project.Id, "Cancelled prev 2");
-        await SeedEventAsync(p1.Id, IssueMetricsQuerier.ClosedType, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
-        await SeedEventAsync(p2.Id, IssueMetricsQuerier.ClosedType, new DateTimeOffset(2026, 5, 25, 11, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(p1.Id, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 5, 10, 9, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(p2.Id, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 5, 25, 11, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -290,7 +290,7 @@ public class IssueMetricsApiSpecs
         // remain intact when totals are populated.
         var project = await CreateProjectAsync($"metrics-additive-{Guid.NewGuid():N}");
         var issue = await CreateIssueAsync(project.Id, "Additive check");
-        await SeedEventAsync(issue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(issue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 15, 8, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=day");
@@ -321,9 +321,9 @@ public class IssueMetricsApiSpecs
         var previousIssue = await CreateIssueAsync(project.Id, "Previous window issue");
 
         // 2026-06-29 (Monday) → current week window.
-        await SeedEventAsync(currentIssue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 29, 10, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(currentIssue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 29, 10, 0, 0, TimeSpan.Zero));
         // 2026-03-30 (Monday) → previous 12-week window.
-        await SeedEventAsync(previousIssue.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 3, 30, 10, 0, 0, TimeSpan.Zero));
+        await SeedEventAsync(previousIssue.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 3, 30, 10, 0, 0, TimeSpan.Zero));
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/metrics/completion?bucket=week");
@@ -2135,7 +2135,7 @@ public class IssueMetricsApiSpecs
             Id = (dbMax ?? 0) + 1,
             Source = source,
             EventId = Guid.NewGuid().ToString(),
-            Type = IssueMetricsQuerier.WorkCompletedType,
+            Type = EventCatalog.ReverseDns.IssueCompleted,
             Time = shipTime,
             SpecVersion = "1.0",
             Subject = number.ToString(),
@@ -2227,7 +2227,7 @@ public class IssueMetricsApiSpecs
                 Id = nextId++,
                 Source = source,
                 EventId = Guid.NewGuid().ToString(),
-                Type = IssueMetricsQuerier.WorkStartedType,
+                Type = EventCatalog.ReverseDns.IssueWorkStarted,
                 Time = start,
                 SpecVersion = "1.0",
                 Subject = number.ToString(),
@@ -2286,7 +2286,7 @@ public class IssueMetricsApiSpecs
             Id = nextId++,
             Source = source,
             EventId = Guid.NewGuid().ToString(),
-            Type = IssueMetricsQuerier.WorkStartedType,
+            Type = EventCatalog.ReverseDns.IssueWorkStarted,
             Time = firstStageStart,
             SpecVersion = "1.0",
             Subject = number.ToString(),
@@ -2299,7 +2299,7 @@ public class IssueMetricsApiSpecs
             Id = nextId++,
             Source = source,
             EventId = Guid.NewGuid().ToString(),
-            Type = IssueMetricsQuerier.WorkCompletedType,
+            Type = EventCatalog.ReverseDns.IssueCompleted,
             Time = shipTime,
             SpecVersion = "1.0",
             Subject = number.ToString(),

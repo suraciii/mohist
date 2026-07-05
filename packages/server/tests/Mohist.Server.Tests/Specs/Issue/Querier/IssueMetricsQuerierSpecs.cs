@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Domain.Events;
 using Issue = Mohist.Server.Issue.Domain.Issue;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -28,6 +29,33 @@ public class IssueMetricsQuerierSpecs
         _fixture = fixture;
     }
 
+
+    // Guard against the regression that silenced every IssueEvents-backed
+    // metric: the querier filters IssueEvents.Type by these constants, so they
+    // must equal what IssueEventSerializer.BusType emits (and EventStore
+    // persists). When they drifted apart, completion/throughput/quality all
+    // returned empty while delivery-time (which reads db.Issues directly) kept
+    // working — a contradiction the closed-loop fixtures below could not catch
+    // because they seeded via the very constant under test.
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void WorkCompletedConstant_MatchesIssueEventSerializerBusType()
+    {
+        Assert.Equal(
+            IssueMetricsQuerier.WorkCompletedType,
+            IssueEventSerializer.BusType(new IssueCompleted(WorkflowRunId: "wr_guard")));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void ClosedConstant_MatchesIssueEventSerializerBusType()
+    {
+        Assert.Equal(
+            IssueMetricsQuerier.ClosedType,
+            IssueEventSerializer.BusType(new IssueCancelled(Reason: null)));
+    }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
@@ -68,9 +96,9 @@ public class IssueMetricsQuerierSpecs
         var i3 = SeedIssue(db, project, "issue_df_3");
         await db.SaveChangesAsync();
 
-        SeedEvent(db, i1.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, i2.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 18, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, i3.Id, IssueMetricsQuerier.ClosedType, new DateTimeOffset(2026, 6, 19, 9, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i2.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 18, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i3.Id, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 6, 19, 9, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -97,7 +125,7 @@ public class IssueMetricsQuerierSpecs
         await db.SaveChangesAsync();
 
         // The completion event is in week 1 (early June).
-        SeedEvent(db, i1.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
         // The issue's `updatedAt` is in week 2 (a later edit/archive
         // touched it). The metric MUST keep the issue in the week 1
         // bucket, because bucketing reads `IssueEvents.Time` (terminal
@@ -132,9 +160,9 @@ public class IssueMetricsQuerierSpecs
         // in week 2. The endpoint counts only the latest terminal
         // event, so the earlier terminal bucket must not retain a stale
         // failure count.
-        SeedEvent(db, i1.Id, IssueMetricsQuerier.ClosedType, new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
         SeedEvent(db, i1.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 12, 10, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, i1.Id, IssueMetricsQuerier.ClosedType, new DateTimeOffset(2026, 6, 15, 10, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(2026, 6, 15, 10, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -158,9 +186,9 @@ public class IssueMetricsQuerierSpecs
         var i1 = SeedIssue(db, project, "issue_recomplete_1");
         await db.SaveChangesAsync();
 
-        SeedEvent(db, i1.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
         SeedEvent(db, i1.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 18, 8, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, i1.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 19, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 19, 8, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -186,9 +214,9 @@ public class IssueMetricsQuerierSpecs
 
         // Two same-type terminal events for the same issue in the
         // same day: must count as 1, not 2.
-        SeedEvent(db, i1.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
-        SeedEvent(db, i1.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 16, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 16, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -213,8 +241,8 @@ public class IssueMetricsQuerierSpecs
         var b1 = SeedIssue(db, projectB, "issue_scope_b_1");
         await db.SaveChangesAsync();
 
-        SeedEvent(db, a1.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, b1.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 9, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, a1.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, b1.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 17, 9, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -245,7 +273,7 @@ public class IssueMetricsQuerierSpecs
         // Only the two terminal types should count; other types
         // (work-started, archived, reopened, …) must not contribute
         // to completed/failed counts.
-        SeedEvent(db, i1.Id, "com.mohist.issue.work-started", new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, EventCatalog.ReverseDns.IssueWorkStarted, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
         SeedEvent(db, i1.Id, "com.mohist.issue.archived", new DateTimeOffset(2026, 6, 17, 9, 0, 0, TimeSpan.Zero));
         SeedEvent(db, i1.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 17, 10, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
@@ -549,7 +577,7 @@ public class IssueMetricsQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_ftr_1", workflowRunId: "wr_quality_ftr_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_ftr_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), "wr_quality_ftr_1");
         await SeedWorkflowRunAsync(db, "wr_quality_ftr_1", QualityRunState("wr_quality_ftr_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -577,7 +605,7 @@ public class IssueMetricsQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_rework_1", workflowRunId: "wr_quality_rework_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_rework_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), "wr_quality_rework_1");
         await SeedWorkflowRunAsync(db, "wr_quality_rework_1", QualityRunState("wr_quality_rework_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 1)]),
@@ -608,7 +636,7 @@ public class IssueMetricsQuerierSpecs
         SeedIssue(db, project, "issue_quality_status_backlog", workflowRunId: null, status: IssueStatus.Backlog);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, shipped.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_status_shipped");
+        SeedEvent(db, shipped.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), "wr_quality_status_shipped");
         await SeedWorkflowRunAsync(db, "wr_quality_status_shipped", QualityRunState("wr_quality_status_shipped", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await SeedWorkflowRunAsync(db, "wr_quality_status_inprogress", QualityRunState("wr_quality_status_inprogress", [("plan", [("plan-ok", "Plan ok", 1)])]));
         await db.SaveChangesAsync();
@@ -635,7 +663,7 @@ public class IssueMetricsQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_stage_1", workflowRunId: "wr_quality_stage_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_stage_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), "wr_quality_stage_1");
         await SeedWorkflowRunAsync(db, "wr_quality_stage_1", QualityRunState("wr_quality_stage_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -671,9 +699,9 @@ public class IssueMetricsQuerierSpecs
         var old = SeedIssue(db, project, "issue_quality_win_old", workflowRunId: "wr_quality_win_old", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, recent.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-3), "wr_quality_win_recent");
-        SeedEvent(db, mid.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-20), "wr_quality_win_mid");
-        SeedEvent(db, old.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-40), "wr_quality_win_old");
+        SeedEvent(db, recent.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-3), "wr_quality_win_recent");
+        SeedEvent(db, mid.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-20), "wr_quality_win_mid");
+        SeedEvent(db, old.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-40), "wr_quality_win_old");
 
         await SeedWorkflowRunAsync(db, "wr_quality_win_recent", QualityRunState("wr_quality_win_recent", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await SeedWorkflowRunAsync(db, "wr_quality_win_mid", QualityRunState("wr_quality_win_mid", [("plan", [("plan-ok", "Plan ok", 0)])]));
@@ -729,8 +757,8 @@ public class IssueMetricsQuerierSpecs
         var onlyPlan = SeedIssue(db, project, "issue_quality_denom_plan", workflowRunId: "wr_quality_denom_plan", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, reachedIntegrate.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_denom_integrate");
-        SeedEvent(db, onlyPlan.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_denom_plan");
+        SeedEvent(db, reachedIntegrate.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), "wr_quality_denom_integrate");
+        SeedEvent(db, onlyPlan.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), "wr_quality_denom_plan");
 
         await SeedWorkflowRunAsync(db, "wr_quality_denom_integrate", QualityRunState("wr_quality_denom_integrate", [
             ("plan", [("plan-ok", "Plan ok", 1)]),
@@ -767,9 +795,9 @@ public class IssueMetricsQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_lifecycle_1", workflowRunId: "wr_quality_lifecycle_final", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, "com.mohist.issue.work-started", now.AddDays(-5), "wr_quality_lifecycle_first");
-        SeedEvent(db, issue.Id, "com.mohist.issue.work-started", now.AddDays(-2), "wr_quality_lifecycle_final");
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_lifecycle_final");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, now.AddDays(-5), "wr_quality_lifecycle_first");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, now.AddDays(-2), "wr_quality_lifecycle_final");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-1), "wr_quality_lifecycle_final");
 
         await SeedWorkflowRunAsync(db, "wr_quality_lifecycle_first", QualityRunState("wr_quality_lifecycle_first", [
             ("plan", [("plan-repair", "Plan repair", 1)]),
@@ -806,7 +834,7 @@ public class IssueMetricsQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_rerun_repair_1", workflowRunId: "wr_quality_rerun_repair_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_rerun_repair_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-1), "wr_quality_rerun_repair_1");
         await SeedWorkflowRunAsync(db, "wr_quality_rerun_repair_1", QualityRunState("wr_quality_rerun_repair_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("check", [("review", "Review", 0)]),
@@ -848,7 +876,7 @@ public class IssueMetricsQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_check_retry_1", workflowRunId: "wr_quality_check_retry_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_check_retry_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-1), "wr_quality_check_retry_1");
         await SeedWorkflowRunAsync(db, "wr_quality_check_retry_1", QualityRunState("wr_quality_check_retry_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("check", [("review", "Review", 0)]),
@@ -883,7 +911,7 @@ public class IssueMetricsQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_missing_run_1", workflowRunId: "wr_quality_missing_run_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_missing_run_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), "wr_quality_missing_run_1");
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -906,7 +934,7 @@ public class IssueMetricsQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_corrupt_run_1", workflowRunId: "wr_quality_corrupt_run_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_corrupt_run_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), "wr_quality_corrupt_run_1");
         await db.Database.ExecuteSqlRawAsync(
             "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
             "wr_quality_corrupt_run_1",
@@ -934,8 +962,8 @@ public class IssueMetricsQuerierSpecs
         var b1 = SeedIssue(db, projectB, "issue_quality_scope_b_1", workflowRunId: "wr_quality_scope_b_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, a1.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero), "wr_quality_scope_a_1");
-        SeedEvent(db, b1.Id, IssueMetricsQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero), "wr_quality_scope_b_1");
+        SeedEvent(db, a1.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero), "wr_quality_scope_a_1");
+        SeedEvent(db, b1.Id, EventCatalog.ReverseDns.IssueCompleted, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero), "wr_quality_scope_b_1");
 
         await SeedWorkflowRunAsync(db, "wr_quality_scope_a_1", QualityRunState("wr_quality_scope_a_1", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await SeedWorkflowRunAsync(db, "wr_quality_scope_b_1", QualityRunState("wr_quality_scope_b_1", [("plan", [("plan-ok", "Plan ok", 1)])]));
@@ -998,7 +1026,7 @@ public class IssueMetricsQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_leading_1", workflowRunId: "wr_quality_trend_leading_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, shipTime, "wr_quality_trend_leading_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, shipTime, "wr_quality_trend_leading_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_leading_1", QualityRunState("wr_quality_trend_leading_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
         ]));
@@ -1029,8 +1057,8 @@ public class IssueMetricsQuerierSpecs
         var notFtrDay17 = SeedIssue(db, project, "issue_quality_trend_ftr_b", workflowRunId: "wr_quality_trend_ftr_b", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, ftrDay17.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2).AddHours(1), "wr_quality_trend_ftr_a");
-        SeedEvent(db, notFtrDay17.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2).AddHours(1), "wr_quality_trend_ftr_b");
+        SeedEvent(db, ftrDay17.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2).AddHours(1), "wr_quality_trend_ftr_a");
+        SeedEvent(db, notFtrDay17.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2).AddHours(1), "wr_quality_trend_ftr_b");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_ftr_a", QualityRunState("wr_quality_trend_ftr_a", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await SeedWorkflowRunAsync(db, "wr_quality_trend_ftr_b", QualityRunState("wr_quality_trend_ftr_b", [("plan", [("plan-repair", "Plan repair", 1)])]));
         await db.SaveChangesAsync();
@@ -1057,7 +1085,7 @@ public class IssueMetricsQuerierSpecs
         var reworked = SeedIssue(db, project, "issue_quality_trend_rework_1", workflowRunId: "wr_quality_trend_rework_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, reworked.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_trend_rework_1");
+        SeedEvent(db, reworked.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-1), "wr_quality_trend_rework_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_rework_1", QualityRunState("wr_quality_trend_rework_1", [
             ("plan", [("plan-repair", "Plan repair", 1)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -1086,7 +1114,7 @@ public class IssueMetricsQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_multistage_1", workflowRunId: "wr_quality_trend_multistage_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-3), "wr_quality_trend_multistage_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-3), "wr_quality_trend_multistage_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_multistage_1", QualityRunState("wr_quality_trend_multistage_1", [
             ("plan", [("plan-repair", "Plan repair", 1)]),
             ("build", [("build-repair", "Build repair", 1)]),
@@ -1123,7 +1151,7 @@ public class IssueMetricsQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_empty_1", workflowRunId: "wr_quality_trend_empty_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_trend_empty_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-1), "wr_quality_trend_empty_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_empty_1", QualityRunState("wr_quality_trend_empty_1", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await db.SaveChangesAsync();
 
@@ -1168,9 +1196,9 @@ public class IssueMetricsQuerierSpecs
 
         // Even if these non-Done issues had terminal events, they
         // must not appear in any trend bucket.
-        SeedEvent(db, inProgress.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_trend_ns_inprog");
-        SeedEvent(db, backlog.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2));
-        SeedEvent(db, cancelled.Id, IssueMetricsQuerier.ClosedType, now.AddDays(-3));
+        SeedEvent(db, inProgress.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-1), "wr_quality_trend_ns_inprog");
+        SeedEvent(db, backlog.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2));
+        SeedEvent(db, cancelled.Id, EventCatalog.ReverseDns.IssueCancelled, now.AddDays(-3));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -1200,7 +1228,7 @@ public class IssueMetricsQuerierSpecs
         // Anchor the ship event on day 5 of the trailing window
         // (now.AddDays(-5) → 2026-06-14, a Sunday).
         var shipTime = now.AddDays(-5);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, shipTime, "wr_quality_trend_anchor_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, shipTime, "wr_quality_trend_anchor_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_anchor_1", QualityRunState("wr_quality_trend_anchor_1", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await db.SaveChangesAsync();
 
@@ -1227,7 +1255,7 @@ public class IssueMetricsQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_today_1", workflowRunId: "wr_quality_trend_today_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, shipTime, "wr_quality_trend_today_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, shipTime, "wr_quality_trend_today_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_today_1", QualityRunState("wr_quality_trend_today_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
         ]));
@@ -1261,7 +1289,7 @@ public class IssueMetricsQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_midday_1", workflowRunId: "wr_quality_trend_midday_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, shipTime, "wr_quality_trend_midday_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, shipTime, "wr_quality_trend_midday_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_midday_1", QualityRunState("wr_quality_trend_midday_1", [
             ("plan", [("plan-repair", "Plan repair", 1)]),
         ]));
@@ -1294,7 +1322,7 @@ public class IssueMetricsQuerierSpecs
         var issue = SeedIssue(db, project, "issue_quality_trend_additive_1", workflowRunId: "wr_quality_trend_additive_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_trend_additive_1");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, now.AddDays(-2), "wr_quality_trend_additive_1");
         await SeedWorkflowRunAsync(db, "wr_quality_trend_additive_1", QualityRunState("wr_quality_trend_additive_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -1335,7 +1363,7 @@ public class IssueMetricsQuerierSpecs
             db, project, "issue_dt_basic",
             createdAt: createdAt,
             completedAt: completedAt);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, workStartedAt);
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, workStartedAt);
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -1370,8 +1398,8 @@ public class IssueMetricsQuerierSpecs
             db, project, "issue_dt_retry",
             createdAt: createdAt,
             completedAt: completedAt);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, firstStart);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, retryStart);
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, firstStart);
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, retryStart);
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -1406,10 +1434,10 @@ public class IssueMetricsQuerierSpecs
             db, project, "issue_dt_reopen",
             createdAt: createdAt,
             completedAt: latestCompletedAt);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, firstStart);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, firstCompletionRecorded);
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, firstStart);
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, firstCompletionRecorded);
         SeedEvent(db, issue.Id, "com.mohist.issue.reopened", reopenedAt);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, latestCompletionRecorded);
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, latestCompletionRecorded);
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -1474,7 +1502,7 @@ public class IssueMetricsQuerierSpecs
             createdAt: createdAt,
             completedAt: zeroMoment);
         // Work-started happens at exactly the same instant as completion.
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, new DateTimeOffset(zeroMoment, TimeSpan.Zero));
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, new DateTimeOffset(zeroMoment, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -1505,7 +1533,7 @@ public class IssueMetricsQuerierSpecs
         // serialized state — the canonical helper does not capture these
         // for non-Done states.
         UpdateCompletedAtAndCreatedAt(db, issue.Id, createdAt, closedAt);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.ClosedType, new DateTimeOffset(closedAt, TimeSpan.Zero));
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCancelled, new DateTimeOffset(closedAt, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
@@ -1680,7 +1708,7 @@ public class IssueMetricsQuerierSpecs
             createdAt: createdAt,
             completedAt: completedAt,
             workflowRunId: "wr_sd_multirun");
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, new DateTimeOffset(2026, 6, 3, 10, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_multirun");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, new DateTimeOffset(2026, 6, 3, 10, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_multirun");
         await db.SaveChangesAsync();
 
         await SeedWorkflowRunAsync(db, "wr_sd_multirun", ApprovalRunState("wr_sd_multirun", requestedAt: new DateTimeOffset(2026, 6, 1, 8, 0, 0, TimeSpan.Zero), wait: TimeSpan.Zero));
@@ -1726,8 +1754,8 @@ public class IssueMetricsQuerierSpecs
             createdAt: createdAt,
             completedAt: completedAt,
             workflowRunId: "wr_sd_second");
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, new DateTimeOffset(2026, 6, 3, 10, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_first");
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_second");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, new DateTimeOffset(2026, 6, 3, 10, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_first");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, new DateTimeOffset(2026, 6, 6, 10, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_second");
         await db.SaveChangesAsync();
 
         // First run: plan takes 1h (started 10:00, completed 11:00).
@@ -1769,8 +1797,8 @@ public class IssueMetricsQuerierSpecs
             createdAt: completedAt.AddDays(-5),
             completedAt: completedAt,
             workflowRunId: currentRunId);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, workStartedAt, workflowRunId: priorRunId);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, completedAt, workflowRunId: currentRunId);
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, workStartedAt, workflowRunId: priorRunId);
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, completedAt, workflowRunId: currentRunId);
         await db.SaveChangesAsync();
 
         await SeedWorkflowRunAsync(db, priorRunId, ApprovalRunState(priorRunId, workStartedAt, TimeSpan.FromHours(1)));
@@ -1825,8 +1853,8 @@ public class IssueMetricsQuerierSpecs
             db, project, "issue_sd_completed_run",
             createdAt: new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc),
             completedAt: completedAt);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, completedAt.AddHours(-4));
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkCompletedType, completedAt, workflowRunId: "wr_sd_completed_run");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, completedAt.AddHours(-4));
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueCompleted, completedAt, workflowRunId: "wr_sd_completed_run");
         await db.SaveChangesAsync();
 
         await SeedWorkflowRunAsync(db, "wr_sd_completed_run", ApprovalRunState("wr_sd_completed_run", completedAt.AddHours(-4), TimeSpan.Zero));
@@ -1856,7 +1884,7 @@ public class IssueMetricsQuerierSpecs
             createdAt: new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc),
             completedAt: completedAt,
             workflowRunId: "wr_sd_duplicate_complete");
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, completedAt.AddHours(-6), workflowRunId: "wr_sd_duplicate_complete");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, completedAt.AddHours(-6), workflowRunId: "wr_sd_duplicate_complete");
         await db.SaveChangesAsync();
 
         await SeedWorkflowRunAsync(db, "wr_sd_duplicate_complete", ApprovalRunState("wr_sd_duplicate_complete", completedAt.AddHours(-6), TimeSpan.Zero));
@@ -1892,7 +1920,7 @@ public class IssueMetricsQuerierSpecs
             createdAt: createdAt,
             completedAt: completedAt,
             workflowRunId: "wr_sd_undef");
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, new DateTimeOffset(2026, 6, 3, 10, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_undef");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, new DateTimeOffset(2026, 6, 3, 10, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_undef");
         await db.SaveChangesAsync();
 
         await SeedWorkflowRunAsync(db, "wr_sd_undef", ApprovalRunState("wr_sd_undef", requestedAt: new DateTimeOffset(2026, 6, 1, 8, 0, 0, TimeSpan.Zero), wait: TimeSpan.Zero));
@@ -1942,7 +1970,7 @@ public class IssueMetricsQuerierSpecs
             createdAt: createdAt,
             completedAt: completedAt,
             workflowRunId: workflowRunId);
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, firstWorkStart, workflowRunId: workflowRunId);
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, firstWorkStart, workflowRunId: workflowRunId);
         await db.SaveChangesAsync();
 
         // Stage spans = 7h (plan 3h + build 4h).
@@ -2021,8 +2049,8 @@ public class IssueMetricsQuerierSpecs
             createdAt: completedAtBase.AddDays(-25),
             completedAt: completedAtBase.AddDays(-1),
             workflowRunId: "wr_sd_weighted_b");
-        SeedEvent(db, issueA.Id, IssueMetricsQuerier.WorkStartedType, completedAtBase.AddDays(-2).AddHours(-10), workflowRunId: "wr_sd_weighted_a");
-        SeedEvent(db, issueB.Id, IssueMetricsQuerier.WorkStartedType, completedAtBase.AddDays(-1).AddHours(-20), workflowRunId: "wr_sd_weighted_b");
+        SeedEvent(db, issueA.Id, EventCatalog.ReverseDns.IssueWorkStarted, completedAtBase.AddDays(-2).AddHours(-10), workflowRunId: "wr_sd_weighted_a");
+        SeedEvent(db, issueB.Id, EventCatalog.ReverseDns.IssueWorkStarted, completedAtBase.AddDays(-1).AddHours(-20), workflowRunId: "wr_sd_weighted_b");
         await db.SaveChangesAsync();
 
         var wrA = "wr_sd_weighted_a";
@@ -2068,8 +2096,8 @@ public class IssueMetricsQuerierSpecs
             createdAt: completedAtBase.AddDays(-12),
             completedAt: completedAtBase.AddDays(-1),
             workflowRunId: "wr_sd_wait_b");
-        SeedEvent(db, issueA.Id, IssueMetricsQuerier.WorkStartedType, completedAtBase.AddDays(-2).AddHours(-10), workflowRunId: "wr_sd_wait_a");
-        SeedEvent(db, issueB.Id, IssueMetricsQuerier.WorkStartedType, completedAtBase.AddDays(-1).AddHours(-10), workflowRunId: "wr_sd_wait_b");
+        SeedEvent(db, issueA.Id, EventCatalog.ReverseDns.IssueWorkStarted, completedAtBase.AddDays(-2).AddHours(-10), workflowRunId: "wr_sd_wait_a");
+        SeedEvent(db, issueB.Id, EventCatalog.ReverseDns.IssueWorkStarted, completedAtBase.AddDays(-1).AddHours(-10), workflowRunId: "wr_sd_wait_b");
         await db.SaveChangesAsync();
 
         var wrA = "wr_sd_wait_a";
@@ -2150,7 +2178,7 @@ public class IssueMetricsQuerierSpecs
             createdAt: completedAt.AddDays(-2),
             completedAt: completedAt,
             workflowRunId: "wr_sd_invalid_wait");
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, completedAt.AddHours(-3), workflowRunId: "wr_sd_invalid_wait");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, completedAt.AddHours(-3), workflowRunId: "wr_sd_invalid_wait");
         await db.SaveChangesAsync();
 
         await SeedWorkflowRunAsync(db, "wr_sd_invalid_wait", ApprovalRunState("wr_sd_invalid_wait", completedAt.AddHours(-3), TimeSpan.FromHours(2)));
@@ -2182,7 +2210,7 @@ public class IssueMetricsQuerierSpecs
             createdAt: completedAt.AddDays(-2),
             completedAt: completedAt,
             workflowRunId: "wr_sd_invalid_stage");
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, completedAt.AddHours(-1), workflowRunId: "wr_sd_invalid_stage");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, completedAt.AddHours(-1), workflowRunId: "wr_sd_invalid_stage");
         await db.SaveChangesAsync();
 
         await SeedWorkflowRunAsync(db, "wr_sd_invalid_stage", ApprovalRunState("wr_sd_invalid_stage", completedAt.AddHours(-2), TimeSpan.Zero));
@@ -2242,7 +2270,7 @@ public class IssueMetricsQuerierSpecs
             createdAt: new DateTime(2026, 6, 1, 8, 0, 0, DateTimeKind.Utc),
             completedAt: zeroMoment,
             workflowRunId: "wr_sd_zero");
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, new DateTimeOffset(zeroMoment, TimeSpan.Zero), workflowRunId: "wr_sd_zero");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, new DateTimeOffset(zeroMoment, TimeSpan.Zero), workflowRunId: "wr_sd_zero");
         await db.SaveChangesAsync();
 
         await SeedWorkflowRunAsync(db, "wr_sd_zero", ApprovalRunState("wr_sd_zero", requestedAt: new DateTimeOffset(2026, 6, 1, 8, 0, 0, TimeSpan.Zero), wait: TimeSpan.Zero));
@@ -2281,7 +2309,7 @@ public class IssueMetricsQuerierSpecs
             createdAt: new DateTime(2026, 5, 25, 8, 0, 0, DateTimeKind.Utc),
             completedAt: new DateTime(2026, 6, 18, 10, 0, 0, DateTimeKind.Utc),
             workflowRunId: "wr_sd_window_inside");
-        SeedEvent(db, inside.Id, IssueMetricsQuerier.WorkStartedType, new DateTimeOffset(2026, 6, 18, 9, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_window_inside");
+        SeedEvent(db, inside.Id, EventCatalog.ReverseDns.IssueWorkStarted, new DateTimeOffset(2026, 6, 18, 9, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_window_inside");
         await db.SaveChangesAsync();
         await SeedWorkflowRunAsync(db, "wr_sd_window_inside", ApprovalRunState("wr_sd_window_inside", requestedAt: new DateTimeOffset(2026, 6, 18, 8, 0, 0, TimeSpan.Zero), wait: TimeSpan.Zero));
         SeedWorkflowRunEvent(db, "wr_sd_window_inside", 1, EventCatalog.ReverseDns.StageStarted, new DateTimeOffset(2026, 6, 18, 9, 0, 0, TimeSpan.Zero), new { stage = "plan" });
@@ -2293,7 +2321,7 @@ public class IssueMetricsQuerierSpecs
             createdAt: new DateTime(2026, 5, 1, 8, 0, 0, DateTimeKind.Utc),
             completedAt: new DateTime(2026, 5, 19, 10, 0, 0, DateTimeKind.Utc),
             workflowRunId: "wr_sd_window_outside");
-        SeedEvent(db, outside.Id, IssueMetricsQuerier.WorkStartedType, new DateTimeOffset(2026, 5, 19, 9, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_window_outside");
+        SeedEvent(db, outside.Id, EventCatalog.ReverseDns.IssueWorkStarted, new DateTimeOffset(2026, 5, 19, 9, 0, 0, TimeSpan.Zero), workflowRunId: "wr_sd_window_outside");
         await db.SaveChangesAsync();
         await SeedWorkflowRunAsync(db, "wr_sd_window_outside", ApprovalRunState("wr_sd_window_outside", requestedAt: new DateTimeOffset(2026, 5, 19, 8, 0, 0, TimeSpan.Zero), wait: TimeSpan.Zero));
         SeedWorkflowRunEvent(db, "wr_sd_window_outside", 1, EventCatalog.ReverseDns.StageStarted, new DateTimeOffset(2026, 5, 19, 9, 0, 0, TimeSpan.Zero), new { stage = "plan" });
@@ -2330,8 +2358,8 @@ public class IssueMetricsQuerierSpecs
             createdAt: new DateTime(2026, 6, 10, 8, 0, 0, DateTimeKind.Utc),
             completedAt: completedAt,
             workflowRunId: "wr_sd_scope_b");
-        SeedEvent(db, insideA.Id, IssueMetricsQuerier.WorkStartedType, new DateTimeOffset(completedAt.AddHours(-2), TimeSpan.Zero), workflowRunId: "wr_sd_scope_a");
-        SeedEvent(db, insideB.Id, IssueMetricsQuerier.WorkStartedType, new DateTimeOffset(completedAt.AddHours(-4), TimeSpan.Zero), workflowRunId: "wr_sd_scope_b");
+        SeedEvent(db, insideA.Id, EventCatalog.ReverseDns.IssueWorkStarted, new DateTimeOffset(completedAt.AddHours(-2), TimeSpan.Zero), workflowRunId: "wr_sd_scope_a");
+        SeedEvent(db, insideB.Id, EventCatalog.ReverseDns.IssueWorkStarted, new DateTimeOffset(completedAt.AddHours(-4), TimeSpan.Zero), workflowRunId: "wr_sd_scope_b");
         await db.SaveChangesAsync();
         await SeedWorkflowRunAsync(db, "wr_sd_scope_a", ApprovalRunState("wr_sd_scope_a", requestedAt: new DateTimeOffset(2026, 6, 18, 7, 0, 0, TimeSpan.Zero), wait: TimeSpan.Zero));
         await SeedWorkflowRunAsync(db, "wr_sd_scope_b", ApprovalRunState("wr_sd_scope_b", requestedAt: new DateTimeOffset(2026, 6, 18, 7, 0, 0, TimeSpan.Zero), wait: TimeSpan.Zero));
@@ -2369,7 +2397,7 @@ public class IssueMetricsQuerierSpecs
             createdAt: new DateTime(2026, 6, 10, 8, 0, 0, DateTimeKind.Utc),
             completedAt: completedAt,
             workflowRunId: "wr_sd_order");
-        SeedEvent(db, issue.Id, IssueMetricsQuerier.WorkStartedType, completedAt.AddHours(-10), workflowRunId: "wr_sd_order");
+        SeedEvent(db, issue.Id, EventCatalog.ReverseDns.IssueWorkStarted, completedAt.AddHours(-10), workflowRunId: "wr_sd_order");
         await db.SaveChangesAsync();
 
         await SeedWorkflowRunAsync(db, "wr_sd_order", ApprovalRunState("wr_sd_order", requestedAt: new DateTimeOffset(2026, 6, 10, 8, 0, 0, TimeSpan.Zero), wait: TimeSpan.Zero));

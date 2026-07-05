@@ -23,12 +23,14 @@ namespace Mohist.Server.Issue.Services;
 /// </summary>
 public class IssueMetricsQuerier : IScopedService
 {
-    internal const string WorkStartedType = "com.mohist.issue.work-started";
+    internal const string WorkStartedType = EventCatalog.ReverseDns.IssueWorkStarted;
     // CloudEvents reverse-DNS bus types that mark a terminal transition.
-    // <c>com.mohist.issue.work-completed</c> → <c>completed</c> (Done).
-    // <c>com.mohist.issue.closed</c> → <c>failed</c> (Cancelled).
-    internal const string WorkCompletedType = "com.mohist.issue.work-completed";
-    internal const string ClosedType = "com.mohist.issue.closed";
+    // These must mirror what <see cref="IssueEventSerializer.BusType"/> emits
+    // (and what <see cref="EventStore"/> persists to <c>IssueEvents.Type</c>),
+    // so we anchor on <see cref="EventCatalog"/> rather than restating the
+    // literal — a previous mismatch silenced every IssueEvents-backed metric.
+    internal const string WorkCompletedType = EventCatalog.ReverseDns.IssueCompleted;
+    internal const string ClosedType = EventCatalog.ReverseDns.IssueCancelled;
     internal const string IssueSourcePrefix = "/mohist/issues/";
 
     private static readonly string[] QualityStageOrder = ["plan", "build", "check", "integrate"];
