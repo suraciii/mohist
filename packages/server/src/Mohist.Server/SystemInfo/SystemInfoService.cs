@@ -1,4 +1,5 @@
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Logging;
 
 namespace Mohist.Server.SystemInfo;
 
@@ -12,6 +13,7 @@ public sealed class SystemInfoService : ISingletonService
     private readonly IServiceStatusChecker _serviceStatusChecker;
     private readonly IConfiguration _configuration;
     private readonly IEnvironmentVariableProvider _environment;
+    private readonly ILogPathResolver _logPathResolver;
     private readonly ILogger<SystemInfoService> _logger;
 
     public SystemInfoService(
@@ -21,6 +23,7 @@ public sealed class SystemInfoService : ISingletonService
         IServiceStatusChecker serviceStatusChecker,
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
+        ILogPathResolver logPathResolver,
         ILogger<SystemInfoService> logger)
     {
         _runtimeBuildInfo = runtimeBuildInfo;
@@ -29,6 +32,7 @@ public sealed class SystemInfoService : ISingletonService
         _serviceStatusChecker = serviceStatusChecker;
         _configuration = configuration;
         _environment = environment;
+        _logPathResolver = logPathResolver;
         _logger = logger;
     }
 
@@ -167,7 +171,7 @@ public sealed class SystemInfoService : ISingletonService
         return new SystemPaths(
             Db: dbPath,
             Config: Path.Combine(dataDir, "config.jsonc"),
-            Logs: Path.Combine(dataDir, "logs"),
+            Logs: _logPathResolver.Resolve(),
             Opencode: Path.Combine(home, ".config", "opencode"));
     }
 }

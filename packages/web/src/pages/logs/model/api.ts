@@ -1,11 +1,23 @@
 import { request } from '../../../shared/api/client'
 
+export interface LogEntry {
+  level: string | null
+  time: string | null
+  service: string | null
+  message: string
+  raw: string
+}
+
 export interface LogTailResult {
-  file: string
-  cursor: number
-  lines: string[]
+  lines: LogEntry[]
+  cursor: number | null
+  nextCursor: number | null
+  source: string | null
   truncated: boolean
   reset: boolean
+  unavailable: boolean
+  expectedLocation: string | null
+  reason: string | null
 }
 
 export function getLogTail(cursor?: number, limit?: number, maxBytes?: number) {

@@ -2,12 +2,18 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Logging;
 using Mohist.Server.Otel;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // 加载 ~/.mohist/config.jsonc，环境变量（MOHIST__*）会自动覆盖它
 builder.Configuration.AddMohistConfigFile();
+
+// 注册文件日志 provider：把每条记录写为 NDJSON 到 ILogPathResolver.Resolve() 指定的目录。
+// 在主 builder 和 BuildAlternateApp 备用 builder 上都注册一遍，保证 OTLP 端口绑定失败时的
+// fallback 主机也以同一格式记录。
+builder.Logging.AddFileLogger();
 
 // 主 API 端口。优先尊重用户已经显式设置的 urls / ASPNETCORE_URLS，
 // 否则使用 Mohist:Host / Mohist:Port（默认 localhost:3456）。
@@ -103,6 +109,7 @@ static WebApplication BuildAlternateApp(string[] args)
 {
     var fresh = WebApplication.CreateBuilder(args);
     fresh.Configuration.AddMohistConfigFile();
+    fresh.Logging.AddFileLogger();
     var altMainHost = fresh.Configuration["urls"]
         ?? fresh.Configuration["ASPNETCORE_URLS"]
         ?? $"http://{fresh.Configuration["Mohist:Host"] ?? "localhost"}:" +

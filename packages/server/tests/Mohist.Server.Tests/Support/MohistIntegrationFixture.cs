@@ -26,6 +26,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     private MohistWebApplicationFactory _factory = null!;
     private string? _runnerRoot;
     private string? _systemUpdateStatePath;
+    private string? _logsPath;
 
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
@@ -36,6 +37,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     public string ConnectionString { get; private set; } = null!;
     public string RunnerRoot => _runnerRoot ?? throw new InvalidOperationException("Fixture is not initialized");
+    public string LogsPath => _logsPath ?? throw new InvalidOperationException("Fixture is not initialized");
 
     public async Task InitializeAsync()
     {
@@ -46,8 +48,9 @@ public class MohistIntegrationFixture : IAsyncLifetime
         _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-root-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_runnerRoot);
         _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
+        _logsPath = Path.Combine(Path.GetTempPath(), $"mohist-logs-{Guid.NewGuid():N}");
 
-        _factory = new MohistWebApplicationFactory(ConnectionString, _runnerRoot, _systemUpdateStatePath, TimeProvider);
+        _factory = new MohistWebApplicationFactory(ConnectionString, _runnerRoot, _systemUpdateStatePath, _logsPath, TimeProvider);
         Client = _factory.CreateClient();
         await _factory.EnsureSchemaAsync();
     }
@@ -64,6 +67,8 @@ public class MohistIntegrationFixture : IAsyncLifetime
             File.Delete(_systemUpdateStatePath);
         if (!string.IsNullOrWhiteSpace(_factory?.ArtifactStorageRoot) && Directory.Exists(_factory.ArtifactStorageRoot))
             Directory.Delete(_factory.ArtifactStorageRoot, recursive: true);
+        if (!string.IsNullOrWhiteSpace(_logsPath) && Directory.Exists(_logsPath))
+            Directory.Delete(_logsPath, recursive: true);
     }
 }
 
@@ -72,18 +77,40 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _connectionString;
     private readonly string _runnerRoot;
     private readonly string _systemUpdateStatePath;
+    private readonly string _logsPath;
     private readonly FakeTimeProvider _timeProvider;
     private readonly string _configPath;
     private readonly string _artifactStorageRoot;
     private string? _webRoot;
 
     public string ArtifactStorageRoot => _artifactStorageRoot;
+    public string LogsPath => _logsPath;
 
-    public MohistWebApplicationFactory(string connectionString, string runnerRoot, string systemUpdateStatePath, FakeTimeProvider? timeProvider = null)
+    public MohistWebApplicationFactory(
+        string connectionString,
+        string runnerRoot,
+        string systemUpdateStatePath,
+        FakeTimeProvider? timeProvider = null)
+        : this(
+            connectionString,
+            runnerRoot,
+            systemUpdateStatePath,
+            Path.Combine(Path.GetTempPath(), $"mohist-logs-{Guid.NewGuid():N}"),
+            timeProvider)
+    {
+    }
+
+    public MohistWebApplicationFactory(
+        string connectionString,
+        string runnerRoot,
+        string systemUpdateStatePath,
+        string logsPath,
+        FakeTimeProvider? timeProvider = null)
     {
         _connectionString = connectionString;
         _runnerRoot = runnerRoot;
         _systemUpdateStatePath = systemUpdateStatePath;
+        _logsPath = logsPath;
         _timeProvider = timeProvider ?? new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
         _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
         _artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
@@ -98,6 +125,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
         builder.UseSetting("Mohist:ArtifactStorage:Root", _artifactStorageRoot);
+        builder.UseSetting("Mohist:LogsPath", _logsPath);
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
@@ -108,6 +136,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = _artifactStorageRoot,
+                ["Mohist:LogsPath"] = _logsPath,
                 ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",
                 ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
