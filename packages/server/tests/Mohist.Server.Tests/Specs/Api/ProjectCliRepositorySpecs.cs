@@ -13,22 +13,49 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public void ProjectRepoHelp_ListsListAddSetDefaultRemoveAndDocumentsProjectOption()
+    public void RepoHelp_ListsListAddUpdateSetDefaultDelete()
     {
-        var help = RenderHelp(["project", "repo", "--help"]);
+        var help = RenderHelp(["repo", "--help"]);
 
         Assert.Contains("list", help);
         Assert.Contains("add", help);
+        Assert.Contains("update", help);
         Assert.Contains("set-default", help);
-        Assert.Contains("remove", help);
+        Assert.Contains("delete", help);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public void ProjectRepoListHelp_DocumentsProjectAndProjectIdOptions()
+    public void RepoListHelp_DocumentsProjectAndProjectIdOptions()
     {
-        var help = RenderHelp(["project", "repo", "list", "--help"]);
+        var help = RenderHelp(["repo", "list", "--help"]);
+
+        Assert.Contains("--project", help);
+        Assert.Contains("--project-id", help);
+        Assert.Contains("--output", help);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public void RepoAddHelp_DocumentsProjectAndProjectIdOptions()
+    {
+        var help = RenderHelp(["repo", "add", "--help"]);
+
+        Assert.Contains("--project", help);
+        Assert.Contains("--project-id", help);
+        Assert.Contains("--git-url", help);
+        Assert.Contains("--set-default", help);
+        Assert.DoesNotContain("--default", help);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public void RepoUpdateHelp_DocumentsProjectAndProjectIdOptions()
+    {
+        var help = RenderHelp(["repo", "update", "--help"]);
 
         Assert.Contains("--project", help);
         Assert.Contains("--project-id", help);
@@ -37,9 +64,9 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public void ProjectRepoAddHelp_DocumentsProjectAndProjectIdOptions()
+    public void RepoSetDefaultHelp_DocumentsProjectAndProjectIdOptions()
     {
-        var help = RenderHelp(["project", "repo", "add", "--help"]);
+        var help = RenderHelp(["repo", "set-default", "--help"]);
 
         Assert.Contains("--project", help);
         Assert.Contains("--project-id", help);
@@ -48,9 +75,9 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public void ProjectRepoSetDefaultHelp_DocumentsProjectAndProjectIdOptions()
+    public void RepoDeleteHelp_DocumentsProjectAndProjectIdOptions()
     {
-        var help = RenderHelp(["project", "repo", "set-default", "--help"]);
+        var help = RenderHelp(["repo", "delete", "--help"]);
 
         Assert.Contains("--project", help);
         Assert.Contains("--project-id", help);
@@ -59,18 +86,7 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public void ProjectRepoRemoveHelp_DocumentsProjectAndProjectIdOptions()
-    {
-        var help = RenderHelp(["project", "repo", "remove", "--help"]);
-
-        Assert.Contains("--project", help);
-        Assert.Contains("--project-id", help);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
-    public void ProjectHelp_ListsRepoAlongsideExistingSubcommands()
+    public void ProjectHelp_DoesNotListRepoSubcommand()
     {
         var help = RenderHelp(["project", "--help"]);
 
@@ -79,53 +95,45 @@ public class ProjectCliRepositorySpecs
         Assert.Contains("show", help);
         Assert.Contains("use", help);
         Assert.Contains("delete", help);
-        Assert.Contains("repo", help);
+        Assert.DoesNotContain("repo", help);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public void ProjectRepoListHelp_ListsOutputOption()
+    public async Task ProjectRepo_AnySubcommand_IsUnrecognized()
     {
-        var help = RenderHelp(["project", "repo", "list", "--help"]);
+        var http = new RecordingHttpHandler();
+        var output = new StringWriter();
+        var error = new StringWriter();
 
-        Assert.Contains("--output", help);
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["project", "repo", "list"],
+            output,
+            error,
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(http.Requests);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public void ProjectRepoAddHelp_DoesNotAdvertiseOutputOption()
+    public void RepoHelp_DoesNotAdvertiseNameOption()
     {
-        var help = RenderHelp(["project", "repo", "add", "--help"]);
+        var help = RenderHelp(["repo", "add", "--help"]);
 
-        Assert.DoesNotContain("--output", help);
+        Assert.DoesNotContain("--name", help);
+        Assert.DoesNotContain("--path", help);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public void ProjectRepoSetDefaultHelp_DoesNotAdvertiseOutputOption()
-    {
-        var help = RenderHelp(["project", "repo", "set-default", "--help"]);
-
-        Assert.DoesNotContain("--output", help);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
-    public void ProjectRepoRemoveHelp_DoesNotAdvertiseOutputOption()
-    {
-        var help = RenderHelp(["project", "repo", "remove", "--help"]);
-
-        Assert.DoesNotContain("--output", help);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
-    [Fact]
-    public async Task ProjectRepoList_ByProjectName_SendsGetOnResolvedPath()
+    public async Task RepoList_ByProjectName_SendsGetOnResolvedPath()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -142,7 +150,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "list", "--project", "mohist-local"],
+            ["repo", "list", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -158,7 +166,7 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ProjectRepoList_ByProjectId_SendsGetOnResolvedPath()
+    public async Task RepoList_ByProjectId_SendsGetOnResolvedPath()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -170,7 +178,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "list", "--project-id", "proj_f6c141d63b6243bfbb481737b2243b87"],
+            ["repo", "list", "--project-id", "proj_f6c141d63b6243bfbb481737b2243b87"],
             output,
             error,
             new FakeFileSystem(),
@@ -184,7 +192,7 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ProjectRepoList_NoActiveProjectAndNoOption_PrintsGuidedDiagnostic()
+    public async Task RepoList_NoActiveProjectAndNoOption_PrintsGuidedDiagnostic()
     {
         var http = new RecordingHttpHandler();
         var output = new StringWriter();
@@ -192,7 +200,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "list"],
+            ["repo", "list"],
             output,
             error,
             new FakeFileSystem(),
@@ -209,7 +217,7 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ProjectRepoList_OutputTable_RendersRepoListTable()
+    public async Task RepoList_OutputTable_RendersRepoListTable()
     {
         const string json = """
             {
@@ -227,7 +235,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "list", "--project", "mohist-local", "--output", "table"],
+            ["repo", "list", "--project", "mohist-local", "--output", "table"],
             output,
             error,
             new FakeFileSystem(),
@@ -247,13 +255,13 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ProjectRepoAdd_ByProjectName_SendsPostWithPayload()
+    public async Task RepoAdd_ByProjectName_SendsPostWithPayload()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.Created, """
             {
               "success": true,
-              "data": { "name": "api", "path": "/path", "remote": null, "baseBranch": "main", "isDefault": true }
+              "data": { "name": "api", "gitUrl": "git@example.com:api.git", "baseBranch": "main", "isDefault": true }
             }
             """);
 
@@ -262,7 +270,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "add", "--project", "mohist-local", "--name", "api", "--path", "/path", "--set-default"],
+            ["repo", "add", "api", "--project", "mohist-local", "--git-url", "git@example.com:api.git", "--set-default"],
             output,
             error,
             new FakeFileSystem(),
@@ -276,20 +284,21 @@ public class ProjectCliRepositorySpecs
         var body = http.ReadCapturedBody(req);
         Assert.NotNull(body);
         Assert.Equal("api", body!["name"]?.GetValue<string>());
-        Assert.Equal("/path", body["path"]?.GetValue<string>());
-        Assert.True(body["setDefault"]?.GetValue<bool>());
+        Assert.Equal("git@example.com:api.git", body["gitUrl"]?.GetValue<string>());
+        Assert.True(body["isDefault"]?.GetValue<bool>());
+        Assert.False(body.AsObject().ContainsKey("path"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ProjectRepoAdd_ByProjectId_SendsPostWithPayload()
+    public async Task RepoAdd_ByProjectId_SendsPostWithPayload()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.Created, """
             {
               "success": true,
-              "data": { "name": "api", "path": "/path", "remote": null, "baseBranch": "main", "isDefault": true }
+              "data": { "name": "api", "gitUrl": "git@example.com:api.git", "baseBranch": "main", "isDefault": true }
             }
             """);
 
@@ -298,7 +307,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "add", "--project-id", "proj_f6c141d63b6243bfbb481737b2243b87", "--name", "api", "--path", "/path", "--set-default"],
+            ["repo", "add", "api", "--project-id", "proj_f6c141d63b6243bfbb481737b2243b87", "--git-url", "git@example.com:api.git", "--set-default"],
             output,
             error,
             new FakeFileSystem(),
@@ -312,7 +321,7 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ProjectRepoAdd_MissingName_WritesErrorAndExitsNonZeroWithNoHttpCall()
+    public async Task RepoAdd_MissingGitUrl_WritesErrorAndExitsNonZeroWithNoHttpCall()
     {
         var http = new RecordingHttpHandler();
         var output = new StringWriter();
@@ -320,7 +329,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "add", "--project", "mohist-local"],
+            ["repo", "add", "api", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -328,13 +337,34 @@ public class ProjectCliRepositorySpecs
 
         Assert.Equal(1, exitCode);
         Assert.Empty(http.Requests);
-        Assert.Contains("--name", error.ToString());
+        Assert.Contains("--git-url", error.ToString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ProjectRepoSetDefault_SendsPatchWithSetDefaultTrue()
+    public async Task RepoAdd_DroppedDefaultFlag_IsRejected()
+    {
+        var http = new RecordingHttpHandler();
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["repo", "add", "api", "--project", "mohist-local", "--git-url", "git@example.com:api.git", "--default"],
+            output,
+            error,
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(http.Requests);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task RepoSetDefault_SendsPatchWithSetDefaultTrue()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -349,7 +379,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "set-default", "--project", "mohist-local", "api"],
+            ["repo", "set-default", "api", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -368,7 +398,7 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ProjectRepoRemove_SendsDeleteOnResolvedPath()
+    public async Task RepoDelete_SendsDeleteOnResolvedPath()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -380,7 +410,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "remove", "--project", "mohist-local", "api"],
+            ["repo", "delete", "api", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -396,7 +426,7 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ProjectRepoRemove_RmAlias_SendsDeleteOnResolvedPath()
+    public async Task RepoRemove_AliasesDelete()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
@@ -408,7 +438,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "rm", "--project", "mohist-local", "api"],
+            ["repo", "remove", "api", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -422,7 +452,33 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ProjectRepoAdd_ConflictResponse_IsSurfacedAsNonZeroExit()
+    public async Task RepoRm_AliasesDelete()
+    {
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """
+            { "success": true, "data": null }
+            """);
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["repo", "rm", "api", "--project", "mohist-local"],
+            output,
+            error,
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(HttpMethod.Delete, http.Requests.Single().Method);
+        Assert.Equal("/api/projects/mohist-local/repositories/api", http.Requests.Single().RequestUri!.PathAndQuery);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task RepoAdd_ConflictResponse_IsSurfacedAsNonZeroExit()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.Conflict, """
@@ -434,7 +490,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "add", "--project", "mohist-local", "--name", "api", "--path", "/path"],
+            ["repo", "add", "api", "--project", "mohist-local", "--git-url", "git@example.com:api.git"],
             output,
             error,
             new FakeFileSystem(),
@@ -448,7 +504,7 @@ public class ProjectCliRepositorySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ProjectRepoRemove_MissingRepositoryResponse_IsSurfacedAsNonZeroExit()
+    public async Task RepoDelete_MissingRepositoryResponse_IsSurfacedAsNonZeroExit()
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.NotFound, """
@@ -460,7 +516,7 @@ public class ProjectCliRepositorySpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "repo", "remove", "--project", "mohist-local", "missing-repo"],
+            ["repo", "delete", "missing-repo", "--project", "mohist-local"],
             output,
             error,
             new FakeFileSystem(),
@@ -469,6 +525,27 @@ public class ProjectCliRepositorySpecs
         Assert.Equal(4, exitCode);
         var err = error.ToString();
         Assert.Contains("not found", err, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task ProjectRepo_Add_IsRejectedAsUnrecognized()
+    {
+        var http = new RecordingHttpHandler();
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["project", "repo", "add", "api", "--git-url", "git@example.com:api.git"],
+            output,
+            error,
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(http.Requests);
     }
 
     private static string RenderHelp(string[] args)

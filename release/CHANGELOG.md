@@ -2,6 +2,21 @@
 
 发布说明。面向使用者，记录每个发布对外可见的变更（含命令路径迁移、不兼容变更、新增能力）。
 
+## Unreleased — issue #383 CLI: repo 命令组统一
+
+### 命令路径迁移（破坏性）
+
+| 旧路径 / 旧参数 | 新路径 / 新参数 | 影响 |
+|---|---|---|
+| `mo project repo ...` | `mo repo ... --project <项目>` | 仓库管理统一到顶层 `mo repo`，项目作用域通过 `--project` / `--project-id` 表达。旧嵌套路径不再可用。 |
+| `mo repo add <名> --default` | `mo repo add <名> --set-default` | “设为默认”flag 统一为 `--set-default`。旧 `--default` 不再可用。 |
+| `mo repo remove <名>` | `mo repo delete <名>` | 删除动词正名为 `delete`；`remove` / `rm` 仍作为别名保留。 |
+
+### 新增命令面
+
+- `mo repo set-default <名> --project <项目>`：将仓库设为项目默认仓库。
+- `mo repo update <名> ... --project <项目>`：与 list/add/set-default/delete 一起支持 `--project` 与 `--project-id`。
+
 ## Unreleased — issue #381 CLI: workflow 命令组完善
 
 ### 命令路径迁移（唯一破坏点）
