@@ -168,6 +168,24 @@ public class FileLoggerProviderSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
+    public void IsEnabled_DisablesLogLevelNone()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"mohist-logger-{Guid.NewGuid():N}");
+        try
+        {
+            using var provider = CreateProvider(dir, out _);
+
+            Assert.False(provider.IsEnabled(LogLevel.None));
+        }
+        finally
+        {
+            Cleanup(dir);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
     public void WriteRecord_FormatMatchesJsonOptions_SoApiPipelineSerializesItIdentically()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"mohist-logger-{Guid.NewGuid():N}");

@@ -63,7 +63,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
     /// <summary>Absolute path of the log file the provider writes to.</summary>
     public string LogFilePath => _logFilePath;
 
-    public bool IsEnabled(LogLevel logLevel) => logLevel >= _minimumLevel && !_disposed;
+    public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None && logLevel >= _minimumLevel && !_disposed;
 
     public ILogger CreateLogger(string categoryName)
         => _loggers.GetOrAdd(categoryName, name => new FileLogger(name, this));
