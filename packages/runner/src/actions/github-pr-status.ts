@@ -2,6 +2,8 @@ import type { ActionContext, ActionResult } from "../core/types.js"
 import { numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
+import { timeoutStepMetadata } from "./github-pr-types.js"
 
 type GhRunner = typeof runCommand
 const ACTION_SOURCE = "action:github-pr-status"
@@ -22,6 +24,8 @@ export interface GitHubPrStatusStep {
   command: string
   exitCode: number
   output: string
+  status?: "timeout"
+  timeoutMs?: number
 }
 
 export interface GitHubPrStatusOutput {
@@ -129,8 +133,8 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
 
   const steps: GitHubPrStatusStep[] = []
   const ghOpts = ghLineOptions(context)
-  const recordStep = (name: string, command: string, exitCode: number, output: string) => {
-    steps.push({ name, command, exitCode, output })
+  const recordStep = (name: string, command: string, exitCode: number, output: string, metadata?: Pick<GitHubPrStatusStep, "status" | "timeoutMs">) => {
+    steps.push({ name, command, exitCode, output, ...metadata })
   }
   const prViewFields = buildPrViewFields(expect)
 
@@ -143,7 +147,7 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
     ghOpts,
   )
   const viewOutput = combinedGhOutput(viewResult)
-  recordStep("gh-pr-view", `pr view ${prNumber} --json ${prViewFields.join(",")}`, viewResult.exitCode, viewOutput)
+  recordStep("gh-pr-view", `pr view ${prNumber} --json ${prViewFields.join(",")}`, viewResult.exitCode, viewOutput, timeoutStepMetadata(viewResult))
 
   if (viewResult.exitCode !== 0) {
     return buildOutput({
@@ -230,7 +234,8 @@ function evaluateExpectation(expectation: GitHubPrStatusExpectation, ctx: Expect
 }
 
 function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
-  return context.log ? { onLine: (line) => context.log!.write(ACTION_SOURCE, line) } : undefined
+  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
 function buildPrViewFields(expect: GitHubPrStatusExpectation[]): string[] {

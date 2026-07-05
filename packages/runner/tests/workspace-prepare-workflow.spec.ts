@@ -177,4 +177,41 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
     expect(result.addTasks?.map((task) => task.id)).toEqual(["resolve-rebase-conflicts", "integrate:rebase"])
     expect(result.addTasks?.some((task) => task.id === "workspace-prepare" || task.uses === "mohist/workspace-prepare")).toBe(false)
   })
+
+  it("WorkspacePrepareProbes_AreLocalOnlyAndCarryNoCommandTimeout", async () => {
+    type RecordingGitCall = { command: string; timeoutMs: number | undefined }
+    const calls: RecordingGitCall[] = []
+    installExecutorGitProbe()
+    setWorkspacePrepareExistsCheckerForTest(() => false)
+    setWorkspacePrepareGitRunnerForTest(async (_workDir, args, _signal, options) => {
+      const command = args.join(" ")
+      calls.push({ command, timeoutMs: options?.timeoutMs })
+      switch (command) {
+        case "rev-parse --git-path rebase-merge":
+          return ok(`${workspacePath}/.git/rebase-merge\n`)
+        case "rev-parse --git-path rebase-apply":
+          return ok(`${workspacePath}/.git/rebase-apply\n`)
+        case "rev-parse --git-path MERGE_HEAD":
+          return ok(`${workspacePath}/.git/MERGE_HEAD\n`)
+        case "rev-parse --git-path CHERRY_PICK_HEAD":
+          return ok(`${workspacePath}/.git/CHERRY_PICK_HEAD\n`)
+        case "rev-parse HEAD":
+          return ok("prepare-head-sha\n")
+        case "rev-parse --abbrev-ref HEAD":
+          return ok(`${EXPECTED_BRANCH}\n`)
+        case "status --porcelain":
+          return ok("")
+        default:
+          return fail(`unexpected workspace-prepare git call: ${command}`)
+      }
+    })
+
+    await workspacePrepareAction(work("workspace-prepare", "mohist/workspace-prepare"))
+
+    // Local-only probes — no network, no per-command timeout.
+    for (const call of calls) {
+      expect(call.timeoutMs, `git call ${call.command} should have no timeoutMs`).toBeUndefined()
+    }
+    expect(calls.length).toBeGreaterThan(0)
+  })
 })

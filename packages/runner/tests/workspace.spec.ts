@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { describe, expect, it, vi } from "vitest"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { WorkspaceManager, slugify } from "../src/runtime/workspace.js"
 import { exists, runCommand } from "../src/system/process.js"
 
@@ -100,6 +101,80 @@ describe("WorkspaceManager.prepare", () => {
     const badUrl = "file:///this-path-does-not-exist/this-host-has-no-git-server.git"
     await expect(manager.prepare(work("wr-first", "issue-first", badUrl), signal)).rejects.toThrow(/git clone failed/)
     expect(exists(join(runnerRoot, "mohist-local", "workspaces", "issue-9"))).toBe(false)
+  })
+
+  it("BaseBranchLsRemoteTimeout_FailsBeforeCloneWithStructuredStep", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+    const processMod = await import("../src/system/process.js")
+    const calls: string[] = []
+    const spy = vi.spyOn(processMod, "runCommand").mockImplementation(async (cmd, args) => {
+      const full = `${cmd} ${args.join(" ")}`
+      calls.push(full)
+      if (args.join(" ") === "ls-remote --heads https://example.com/repo.git master") {
+        return {
+          exitCode: 124,
+          stdout: "",
+          stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+          status: "timeout" as const,
+          timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+        }
+      }
+      throw new Error(`unexpected command: ${full}`)
+    })
+    try {
+      await expect(manager.prepare(work("wr-timeout", "issue-timeout", "https://example.com/repo.git"), signal)).rejects.toMatchObject({
+        kind: "workspace-network-timeout",
+        step: {
+          name: "git-ls-remote",
+          command: "ls-remote --heads https://example.com/repo.git master",
+          exitCode: 124,
+          status: "timeout",
+          timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+        },
+      })
+    } finally {
+      spy.mockRestore()
+    }
+    expect(calls.some((call) => call.startsWith("git clone"))).toBe(false)
+  })
+
+  it("CloneTimeout_FailsWithStructuredStep", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+    const processMod = await import("../src/system/process.js")
+    const spy = vi.spyOn(processMod, "runCommand").mockImplementation(async (cmd, args) => {
+      const full = `${cmd} ${args.join(" ")}`
+      if (args[0] === "ls-remote") return { exitCode: 1, stdout: "", stderr: "remote unavailable" }
+      if (args[0] === "clone") {
+        return {
+          exitCode: 124,
+          stdout: "",
+          stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+          status: "timeout" as const,
+          timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+        }
+      }
+      throw new Error(`unexpected command: ${full}`)
+    })
+    try {
+      await expect(manager.prepare(work("wr-timeout", "issue-timeout", "https://example.com/repo.git"), signal)).rejects.toMatchObject({
+        name: "WorkspaceNetworkTimeoutError",
+        step: {
+          name: "git-clone",
+          command: `clone https://example.com/repo.git ${join(runnerRoot, "mohist-local", "workspaces", "issue-9")}`,
+          exitCode: 124,
+          status: "timeout",
+          timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+        },
+      })
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it("Preparation_DoesNotUseGitWorktreeCommands", async () => {

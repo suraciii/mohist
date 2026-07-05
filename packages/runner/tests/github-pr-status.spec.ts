@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import {
   __testing,
   githubPrStatusAction,
@@ -8,12 +9,15 @@ import {
   setGitHubPrStatusGhRunnerForTest,
 } from "../src/actions/github-pr-status.js"
 
-type CommandResult = { exitCode: number; stdout: string; stderr: string }
+type CommandResult = { exitCode: number; stdout: string; stderr: string; status?: "timeout"; timeoutMs?: number }
+type GhCall = { command: string; timeoutMs: number | undefined }
 
 const WORKSPACE_PATH = "/workspace"
+const ghCalls: GhCall[] = []
 
 afterEach(() => {
   setGitHubPrStatusGhRunnerForTest(null)
+  ghCalls.length = 0
 })
 
 function ghOk(stdout: string, stderr = ""): CommandResult {
@@ -59,7 +63,10 @@ function withLog(ctx: ActionContext, writes: Array<{ source: string; text: strin
 }
 
 function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
-  setGitHubPrStatusGhRunnerForTest(async (cmd, args, cwd, _signal) => await respond(cmd, args, cwd))
+  setGitHubPrStatusGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
+    ghCalls.push({ command: [cmd, ...args].join(" "), timeoutMs: options?.timeoutMs })
+    return await respond(cmd, args, cwd)
+  })
 }
 
 const PR_VIEW_OPEN = JSON.stringify({
@@ -255,5 +262,48 @@ describe("mohist/github-pr-status action", () => {
   it("requests only fields needed by each expectation set", () => {
     expect(__testing.buildPrViewFields(["open", "ready"])).toEqual(["url", "state", "isDraft"])
     expect(__testing.buildPrViewFields(["merged"])).toEqual(["url", "state"])
+  })
+
+  it("NetworkGhPrView_ReceivesTimeoutMs", async () => {
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_OPEN)
+      return ghFail(`unexpected gh call: ${full}`)
+    })
+
+    await githubPrStatusAction(context({ prNumber: 42 }))
+
+    const view = ghCalls.find((c) => c.command.startsWith("gh pr view 42"))
+    expect(view?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+  })
+
+  it("GhPrViewTimeout_SurfacesStepNameAndDuration", async () => {
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      if (full.startsWith("gh pr view 42")) {
+        return {
+          exitCode: 124,
+          stdout: "",
+          stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+          status: "timeout" as const,
+          timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+        }
+      }
+      return ghFail(`unexpected gh call: ${full}`)
+    })
+
+    const result = await githubPrStatusAction(context({ prNumber: 42 }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    // The action surfaces the raw gh failure without going through
+    // classifyGhFailure; the existing gh-pr-view failure path stays
+    // unchanged so a timeout is reported as a plain `failed` status
+    // with the captured output. The classifier is reserved for the
+    // delivery actions (push, create-pr, mark-ready, merge).
+    expect(output.status).toBe("failed")
+    expect(output.output).toContain("timed out")
+    expect(output.steps[0].name).toBe("gh-pr-view")
+    expect(output.steps[0].output).toContain("timed out")
   })
 })
