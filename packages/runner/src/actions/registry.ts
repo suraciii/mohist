@@ -4,6 +4,7 @@ import type { ActionContext, ActionResult } from "../core/types.js"
 import { arrayInput, numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { deleteFile, exists, readText, runCommand, writeText, type CommandLineOptions } from "../system/process.js"
+import { timeoutSignal } from "../system/timeout-signal.js"
 import { acpAgentAction } from "./acp-agent.js"
 import { resolveActionPath } from "./expectations.js"
 import {
@@ -185,23 +186,4 @@ function trim(value: string) {
 
 function logLineOptions(context: ActionContext, source: string): CommandLineOptions | undefined {
   return context.log ? { onLine: (line) => context.log!.write(source, line) } : undefined
-}
-
-function timeoutSignal(parent: AbortSignal, timeoutMs: number) {
-  const controller = new AbortController()
-  const abort = () => controller.abort(parent.reason)
-  if (parent.aborted) {
-    abort()
-  } else {
-    const onAbort = () => {
-      clearTimeout(timer)
-      abort()
-    }
-    const timer = setTimeout(() => {
-      controller.abort(new Error(`Timed out after ${timeoutMs / 1000}s`))
-      parent.removeEventListener("abort", onAbort)
-    }, timeoutMs)
-    parent.addEventListener("abort", onAbort, { once: true })
-  }
-  return controller.signal
 }
