@@ -7,6 +7,7 @@ import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 
 interface CapturedBuilder {
   url?: string
+  reconnectPolicy?: number[]
   handlers: Map<string, (...args: unknown[]) => unknown>
   connection: FakeConnection
 }
@@ -79,7 +80,9 @@ vi.mock("@microsoft/signalr", () => {
         builders.push({ url, handlers: this._handlers, connection: this._connection })
         return this
       }
-      withAutomaticReconnect() {
+      withAutomaticReconnect(reconnectPolicy: number[]) {
+        const builder = builders.at(-1)
+        if (builder) builder.reconnectPolicy = reconnectPolicy
         return this
       }
       build() {
@@ -270,6 +273,13 @@ describe("RunnerSignalRClient handshake", () => {
     new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects")
     const last = builders.at(-1)
     expect(last?.url).toBe("http://localhost:3456/hubs/runner?runnerId=runner-1")
+  })
+
+  it("ConfiguresFixedAutomaticReconnectIntervals", () => {
+    builders.length = 0
+    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
+    const last = builders.at(-1)
+    expect(last?.reconnectPolicy).toEqual([0, 2000, 5000, 10000, 30000])
   })
 })
 
@@ -1242,5 +1252,929 @@ describe("RunnerSignalRClient CancelAgentSession handler (T-005)", () => {
 
     expect(reply).toEqual({ state: "not-cancellable" })
     expect(cancel).not.toHaveBeenCalled()
+  })
+})
+
+// Issue-313 T-006: test-first coverage for the four git query handlers
+// that previously had zero direct tests (GetDiff / GetCommits /
+// GetCommitDiff / GetFileContent). Each handler is captured from the
+// mocked SignalR connection via `findHandler`, with the git runner and
+// filesystem-existence checker injected via the existing test seams
+// (`setRunnerSignalRGitRunnerForTest` / `setRunnerSignalRExistsCheckerForTest`).
+// These tests pin the current behaviour so T-007 can extract the handlers
+// to `workspace-git-handlers.ts` without contract drift.
+
+function buildGitOnlyClient() {
+  builders.length = 0
+  new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
+  return lastBuilder()
+}
+
+describe("RunnerSignalRClient GetDiff handler (T-006)", () => {
+  it("UnresolvableWorkspace_ReturnsNullAndDoesNotInvokeGit", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      return runFail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetDiff")
+
+    // Missing baseBranch → resolveWorkspaceQuery returns null → no git call.
+    const result = await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+    })
+
+    expect(result).toBeNull()
+    expect(calls).toEqual([])
+  })
+
+  it("MissingBranch_IsResolvesToNullAndDoesNotInvokeGit", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      return runFail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetDiff")
+
+    const result = await handler({
+      workspacePath: "/runner-root/workspace",
+      baseBranch: "master",
+    })
+
+    expect(result).toBeNull()
+    expect(calls).toEqual([])
+  })
+
+  it("MissingWorkspacePath_IsResolvesToNullAndDoesNotInvokeGit", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      return runFail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetDiff")
+
+    const result = await handler({
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })
+
+    expect(result).toBeNull()
+    expect(calls).toEqual([])
+  })
+
+  it("GitWorkTreeProbeFails_ReturnsNullAndDoesNotIssueDiffOrMergeBase", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => false)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      return runFail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetDiff")
+
+    const result = await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })
+
+    expect(result).toBeNull()
+    expect(calls).toEqual([])
+  })
+
+  it("PathExistsButNotWorktree_ReturnsNullAndDoesNotIssueDiffOrMergeBase", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runFail("fatal: not a git repository")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetDiff")
+
+    const result = await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })
+
+    expect(result).toBeNull()
+    expect(calls).toEqual(["rev-parse --is-inside-work-tree"])
+  })
+
+  it("HeadRefMissing_ReturnsNullAndDoesNotIssueDiffOrMergeBase", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "rev-parse --verify refs/heads/mohist/run-wr-1":
+          return runFail("error: malformed object name")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetDiff")
+
+    const result = await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })
+
+    expect(result).toBeNull()
+    expect(calls).toEqual([
+      "rev-parse --is-inside-work-tree",
+      "rev-parse --verify refs/heads/mohist/run-wr-1",
+    ])
+  })
+
+  it("MergeBaseFails_MergeBaseFallsBackToBaseBranch", async () => {
+    const numstat = "3\t1\tpackages/foo.ts\n"
+    const fullDiff = [
+      "diff --git a/packages/foo.ts b/packages/foo.ts",
+      "index 0000..1111 100644",
+      "--- a/packages/foo.ts",
+      "+++ b/packages/foo.ts",
+      "@@ -1,1 +1,3 @@",
+      "-old",
+      "+new",
+      "+again",
+    ].join("\n")
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "rev-parse --verify refs/heads/mohist/run-wr-1":
+          return runOk("headSha\n")
+        case "diff master...mohist/run-wr-1 --numstat":
+          return runOk(numstat)
+        case "diff master...mohist/run-wr-1":
+          return runOk(fullDiff)
+        case "merge-base master mohist/run-wr-1":
+          return runFail("fatal: no merge base")
+        case "rev-list --left-right --count master...mohist/run-wr-1":
+          return runOk("3\t2\n")
+        case "log master...mohist/run-wr-1 --format=%H":
+          return runOk("abc\ndef\n")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetDiff")
+
+    const result = (await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })) as Record<string, unknown>
+
+    expect(result).toMatchObject({
+      base: "master",
+      head: "mohist/run-wr-1",
+      mergeBase: "master",
+      ahead: 2,
+      behind: 3,
+      commitCount: 2,
+      totalAdditions: 3,
+      totalDeletions: 1,
+    })
+    expect(calls).toContain("merge-base master mohist/run-wr-1")
+  })
+
+  it("CommitCountLogFails_CommitCountFallsBackToZero", async () => {
+    const numstat = "5\t2\tpackages/bar.ts\n"
+    const fullDiff = [
+      "diff --git a/packages/bar.ts b/packages/bar.ts",
+      "index 0000..1111 100644",
+      "--- a/packages/bar.ts",
+      "+++ b/packages/bar.ts",
+    ].join("\n")
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "rev-parse --verify refs/heads/mohist/run-wr-1":
+          return runOk("headSha\n")
+        case "diff master...mohist/run-wr-1 --numstat":
+          return runOk(numstat)
+        case "diff master...mohist/run-wr-1":
+          return runOk(fullDiff)
+        case "merge-base master mohist/run-wr-1":
+          return runOk("abc123\n")
+        case "rev-list --left-right --count master...mohist/run-wr-1":
+          return runOk("1\t4\n")
+        case "log master...mohist/run-wr-1 --format=%H":
+          return runFail("fatal: bad revision")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetDiff")
+
+    const result = (await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })) as Record<string, unknown>
+
+    expect(result).toMatchObject({
+      base: "master",
+      head: "mohist/run-wr-1",
+      mergeBase: "abc123",
+      ahead: 4,
+      behind: 1,
+      commitCount: 0,
+      totalAdditions: 5,
+      totalDeletions: 2,
+    })
+  })
+
+  it("PerFileDiff_IsKeyedByTheBPath", async () => {
+    const numstat = "2\t0\tsrc/foo.txt\n1\t1\tsrc/bar.txt\n"
+    const fullDiff = [
+      "diff --git a/src/foo.txt b/src/foo.txt",
+      "index 0000..1111 100644",
+      "--- a/src/foo.txt",
+      "+++ b/src/foo.txt",
+      "@@ -1,1 +1,3 @@",
+      "-old",
+      "+new",
+      "+again",
+      "diff --git a/src/bar.txt b/src/bar.txt",
+      "index 0000..2222 100644",
+      "--- a/src/bar.txt",
+      "+++ b/src/bar.txt",
+      "@@ -1,1 +1,1 @@",
+      "-x",
+      "+y",
+    ].join("\n")
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "rev-parse --verify refs/heads/mohist/run-wr-1":
+          return runOk("headSha\n")
+        case "diff master...mohist/run-wr-1 --numstat":
+          return runOk(numstat)
+        case "diff master...mohist/run-wr-1":
+          return runOk(fullDiff)
+        case "merge-base master mohist/run-wr-1":
+          return runOk("mergeBaseSha\n")
+        case "rev-list --left-right --count master...mohist/run-wr-1":
+          return runOk("0\t2\n")
+        case "log master...mohist/run-wr-1 --format=%H":
+          return runOk("a\nb\n")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetDiff")
+
+    const result = (await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })) as {
+      files: Array<{ file: string; additions: number; deletions: number; diff: string; isBinary: boolean }>
+      totalAdditions: number
+      totalDeletions: number
+      base: string
+      head: string
+      mergeBase: string
+      ahead: number
+      behind: number
+      commitCount: number
+    }
+
+    expect(result.base).toBe("master")
+    expect(result.head).toBe("mohist/run-wr-1")
+    expect(result.mergeBase).toBe("mergeBaseSha")
+    expect(result.ahead).toBe(2)
+    expect(result.behind).toBe(0)
+    expect(result.commitCount).toBe(2)
+    expect(result.totalAdditions).toBe(3)
+    expect(result.totalDeletions).toBe(1)
+    expect(result.files).toHaveLength(2)
+    expect(result.files[0]).toMatchObject({ file: "src/foo.txt", additions: 2, deletions: 0, isBinary: false })
+    expect(result.files[0].diff).toContain("diff --git a/src/foo.txt b/src/foo.txt")
+    expect(result.files[0].diff).toContain("-old")
+    expect(result.files[0].diff).toContain("+new")
+    expect(result.files[0].diff).not.toContain("src/bar.txt")
+    expect(result.files[1]).toMatchObject({ file: "src/bar.txt", additions: 1, deletions: 1, isBinary: false })
+    expect(result.files[1].diff).toContain("diff --git a/src/bar.txt b/src/bar.txt")
+    expect(result.files[1].diff).toContain("-x")
+    expect(result.files[1].diff).toContain("+y")
+    expect(result.files[1].diff).not.toContain("src/foo.txt")
+  })
+
+  it("BinaryFile_YieldsZeroAdditionsAndDeletionsAndIsBinaryTrue", async () => {
+    const numstat = "-\t-\tbin/logo.png\n1\t0\tsrc/foo.ts\n"
+    const fullDiff = [
+      "diff --git a/bin/logo.png b/bin/logo.png",
+      "index 0000..1111 100644",
+      "Binary files a/bin/logo.png and b/bin/logo.png differ",
+      "diff --git a/src/foo.ts b/src/foo.ts",
+      "index 0000..2222 100644",
+      "--- a/src/foo.ts",
+      "+++ b/src/foo.ts",
+      "@@ -1,1 +1,2 @@",
+      "-old",
+      "+new",
+    ].join("\n")
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "rev-parse --verify refs/heads/mohist/run-wr-1":
+          return runOk("headSha\n")
+        case "diff master...mohist/run-wr-1 --numstat":
+          return runOk(numstat)
+        case "diff master...mohist/run-wr-1":
+          return runOk(fullDiff)
+        case "merge-base master mohist/run-wr-1":
+          return runOk("mergeBaseSha\n")
+        case "rev-list --left-right --count master...mohist/run-wr-1":
+          return runOk("0\t1\n")
+        case "log master...mohist/run-wr-1 --format=%H":
+          return runOk("a\n")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetDiff")
+
+    const result = (await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })) as {
+      files: Array<{ file: string; additions: number; deletions: number; diff: string; isBinary: boolean }>
+      totalAdditions: number
+      totalDeletions: number
+    }
+
+    expect(result.files).toHaveLength(2)
+    expect(result.files[0]).toEqual({
+      file: "bin/logo.png",
+      additions: 0,
+      deletions: 0,
+      diff: expect.stringContaining("Binary files a/bin/logo.png and b/bin/logo.png differ"),
+      isBinary: true,
+    })
+    expect(result.files[1]).toMatchObject({ file: "src/foo.ts", additions: 1, deletions: 0, isBinary: false })
+    expect(result.totalAdditions).toBe(1)
+    expect(result.totalDeletions).toBe(0)
+  })
+})
+
+describe("RunnerSignalRClient GetCommits handler (T-006)", () => {
+  it("UnresolvableWorkspace_ReturnsNullAndDoesNotInvokeGit", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      return runFail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetCommits")
+
+    const result = await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+    })
+
+    expect(result).toBeNull()
+    expect(calls).toEqual([])
+  })
+
+  it("GitWorkTreeProbeFails_ReturnsNullAndDoesNotInvokeGit", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => false)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      return runFail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetCommits")
+
+    const result = await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })
+
+    expect(result).toBeNull()
+    expect(calls).toEqual([])
+  })
+
+  it("PathExistsButNotWorktree_ReturnsNullAndDoesNotInvokeGit", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runFail("fatal: not a git repository")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetCommits")
+
+    const result = await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })
+
+    expect(result).toBeNull()
+    expect(calls).toEqual(["rev-parse --is-inside-work-tree"])
+  })
+
+  it("ParsesCommitsFromTabSeparatedLog_WithFileTotalsAndMergeBaseFallback", async () => {
+    const log = [
+      "abc123\tabc\tsubject 1\tAlice\t2026-07-01T10:00:00+00:00",
+      "def456\tdef\tsubject 2\tBob\t2026-07-02T11:00:00+00:00",
+    ].join("\n")
+    const numstat = "3\t1\tpackages/foo.ts\n5\t0\tpackages/bar.ts\n"
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "log master...mohist/run-wr-1 --format=%H\t%h\t%s\t%an\t%ad --date=iso":
+          return runOk(log)
+        case "diff master...mohist/run-wr-1 --numstat":
+          return runOk(numstat)
+        case "merge-base master mohist/run-wr-1":
+          return runFail("fatal: no merge base")
+        case "rev-list --left-right --count master...mohist/run-wr-1":
+          return runOk("3\t2\n")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetCommits")
+
+    const result = (await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })) as {
+      base: string
+      head: string
+      mergeBase: string
+      ahead: number
+      behind: number
+      filesChanged: number
+      totalAdditions: number
+      totalDeletions: number
+      commits: Array<{ hash: string; shortHash: string; message: string; author: string; date: string; files: string[] }>
+    }
+
+    expect(result).toMatchObject({
+      base: "master",
+      head: "mohist/run-wr-1",
+      mergeBase: "master",
+      ahead: 2,
+      behind: 3,
+      filesChanged: 2,
+      totalAdditions: 8,
+      totalDeletions: 1,
+    })
+    expect(result.commits).toHaveLength(2)
+    expect(result.commits[0]).toEqual({
+      hash: "abc123",
+      shortHash: "abc",
+      message: "subject 1",
+      author: "Alice",
+      date: "2026-07-01T10:00:00+00:00",
+      files: [],
+    })
+    expect(result.commits[1]).toEqual({
+      hash: "def456",
+      shortHash: "def",
+      message: "subject 2",
+      author: "Bob",
+      date: "2026-07-02T11:00:00+00:00",
+      files: [],
+    })
+    expect(calls).toContain("merge-base master mohist/run-wr-1")
+  })
+
+  it("EmptyLog_ReturnsCommitsEmptyArrayButStillReportsTotals", async () => {
+    const numstat = ""
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "log master...mohist/run-wr-1 --format=%H\t%h\t%s\t%an\t%ad --date=iso":
+          return runOk("")
+        case "diff master...mohist/run-wr-1 --numstat":
+          return runOk(numstat)
+        case "merge-base master mohist/run-wr-1":
+          return runOk("mergeBaseSha\n")
+        case "rev-list --left-right --count master...mohist/run-wr-1":
+          return runOk("0\t0\n")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetCommits")
+
+    const result = (await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })) as { commits: unknown[]; filesChanged: number }
+
+    expect(result.commits).toEqual([])
+    expect(result.filesChanged).toBe(0)
+  })
+
+  it("ShortLogLines_AreDropped", async () => {
+    // Real-world: parseCommits skips lines with fewer than 5 tab fields.
+    const log = [
+      "abc123\tabc\tsubject 1\tAlice\t2026-07-01T10:00:00+00:00",
+      "too-short",
+      "def456\tdef\tsubject 2", // only 3 fields
+      "ghi789", // only 1 field
+    ].join("\n")
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "log master...mohist/run-wr-1 --format=%H\t%h\t%s\t%an\t%ad --date=iso":
+          return runOk(log)
+        case "diff master...mohist/run-wr-1 --numstat":
+          return runOk("")
+        case "merge-base master mohist/run-wr-1":
+          return runOk("mergeBaseSha\n")
+        case "rev-list --left-right --count master...mohist/run-wr-1":
+          return runOk("0\t1\n")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetCommits")
+
+    const result = (await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })) as { commits: Array<{ hash: string }> }
+
+    expect(result.commits).toHaveLength(1)
+    expect(result.commits[0].hash).toBe("abc123")
+  })
+})
+
+describe("RunnerSignalRClient GetCommitDiff handler (T-006)", () => {
+  it("UnresolvableWorkspace_ReturnsNullAndDoesNotInvokeGit", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      return runFail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetCommitDiff")
+
+    const result = await handler(
+      {
+        workspacePath: "/runner-root/workspace",
+        branch: "mohist/run-wr-1",
+      },
+      "abc123",
+    )
+
+    expect(result).toBeNull()
+    expect(calls).toEqual([])
+  })
+
+  it("GitWorkTreeProbeFails_ReturnsNullAndDoesNotIssueShow", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => false)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      return runFail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetCommitDiff")
+
+    const result = await handler(
+      {
+        workspacePath: "/runner-root/workspace",
+        branch: "mohist/run-wr-1",
+        baseBranch: "master",
+      },
+      "abc123",
+    )
+
+    expect(result).toBeNull()
+    expect(calls).toEqual([])
+  })
+
+  it("SuccessfulShow_ReturnsThePatch", async () => {
+    const patch = "diff --git a/foo b/foo\nindex 0000..1111 100644\n--- a/foo\n+++ b/foo\n@@ -1 +1 @@\n-old\n+new\n"
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "show --format= --patch abc123":
+          return runOk(patch)
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetCommitDiff")
+
+    const result = (await handler(
+      {
+        workspacePath: "/runner-root/workspace",
+        branch: "mohist/run-wr-1",
+        baseBranch: "master",
+      },
+      "abc123",
+    )) as { diff: string }
+
+    expect(result).toEqual({ diff: patch })
+    expect(calls).toEqual([
+      "rev-parse --is-inside-work-tree",
+      "show --format= --patch abc123",
+    ])
+  })
+
+  it("NonZeroExit_ReturnsNull", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "show --format= --patch deadbeef":
+          return runFail("fatal: bad revision")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetCommitDiff")
+
+    const result = await handler(
+      {
+        workspacePath: "/runner-root/workspace",
+        branch: "mohist/run-wr-1",
+        baseBranch: "master",
+      },
+      "deadbeef",
+    )
+
+    expect(result).toBeNull()
+    expect(calls).toContain("show --format= --patch deadbeef")
+  })
+})
+
+describe("RunnerSignalRClient GetFileContent handler (T-006)", () => {
+  it("UnresolvableWorkspace_ReturnsBaseAndHeadNullAndDoesNotInvokeGit", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      return runFail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetFileContent")
+
+    const result = await handler(
+      {
+        workspacePath: "/runner-root/workspace",
+        branch: "mohist/run-wr-1",
+      },
+      "src/foo.ts",
+    )
+
+    expect(result).toEqual({ base: null, head: null })
+    expect(calls).toEqual([])
+  })
+
+  it("GitWorkTreeProbeFails_ReturnsBaseAndHeadNull", async () => {
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => false)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      return runFail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetFileContent")
+
+    const result = await handler(
+      {
+        workspacePath: "/runner-root/workspace",
+        branch: "mohist/run-wr-1",
+        baseBranch: "master",
+      },
+      "src/foo.ts",
+    )
+
+    expect(result).toEqual({ base: null, head: null })
+    expect(calls).toEqual([])
+  })
+
+  it("BothSidesPresent_ReturnsBaseAndHeadStdout", async () => {
+    const baseStdout = "BASE_CONTENT\n"
+    const headStdout = "HEAD_CONTENT\n"
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "show master:src/foo.ts":
+          return runOk(baseStdout)
+        case "show mohist/run-wr-1:src/foo.ts":
+          return runOk(headStdout)
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetFileContent")
+
+    const result = (await handler(
+      {
+        workspacePath: "/runner-root/workspace",
+        branch: "mohist/run-wr-1",
+        baseBranch: "master",
+      },
+      "src/foo.ts",
+    )) as { base: string | null; head: string | null }
+
+    expect(result).toEqual({ base: baseStdout, head: headStdout })
+    expect(calls).toContain("show master:src/foo.ts")
+    expect(calls).toContain("show mohist/run-wr-1:src/foo.ts")
+  })
+
+  it("BaseMissing_HeadPresent_ReturnsBaseNullAndHeadStdout", async () => {
+    const headStdout = "HEAD_ONLY\n"
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "show master:src/foo.ts":
+          return runFail("fatal: path 'src/foo.ts' does not exist in 'master'")
+        case "show mohist/run-wr-1:src/foo.ts":
+          return runOk(headStdout)
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetFileContent")
+
+    const result = (await handler(
+      {
+        workspacePath: "/runner-root/workspace",
+        branch: "mohist/run-wr-1",
+        baseBranch: "master",
+      },
+      "src/foo.ts",
+    )) as { base: string | null; head: string | null }
+
+    expect(result).toEqual({ base: null, head: headStdout })
+  })
+
+  it("BasePresent_HeadMissing_ReturnsBaseStdoutAndHeadNull", async () => {
+    const baseStdout = "BASE_ONLY\n"
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "show master:src/foo.ts":
+          return runOk(baseStdout)
+        case "show mohist/run-wr-1:src/foo.ts":
+          return runFail("fatal: path 'src/foo.ts' does not exist in 'mohist/run-wr-1'")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetFileContent")
+
+    const result = (await handler(
+      {
+        workspacePath: "/runner-root/workspace",
+        branch: "mohist/run-wr-1",
+        baseBranch: "master",
+      },
+      "src/foo.ts",
+    )) as { base: string | null; head: string | null }
+
+    expect(result).toEqual({ base: baseStdout, head: null })
+  })
+
+  it("BothSidesMissing_ReturnsBaseAndHeadNull", async () => {
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args) => {
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "show master:src/foo.ts":
+          return runFail("fatal: missing on base")
+        case "show mohist/run-wr-1:src/foo.ts":
+          return runFail("fatal: missing on head")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const builder = buildGitOnlyClient()
+    const handler = findHandler("GetFileContent")
+
+    const result = (await handler(
+      {
+        workspacePath: "/runner-root/workspace",
+        branch: "mohist/run-wr-1",
+        baseBranch: "master",
+      },
+      "src/foo.ts",
+    )) as { base: string | null; head: string | null }
+
+    expect(result).toEqual({ base: null, head: null })
   })
 })
