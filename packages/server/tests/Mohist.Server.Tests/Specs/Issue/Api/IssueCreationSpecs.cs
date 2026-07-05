@@ -92,6 +92,30 @@ public class IssueCreationSpecs
         Assert.Equal("mohist/local", issue.WorkflowProfileId);
     }
 
+    // Regression guard for the bug that left IssueEvents permanently empty:
+    // SaveIssueAsync snapshotted PendingEvents by reference, then
+    // ClearPendingEvents() drained the same list, so PublishIssueEventsAsync
+    // no-op'd on an empty collection and no issue lifecycle CloudEvent ever
+    // reached EventStore. WorkflowRunEvents and EpicEvents worked because
+    // their drain paths snapshot via ToList(). This spec is the only place
+    // that asserts the issue→IssueEvents append actually happens end-to-end
+    // through the real grain + EventStore.
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_PersistsCreatedEventToIssueEvents()
+    {
+        var project = await SetupProjectAsync();
+        var issue = await CreateIssueAsync(project.Id, "Event persistence probe");
+
+        using var scope = _services.CreateScope();
+        var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+        var stored = await events.ListIssueEventsAsync(issue.Id);
+
+        var created = Assert.Single(stored, e => e.Envelope.Type == "com.mohist.issue.created");
+        Assert.Equal($"/mohist/issues/{issue.Id}", created.Envelope.Source.ToString());
+    }
+
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
