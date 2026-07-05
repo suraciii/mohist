@@ -99,3 +99,35 @@
 - `dotnet build Mohist.sln` clean (0 warnings, 0 errors).
 - `packages/cli/tests/Mohist.Cli.Tests`: 699 passed, 0 failed (662 prior + 37 new).
 - `packages/server/tests/Mohist.Server.Tests` filter `Cli`: 388 passed, 0 failed.
+
+## T-005 decisions
+
+- File layout: the 5 read commands live in a new partial file `MohistCliCommands.Workflow.Reads.cs` alongside the existing `MohistCliCommands.Workflow.cs` (which T-004 populated with the 7 control verbs). Splitting by direction (control vs read) keeps each file scannable — the verbs in each cluster share identical factory shape (`<run-id>` arg + `-o` + optional command-specific flags).
+- Three new TableShapes: `WorkflowRunDetail`, `WorkflowRunStatus`, `WorkflowRunVariables`, `WorkflowRunEvents`. Two payload paths in the same file:
+  - `WorkflowRunDetail` / `WorkflowRunStatus` consume the `WorkflowRunDetailDto` (`{status: WorkflowStatusView, issueRef: WorkflowRunIssueRef?}`). Both render `data["status"]` as the inner view; `WorkflowRunDetail` additionally renders the `issueRef` line + metadata block, `WorkflowRunStatus` deliberately omits them so `show` is a strict superset of `status` (per design.md Decision 3 and workflow-run-reads/spec.md#status-is-more-compact-than-show).
+  - `WorkflowRunVariables` is a flat key/value renderer for `GET .../variables/effective[/{keyPath}]`. Distinct from the existing `WorkflowVariables` shape (which expects `VariableBundle` shape `{vars, stages}` for the issue-scoped config bundle); the run-scoped effective-variables endpoint returns a flat dict after stage resolution, so a new shape is the honest answer.
+  - `WorkflowRunEvents` is a thin CloudEvent table (type / source / time / subject) — enough to scan the stream without dumping every event's data payload.
+- `show -o yaml` is special-cased: it hits the existing `GET /api/workflow-runs/{id}/yaml` endpoint and prints the rendered template-definition YAML verbatim. The shared `PrintWithOutputAsync` path can't carry yaml — the bare GET response is the read model (`{status, issueRef}`), not the template definition. Honoring "output format never creates a command" means routing through `show -o yaml`, not minting a new `mo workflow yaml` command. The bare GET is still hit by `show -o json` / `-o table` so `show` is one resource command.
+- `-o yaml` is accepted only by `show`. Other commands (`status`, `variables`, `events`, `list-sessions`) keep the global `table`/`json` validator and reject yaml with the standard `--output must be 'table' or 'json'` error. Adding global yaml support would let `-o yaml` silently fall through to JSON on those commands, which is misleading.
+- `variables --key <path>` builds the URL `.../variables/effective/{escapedKey}` and `variables --stage <s>` appends `?stage={stage}`. Combining both yields `...?stage={stage}` after the key path (matches the server's expected query shape).
+- `events --limit N` appends `?limit=N` (server defaults to 200 when missing; matches the existing issue-scoped endpoint's default).
+- `list-sessions` reuses the existing `Sessions` TableShape so the rendering is consistent with `mo issue sessions <num>` (same data shape, same view contract).
+- Spec placement: `packages/cli/tests/Mohist.Cli.Tests/CliWorkflowReads.cs` (25 tests). Coverage:
+  - Help advertises all 5 verbs (`<verb> <run-id>` shape) and asserts no standalone `yaml` subcommand and no single-session sub-actions (transcript/reset/followup).
+  - `show -o json` / `show -o table` / `show -o yaml` each hit the right endpoint (bare GET / .../yaml), and `show -o yaml` does NOT hit the bare GET (proves the dispatch is correct, not a coincidence).
+  - `show` table renders the associated-issue line (`#<number> <title>`), closing the `agent-subscriptions.md` `mo workflow get <runId>` prerequisite.
+  - `status` renders the strict compact subset: equal-or-fewer lines than `show` and the `issue:` line is absent (proves the superset relationship without coupling to exact line counts).
+  - `variables` covers bare / `--stage` / `--key` / `--key --stage` (4 shapes) and confirms the URL fragments (escaped key, stage query).
+  - `events` covers bare / `--limit 50` with the exact query string.
+  - `list-sessions` covers the bare endpoint; the negative test invokes `mo workflow session {show|transcript|compact|reset|followup}` and asserts each fails with no HTTP, proving no single-session sub-action was added.
+  - Five "unknown run id" cases (one per read verb) confirm structured server errors print to stderr with `code` and a non-zero exit.
+  - `-o xml` on `show` is rejected by the shared validator before any HTTP.
+  - `ReadCommands_AddressByRunIdOnly_NoProjectOrIssueRequired` runs all five reads with `activeProjectId=null` (no cli-state.json seeded) and confirms none of them hit `/issues/` or `/projects/`.
+- Regression fixed: `WorkflowCliProfileListSpecs.WorkflowHelp_NoLongerExposesListSubcommand` was asserting `Assert.DoesNotContain("list", help)` — overly broad now that `list-sessions` legitimately contains the substring. Tightened to assert against the canonical command shape (`list ` prefix on subcommand lines) instead of the bare substring. The intent — no `list` (profile-listing) subcommand on `mo workflow` — is preserved.
+
+## Validation
+
+- `dotnet build Mohist.sln` clean (0 warnings, 0 errors).
+- `packages/cli/tests/Mohist.Cli.Tests`: 724 passed, 0 failed (699 prior + 25 new).
+- `packages/server/tests/Mohist.Server.Tests` filter `Cli`: 388 passed, 0 failed.
+- `packages/server/tests/Mohist.Server.Tests` `WorkflowRunDetailApiSpecs` + `WorkflowRunControlApiSpecs`: 33 passed, 0 failed (T-001 + T-002 server specs unchanged).

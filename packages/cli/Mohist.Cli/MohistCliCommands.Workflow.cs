@@ -16,6 +16,12 @@ internal static partial class WorkflowCommands
         workflow.Subcommands.Add(BuildPause(api));
         workflow.Subcommands.Add(BuildStop(api));
 
+        workflow.Subcommands.Add(BuildShow(api));
+        workflow.Subcommands.Add(BuildStatus(api));
+        workflow.Subcommands.Add(BuildVariables(api));
+        workflow.Subcommands.Add(BuildEvents(api));
+        workflow.Subcommands.Add(BuildListSessions(api));
+
         return workflow;
     }
 
