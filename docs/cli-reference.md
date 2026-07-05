@@ -301,7 +301,8 @@ mo update runner                    仅升级执行器
 
 | 当前实装 | 本文 spec | 性质 |
 |---|---|---|
-| `mo project workflow config ...` | `mo project workflow profile ...` | 正名（config → profile） |
+| `mo workflow show <runId>` | `mo workflow get <runId>` | 词表统一（show → get） |
+| `mo workflow status <runId>` | （删除，`get` 默认 table 即摘要） | 冗余命令删除 |
 | `mo repo ...`（顶层）与 `mo project repo ...`（嵌套）双轨 | `mo repo --project`（扁平，作用域用 flag） | 双轨合并 + 作用域用 flag 原则 |
 | `mo agent delete` | `mo agent archive` | 正名（delete → archive） |
 | `mo label remove` | `mo label delete`（remove 转别名） | 词表统一 |
@@ -312,9 +313,7 @@ mo update runner                    仅升级执行器
 | `mo use` | （删除，留 `mo project use`） | 重复入口删除 |
 | `mo notify setup` | `mo notification setup` | 资源化 |
 | `mo system info` | `mo server info` | 消歧（与 `mo info` 区分） |
-| `mo <资源> show` | `mo <资源> get` | 词表统一（show → get） |
-| `mo workflow <control/read> <runId>` | （本文已列） | 新增，待实装 |
-| `mo project workflow profile enable/disable` | （本文已列） | 新增，待实装 |
+| （无） | `mo project workflow profile enable/disable` | 新增，待实装 |
 
 未对齐处以代码为实装事实，但本文是目标。各差距对应 epic #40 下的子 issue。
 
