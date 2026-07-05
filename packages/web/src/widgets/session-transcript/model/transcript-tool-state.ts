@@ -7,7 +7,6 @@ import {
   getFilePathFromInput,
   getToolLabel,
 } from './transcript-tool-utils'
-import { asPayloadRecord, asRecord, getNumber, getString, truncatePreview } from './transcript-payload'
 
 export interface LiveToolCall {
   toolCallId: string
@@ -118,95 +117,6 @@ export function deriveToolTarget(toolName: string, rawInput: unknown, title?: st
   return label ?? title
 }
 
-export function buildLiveToolDetails(
-  normalizedName: string,
-  rawInput: unknown,
-  rawOutput: unknown,
-  metadata?: Record<string, unknown>,
-  error?: string,
-): Record<string, unknown> | undefined {
-  const input = asPayloadRecord(rawInput)
-  const output = asPayloadRecord(rawOutput)
-  const lower = normalizedName.toLowerCase()
-
-  if (lower === 'bash' || lower === 'shell' || lower === 'exec' || lower === 'command') {
-    const details: Record<string, unknown> = { family: 'execution' }
-    const command = getString(input?.command ?? input?.script ?? input?.cmd)
-    const cwd = getString(input?.cwd ?? input?.workdir ?? input?.workingDir)
-    const timeout = getNumber(input?.timeout)
-    const exitCode = getNumber(output?.exitCode ?? output?.exit_code ?? output?.code)
-    const outputPreview = getString(output?.stdout ?? output?.output)
-    if (command) details.command = command
-    if (cwd) details.cwd = cwd
-    if (timeout !== undefined) details.timeout = timeout
-    if (exitCode !== undefined) details.exitCode = exitCode
-    if (outputPreview) details.outputPreview = truncatePreview(outputPreview)
-    else if (typeof rawOutput === 'string' && rawOutput) details.outputPreview = truncatePreview(rawOutput)
-    if (error) details.completionStatus = 'failed'
-    else if (rawOutput !== undefined) details.completionStatus = 'completed'
-    return details
-  }
-
-  if (lower === 'task') {
-    const details: Record<string, unknown> = { family: 'delegation' }
-    const description = getString(input?.description ?? input?.prompt ?? input?.task ?? input?.command ?? metadata?.description)
-    const subagentType = getString(input?.subagent_type ?? input?.agentType ?? input?.type ?? metadata?.subagentType)
-    const subagentName = getString(input?.subagent_name ?? input?.agentName ?? input?.name)
-    const taskId = getString(input?.task_id ?? input?.taskId)
-    const childSessionId = getString(metadata?.childSessionId ?? metadata?.sessionId ?? metadata?.child_session_id)
-    if (description) details.description = description
-    if (subagentType) details.subagentType = subagentType
-    if (subagentName) details.subagentName = subagentName
-    if (taskId) details.taskId = taskId
-    if (childSessionId) details.childSessionId = childSessionId
-    return details
-  }
-
-  if (lower === 'skill') {
-    const details: Record<string, unknown> = { family: 'skill' }
-    const title = getString(metadata?.title)
-    const skillNameFromTitle = title?.match(/(?:loaded skill:?\s*)(.+)/i)?.[1]?.trim()
-    const skillName = skillNameFromTitle
-      ?? getString(input?.name ?? input?.skillName ?? input?.skill)
-      ?? getString(metadata?.skillName ?? metadata?.name)
-    if (skillName) details.skillName = skillName
-    return details
-  }
-
-  if (lower === 'question' || lower === 'webfetch' || lower === 'websearch') {
-    const details: Record<string, unknown> = { family: 'interaction' }
-    const url = getString(input?.url ?? input?.uri)
-    const query = getString(input?.query ?? input?.search_query ?? input?.searchQuery ?? input?.search ?? input?.question ?? input?.text)
-    const textPreview = getString(output?.content ?? output?.text ?? output?.summary)
-    const answers = Array.isArray(output?.answers) ? output.answers : undefined
-    if (url) details.url = url
-    if (query) details.query = query
-    if (answers) details.answerCount = answers.length
-    if (textPreview) details.resultPreview = textPreview.slice(0, 300)
-    else if (typeof rawOutput === 'string' && rawOutput) details.resultPreview = rawOutput.slice(0, 300)
-    return details
-  }
-
-  if (lower === 'todowrite' || lower === 'todo') {
-    const todos = Array.isArray(input?.todos) ? input.todos : []
-    const details: Record<string, unknown> = {
-      family: 'planning',
-      totalCount: todos.length,
-    }
-    const byStatus: Record<string, number> = {}
-    for (const todo of todos) {
-      const status = asRecord(todo)?.status
-      if (typeof status === 'string' && status) {
-        byStatus[status] = (byStatus[status] ?? 0) + 1
-      }
-    }
-    if (Object.keys(byStatus).length > 0) details.statusCounts = byStatus
-    return details
-  }
-
-  return undefined
-}
-
 export function getNormalizedName(detail: {
   normalizedName?: string
   toolName: string
@@ -243,6 +153,57 @@ export function getDisplayFields(detail: {
   }
 }
 
+function mergeToolPart(
+  toolPart: ToolPart,
+  updates: Partial<LiveToolCall>,
+  now: string,
+  overrideToolCallId?: string,
+): ToolPart {
+  const rawInput = updates.rawInput ?? updates.input ?? toolPart.tool.rawInput ?? toolPart.tool.input
+  const rawOutput = updates.rawOutput ?? updates.output ?? toolPart.tool.rawOutput ?? toolPart.tool.output
+  const metadata = updates.metadata ?? toolPart.tool.metadata
+  const details = updates.details ?? toolPart.tool.details
+  const startedAt = updates.startedAt ?? toolPart.tool.startedAt
+  const { normalizedName, displayTitle, displaySubtitle } = getDisplayFields({
+    normalizedName: updates.normalizedName ?? toolPart.tool.normalizedName,
+    displayTitle: updates.displayTitle ?? toolPart.tool.displayTitle,
+    displaySubtitle: updates.displaySubtitle ?? toolPart.tool.displaySubtitle,
+    toolName: updates.toolName ?? toolPart.tool.toolName,
+    title: updates.title ?? toolPart.tool.title,
+    rawInput,
+    rawOutput,
+  })
+  const input = stringifyPayload(rawInput) ?? toolPart.tool.input
+  const output = stringifyPayload(rawOutput) ?? toolPart.tool.output
+  const parsedEdit = parseEditInput(input)
+  const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
+  const newStatus = mapStatusToDisplay(updates.status ?? toolPart.tool.status)
+  const { status: _updatesStatus, ...restUpdates } = updates
+  return {
+    ...toolPart,
+    tool: {
+      ...toolPart.tool,
+      ...restUpdates,
+      ...(overrideToolCallId !== undefined ? { toolCallId: overrideToolCallId } : {}),
+      normalizedName,
+      displayTitle,
+      displaySubtitle,
+      category: updates.category ?? toolPart.tool.category,
+      input,
+      output,
+      rawInput: input,
+      rawOutput: output,
+      metadata,
+      details,
+      target: updates.target ?? toolPart.tool.target,
+      changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
+      startedAt,
+      status: newStatus,
+      completedAt: isTerminalState(newStatus) ? now : toolPart.tool.completedAt,
+    },
+  }
+}
+
 export function updateToolInTurn(
   turn: SessionTurn,
   toolCallId: string,
@@ -259,49 +220,7 @@ export function updateToolInTurn(
       ...turn,
       assistant: turn.assistant.map((p, i) => {
         if (i !== existingToolIndex) return p
-        const toolPart = p as ToolPart
-        const rawInput = updates.rawInput ?? updates.input ?? toolPart.tool.rawInput ?? toolPart.tool.input
-        const rawOutput = updates.rawOutput ?? updates.output ?? toolPart.tool.rawOutput ?? toolPart.tool.output
-        const metadata = updates.metadata ?? toolPart.tool.metadata
-        const details = updates.details ?? toolPart.tool.details
-        const startedAt = updates.startedAt ?? toolPart.tool.startedAt
-        const { normalizedName, displayTitle, displaySubtitle } = getDisplayFields({
-          normalizedName: updates.normalizedName ?? toolPart.tool.normalizedName,
-          displayTitle: updates.displayTitle ?? toolPart.tool.displayTitle,
-          displaySubtitle: updates.displaySubtitle ?? toolPart.tool.displaySubtitle,
-          toolName: updates.toolName ?? toolPart.tool.toolName,
-          title: updates.title ?? toolPart.tool.title,
-          rawInput,
-          rawOutput,
-        })
-        const input = stringifyPayload(rawInput) ?? toolPart.tool.input
-        const output = stringifyPayload(rawOutput) ?? toolPart.tool.output
-        const parsedEdit = parseEditInput(input)
-        const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
-        const newStatus = mapStatusToDisplay(updates.status ?? toolPart.tool.status)
-        const { status: _updatesStatus, ...restUpdates } = updates
-        return {
-          ...toolPart,
-          tool: {
-            ...toolPart.tool,
-            ...restUpdates,
-            normalizedName,
-            displayTitle,
-            displaySubtitle,
-            category: updates.category ?? toolPart.tool.category,
-            input,
-            output,
-            rawInput: input,
-            rawOutput: output,
-            metadata,
-            details,
-            target: updates.target ?? toolPart.tool.target,
-            changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
-            startedAt,
-            status: newStatus,
-            completedAt: isTerminalState(newStatus) ? now : toolPart.tool.completedAt,
-          },
-        }
+        return mergeToolPart(p as ToolPart, updates, now)
       }),
     }
   }
@@ -311,54 +230,12 @@ export function updateToolInTurn(
     const correlatedIndex = findToolByCorrelation(turn, normalizedName, target)
 
     if (correlatedIndex >= 0) {
+      const correlationUpdates: Partial<LiveToolCall> = { ...updates, normalizedName }
       return {
         ...turn,
         assistant: turn.assistant.map((p, i) => {
           if (i !== correlatedIndex) return p
-          const toolPart = p as ToolPart
-          const rawInput = updates.rawInput ?? updates.input ?? toolPart.tool.rawInput ?? toolPart.tool.input
-          const rawOutput = updates.rawOutput ?? updates.output ?? toolPart.tool.rawOutput ?? toolPart.tool.output
-          const metadata = updates.metadata ?? toolPart.tool.metadata
-          const details = updates.details ?? toolPart.tool.details
-          const startedAt = updates.startedAt ?? toolPart.tool.startedAt
-          const { displayTitle, displaySubtitle } = getDisplayFields({
-            normalizedName,
-            displayTitle: updates.displayTitle ?? toolPart.tool.displayTitle,
-            displaySubtitle: updates.displaySubtitle ?? toolPart.tool.displaySubtitle,
-            toolName: updates.toolName ?? toolPart.tool.toolName,
-            title: updates.title ?? toolPart.tool.title,
-            rawInput,
-            rawOutput,
-          })
-          const input = stringifyPayload(rawInput) ?? toolPart.tool.input
-          const output = stringifyPayload(rawOutput) ?? toolPart.tool.output
-          const parsedEdit = parseEditInput(input)
-          const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
-          const newStatus = mapStatusToDisplay(updates.status ?? toolPart.tool.status)
-          const { status: _updatesStatus, ...restUpdates } = updates
-          return {
-            ...toolPart,
-            tool: {
-              ...toolPart.tool,
-              ...restUpdates,
-              toolCallId,
-              normalizedName,
-              displayTitle,
-              displaySubtitle,
-              category: updates.category ?? toolPart.tool.category,
-              input,
-              output,
-              rawInput: input,
-              rawOutput: output,
-              metadata,
-              details,
-              target: updates.target ?? toolPart.tool.target,
-              changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
-              startedAt,
-              status: newStatus,
-              completedAt: isTerminalState(newStatus) ? now : toolPart.tool.completedAt,
-            },
-          }
+          return mergeToolPart(p as ToolPart, correlationUpdates, now, toolCallId)
         }),
       }
     }
@@ -391,3 +268,5 @@ export function updateToolInTurn(
     ],
   }
 }
+
+export { buildLiveToolDetails } from '../ui/tool-views/live-details'
