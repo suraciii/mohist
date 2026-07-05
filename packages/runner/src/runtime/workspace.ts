@@ -3,7 +3,8 @@ import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { JsonObject, RenderedWorkItem } from "../core/types.js"
 import { getSegments, stringAt } from "../core/json-path.js"
-import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from "../system/process.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
+import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText, type CommandResult } from "../system/process.js"
 import type { WorkspaceRegistry } from "./workspace-registry.js"
 import type { TaskLogger } from "./task-log.js"
 
@@ -48,6 +49,23 @@ export class WorkspaceBranchMismatchError extends Error {
   constructor(message: string, readonly workspacePath: string, readonly expectedBranch: string, readonly observedBranch: string | null, readonly observedRef: string | null = null, readonly detail?: string) {
     super(message)
     this.name = "WorkspaceBranchMismatchError"
+  }
+}
+
+export interface WorkspaceNetworkTimeoutStep {
+  name: string
+  command: string
+  exitCode: number
+  output: string
+  status: "timeout"
+  timeoutMs?: number
+}
+
+export class WorkspaceNetworkTimeoutError extends Error {
+  readonly kind = "workspace-network-timeout"
+  constructor(message: string, readonly step: WorkspaceNetworkTimeoutStep) {
+    super(message)
+    this.name = "WorkspaceNetworkTimeoutError"
   }
 }
 
@@ -196,10 +214,11 @@ export class WorkspaceManager {
     if (exists(workspacePath)) await deleteDirectory(workspacePath)
     await ensureDir(join(workspacePath, ".."))
     const sink = workspacePrepSink(log)
-    const result = await runCommand("git", ["clone", gitUrl, workspacePath], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
+    const result = await runCommand("git", ["clone", gitUrl, workspacePath], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
     if (result.exitCode !== 0) {
       // Drop any partial clone git left behind so a retry starts clean.
       await deleteDirectory(workspacePath).catch(() => {})
+      if (result.status === "timeout") throw workspaceNetworkTimeout("git-clone", `clone ${gitUrl} ${workspacePath}`, result)
       throw new Error(`git clone failed for ${gitUrl}: ${result.stderr || result.stdout}`)
     }
   }
@@ -220,7 +239,8 @@ export class WorkspaceManager {
   // its own error; only a reachable repo with an absent branch fails here.
   private async verifyBaseBranch(gitUrl: string, baseBranch: string, signal: AbortSignal, log: TaskLogger | null = null): Promise<void> {
     const sink = workspacePrepSink(log)
-    const result = await runCommand("git", ["ls-remote", "--heads", gitUrl, baseBranch], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line) } : undefined)
+    const result = await runCommand("git", ["ls-remote", "--heads", gitUrl, baseBranch], ".", signal, undefined, sink ? { onLine: (line) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
+    if (result.status === "timeout") throw workspaceNetworkTimeout("git-ls-remote", `ls-remote --heads ${gitUrl} ${baseBranch}`, result)
     if (result.exitCode === 0 && result.stdout.trim() === "") {
       throw new Error(`Configured base branch '${baseBranch}' cannot be resolved from repository gitUrl.`)
     }
@@ -282,6 +302,14 @@ export class WorkspaceManager {
     }
     return null
   }
+}
+
+function workspaceNetworkTimeout(name: string, command: string, result: CommandResult): WorkspaceNetworkTimeoutError {
+  const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n")
+  return new WorkspaceNetworkTimeoutError(
+    `Workspace preparation network command timed out: ${name} (${command}) after ${(result.timeoutMs ?? NETWORK_COMMAND_TIMEOUT_MS) / 1000}s`,
+    { name, command, exitCode: result.exitCode, output, status: "timeout", timeoutMs: result.timeoutMs },
+  )
 }
 
 export function defaultRunnerRoot() {

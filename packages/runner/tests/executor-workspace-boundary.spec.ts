@@ -6,7 +6,8 @@ import { promisify } from "node:util"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { ActionRegistry } from "../src/actions/registry.js"
-import { WorkspaceManager } from "../src/runtime/workspace.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
+import { WorkspaceManager, WorkspaceNetworkTimeoutError } from "../src/runtime/workspace.js"
 import type { ActionContext, ActionResult, WorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 
@@ -128,6 +129,51 @@ describe("workspace preparation across stages", () => {
     expect(result.status).toBe("completed")
     expect(result.message).toBe("agent ran")
     expect(recorded).toEqual({ prepare: 0 })
+  })
+
+  it("WorkspaceNetworkTimeoutFailure_SerializesStructuredRetrySafeStep", async () => {
+    const timeout = new WorkspaceNetworkTimeoutError(
+      "Workspace preparation network command timed out: git-ls-remote after 120s",
+      {
+        name: "git-ls-remote",
+        command: "ls-remote --heads https://example.com/repo.git master",
+        exitCode: 124,
+        output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+        status: "timeout",
+        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+      },
+    )
+    const failingManager = {
+      async prepare() {
+        throw timeout
+      },
+    } as unknown as WorkspaceManager
+    const executor = new WorkExecutor(
+      buildRegistry(async () => ({ status: "success", message: "should not run" })),
+      failingManager,
+      connection as never,
+      {} as never,
+      null,
+      runnerRoot,
+    )
+
+    const result = await executor.execute(buildWork("https://example.com/repo.git", "wr-timeout", "issue-timeout", "plan", "plan:write"), new AbortController().signal)
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failed")
+    expect(result.message).toContain("workspace-setup")
+    expect(output).toEqual({
+      kind: "workspace-setup",
+      failureKind: "retry-safe",
+      step: {
+        name: "git-ls-remote",
+        command: "ls-remote --heads https://example.com/repo.git master",
+        exitCode: 124,
+        output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+        status: "timeout",
+        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+      },
+    })
   })
 })
 

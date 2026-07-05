@@ -12,6 +12,15 @@ export interface GitHubPrStep {
   command: string
   exitCode: number
   output: string
+  status?: "timeout"
+  timeoutMs?: number
+}
+
+export type GitHubPrStepMetadata = Pick<GitHubPrStep, "status" | "timeoutMs">
+
+export function timeoutStepMetadata(result: { status?: "timeout"; timeoutMs?: number }): GitHubPrStepMetadata | undefined {
+  if (result.status !== "timeout") return undefined
+  return { status: "timeout", timeoutMs: result.timeoutMs }
 }
 
 export interface CreateGitHubPrOutput {

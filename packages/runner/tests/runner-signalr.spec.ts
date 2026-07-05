@@ -3,6 +3,7 @@ import * as signalR from "@microsoft/signalr"
 import { isUnderRunnerRoot, resolveWorkspaceQuery, resolveSessionTarget, RunnerSignalRClient, type CancelAgentSessionPayload, type ReceiveFollowupPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
 import type { CommandResult } from "../src/system/process.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 
 interface CapturedBuilder {
   url?: string
@@ -149,10 +150,10 @@ describe("RunnerSignalRClient workspace queries", () => {
 
   it("GetWorkspaceStatus_WhenFetchFails_ReturnsExistingWorkspaceWithRebaseState", async () => {
     builders.length = 0
-    const calls: string[] = []
+    const calls: Array<{ command: string; timeoutMs: number | undefined }> = []
     setRunnerSignalRExistsCheckerForTest(() => true)
-    setRunnerSignalRGitRunnerForTest(async (_cmd, args, _cwd) => {
-      calls.push(args.join(" "))
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args, _cwd, _signal, _env, options) => {
+      calls.push({ command: args.join(" "), timeoutMs: options?.timeoutMs })
       switch (args.join(" ")) {
         case "rev-parse --is-inside-work-tree":
           return runOk("true\n")
@@ -185,22 +186,24 @@ describe("RunnerSignalRClient workspace queries", () => {
       conflictingFiles: ["packages/runner/src/server/runner-signalr.ts"],
       reason: "fetch_failed",
     })
-    expect(calls).toEqual([
+    expect(calls.map((call) => call.command)).toEqual([
       "rev-parse --is-inside-work-tree",
       "rev-parse --verify refs/heads/mohist/run-wr-1",
       "rebase --show-current-patch",
       "diff --name-only --diff-filter=U",
       "fetch origin master",
     ])
-    expect(calls).not.toContain("rev-list --left-right --count origin/master...mohist/run-wr-1")
+    expect(calls.find((call) => call.command === "fetch origin master")?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+    expect(calls.filter((call) => call.command !== "fetch origin master").every((call) => call.timeoutMs === undefined)).toBe(true)
+    expect(calls.map((call) => call.command)).not.toContain("rev-list --left-right --count origin/master...mohist/run-wr-1")
   })
 
   it("GetWorkspaceStatus_WhenFetchSucceeds_ReportsAheadBehindFromOriginBase", async () => {
     builders.length = 0
-    const calls: string[] = []
+    const calls: Array<{ command: string; timeoutMs: number | undefined }> = []
     setRunnerSignalRExistsCheckerForTest(() => true)
-    setRunnerSignalRGitRunnerForTest(async (_cmd, args, _cwd) => {
-      calls.push(args.join(" "))
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args, _cwd, _signal, _env, options) => {
+      calls.push({ command: args.join(" "), timeoutMs: options?.timeoutMs })
       switch (args.join(" ")) {
         case "rev-parse --is-inside-work-tree":
           return runOk("true\n")
@@ -234,13 +237,15 @@ describe("RunnerSignalRClient workspace queries", () => {
       rebaseInProgress: false,
       conflictingFiles: [],
     })
-    expect(calls).toEqual([
+    expect(calls.map((call) => call.command)).toEqual([
       "rev-parse --is-inside-work-tree",
       "rev-parse --verify refs/heads/mohist/run-wr-1",
       "rebase --show-current-patch",
       "fetch origin master",
       "rev-list --left-right --count origin/master...mohist/run-wr-1",
     ])
+    expect(calls.find((call) => call.command === "fetch origin master")?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+    expect(calls.filter((call) => call.command !== "fetch origin master").every((call) => call.timeoutMs === undefined)).toBe(true)
   })
 })
 

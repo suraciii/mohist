@@ -3,7 +3,8 @@ import { resolve, relative, isAbsolute } from "node:path"
 import * as signalR from "@microsoft/signalr"
 import type { ClientSideConnection } from "@agentclientprotocol/sdk"
 import type { JsonObject, RenderedWorkItem } from "../core/types.js"
-import { deleteDirectory, runCommand as defaultRunCommand } from "../system/process.js"
+import { deleteDirectory, runCommand as defaultRunCommand, type CommandLineOptions } from "../system/process.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import { WorkspaceManager } from "../runtime/workspace.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
 import { isTerminalWorkflowStatus } from "../runtime/workflow-terminal-status.js"
@@ -320,7 +321,7 @@ export class RunnerSignalRClient {
 
       const baseStatus = { exists: true, branch: workspace.head, baseBranch: workspace.baseBranch, rebaseInProgress, conflictingFiles }
 
-      const fetchResult = await git(workspace.workDir, ["fetch", "origin", workspace.baseBranch], ac.signal)
+      const fetchResult = await git(workspace.workDir, ["fetch", "origin", workspace.baseBranch], ac.signal, { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
       if (fetchResult.exitCode !== 0) return { ...baseStatus, reason: "fetch_failed" }
       if (rebaseInProgress) return { ...baseStatus, reason: "rebase_in_progress" }
 
@@ -622,8 +623,8 @@ export class RunnerSignalRClient {
   }
 }
 
-async function git(workDir: string, args: string[], signal: AbortSignal) {
-  return runGitCommand("git", args, workDir, signal)
+async function git(workDir: string, args: string[], signal: AbortSignal, options?: CommandLineOptions) {
+  return runGitCommand("git", args, workDir, signal, undefined, options)
 }
 
 export interface WorkspaceQuery {

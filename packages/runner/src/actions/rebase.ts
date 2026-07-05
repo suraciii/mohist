@@ -2,7 +2,7 @@ import { join } from "node:path"
 import { exists } from "../system/process.js"
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { stringInput } from "../core/json.js"
-import { git as defaultGit, type GitOptions } from "./git.js"
+import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { isIssueFieldSource, resolveIssueField } from "./issue-fields.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
@@ -11,9 +11,19 @@ type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?
   stderr: string
   exitCode: number
   combinedOutput: string
+  status?: "timeout"
+  timeoutMs?: number
 }>
 type ExistsChecker = typeof exists
 type GitResult = Awaited<ReturnType<GitRunner>>
+interface RebaseStep {
+  name: string
+  command: string
+  exitCode: number
+  output: string
+  status?: "timeout"
+  timeoutMs?: number
+}
 let git: GitRunner = defaultGit
 let pathExists: ExistsChecker = exists
 
@@ -26,6 +36,11 @@ const ACTION_SOURCE = "action:rebase"
 
 function sinkOptions(context: ActionContext): GitOptions | undefined {
   return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
+}
+
+function networkOptions(context: ActionContext): GitOptions | undefined {
+  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { sink: { log: context.log, source: ACTION_SOURCE }, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
 export type RebaseGitResult = GitResult
@@ -54,9 +69,10 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
     return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, squashMessageResult.message, "retry-safe", 1)
   }
   if (remote) {
-    const fetch = await git(context.workDir, ["fetch", remote, baseBranch], context.signal, opts)
+    const fetch = await git(context.workDir, ["fetch", remote, baseBranch], context.signal, networkOptions(context))
     if (!fetch.success) {
-      return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, fetch.combinedOutput, "retry-safe", fetch.exitCode)
+      const steps = [rebaseStep("git-fetch-base", `fetch ${remote} ${baseBranch}`, fetch)]
+      return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, fetch.combinedOutput, "retry-safe", fetch.exitCode, false, steps)
     }
   }
   const baseShaResult = await git(context.workDir, ["rev-parse", baseRef], context.signal, opts)
@@ -254,6 +270,7 @@ function rebaseOutput(
   failureKind: RebaseFailureKind = null,
   exitCode: number | null = null,
   rebaseLeftInProgress: boolean = false,
+  steps: RebaseStep[] = [],
 ): ActionResult {
   const output = JSON.stringify({
     kind: "rebase",
@@ -272,6 +289,7 @@ function rebaseOutput(
     errorCode: failureKind,
     rebaseLeftInProgress,
     output: gitOutput,
+    steps,
   })
   if (rebased) {
     return { status: "success", message: squashed ? "Rebase and squash completed" : "Rebase completed", output }
@@ -284,6 +302,15 @@ function rebaseOutput(
       ? "Rebase squashed: a commit 'message' is required when 'squash' is true"
       : `Rebase failed after ${resolveAttempts} conflict resolution attempts`
   return { status: "failure", message: label, output, exitCode: exitCode ?? 1 }
+}
+
+function rebaseStep(name: string, command: string, result: GitResult): RebaseStep {
+  return { name, command, exitCode: result.exitCode, output: result.combinedOutput, ...timeoutMetadata(result) }
+}
+
+function timeoutMetadata(result: GitResult): Pick<RebaseStep, "status" | "timeoutMs"> | undefined {
+  if (result.status !== "timeout") return undefined
+  return { status: "timeout", timeoutMs: result.timeoutMs }
 }
 
 function booleanInput(input: JsonObject | null | undefined, key: string) {

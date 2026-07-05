@@ -5,7 +5,7 @@ import { errorMessage } from "../core/errors.js"
 import { stringAt } from "../core/json-path.js"
 import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
 import { ensureDir } from "../system/process.js"
-import { runnerVariables, WorkspaceManager } from "./workspace.js"
+import { runnerVariables, WorkspaceManager, WorkspaceNetworkTimeoutError } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
@@ -259,10 +259,13 @@ function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: Abor
 // structured so the CLI/API/UI render it distinctly from ordinary task failures.
 function workspaceSetupFailure(work: RenderedWorkItem, error: unknown): WorkItemResult {
   const message = error instanceof Error ? error.message : String(error)
+  const output = error instanceof WorkspaceNetworkTimeoutError
+    ? JSON.stringify({ kind: "workspace-setup", failureKind: "retry-safe", step: error.step })
+    : JSON.stringify({ kind: "workspace-setup" })
   return {
     status: failureStatus(work),
     message: `could not prepare workflow workspace (workspace-setup): ${message}`.slice(0, 4000),
-    output: JSON.stringify({ kind: "workspace-setup" }),
+    output,
   }
 }
 

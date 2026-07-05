@@ -1,7 +1,8 @@
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { booleanInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
-import { git as defaultGit, type GitOptions } from "./git.js"
+import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
+import { timeoutStepMetadata, type GitHubPrStep } from "./github-pr-types.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
@@ -9,6 +10,8 @@ type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?
   stderr: string
   exitCode: number
   combinedOutput: string
+  status?: "timeout"
+  timeoutMs?: number
 }>
 type GitResult = Awaited<ReturnType<GitRunner>>
 let git: GitRunner = defaultGit
@@ -30,6 +33,11 @@ function sinkOptions(context: ActionContext): GitOptions | undefined {
   return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
 }
 
+function networkOptions(context: ActionContext): GitOptions | undefined {
+  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { sink: { log: context.log, source: ACTION_SOURCE }, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+}
+
 export async function pushAction(context: ActionContext): Promise<ActionResult> {
   const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
   const target = stringInput(context.with, "target")
@@ -43,6 +51,8 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
   const refspec = `${source}:${target}`
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
   const opts = sinkOptions(context)
+  const networkOpts = networkOptions(context)
+  const steps: GitHubPrStep[] = []
 
   const sourceResolve = await git(workDir, ["rev-parse", source], context.signal, opts)
   if (!sourceResolve.success) {
@@ -73,22 +83,27 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
     // Regular force-with-lease path: resolve the remote tip and use the
     // explicit lease form, which git trusts regardless of tracking-ref state.
     // If the probe itself fails, fall back to the bare form (best-effort).
-    const remoteTip = await resolveRemoteTip(workDir, remote, target, context.signal, opts)
-    if (remoteTip === null) {
-      pushArgs.push("--force-with-lease")
-    } else if (remoteTip) {
-      pushArgs.push(`--force-with-lease=${target}:${remoteTip}`)
+    const remoteTip = await resolveRemoteTip(workDir, remote, target, context.signal, networkOpts)
+    if (remoteTip.kind === "timeout") {
+      steps.push({ name: "git-ls-remote", command: remoteTip.command, exitCode: remoteTip.result.exitCode, output: remoteTip.result.combinedOutput, ...timeoutStepMetadata(remoteTip.result) })
+      return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, remoteTip.result.combinedOutput, "retry-safe", remoteTip.result.exitCode, steps)
     }
-    // remoteTip === "" → branch absent on remote; a plain push creates it, no force needed.
+    if (remoteTip.kind === "failed") {
+      pushArgs.push("--force-with-lease")
+    } else if (remoteTip.tip) {
+      pushArgs.push(`--force-with-lease=${target}:${remoteTip.tip}`)
+    }
+    // remoteTip.tip === "" → branch absent on remote; a plain push creates it, no force needed.
   }
   pushArgs.push(remote, refspec)
-  const push = await git(workDir, pushArgs, context.signal, opts)
+  const push = await git(workDir, pushArgs, context.signal, networkOpts)
+  steps.push({ name: "git-push", command: pushArgs.join(" "), exitCode: push.exitCode, output: push.combinedOutput, ...timeoutStepMetadata(push) })
   if (!push.success) {
     const failureKind = looksLikeNonFastForward(push.combinedOutput) ? "base-moved" : "retry-safe"
-    return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, push.combinedOutput, failureKind, push.exitCode)
+    return pushOutput(source, target, remote, workDir, landedCommit, false, force, forceWithLease, push.combinedOutput, failureKind, push.exitCode, steps)
   }
 
-  return pushOutput(source, target, remote, workDir, landedCommit, true, force, forceWithLease, push.combinedOutput, null, push.exitCode)
+  return pushOutput(source, target, remote, workDir, landedCommit, true, force, forceWithLease, push.combinedOutput, null, push.exitCode, steps)
 }
 
 type PushFailureKind = "base-moved" | "retry-safe" | null
@@ -105,6 +120,7 @@ function pushOutput(
   gitOutput: string,
   failureKind: PushFailureKind,
   exitCode: number | null,
+  steps: GitHubPrStep[] = [],
 ): ActionResult {
   // Schema convention: `failureKind` is always present (null on success).
   // Downstream renderers (CLI DeliveryFailureGuidance, web delivery-failure.ts)
@@ -127,6 +143,7 @@ function pushOutput(
     forceWithLease,
     failureKind,
     output: gitOutput,
+    steps,
   })
   if (pushed) {
     return { status: "success", message: "Push completed", output, exitCode: exitCode ?? 0 }
@@ -150,11 +167,20 @@ function looksLikeNonFastForward(text: string) {
  * Resolves the current tip of `target` on `remote` via `ls-remote`.
  *   - tip sha when the branch exists on the remote,
  *   - "" when the branch is absent (a plain push creates it, no force needed),
- *   - null when the probe itself failed (caller falls back to bare --force-with-lease).
+ *   - failed when the probe itself failed (caller falls back to bare --force-with-lease),
+ *   - timeout when the probe hung and must be surfaced instead of disappearing.
  */
-async function resolveRemoteTip(workDir: string, remote: string, target: string, signal: AbortSignal, opts?: GitOptions): Promise<string | null> {
-  const probe = await git(workDir, ["ls-remote", remote, `refs/heads/${target}`], signal, opts)
-  if (!probe.success) return null
+async function resolveRemoteTip(workDir: string, remote: string, target: string, signal: AbortSignal, opts?: GitOptions): Promise<
+  | { kind: "resolved"; tip: string }
+  | { kind: "failed" }
+  | { kind: "timeout"; command: string; result: GitResult }
+> {
+  const args = ["ls-remote", remote, `refs/heads/${target}`]
+  const probe = await git(workDir, args, signal, opts)
+  if (!probe.success) {
+    if (probe.status === "timeout") return { kind: "timeout", command: args.join(" "), result: probe }
+    return { kind: "failed" }
+  }
   const firstLine = probe.stdout.split(/\r?\n/)[0] ?? ""
-  return firstLine.trim().split(/\s+/)[0] ?? ""
+  return { kind: "resolved", tip: firstLine.trim().split(/\s+/)[0] ?? "" }
 }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { setIssueFieldCommandRunnerForTest } from "../src/actions/issue-fields.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import {
   mergeGitHubPrAction,
   setGitHubPrChecksTimingForTest,
@@ -10,11 +11,13 @@ import {
   setGitHubPrTransientRetryForTest,
 } from "../src/actions/github-pr.js"
 
-type CommandResult = { exitCode: number; stdout: string; stderr: string }
+type CommandResult = { exitCode: number; stdout: string; stderr: string; status?: "timeout"; timeoutMs?: number }
+type GhCall = { command: string; timeoutMs: number | undefined }
 
 const WORKSPACE_PATH = "/workspace"
 const PROJECT_PATH = "/project"
 const PR_CHECKS_COMMAND = "gh pr view 42 --json statusCheckRollup"
+const ghCalls: GhCall[] = []
 
 afterEach(() => {
   setGitHubPrGitRunnerForTest(null)
@@ -22,6 +25,7 @@ afterEach(() => {
   setGitHubPrChecksTimingForTest(null)
   setGitHubPrTransientRetryForTest(null)
   setIssueFieldCommandRunnerForTest(null)
+  ghCalls.length = 0
 })
 
 function ghOk(stdout: string, stderr = ""): CommandResult {
@@ -30,6 +34,16 @@ function ghOk(stdout: string, stderr = ""): CommandResult {
 
 function ghFail(stderr: string, stdout = "", exitCode = 1): CommandResult {
   return { exitCode, stdout, stderr }
+}
+
+function ghTimeout(): CommandResult {
+  return {
+    exitCode: 124,
+    stdout: "",
+    stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+    status: "timeout",
+    timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+  }
 }
 
 function checksRollup(checks: unknown[]): string {
@@ -75,7 +89,10 @@ function installGit(respond: () => never) {
 }
 
 function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
-  setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal) => await respond(cmd, args, cwd))
+  setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
+    ghCalls.push({ command: [cmd, ...args].join(" "), timeoutMs: options?.timeoutMs })
+    return await respond(cmd, args, cwd)
+  })
 }
 
 function installMoIssueShow(title = "Use GitHub PR workflow", body = "body") {
@@ -974,5 +991,130 @@ describe("mohist/merge-github-pr action", () => {
       expect(result.status).toBe("failure")
       expect(ghCalls.filter((c) => c === "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus").length).toBe(1)
     })
+  })
+
+  it("NetworkGhCalls_AllReceiveTimeoutMs", async () => {
+    installMoIssueShow()
+    installGit(() => { throw new Error("git should not be called") })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
+          return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
+        case "gh pr view 42 --json statusCheckRollup":
+          return ghOk(checksRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
+        case "gh pr view 42 --json mergeStateStatus":
+          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
+        case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
+          return ghOk("Merged pull request #42\n")
+        case "gh pr view 42 --json state,mergeCommit,url":
+          return ghOk(JSON.stringify({ state: "MERGED", url: "https://github.com/example/repo/pull/42", mergeCommit: { oid: "merge-sha-1" } }))
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    await mergeGitHubPrAction(context({
+      prNumber: 42,
+      method: "squash",
+      subjectFrom: "issue.title",
+    }))
+
+    const networkCommands = [
+      "gh --version",
+      "gh auth status",
+      "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus",
+      "gh pr view 42 --json statusCheckRollup",
+      "gh pr view 42 --json mergeStateStatus",
+      "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ",
+      "gh pr view 42 --json state,mergeCommit,url",
+    ]
+    for (const command of networkCommands) {
+      const call = ghCalls.find((c) => c.command === command)
+      expect(call?.timeoutMs, `gh call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+    }
+  })
+
+  it("GhPrMergeTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
+    installMoIssueShow()
+    installGit(() => { throw new Error("git should not be called") })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
+          return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
+        case "gh pr view 42 --json statusCheckRollup":
+          return ghOk(checksRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
+        case "gh pr view 42 --json mergeStateStatus":
+          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
+        case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
+          return {
+            exitCode: 124,
+            stdout: "",
+            stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+            status: "timeout" as const,
+            timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+          }
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await mergeGitHubPrAction(context({
+      prNumber: 42,
+      method: "squash",
+      subjectFrom: "issue.title",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("retry-safe")
+    expect(output.output).toContain("timed out")
+    const mergeStep = output.steps.find((step: { name: string }) => step.name === "gh-pr-merge")
+    expect(mergeStep).toBeDefined()
+    expect(mergeStep.output).toContain("timed out")
+    expect(mergeStep.exitCode).toBe(124)
+  })
+
+  it("GhPrViewTimeout_IsNotRetriedAndSurfacesDuration", async () => {
+    installMoIssueShow()
+    installGit(() => { throw new Error("git should not be called") })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
+          return ghTimeout()
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await mergeGitHubPrAction(context({
+      prNumber: 42,
+      method: "squash",
+      subjectFrom: "issue.title",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("retry-safe")
+    expect(ghCalls.filter((c) => c.command === "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus")).toHaveLength(1)
+    const viewStep = output.steps.find((step: { name: string }) => step.name === "gh-pr-view")
+    expect(viewStep).toMatchObject({
+      command: "pr view 42 --json state,mergeCommit,url,number,mergeStateStatus",
+      exitCode: 124,
+      status: "timeout",
+      timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+    })
+    expect(viewStep.output).toContain("timed out")
   })
 })

@@ -676,4 +676,42 @@ describe("mohist/workspace-prepare", () => {
     expect(abortIdx).toBeLessThan(resetIdx)
     expect(resetIdx).toBeLessThan(cleanIdx)
   })
+
+  it("LocalProbes_NoCommandTimeoutIsApplied", async () => {
+    type RecordingGitCall = { workDir: string; args: string[]; timeoutMs: number | undefined }
+    const calls: RecordingGitCall[] = []
+    setWorkspacePrepareExistsCheckerForTest(() => false)
+    setWorkspacePrepareGitRunnerForTest(async (workDir, args, _signal, options) => {
+      calls.push({ workDir, args: [...args], timeoutMs: options?.timeoutMs })
+      const command = args.join(" ")
+      switch (command) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/workspace/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/workspace/.git/rebase-apply\n")
+        case "rev-parse --git-path MERGE_HEAD":
+          return ok("/workspace/.git/MERGE_HEAD\n")
+        case "rev-parse --git-path CHERRY_PICK_HEAD":
+          return ok("/workspace/.git/CHERRY_PICK_HEAD\n")
+        case "rev-parse HEAD":
+          return ok("clean-head-sha\n")
+        case "rev-parse --abbrev-ref HEAD":
+          return ok(`${EXPECTED_BRANCH}\n`)
+        case "status --porcelain":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    await workspacePrepareAction(context())
+
+    // All local-only git probes must keep no per-command timeout —
+    // they cannot hang on the network and so run under the work-level
+    // signal only.
+    for (const call of calls) {
+      expect(call.timeoutMs, `git call ${call.args.join(" ")} should have no timeoutMs`).toBeUndefined()
+    }
+    expect(calls.length).toBeGreaterThan(0)
+  })
 })

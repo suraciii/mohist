@@ -25,7 +25,7 @@ export function setGitHubPrGhRunnerForTest(runner: GhRunner | null) {
 }
 
 export type GhPrecheckOk = { ok: true; output: string }
-export type GhPrecheckFailure = { ok: false; exitCode: number; output: string; message: string }
+export type GhPrecheckFailure = { ok: false; exitCode: number; output: string; message: string; status?: "timeout"; timeoutMs?: number }
 export type GhPrecheckResult = GhPrecheckOk | GhPrecheckFailure
 
 export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal, options?: CommandLineOptions): Promise<GhPrecheckResult> {
@@ -37,6 +37,8 @@ export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: Abort
       exitCode: version.exitCode,
       output,
       message: "gh CLI is not installed or not on PATH. Install GitHub CLI and run `gh auth login` on the runner host before re-running this issue.",
+      status: version.status,
+      timeoutMs: version.timeoutMs,
     }
   }
 
@@ -48,6 +50,8 @@ export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: Abort
       exitCode: auth.exitCode,
       output: authOutput,
       message: "gh CLI is installed but `gh auth status` did not return a logged-in account. Run `gh auth login` on the runner host before re-running this issue.",
+      status: auth.status,
+      timeoutMs: auth.timeoutMs,
     }
   }
 

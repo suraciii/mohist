@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 
-type GitCall = { workDir: string; args: string[] }
+type GitCall = { workDir: string; args: string[]; timeoutMs: number | undefined }
 
 const WORKSPACE_PATH = "/workspace"
 const PROJECT_PATH = "/project-checkout"
@@ -12,10 +13,10 @@ afterEach(() => {
   setPushGitRunnerForTest(null)
 })
 
-function installGit(respond: (call: GitCall, history: GitCall[]) => { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string } | Promise<{ success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }>) {
+function installGit(respond: (call: GitCall, history: GitCall[]) => { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string; status?: "timeout"; timeoutMs?: number } | Promise<{ success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string; status?: "timeout"; timeoutMs?: number }>) {
   const calls: GitCall[] = []
-  setPushGitRunnerForTest(async (workDir, args) => {
-    const record: GitCall = { workDir, args: [...args] }
+  setPushGitRunnerForTest(async (workDir, args, _signal, options) => {
+    const record: GitCall = { workDir, args: [...args], timeoutMs: options?.timeoutMs }
     calls.push(record)
     return await respond(record, calls)
   })
@@ -593,5 +594,134 @@ describe("mohist/push", () => {
       pushed: true,
       failureKind: null,
     })
+  })
+
+  it("NetworkCommands_ReceiveTimeoutMsAndLocalProbesDoNot", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("source-sha\n")
+        case "push origin mo/issue-99:master":
+          return ok("To https://example.com/repo.git\n   base-sha..source-sha  mo/issue-99 -> master")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    await pushAction(context())
+
+    const revParse = calls.find((c) => c.args.join(" ") === "rev-parse mo/issue-99")
+    const push = calls.find((c) => c.args.join(" ") === "push origin mo/issue-99:master")
+    expect(revParse?.timeoutMs).toBeUndefined()
+    expect(push?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+  })
+
+  it("ForceWithLease_LsRemoteProbeAndPushReceiveNetworkTimeout", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("rewritten-sha\n")
+        case "ls-remote origin refs/heads/master":
+          return ok("remote-tip-sha\trefs/heads/master\n")
+        case "push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master":
+          return ok("To https://example.com/repo.git\n + rewritten-sha...rewritten-sha  mo/issue-99 -> master (forced update)")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    await pushAction(context({ forceWithLease: true }))
+
+    const revParse = calls.find((c) => c.args.join(" ") === "rev-parse mo/issue-99")
+    const lsRemote = calls.find((c) => c.args.join(" ") === "ls-remote origin refs/heads/master")
+    const push = calls.find((c) => c.args.join(" ") === "push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master")
+    expect(revParse?.timeoutMs).toBeUndefined()
+    expect(lsRemote?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+    expect(push?.timeoutMs).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+  })
+
+  it("PushTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
+    installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("source-sha\n")
+        case "push origin mo/issue-99:master":
+          // D4-shaped timeout result: the structured fields propagate through
+          // git() and the sentinel stderr matches `looksLikeRetrySafe`.
+          return {
+            success: false,
+            stdout: "",
+            stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+            exitCode: 124,
+            combinedOutput: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+            status: "timeout" as const,
+            timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+          }
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context())
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.failureKind).toBe("retry-safe")
+    expect(output.output).toContain("timed out")
+    expect(result.exitCode).toBe(124)
+    expect(output.steps).toEqual([
+      {
+        name: "git-push",
+        command: "push origin mo/issue-99:master",
+        exitCode: 124,
+        output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+        status: "timeout",
+        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+      },
+    ])
+    expect(result.message).not.toContain("base branch moved")
+  })
+
+  it("ForceWithLease_LsRemoteTimeoutFailsRetrySafeAndSurfacesDuration", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("rewritten-sha\n")
+        case "ls-remote origin refs/heads/master":
+          return {
+            success: false,
+            stdout: "",
+            stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+            exitCode: 124,
+            combinedOutput: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+            status: "timeout" as const,
+            timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+          }
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context({ forceWithLease: true }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.failureKind).toBe("retry-safe")
+    expect(output.output).toContain("timed out")
+    expect(calls.some((call) => call.args[0] === "push")).toBe(false)
+    expect(output.steps).toEqual([
+      {
+        name: "git-ls-remote",
+        command: "ls-remote origin refs/heads/master",
+        exitCode: 124,
+        output: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s`,
+        status: "timeout",
+        timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+      },
+    ])
   })
 })

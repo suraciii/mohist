@@ -4,11 +4,22 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { dirname } from "node:path"
 import { StringDecoder } from "node:string_decoder"
+import { createTimeoutSignal } from "./timeout-signal.js"
 
 export interface CommandResult {
   exitCode: number
   stdout: string
   stderr: string
+  /**
+   * Present only when the per-command timeout fired. The normal-exit path
+   * constructs the result without this key so the serialized object stays
+   * byte-identical to its pre-timeout shape.
+   */
+  status?: "timeout"
+  /**
+   * The per-command timeout (ms) that fired. Absent on normal exit.
+   */
+  timeoutMs?: number
 }
 
 /**
@@ -28,10 +39,19 @@ export interface CommandResult {
  * and is the only place that observes the process terminator. Callers
  * that do not pass `onLine` see no behavioral change — the existing
  * aggregate `CommandResult` is byte-identical.
+ *
+ * `timeoutMs` (optional) arms a per-command timer layered over the
+ * caller-supplied `AbortSignal`. Omitted or non-positive ⇒ no timer is
+ * armed and the resolved result is byte-identical to a normal exit
+ * (no `status` / `timeoutMs` keys). On expiry the child + its process
+ * group are signaled, captured output up to the kill is preserved,
+ * a sentinel line is appended to stderr, and the promise resolves with
+ * `{ exitCode, stdout, stderr, status: "timeout", timeoutMs }`.
  */
 export interface CommandLineOptions {
   onLine?: (line: string) => void
   onClose?: (exitCode: number) => void
+  timeoutMs?: number
 }
 
 export async function ensureDir(path: string) {
@@ -67,14 +87,34 @@ export async function runCommand(
   env?: NodeJS.ProcessEnv,
   options?: CommandLineOptions,
 ) {
+  const timeoutMs = options?.timeoutMs
+  const onLine = options?.onLine
+  const onClose = options?.onClose
+  // Layer the per-command timer over the caller signal only when armed.
+  // Omitted / non-positive ⇒ byte-identical behavior (no timer, no keys).
+  const timeoutHandle = timeoutMs && timeoutMs > 0 ? createTimeoutSignal(signal, timeoutMs) : undefined
+  const effectiveSignal = timeoutHandle?.signal ?? signal
   return await new Promise<CommandResult>((resolve, reject) => {
-    const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, signal, shell: false })
+    // detached:true makes the child the leader of its own process group,
+    // so on timeout / parent-abort we can signal the whole group via
+    // process.kill(-pid) and reap helper processes (git-remote-http, ...)
+    // alongside the direct child. We do NOT unref(): the parent still
+    // awaits close, otherwise we'd race the spawn-error path.
+    const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, signal: effectiveSignal, shell: false, detached: true })
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
-    const onLine = options?.onLine
-    const onClose = options?.onClose
     const stdoutState: LineBufferState = { carry: "", decoder: new StringDecoder("utf8") }
     const stderrState: LineBufferState = { carry: "", decoder: new StringDecoder("utf8") }
+    // On timeout-vs-parent-abort distinction: the layered signal's reason
+    // carries the timeout Error if and only if the per-command timer fired.
+    // We consult it lazily from inside the error / close handlers so we
+    // never race Node's internal abort listener.
+    const wasTimeout = () => timeoutHandle?.timedOut() === true
+    const onAbort = () => killProcess(child)
+    const cleanup = () => {
+      effectiveSignal.removeEventListener("abort", onAbort)
+      timeoutHandle?.dispose()
+    }
     child.stdout.on("data", (chunk: Buffer) => {
       stdout.push(chunk)
       if (onLine) emitLines(stdoutState.decoder.write(chunk), stdoutState, onLine)
@@ -83,9 +123,23 @@ export async function runCommand(
       stderr.push(chunk)
       if (onLine) emitLines(stderrState.decoder.write(chunk), stderrState, onLine)
     })
-    child.on("error", reject)
+    child.on("error", (error) => {
+      // Node's spawn-time `signal` aborts the child via `abortChildProcess`
+      // which emits `error` with an `AbortError`. We classify that abort:
+      //   - timeout fired ⇒ swallow (close resolves with structured timeout)
+      //   - parent aborted ⇒ reject (today's behavior, unchanged)
+      if (wasTimeout()) return
+      cleanup()
+      reject(error)
+    })
+    // Group-kill helper processes (git-remote-http, …) alongside the direct
+    // child. Node's `signal` option only kills the direct child, so an
+    // explicit process-group kill is required on both abort paths.
+    effectiveSignal.addEventListener("abort", onAbort, { once: true })
     child.on("close", (code) => {
       const exitCode = code ?? 1
+      const timedOut = wasTimeout()
+      cleanup()
       if (onLine) {
         emitLines(stdoutState.decoder.end(), stdoutState, onLine)
         emitLines(stderrState.decoder.end(), stderrState, onLine)
@@ -95,7 +149,24 @@ export async function runCommand(
         drainTail(stderrState, onLine)
       }
       if (onClose) onClose(exitCode)
-      resolve({ exitCode, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") })
+      const stdoutText = Buffer.concat(stdout).toString("utf8")
+      const stderrText = Buffer.concat(stderr).toString("utf8")
+      if (timedOut) {
+        // Structured timeout result. The sentinel `Command timed out after Ns`
+        // matches the unchanged `looksLikeRetrySafe` arm in
+        // `actions/github-pr-classify.ts` so the classifier absorbs the
+        // timeout as `retry-safe` with no rule additions.
+        const sentinel = `Command timed out after ${timeoutMs! / 1000}s\n`
+        resolve({
+          exitCode,
+          stdout: stdoutText,
+          stderr: stderrText + sentinel,
+          status: "timeout",
+          timeoutMs: timeoutMs!,
+        })
+        return
+      }
+      resolve({ exitCode, stdout: stdoutText, stderr: stderrText })
     })
   })
 }
@@ -133,9 +204,25 @@ export async function copyDirectory(source: string, destination: string) {
   await cp(source, destination, { recursive: true, force: true })
 }
 
-export function killProcess(child: ChildProcess) {
+/**
+ * Signal the child. When the child was spawned detached (it leads its
+ * own process group), prefer `process.kill(-pid)` to reap helper
+ * processes alongside the direct child. On Windows (no negative-PID
+ * support) or when the group kill fails (including non-detached children),
+ * fall back to `child.kill(sig)` so the direct child is still signaled.
+ */
+export function killProcess(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM") {
+  if (child.pid !== undefined && process.platform !== "win32") {
+    try {
+      process.kill(-child.pid, signal)
+      return
+    } catch {
+      // A non-detached child has no process group whose id equals child.pid;
+      // keep ACP and other existing callers safe by signaling the direct child.
+    }
+  }
   try {
-    child.kill("SIGTERM")
+    child.kill(signal)
   } catch {
     // The process may have already exited.
   }

@@ -1,19 +1,23 @@
 import { afterEach, describe, expect, it } from "vitest"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import {
   markGitHubPrReadyAction,
   setGitHubPrGhRunnerForTest,
   setGitHubPrGitRunnerForTest,
 } from "../src/actions/github-pr.js"
 
-type CommandResult = { exitCode: number; stdout: string; stderr: string }
+type CommandResult = { exitCode: number; stdout: string; stderr: string; status?: "timeout"; timeoutMs?: number }
+type GhCall = { command: string; timeoutMs: number | undefined }
 
 const WORKSPACE_PATH = "/workspace"
+const ghCalls: GhCall[] = []
 
 afterEach(() => {
   setGitHubPrGitRunnerForTest(null)
   setGitHubPrGhRunnerForTest(null)
+  ghCalls.length = 0
 })
 
 function ghOk(stdout: string, stderr = ""): CommandResult {
@@ -60,7 +64,10 @@ function installGit(respond: () => never) {
 }
 
 function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
-  setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal) => await respond(cmd, args, cwd))
+  setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
+    ghCalls.push({ command: [cmd, ...args].join(" "), timeoutMs: options?.timeoutMs })
+    return await respond(cmd, args, cwd)
+  })
 }
 
 describe("mohist/mark-github-pr-ready registry", () => {
@@ -308,5 +315,65 @@ describe("mohist/mark-github-pr-ready action", () => {
       errorCode: "retry-safe",
       prNumber: 42,
     })
+  })
+
+  it("NetworkGhCalls_AllReceiveTimeoutMs", async () => {
+    installGit(() => { throw new Error("git should not be called") })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,isDraft,url":
+          return ghOk(JSON.stringify({ state: "OPEN", isDraft: true, url: "https://github.com/example/repo/pull/42" }))
+        case "gh pr ready 42":
+          return ghOk("https://github.com/example/repo/pull/42\n")
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    await markGitHubPrReadyAction(context({ prNumber: 42 }))
+
+    for (const command of ["gh --version", "gh auth status", "gh pr view 42 --json state,isDraft,url", "gh pr ready 42"]) {
+      const call = ghCalls.find((c) => c.command === command)
+      expect(call?.timeoutMs, `gh call ${command} missing timeoutMs`).toBe(NETWORK_COMMAND_TIMEOUT_MS)
+    }
+  })
+
+  it("GhPrReadyTimeout_ClassifiesAsRetrySafeAndSurfacesDuration", async () => {
+    installGit(() => { throw new Error("git should not be called") })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,isDraft,url":
+          return ghOk(JSON.stringify({ state: "OPEN", isDraft: true, url: "https://github.com/example/repo/pull/42" }))
+        case "gh pr ready 42":
+          return {
+            exitCode: 124,
+            stdout: "",
+            stderr: `Command timed out after ${NETWORK_COMMAND_TIMEOUT_MS / 1000}s\n`,
+            status: "timeout" as const,
+            timeoutMs: NETWORK_COMMAND_TIMEOUT_MS,
+          }
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("retry-safe")
+    expect(output.output).toContain("timed out")
+    const readyStep = output.steps.find((step: { name: string }) => step.name === "gh-pr-ready")
+    expect(readyStep).toBeDefined()
+    expect(readyStep.output).toContain("timed out")
+    expect(readyStep.exitCode).toBe(124)
   })
 })

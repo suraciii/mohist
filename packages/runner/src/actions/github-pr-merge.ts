@@ -5,7 +5,7 @@ import {
   parsePrStatusCheckRollupResult,
 } from "./github-pr-checks.js"
 import { combinedGhOutput, errorMessage, parsePrView } from "./github-pr-parse.js"
-import type { GitHubPrErrorCode } from "./github-pr-types.js"
+import { timeoutStepMetadata, type GitHubPrErrorCode, type GitHubPrStepMetadata } from "./github-pr-types.js"
 
 type GhRunner = typeof runCommand
 
@@ -80,7 +80,7 @@ export async function waitChecksAndMergePr(
   prNumber: number,
   subject: string,
   signal: AbortSignal,
-  record: (name: string, command: string, exitCode: number, output: string) => void,
+  record: (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => void,
   options?: CommandLineOptions,
 ): Promise<WaitChecksAndMergeOk | WaitChecksAndMergeFailure> {
   const viewResult = await runGhReadWithRetry(
@@ -232,7 +232,7 @@ export async function waitChecksAndMergePr(
   const mergeArgs = ["pr", "merge", String(prNumber), "--squash", "--subject", subject, "--body", ""]
   const mergeResult = await gh("gh", mergeArgs, workDir, signal, undefined, options)
   const mergeOutput = combinedGhOutput(mergeResult)
-  record("gh-pr-merge", `pr merge ${prNumber} --squash --subject "${subject}"`, mergeResult.exitCode, mergeOutput)
+  record("gh-pr-merge", `pr merge ${prNumber} --squash --subject "${subject}"`, mergeResult.exitCode, mergeOutput, timeoutStepMetadata(mergeResult))
   if (mergeResult.exitCode !== 0) {
     return {
       kind: "failure",
@@ -322,7 +322,7 @@ async function waitForPrChecks(
   workDir: string,
   prNumber: number,
   signal: AbortSignal,
-  record: (name: string, command: string, exitCode: number, output: string) => void,
+  record: (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => void,
   options?: CommandLineOptions,
 ): Promise<PrChecksWaitResult> {
   // Timestamp of the first poll that saw zero check runs, or null once checks
@@ -441,7 +441,7 @@ async function runGhReadWithRetry(
   args: string[],
   workDir: string,
   signal: AbortSignal,
-  record: (name: string, command: string, exitCode: number, output: string) => void,
+  record: (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => void,
   recordName: string,
   recordCommand: string,
   options?: CommandLineOptions,
@@ -450,14 +450,15 @@ async function runGhReadWithRetry(
   for (;;) {
     const result = await gh("gh", args, workDir, signal, undefined, options)
     const transient = result.exitCode !== 0
+      && result.status !== "timeout"
       && attempt < ghTransientRetryLimit
       && looksLikeRetrySafe(`${result.stdout}\n${result.stderr}`)
     if (!transient) {
-      record(recordName, recordCommand, result.exitCode, combinedGhOutput(result))
+      record(recordName, recordCommand, result.exitCode, combinedGhOutput(result), timeoutStepMetadata(result))
       return result
     }
     attempt++
-    record(recordName, `${recordCommand} (transient retry ${attempt}/${ghTransientRetryLimit})`, result.exitCode, combinedGhOutput(result))
+    record(recordName, `${recordCommand} (transient retry ${attempt}/${ghTransientRetryLimit})`, result.exitCode, combinedGhOutput(result), timeoutStepMetadata(result))
     try {
       await delayWithSignal(ghTransientRetryBackoffMs, signal)
     } catch (error) {

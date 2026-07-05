@@ -2,12 +2,12 @@ import { stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { runCommand, type CommandLineOptions } from "../system/process.js"
-import { git as defaultGit, type GitOptions } from "./git.js"
+import { git as defaultGit, NETWORK_COMMAND_TIMEOUT_MS, type GitOptions } from "./git.js"
 import { resolveCreatePrText } from "./github-pr-issue-fields.js"
 import { combinedGhOutput, extractPrNumberFromUrl, parsePrListWithDraft } from "./github-pr-parse.js"
 import { classifyGhFailure } from "./github-pr-classify.js"
 import { getGitHubPrGh, getGitHubPrGit, runGhPrecheck } from "./github-pr-runtime.js"
-import type { CreateGitHubPrOutput, GitHubPrErrorCode, GitHubPrStep } from "./github-pr-types.js"
+import { timeoutStepMetadata, type CreateGitHubPrOutput, type GitHubPrErrorCode, type GitHubPrStep, type GitHubPrStepMetadata } from "./github-pr-types.js"
 
 type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) => Promise<{
   success: boolean
@@ -15,6 +15,8 @@ type GitRunner = (workDir: string, args: string[], signal: AbortSignal, options?
   stderr: string
   exitCode: number
   combinedOutput: string
+  status?: "timeout"
+  timeoutMs?: number
 }>
 type GhRunner = typeof runCommand
 
@@ -29,8 +31,18 @@ function sinkOptions(context: ActionContext): GitOptions | undefined {
   return context.log ? { sink: { log: context.log, source: ACTION_SOURCE } } : undefined
 }
 
+function networkGitOptions(context: ActionContext): GitOptions | undefined {
+  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { sink: { log: context.log, source: ACTION_SOURCE }, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+}
+
 function ghLineOptions(context: ActionContext): CommandLineOptions | undefined {
   return context.log ? { onLine: (line) => context.log!.write(ACTION_SOURCE, line) } : undefined
+}
+
+function networkGhOptions(context: ActionContext): CommandLineOptions | undefined {
+  if (!context.log) return { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  return { onLine: (line) => context.log!.write(ACTION_SOURCE, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
 }
 
 export async function createGitHubPrAction(context: ActionContext): Promise<ActionResult> {
@@ -68,9 +80,9 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
     steps,
   })
 
-  const ghOpts = ghLineOptions(context)
+  const ghOpts = networkGhOptions(context)
   const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal, ghOpts)
-  record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output)
+  record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output, ghPrecheck.ok ? undefined : timeoutStepMetadata(ghPrecheck))
   if (!ghPrecheck.ok) {
     return fail("config-error", ghPrecheck.message, { output: ghPrecheck.output })
   }
@@ -99,8 +111,8 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
     return fail(baseSha.failureKind, baseSha.message, { output: baseSha.output, branch: branchProbe.name })
   }
 
-  const pushResult = await git(workDir, ["push", "--force-with-lease", remote, branchProbe.name], context.signal, sinkOptions(context))
-  record("git-push", `push --force-with-lease ${remote} ${branchProbe.name}`, pushResult.exitCode, pushResult.combinedOutput)
+  const pushResult = await git(workDir, ["push", "--force-with-lease", remote, branchProbe.name], context.signal, networkGitOptions(context))
+  record("git-push", `push --force-with-lease ${remote} ${branchProbe.name}`, pushResult.exitCode, pushResult.combinedOutput, timeoutStepMetadata(pushResult))
   if (!pushResult.success) {
     return fail(
       classifyGhFailure(pushResult.stdout, pushResult.stderr),
@@ -139,8 +151,8 @@ export async function createGitHubPrAction(context: ActionContext): Promise<Acti
 }
 
 function createRecorder(steps: GitHubPrStep[]) {
-  return (name: string, command: string, exitCode: number, output: string) => {
-    steps.push({ name, command, exitCode, output })
+  return (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => {
+    steps.push({ name, command, exitCode, output, ...metadata })
   }
 }
 
@@ -153,7 +165,7 @@ export async function openOrReusePr(
   body: string,
   draft: boolean,
   signal: AbortSignal,
-  record: (name: string, command: string, exitCode: number, output: string) => void,
+  record: (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => void,
   options?: CommandLineOptions,
 ): Promise<
   | { kind: "ok"; prNumber: number; prUrl: string; operation: "created" | "updated" | "reused"; output: string }
@@ -161,7 +173,7 @@ export async function openOrReusePr(
 > {
   const listResult = await gh("gh", ["pr", "list", "--head", head, "--base", base, "--state", "open", "--json", "number,url,isDraft"], workDir, signal, undefined, options)
   const listOutput = combinedGhOutput(listResult)
-  record("gh-pr-list", `pr list --head ${head} --base ${base} --state open --json number,url,isDraft`, listResult.exitCode, listOutput)
+  record("gh-pr-list", `pr list --head ${head} --base ${base} --state open --json number,url,isDraft`, listResult.exitCode, listOutput, timeoutStepMetadata(listResult))
   if (listResult.exitCode !== 0) {
     return {
       kind: "failure",
@@ -177,7 +189,7 @@ export async function openOrReusePr(
     const editArgs = ["pr", "edit", String(pr.number), "--title", title, "--body", body]
     const editResult = await gh("gh", editArgs, workDir, signal, undefined, options)
     const editOutput = combinedGhOutput(editResult)
-    record("gh-pr-edit", `pr edit ${pr.number} --title "${title}" --body "${body}"`, editResult.exitCode, editOutput)
+    record("gh-pr-edit", `pr edit ${pr.number} --title "${title}" --body "${body}"`, editResult.exitCode, editOutput, timeoutStepMetadata(editResult))
     if (editResult.exitCode !== 0) {
       return {
         kind: "failure",
@@ -193,7 +205,7 @@ export async function openOrReusePr(
   if (draft) createArgs.push("--draft")
   const createResult = await gh("gh", createArgs, workDir, signal, undefined, options)
   const createOutput = combinedGhOutput(createResult)
-  record("gh-pr-create", `pr create --head ${head} --base ${base} --title "${title}"${draft ? " --draft" : ""}`, createResult.exitCode, createOutput)
+  record("gh-pr-create", `pr create --head ${head} --base ${base} --title "${title}"${draft ? " --draft" : ""}`, createResult.exitCode, createOutput, timeoutStepMetadata(createResult))
   if (createResult.exitCode !== 0) {
     return {
       kind: "failure",
@@ -251,11 +263,12 @@ export async function resolveBaseSha(
   remote: string,
   target: string,
   signal: AbortSignal,
-  record: (name: string, command: string, exitCode: number, output: string) => void,
+  record: (name: string, command: string, exitCode: number, output: string, metadata?: GitHubPrStepMetadata) => void,
   opts?: GitOptions,
 ): Promise<BaseShaOk | BaseShaFailure> {
-  const fetch = await git(workDir, ["fetch", remote, target], signal, opts)
-  record("git-fetch-base", `fetch ${remote} ${target}`, fetch.exitCode, fetch.combinedOutput)
+  const networkOpts: GitOptions | undefined = opts ? { ...opts, timeoutMs: NETWORK_COMMAND_TIMEOUT_MS } : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+  const fetch = await git(workDir, ["fetch", remote, target], signal, networkOpts)
+  record("git-fetch-base", `fetch ${remote} ${target}`, fetch.exitCode, fetch.combinedOutput, timeoutStepMetadata(fetch))
   if (!fetch.success) {
     return { kind: "failure", failureKind: "retry-safe", message: `git fetch ${remote} ${target} failed: ${fetch.combinedOutput}`, output: fetch.combinedOutput }
   }
