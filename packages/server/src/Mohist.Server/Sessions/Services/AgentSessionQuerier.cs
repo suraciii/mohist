@@ -80,9 +80,9 @@ public class AgentSessionQuerier : IScopedService
             limit,
             status: status,
             ct: ct);
-        sessions = await ReconcileActiveSessionsAsync(db, sessions, ct);
+        sessions = await TranscriptReductions.ReconcileActiveSessionsAsync(db, sessions, ct);
         var issueTitles = await LoadIssueTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
-        var eventSummaries = await LoadEventSummariesAsync(db, sessions.Select(r => r.Session.Id), ct);
+        var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessions.Select(r => r.Session.Id), ct);
         return sessions.Select(record =>
         {
             var s = record.Session;
@@ -180,7 +180,7 @@ public class AgentSessionQuerier : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var sessionIds = records.Select(r => r.Session.Id).ToArray();
         var terminalFacts = await LoadTerminalFactsAsync(db, sessionIds, ct);
-        var eventSummaries = await LoadEventSummariesAsync(db, sessionIds, ct);
+        var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessionIds, ct);
 
         var items = records.Select(record =>
         {
@@ -624,21 +624,6 @@ public class AgentSessionQuerier : IScopedService
             : null;
     }
 
-    internal static async Task<Dictionary<string, AgentSessionTranscriptSummary>> LoadEventSummariesAsync(
-        MohistDbContext db, IEnumerable<string> sessionIds, CancellationToken ct)
-    {
-        var loaded = await TranscriptPartLoader.LoadAsync(db, sessionIds, ct: ct);
-        if (loaded.Parts.Count == 0) return [];
-
-        return loaded.Parts
-            .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
-            .Select(part => AgentSessionDtoMapper.ToProjection(loaded.SessionByTurnId[part.TurnId], part))
-            .OrderBy(e => e.Sequence)
-            .GroupBy(e => e.SessionId, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => TranscriptEventSummaryProjector.Summarize(
-                g.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson))), StringComparer.Ordinal);
-    }
-
     /// <summary>
     /// Loads the issue titles for the given (project, issue-numbers) batch.
     /// Shared between the core querier's <see cref="ListCurrentAsync"/>
@@ -752,100 +737,9 @@ public class AgentSessionQuerier : IScopedService
         loaded.Parts
             .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
             .OrderBy(part => part.Sequence)
-            .ThenBy(part => part.Id)
+.ThenBy(part => part.Id)
             .Select(part => AgentSessionDtoMapper.ToProjection(loaded.SessionByTurnId[part.TurnId], part))
             .ToList();
-
-    internal static async Task<IReadOnlyList<AgentSessionRecord>> ReconcileActiveSessionsAsync(
-        MohistDbContext db,
-        IReadOnlyList<AgentSessionRecord> sessions,
-        CancellationToken ct)
-    {
-        if (sessions.Count == 0) return sessions;
-
-        var activeRows = sessions
-            .Where(IsActiveSession)
-            .ToList();
-        if (activeRows.Count == 0) return sessions;
-
-        var runsByWorkflow = await LoadWorkflowRunsForReconciliationAsync(db, activeRows, ct);
-        if (runsByWorkflow.Count == 0) return sessions;
-
-        var allowedSessionIds = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var activeSession in activeRows)
-        {
-            var workflowRunId = activeSession.Label(AgentSessionQueryMetadataKeys.WorkflowRunId);
-            if (workflowRunId is null || !runsByWorkflow.TryGetValue(workflowRunId, out var run) || run is null)
-            {
-                allowedSessionIds.Add(activeSession.Session.Id);
-                continue;
-            }
-
-            if (IsSessionAssociatedWithRun(run, activeSession))
-                allowedSessionIds.Add(activeSession.Session.Id);
-        }
-
-        return sessions
-            .Where(s => !IsActiveSession(s) || allowedSessionIds.Contains(s.Session.Id))
-            .ToList();
-    }
-
-    private static Mohist.Server.Workflow.Domain.Run.WorkflowRun? DeserializeWorkflowRun(string json)
-    {
-        try { return JsonSerializer.Deserialize<Mohist.Server.Workflow.Domain.Run.WorkflowRun>(json, Infrastructure.Data.Sessions.AgentSessionJson.JsonOptions); }
-        catch { return null; }
-    }
-
-    private static async Task<Dictionary<string, Mohist.Server.Workflow.Domain.Run.WorkflowRun?>> LoadWorkflowRunsForReconciliationAsync(
-        MohistDbContext db, List<AgentSessionRecord> sessions, CancellationToken ct)
-    {
-        var workflowIds = sessions
-            .Select(s => s.Label(AgentSessionQueryMetadataKeys.WorkflowRunId))
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Select(id => id!)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        var rows = await db.WorkflowRuns.AsNoTracking()
-            .Where(r => workflowIds.Contains(r.WorkflowRunId))
-            .ToListAsync(ct);
-
-        var runs = new Dictionary<string, Mohist.Server.Workflow.Domain.Run.WorkflowRun?>(StringComparer.Ordinal);
-        foreach (var row in rows)
-            runs[row.WorkflowRunId] = DeserializeWorkflowRun(row.State);
-        return runs;
-    }
-
-    /// <summary>
-    /// Determines whether <paramref name="session"/> is associated with <paramref name="run"/>
-    /// by reference through a <see cref="Mohist.Server.Workflow.Domain.Run.TaskRun"/>, not by ownership.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="AgentSession"/> is a peer aggregate, never owned by <see cref="Mohist.Server.Workflow.Domain.Run.WorkflowRun"/>.
-    /// The association is established through a <see cref="Mohist.Server.Workflow.Domain.Run.TaskRun"/> session reference and
-    /// relies on the single-runner assignment invariant: if the run is assigned, the session MUST
-    /// belong to the same runner (<see cref="WorkflowAssignmentInfo.RunnerId"/> == session.RunnerId)
-    /// and the task identified by <see cref="AgentSessionQueryMetadataKeys.WorkId"/> (if running)
-    /// MUST match the session's work item (the task whose reference links them).
-    /// When the run has no assignment yet (<see cref="Mohist.Server.Workflow.Domain.Run.WorkflowRun.AssignedTo"/> is null), any active
-    /// session known by workflow-run-id is provisionally accepted.
-    /// </remarks>
-    private static bool IsSessionAssociatedWithRun(Mohist.Server.Workflow.Domain.Run.WorkflowRun run, AgentSessionRecord session)
-    {
-        if (run.AssignedTo is null) return true;
-
-        if (!string.Equals(run.AssignedTo, session.Row.RunnerId, StringComparison.Ordinal))
-            return false;
-
-        var runningTask = run.Stages
-            .SelectMany(s => s.Tasks)
-            .FirstOrDefault(t => t.Status == Workflow.Domain.Run.TaskRunStatus.Running);
-
-        return runningTask is null || string.Equals(runningTask.Id, session.Label(AgentSessionQueryMetadataKeys.WorkId), StringComparison.Ordinal);
-    }
-
-    private static bool IsActiveSession(AgentSessionRecord session) =>
-        session.Row.AgentSessionId is not null;
 }
 
 internal sealed record TranscriptEventProjection

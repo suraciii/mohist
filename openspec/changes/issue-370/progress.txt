@@ -135,3 +135,70 @@ T-002 (record accessors + Annotation forwarder removal) — completed.
   explicitly and points the reader at the `AgentSessionQuery.ToRecords`
   construction site where the production-dictionary-coincides invariant
   holds.
+
+T-003 (transcript reductions relocation) — completed.
+
+## Codebase Patterns (T-003)
+
+- `internal static class` for reductions that take `MohistDbContext` as a
+  parameter (no DI, no clock) matches the existing mapper precedent
+  (`AgentSessionDtoMapper`, `IssueRowMapper`). `TranscriptReductions` is a
+  peer to `TranscriptPartLoader` so the transcript read-region is now
+  bounded by two co-located types: the loader returns raw materials, the
+  reductions project/summarise/reconcile them.
+- Re-target pattern: each call site swap is a one-token rename
+  (`AgentSessionQuerier.LoadEventSummariesAsync` →
+  `TranscriptReductions.LoadEventSummariesAsync` and the same for
+  `ReconcileActiveSessionsAsync`). Two call sites in the querier
+  (`ListCurrentAsync`, `ListAgentSessionsAsync`) and two in the
+  assembler (`GetActivityAsync` reconciliation + event-summaries); all
+  four were renamed in lockstep. The assembler's `<see cref>` doc
+  references were repointed to `TranscriptReductions.*` as part of the
+  same swap, satisfying T-005's pre-emptive doc-cleanup note.
+- The reductions consume the relocated primitives correctly:
+  `LoadEventSummariesAsync` uses `AgentSessionDtoMapper.ToProjection` (T-001)
+  for projection and `TranscriptEventSummaryProjector.Summarize` for
+  per-session roll-up; `ReconcileActiveSessionsAsync` reads
+  `WorkflowRunId` / `WorkId` labels via the record-instance `Label(key)`
+  method (T-002), so the fallback semantics ride along for free.
+
+## Gotchas (T-003)
+
+- `TranscriptReductions` keeps its `using System.Text.Json;` and
+  `using Microsoft.EntityFrameworkCore;` for the
+  `DeserializeWorkflowRun` helper (typed deserialisation) and the
+  `LoadWorkflowRunsForReconciliationAsync` LINQ-to-EF query respectively;
+  those stay on the file because the reductions *do* talk to the DB
+  through `MohistDbContext`, unlike `AgentSessionDtoMapper` which is a
+  pure projection type.
+- `LoadIssueTitlesAsync` / `IssueTitle` remain on `AgentSessionQuerier`
+  for now — T-004's responsibility (issue-title lookup relocation to
+  `Issue/Services/IssueTitleLookup`). The T-003 acceptance criteria
+  scope explicitly excludes them; the verification gate
+  `rg "internal static.*AgentSessionQuerier\b"` will only reach zero
+  after T-004 lands.
+- Existing `AgentSessionRecoveryDomainSpecs` (27 specs) and
+  `AgentActivityFeedAssemblerSpecs` (6 specs) exercise both reconciliation
+  branches via the end-to-end paths that the reductions now serve — the
+  reduction logic itself is unchanged (pure move, not a rewrite), so the
+  byte-alignment invariant holds without re-targeting any test calls.
+
+## Decisions (T-003)
+
+- Followed the design's additive-first sub-strategy: introduced
+  `TranscriptReductions` with both reductions + helpers → swapped the
+  four call sites (`AgentSessionQuerier.ListCurrentAsync`,
+  `AgentSessionQuerier.ListAgentSessionsAsync`,
+  `AgentActivityFeedAssembler.GetActivityAsync` ×2) → repointed the
+  assembler's `<see cref>` doc references → removed the six members
+  (`LoadEventSummariesAsync`, `ReconcileActiveSessionsAsync`, plus four
+  private helpers: `DeserializeWorkflowRun`,
+  `LoadWorkflowRunsForReconciliationAsync`,
+  `IsSessionAssociatedWithRun`, `IsActiveSession`) from
+  `AgentSessionQuerier`. Each sub-step left the build green and the
+  324 Sessions specs passing.
+- Chose `internal static` for `TranscriptReductions` (matching design D4
+  and the `IssueRowMapper` / `AgentSessionDtoMapper` precedent). The
+  reductions take `MohistDbContext` as a parameter, which is sufficient
+  to keep them testable via the in-memory test DB factory the existing
+  `AgentActivityFeedAssemblerSpecs` already exercises end-to-end.

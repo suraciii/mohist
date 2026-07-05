@@ -18,9 +18,10 @@ namespace Mohist.Server.Sessions.Services;
 /// (issue-327 T-003 / design D1, D2). Composes listing + active-session
 /// reconciliation + latest-event / event-summary / issue-title /
 /// task-progress / preview-card projection into a single
-/// <see cref="ActivityDto"/>. Depends one-way on the core
-/// <see cref="AgentSessionQuerier.ReconcileActiveSessionsAsync"/> +
-/// <see cref="AgentSessionQuerier.LoadEventSummariesAsync"/> primitives and
+/// <see cref="ActivityDto"/>. Depends one-way on the shared
+/// <see cref="TranscriptReductions.ReconcileActiveSessionsAsync"/> +
+/// <see cref="TranscriptReductions.LoadEventSummariesAsync"/> reductions
+/// (moved off <see cref="AgentSessionQuerier"/> by issue-370 T-003) and
 /// the shared <see cref="TranscriptPartLoader"/> (T-002) — the core
 /// querier does not depend on this service.
 /// </summary>
@@ -80,11 +81,11 @@ public sealed class AgentActivityFeedAssembler : IScopedService
                 AgentSessionQueryOrder.CreatedDescending,
                 take,
                 ct: ct);
-        sessions = await AgentSessionQuerier.ReconcileActiveSessionsAsync(db, sessions, ct);
+        sessions = await TranscriptReductions.ReconcileActiveSessionsAsync(db, sessions, ct);
 
         var sessionIds = sessions.Select(s => s.Session.Id).ToArray();
         var latestEvents = await LoadLatestEventsAsync(db, sessionIds, ct);
-        var eventSummaries = await AgentSessionQuerier.LoadEventSummariesAsync(db, sessionIds, ct);
+        var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessionIds, ct);
         var issueTitles = await AgentSessionQuerier.LoadIssueTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
         var taskProgressMap = await BuildTaskProgressMapAsync(sessions, ct);
 
