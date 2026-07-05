@@ -92,8 +92,8 @@ public class WorkflowSessionSpecs
     [Fact]
     public async Task GivenRunnerReportsAcpSessionEvents_WhenSessionIsQueried_ThenEventsAreSavedInSessionOrder()
     {
-        var projectId = $"proj_{Guid.NewGuid():N}";
-        var workflowRunId = $"wr_{Guid.NewGuid():N}";
+        var (project, issue, workflowRunId) = await CreateIssueWorkflowAsync("Runner reports ACP session events");
+        var projectId = project.Id;
         var sessionName = "builder";
 
         var opened = await PostRawAsync<RunnerAgentSessionDto>($"/api/runner/runner-1/sessions/{projectId}/{workflowRunId}/{sessionName}/open", new
@@ -102,7 +102,7 @@ public class WorkflowSessionSpecs
             workType = "task",
             stage = "plan",
             title = "Generate proposal",
-            issueNumber = 7,
+            issueNumber = issue.Number,
         });
         await PostRawAsync<RunnerAgentSessionDto>(RunnerAgentSessionAttachPath("runner-1", projectId, workflowRunId, sessionName), new
         {
@@ -240,6 +240,21 @@ public class WorkflowSessionSpecs
 
     private async Task<(ProjectDto Project, IssueDto Issue, string SessionName, string WorkflowRunId)> CreateIssueWorkflowSessionAsync(string name, string? title = null)
     {
+        var issueTitle = title ?? $"Workflow session {name}";
+        var (project, issue, workflowRunId) = await CreateIssueWorkflowAsync(issueTitle);
+        var sessionName = $"task-{Guid.NewGuid():N}";
+        var sessionId = Guid.NewGuid().ToString("N");
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
+            .OpenAsync(new OpenAgentSessionCommand(
+                _runnerId,
+                "opencode",
+                Metadata: WorkflowSessionMetadata(project.Id, issue.Number, workflowRunId, sessionName, sessionName, "task", "Build", issueTitle)));
+
+        return (project, issue, sessionName, workflowRunId);
+    }
+
+    private async Task<(ProjectDto Project, IssueDto Issue, string WorkflowRunId)> CreateIssueWorkflowAsync(string title)
+    {
         var projectName = $"wfs-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
         {
@@ -252,12 +267,11 @@ public class WorkflowSessionSpecs
             baseBranch = "main",
             isDefault = true
         });
-        var issueTitle = title ?? $"Workflow session {name}";
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
         {
-            title = issueTitle,
+            title,
             body = "track workflow session",
-labels = new Dictionary<string, string>(StringComparer.Ordinal),
+            labels = new Dictionary<string, string>(StringComparer.Ordinal),
             priority = "p1",
             isDraft = false
         });
@@ -265,15 +279,7 @@ labels = new Dictionary<string, string>(StringComparer.Ordinal),
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
         await issueGrain.StartWorkAsync();
         var workflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
-        var sessionName = $"task-{Guid.NewGuid():N}";
-        var sessionId = Guid.NewGuid().ToString("N");
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
-            .OpenAsync(new OpenAgentSessionCommand(
-                _runnerId,
-                "opencode",
-                Metadata: WorkflowSessionMetadata(project.Id, issue.Number, workflowRunId, sessionName, sessionName, "task", "Build", issueTitle)));
-
-        return (project, issue, sessionName, workflowRunId);
+        return (project, issue, workflowRunId);
     }
 
     private async Task<T> PostRawAsync<T>(string path, object body)
