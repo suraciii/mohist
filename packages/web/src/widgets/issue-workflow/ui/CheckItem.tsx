@@ -1,11 +1,7 @@
 import type { StageCheckState, CheckRepairState, CheckRepairStatus } from '../../../entities/issue'
 import { formatDuration, formatOriginLabel, formatOriginTitle } from './format'
 import { CheckmarkIcon, CrossIcon, EmptyCircleIcon, SpinnerIcon } from './StageStatusIcons'
-
-function isScriptHealthCheck(check: StageCheckState): boolean {
-  const output = check.output as { kind?: string } | undefined
-  return check.checkName === 'health' || output?.kind === 'script'
-}
+import { isScriptHealthCheck } from '../model/runtime-query-helpers'
 
 export function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLabel?: string }) {
   const isPending = check.status === 'pending'

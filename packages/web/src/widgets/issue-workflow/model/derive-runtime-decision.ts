@@ -1,5 +1,12 @@
 import { IssueHealth, WorkflowStage, type Issue, type RecoveryProjection, type WorkflowTimeline } from '../../../entities/issue'
 import type { AgentStatus } from '../../../entities/agent'
+import {
+  findFailedCheck,
+  findFailedScriptHealthCheck,
+  findRunningCheck,
+  findRunningTask,
+  formatStageLabel,
+} from './runtime-query-helpers'
 
 export type RuntimeSummary =
   | 'running'
@@ -72,90 +79,6 @@ export interface RuntimeDecisionInput {
 }
 
 const APPROVAL_FAILURE_OVERRIDE_SUMMARY: RuntimeSummary = 'failed'
-
-function isScriptHealthCheck(check: { name?: string; status?: string; message?: string | null } | undefined | null): boolean {
-  if (!check) return false
-  if (check.name === 'health') return true
-  return false
-}
-
-function isFailedCheck(check: { status?: string; message?: string | null } | undefined | null): boolean {
-  if (!check || !check.status) return false
-  const status = check.status.toLowerCase()
-  return status === 'failed' || status === 'error'
-}
-
-function findFailedScriptHealthCheck(
-  timeline: RuntimeDecisionInput['timeline'],
-): boolean {
-  if (!timeline?.stages) return false
-  for (const stage of timeline.stages) {
-    if (!stage.checks) continue
-    for (const check of stage.checks) {
-      if (isScriptHealthCheck(check) && isFailedCheck(check)) {
-        return true
-      }
-    }
-  }
-  return false
-}
-
-function findRunningCheck(
-  timeline: RuntimeDecisionInput['timeline'],
-): { title: string; status: string } | null {
-  if (!timeline?.stages) return null
-  for (const stage of timeline.stages) {
-    if (!stage.checks) continue
-    for (const check of stage.checks) {
-      const status = (check.status ?? '').toLowerCase()
-      if (status === 'running') {
-        return { title: check.title || check.name, status: check.status ?? 'running' }
-      }
-    }
-  }
-  return null
-}
-
-function findRunningTask(
-  timeline: RuntimeDecisionInput['timeline'],
-): { title: string; status: string } | null {
-  if (!timeline?.stages) return null
-  for (const stage of timeline.stages) {
-    if (!stage.tasks) continue
-    for (const task of stage.tasks) {
-      const status = (task.status ?? '').toLowerCase()
-      if (status === 'running') {
-        return { title: task.title, status: task.status ?? 'running' }
-      }
-    }
-  }
-  return null
-}
-
-function findFailedCheck(
-  timeline: RuntimeDecisionInput['timeline'],
-): { title: string; status: string } | null {
-  if (!timeline?.stages) return null
-  for (const stage of timeline.stages) {
-    if (!stage.checks) continue
-    for (const check of stage.checks) {
-      const status = (check.status ?? '').toLowerCase()
-      if (status === 'failed' || status === 'error') {
-        return { title: check.title || check.name, status: check.status ?? 'failed' }
-      }
-    }
-  }
-  return null
-}
-
-function formatStageLabel(stage: string | null | undefined): string {
-  if (!stage) return 'workflow'
-  return stage
-    .split(/[_-]/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
-}
 
 function buildAllowedActions(input: RuntimeDecisionInput): Set<string> {
   const recoveryActions = input.issue?.recovery?.allowedActions ?? []
