@@ -32,6 +32,7 @@
 
 ```
 mo project      项目
+mo repo         仓库
 mo issue        工作项
 mo epic         产品里程碑
 mo workflow     工作流执行（WorkflowRun）

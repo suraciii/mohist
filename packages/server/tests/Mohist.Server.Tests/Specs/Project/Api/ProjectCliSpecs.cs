@@ -233,7 +233,7 @@ public class ProjectCliSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task RepositoryAdd_WithPathOnly_IsRejectedWithValidationError()
+    public async Task RepositoryAdd_ServerValidationError_IsSurfaced()
     {
         var files = new FakeFileSystem();
         var statePath = Path.Combine(

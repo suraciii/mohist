@@ -7,8 +7,8 @@ internal static class RepositoryCommands
 {
     public static Command Build(MohistCliApi api)
     {
-        var repository = new Command("repository", "Repository management");
-        repository.Aliases.Add("repo");
+        var repository = new Command("repo", "Repository management");
+        repository.Aliases.Add("repository");
 
         repository.Subcommands.Add(BuildList(api));
         repository.Subcommands.Add(BuildAdd(api));
