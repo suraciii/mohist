@@ -528,3 +528,69 @@ handler).
   - `label remove` / `label rm` (aliases of `delete`, T-005)
   T-006 should consolidate this inventory in an issue comment.
 
+## T-006: Finalize — gap-table cleanup + alias inventory comment
+
+### `docs/cli-reference.md` gap-table cleanup
+
+Removed exactly the six rows that T-001..T-005 converged (per acceptance
+criteria #1), nothing else. The remaining rows (repo double-track,
+install/update double-entry, `status`/`logs`/`use`/`notify`/`info` bare-verb
+rehoming) stay — they're tracked under separate issues outside #386's scope.
+
+Rows removed (in original table order):
+
+- `mo workflow show` → `mo workflow get` (T-001)
+- `mo workflow status` deletion (T-001)
+- `mo agent delete` → `mo agent archive` (T-004)
+- `mo label remove` → `mo label delete` (T-005)
+- `mo issue rerun-from-stage` → `mo issue rerun --from-stage` (T-003)
+- `(no entry)` → `mo project workflow profile enable/disable` (T-002)
+
+Spec body left untouched (acceptance #2 — the target shape was already
+documented in the body; only the gap-table footnote is removed). No edits to
+`docs/issues.md` either (the `rerun-from-stage` rows there document the
+transitional peer command per D3 and are listed in the comment's cleanup
+checklist for the future cleanup issue).
+
+### Issue comment on #386
+
+Posted via `mo issue comment add 386 --project-id ... --body-file ...` with
+two sections:
+
+1. **D1 decision recap** — names the rule (renames alias, redundant removes)
+   and the rationale (shared handler can't diverge; `status` was a strict
+   subset of `get`'s default table). Cross-references
+   `openspec/changes/issue-386/design.md#d1-...`.
+2. **Transitional-alias inventory** — five-row table of every transitional
+   alias introduced (workflow show, agent delete, label remove, label rm,
+   issue rerun-from-stage --stage), each annotated with alias type (true
+   `cmd.Aliases.Add` vs peer command) and origin task. Plus a "Removed
+   without alias" row for `mo workflow status`. Plus a five-step cleanup
+   checklist the future cleanup issue can follow verbatim — naming every
+   code site, test, and doc location to touch.
+
+Comment id: `cmt_19e3de8419624d11b23b7bc409fe7b22`.
+
+### Verification
+
+`npm run build`: clean (.NET + Web + Runner).
+`dotnet test packages/cli/tests/Mohist.Cli.Tests`: **760 pass, 3 fail** —
+same three pre-existing `CliReferenceDocsSpecs` failures that have been
+present since T-001 (documented in T-001's verification section of this
+file):
+
+- `CliReference_IssueCommandExamplesUseCurrentCommentAndPrereqSurface` —
+  expects English form `mo issue comment add <number>` but cli-reference.md
+  uses Chinese form `mo issue comment add <编号>`. Pre-existing Chinese-doc
+  drift, unrelated to #386.
+- `CliReference_OptionNotesDoNotOverstateOutputOrProjectFlags` — expects
+  the Chinese phrase `\`list\`、\`show\` 和 session 子命令支持 \`-o table|json\``
+  which doesn't appear in cli-reference.md. Pre-existing, unrelated to #386.
+- `CliReference_DocumentsRealTopLevelCommandGroupsAndCriticalSubcommands` —
+  expects `mo server start` literal but cli-reference.md lists
+  `mo server ...` / similar (pre-existing). Unrelated to #386.
+
+T-006 net change: 0 new failures, 0 new passes. The gap-table edit is
+the only CLI-related file change in this task; nothing about the spec body
+or any test was touched.
+
