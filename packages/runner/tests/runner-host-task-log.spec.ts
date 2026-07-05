@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
 
@@ -150,7 +150,43 @@ function workWith(overrides: Partial<{ workflowRunId: string; workId: string; us
   }
 }
 
+// Drain microtasks until quiescence. Under fake timers the host's
+// async chains (poll → executeAndReport → append → noteAppend → flush →
+// upload) advance on microtask turns; a single `await Promise.resolve()`
+// is not enough because some continuations schedule on later turns.
+// Mirrors the helper in runner-host-cleanup-config.spec.ts so the two
+// specs stay symmetric in how they drive the same `RunnerHost.run` loop.
+async function flushMicrotasks() {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+// Advance fake time in fixed steps, draining microtasks between ticks
+// so fire-and-forget promises (heartbeat, runCleanupOnce, the host's
+// per-work microtask chain) settle before the next timer fires. Using
+// small steps (rather than one big jump) keeps ordering deterministic
+// when several intervals share the clock.
+async function flushCycles(ms: number, cycles: number) {
+  for (let i = 0; i < cycles; i += 1) {
+    await vi.advanceTimersByTimeAsync(ms)
+    await flushMicrotasks()
+  }
+}
+
 describe("RunnerHost task-log best-effort flush (T-003)", () => {
+  // Drive the host loop with fake timers so the assertions never depend
+  // on wall-clock scheduling (project rule: tests must not rely on real
+  // time). `vi.waitFor` is retained as a polling helper, but under fake
+  // timers its `timeout` is a sentinel, not a real deadline — every
+  // state transition is advanced deterministically by
+  // `vi.advanceTimersByTimeAsync` + microtask flushes.
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("UploadsIncrementalLogBeforeWorkCompletes", async () => {
     vi.clearAllMocks()
     connect.mockResolvedValue(undefined)
@@ -181,13 +217,18 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     })
     const run = host.run(controller.signal)
 
+    // Start the host loop (connect + first poll under fake timers).
+    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
+    // Drive the poll cycle so the work item is dequeued and the
+    // action's append → noteAppend → flush microtask chain runs.
+    await flushCycles(1, 3)
     await vi.waitFor(() => expect(uploadTaskLog).toHaveBeenCalled(), { timeout: 5_000 })
     expect(report).not.toHaveBeenCalled()
 
     release.resolve()
     await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
     controller.abort()
-    await expect(run).resolves.toBeUndefined()
+    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
   })
 
   it("RoutesConcurrentIncrementalUploadsToEachWorkItemCollector", async () => {
@@ -225,6 +266,12 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     })
     const run = host.run(controller.signal)
 
+    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
+    // Drain both poll cycles so work-A and work-B are dequeued, and the
+    // per-work append → threshold(1) → flush microtask chain runs for
+    // each. Under fake timers this is deterministic regardless of how
+    // many other test processes share the host CPU.
+    await flushCycles(1, 4)
     await vi.waitFor(() => expect(uploadTaskLog.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
 
     for (const call of uploadTaskLog.mock.calls) {
@@ -239,7 +286,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     releases.get("work-B")?.resolve()
     await vi.waitFor(() => expect(report).toHaveBeenCalledTimes(2), { timeout: 5_000 })
     controller.abort()
-    await expect(run).resolves.toBeUndefined()
+    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
   })
 
   it("FallbackExecutorPathStreamsIncrementalLogsBeforeReport", async () => {
@@ -289,13 +336,15 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     })
     const run = host.run(controller.signal)
 
+    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
+    await flushCycles(1, 3)
     await vi.waitFor(() => expect(uploadTaskLog).toHaveBeenCalled(), { timeout: 5_000 })
     expect(report).not.toHaveBeenCalled()
 
     release.resolve()
     await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
     controller.abort()
-    await expect(run).resolves.toBeUndefined()
+    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
     errorSpy.mockRestore()
   })
 
@@ -316,9 +365,14 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     const controller = new AbortController()
     const host = buildHost()
     const run = host.run(controller.signal)
+    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
+    // The default action writes two rebase lines and resolves; the
+    // terminal flush + report then run as a microtask chain after the
+    // poll dequeues the work item.
+    await flushCycles(1, 3)
     await vi.waitFor(() => expect(uploadTaskLog).toHaveBeenCalled(), { timeout: 5_000 })
     controller.abort()
-    await expect(run).resolves.toBeUndefined()
+    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
 
     const uploadCall = uploadTaskLog.mock.calls[0] as [string, string, { entries: Array<{ source: string; text: string }>; truncated: boolean }]
     expect(uploadCall[0]).toBe("aj-336")
@@ -364,9 +418,11 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
       dispatchLivenessProbeIntervalMs: 60_000,
     })
     const run = host.run(controller.signal)
+    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
+    await flushCycles(1, 3)
     await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
     controller.abort()
-    await expect(run).resolves.toBeUndefined()
+    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
 
     expect(uploadTaskLog).toHaveBeenCalled()
     expect(report).toHaveBeenCalledTimes(1)
@@ -395,9 +451,18 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     const controller = new AbortController()
     const host = buildHost()
     const run = host.run(controller.signal)
+    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
+    // Dequeue the work item; the terminal flush then races a forever-
+    // pending upload against the 250ms terminal-timeout guard. Under
+    // fake timers that guard NEVER fires on its own — advance past it
+    // explicitly so the upload rejects, the error is logged, and the
+    // report is reached.
+    await flushCycles(1, 3)
+    await vi.advanceTimersByTimeAsync(250)
+    await flushMicrotasks()
     await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
     controller.abort()
-    await expect(run).resolves.toBeUndefined()
+    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
 
     expect(uploadTaskLog).toHaveBeenCalled()
     expect(report).toHaveBeenCalledTimes(1)
@@ -434,9 +499,11 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
       dispatchLivenessProbeIntervalMs: 60_000,
     })
     const run = host.run(controller.signal)
+    await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
+    await flushCycles(1, 3)
     await vi.waitFor(() => expect(report).toHaveBeenCalled(), { timeout: 5_000 })
     controller.abort()
-    await expect(run).resolves.toBeUndefined()
+    await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })
 
     const reportCall = report.mock.calls[0] as [unknown, { status: string; message: string }]
     expect(reportCall[1].status).toBe("failed")
