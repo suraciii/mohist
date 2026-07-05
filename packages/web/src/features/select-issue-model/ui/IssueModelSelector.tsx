@@ -220,7 +220,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     async (modelId: string) => {
       try {
         if (!projectId) throw new Error('Project is required')
-        await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { type: 'opencode', model: modelId }, projectId)
+        await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { type: 'opencode', model: modelId, variant: null }, projectId)
         setLocalWorkflowModel(modelId)
         setLocalWorkflowVariant(null)
         addRecent(modelId)
@@ -274,7 +274,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
       try {
         const updated = { ...localStageModels, [stage]: modelId }
         if (!projectId) throw new Error('Project is required')
-        await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { type: 'opencode', model: modelId }, projectId)
+        await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { type: 'opencode', model: modelId, variant: null }, projectId)
         setLocalStageModels(updated)
         setLocalStageVariants((prev) => {
           const next = { ...prev }

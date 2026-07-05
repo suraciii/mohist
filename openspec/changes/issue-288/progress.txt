@@ -42,3 +42,32 @@ Outcome: 4 new specs added in `VariableBundleSpecs.cs`, runner coverage confirme
 ### Diff footprint
 - Modified: `packages/server/tests/Mohist.Server.Tests/Specs/Foundation/VariableBundleSpecs.cs` (+173 lines, only adds spec methods; no edits to existing tests; no production code touched).
 - No commit yet — staged for the T-001 commit on `mohist/run-wr_543aed6011a44fcfa09cb634b2cdaa5d`.
+
+## T-002 — Clear stale variant in IssueModelSelector on model-only selection (issue default + issue stage scope)
+
+Outcome: source payload fixed at both scopes (`handleSelect` + `handleSetStageModel`), 3 new test cases added + 1 flipped, all web tests green.
+
+### What landed
+- `packages/web/src/features/select-issue-model/ui/IssueModelSelector.tsx`
+  - `handleSelect` (issue default, ~line 223): payload `{ type: 'opencode', model: modelId }` → `{ type: 'opencode', model: modelId, variant: null }`.
+  - `handleSetStageModel` (issue stage scope, ~line 277): payload `{ type: 'opencode', model: modelId }` → `{ type: 'opencode', model: modelId, variant: null }`. Stage scope carries through unchanged: `patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { ... }, projectId)` still wraps it under `stages.<stage>.vars.agent`.
+- `packages/web/src/features/select-issue-model/ui/IssueModelSelector.test.tsx`
+  - Flipped: `'selects the default variant (no variant) when the model body is clicked'` — payload now asserted as `{ type: 'opencode', model: 'anthropic/claude', variant: null }`.
+  - New (a) issue default idempotent delete: no prior variant stored → PATCH still carries `variant: null` (with explicit `hasOwnProperty('variant')` assertion to lock "key present and null, not omitted").
+  - New (b) stage no-variant select: prior stage variant `'max'` → PATCH carries `{ ..., variant: null }` under stage `build`, with the same `hasOwnProperty('variant')` invariant.
+  - New (c) sibling stage preservation: `plan` and `check` both carry `variant: 'max'` / `variant: 'high'` → only `plan` is PATCHed, `check` is never sent (asserted via `calls.map(c => c[1])` not containing `'check'`). Cements AC#3 ("Stage-scoped delete only clears the targeted stage's variant").
+
+### Decisions / gotchas
+- Used `Object.prototype.hasOwnProperty.call(valueArg, 'variant')` rather than just `expect(valueArg.variant).toBeNull()` in the new tests to lock the **contract** "key present and null, not omitted" — that's the difference between T-002's payload and the buggy omitted-key shape. Otherwise the test would silently pass if someone "fixed" the bug by accidently dropping the key (which would re-introduce the very issue-288 bug class).
+- The `data-model-id` selector in the per-stage tests resolves to the model row inside the *open* popover only (ModelSelect only emits `data-model-id` for the open list at `ModelSelect.tsx:422`). Closed popovers don't expose this attribute on their trigger button. So `document.querySelector('[data-model-id="anthropic/claude"]')` correctly scopes to whichever popover is open.
+- Web tests for stage-scope variant chip selection (existing `'persists the selected per-stage variant ...'`) still assert `variant: 'high'` on chip-click path — that path is `handleSetStageVariant` (unchanged in T-002; only `handleSetStageModel` and `handleSelect` changed). Verified: 14/14 IssueModelSelector tests pass, 4410/4411 web tests pass (1 unrelated skip).
+
+### Verification run
+- `npm run -w packages/web test:run -- IssueModelSelector` → 14/14 pass (was 11 before this task: 11 → 14 with 3 new + 0 removed). Duration 1.20s.
+- `npm run -w packages/web test:run` → 4410 pass / 1 skipped / 0 fail. Duration 18.20s.
+- `npm run typecheck -w packages/web` → clean (tsc -b no errors).
+
+### Diff footprint
+- Modified: `packages/web/src/features/select-issue-model/ui/IssueModelSelector.tsx` (+2 lines net, two PATCH payload literals get `variant: null` added).
+- Modified: `packages/web/src/features/select-issue-model/ui/IssueModelSelector.test.tsx` (+127 lines net: 1 flipped assertion + 3 new tests).
+- No production source outside `packages/web`. Server / runner untouched, consistent with T-001's locked contract.
