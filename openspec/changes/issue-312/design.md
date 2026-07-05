@@ -11,7 +11,7 @@
 - `WorkflowReadModel` —— **composed 内联**（`new WorkflowReadModel(this)`），持有 `WorkflowGrain _owner`，经 internal 访问器（`RunOrNull` / `GetProjectId()` / `GetIssueId()` / `GetIssueNumber()`）读 grain 状态。纯读，不突变。
 - `WorkflowSessionHealthService` —— **DI 注入的 `IScopedService`**，方法签名 `(WorkflowRun run, Func<IReadOnlyList<WorkflowEvent>, Task> commitAsync, ...)`：按引用接收可变 `WorkflowRun` + commit 回调。它是 outcome 簇耦合度的下界参照（只**读** run + 回调 commit，不直接突变 run）。
 
-守护套件：`packages/server/tests/Mohist.Server.Tests/Specs/Workflow/Grain/` 下 35 个 spec 文件（~8k 行），作为行为等价性的兜底。约束详见 proposal 与三份 spec；最硬的不变量是「不在 run 突变中途引入新的 async 让出点」与「ETag 冲突时 `SaveRunAsync` 内 `DeactivateOnIdle()` 重载路径」。
+守护套件：`packages/server/tests/Mohist.Server.Tests/Specs/Workflow/Grain/` 下 34 个 spec 文件（~8k 行），作为行为等价性的兜底。约束详见 proposal 与三份 spec；最硬的不变量是「不在 run 突变中途引入新的 async 让出点」与「ETag 冲突时 `SaveRunAsync` 内 `DeactivateOnIdle()` 重载路径」。
 
 ## Goals / Non-Goals
 
