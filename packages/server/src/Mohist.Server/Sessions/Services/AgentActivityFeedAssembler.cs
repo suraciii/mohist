@@ -4,6 +4,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Domain;
@@ -18,17 +19,18 @@ namespace Mohist.Server.Sessions.Services;
 /// (issue-327 T-003 / design D1, D2). Composes listing + active-session
 /// reconciliation + latest-event / event-summary / issue-title /
 /// task-progress / preview-card projection into a single
-/// <see cref="ActivityDto"/>. Depends one-way on the core
-/// <see cref="AgentSessionQuerier.ReconcileActiveSessionsAsync"/> +
-/// <see cref="AgentSessionQuerier.LoadEventSummariesAsync"/> primitives and
+/// <see cref="ActivityDto"/>. Depends one-way on the shared
+/// <see cref="TranscriptReductions.ReconcileActiveSessionsAsync"/> +
+/// <see cref="TranscriptReductions.LoadEventSummariesAsync"/> reductions
+/// (moved off <see cref="AgentSessionQuerier"/> by issue-370 T-003) and
 /// the shared <see cref="TranscriptPartLoader"/> (T-002) — the core
 /// querier does not depend on this service.
 /// </summary>
 /// <remarks>
 /// Previously these methods (and their private helpers
 /// <c>ToActivityCard</c>, <c>BuildTaskProgressMapAsync</c>,
-/// <c>LoadIssueTitlesAsync</c>, <c>ToPreview</c>, <c>ExtractPreviewText</c>,
-/// <c>Truncate</c>, <c>IssueTitle</c>, <c>LoadLatestEventsAsync</c>) lived
+/// <c>ToPreview</c>, <c>ExtractPreviewText</c>,
+/// <c>Truncate</c>, <c>LoadLatestEventsAsync</c>) lived
 /// on the core <see cref="AgentSessionQuerier"/> together with five
 /// unrelated concerns. Splitting the activity-feed projection out keeps
 /// the core querier a pure query service and gives the assembly logic a
@@ -36,7 +38,13 @@ namespace Mohist.Server.Sessions.Services;
 /// <see cref="Mohist.Server.Workflow.Services.WorkflowQuerier"/>
 /// dependency moved from the core querier here (it was only consumed by
 /// the task-progress map) and the core querier constructor signature
-/// dropped that argument.
+/// dropped that argument. The issue-title batch lookup and the
+/// <c>Issue #{number}</c> fallback resolver moved to
+/// <see cref="IssueTitleLookup"/> on the Issue read side
+/// (issue-370 T-004 / design D5), so the assembler now reads the
+/// same <c>(project, numbers)</c> tuple as
+/// <see cref="AgentSessionQuerier.ListCurrentAsync"/> without going
+/// through the core querier.
 /// </remarks>
 public sealed class AgentActivityFeedAssembler : IScopedService
 {
@@ -76,16 +84,16 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         var take = Math.Clamp(limit ?? 50, 1, 200);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var sessions = await _sessionQuery.ListByLabelsAsync(
-                Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
+                AgentSessionDtoMapper.Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
                 AgentSessionQueryOrder.CreatedDescending,
                 take,
                 ct: ct);
-        sessions = await AgentSessionQuerier.ReconcileActiveSessionsAsync(db, sessions, ct);
+        sessions = await TranscriptReductions.ReconcileActiveSessionsAsync(db, sessions, ct);
 
         var sessionIds = sessions.Select(s => s.Session.Id).ToArray();
         var latestEvents = await LoadLatestEventsAsync(db, sessionIds, ct);
-        var eventSummaries = await AgentSessionQuerier.LoadEventSummariesAsync(db, sessionIds, ct);
-        var issueTitles = await AgentSessionQuerier.LoadIssueTitlesAsync(db, projectId, sessions.Select(AgentSessionQuerier.IssueNumber), ct);
+        var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(db, sessionIds, ct);
+        var issueTitles = await IssueTitleLookup.LoadTitlesAsync(db, projectId, sessions.Select(r => r.IssueNumber()), ct);
         var taskProgressMap = await BuildTaskProgressMapAsync(sessions, ct);
 
         var cards = sessions
@@ -93,7 +101,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
                 record,
                 latestEvents.GetValueOrDefault(record.Session.Id),
                 eventSummaries.GetValueOrDefault(record.Session.Id),
-                AgentSessionQuerier.IssueTitle(issueTitles, AgentSessionQuerier.IssueNumber(record)),
+                IssueTitleLookup.Resolve(issueTitles, record.IssueNumber()),
                 taskProgressMap.GetValueOrDefault(record.Session.Id)))
             .ToList();
 
@@ -124,7 +132,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     {
         var result = new Dictionary<string, ActivityTaskProgressDto>(StringComparer.Ordinal);
         var workflowRunIds = sessions
-            .Select(s => AgentSessionQuerier.Label(s, AgentSessionQueryMetadataKeys.WorkflowRunId))
+            .Select(s => s.Label(AgentSessionQueryMetadataKeys.WorkflowRunId))
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id!)
             .Distinct(StringComparer.Ordinal)
@@ -141,7 +149,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
 
         foreach (var session in sessions)
         {
-            var workflowRunId = AgentSessionQuerier.Label(session, AgentSessionQueryMetadataKeys.WorkflowRunId);
+            var workflowRunId = session.Label(AgentSessionQueryMetadataKeys.WorkflowRunId);
             if (workflowRunId is null || !statusByWorkflow.TryGetValue(workflowRunId, out var status) || status is null)
                 continue;
 
@@ -171,8 +179,8 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     /// field (status, model, timestamps, work-item, task-progress, last
     /// activity preview, event-summary, usage). Status, usage and
     /// event-summary projections are sourced from the shared
-    /// <see cref="AgentSessionQuerier"/> mappers so list / summary /
-    /// activity feeds stay in lockstep.
+    /// <see cref="AgentSessionDtoMapper"/> so list / summary / activity
+    /// feeds stay in lockstep.
     /// </summary>
     private ActivityCardDto ToActivityCard(
         AgentSessionRecord record,
@@ -183,18 +191,18 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     {
         var s = record.Session;
         var lastActivityAt = AgentSessionJsonHelper.LastActivityAt(s).ToString("o");
-        var issueNumber = AgentSessionQuerier.IssueNumber(record);
-        var projectId = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty;
-        var sessionName = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? s.Id;
-        var stage = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.Stage);
-        var workId = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.WorkId);
-        var workType = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.WorkType);
-        var sourceKind = AgentSessionQuerier.Label(record, AgentSessionQueryMetadataKeys.SourceKind);
+        var issueNumber = record.IssueNumber();
+        var projectId = record.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty;
+        var sessionName = record.Label(AgentSessionQueryMetadataKeys.SessionName) ?? s.Id;
+        var stage = record.Label(AgentSessionQueryMetadataKeys.Stage);
+        var workId = record.Label(AgentSessionQueryMetadataKeys.WorkId);
+        var workType = record.Label(AgentSessionQueryMetadataKeys.WorkType);
+        var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
 
         if (string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
         {
-            var agentId = AgentSessionQuerier.Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty;
-            var agentName = AgentSessionQuerier.Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty;
+            var agentId = record.Label(GenericAgentSessionMetadata.AgentId) ?? string.Empty;
+            var agentName = record.Label(GenericAgentSessionMetadata.AgentName) ?? string.Empty;
             return new ActivityCardDto(
                 $"agent_{agentId}",
                 issueNumber,
@@ -214,8 +222,8 @@ public sealed class AgentActivityFeedAssembler : IScopedService
                 null,
                 agentId,
                 agentName,
-                AgentSessionQuerier.ToEventSummaryDto(eventSummary),
-                AgentSessionQuerier.ToUsageDto(s));
+                AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
+                AgentSessionDtoMapper.ToUsageDto(s));
         }
 
         return new ActivityCardDto(
@@ -237,8 +245,8 @@ public sealed class AgentActivityFeedAssembler : IScopedService
             null,
             null,
             null,
-            AgentSessionQuerier.ToEventSummaryDto(eventSummary),
-            AgentSessionQuerier.ToUsageDto(s));
+            AgentSessionDtoMapper.ToEventSummaryDto(eventSummary),
+            AgentSessionDtoMapper.ToUsageDto(s));
     }
 
     /// <summary>
@@ -260,7 +268,7 @@ public sealed class AgentActivityFeedAssembler : IScopedService
         var result = new Dictionary<string, TranscriptEventProjection>(StringComparer.Ordinal);
         foreach (var part in loaded.Parts.OrderBy(e => e.LastSeenAt).ThenBy(e => e.Id))
             if (loaded.SessionByTurnId.TryGetValue(part.TurnId, out var sessionId))
-                result[sessionId] = AgentSessionQuerier.ToProjection(sessionId, part);
+                result[sessionId] = AgentSessionDtoMapper.ToProjection(sessionId, part);
 
         return result;
     }
@@ -298,17 +306,6 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     }
 
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "\u2026";
-
-    private static IReadOnlyDictionary<string, string> Labels(params (string Key, string? Value)[] values)
-    {
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (key, value) in values)
-        {
-            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value)) continue;
-            result[key] = value;
-        }
-        return result;
-    }
 
     private DateTime Now() => _timeProvider.GetUtcNow().UtcDateTime;
 }

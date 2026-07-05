@@ -179,7 +179,7 @@ public class AgentSessionRecoveryDomainSpecs
             }
         };
 
-        var lineage = AgentSessionQuerier.BuildLineageDto(session);
+        var lineage = AgentSessionDtoMapper.BuildLineageDto(session);
 
         Assert.NotNull(lineage);
         Assert.Equal(2, lineage!.Count);
@@ -206,7 +206,7 @@ public class AgentSessionRecoveryDomainSpecs
             RuntimeSessionLineage = null
         };
 
-        var lineage = AgentSessionQuerier.BuildLineageDto(session);
+        var lineage = AgentSessionDtoMapper.BuildLineageDto(session);
 
         Assert.NotNull(lineage);
         var entry = Assert.Single(lineage!);
@@ -230,7 +230,7 @@ public class AgentSessionRecoveryDomainSpecs
             RuntimeSessionLineage = null
         };
 
-        var lineage = AgentSessionQuerier.BuildLineageDto(session);
+        var lineage = AgentSessionDtoMapper.BuildLineageDto(session);
 
         Assert.Null(lineage);
     }
@@ -529,7 +529,7 @@ public class AgentSessionRecoveryDomainSpecs
             }
         };
 
-        var dto = AgentSessionQuerier.BuildUsageHistoryDto(session);
+        var dto = AgentSessionDtoMapper.BuildUsageHistoryDto(session);
 
         Assert.NotNull(dto);
         Assert.Equal(2, dto!.Count);
@@ -550,7 +550,7 @@ public class AgentSessionRecoveryDomainSpecs
         var session = CreateSession();
         session.Status = session.Status with { ContextUsageHistory = null };
 
-        var dto = AgentSessionQuerier.BuildUsageHistoryDto(session);
+        var dto = AgentSessionDtoMapper.BuildUsageHistoryDto(session);
 
         Assert.Null(dto);
     }
@@ -563,7 +563,7 @@ public class AgentSessionRecoveryDomainSpecs
         var session = CreateSession();
         session.Status = session.Status with { ContextUsageHistory = Array.Empty<ContextUsageHistoryEntry>() };
 
-        var dto = AgentSessionQuerier.BuildUsageHistoryDto(session);
+        var dto = AgentSessionDtoMapper.BuildUsageHistoryDto(session);
 
         Assert.Null(dto);
     }
@@ -589,7 +589,7 @@ public class AgentSessionRecoveryDomainSpecs
             ContextUsageHistory = new[] { new ContextUsageHistoryEntry(at, 60.0) }
         };
 
-        var dto = AgentSessionQuerier.ToUsageDto(session);
+        var dto = AgentSessionDtoMapper.ToUsageDto(session);
 
         Assert.NotNull(dto.ContextUsageHistory);
         var sample = Assert.Single(dto.ContextUsageHistory!);
@@ -613,7 +613,7 @@ public class AgentSessionRecoveryDomainSpecs
             ContextUsageHistory = null
         };
 
-        var dto = AgentSessionQuerier.ToUsageDto(session);
+        var dto = AgentSessionDtoMapper.ToUsageDto(session);
 
         Assert.Null(dto.ContextUsageHistory);
     }
