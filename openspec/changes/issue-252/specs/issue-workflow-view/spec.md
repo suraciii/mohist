@@ -49,7 +49,7 @@ The refactor MUST NOT alter the rendered DOM structure, copy, class names, inter
 
 ### Requirement: Widget barrel public surface unchanged
 
-The widget's public barrel (`packages/web/src/widgets/issue-workflow/index.ts`) SHALL export exactly the same set of names with the same types as before this change. External consumers MUST require zero edits. Any export that previously reached outside the widget through the barrel (including `WorkflowView`, `CheckRepairPanel`, and the `deriveRuntimeDecision` family) MUST remain reachable unchanged.
+The widget's public barrel (`packages/web/src/widgets/issue-workflow/index.ts`) SHALL export exactly the same set of names with the same types as before this change. External consumers MUST require zero edits. Any export that previously reached outside the widget through the barrel (including `WorkflowView` and the `deriveRuntimeDecision` family plus the `Runtime*` types) MUST remain reachable unchanged.
 
 #### Scenario: External imports resolve unchanged
 
