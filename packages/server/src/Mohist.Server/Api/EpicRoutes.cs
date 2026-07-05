@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Mohist.Server.Epic.Domain;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services;
 using System.Net.Http.Json;
 
@@ -113,7 +114,27 @@ public static class EpicRoutes
         group.MapPost("/{id}/resume", ResumeRouteAsync);
         group.MapPost("/{id}/reopen", ReopenRouteAsync);
 
+        group.MapGet("/{id}/events", ListEventsRouteAsync);
+
         return app;
+    }
+
+    private static async Task<IResult> ListEventsRouteAsync(
+        HttpContext context,
+        string id,
+        int? limit,
+        EpicQuerier queryService,
+        EpicEventQuerier eventQuery)
+    {
+        var pid = context.GetResolvedProject().Id;
+        var resolved = int.TryParse(id, out var number)
+            ? await queryService.GetByNumberAsync(pid, number)
+            : await queryService.GetAsync(pid, id);
+        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+
+        var events = await eventQuery.ListAsync(resolved.Id, limit ?? 200, context.RequestAborted);
+        var response = events.Select(StoredCloudEventDto.From).ToList();
+        return ApiResults.Ok(response);
     }
 
     private static async Task<IResult> SetStatusRouteAsync(HttpContext context, string id, string status, IGrainFactory grains, EpicQuerier queryService)

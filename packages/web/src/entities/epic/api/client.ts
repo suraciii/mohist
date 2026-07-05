@@ -1,5 +1,5 @@
 import { request, projectApiPath } from '../../../shared/api/client'
-import type { Epic, EpicDetail, EpicWithProgress } from '../model/types'
+import type { Epic, EpicDetail, EpicWithProgress, StoredCloudEventDto } from '../model/types'
 
 export function getEpics(params?: { projectId?: string; search?: string; sort?: string; dir?: string }) {
   const query = buildEpicListQuery(params)
@@ -119,4 +119,8 @@ export function startEpic(id: string, projectId?: string | null) {
 
 export function reopenEpic(id: string, projectId?: string | null) {
   return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/reopen`), { method: 'POST' })
+}
+
+export function getEpicEvents(id: string, projectId?: string | null) {
+  return request<StoredCloudEventDto[]>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/events`))
 }

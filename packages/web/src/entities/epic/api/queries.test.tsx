@@ -3,9 +3,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { usePauseEpic, useReopenEpic, useResumeEpic, useStartEpic, useStartIssue } from './queries'
+import { useEpicEvents, usePauseEpic, useReopenEpic, useResumeEpic, useStartEpic, useStartIssue } from './queries'
 
 const mocks = vi.hoisted(() => ({
+  getEpicEvents: vi.fn(),
   pauseEpic: vi.fn(),
   reopenEpic: vi.fn(),
   resumeEpic: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('./client', () => ({
   closeEpic: vi.fn(),
   createEpic: vi.fn(),
   getEpic: vi.fn(),
+  getEpicEvents: mocks.getEpicEvents,
   getEpics: vi.fn(),
   markEpicDone: vi.fn(),
   pauseEpic: mocks.pauseEpic,
@@ -183,5 +185,59 @@ describe('epic lifecycle query invalidation', () => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
     })
     expect(mocks.toast.success).toHaveBeenCalledWith('Epic reopened')
+  })
+})
+
+describe('useEpicEvents query', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.getEpicEvents.mockResolvedValue([])
+  })
+
+  it('uses queryKey ["epics", projectId, id, "events"] and disables the query when id is empty', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useEpicEvents(null), { wrapper: wrapperFor(queryClient) })
+
+    expect(result.current.fetchStatus).toBe('idle')
+    expect(mocks.getEpicEvents).not.toHaveBeenCalled()
+  })
+
+  it('fetches via getEpicEvents(epicId, projectId) and exposes the resolved data', async () => {
+    const events = [
+      {
+        id: 1,
+        eventId: 'evt-1',
+        source: '/mohist/epics/epic-1',
+        type: 'com.mohist.epic.created',
+        specVersion: '1.0',
+        subject: '1',
+        time: '2026-06-30T12:00:00+00:00',
+        dataContentType: 'application/json',
+        data: { title: 'Auth epic', description: 'desc', priority: 'p2' },
+        extensions: { projectid: 'proj-1', epicid: 'epic-1', epicno: '1' },
+      },
+    ]
+    mocks.getEpicEvents.mockResolvedValue(events)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useEpicEvents('epic-1'), { wrapper: wrapperFor(queryClient) })
+
+    await waitFor(() => expect(result.current.data).toEqual(events))
+    expect(mocks.getEpicEvents).toHaveBeenCalledWith('epic-1', 'proj-1')
+  })
+
+  it('does not run the query when useProject has no projectId', () => {
+    mocks.useProject.mockReturnValue({ projectId: null })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    renderHook(() => useEpicEvents('epic-1'), { wrapper: wrapperFor(queryClient) })
+
+    expect(mocks.getEpicEvents).not.toHaveBeenCalled()
+  })
+
+  it('passes enabled=false through to the underlying query', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    renderHook(() => useEpicEvents('epic-1', false), { wrapper: wrapperFor(queryClient) })
+
+    expect(mocks.getEpicEvents).not.toHaveBeenCalled()
   })
 })

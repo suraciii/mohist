@@ -185,3 +185,66 @@
   query-string serialization (no `?` when no params, search
   forward, sort forward, composition).
 
+## T-005 notes
+
+- Timeline read path is a **pass-through** by design: `EpicEventQuerier`
+  wraps `IEventStore.ListEpicEventsAsync` (no DTO mapping at the
+  querier level); the wire-level `StoredCloudEventDto` is produced by
+  the route via the shared `StoredCloudEventDto.From` factory used by
+  the issue/workflow event routes. Every variant maps onto the
+  envelope's `Type` (reverse-DNS, e.g. `com.mohist.epic.created`) and
+  payload `Data` JsonElement. The HTTP body is exactly the shape the
+  existing `GET /api/workflow-runs/{id}/events` and
+  `GET /api/projects/{ref}/issues/{number}/events` already expose, so
+  the timeline reads the same envelope shape and the time-ordering
+  guarantee comes straight from the EventStore's
+  `TakeLast(limit).OrderBy(Id)` policy established in T-001.
+- Route: `GET /api/projects/{projectRef}/epics/{id}/events` lives in
+  `EpicRoutes.cs:117-138`. It accepts internal id or number via the
+  existing `int.TryParse(id, out var number) ? GetByNumberAsync : GetAsync`
+  resolver (same pattern as every other epic read/mutation route). A
+  missing epic returns 404 (consistent with the rest of the surface);
+  an epic with zero persisted events returns 200 with an empty JSON
+  array (the EmptyState test renders the timeline section as
+  `data-empty="true"`).
+- Web surface: a brand-new `getEpicEvents(id, projectId)` lives on
+  the entity client. `useEpicEvents(id, enabled)` is a TanStack
+  Query keyed `['epics', projectId, id, 'events']` (consistent with
+  the issue events query which keys `['issues', projectId, id,
+  'events']`). The id is normalized to `null` when missing so the
+  query stays disabled; `enabled=false` is honored so future
+  callers can defer until a flag flips (no eager fetch).
+- `StoredCloudEventDto` is exported from the epic entity types — the
+  timeline component imports it from the same surface the queries do,
+  avoiding a duplicate domain type in the web layer.
+- `EpicActivityTimelineSection` is a render-only component (it owns
+  no state besides the React-Query hook), keyed by `data-testid` so
+  tests can assert by data-testid rather than text content for
+  load/error/empty/loaded states. Each entry is
+  `data-testid="epic-activity-entry-{kind}"` and exposes
+  `data-time` so the detail page timestamp source-of-truth is the
+  envelope's `time` (not the section's render time).
+- The dedicated `EpicReopened` entry is test-id-distinct from a
+  generic status change (`epic-activity-entry-reopened` vs
+  `epic-activity-entry-status`); the test suite explicitly verifies
+  that a single `com.mohist.epic.reopened` envelope renders only the
+  reopen entry (status entry testid is absent).
+- Unparseable entries are silently dropped (`toEntry` returns
+  `null`), so a payload regression for one variant does not break
+  the rest of the timeline section.
+- Tests: server unit `EpicEventQuerierListAsyncSpecs` (6 specs — empty,
+  chronological, isolation, DTO shape, limit tail, mapping
+  round-trip); server integration `EpicEventsApiSpecs` (8 specs — 200,
+  status-200, chronological ordering with monotonic Ids, id/number
+  parity, 404 unknown id, 404 unassigned number, limit tail,
+  type+time+payload DTO shape); web
+  `EpicActivityTimelineSection.test.tsx` (10 specs — empty state,
+  loading state, error state, creation, status w/ old+new, priority
+  w/ old+new, issue-linked, issue-unlinked, reopen distinct from
+  status, closed, multi-entry chronological with per-entry
+  timestamps, payload-parsing-skip); `entities/epic/api/client.test.ts`
+  getEpicEvents describe (3 specs — request shape, id encoding, 200
+  parsing); `entities/epic/api/queries.test.tsx` useEpicEvents
+  describe (4 specs — empty-id disable, queryFn forwarding,
+  no-projectId disable, enabled=false passthrough).
+

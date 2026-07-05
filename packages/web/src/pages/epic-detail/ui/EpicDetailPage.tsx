@@ -49,6 +49,7 @@ import {
   DependencyGraphWidget,
   type Renderability,
 } from '../../../widgets/epic-dependency-graph'
+import { EpicActivityTimelineSection } from './sections/EpicActivityTimelineSection'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {
@@ -1066,6 +1067,8 @@ export function EpicDetailPage() {
           </div>
         )}
       </Card>
+
+      <EpicActivityTimelineSection epicId={epic.id} />
 
       <EditEpicDialog
         open={editDialogOpen}

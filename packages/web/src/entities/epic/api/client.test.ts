@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getEpics } from './client'
+import { getEpicEvents, getEpics } from './client'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -102,5 +102,57 @@ describe('getEpics query-string forwarding', () => {
 
     expect(result).toHaveLength(1)
     expect(result[0].id).toBe('epic-1')
+  })
+})
+
+describe('getEpicEvents', () => {
+  it('requests GET /api/projects/{ref}/epics/{id}/events with the encoded id', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(mockJsonResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await getEpicEvents('epic-1', 'proj-1')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [calledPath, calledInit] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/epics/epic-1/events')
+    expect(calledInit?.method).toBeUndefined()
+  })
+
+  it('encodes epic ids that contain characters needing URL escaping', async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(mockJsonResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await getEpicEvents('epic with/slash', 'proj-1')
+
+    const [calledPath] = fetchMock.mock.calls[0]
+    expect(calledPath).toBe('/api/projects/proj-1/epics/epic%20with%2Fslash/events')
+  })
+
+  it('returns the parsed events array on a 200 success envelope', async () => {
+    const payload = [
+      {
+        id: 1,
+        eventId: 'evt-1',
+        source: '/mohist/epics/epic-1',
+        type: 'com.mohist.epic.created',
+        specVersion: '1.0',
+        subject: '1',
+        time: '2026-06-30T12:00:00+00:00',
+        dataContentType: 'application/json',
+        data: { title: 'Auth epic', description: 'desc', priority: 'p2' },
+        extensions: { projectid: 'proj-1', epicid: 'epic-1', epicno: '1' },
+      },
+    ]
+    const fetchMock = vi.fn<typeof fetch>()
+    fetchMock.mockResolvedValue(mockJsonResponse(payload))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await getEpicEvents('epic-1', 'proj-1')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].type).toBe('com.mohist.epic.created')
+    expect(result[0].data).toMatchObject({ title: 'Auth epic', priority: 'p2' })
   })
 })

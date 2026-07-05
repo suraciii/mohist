@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { Epic, EpicDetail, EpicWithProgress } from '../model/types'
+import type { Epic, EpicDetail, EpicWithProgress, StoredCloudEventDto } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
 import { startIssue } from '../../issue'
-import { addEpicIssue, closeEpic, createEpic, getEpic, getEpics, markEpicDone, pauseEpic, removeEpicIssue, reopenEpic, resumeEpic, startEpic, updateEpic, type UpdateEpicInput } from './client'
+import { addEpicIssue, closeEpic, createEpic, getEpic, getEpicEvents, getEpics, markEpicDone, pauseEpic, removeEpicIssue, reopenEpic, resumeEpic, startEpic, updateEpic, type UpdateEpicInput } from './client'
 
 export interface UseEpicsParams {
   search?: string
@@ -205,5 +205,15 @@ export function useUpdateEpic() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
+  })
+}
+
+export function useEpicEvents(id: string | null | undefined, enabled: boolean = true) {
+  const { projectId } = useProject()
+  const safeId = typeof id === 'string' && id.length > 0 ? id : null
+  return useQuery<StoredCloudEventDto[]>({
+    queryKey: ['epics', projectId, safeId, 'events'],
+    queryFn: () => getEpicEvents(safeId!, projectId),
+    enabled: enabled && !!projectId && !!safeId,
   })
 }
