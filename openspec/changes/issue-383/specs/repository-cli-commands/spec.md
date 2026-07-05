@@ -154,7 +154,8 @@ primary and `delete` an alias MUST be flipped.
 ### Requirement: Output goes through the shared output option
 
 Every `mo repo` subcommand SHALL render its result through the shared
-`OutputOption()` factory, exposing `-o table|json` (short form `-o`). `list`
+`OutputOption()` factory, exposing `--output`/`-o` (accepted values `table`,
+`json`). `list`
 SHALL render via the shared `PrintWithOutputAsync` path using the repository
 list table shape for `-o table` and the raw server payload for `-o json`. The
 subcommands SHALL NOT use raw, unformatted print calls.
