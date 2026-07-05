@@ -76,7 +76,6 @@ export function AiSettingsSection() {
   const resolvedDefaultVariant = resolveVariantAgainstModel(storedDefaultModel, storedDefaultVariant, modelVariantsMap)
 
   const handleSetOpencodeModel = (modelId: string) => {
-    if (modelId === storedDefaultModel) return
     setOpencodeModel.mutate({ model: modelId, variant: null })
   }
 
