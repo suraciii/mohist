@@ -5,13 +5,13 @@ style:
   - "中文为主，表格 + 少量代码/ASCII。"
 include:
   - "领域边界判定：订阅归属 Agent 上下文，消费 CloudEvent PL，不构成反向模型依赖。"
-  - "上下文获取：handler 只读信封自带字段（runId/stage），Agent 用 mo workflow get 自拉关联 issue；零反查、零盖印、零业务域依赖。"
+  - "上下文获取：handler 只读信封自带字段（runId/stage），Agent 用 mo workflow show 自拉关联 issue；零反查、零盖印、零业务域依赖。"
   - "组件清单：Subscription 聚合 / IAgentLauncher / 分发 handler / 模板渲染。"
   - "落地依赖与顺序。"
 exclude:
   - "grain 内部实现、EF mapping、SQL 细节。"
   - "响应提示词的内容设计（用户自配，见产品文档）。"
-status: "WIP——技术方案。核心边界已收敛：①订阅归属 Agent 上下文、消费 CloudEvent PL；②handler 只读信封、Agent 用 mo workflow get 自拉上下文、零反查零盖印；③前置依赖 mo workflow 命令套件（独立功能）。开放项见末尾表格。"
+status: "WIP——技术方案。核心边界已收敛：①订阅归属 Agent 上下文、消费 CloudEvent PL；②handler 只读信封、Agent 用 mo workflow show 自拉上下文、零反查零盖印；③前置依赖 mo workflow 命令套件（issue #381 已交付：mo workflow show 含关联 issue，已满足 MVP 读路径）。开放项见末尾表格。"
 ---
 
 # Agent 事件订阅（技术方案）
@@ -48,7 +48,7 @@ Agent 订阅 handler 启动 Agent 时，响应提示词需要上下文（这是�
 - **handler 反查 Issue/Workflow 读侧**——`IssueQuerier.GetIssueIdForWorkflowRunAsync` 等。违规：Agent 是叶子域，handler 若 `using Issue.Services` / `using Workflow.Infrastructure` 即反向依赖业务域。（注：`IssueWorkflowCompletionHandler` 虽反查合法，但它是 **Issue 上下文**的代码消费 Workflow 事件推进自己，属合法的 Issue→Workflow 下游消费；Agent 是叶子，地位不同，不能照搬。）
 - **生产侧盖印进 CloudEvent subject/extensions**——让 workflow 事件携带 issue 身份。否决理由：把"找 issue"的责任塞进事件信封，要么 workflow 主动理解 issue（污染核心域），要么引入一个 infra 盖印层机械抄录 annotations（tricky 的隐式约定）。两路都为 handler 其实不需要的东西引入复杂度。
 
-**收敛的方案：handler 只渲染信封自带字段，Agent 用 `mo workflow get` 主动拉取 workflow 详情（含关联 issue）。**
+**收敛的方案：handler 只渲染信封自带字段，Agent 用 `mo workflow show` 主动拉取 workflow 详情（含关联 issue）。**
 
 关键洞察：issue 身份是**响应提示词的需求**，不是 handler 的硬需求。用户写订阅提示词时不知道会触发哪个 issue，提示词天然是泛化的。而 workflow run id 是 CloudEvent `source` 自带的，stage 是 `data` 自带的——handler 只渲染这两个，就够了：
 
@@ -59,12 +59,12 @@ Agent 订阅 handler 启动 Agent 时，响应提示词需要上下文（这是�
   ↓ handler 只读信封，不反查、不盖印、不跨域
 渲染提示词：
   "workflow run {{workflow_run_id}} 在 {{stage}} 阶段进入审批门。
-   `mo workflow get {{workflow_run_id}} --json` 拉取它的详情（含关联 issue），
+   `mo workflow show {{workflow_run_id}} -o json` 拉取它的详情（含关联 issue），
    再 `mo issue show <number>` 读 proposal，approve 或 reject。"
   ↓
 Agent 启动，按提示词执行：
-  mo workflow get <runId> --json   →  拿到 issue number、stage、状态等
-  mo issue show <number>           →  读 proposal/tasks
+  mo workflow show <runId> -o json   →  拿到 issue number、stage、状态等
+  mo issue show <number>              →  读 proposal/tasks
   mo issue approve/reject <number>
 ```
 
@@ -73,19 +73,21 @@ Agent 启动，按提示词执行：
 - workflow 事件零改动，issue 事件零改动，eventbus-v2 的 identity 盖印与本功能解耦（盖印仍是 eventbus-v2 自己的优化项，但不再是本功能的前置依赖）。
 - 「找关联 issue」交给 Agent（智能体）和用户提示词，不交给 handler（机械代码）——契合产品定位「判断逻辑写在提示词里，不写在程序里」。
 
-**前置依赖**：Agent 要能 `mo workflow get <runId>` 拿到关联 issue。当前 `mo` 没有 workflow 命令套件，需**先做**（见决策 3）。
+**前置依赖**：Agent 要能 `mo workflow show <runId>` 拿到关联 issue。当前 `mo` 没有 workflow 命令套件，需**先做**（见决策 3）。**已交付**：issue #381 落地了 `mo workflow show <runId>`（含 `-o yaml/json/table`），响应包含关联 issue 的 number + title——MVP 读路径已满足。控制命令（approve/reject/retry/rerun/resume/pause/stop）同步落地，Agent 也能直接按 runId 触发状态裁判，不再强依赖 issue 号快捷方式。命名与命令归属约定见 `design/cli.md`。
 
 ### 决策 3：前置需求——`mo workflow` 命令套件
 
 Workflow 是产品一等公民，应有独立的用户面命令套件，而不是只能通过 `mo issue` 间接操作。这是 Agent 订阅的前置需求，也是独立的产品价值。
 
-**MVP 范围（支撑 Agent 订阅）**：`mo workflow get <runId> --json`——返回一个 workflow run 的详情读模型，**至少包含**：run id、状态、当前 stage、各 stage 进展、审批态、**关联 issue（number + 标题）**。
+**MVP 范围（支撑 Agent 订阅）**：`mo workflow show <runId>`——返回一个 workflow run 的详情读模型，**至少包含**：run id、状态、当前 stage、各 stage 进展、审批态、**关联 issue（number + 标题）**。
 
 读模型来源已有基础：`WorkflowActiveWorkView`（`IWorkflowGrain.cs:122-130`）和 `WorkflowFeedbackRecord`（`:140-148`）已经在显式字段层面携带 `IssueId` / `IssueNumber`——「workflow 读模型带 issue 号供 correlate」是已确立模式。新建的 workflow 详情读模型延续这一模式。
 
-**后续范围（独立演进，不阻塞 Agent 订阅）**：`mo workflow list`、把现散在 `mo issue` 下的 workflow 操作（approve/retry/rerun/rerun-from-stage/stop）归拢到 `mo workflow` 子命令组等。详见 `mo workflow` 套件自己的设计文档（待建）。
+**MVP 范围状态**：✅ issue #381 已交付（`mo workflow show <runId>` 含关联 issue join，满足 Agent 自拉上下文需求）。
 
-> 注：`mo workflow` 套件是**独立功能**，单独立项，不在本设计文档展开。本设计文档只声明对它的依赖（`mo workflow get` 返回关联 issue）。
+**后续范围（独立演进，不阻塞 Agent 订阅）**：issue #381 已同步落地控制命令（approve/reject/retry/rerun/resume/pause/stop，按 runId 寻址）与读命令（status / variables / events / list-sessions）。命名归属与输出格式约定的耐久原则见 `design/cli.md`。WorkflowProfile 已下沉到 `mo project workflow profile`（与 template/config 同层）。
+
+> 注：`mo workflow` 套件是**独立功能**，单独立项，不在本设计文档展开。本设计文档只声明对它的依赖（`mo workflow show` 返回关联 issue），该依赖 issue #381 已落地关闭。
 
 ## 组件清单（归属 Agent 上下文）
 
@@ -127,11 +129,11 @@ AgentSubscription（Agent 域新聚合）
 
 | 变量 | 来源 | 说明 |
 |---|---|---|
-| `{{workflow_run_id}}` | CloudEvent `source`（`/mohist/workflow-runs/{runId}`） | 定位线索；Agent 用 `mo workflow get` 据此拉详情 |
+| `{{workflow_run_id}}` | CloudEvent `source`（`/mohist/workflow-runs/{runId}`） | 定位线索；Agent 用 `mo workflow show` 据此拉详情 |
 | `{{stage}}` | CloudEvent `data.Stage` | workflow 事件 payload 自带 |
 | `{{event_type}}` | CloudEvent `type` | 事件类型字符串 |
 
-简单字符串替换，不引入模板引擎。**不提供 `{{issue}}` 变量**——issue 号由 Agent 执行 `mo workflow get` 后从返回里获取（见决策 2）。issue 域事件如需订阅，其 `source` 是 `/mohist/issues/{id}`，handler 可解析出 issue 号直接渲染（同样零跨域）。
+简单字符串替换，不引入模板引擎。**不提供 `{{issue}}` 变量**——issue 号由 Agent 执行 `mo workflow show` 后从返回里获取（见决策 2）。issue 域事件如需订阅，其 `source` 是 `/mohist/issues/{id}`，handler 可解析出 issue 号直接渲染（同样零跨域）。
 
 ## (开放) 其余未定项
 
@@ -152,8 +154,10 @@ AgentSubscription（Agent 域新聚合）
 ## 落地顺序
 
 ```
-0. (前置，独立功能) mo workflow 命令套件：至少 mo workflow get <runId> --json
-   —— 返回 workflow 详情读模型，含关联 issue（number + 标题）
+0. (前置，独立功能) mo workflow 命令套件 ✅ 已交付（issue #381）
+   —— mo workflow show <runId> 返回 workflow 详情读模型，含关联 issue（number + 标题）
+   —— 控制命令（approve/reject/retry/rerun/resume/pause/stop）按 runId 寻址
+   —— 命名与命令归属：mo workflow 归 WorkflowRun；mo project workflow profile 归 WorkflowProfile
    ↓ 依赖
 1. IAgentLauncher 重构（纯提取，可独立验证）
 2. Subscription 聚合 + Store + CRUD API

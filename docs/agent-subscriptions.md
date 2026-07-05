@@ -6,6 +6,8 @@ status: wip-not-implemented
 
 > **⚠️ 尚未实现**：本文描述的功能当前**没有**实装。这是产品方案，记录用户需求与设计方向。文中带「（开放）」的条目尚未定稿。已实装的能力请看其它文档。
 
+> **CLI 前置依赖已关闭**：Agent 响应提示词里要按 `workflowRunId` 拉取 run 详情（含关联 issue）的能力已由 `mo workflow show <runId>` 提供（issue #381）。本特性落地时不再受该前置依赖阻塞。
+
 ## 它解决什么问题
 
 现在 Agent 只有一种用法：**你手动启动**——在 Web UI 填一段 prompt 点 New Session，或用 `mo` 命令。Agent 不会自己醒来，也不会因为 issue 发生了什么就行动。

@@ -185,7 +185,7 @@ public class CliWorkflowReads
         Assert.Contains("run id:", stdout);
         Assert.Contains(WrId, stdout);
         // The associated issue is rendered (closing the
-        // agent-subscriptions.md `mo workflow get <runId>` prerequisite).
+        // agent-subscriptions.md `mo workflow show <runId>` prerequisite).
         Assert.Contains("issue:", stdout);
         Assert.Contains("#42", stdout);
         Assert.Contains("Close the agent subscriptions gap", stdout);

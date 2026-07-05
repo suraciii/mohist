@@ -131,3 +131,26 @@
 - `packages/cli/tests/Mohist.Cli.Tests`: 724 passed, 0 failed (699 prior + 25 new).
 - `packages/server/tests/Mohist.Server.Tests` filter `Cli`: 388 passed, 0 failed.
 - `packages/server/tests/Mohist.Server.Tests` `WorkflowRunDetailApiSpecs` + `WorkflowRunControlApiSpecs`: 33 passed, 0 failed (T-001 + T-002 server specs unchanged).
+
+## T-006 decisions
+
+- New `design/cli.md` carries the two durable principles for the `mo` CLI surface. Frontmatter matches the design/ doc style (`purpose` / `style` / `include` / `exclude`); the doc is purely principles + reasoning + canonical example, no command-by-command enumeration (that lives in `docs/cli-reference.md`).
+- Naming ownership principle is stated with a current-commands table (project / issue / epic / agent / workflow / project workflow profile | template | config / runner / server). The table anchors the principle to the actual command tree so future CLI work has a concrete pattern to extend.
+- WorkflowProfile sinking rationale explicitly named "this is the issue #381 rename": the table records the existing anti-pattern and the corrected ownership, so a future reader doesn't have to re-litigate it.
+- Output-format-vs-subresource-vs-associated-resource principle cited `mo workflow show -o yaml` as the canonical example, with `mo workflow variables` (subresource) and `mo workflow events` (associated) as the contrasting examples. A small decision flow chart is included so the rule is operational, not just descriptive.
+- Compound-prefers-flag rule from `conventions.md` is explicitly cited under the principle section (`rerun --from-stage` is the instance) so the rule of "one fewer command, one more flag" lives next to the related output-format rule.
+- Task-injection deferral (Decision 5) lives in `design/cli.md` rather than `design.md` because the rationale is a CLI-surface adjudication (Tier 2 mandatory + endpoint guard gap + conceptual grouping); the same rationale is referenced from `release/CHANGELOG.md` for users.
+- `design/README.md` 支撑主题 section gets a one-line index entry pointing to `cli.md` (purpose: "命名归属 + 输出格式/子资源/关联资源三类不可混用 + 任务注入延后"), so the doc is discoverable from the index without expanding the global foundation list.
+- `docs/cli-reference.md` Workflow 管理 section is restructured to put `mo workflow` (WorkflowRun) first, then `mo project workflow profile list` migration note. The migration note is a callout block ("**路径迁移**") so it's scannable without reading the body. The template / config subgroups explicitly point readers back to 项目管理 so the existing docs stay unchanged.
+- `docs/cli-reference.md` "设计原则" subsection is a brief user-language summary of the two principles (no `design/` references), so users see the rule without being pointed into the developer docs. Cross-reference link to `design/cli.md` is included.
+- `design/agent-subscriptions.md` updates: replaced all `mo workflow get` references with `mo workflow show` (the actual delivered command — `get` was the placeholder name in the original design), marked the frontmatter status as "前置依赖已交付" (issue #381 closed it), expanded Decision 3 with MVP status ✅, expanded the 落地顺序 step 0 with the delivered surface and the named-ownership pointer to `design/cli.md`. Kept the variable-table text close to original — only changed `mo workflow get` → `mo workflow show` for naming consistency.
+- `docs/agent-subscriptions.md` gets a small CLI-prerequisite-closed callout under the existing WIP banner so users landing on the product doc see the prerequisite is no longer blocking. Did NOT rewrite the existing `{{issue}}` response-prompt example because it's a forward-looking illustration in a WIP doc, not a behavior claim.
+- `release/CHANGELOG.md` created at repo root (no prior convention — release/changelog was a forward-looking promise in the spec). Single Unreleased section, single breaking-change table (the only path migration), new-commands summary, doc pointers, and the two "not in this release" notes (single-session sub-actions + task-injection deferral). The "唯一破坏点" framing matches the spec's wording exactly so a release-tool that scans for breaking-change tables finds it.
+- `design.md` Decision 5 (task injection deferral) and Decision 7 (cli.md principles) are referenced from `design/cli.md` rather than edited — `design.md` is the per-change design doc, `design/cli.md` is the durable rule book, and editing `design.md` after the change lands would muddy the per-change artifact.
+
+## Validation
+
+- No build needed (docs only).
+- Spot-checked that the new `design/cli.md` frontmatter style (`purpose` / `style` / `include` / `exclude`) matches `design/runner.md` and the other design/ docs.
+- Spot-checked that `docs/cli-reference.md` `mo project workflow template` / `mo project workflow config` documentation is unchanged (verifying "mo project workflow template / config 文档保持不变" acceptance criterion).
+- Cross-references between `design/cli.md` ↔ `design/agent-subscriptions.md` ↔ `docs/cli-reference.md` ↔ `release/CHANGELOG.md` form a closed loop (no broken `design/cli.md` references — verified by grep).
