@@ -40,6 +40,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private readonly ILogger<WorkflowGrain> _log;
     private readonly WorkflowReadModel _readModel;
     private readonly WorkflowStageLockCoordinator _stageLockCoordinator;
+    private readonly WorkflowStageInitializer _stageInitializer;
 
     /// <summary>
     /// Internal accessor exposing the in-memory run to grain-composed helpers
@@ -88,6 +89,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log = log;
         _readModel = new WorkflowReadModel(this);
         _stageLockCoordinator = new WorkflowStageLockCoordinator(this);
+        _stageInitializer = new WorkflowStageInitializer(this);
     }
 
     public override async Task OnActivateAsync(CancellationToken ct)
@@ -776,7 +778,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         if (_run is not null)
         {
-            var resolved = await InitializeFreshStagesAsync(events);
+            var resolved = await _stageInitializer.InitializeFreshStagesAsync(events);
             _runDirty = true;
             await SaveRunAsync(resolved);
             events = resolved;
@@ -784,61 +786,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         foreach (var e in events)
             await On(e, reason);
-    }
-
-    /// <summary>
-    /// Pre-commit step that materializes any <see cref="StageStarted"/> event
-    /// by loading fresh stage specs and calling
-    /// <see cref="WorkflowRunExtensions.InitializeStage"/>. Maintains the
-    /// invariant <c>StageStarted ⟹ Initialized</c>: a stage is always
-    /// initialized before its <see cref="StageStarted"/> is persisted or
-    /// surfaced via <see cref="WorkflowRunExtensions.NextWork"/>. The merged
-    /// events are returned so the caller commits them in a single batch with
-    /// the original events (which preserves event ordering for downstream
-    /// subscribers). Loop terminates when no further <see cref="StageStarted"/>
-    /// is emitted — each <c>InitializeStage</c> → <c>Advance</c> may auto-skip
-    /// an empty stage and emit another <see cref="StageStarted"/> for the
-    /// next stage, which must also be initialized.
-    /// </summary>
-    private async Task<IReadOnlyList<WorkflowEvent>> InitializeFreshStagesAsync(IReadOnlyList<WorkflowEvent> events)
-    {
-        if (_run is null) return events;
-
-        var materialized = new List<WorkflowEvent>(events);
-        var initializedStages = new HashSet<string>(StringComparer.Ordinal);
-
-        while (true)
-        {
-            StageStarted? pendingStart = null;
-            foreach (var e in materialized)
-            {
-                if (e is StageStarted started
-                    && !initializedStages.Contains(started.Stage))
-                {
-                    var stageRun = _run.Stages.FirstOrDefault(s => string.Equals(s.Id, started.Stage, StringComparison.Ordinal));
-                    if (stageRun is { Initialized: false })
-                    {
-                        pendingStart = started;
-                        break;
-                    }
-                }
-            }
-
-            if (pendingStart is null) break;
-
-            initializedStages.Add(pendingStart.Stage);
-
-            var projectId = GetProjectId();
-            var issueId = GetIssueId();
-            var stageDef = await _profileManager.LoadStageSpecsAsync(
-                GrainKey, pendingStart.Stage,
-                string.IsNullOrWhiteSpace(projectId) ? null : projectId,
-                string.IsNullOrWhiteSpace(issueId) ? null : issueId);
-            var initEvents = _run.InitializeStage(stageDef.Tasks, stageDef.Checks);
-            materialized.AddRange(initEvents);
-        }
-
-        return materialized;
     }
 
     private Task On(WorkflowEvent e, string? reason = null) =>
