@@ -71,3 +71,31 @@
 - `packages/cli/tests/Mohist.Cli.Tests`: 662 passed, 0 failed.
 - `packages/server/tests/Mohist.Server.Tests` filter `Cli & !WorkflowCliListSpecs & !WorkflowCliSpecs`: 388 passed, 0 failed.
 - `packages/server/tests/Mohist.Server.Tests` filter `Workflow` (excluding pre-existing flaky): 1041 passed, 0 failed (1 pre-existing flaky transcript-axes test reproduces on master; not blocking).
+
+## T-004 decisions
+
+- File shape: kept all 8 control verbs in a single `MohistCliCommands.Workflow.cs` (rewritten to `internal static partial class WorkflowCommands`) instead of splitting per verb, because the verbs share an identical factory (`run-id` arg + `--dry-run` + `-o`) and splitting would create noise without aiding navigation. Sub-builders are private static helpers next to the main `Build` so the file reads as one product slice.
+- `WorkflowRunPath(runId, suffix)` mirrors `ProjectIssuesPath`: prefixed `/api/workflow-runs/{Escape(runId)}` with optional `/suffix`. The leading-slash behavior matches the existing helper so callers can pass `"/approve"` or `""` interchangeably.
+- `rerun --from-stage` flag detection: the System.CommandLine `ctx.GetResult(opt) is not null` test (vs `GetValue` truthiness check) is the right "user actually passed the flag" signal — `GetValue` would lie when the user passed `--from-stage ""` because it collapses empty-string to the option default. This distinction is what lets the local validation reject `rerun --from-stage "  "` without sending an empty-stage request to the server (server would otherwise 400 with `Stage is required`).
+- Verb naming and help wording inherit the issue shortcuts' contracts: `pause` help explicitly calls out "resumable via 'mo workflow resume'"; `stop` help explicitly calls out "terminal — cannot be resumed; use 'pause' if you want a pause you can resume". The mirror wording makes the resumability distinction scannable from `--help`.
+- `--dry-run` convention applied uniformly across all 8 control verbs (including reject and rerun). Output format is `[dry-run] POST <path>`; reject and rerun --from-stage echo the bound body bits (`{message=<set>}` / ` {stage=...}`) so a script reading the dry-run output can see what would be sent.
+- Body typing: `rerun` returns `object body` rather than two anonymous types so the `?:` expression type-checks under C#'s anonymous-type unification rules. The control verbs are the only place in this file that need a typed body; the others use `new { }`.
+- Spec placement: `packages/cli/tests/Mohist.Cli.Tests/CliWorkflowControlSpecs.cs` (sibling to `CliProjectWorkflowProfileSpecs` and `CliIssueRejectAndStopSpecs`). 37 tests, no real net/process/time per `design/testing.md`. Coverage:
+  - Help advertises the 7 verbs and omits `rerun-from-stage` (asserted via `<verb> <run-id>` shape, not bare substring, because the rerun help description legitimately references `rerun-from-stage` as the old command).
+  - Happy paths for every verb (8 tests).
+  - Local validation: `reject` missing/blank `--message`, `rerun` blank `--from-stage`, `rerun` no `<run-id>`. None of these issue HTTP.
+  - ActiveOnly admission surface: server returns 409 with `Workflow is not active for this run` → CLI surfaces `message + code` on stderr, non-zero exit.
+  - Structured-error passthrough: `unknown_stage` / `stage_not_reached` (400) and `active_work_in_range` (409) are surfaced verbatim from `mo workflow rerun --from-stage`.
+  - Pause/resume round-trip shape (each verb hits its endpoint) and resume-after-stop is rejected by the server with `not active`.
+  - `--dry-run` for 4 representative verbs (approve, reject, rerun, rerun --from-stage) — every one makes zero HTTP calls and prints the intended request shape.
+  - `-o json` honored (raw payload, no `success` envelope) and `-o table` honored via the shared output-format path.
+  - Issue shortcut regression: `mo issue approve`, `mo issue reject`, `mo issue rerun-from-stage`, `mo issue force-stop` still hit the legacy `/api/projects/{id}/issues/{n}/{verb}` endpoints with the legacy body shapes — no change to `MohistCliCommands.Issue.Lifecycle.cs`.
+  - Negative regression: `mo workflow list` still returns Unrecognized command (no HTTP), confirming T-003's removal is intact.
+- The `pause` ↔ `force-stop` parity is documented but not asserted at the URL level (since the issue routes POST to `/force-stop` and the run routes POST to `/pause`); the regression test asserts only that the issue shortcut still hits its own endpoint, which is sufficient — both grain methods are `PauseAsync` with different reason strings, which is the server-side parity concern and is already covered by T-001's spec.
+- Did NOT add a new `TableShape` for control verbs: the post bodies return no meaningful row data (just `{}` or stage/reject acks), and reusing `IssueShow` keeps the `-o table` path benign even when the data is null. A new shape would only add surface without product value.
+
+## Validation
+
+- `dotnet build Mohist.sln` clean (0 warnings, 0 errors).
+- `packages/cli/tests/Mohist.Cli.Tests`: 699 passed, 0 failed (662 prior + 37 new).
+- `packages/server/tests/Mohist.Server.Tests` filter `Cli`: 388 passed, 0 failed.
