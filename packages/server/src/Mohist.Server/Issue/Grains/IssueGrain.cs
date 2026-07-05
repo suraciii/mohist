@@ -638,7 +638,12 @@ public class IssueGrain : Grain, IIssueGrain
     private async Task SaveIssueAsync()
     {
         if (_issue is null) return;
-        var pending = _issue.PendingEvents;
+        // Snapshot before clearing: PendingEvents returns a live view over the
+        // same _pendingEvents list, so ClearPendingEvents() would otherwise
+        // drain `pending` too and PublishIssueEventsAsync would no-op on an
+        // empty collection — silently skipping every IssueEvents append (the
+        // regression that left IssueEvents permanently empty).
+        var pending = _issue.PendingEvents.ToList();
         _issue.ClearPendingEvents();
         await _issueStore.SaveAsync(_issue.Id, _issue);
         await PublishIssueEventsAsync(pending);
