@@ -87,7 +87,6 @@ public class AgentSessionQuerier : IScopedService
         {
             var s = record.Session;
             var events = eventSummaries.GetValueOrDefault(s.Id);
-            var usage = AgentSessionJsonHelper.Usage(s);
             var issueNumber = record.IssueNumber();
             return new AgentSessionInfoDto(
             issueNumber,
@@ -101,7 +100,7 @@ public class AgentSessionQuerier : IScopedService
             null,
             AgentSessionJsonHelper.LastActivityAt(s).ToString("o"),
             AgentSessionDtoMapper.ToEventSummaryDto(events),
-            AgentSessionDtoMapper.ToUsageDto(usage));
+            AgentSessionDtoMapper.ToUsageDto(s));
         }).ToList();
     }
 
@@ -698,7 +697,7 @@ public class AgentSessionQuerier : IScopedService
         loaded.Parts
             .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
             .OrderBy(part => part.Sequence)
-.ThenBy(part => part.Id)
+            .ThenBy(part => part.Id)
             .Select(part => AgentSessionDtoMapper.ToProjection(loaded.SessionByTurnId[part.TurnId], part))
             .ToList();
 }

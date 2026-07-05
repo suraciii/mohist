@@ -1,162 +1,288 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
-using Xunit;
 using Mohist.Server.Tests.Support;
+using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Sessions;
 
 /// <summary>
-/// Codifies the byte-alignment invariant that issue-327 T-003 / issue-370
-/// T-001 / design D1 pin between the three read-side consumers of
-/// <see cref="AgentSession"/> DTO projections:
-/// <list type="bullet">
-///   <item><description>the core query service (workflow list / detail / current list / session metadata / generic summary paths),</description></item>
-///   <item><description>the activity feed assembler, and</description></item>
-///   <item><description>the generic session summary path.</description></item>
-/// </list>
-/// All three call the same <see cref="AgentSessionDtoMapper"/> method, so
-/// the projections cannot drift. These specs assert identity across
-/// callers for the three projection shapes that previously lived as
-/// <c>internal static</c> members on <see cref="AgentSessionQuerier"/>:
-/// <see cref="AgentUsageDto"/>, <see cref="AgentEventSummaryDto"/>, and
-/// <see cref="RuntimeSessionLineageEntryDto"/>.
+/// Codifies the byte-alignment invariant that issue-370 T-001 pins between
+/// the read-side consumers of <see cref="AgentSession"/> DTO projections.
+/// These specs call consumer APIs, not the mapper directly, so they fail when
+/// one consumer drifts away from <see cref="AgentSessionDtoMapper"/>.
 /// </summary>
+[Collection("MohistDb")]
 public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    private static readonly DateTime CreatedAt = new(2026, 6, 10, 5, 0, 0, DateTimeKind.Utc);
+    private readonly MohistDbFixture _fixture;
+
+    public AgentSessionDtoMapperCrossConsumerIdentitySpecs(MohistDbFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public void UsageDto_QuerierAndAssembler_ProduceIdenticalOutputForSameSession()
+    public async Task UsageAndEventSummary_QuerierAndAssembler_ProduceIdenticalOutputForSameSession()
     {
-        // The querier (ToUsageDto(AgentSession) → activity-card path via ListCurrentAsync)
-        // and the assembler (ToActivityCard) both project the same AgentSession
-        // through AgentSessionDtoMapper.ToUsageDto. Assert byte-identity for
-        // every field on the DTO, including the bounded context-usage history
-        // and the context-health classification.
-        var session = CreateSessionWithUsage();
-        var at = new DateTime(2026, 6, 10, 5, 0, 0, DateTimeKind.Utc);
-        session.Status = session.Status with
-        {
-            UsageSummary = new AgentUsageSummary
+        using var scope = _fixture.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        var projectId = $"proj-cross-consumer-{Guid.NewGuid():N}";
+        var sessionId = $"session-{Guid.NewGuid():N}";
+        var issueNumber = 731;
+
+        await SeedIssueAsync(dbFactory, projectId, issueNumber, "Shared issue title", workflowRunId: null);
+        await SeedGenericSessionWithUsageAndTranscriptAsync(dbFactory, projectId, sessionId, issueNumber);
+
+        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
+        var assembler = scope.ServiceProvider.GetRequiredService<AgentActivityFeedAssembler>();
+
+        var current = await querier.ListCurrentAsync(projectId, limit: 10);
+        var activity = await assembler.GetActivityAsync(projectId, limit: 10);
+
+        var fromQuerierPath = Assert.Single(current, session => session.SessionId == sessionId);
+        var fromAssemblerPath = Assert.Single(activity.Sessions, session => session.SessionId == sessionId);
+
+        Assert.Equal(fromQuerierPath.IssueNumber, fromAssemblerPath.IssueNumber);
+        Assert.Equal(fromQuerierPath.IssueTitle, fromAssemblerPath.IssueTitle);
+        AssertUsageDtoEqual(fromQuerierPath.Usage, fromAssemblerPath.Usage);
+        AssertEventSummaryDtoEqual(fromQuerierPath.EventSummary, fromAssemblerPath.EventSummary);
+        Assert.True(fromQuerierPath.EventSummary.ContextExhaustionSuspected);
+        Assert.Null(fromQuerierPath.EventSummary.ContextExhaustion);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task Lineage_MetadataPath_DelegatesRuntimeLineageProjectionToSharedMapper()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
+        var projectId = $"proj-lineage-{Guid.NewGuid():N}";
+        var workflowRunId = $"wr-{Guid.NewGuid():N}";
+        var sessionName = "plan";
+        var issueNumber = 917;
+        var session = CreateWorkflowSession(projectId, issueNumber, workflowRunId, sessionName);
+
+        await SeedIssueAsync(dbFactory, projectId, issueNumber, "Workflow issue", workflowRunId);
+        await SeedSessionAsync(dbFactory, session, rowStatus: "bound");
+
+        var metadata = await querier.GetSessionMetadataAsync(projectId, issueNumber, sessionName);
+
+        Assert.NotNull(metadata);
+        var lineage = metadata!.RuntimeSessionLineage;
+        Assert.NotNull(lineage);
+        Assert.Collection(
+            lineage!,
+            entry =>
             {
-                InputTokens = 100,
-                OutputTokens = 200,
-                TotalTokens = 300,
-                CachedReadTokens = 50,
-                ThoughtTokens = 25,
-                CostAmount = 0.42,
-                CostCurrency = "USD",
-                ContextWindowUsed = 60_000,
-                ContextWindowSize = 100_000
+                Assert.Equal("acp-original", entry.AgentRuntimeSessionId);
+                Assert.Equal(CreatedAt.ToString("o"), entry.BoundAt);
             },
-            ContextUsageHistory = new[] { new ContextUsageHistoryEntry(at, 60.0) }
-        };
-
-        var fromQuerierPath = AgentSessionDtoMapper.ToUsageDto(session);
-        var fromAssemblerPath = AgentSessionDtoMapper.ToUsageDto(session);
-
-        AssertUsageDtoEqual(fromQuerierPath, fromAssemblerPath);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public void EventSummaryDto_QuerierAndAssembler_ProduceIdenticalOutputForSameSummary()
-    {
-        // ListCurrentAsync (querier) and GetActivityAsync (assembler) both
-        // project the same AgentSessionTranscriptSummary through
-        // AgentSessionDtoMapper.ToEventSummaryDto. Assert byte-identity
-        // including the context-exhaustion flags (null when unmatched, not
-        // false — preserves the pre-change wire shape).
-        var summary = new AgentSessionTranscriptSummary(
-            ResolvedModel: "gpt-4o",
-            FailureCategory: "context_exhaustion_suspected",
-            ToolCallCount: 3,
-            ToolErrorCount: 1);
-
-        var fromQuerierPath = AgentSessionDtoMapper.ToEventSummaryDto(summary);
-        var fromAssemblerPath = AgentSessionDtoMapper.ToEventSummaryDto(summary);
-
-        AssertEventSummaryDtoEqual(fromQuerierPath, fromAssemblerPath);
-        Assert.True(fromQuerierPath.ContextExhaustionSuspected);
-        Assert.Null(fromQuerierPath.ContextExhaustion);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public void EventSummaryDto_NonExhaustionCategory_KeepsFlagsNull()
-    {
-        // Cross-consumer identity for the non-exhaustion branch: both
-        // querier and assembler paths must keep the
-        // context-exhaustion / suspected-context-exhaustion flags null
-        // (not false) when the failure category is neither category.
-        var summary = new AgentSessionTranscriptSummary(
-            ResolvedModel: "gpt-4o",
-            FailureCategory: "task_failed",
-            ToolCallCount: 1,
-            ToolErrorCount: 0);
-
-        var fromQuerierPath = AgentSessionDtoMapper.ToEventSummaryDto(summary);
-        var fromAssemblerPath = AgentSessionDtoMapper.ToEventSummaryDto(summary);
-
-        AssertEventSummaryDtoEqual(fromQuerierPath, fromAssemblerPath);
-        Assert.Null(fromQuerierPath.ContextExhaustion);
-        Assert.Null(fromQuerierPath.ContextExhaustionSuspected);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public void LineageDto_MetadataPathAndGenericSummaryPath_ProduceIdenticalOutput()
-    {
-        // BuildSessionMetadataDtoAsync (querier, session-metadata path) and
-        // GetGenericSessionSummaryAsync (querier, generic-summary path) both
-        // project the same AgentSession through
-        // AgentSessionDtoMapper.BuildLineageDto. Assert byte-identity across
-        // the populated-lineage, legacy-synthesis, and unbound branches.
-        var firstBoundAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
-        var secondBoundAt = firstBoundAt.AddMinutes(10);
-
-        var populated = CreateSession();
-        populated.Status = populated.Status with
-        {
-            AgentRuntimeSessionId = "acp-2",
-            BoundAt = secondBoundAt,
-            RuntimeSessionLineage = new[]
+            entry =>
             {
-                new RuntimeSessionLineageEntry("acp-1", firstBoundAt),
-                new RuntimeSessionLineageEntry("acp-2", secondBoundAt)
-            }
-        };
-        var populatedMetadataPath = AgentSessionDtoMapper.BuildLineageDto(populated);
-        var populatedGenericPath = AgentSessionDtoMapper.BuildLineageDto(populated);
-        AssertLineageDtoListEqual(populatedMetadataPath, populatedGenericPath);
+                Assert.Equal("acp-current", entry.AgentRuntimeSessionId);
+                Assert.Equal(CreatedAt.AddMinutes(15).ToString("o"), entry.BoundAt);
+            });
 
-        var legacy = CreateSession();
-        var legacyBoundAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
-        legacy.Status = legacy.Status with
-        {
-            AgentRuntimeSessionId = "acp-legacy",
-            BoundAt = legacyBoundAt,
-            RuntimeSessionLineage = null
-        };
-        var legacyMetadataPath = AgentSessionDtoMapper.BuildLineageDto(legacy);
-        var legacyGenericPath = AgentSessionDtoMapper.BuildLineageDto(legacy);
-        AssertLineageDtoListEqual(legacyMetadataPath, legacyGenericPath);
+        var querierSource = File.ReadAllText(SourcePath(
+            "src",
+            "Mohist.Server",
+            "Sessions",
+            "Services",
+            "AgentSessionQuerier.cs"));
+        Assert.Contains("var lineage = AgentSessionDtoMapper.BuildLineageDto(domainSession);", querierSource);
+        Assert.DoesNotContain("new RuntimeSessionLineageEntryDto", querierSource);
+    }
 
-        var unbound = CreateSession();
-        unbound.Status = unbound.Status with
+    private static async Task SeedGenericSessionWithUsageAndTranscriptAsync(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        string projectId,
+        string sessionId,
+        int issueNumber)
+    {
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            AgentRuntimeSessionId = null,
-            BoundAt = null,
-            RuntimeSessionLineage = null
+            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+            [AgentSessionQueryMetadataKeys.IssueNumber] = issueNumber.ToString(),
+            [GenericAgentSessionMetadata.AgentId] = "agent_cross_consumer",
+            [GenericAgentSessionMetadata.AgentName] = "cross-consumer-agent",
         };
-        var unboundMetadataPath = AgentSessionDtoMapper.BuildLineageDto(unbound);
-        var unboundGenericPath = AgentSessionDtoMapper.BuildLineageDto(unbound);
-        AssertLineageDtoListEqual(unboundMetadataPath, unboundGenericPath);
-        Assert.Null(unboundMetadataPath);
+
+        var session = new AgentSession
+        {
+            Id = sessionId,
+            Runtime = new AgentSessionRuntime("runner-cross", null),
+            Settings = new AgentSessionSettings("gpt-4o"),
+            Status = new AgentSessionStatusSnapshot(
+                AgentRuntimeSessionId: sessionId,
+                CreatedAt: CreatedAt,
+                BoundAt: CreatedAt.AddSeconds(1),
+                LastDataAt: CreatedAt.AddMinutes(5),
+                UsageSummary: new AgentUsageSummary(
+                    InputTokens: 100,
+                    OutputTokens: 200,
+                    TotalTokens: 300,
+                    CachedReadTokens: 50,
+                    ThoughtTokens: 25,
+                    CostAmount: 0.42,
+                    CostCurrency: "USD",
+                    ContextWindowUsed: 60_000,
+                    ContextWindowSize: 100_000),
+                RuntimeSessionLineage: [],
+                ContextUsageHistory:
+                [
+                    new ContextUsageHistoryEntry(CreatedAt.AddMinutes(1), 0.42),
+                    new ContextUsageHistoryEntry(CreatedAt.AddMinutes(4), 0.60),
+                ]),
+            Metadata = new AgentSessionMetadata(labels),
+        };
+
+        await SeedSessionAsync(dbFactory, session, rowStatus: "bound");
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var turn = new AgentSessionTranscriptTurnRow
+        {
+            SessionId = sessionId,
+            Sequence = 1,
+            StartedAt = CreatedAt,
+            UpdatedAt = CreatedAt.AddMinutes(5),
+        };
+        db.AgentSessionTranscriptTurns.Add(turn);
+        await db.SaveChangesAsync();
+
+        db.AgentSessionTranscriptParts.AddRange(
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 1,
+                Type = TranscriptPartTypes.Model,
+                CorrelationKey = "model",
+                PayloadJson = JsonSerializer.Serialize(new { resolvedModel = "gpt-4o" }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(1),
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 2,
+                Type = TranscriptPartTypes.Tool,
+                CorrelationKey = "tool-ok",
+                PayloadJson = JsonSerializer.Serialize(new { toolCallId = "tool-ok", toolName = "read", status = "completed" }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(2),
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 3,
+                Type = TranscriptPartTypes.Tool,
+                CorrelationKey = "tool-failed",
+                PayloadJson = JsonSerializer.Serialize(new { toolCallId = "tool-failed", toolName = "write", status = "failed" }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(3),
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                TurnId = turn.Id,
+                Sequence = 4,
+                Type = TranscriptPartTypes.SessionClosed,
+                CorrelationKey = "session.closed",
+                PayloadJson = JsonSerializer.Serialize(new { status = "failed", failureCategory = ContextExhaustionClassifier.SuspectedContextExhaustionCategory }, JSON.Options),
+                LastSeenAt = CreatedAt.AddMinutes(4),
+            });
+        await db.SaveChangesAsync();
+    }
+
+    private static AgentSession CreateWorkflowSession(
+        string projectId,
+        int issueNumber,
+        string workflowRunId,
+        string sessionName)
+    {
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+            [AgentSessionQueryMetadataKeys.WorkflowRunId] = workflowRunId,
+            [AgentSessionQueryMetadataKeys.WorkId] = "work-lineage",
+            [AgentSessionQueryMetadataKeys.WorkType] = "task",
+            [AgentSessionQueryMetadataKeys.Stage] = "Build",
+            [AgentSessionQueryMetadataKeys.IssueNumber] = issueNumber.ToString(),
+            [AgentSessionQueryMetadataKeys.SessionName] = sessionName,
+        };
+
+        return new AgentSession
+        {
+            Id = $"session-{Guid.NewGuid():N}",
+            Runtime = new AgentSessionRuntime("runner-lineage", null),
+            Settings = new AgentSessionSettings("gpt-4o"),
+            Status = new AgentSessionStatusSnapshot(
+                AgentRuntimeSessionId: "acp-current",
+                CreatedAt: CreatedAt,
+                BoundAt: CreatedAt.AddMinutes(15),
+                LastDataAt: CreatedAt.AddMinutes(20),
+                UsageSummary: new AgentUsageSummary(),
+                RuntimeSessionLineage:
+                [
+                    new RuntimeSessionLineageEntry("acp-original", CreatedAt),
+                    new RuntimeSessionLineageEntry("acp-current", CreatedAt.AddMinutes(15)),
+                ],
+                ContextUsageHistory: []),
+            Metadata = new AgentSessionMetadata(labels),
+        };
+    }
+
+    private static async Task SeedIssueAsync(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        string projectId,
+        int number,
+        string title,
+        string? workflowRunId)
+    {
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = $"issue_{projectId}_{number}",
+            ProjectId = projectId,
+            Number = number,
+            Title = title,
+            WorkflowRunId = workflowRunId,
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal),
+            Priority = "p2",
+            Status = IssueStatus.Backlog,
+        };
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        db.Issues.Add(new IssueRow { IssueId = issue.Id, State = IssueStore.Serialize(issue) });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedSessionAsync(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        AgentSession session,
+        string rowStatus)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        db.AgentSessions.Add(new AgentSessionRow
+        {
+            Id = session.Id,
+            State = JsonSerializer.Serialize(session, AgentSessionJson.JsonOptions),
+            CreatedAt = session.Status.CreatedAt,
+            Status = rowStatus,
+            AgentSessionId = session.Status.AgentRuntimeSessionId,
+            RunnerId = session.Runtime.RunnerId,
+        });
+        await db.SaveChangesAsync();
     }
 
     private static void AssertUsageDtoEqual(AgentUsageDto expected, AgentUsageDto actual)
@@ -172,15 +298,7 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         Assert.Equal(expected.ContextWindowSize, actual.ContextWindowSize);
         Assert.Equal(expected.ContextUsagePercent, actual.ContextUsagePercent);
         Assert.Equal(expected.HealthStatus, actual.HealthStatus);
-        Assert.Equal(expected.ContextUsageHistory?.Count, actual.ContextUsageHistory?.Count);
-        if (expected.ContextUsageHistory is not null)
-        {
-            for (var i = 0; i < expected.ContextUsageHistory.Count; i++)
-            {
-                Assert.Equal(expected.ContextUsageHistory[i].At, actual.ContextUsageHistory![i].At);
-                Assert.Equal(expected.ContextUsageHistory[i].Percent, actual.ContextUsageHistory[i].Percent);
-            }
-        }
+        Assert.Equal(expected.ContextUsageHistory, actual.ContextUsageHistory);
     }
 
     private static void AssertEventSummaryDtoEqual(AgentEventSummaryDto expected, AgentEventSummaryDto actual)
@@ -193,39 +311,14 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         Assert.Equal(expected.ToolErrorCount, actual.ToolErrorCount);
     }
 
-    private static void AssertLineageDtoListEqual(
-        IReadOnlyList<RuntimeSessionLineageEntryDto>? expected,
-        IReadOnlyList<RuntimeSessionLineageEntryDto>? actual)
-    {
-        if (expected is null && actual is null) return;
-        Assert.NotNull(expected);
-        Assert.NotNull(actual);
-        Assert.Equal(expected!.Count, actual!.Count);
-        for (var i = 0; i < expected.Count; i++)
-        {
-            Assert.Equal(expected[i].AgentRuntimeSessionId, actual[i].AgentRuntimeSessionId);
-            Assert.Equal(expected[i].BoundAt, actual[i].BoundAt);
-        }
-    }
-
-    private static AgentSession CreateSession()
-    {
-        var metadata = new AgentSessionMetadata()
-            .WithLabel("owner", "proj")
-            .WithLabel("source", "wf")
-            .WithLabel("name", "session");
-        return AgentSession.Create(
-            "proj/wf/session",
-            "runner-1",
-            "/work",
-            metadata: metadata,
-            now: new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
-    }
-
-    private static AgentSession CreateSessionWithUsage()
-    {
-        var session = CreateSession();
-        session.Settings = new AgentSessionSettings("opencode");
-        return session;
-    }
+    private static string SourcePath(params string[] segments) => Path.GetFullPath(Path.Combine(
+        [
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            .. segments,
+        ]));
 }

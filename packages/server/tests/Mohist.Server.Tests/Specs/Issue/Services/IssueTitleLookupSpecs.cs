@@ -1,9 +1,13 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Sessions;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -200,8 +204,9 @@ public class IssueTitleLookupSpecs
     {
         // The cross-consumer identity invariant: the core querier
         // (ListCurrentAsync) and the activity feed assembler
-        // (GetActivityAsync) call IssueTitleLookup with the same
-        // (project, numbers) tuple and observe the same dictionary.
+        // (GetActivityAsync) surface titles for the same project + number
+        // set. This calls the consumers directly so a future drift away
+        // from IssueTitleLookup trips the spec.
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
 
@@ -215,12 +220,21 @@ public class IssueTitleLookupSpecs
             new IssueRow { IssueId = i3.Id, State = IssueStore.Serialize(i3) });
         await db.SaveChangesAsync();
 
+        await InsertGenericSessionAsync(db, projectId, $"session-{Guid.NewGuid():N}", 11, new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc));
+        await InsertGenericSessionAsync(db, projectId, $"session-{Guid.NewGuid():N}", 22, new DateTime(2026, 6, 1, 0, 1, 0, DateTimeKind.Utc));
+        await InsertGenericSessionAsync(db, projectId, $"session-{Guid.NewGuid():N}", 33, new DateTime(2026, 6, 1, 0, 2, 0, DateTimeKind.Utc));
+
         DetachTracked(db);
 
-        var numbers = new[] { 11, 22, 33 };
-        var fromQuerierPath = await IssueTitleLookup.LoadTitlesAsync(db, projectId, numbers, CancellationToken.None);
-        var fromAssemblerPath = await IssueTitleLookup.LoadTitlesAsync(db, projectId, numbers, CancellationToken.None);
+        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
+        var assembler = scope.ServiceProvider.GetRequiredService<AgentActivityFeedAssembler>();
+        var current = await querier.ListCurrentAsync(projectId, limit: 10);
+        var activity = await assembler.GetActivityAsync(projectId, limit: 10);
 
+        var fromQuerierPath = current.ToDictionary(session => session.IssueNumber, session => session.IssueTitle);
+        var fromAssemblerPath = activity.Sessions.ToDictionary(session => session.IssueNumber, session => session.IssueTitle);
+
+        Assert.Equal(fromQuerierPath.OrderBy(pair => pair.Key), fromAssemblerPath.OrderBy(pair => pair.Key));
         Assert.Equal(fromQuerierPath.Count, fromAssemblerPath.Count);
         Assert.Equal(fromQuerierPath[11], fromAssemblerPath[11]);
         Assert.Equal(fromQuerierPath[22], fromAssemblerPath[22]);
@@ -250,6 +264,49 @@ public class IssueTitleLookupSpecs
 
         Assert.Null(loadTitles);
         Assert.Null(issueTitle);
+    }
+
+    private static async Task InsertGenericSessionAsync(
+        MohistDbContext db,
+        string projectId,
+        string sessionId,
+        int issueNumber,
+        DateTime createdAt)
+    {
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+            [AgentSessionQueryMetadataKeys.IssueNumber] = issueNumber.ToString(),
+            [GenericAgentSessionMetadata.AgentId] = $"agent_{issueNumber}",
+            [GenericAgentSessionMetadata.AgentName] = $"agent-{issueNumber}",
+        };
+        var session = new AgentSession
+        {
+            Id = sessionId,
+            Runtime = new AgentSessionRuntime("runner-title-lookup", null),
+            Settings = new AgentSessionSettings("test-model"),
+            Status = new AgentSessionStatusSnapshot(
+                AgentRuntimeSessionId: sessionId,
+                CreatedAt: createdAt,
+                BoundAt: createdAt.AddSeconds(1),
+                LastDataAt: createdAt.AddMinutes(1),
+                UsageSummary: new AgentUsageSummary(),
+                RuntimeSessionLineage: [],
+                ContextUsageHistory: []),
+            Metadata = new AgentSessionMetadata(labels),
+        };
+
+        db.AgentSessions.Add(new AgentSessionRow
+        {
+            Id = session.Id,
+            State = JsonSerializer.Serialize(session, AgentSessionJson.JsonOptions),
+            CreatedAt = createdAt,
+            Status = "bound",
+            AgentSessionId = sessionId,
+            RunnerId = session.Runtime.RunnerId,
+        });
+        await db.SaveChangesAsync();
     }
 
     private static Mohist.Server.Issue.Domain.Issue NewIssue(string projectId, int number, string title) => new()

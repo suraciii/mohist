@@ -350,4 +350,3 @@ T-005 (zero-statics verification gate) — completed.
   acceptance criteria of T-005 hold simultaneously only because the
   upstream tasks each kept the build + test suite green at every
   sub-step. Issue-370 is ready to be merged.
-

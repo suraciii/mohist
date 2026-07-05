@@ -179,8 +179,8 @@ public sealed class AgentActivityFeedAssembler : IScopedService
     /// field (status, model, timestamps, work-item, task-progress, last
     /// activity preview, event-summary, usage). Status, usage and
     /// event-summary projections are sourced from the shared
-    /// <see cref="AgentSessionQuerier"/> mappers so list / summary /
-    /// activity feeds stay in lockstep.
+    /// <see cref="AgentSessionDtoMapper"/> so list / summary / activity
+    /// feeds stay in lockstep.
     /// </summary>
     private ActivityCardDto ToActivityCard(
         AgentSessionRecord record,
