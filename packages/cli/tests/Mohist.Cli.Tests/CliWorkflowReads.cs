@@ -5,16 +5,23 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-// Read commands under `mo workflow` — show / status / variables / events /
-// list-sessions. These address a WorkflowRun directly by id (no project or
-// issue number required) and follow the strict output-format /
-// subresource / associated-resource distinction recorded in design/cli.md
-// and the workflow-run-reads spec. Spec scope is intentionally narrow: HTTP
-// interaction shape (path, query, body), server-error surfacing, and the
-// shape→renderer mapping. Rendering details are covered by the table
-// renderer specs in the project workflow surface; here we assert that the
-// CLI picks the right shape for each command and honors the standard
+// Read commands under `mo workflow` — get (with `show` as a transitional
+// alias) / variables / events / list-sessions. These address a WorkflowRun
+// directly by id (no project or issue number required) and follow the strict
+// output-format / subresource / associated-resource distinction recorded in
+// design/cli.md and the workflow-run-reads spec. Spec scope is intentionally
+// narrow: HTTP interaction shape (path, query, body), server-error
+// surfacing, and the shape→renderer mapping. Rendering details are covered by
+// the table renderer specs in the project workflow surface; here we assert
+// that the CLI picks the right shape for each command and honors the standard
 // `-o` plumbing.
+//
+// The `status` command is gone (its compact view folded into `get`'s default
+// table output, per workflow-run-reads/spec.md#the-redundant-status-command-is-removed)
+// and the `show` command is now a transitional alias of `get`
+// (workflow-run-reads/spec.md#show-is-a-transitional-alias-of-get). Alias
+// parity is asserted by re-running the same scenario under both names and
+// diffing the recorded HTTP requests + stdout + exit code.
 public class CliWorkflowReads
 {
     private const string WrId = "wr_read01";
@@ -63,30 +70,82 @@ public class CliWorkflowReads
         issueRef = new { number = 42, title = "Close the agent subscriptions gap" },
     };
 
+    // A single canned responder returns the same payload for /{runId} and
+    // /{runId}/yaml. Both `get` and its `show` alias share the handler, so we
+    // intentionally capture the requests per scenario.
+    private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
+        CreateHarness() => CliTestHarness.CreateSync();
+
+    private static void RunUnderBothNames(
+        RecordingHttpHandler handler,
+        HttpClient http,
+        StringWriter output,
+        StringWriter error,
+        FakeFileSystem fs,
+        FakeCommandExecutor executor,
+        string[] runIdArgs,
+        out int exit,
+        out string stdoutText,
+        out string stderrText)
+    {
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+        var canonicalExit = MohistCliCommands.RunAsync(
+            http, new[] { "workflow", "get" }.Concat(runIdArgs).ToArray(), output, error, fs, executor).GetAwaiter().GetResult();
+        var canonicalStdout = output.ToString();
+        var canonicalStderr = error.ToString();
+        var canonicalRequests = handler.Requests.ToList();
+
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+        var aliasExit = MohistCliCommands.RunAsync(
+            http, new[] { "workflow", "show" }.Concat(runIdArgs).ToArray(), output, error, fs, executor).GetAwaiter().GetResult();
+        var aliasStdout = output.ToString();
+        var aliasStderr = error.ToString();
+        var aliasRequests = handler.Requests.Skip(canonicalRequests.Count).ToList();
+
+        Assert.Equal(canonicalExit, aliasExit);
+        Assert.Equal(canonicalStdout, aliasStdout);
+        Assert.Equal(canonicalStderr, aliasStderr);
+        Assert.Equal(canonicalRequests.Count, aliasRequests.Count);
+        for (var i = 0; i < canonicalRequests.Count; i++)
+        {
+            Assert.Equal(canonicalRequests[i].Method, aliasRequests[i].Method);
+            Assert.Equal(canonicalRequests[i].RequestUri, aliasRequests[i].RequestUri);
+        }
+
+        exit = aliasExit;
+        stdoutText = aliasStdout;
+        stderrText = aliasStderr;
+    }
+
     [Fact]
     public async Task WorkflowHelp_ExposesReadVerbsAndNoYamlSubcommand()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CreateHarness();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "--help"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        foreach (var verb in new[] { "show", "status", "variables", "events", "list-sessions" })
+        foreach (var verb in new[] { "variables", "events", "list-sessions" })
         {
             Assert.Contains($"{verb} <run-id>", stdout);
         }
-        // `yaml` is an output format on `show`, never a stand-alone command.
-        // The canonical command shape (`yaml <run-id>`) must not appear.
-        Assert.DoesNotContain("yaml <run-id>", stdout);
-        // And the subcommand list must not advertise a `yaml` command at
-        // all (lines that start with whitespace + `yaml` would be a
-        // positional subcommand entry in System.CommandLine's help output).
+        // `get` is the canonical command and `show` is a transitional name
+        // alias of it, so System.CommandLine surfaces both names on the
+        // `get` row (e.g. `get, show <run-id>`).
+        Assert.Contains("get, show <run-id>", stdout);
         var subcommandLines = stdout
             .Split('\n')
             .Where(line => line.StartsWith("  ", StringComparison.Ordinal))
             .ToList();
+        Assert.DoesNotContain(subcommandLines, line => line.TrimStart().StartsWith("show ", StringComparison.Ordinal));
+        // `status` is gone — the redundant command must not be discoverable.
+        Assert.DoesNotContain(subcommandLines, line => line.TrimStart().StartsWith("status ", StringComparison.Ordinal));
+        // `yaml` is an output format on `get`, never a stand-alone command.
+        Assert.DoesNotContain("yaml <run-id>", stdout);
         Assert.DoesNotContain(subcommandLines, line => line.TrimStart().StartsWith("yaml ", StringComparison.Ordinal));
         Assert.Empty(handler.Requests);
     }
@@ -94,23 +153,15 @@ public class CliWorkflowReads
     [Fact]
     public async Task WorkflowHelp_DoesNotExposeSingleSessionSubActions()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CreateHarness();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "--help"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        // Per design/cli.md and the workflow-run-reads spec, single-session
-        // sub-actions (show/transcript/compact/reset/followup) stay under
-        // `mo issue session ...` and are not exposed as workflowRunId-direct
-        // commands under `mo workflow`. Only `list-sessions` (the list-only
-        // associated resource) is present under `mo workflow`.
         Assert.Contains("list-sessions <run-id>", stdout);
-        // No `mo workflow session <name> ...` subcommand exists.
         Assert.DoesNotContain("session <name>", stdout);
-        // None of the single-session sub-actions appear as positional
-        // subcommand entries (lines indented under the parent command).
         var subcommandLines = stdout
             .Split('\n')
             .Where(line => line.StartsWith("  ", StringComparison.Ordinal))
@@ -123,7 +174,7 @@ public class CliWorkflowReads
     }
 
     [Fact]
-    public async Task Show_Json_HitsBareGetEndpointAndReturnsDetailPayload()
+    public async Task Get_IsTheCanonicalSingleResourceRead_HitsBareGetEndpointAndReturnsDetailPayload()
     {
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
@@ -133,22 +184,19 @@ public class CliWorkflowReads
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "show", WrId, "-o", "json"], output, error, fs, executor);
+            http, ["workflow", "get", WrId, "-o", "json"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReq = handler.Requests.Single(r => r.Method == HttpMethod.Get);
         Assert.Equal($"/api/workflow-runs/{WrId}", getReq.RequestUri?.PathAndQuery);
         var stdout = output.ToString();
-        // The full resource is rendered as raw JSON (the success envelope
-        // is stripped by the API layer), so we can assert on the response
-        // shape rather than the success wrapper.
         Assert.Contains("\"issueRef\"", stdout);
         Assert.Contains("\"number\": 42", stdout);
         Assert.Contains("Close the agent subscriptions gap", stdout);
     }
 
     [Fact]
-    public async Task Show_Json_DoesNotReverseResolveToIssueEndpoint()
+    public async Task Get_DoesNotReverseResolveToIssueEndpoint()
     {
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
@@ -158,17 +206,14 @@ public class CliWorkflowReads
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "show", WrId], output, error, fs, executor);
+            http, ["workflow", "get", WrId], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
-        // The CLI must not call any /api/projects/.../issues/... endpoint to
-        // satisfy a workflowRunId-addressed show — that would be the
-        // reverse-resolution anti-pattern this change exists to eliminate.
         Assert.DoesNotContain(handler.Requests, r => r.RequestUri?.PathAndQuery.Contains("/issues/") == true);
     }
 
     [Fact]
-    public async Task Show_Table_RendersIssueRefAndRunIdentity()
+    public async Task Get_Table_Default_RendersSummaryIncludingStatusStageApprovalAndIssue()
     {
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
@@ -178,21 +223,24 @@ public class CliWorkflowReads
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "show", WrId, "-o", "table"], output, error, fs, executor);
+            http, ["workflow", "get", WrId], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
+        // Default table renders the summary view: status, current stage,
+        // assigned-to (when set), associated issue. The WorkflowRunDetail
+        // renderer covers all four — see RenderWorkflowRunDetail.
         Assert.Contains("run id:", stdout);
         Assert.Contains(WrId, stdout);
-        // The associated issue is rendered (closing the
-        // agent-subscriptions.md `mo workflow show <runId>` prerequisite).
+        Assert.Contains("status:", stdout);
+        Assert.Contains("current stage:", stdout);
         Assert.Contains("issue:", stdout);
         Assert.Contains("#42", stdout);
         Assert.Contains("Close the agent subscriptions gap", stdout);
     }
 
     [Fact]
-    public async Task Show_Yaml_HitsYamlSubresourceEndpointAndPrintsDefinition()
+    public async Task Get_Yaml_HitsYamlSubresourceEndpointAndPrintsDefinition()
     {
         var yamlBody = "name: mohist/local\nstages:\n  - id: plan\n  - id: build";
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
@@ -203,21 +251,17 @@ public class CliWorkflowReads
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "show", WrId, "-o", "yaml"], output, error, fs, executor);
+            http, ["workflow", "get", WrId, "-o", "yaml"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var getReq = handler.Requests.Single(r => r.Method == HttpMethod.Get);
         Assert.Equal($"/api/workflow-runs/{WrId}/yaml", getReq.RequestUri?.PathAndQuery);
         var stdout = output.ToString();
-        // The yaml command surfaces the template-definition YAML verbatim;
-        // no `data` / `success` envelope should leak through to stdout.
-        // The CLI terminates with a final newline, so we trim before
-        // comparing against the body we sent down.
         Assert.Equal(yamlBody, stdout.TrimEnd());
     }
 
     [Fact]
-    public async Task Show_Yaml_DoesNotHitBareGetEndpoint()
+    public async Task Get_Yaml_DoesNotHitBareGetEndpoint()
     {
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
@@ -227,22 +271,20 @@ public class CliWorkflowReads
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "show", WrId, "-o", "yaml"], output, error, fs, executor);
+            http, ["workflow", "get", WrId, "-o", "yaml"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
-        // `show -o yaml` must hit the existing yaml endpoint, not the bare
-        // GET — the bare-GET payload does not carry the template definition.
         Assert.DoesNotContain(handler.Requests, r =>
             r.Method == HttpMethod.Get && r.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}");
     }
 
     [Fact]
-    public async Task ShowHelp_DocumentsYamlOutputFormat()
+    public async Task GetHelp_DocumentsYamlOutputFormat()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CreateHarness();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "show", "--help"], output, error, fs, executor);
+            http, ["workflow", "get", "--help"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -251,22 +293,7 @@ public class CliWorkflowReads
     }
 
     [Fact]
-    public async Task StatusHelp_DoesNotDocumentYamlOutputFormat()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "status", "--help"], output, error, fs, executor);
-
-        Assert.Equal(0, exitCode);
-        var stdout = output.ToString();
-        Assert.Contains("table, json", stdout);
-        Assert.DoesNotContain("table, json, yaml", stdout);
-        Assert.Empty(handler.Requests);
-    }
-
-    [Fact]
-    public async Task Show_Yaml_OnMissingRun_SurfacesServerErrorToStderr()
+    public async Task Get_Yaml_OnMissingRun_SurfacesServerErrorToStderr()
     {
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
@@ -279,7 +306,7 @@ public class CliWorkflowReads
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "show", WrId, "-o", "yaml"], output, error, fs, executor);
+            http, ["workflow", "get", WrId, "-o", "yaml"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         var stderr = error.ToString();
@@ -288,7 +315,25 @@ public class CliWorkflowReads
     }
 
     [Fact]
-    public async Task Status_HitsBareGetEndpointAndRendersCompactSubset()
+    public async Task Get_MissingRunId_FailsLocallyWithoutHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["workflow", "get"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("<run-id> is required", error.ToString());
+    }
+
+    // Alias parity: `show` runs through the same handler as `get`. We
+    // re-execute the canonical bare-GET and the -o json|yaml paths under
+    // both names with the same canned response and assert identical requests,
+    // stdout, stderr, and exit codes. (Per spec scenario
+    // workflow-run-reads/spec.md#show-behaves-identically-to-get.)
+    [Fact]
+    public async Task Show_IsAliasOfGet_BareJson_ProducesIdenticalRequestsOutputAndExit()
     {
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
@@ -297,22 +342,16 @@ public class CliWorkflowReads
             return null!;
         });
 
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "status", WrId, "-o", "table"], output, error, fs, executor);
+        RunUnderBothNames(handler, http, output, error, fs, executor,
+            new[] { WrId, "-o", "json" },
+            out var exit, out var stdout, out _);
 
-        Assert.Equal(0, exitCode);
-        var getReq = handler.Requests.Single(r => r.Method == HttpMethod.Get);
-        Assert.Equal($"/api/workflow-runs/{WrId}", getReq.RequestUri?.PathAndQuery);
-        var stdout = output.ToString();
-        // status renders the strict compact subset (current stage + status
-        // + stage table) — it deliberately omits the associated issue ref.
-        Assert.Contains("run id:", stdout);
-        Assert.Contains("current stage:", stdout);
-        Assert.DoesNotContain("issue:", stdout);
+        Assert.Equal(0, exit);
+        Assert.Contains("\"issueRef\"", stdout);
     }
 
     [Fact]
-    public async Task Status_OutputIsCompactSubsetOfShow()
+    public async Task Show_IsAliasOfGet_BareTable_ProducesIdenticalRequestsOutputAndExit()
     {
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
         {
@@ -321,24 +360,88 @@ public class CliWorkflowReads
             return null!;
         });
 
-        await MohistCliCommands.RunAsync(
-            http, ["workflow", "show", WrId, "-o", "table"], output, error, fs, executor);
-        var showOut = output.ToString();
-        var showLineCount = showOut.Split('\n').Length;
+        RunUnderBothNames(handler, http, output, error, fs, executor,
+            new[] { WrId, "-o", "table" },
+            out var exit, out var stdout, out _);
 
-        output.GetStringBuilder().Clear();
-        await MohistCliCommands.RunAsync(
-            http, ["workflow", "status", WrId, "-o", "table"], output, error, fs, executor);
-        var statusOut = output.ToString();
-        var statusLineCount = statusOut.Split('\n').Length;
+        Assert.Equal(0, exit);
+        Assert.Contains("run id:", stdout);
+        Assert.Contains("issue:", stdout);
+    }
 
-        // status is the strict compact subset — fewer or equal lines than
-        // show (the issue-ref line and the broader metadata block are absent).
-        Assert.True(statusLineCount <= showLineCount,
-            $"status ({statusLineCount} lines) should not exceed show ({showLineCount} lines)");
-        // And the issue ref renders in show but never in status.
-        Assert.Contains("issue:", showOut);
-        Assert.DoesNotContain("issue:", statusOut);
+    [Fact]
+    public async Task Show_IsAliasOfGet_Yaml_HitsYamlSubresource_ProducesIdenticalRequestsOutputAndExit()
+    {
+        var yamlBody = "name: mohist/local\nstages:\n  - id: plan\n  - id: build";
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/yaml")
+                return RecordingHttpHandler.Json(new { success = true, data = new { workflowRunId = WrId, yaml = yamlBody } });
+            return null!;
+        });
+
+        RunUnderBothNames(handler, http, output, error, fs, executor,
+            new[] { WrId, "-o", "yaml" },
+            out var exit, out var stdout, out _);
+
+        Assert.Equal(0, exit);
+        // The yaml endpoint was hit, never the JSON read model.
+        Assert.All(handler.Requests, r =>
+        {
+            if (r.Method == HttpMethod.Get)
+                Assert.Equal($"/api/workflow-runs/{WrId}/yaml", r.RequestUri?.PathAndQuery);
+        });
+        Assert.Equal(yamlBody, stdout.TrimEnd());
+    }
+
+    [Fact]
+    public async Task Show_Help_DocumentsYamlOutputFormat()
+    {
+        // The `show` alias surfaces the same help block as `get`.
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["workflow", "show", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("table, json, yaml", stdout);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Status_IsNotARegisteredSubcommand()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["workflow", "status", WrId], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        // System.CommandLine surfaces an "Unrecognized command" / parse error
+        // for an unknown subcommand. No request must have been issued.
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Status_IsNotAdvertisedInWorkflowHelp()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["workflow", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        // No `status <run-id>` row in the subcommand table — the redundant
+        // command must not be discoverable through `mo workflow --help`.
+        Assert.DoesNotContain("status <run-id>", stdout);
+        var subcommandLines = stdout
+            .Split('\n')
+            .Where(line => line.StartsWith("  ", StringComparison.Ordinal))
+            .ToList();
+        Assert.DoesNotContain(subcommandLines, line => line.TrimStart().StartsWith("status ", StringComparison.Ordinal));
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -402,8 +505,6 @@ public class CliWorkflowReads
         var getReq = handler.Requests.Single(r => r.Method == HttpMethod.Get);
         Assert.Equal($"/api/workflow-runs/{WrId}/variables/effective/some.nested.key", getReq.RequestUri?.PathAndQuery);
         var stdout = output.ToString();
-        // A single-key lookup returns the value at that path; for string
-        // values, it's printed verbatim in JSON mode.
         Assert.Contains("the-value", stdout);
     }
 
@@ -517,12 +618,9 @@ public class CliWorkflowReads
     [Fact]
     public async Task ListSessions_DoesNotExposeSingleSessionSubActions()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CreateHarness();
 
-        // Each of these would resolve to a `mo workflow session <name> ...`
-        // subcommand if we had added one. They should all fail with an
-        // "Unrecognized command" parse error from System.CommandLine.
-        foreach (var verb in new[] { "show", "transcript", "compact", "reset", "followup" })
+        foreach (var verb in new[] { "get", "transcript", "compact", "reset", "followup" })
         {
             output.GetStringBuilder().Clear();
             error.GetStringBuilder().Clear();
@@ -536,9 +634,10 @@ public class CliWorkflowReads
     [Fact]
     public async Task ReadCommands_AddressByRunIdOnly_NoProjectOrIssueRequired()
     {
-        // No active project on disk (we don't seed cli-state.json for this
-        // test) and no --project/--project-id flag — yet every read verb
-        // resolves the run solely from the workflowRunId and issues its GET.
+        // No active project on disk and no --project/--project-id flag — yet
+        // every read verb resolves the run solely from the workflowRunId and
+        // issues its GET. The status subcommand is gone and not exercised
+        // here.
         var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(responder: null, activeProjectId: null);
         handler.SetResponder((req, _) =>
         {
@@ -554,8 +653,8 @@ public class CliWorkflowReads
 
         foreach (var args in new[]
         {
+            new[] { "workflow", "get", WrId },
             new[] { "workflow", "show", WrId },
-            new[] { "workflow", "status", WrId },
             new[] { "workflow", "variables", WrId },
             new[] { "workflow", "events", WrId },
             new[] { "workflow", "list-sessions", WrId },
@@ -568,9 +667,30 @@ public class CliWorkflowReads
             Assert.Equal(0, exitCode);
         }
 
-        // No request should have hit an issue-scoped or project-scoped path.
         Assert.DoesNotContain(handler.Requests, r => r.RequestUri?.PathAndQuery.Contains("/issues/") == true);
         Assert.DoesNotContain(handler.Requests, r => r.RequestUri?.PathAndQuery.Contains("/projects/") == true);
+    }
+
+    [Fact]
+    public async Task Get_UnknownRunId_PrintsServerErrorToStderrAndExitsNonZero()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        {
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}")
+                return RecordingHttpHandler.JsonError(
+                    $"Workflow run '{WrId}' not found",
+                    code: "not_found",
+                    statusCode: HttpStatusCode.NotFound);
+            return null!;
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["workflow", "get", WrId], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        var stderr = error.ToString();
+        Assert.Contains("not found", stderr);
+        Assert.Contains("not_found", stderr);
     }
 
     [Fact]
@@ -588,28 +708,6 @@ public class CliWorkflowReads
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["workflow", "show", WrId], output, error, fs, executor);
-
-        Assert.NotEqual(0, exitCode);
-        var stderr = error.ToString();
-        Assert.Contains("not found", stderr);
-        Assert.Contains("not_found", stderr);
-    }
-
-    [Fact]
-    public async Task Status_UnknownRunId_PrintsServerErrorToStderrAndExitsNonZero()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
-        {
-            if (req.Method == HttpMethod.Get)
-                return RecordingHttpHandler.JsonError(
-                    $"Workflow run '{WrId}' not found",
-                    code: "not_found",
-                    statusCode: HttpStatusCode.NotFound);
-            return null!;
-        });
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "status", WrId], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("not found", error.ToString());
@@ -677,12 +775,12 @@ public class CliWorkflowReads
     }
 
     [Fact]
-    public async Task Show_InvalidOutputFormat_FailsBeforeHttp()
+    public async Task Get_InvalidOutputFormat_FailsBeforeHttp()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CreateHarness();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["workflow", "show", WrId, "-o", "xml"], output, error, fs, executor);
+            http, ["workflow", "get", WrId, "-o", "xml"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);

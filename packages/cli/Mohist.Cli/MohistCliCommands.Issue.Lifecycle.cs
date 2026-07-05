@@ -77,9 +77,49 @@ internal static partial class IssueCommands
         return cmd;
     }
 
+    private static Command BuildRerun(MohistCliApi api)
+    {
+        var cmd = new Command("rerun", "Rerun the issue workflow from the start (no flag) or from a specific stage (--from-stage; equivalent to 'mo issue rerun-from-stage --stage')");
+        var numberArg = NumberArg();
+        var fromStageOpt = new Option<string?>("--from-stage")
+        {
+            Description = "Rerun from the specified stage (equivalent to 'mo issue rerun-from-stage --stage')",
+        };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(fromStageOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var fromStage = ctx.GetValue(fromStageOpt);
+            var fromStageProvided = IsOptionProvided(ctx, fromStageOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            return RerunAsync();
+
+            async Task<int> RerunAsync()
+            {
+                if (fromStageProvided && string.IsNullOrWhiteSpace(fromStage))
+                {
+                    api.Error.WriteLine("--from-stage is required and must not be empty");
+                    return 1;
+                }
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                var suffix = fromStageProvided ? "/rerun-from-stage" : "/rerun";
+                object body = fromStageProvided ? new { stage = fromStage! } : new { };
+                var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}{suffix}");
+                return await api.PrintPostAsync(path, body);
+            }
+        });
+        return cmd;
+    }
+
     private static Command BuildRerunFromStage(MohistCliApi api)
     {
-        var cmd = new Command("rerun-from-stage", "Rerun the workflow from a specified stage (invalidates the target stage and all later stages, creating new attempts)");
+        var cmd = new Command("rerun-from-stage", "[transitional alias of 'mo issue rerun --from-stage'] Rerun the workflow from a specified stage (invalidates the target stage and all later stages, creating new attempts)");
         var numberArg = NumberArg();
         var stageOpt = new Option<string>("--stage")
         {

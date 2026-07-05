@@ -19,7 +19,83 @@ internal static class ProjectWorkflowCommands
     {
         var profile = new Command("profile", "Manage project workflow profiles");
         profile.Subcommands.Add(BuildProfileList(api));
+        profile.Subcommands.Add(BuildProfileEnable(api));
+        profile.Subcommands.Add(BuildProfileDisable(api));
         return profile;
+    }
+
+    private static Command BuildProfileEnable(MohistCliApi api)
+    {
+        var cmd = new Command("enable", "Enable a workflow profile (POST .../workflow-profile/enable)");
+        var profileIdArg = new Argument<string?>("profile-id")
+        {
+            Description = "Workflow profile id",
+            Arity = ArgumentArity.ZeroOrOne,
+            DefaultValueFactory = _ => null,
+        };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        cmd.Arguments.Add(profileIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.SetAction(ctx =>
+        {
+            var profileId = ctx.GetValue(profileIdArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            return ToggleAsync();
+
+            async Task<int> ToggleAsync()
+            {
+                if (string.IsNullOrWhiteSpace(profileId))
+                {
+                    api.Error.WriteLine("<profile-id> is required");
+                    return 1;
+                }
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                return await api.PrintPostAsync(
+                    ProjectWorkflowProfilePath(resolvedProjectId, "/enable"),
+                    new { profileId });
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildProfileDisable(MohistCliApi api)
+    {
+        var cmd = new Command("disable", "Disable a workflow profile (POST .../workflow-profile/disable); refusing to leave the project with no enabled profile surfaces the server's last_enabled_workflow_profile guard");
+        var profileIdArg = new Argument<string?>("profile-id")
+        {
+            Description = "Workflow profile id",
+            Arity = ArgumentArity.ZeroOrOne,
+            DefaultValueFactory = _ => null,
+        };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        cmd.Arguments.Add(profileIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.SetAction(ctx =>
+        {
+            var profileId = ctx.GetValue(profileIdArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            return ToggleAsync();
+
+            async Task<int> ToggleAsync()
+            {
+                if (string.IsNullOrWhiteSpace(profileId))
+                {
+                    api.Error.WriteLine("<profile-id> is required");
+                    return 1;
+                }
+                var (resolvedProjectId, resolveExit) = await api.ResolveProject(project, projectId);
+                if (resolveExit != 0) return resolveExit;
+                return await api.PrintPostAsync(
+                    ProjectWorkflowProfilePath(resolvedProjectId, "/disable"),
+                    new { profileId });
+            }
+        });
+        return cmd;
     }
 
     private static Command BuildProfileList(MohistCliApi api)

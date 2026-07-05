@@ -69,7 +69,7 @@ mo info         CLI 本地诊断（受控例外：跨资源只读，不归任一
 
 这些动作也可通过 issue 号触发（`mo issue approve <编号>`），issue 号是工作流执行的人类可读别名。直接寻址面向脚本与 agent 订阅场景——它们手里只有执行 ID。
 
-所有控制命令支持 `-o table|json` 和 `--dry-run`（打印请求体不发请求）。`rerun --from-stage` 等价旧 issue 快捷方式 `mo issue rerun-from-stage --stage <阶段>`；`pause` 可恢复，`stop` 是终态。
+所有控制命令支持 `-o table|json` 和 `--dry-run`（打印请求体不发请求）。issue 快捷方式同样使用 `mo issue rerun <编号> --from-stage <阶段>`；`pause` 可恢复，`stop` 是终态。
 
 ### 查询
 
@@ -92,8 +92,8 @@ mo project workflow profile get                     查看 profile 全貌（默�
 mo project workflow profile set [flags]             复合写入（默认模板/变量/提示词）
 mo project workflow profile clear [flags]           复合清除
 mo project workflow profile preview <键>            预览渲染后的提示词
-mo project workflow profile enable                  启用 profile
-mo project workflow profile disable                 禁用 profile
+mo project workflow profile enable <profile-id>     启用 profile
+mo project workflow profile disable <profile-id>    禁用 profile
 ```
 
 > **路径迁移**：旧 `mo workflow list`（WorkflowProfile）已下沉到 `mo project workflow profile list`。原路径不再可用——profile 归 `mo project workflow`，与 template / config 同层。
@@ -301,19 +301,13 @@ mo update runner                    仅升级执行器
 
 | 当前实装 | 本文 spec | 性质 |
 |---|---|---|
-| `mo workflow show <runId>` | `mo workflow get <runId>` | 词表统一（show → get） |
-| `mo workflow status <runId>` | （删除，`get` 默认 table 即摘要） | 冗余命令删除 |
 | `mo repo ...`（顶层）与 `mo project repo ...`（嵌套）双轨 | `mo repo --project`（扁平，作用域用 flag） | 双轨合并 + 作用域用 flag 原则 |
-| `mo agent delete` | `mo agent archive` | 正名（delete → archive） |
-| `mo label remove` | `mo label delete`（remove 转别名） | 词表统一 |
 | `mo server install/update`、`mo runner install/update` | `mo install/update` | 双入口合并 |
-| `mo issue rerun-from-stage` | `mo issue rerun --from-stage` | 命令收敛为 flag |
 | `mo status` | `mo project status` | 裸动词归位 |
 | `mo logs` | `mo system logs` | 裸动词归位 |
 | `mo use` | （删除，留 `mo project use`） | 重复入口删除 |
 | `mo notify setup` | `mo notification setup` | 资源化 |
 | `mo system info` | `mo server info` | 消歧（与 `mo info` 区分） |
-| （无） | `mo project workflow profile enable/disable` | 新增，待实装 |
 
 未对齐处以代码为实装事实，但本文是目标。各差距对应 epic #40 下的子 issue。
 
