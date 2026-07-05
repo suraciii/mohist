@@ -9,7 +9,7 @@
 - **形状**：`mo <资源> <动词>`。资源是名词（issue、epic、workflow），动词是动作（create、get、start）。
 - **根命令层只有资源**：`mo` 直接子命令都是资源或资源组，没有裸动词（受控例外仅 `mo info` 一项，见「系统诊断」）。
 - **输出格式**：所有 get/list 类命令支持 `-o table|json|yaml|compact`。**输出格式不创造命令**——看资源 yaml 用 `mo <资源> get <id> -o yaml`，不存在 `mo <资源> yaml`。
-- **项目作用域**：项目内资源支持 `--project <名>` 与 `--project-id <id>` 两种形式，缺一不可。
+- **项目作用域**：项目内资源支持 `--project <名>` 与 `--project-id <id>` 两种形式，缺一不可。作用域用 flag 表达（对标 `--namespace`），不进命令路径——项目作用域内的资源在顶层有自己的命令组，通过 `--project` 限定，不嵌套在 `mo project` 下（仓库、issue、epic、agent 等都是如此）。
 - **预演**：会改状态的控制类命令支持 `--dry-run`。
 - **别名**：高频命令提供短别名（`ls` = list、`rm` = delete），别名与正名同行为。
 
@@ -122,20 +122,19 @@ mo project get <名或id>
 mo project use <名或id>            设置当前项目
 mo project delete <名或id>
 mo project status                  当前项目聚合状态
-mo project repo ...                仓库管理（见下）
 mo project workflow ...            工作流配置（template / profile，见上）
 ```
 
-### Repository（仓库）
+## Repository（仓库）
 
-一个 project 可关联多个仓库（如 monorepo 多模块）。单一入口 `mo project repo`，无顶层 `mo repo`。
+一个 project 可关联多个仓库（如 monorepo 多模块）。仓库是项目作用域内的资源，用 `--project` 限定作用域（对标 `--namespace`），不嵌套在 project 命令下。
 
 ```
-mo project repo list
-mo project repo add <名> --git-url <url> [--base-branch <分支>] [--set-default]
-mo project repo update <名> [flags]
-mo project repo set-default <名>
-mo project repo delete <名>
+mo repo list [--project <名>]
+mo repo add <名> --git-url <url> [--base-branch <分支>] [--set-default] [--project <名>]
+mo repo update <名> [flags] [--project <名>]
+mo repo set-default <名> [--project <名>]
+mo repo delete <名> [--project <名>]
 ```
 
 仓库是往项目集合加成员，用 `add`（不是 create）。
@@ -304,7 +303,7 @@ mo update runner                    仅升级执行器
 | 当前实装 | 本文 spec | 性质 |
 |---|---|---|
 | `mo project workflow config ...` | `mo project workflow profile ...` | 正名（config → profile） |
-| `mo repo ...`（顶层） | `mo project repo ...` | 双轨合并 |
+| `mo repo ...`（顶层）与 `mo project repo ...`（嵌套）双轨 | `mo repo --project`（扁平，作用域用 flag） | 双轨合并 + 作用域用 flag 原则 |
 | `mo agent delete` | `mo agent archive` | 正名（delete → archive） |
 | `mo label remove` | `mo label delete`（remove 转别名） | 词表统一 |
 | `mo server install/update`、`mo runner install/update` | `mo install/update` | 双入口合并 |
