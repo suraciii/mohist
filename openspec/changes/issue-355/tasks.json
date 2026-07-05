@@ -21,7 +21,7 @@
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/server/src/Mohist.Server/Infrastructure/Config/MohistConfigurationExtensions.cs (AddJsonFile + OnLoadException, StripJsoncComments deleted); packages/server/src/MohistServer/Infrastructure/Config/ConfigService.cs (ReadConfigFile + WriteConfigFileAsync migrated); updated/new unit tests in ConfigServiceSpecs and a config-load unit test for AddMohistConfigFile.",
+      "output": "packages/server/src/Mohist.Server/Infrastructure/Config/MohistConfigurationExtensions.cs (AddJsonFile + OnLoadException, StripJsoncComments deleted); packages/server/src/Mohist.Server/Infrastructure/Config/ConfigService.cs (ReadConfigFile + WriteConfigFileAsync migrated); updated/new unit tests in ConfigServiceSpecs and a config-load unit test for AddMohistConfigFile.",
       "dependsOn": [],
       "passes": false,
       "notes": "Per design D1/D2/D4: optional:true covers missing file; OnLoadException covers present-but-malformed at both startup and runtime reload. Keep the public signature of AddMohistConfigFile unchanged (reloadOnChange param stays, now actually wired). Program.cs call sites (:11 and :111 BuildAlternateApp) need no change. Remove now-unused usings (System.Text.Json / Microsoft.Extensions.Configuration.Json) only if unreferenced after the edit."
@@ -43,7 +43,7 @@
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "packages/server/src/MohistServer/Api/RunnerRoutes.cs (IOptionsSnapshot parameter); new Specs/Runner/Config/ConfigHotReloadSpecs.cs (or an added reload case in RunnerConfigApiSpecs) using IConfigurationRoot.Reload() + a temp JSONC source.",
+      "output": "packages/server/src/Mohist.Server/Api/RunnerRoutes.cs (IOptionsSnapshot parameter); new Specs/Runner/Config/ConfigHotReloadSpecs.cs (or an added reload case in RunnerConfigApiSpecs) using IConfigurationRoot.Reload() + a temp JSONC source.",
       "dependsOn": ["T-001"],
       "notes": "Per design D3/D5: choose IOptionsSnapshot (request-scoped, textbook fit) over IOptionsMonitor — no singleton consumes CleanupPolicyOptions today. The hot-reload spec is the acceptance test for the options-live-consumption 'edited policy returned without restart' scenario; it depends on T-001's source-reload wiring being in place. Prefer a small per-test harness (temp file + ConfigureAppConfiguration) over widening the shared MohistIntegrationFixture. Do NOT abstract AddJsonFile behind a factory for testability — Reload() is the deterministic seam."
     }
