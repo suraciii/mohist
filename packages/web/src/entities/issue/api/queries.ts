@@ -57,7 +57,7 @@ export function useIssueWorkflowArtifactContent(issueNumber: number, artifactId:
   })
 }
 
-export function useIssues(params?: { stage?: string; label?: string; projectId?: string }) {
+export function useIssues(params?: { stage?: string; label?: string; projectId?: string; archived?: boolean; all?: boolean }) {
   return useQuery({
     queryKey: ['issues', params],
     queryFn: () => getIssues(params),

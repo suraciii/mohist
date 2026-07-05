@@ -18,6 +18,7 @@ import { useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowPr
 import type { WorkflowProfileInfo } from '../../../entities/settings'
 import { useIssueTemplate, useIssueTemplates } from '../../../entities/issue-templates'
 import { useProject, useRepositories } from '../../../entities/project'
+import { IssuePrerequisitePicker } from '../../prerequisite-picker'
 import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
 import { parseIssueFrontmatter } from '../lib/frontmatter'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
@@ -132,6 +133,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   const [risk, setRisk] = useState<string | null>(null)
   const [riskTouched, setRiskTouched] = useState(false)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
+  const [prerequisiteNumbers, setPrerequisiteNumbers] = useState<number[]>([])
   const { projectId, projects } = useProject()
   const currentProject = projects?.find((p) => p.id === projectId)
   const { data: repositories } = useRepositories(currentProject?.id)
@@ -202,6 +204,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         ...(repositoryName ? { repositoryName } : {}),
         ...(workflowProfileId ? { workflowProfileId } : {}),
         ...(risk ? { risk } : {}),
+        ...(prerequisiteNumbers.length > 0 ? { prerequisiteNumbers } : {}),
       })
     },
     onSuccess: (data: Issue) => {
@@ -227,6 +230,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     setRisk(null)
     setRiskTouched(false)
     setSelectedTemplateId(null)
+    setPrerequisiteNumbers([])
     onClose()
   }
 
@@ -359,6 +363,18 @@ export function CreateIssueDialog({ open, onClose }: Props) {
               onChange={setLabels}
               inputIdPrefix="create-issue-label"
               emptyHint="Add a key+value pair (e.g. stream=frontend) to classify this issue."
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Prerequisites</label>
+            <IssuePrerequisitePicker
+              projectId={projectId ?? ''}
+              selected={prerequisiteNumbers}
+              excludeNumbers={prerequisiteNumbers}
+              mode="buffer"
+              onAdd={(n) => setPrerequisiteNumbers((prev) => (prev.includes(n) ? prev : [...prev, n]))}
+              onRemove={(n) => setPrerequisiteNumbers((prev) => prev.filter((x) => x !== n))}
             />
           </div>
 

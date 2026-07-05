@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
+import { IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'
 import { CreateIssueDialog } from './CreateIssueDialog'
 
 const TEMPLATE_FIXTURES = {
@@ -63,6 +64,7 @@ const mocks = vi.hoisted(() => ({
   })),
   useIssueTemplates: vi.fn<() => { data: unknown[]; isLoading: boolean }>(() => ({ data: [], isLoading: false })),
   useIssueTemplate: vi.fn<(id: string | null) => { data: unknown }>(() => ({ data: undefined })),
+  useIssues: vi.fn((_params?: { stage?: string; label?: string; projectId?: string }) => ({ data: [] as Issue[] | undefined, isLoading: false })),
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -79,6 +81,7 @@ vi.mock('../../../entities/issue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../entities/issue')>()),
   createIssue: mocks.createIssue,
   useLabels: mocks.useLabels,
+  useIssues: mocks.useIssues,
 }))
 
 vi.mock('../../../entities/project', () => ({
@@ -626,3 +629,232 @@ describe('CreateIssueDialog workflow profile default', () => {
     }))
   })
 })
+
+describe('CreateIssueDialog prerequisites', () => {
+  const PICKER_PROJECT_ISSUES: Issue[] = [
+    {
+      id: 'issue_5',
+      number: 5,
+      title: 'Wire up auth',
+      status: IssueStatus.InProgress,
+      health: IssueHealth.Active,
+      projectId: 'proj_create',
+      labels: {},
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      isDraft: false,
+      canStart: true,
+      blocker: null,
+    },
+    {
+      id: 'issue_7',
+      number: 7,
+      title: 'Audit auth tokens',
+      status: IssueStatus.Backlog,
+      health: IssueHealth.Active,
+      projectId: 'proj_create',
+      labels: {},
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      isDraft: false,
+      canStart: true,
+      blocker: null,
+    },
+    {
+      id: 'issue_99',
+      number: 99,
+      title: 'Other issue',
+      status: IssueStatus.Backlog,
+      health: IssueHealth.Active,
+      projectId: 'proj_create',
+      labels: {},
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      isDraft: false,
+      canStart: true,
+      blocker: null,
+    },
+  ]
+
+  function setupPickerIssues(issues: Issue[] = PICKER_PROJECT_ISSUES) {
+    mocks.useIssues.mockImplementation((params: { projectId?: string } | undefined) => ({
+      data: params?.projectId === 'proj_create' ? issues : [],
+      isLoading: false,
+    }))
+  }
+
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('renders the Prerequisites picker in buffer mode and sends the selected numbers on submit', async () => {
+    setupPickerIssues()
+    mocks.createIssue.mockResolvedValue({ id: 'issue_new', number: 42 } as never)
+    const user = userEvent.setup()
+    renderDialog()
+
+    const picker = await screen.findByTestId('issue-prerequisite-picker')
+    expect(picker).toBeInTheDocument()
+    expect(within(picker).getByTestId('prerequisite-picker-trigger')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Plan with deps' } })
+
+    await user.click(screen.getByTestId('prerequisite-picker-trigger'))
+    const options = await screen.findAllByTestId('prerequisite-picker-option')
+    const opt5 = options.find((opt) => opt.getAttribute('data-issue-number') === '5')
+    const opt7 = options.find((opt) => opt.getAttribute('data-issue-number') === '7')
+    expect(opt5).toBeDefined()
+    expect(opt7).toBeDefined()
+    await user.click(opt5!)
+    await user.click(opt7!)
+
+    const chips = await screen.findAllByTestId('prerequisite-picker-chip')
+    expect(chips.map((c) => c.getAttribute('data-issue-number'))).toEqual(['5', '7'])
+    expect(within(picker).getByTestId('prerequisite-picker-chips')).toHaveAttribute('data-mode', 'buffer')
+
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Plan with deps',
+      prerequisiteNumbers: [5, 7],
+    }))
+  })
+
+  it('removes a buffered chip from the local selection without sending the removed number', async () => {
+    setupPickerIssues()
+    mocks.createIssue.mockResolvedValue({ id: 'issue_new', number: 42 } as never)
+    const user = userEvent.setup()
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Trim deps' } })
+
+    await user.click(screen.getByTestId('prerequisite-picker-trigger'))
+    let options = await screen.findAllByTestId('prerequisite-picker-option')
+    let opt5 = options.find((opt) => opt.getAttribute('data-issue-number') === '5')
+    let opt7 = options.find((opt) => opt.getAttribute('data-issue-number') === '7')
+    await user.click(opt5!)
+    await user.click(opt7!)
+
+    let chips = screen.getAllByTestId('prerequisite-picker-chip')
+    expect(chips).toHaveLength(2)
+
+    const chip5 = chips.find((chip) => chip.getAttribute('data-issue-number') === '5')
+    await user.click(within(chip5!).getByTestId('prerequisite-picker-chip-remove'))
+
+    chips = screen.getAllByTestId('prerequisite-picker-chip')
+    expect(chips).toHaveLength(1)
+    expect(chips[0]).toHaveAttribute('data-issue-number', '7')
+
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+      prerequisiteNumbers: [7],
+    }))
+
+    // after submit, the picker re-opened from scratch (dialog was reset); confirm chip state was cleared.
+    cleanup()
+    mocks.createIssue.mockClear()
+    mocks.useIssues.mockClear()
+    setupPickerIssues()
+    renderDialog()
+    expect(screen.queryByTestId('prerequisite-picker-chip')).not.toBeInTheDocument()
+  })
+
+  it('omits prerequisiteNumbers from the create body when no prerequisites are selected', async () => {
+    setupPickerIssues()
+    mocks.createIssue.mockResolvedValue({ id: 'issue_new', number: 42 } as never)
+    const user = userEvent.setup()
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'No deps' } })
+
+    expect(screen.queryByTestId('prerequisite-picker-chip')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    const payload = mocks.createIssue.mock.calls[0][0] as Record<string, unknown>
+    expect(payload).not.toHaveProperty('prerequisiteNumbers')
+    expect(payload.title).toBe('No deps')
+  })
+
+  it('clears the prerequisite buffer after a successful create so reopening starts empty', async () => {
+    setupPickerIssues()
+    mocks.createIssue.mockResolvedValue({ id: 'issue_new', number: 42 } as never)
+    const onClose = vi.fn()
+    const user = userEvent.setup()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <CreateIssueDialog open onClose={onClose} />
+      </QueryClientProvider>,
+    )
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Reset deps' } })
+
+    await user.click(screen.getByTestId('prerequisite-picker-trigger'))
+    const options = await screen.findAllByTestId('prerequisite-picker-option')
+    const opt5 = options.find((opt) => opt.getAttribute('data-issue-number') === '5')
+    await user.click(opt5!)
+
+    expect(screen.getByTestId('prerequisite-picker-chip')).toHaveAttribute('data-issue-number', '5')
+
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+      prerequisiteNumbers: [5],
+    }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <CreateIssueDialog open={false} onClose={onClose} />
+      </QueryClientProvider>,
+    )
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <CreateIssueDialog open onClose={onClose} />
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByTestId('prerequisite-picker-chip')).not.toBeInTheDocument()
+
+    queryClient.clear()
+  })
+
+  it('create-issue mutation onSuccess still reads data.number off the bare Issue shape', async () => {
+    setupPickerIssues()
+    mocks.createIssue.mockResolvedValue({ id: 'issue_201', number: 201 } as never)
+    const user = userEvent.setup()
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Success path' } })
+
+    await user.click(screen.getByTestId('prerequisite-picker-trigger'))
+    const options = await screen.findAllByTestId('prerequisite-picker-option')
+    const opt7 = options.find((opt) => opt.getAttribute('data-issue-number') === '7')
+    await user.click(opt7!)
+
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mocks.toast.success).toHaveBeenCalledWith('Issue #201 created'))
+    expect(mocks.toast.success.mock.calls[0][0]).toBe('Issue #201 created')
+  })
+})
+
+function within(el: HTMLElement) {
+  return {
+    getByTestId: (testId: string) => {
+      const found = el.querySelector(`[data-testid="${testId}"]`)
+      if (!found) throw new Error(`[data-testid="${testId}"] not found within ${el.outerHTML}`)
+      return found as HTMLElement
+    },
+    queryByTestId: (testId: string) => el.querySelector(`[data-testid="${testId}"]`) as HTMLElement | null,
+  }
+}
