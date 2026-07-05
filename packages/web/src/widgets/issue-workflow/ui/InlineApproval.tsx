@@ -13,6 +13,7 @@ import { classifyResult } from './format'
 import { TaskItem } from './TaskItem'
 import { CheckItem } from './CheckItem'
 import { WORKFLOW_STAGES } from './StageBar'
+import { isScriptHealthCheck } from '../model/runtime-query-helpers'
 
 export function InlineApprovalControls({
   issueNumber,
@@ -221,9 +222,7 @@ export function StepList({
   const taskResults: StageTaskState[] = stageState?.tasks ?? []
   const checkResults: StageCheckState[] = stageState?.checks ?? []
 
-  const scriptHealthChecks = checkResults.filter(c =>
-    c.checkName === 'health' || (c.output && (c.output as Record<string, unknown>).kind === 'script')
-  )
+  const scriptHealthChecks = checkResults.filter(isScriptHealthCheck)
   const failedScriptHealthChecks = scriptHealthChecks.filter(c => c.status === 'failed' || c.status === 'error')
   const displayedWorkflowStage = issue.status === IssueStatus.Done
     && (!issue.workflowStage || !WORKFLOW_STAGES.includes(issue.workflowStage))
