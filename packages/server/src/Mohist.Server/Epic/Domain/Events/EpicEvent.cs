@@ -7,7 +7,8 @@ public union EpicEvent(
     EpicIssueLinked,
     EpicIssueUnlinked,
     EpicStatusChanged,
-    EpicClosed);
+    EpicClosed,
+    EpicReopened);
 
 public sealed record EpicCreated(
     string Title,
@@ -36,3 +37,5 @@ public sealed record EpicStatusChanged(
     string NewStatus);
 
 public sealed record EpicClosed;
+
+public sealed record EpicReopened;

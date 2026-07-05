@@ -11,4 +11,7 @@ public class NoopEventStore : IEventStore
 
     public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+
+    public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
 }

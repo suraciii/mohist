@@ -11,6 +11,7 @@ import {
   useMarkEpicDone,
   usePauseEpic,
   useRemoveEpicIssue,
+  useReopenEpic,
   useResumeEpic,
   useStartEpic,
   useStartIssue,
@@ -48,6 +49,7 @@ import {
   DependencyGraphWidget,
   type Renderability,
 } from '../../../widgets/epic-dependency-graph'
+import { EpicActivityTimelineSection } from './sections/EpicActivityTimelineSection'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {
@@ -518,6 +520,7 @@ export function EpicDetailPage() {
   const pauseEpic = usePauseEpic()
   const resumeEpic = useResumeEpic()
   const startEpic = useStartEpic()
+  const reopenEpic = useReopenEpic()
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
@@ -759,6 +762,16 @@ export function EpicDetailPage() {
                 data-testid="mark-epic-done"
               >
                 {markEpicDone.isPending ? 'Marking...' : 'Mark Done'}
+              </Button>
+            )}
+            {primaryAction?.kind === 'reopen-epic' && (
+              <Button
+                type="button"
+                onClick={() => reopenEpic.mutate(epicId)}
+                disabled={reopenEpic.isPending}
+                data-testid="reopen-epic-trigger"
+              >
+                {reopenEpic.isPending ? 'Reopening...' : 'Reopen'}
               </Button>
             )}
             {!isTerminal && !isMarkDonePrimary && (
@@ -1054,6 +1067,8 @@ export function EpicDetailPage() {
           </div>
         )}
       </Card>
+
+      <EpicActivityTimelineSection epicId={epic.id} />
 
       <EditEpicDialog
         open={editDialogOpen}

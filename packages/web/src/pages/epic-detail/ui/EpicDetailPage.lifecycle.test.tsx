@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   useUpdateEpic: vi.fn(),
   usePauseEpic: vi.fn(),
   useResumeEpic: vi.fn(),
+  useReopenEpic: vi.fn(),
 }))
 
 vi.mock('../../../entities/project', async (importOriginal) => {
@@ -53,6 +54,7 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
     useUpdateEpic: mocks.useUpdateEpic,
     usePauseEpic: mocks.usePauseEpic,
     useResumeEpic: mocks.useResumeEpic,
+    useReopenEpic: mocks.useReopenEpic,
   }
 })
 
@@ -97,6 +99,7 @@ describe('EpicDetailPage lifecycle guards', () => {
   const updateMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
+  const reopenMutate = vi.fn()
   const startEpicMutate = vi.fn()
 
   beforeEach(() => {
@@ -111,6 +114,7 @@ describe('EpicDetailPage lifecycle guards', () => {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useReopenEpic.mockReturnValue({ mutate: reopenMutate, isPending: false })
     mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
@@ -351,6 +355,7 @@ describe('EpicDetailPage pause/resume actions', () => {
   const startEpicMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
+  const reopenMutate = vi.fn()
 
   function makeEpic(overrides: Record<string, unknown> = {}) {
     return {
@@ -387,6 +392,7 @@ describe('EpicDetailPage pause/resume actions', () => {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useReopenEpic.mockReturnValue({ mutate: reopenMutate, isPending: false })
     mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
@@ -574,6 +580,72 @@ describe('EpicDetailPage pause/resume actions', () => {
     expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
     expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
   })
+
+  describe('reopen control for terminal epics', () => {
+    it('shows a Reopen button on a done epic', () => {
+      mocks.useEpic.mockReturnValue({
+        data: makeEpic({ status: EpicStatus.Done }),
+        isLoading: false,
+      })
+
+      renderPage()
+
+      expect(screen.getByTestId('reopen-epic-trigger')).toBeTruthy()
+      expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
+      expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
+      expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
+      expect(screen.queryByTestId('mark-epic-done')).toBeNull()
+    })
+
+    it('shows a Reopen button on a closed epic', () => {
+      mocks.useEpic.mockReturnValue({
+        data: makeEpic({ status: EpicStatus.Closed }),
+        isLoading: false,
+      })
+
+      renderPage()
+
+      expect(screen.getByTestId('reopen-epic-trigger')).toBeTruthy()
+    })
+
+    it('does not show a Reopen button on a non-terminal epic', () => {
+      mocks.useEpic.mockReturnValue({
+        data: makeEpic({ status: EpicStatus.Idle }),
+        isLoading: false,
+      })
+
+      renderPage()
+
+      expect(screen.queryByTestId('reopen-epic-trigger')).toBeNull()
+    })
+
+    it('invokes the reopen mutation with the epic id on click', () => {
+      mocks.useEpic.mockReturnValue({
+        data: makeEpic({ status: EpicStatus.Done }),
+        isLoading: false,
+      })
+
+      renderPage()
+
+      fireEvent.click(screen.getByTestId('reopen-epic-trigger'))
+
+      expect(reopenMutate).toHaveBeenCalledWith('epic-12345678')
+    })
+
+    it('disables the Reopen button while the mutation is in flight', () => {
+      mocks.useReopenEpic.mockReturnValue({ mutate: reopenMutate, isPending: true })
+      mocks.useEpic.mockReturnValue({
+        data: makeEpic({ status: EpicStatus.Closed }),
+        isLoading: false,
+      })
+
+      renderPage()
+
+      const reopenButton = screen.getByTestId('reopen-epic-trigger')
+      expect(reopenButton).toBeDisabled()
+      expect(reopenButton).toHaveTextContent(/Reopening/)
+    })
+  })
 })
 
 describe('EpicDetailPage lifecycle header actions', () => {
@@ -585,6 +657,7 @@ describe('EpicDetailPage lifecycle header actions', () => {
   const updateMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
+  const reopenMutate = vi.fn()
   const startEpicMutate = vi.fn()
 
   function makeEpic(overrides: Record<string, unknown> = {}) {
@@ -623,6 +696,7 @@ describe('EpicDetailPage lifecycle header actions', () => {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useReopenEpic.mockReturnValue({ mutate: reopenMutate, isPending: false })
     mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
@@ -680,7 +754,7 @@ describe('EpicDetailPage lifecycle header actions', () => {
     expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
   })
 
-  it('renders no lifecycle action when the epic is done', () => {
+  it('renders Reopen as the lifecycle action when the epic is done', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpic({
         status: EpicStatus.Done,
@@ -699,6 +773,7 @@ describe('EpicDetailPage lifecycle header actions', () => {
 
     renderPage()
 
+    expect(screen.getByTestId('reopen-epic-trigger')).toHaveTextContent('Reopen')
     expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
     expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
     expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
@@ -706,11 +781,12 @@ describe('EpicDetailPage lifecycle header actions', () => {
     expect(screen.queryByTestId('close-epic-trigger')).toBeNull()
   })
 
-  it('renders no lifecycle action when the epic is closed', () => {
+  it('renders Reopen as the lifecycle action when the epic is closed', () => {
     mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Closed }), isLoading: false })
 
     renderPage()
 
+    expect(screen.getByTestId('reopen-epic-trigger')).toHaveTextContent('Reopen')
     expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
     expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
     expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()

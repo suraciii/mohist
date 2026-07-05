@@ -24,10 +24,18 @@ public class EpicQuerier : IScopedService
         _issuesQuery = issuesQuery;
     }
 
-    public async Task<List<EpicWithProgressDto>> ListAsync(string projectId)
+    public async Task<List<EpicWithProgressDto>> ListAsync(
+        string projectId,
+        string? search = null,
+        string? sortBy = null,
+        string? sortDir = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        const string sql = """
+
+        var normalizedSearch = NormalizeSearch(search);
+        var orderBy = ResolveOrderBy(sortBy, sortDir);
+
+        var sql = $$"""
             SELECT
                 e."Id" AS "EpicId",
                 e."Number" AS "EpicNumber",
@@ -51,11 +59,16 @@ public class EpicQuerier : IScopedService
             LEFT JOIN "EpicIssues" li ON li."EpicId" = e."Id"
             LEFT JOIN "Issues" i ON i."IssueId" = li."IssueId"
             WHERE e."ProjectId" = @projectId
-            ORDER BY e."Priority", e."UpdatedAt" DESC, li."CreatedAt"
+            {{(normalizedSearch is null ? string.Empty : "AND LOWER(e.\"Title\") LIKE LOWER('%' || @search || '%') ESCAPE '\\'")}}
+            ORDER BY {{orderBy}}
             """;
 
+        var parameters = new List<SqliteParameter> { new("@projectId", projectId) };
+        if (normalizedSearch is not null)
+            parameters.Add(new SqliteParameter("@search", normalizedSearch));
+
         var rows = await db.Database
-            .SqlQueryRaw<EpicIssueListItem>(sql, new SqliteParameter("@projectId", projectId))
+            .SqlQueryRaw<EpicIssueListItem>(sql, parameters.Cast<object>().ToArray())
             .ToListAsync();
 
         var allIssueRows = rows
@@ -93,6 +106,51 @@ public class EpicQuerier : IScopedService
 
         return result;
     }
+
+    // Order-by fragments are composed from a closed enum-bound map so the
+    // sort selector never reaches the SQL builder as an interpolated string.
+    // New keys / directions must be added here explicitly; unknown inputs
+    // fall back to the original hardcoded ordering.
+    internal const string DefaultOrderBy = "e.\"Priority\" ASC, e.\"UpdatedAt\" DESC, li.\"CreatedAt\"";
+
+    private static readonly Dictionary<(string Field, string Dir), string> OrderByMap =
+        new()
+        {
+            [("priority", "asc")] = "e.\"Priority\" ASC, e.\"UpdatedAt\" DESC, li.\"CreatedAt\"",
+            [("priority", "desc")] = "e.\"Priority\" DESC, e.\"UpdatedAt\" DESC, li.\"CreatedAt\"",
+            [("updated", "asc")] = "e.\"UpdatedAt\" ASC, e.\"Priority\" ASC, li.\"CreatedAt\"",
+            [("updated", "desc")] = "e.\"UpdatedAt\" DESC, e.\"Priority\" ASC, li.\"CreatedAt\"",
+        };
+
+    internal static string ResolveOrderBy(string? sortBy, string? sortDir)
+    {
+        var field = NormalizeSortToken(sortBy);
+        var dir = NormalizeSortToken(sortDir);
+        if (field is null || dir is null) return DefaultOrderBy;
+        return OrderByMap.TryGetValue((field, dir), out var fragment)
+            ? fragment
+            : DefaultOrderBy;
+    }
+
+    private static string? NormalizeSortToken(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var trimmed = raw.Trim();
+        return trimmed.All(char.IsLetterOrDigit) ? trimmed.ToLowerInvariant() : null;
+    }
+
+    internal static string? NormalizeSearch(string? raw)
+    {
+        if (raw is null) return null;
+        var trimmed = raw.Trim();
+        return trimmed.Length == 0 ? null : EscapeLikePattern(trimmed);
+    }
+
+    private static string EscapeLikePattern(string value) =>
+        value
+            .Replace(@"\", @"\\")
+            .Replace("%", @"\%")
+            .Replace("_", @"\_");
 
     public async Task<EpicDetailDto?> GetAsync(string projectId, string epicId)
     {

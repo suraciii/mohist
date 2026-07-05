@@ -3,14 +3,14 @@ import { EpicStatus } from '../../../entities/epic/model/types'
 import { primaryLifecycleAction } from './primaryLifecycleAction'
 
 describe('primaryLifecycleAction', () => {
-  describe('terminal statuses (done, closed) always return null', () => {
+  describe('terminal statuses (done, closed) always return reopen-epic', () => {
     it.each([
       [EpicStatus.Done, false],
       [EpicStatus.Done, true],
       [EpicStatus.Closed, false],
       [EpicStatus.Closed, true],
-    ] as const)('returns null for status=%s, readyToMarkDone=%s', (status, ready) => {
-      expect(primaryLifecycleAction(status, ready)).toBeNull()
+    ] as const)('returns reopen-epic for status=%s, readyToMarkDone=%s', (status, ready) => {
+      expect(primaryLifecycleAction(status, ready)).toEqual({ kind: 'reopen-epic' })
     })
   })
 
@@ -59,7 +59,7 @@ describe('primaryLifecycleAction', () => {
     )('returns a valid primary kind for status=%s, ready=%s', (status, ready) => {
       const action = primaryLifecycleAction(status, ready)
       if (status === EpicStatus.Done || status === EpicStatus.Closed) {
-        expect(action).toBeNull()
+        expect(action).toEqual({ kind: 'reopen-epic' })
         return
       }
       expect(action?.kind).toMatch(/^(start-epic|pause-epic|resume-epic|mark-done)$/)
@@ -73,10 +73,10 @@ describe('primaryLifecycleAction', () => {
         'running|true': 'mark-done',
         'paused|false': 'resume-epic',
         'paused|true': 'resume-epic',
-        'done|false': 'none',
-        'done|true': 'none',
-        'closed|false': 'none',
-        'closed|true': 'none',
+        'done|false': 'reopen-epic',
+        'done|true': 'reopen-epic',
+        'closed|false': 'reopen-epic',
+        'closed|true': 'reopen-epic',
       }
       for (const status of allStatuses) {
         for (const ready of readyValues) {

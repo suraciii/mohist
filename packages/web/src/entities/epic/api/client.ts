@@ -1,8 +1,18 @@
 import { request, projectApiPath } from '../../../shared/api/client'
-import type { Epic, EpicDetail, EpicWithProgress } from '../model/types'
+import type { Epic, EpicDetail, EpicWithProgress, StoredCloudEventDto } from '../model/types'
 
-export function getEpics(params?: { projectId?: string }) {
-  return request<EpicWithProgress[]>(projectApiPath(params?.projectId, '/epics'))
+export function getEpics(params?: { projectId?: string; search?: string; sort?: string; dir?: string }) {
+  const query = buildEpicListQuery(params)
+  return request<EpicWithProgress[]>(projectApiPath(params?.projectId, '/epics') + query)
+}
+
+function buildEpicListQuery(params?: { search?: string; sort?: string; dir?: string }) {
+  const query = new URLSearchParams()
+  if (params?.search) query.set('search', params.search)
+  if (params?.sort) query.set('sort', params.sort)
+  if (params?.dir) query.set('dir', params.dir)
+  const qs = query.toString()
+  return qs.length === 0 ? '' : `?${qs}`
 }
 
 export function getEpic(id: string, params?: { projectId?: string }) {
@@ -28,6 +38,47 @@ export function removeEpicIssue(epicId: string, issueId: string, projectId?: str
   return request<{ epicId: string; issueId: string }>(projectApiPath(projectId, `/epics/${encodeURIComponent(epicId)}/issues/${encodeURIComponent(issueId)}`), {
     method: 'DELETE',
   })
+}
+
+export interface BatchMembershipOutcome {
+  identifier: string
+  status: 'linked' | 'already-linked' | 'conflict' | 'not-found' | 'unlinked' | 'was-not-a-member'
+  issueId?: string | null
+  issueNumber?: number | null
+  owningEpicId?: string | null
+  owningEpicTitle?: string | null
+}
+
+export interface BatchMembershipResponse {
+  results: BatchMembershipOutcome[]
+}
+
+export function batchAddEpicIssues(
+  epicId: string,
+  issueIds: string[],
+  projectId?: string | null,
+) {
+  return request<BatchMembershipResponse>(
+    projectApiPath(projectId, `/epics/${encodeURIComponent(epicId)}/issues:batch`),
+    {
+      method: 'POST',
+      body: JSON.stringify({ issueIds }),
+    },
+  )
+}
+
+export function batchRemoveEpicIssues(
+  epicId: string,
+  issueIds: string[],
+  projectId?: string | null,
+) {
+  return request<BatchMembershipResponse>(
+    projectApiPath(projectId, `/epics/${encodeURIComponent(epicId)}/issues:batch-unlink`),
+    {
+      method: 'POST',
+      body: JSON.stringify({ issueIds }),
+    },
+  )
 }
 
 export function markEpicDone(id: string, projectId?: string | null) {
@@ -64,4 +115,12 @@ export function resumeEpic(id: string, projectId?: string | null) {
 
 export function startEpic(id: string, projectId?: string | null) {
   return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/start`), { method: 'POST' })
+}
+
+export function reopenEpic(id: string, projectId?: string | null) {
+  return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/reopen`), { method: 'POST' })
+}
+
+export function getEpicEvents(id: string, projectId?: string | null) {
+  return request<StoredCloudEventDto[]>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/events`))
 }

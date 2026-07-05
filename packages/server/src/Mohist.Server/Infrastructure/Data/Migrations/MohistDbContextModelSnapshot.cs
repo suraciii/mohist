@@ -176,6 +176,57 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("Epics");
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.EpicEventRow", b =>
+                {
+                    b.Property<string>("Source")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Data")
+                        .IsRequired()
+                        .HasColumnType("JSON");
+
+                    b.Property<string>("DataContentType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExtensionsJson")
+                        .IsRequired()
+                        .HasColumnType("JSON");
+
+                    b.Property<string>("SpecVersion")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("Time")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Source", "Id");
+
+                    b.HasIndex("Type", "Source", "Id");
+
+                    b.ToTable("EpicEvents", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.IssueEventRow", b =>
                 {
                     b.Property<string>("Source")

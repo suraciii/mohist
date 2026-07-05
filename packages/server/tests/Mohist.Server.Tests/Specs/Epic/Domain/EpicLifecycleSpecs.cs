@@ -465,6 +465,140 @@ public class EpicLifecycleSpecs
         Assert.Empty(secondRow.ExternalPrerequisites);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Reopen_OnClosedEpic_ReturnsIdleEpic()
+    {
+        var project = await CreateProjectAsync();
+        var epic = await CreateEpicAsync(project.Id, "Reopen me");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
+
+        var reopened = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}/reopen", null);
+
+        Assert.Equal("idle", reopened.Status);
+
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.Equal("idle", detail.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Reopen_OnDoneEpic_ReturnsIdleEpic()
+    {
+        var project = await CreateProjectAsync();
+        var issue = await CreateIssueAsync(project.Id, "Done issue");
+        await CompleteIssueAsync(project.Id, issue);
+        var epic = await CreateEpicAsync(project.Id, "Done epic");
+        await LinkIssueAsync(project.Id, epic.Id, issue.Number);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
+
+        var reopened = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}/reopen", null);
+
+        Assert.Equal("idle", reopened.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Reopen_OnIdleEpic_Returns409EpIcNotTerminal()
+    {
+        var project = await CreateProjectAsync();
+        var epic = await CreateEpicAsync(project.Id, "Idle epic");
+
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Id}/reopen", null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        var envelope = await response.Content.ReadFromJsonAsync<ConflictEnvelope>();
+        Assert.NotNull(envelope);
+        Assert.False(envelope!.Success);
+        Assert.Equal("EPIC_NOT_TERMINAL", envelope.Code);
+        Assert.NotNull(envelope.Details);
+        Assert.Equal("idle", envelope.Details!.CurrentStatus);
+
+        var after = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.Equal("idle", after.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Reopen_OnRunningEpic_Returns409EpIcNotTerminal()
+    {
+        var project = await CreateProjectAsync();
+        var epic = await CreateEpicAsync(project.Id, "Running epic");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/start", null);
+
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Id}/reopen", null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        var envelope = await response.Content.ReadFromJsonAsync<ConflictEnvelope>();
+        Assert.NotNull(envelope);
+        Assert.Equal("EPIC_NOT_TERMINAL", envelope.Code);
+        Assert.Equal("running", envelope!.Details!.CurrentStatus);
+
+        var after = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.Equal("running", after.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Reopen_OnMissingEpic_Returns404()
+    {
+        var project = await CreateProjectAsync();
+
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/epic_nonexistent/reopen", null);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Reopen_AcceptsIssueNumberOrInternalId()
+    {
+        var project = await CreateProjectAsync();
+        var epic = await CreateEpicAsync(project.Id, "By number");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
+
+        var byNumber = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Number}/reopen", null);
+        Assert.Equal("idle", byNumber.Status);
+
+        // Now close again, reopen by internal id.
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
+        var byId = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}/reopen", null);
+        Assert.Equal("idle", byId.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Reopen_OnClosedEpic_WithLinkedIssues_PreservesMembershipsAndUnblocksAdvancement()
+    {
+        // After reopen, the linked issues are still linked (close
+        // never destroyed them); reopen re-establishes the active
+        // membership so EpicQuerier surfaces them again as part of
+        // the epic's progress.
+        var project = await CreateProjectAsync();
+        var first = await CreateIssueAsync(project.Id, "First");
+        var second = await CreateIssueAsync(project.Id, "Second");
+        var epic = await CreateEpicAsync(project.Id, "Reopen preserves links");
+        await LinkIssueAsync(project.Id, epic.Id, first.Number);
+        await LinkIssueAsync(project.Id, epic.Id, second.Number);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/reopen", null);
+
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.Equal("idle", detail.Status);
+        Assert.Equal(2, detail.LinkedIssues.Length);
+        Assert.Equal(2, detail.Progress.TotalIssueCount);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new

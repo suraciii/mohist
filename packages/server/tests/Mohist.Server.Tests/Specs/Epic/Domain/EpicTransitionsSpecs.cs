@@ -582,6 +582,142 @@ public class EpicTransitionsSpecs
         Assert.Equal(eventsBefore, epic.PendingEvents.Count);
         Assert.Equal(updatedAtBefore, epic.UpdatedAt);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Reopen_FromDone_TransitionsToIdleAndRecordsReopenedAndStatusChanged()
+    {
+        var epic = NewIdleEpic();
+        epic.LinkIssue("issue_1", 1, UtcNow);
+        epic.MarkDone(new HashSet<int>(), UtcNow);
+
+        epic.Reopen(UtcNow);
+
+        Assert.Equal(EpicStatus.Idle, epic.Status);
+        Assert.False(epic.Status == EpicStatus.Done || epic.Status == EpicStatus.Closed);
+        var statusChanged = EpicEventAssertions.OfType<EpicStatusChanged>(epic.PendingEvents).Last();
+        Assert.Equal("done", statusChanged.OldStatus);
+        Assert.Equal("idle", statusChanged.NewStatus);
+        var reopened = EpicEventAssertions.OfType<EpicReopened>(epic.PendingEvents).Single();
+        Assert.NotNull(reopened);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Reopen_FromClosed_TransitionsToIdleAndClearsPauseReason()
+    {
+        var epic = NewIdleEpic();
+        epic.Start(UtcNow);
+        epic.Pause("temp", UtcNow);
+        epic.Resume(UtcNow);
+        epic.Close(UtcNow);
+
+        epic.Reopen(UtcNow);
+
+        Assert.Equal(EpicStatus.Idle, epic.Status);
+        Assert.Null(epic.PauseReason);
+        var statusChanged = EpicEventAssertions.OfType<EpicStatusChanged>(epic.PendingEvents).Last();
+        Assert.Equal("closed", statusChanged.OldStatus);
+        Assert.Equal("idle", statusChanged.NewStatus);
+        Assert.Single(EpicEventAssertions.OfType<EpicReopened>(epic.PendingEvents));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Reopen_FromIdle_ThrowsNotTerminalAndLeavesStateUnchanged()
+    {
+        var epic = NewIdleEpic();
+        var eventsBefore = epic.PendingEvents.Count;
+        var updatedAtBefore = epic.UpdatedAt;
+
+        var ex = Assert.Throws<EpicNotTerminalException>(() => epic.Reopen(UtcNow));
+
+        Assert.Equal(epic.Id, ex.EpicId);
+        Assert.Equal("idle", ex.CurrentStatus);
+        Assert.Equal(EpicStatus.Idle, epic.Status);
+        Assert.Equal(eventsBefore, epic.PendingEvents.Count);
+        Assert.Equal(updatedAtBefore, epic.UpdatedAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Reopen_FromRunning_ThrowsNotTerminalAndLeavesStateUnchanged()
+    {
+        var epic = NewIdleEpic();
+        epic.Start(UtcNow);
+        var eventsBefore = epic.PendingEvents.Count;
+
+        var ex = Assert.Throws<EpicNotTerminalException>(() => epic.Reopen(UtcNow));
+
+        Assert.Equal("running", ex.CurrentStatus);
+        Assert.Equal(EpicStatus.Running, epic.Status);
+        Assert.Equal(eventsBefore, epic.PendingEvents.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Reopen_FromPaused_ThrowsNotTerminalAndLeavesStateUnchanged()
+    {
+        var epic = NewIdleEpic();
+        epic.Start(UtcNow);
+        epic.Pause("hold", UtcNow);
+        var eventsBefore = epic.PendingEvents.Count;
+
+        var ex = Assert.Throws<EpicNotTerminalException>(() => epic.Reopen(UtcNow));
+
+        Assert.Equal("paused", ex.CurrentStatus);
+        Assert.Equal(EpicStatus.Paused, epic.Status);
+        Assert.Equal("hold", epic.PauseReason);
+        Assert.Equal(eventsBefore, epic.PendingEvents.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Reopen_LeavesLinkedIssueMembershipsIntact()
+    {
+        // Reopen only flips status; the EpicIssueRows (link records)
+        // remain in the aggregate so the grain's re-claim loop can
+        // re-establish active memberships.
+        var epic = NewIdleEpic();
+        epic.LinkIssue("issue_1", 1, UtcNow);
+        epic.LinkIssue("issue_2", 2, UtcNow);
+        epic.MarkDone(new HashSet<int>(), UtcNow);
+        Assert.Equal(2, epic.LinkedIssueNumbers.Count);
+
+        epic.Reopen(UtcNow);
+
+        Assert.Equal(2, epic.LinkedIssueNumbers.Count);
+        Assert.True(epic.LinkedIssueNumbers.ContainsKey("issue_1"));
+        Assert.True(epic.LinkedIssueNumbers.ContainsKey("issue_2"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void EnsureNotTerminal_StillBlocksOtherTransitionsAfterReopenAdded()
+    {
+        // Regression: EnsureNotTerminal must continue to block Start,
+        // Pause, Resume, MarkDone, and Close from terminal states.
+        // Reopen is the only allowed exit.
+        var epic = NewIdleEpic();
+        epic.Close(UtcNow);
+
+        Assert.Throws<EpicAlreadyTerminalException>(() => epic.Start(UtcNow));
+        Assert.Throws<EpicAlreadyTerminalException>(() => epic.Pause(null, UtcNow));
+        Assert.Throws<EpicAlreadyTerminalException>(() => epic.Resume(UtcNow));
+        Assert.Throws<EpicAlreadyTerminalException>(() => epic.MarkDone(new HashSet<int>(), UtcNow));
+        Assert.Throws<EpicAlreadyTerminalException>(() => epic.Close(UtcNow));
+
+        // Reopen is allowed.
+        epic.Reopen(UtcNow);
+        Assert.Equal(EpicStatus.Idle, epic.Status);
+    }
 }
 
 internal static class EpicEventAssertions

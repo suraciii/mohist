@@ -78,6 +78,14 @@ public static class EventCatalog
         ReverseDns.IssueCancelled,
         ReverseDns.IssueWorkStarted,
         ReverseDns.InboxItemPersisted,
+        ReverseDns.EpicCreated,
+        ReverseDns.EpicUpdated,
+        ReverseDns.EpicPriorityChanged,
+        ReverseDns.EpicIssueLinked,
+        ReverseDns.EpicIssueUnlinked,
+        ReverseDns.EpicStatusChanged,
+        ReverseDns.EpicClosed,
+        ReverseDns.EpicReopened,
     };
 
     /// <summary>
@@ -126,6 +134,15 @@ public static class EventCatalog
         public const string IssueCompleted = "com.mohist.issue.completed";
         public const string IssueCancelled = "com.mohist.issue.cancelled";
         public const string IssueWorkStarted = "com.mohist.issue.work-started";
+
+        public const string EpicCreated = "com.mohist.epic.created";
+        public const string EpicUpdated = "com.mohist.epic.updated";
+        public const string EpicPriorityChanged = "com.mohist.epic.priority-changed";
+        public const string EpicIssueLinked = "com.mohist.epic.issue-linked";
+        public const string EpicIssueUnlinked = "com.mohist.epic.issue-unlinked";
+        public const string EpicStatusChanged = "com.mohist.epic.status-changed";
+        public const string EpicClosed = "com.mohist.epic.closed";
+        public const string EpicReopened = "com.mohist.epic.reopened";
 
         public const string InboxItemPersisted = "com.mohist.inbox.item-persisted";
     }
