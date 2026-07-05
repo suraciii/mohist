@@ -231,3 +231,99 @@ Added 12 tests covering the acceptance criteria:
   add more subcommands — the assertion is on substring presence of
   `enable` and `disable`, which the renderer emits as part of the
   subcommand listing.
+
+## T-003: Issue rerun — add --from-stage, keep rerun-from-stage as peer alias
+
+### Code
+
+- New `BuildRerun` lives in `MohistCliCommands.Issue.Lifecycle.cs` right
+  above `BuildRerunFromStage`. The previous generic
+  `BuildAction("rerun", "Rerun issue", api)` registration in
+  `MohistCliCommands.Issue.cs:21` is replaced with a direct
+  `BuildRerun(api)` call. The generic `BuildAction` factory is left in
+  place — it's still used for `start`/`approve`/`close`/`reopen`/`retry`/
+  `force-stop`/`resume`/`unarchive` (those have no flags).
+- `BuildRerun` mirrors `MohistCliCommands.Workflow.cs:174` (workflow's
+  `BuildRerun`) structurally: `--from-stage` as `Option<string?>`,
+  `fromStageProvided` from `IsOptionProvided(ctx, fromStageOpt)`, then
+  `suffix = fromStageProvided ? "/rerun-from-stage" : "/rerun"`. The
+  empty-body branch sends `new { }` (serializes as `{}` to the server,
+  matching the rerun-from-start contract); the present branch sends
+  `new { stage = fromStage! }`.
+- `fromStageProvided` uses `IssueCommands.IsOptionProvided(ctx, ...)`
+  (already declared at `MohistCliCommands.Issue.cs:54`) — returns
+  `true` only when the user actually typed `--from-stage` on the
+  command line (NOT when its default applies). Workflow's rerun does
+  the same with the same helper pattern; the empty-vs-absent distinction
+  is what makes `--from-stage ""` fail locally while bare `rerun` still
+  POSTs to `/rerun` successfully.
+- Local-failure message is `--from-stage is required and must not be
+  empty` (verbatim spec phrasing from
+  `specs/issue-rerun/spec.md#scenario-empty---from-stage-fails-locally`).
+  Workflow uses the same text — symmetric error surfaces.
+- `BuildRerunFromStage` is kept intact (D3: name-aliases share option
+  sets so cannot honor both `--stage` and `--from-stage`). Its
+  description was prefixed with `[transitional alias of 'mo issue rerun
+  --from-stage']` so `--help` advertises it as a peer, not a primary.
+  Wire behavior is unchanged: POSTs `{stage}` to `/rerun-from-stage`.
+
+### Tests (`CliIssueRerunFromStageSpecs.cs`)
+
+Added 7 tests on top of the existing 4 (rerun-from-stage peer behavior):
+
+- `IssueRerun_NoFromStage_PostsEmptyBodyToRerunEndpoint` — bare rerun
+  hits `/rerun` with `{}` body (acceptance #1).
+- `IssueRerun_WithFromStage_PostsStageBodyToRerunFromStageEndpoint` —
+  rerun --from-stage hits `/rerun-from-stage` with `{stage}` body
+  (acceptance #2). Mirrors `CliWorkflowControlSpecs.Rerun_WithFromStage`.
+- `IssueRerun_EmptyFromStage_FailsLocallyWithoutHttp` — `--from-stage ""`
+  exits 1, no HTTP, stderr contains the exact spec phrasing
+  (acceptance #3).
+- `IssueRerun_BlankFromStage_FailsLocallyWithoutHttp` — `--from-stage "   "`
+  same path (acceptance #3 — whitespace case).
+- `IssueRerun_NoFromStage_HonorsProjectIdFlag` — `--project-id` reroutes
+  to `/api/projects/<id>/issues/42/rerun` (acceptance #5).
+- `IssueRerun_WithFromStage_HonorsProjectIdFlag` — same for the
+  rerun-from-stage path (acceptance #5).
+- `IssueRerun_FromStageAlias_PostsSameRequestAsRerunFromStagePeer` —
+  runs both commands back-to-back against the same harness, captures
+  requests, asserts method/URI/body all identical and exit codes equal
+  (acceptance #4 parity). Different shape than `RunUnderBothNames` (workflow
+  get/show) because the two commands have different flag names
+  (`--from-stage` vs `--stage`) so we cannot pre-build a shared arg
+  list; instead we invoke each command separately and diff the captured
+  requests.
+
+### Verification
+
+`dotnet test packages/cli/tests/Mohist.Cli.Tests`:
+
+- Before T-003: 741 pass, 3 fail (the 3 pre-existing `CliReferenceDocsSpecs`
+  failures from T-002's report).
+- After T-003: 748 pass, 3 fail (same 3 pre-existing — T-006 scope).
+  Net: +7 tests, all green.
+
+`CliIssueRerunFromStageSpecs`: 11/11 pass (4 pre-existing + 7 new).
+
+### Gotchas for next tasks
+
+- The `BuildAction` factory is left in place (used by 8 other issue
+  lifecycle verbs). Don't remove it — only `rerun` needed the dedicated
+  handler because it's the only one with a flag-driven variant. If a
+  future issue lifecycle verb gains a flag, prefer adding a dedicated
+  `Build<Verb>` (mirrors `BuildRerun`/`BuildReject`/`BuildStop`/`BuildRebase`
+  /`BuildArchive` pattern) over extending `BuildAction`.
+- The `fromStageProvided` check uses `IssueCommands.IsOptionProvided`,
+  which lives in `MohistCliCommands.Issue.cs:54`. Workflow-side rerun
+  doesn't use that helper — it inlines the same logic with `ctx.GetResult
+  (fromStageOpt) is not null`. The two are equivalent; either could be
+  promoted to `MohistCliCommands.IsOptionProvided` later.
+- The transitional alias description for `rerun-from-stage` starts with
+  the literal `[transitional alias of 'mo issue rerun --from-stage']`
+  prefix. Future cleanup issues can grep for this exact prefix to find
+  every transitional alias in one pass.
+- Both `rerun` and `rerun-from-stage` show up as separate rows in
+  `mo issue --help` (System.CommandLine doesn't merge them — they're
+  sibling `Command` instances). That's intentional per D3; the
+  `[transitional alias ...]` description prefix is how `--help` users
+  discover the relationship.
