@@ -421,10 +421,11 @@ internal sealed partial class TableRenderer
     // Renders the full WorkflowRunDetailDto payload from
     // GET /api/workflow-runs/{workflowRunId}: composes the WorkflowStatusView
     // (under `status`) with the associated-issue reference (under `issueRef`).
-    // This is the table shape for `mo workflow show <runId> -o table`. The
-    // shape is intentionally broader than the `WorkflowRunStatus` compact view
-    // so `show` is a strict superset of `status` (per design.md Decision 3 and
-    // workflow-run-reads/spec.md#status-is-more-compact-than-show).
+    // This is the table shape for `mo workflow get <runId> -o table` (and its
+    // transitional `show` alias). The default table output is itself the summary
+    // view (status, stage progress, approval state, associated issue), so a
+    // separate compact subset for an old `status` command is no longer needed
+    // — see workflow-run-reads/spec.md#the-redundant-status-command-is-removed.
     private void RenderWorkflowRunDetail(JsonNode? data)
     {
         if (data is null)
@@ -459,39 +460,6 @@ internal sealed partial class TableRenderer
         }
 
         RenderWorkflowRunMetadata(status);
-        RenderWorkflowRunFailure(status?["failure"]);
-
-        var stages = status?["stages"] as JsonArray;
-        if (stages is not null)
-        {
-            RenderWorkflowRunStages(stages);
-        }
-    }
-
-    // Renders the compact subset of WorkflowRunDetailDto for
-    // `mo workflow status <runId> -o table`. The same data is read by
-    // `WorkflowRunDetail`, but this view deliberately omits the associated
-    // issue ref, metadata, and pending-work detail — only the run status,
-    // current stage, stage progress table, and failure (when present) are
-    // surfaced. The shape is the rendering answer to
-    // workflow-run-reads/spec.md#status-is-more-compact-than-show.
-    private void RenderWorkflowRunStatus(JsonNode? data)
-    {
-        if (data is null)
-        {
-            _out.WriteLine("");
-            return;
-        }
-
-        var status = data["status"] as JsonObject;
-        var runId = StringOf(status, "workflowRunId");
-        var runStatus = StringOf(status, "status");
-        var currentStage = StringOf(status, "currentStage");
-
-        _out.WriteLine($"run id:        {runId}");
-        _out.WriteLine($"status:        {runStatus}");
-        _out.WriteLine($"current stage: {currentStage}");
-
         RenderWorkflowRunFailure(status?["failure"]);
 
         var stages = status?["stages"] as JsonArray;

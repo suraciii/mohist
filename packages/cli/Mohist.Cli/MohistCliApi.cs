@@ -806,7 +806,6 @@ internal sealed class MohistCliApi
         ProjectWorkflowProfile,
         IssueArchiveCompleted,
         WorkflowRunDetail,
-        WorkflowRunStatus,
         WorkflowRunVariables,
         WorkflowRunEvents,
     }

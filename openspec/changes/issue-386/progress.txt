@@ -1,0 +1,132 @@
+## Codebase Patterns
+
+- `System.CommandLine` name alias (`cmd.Aliases.Add("name")`) is the established
+  pattern for renames (`rm` on label remove, `ls` on list commands, `repo` on
+  repository). It shares the handler/option set by construction, so the alias
+  *cannot* diverge — exactly what we need for `show`-as-alias-of-`get`.
+- The `-o yaml` template-definition contract in `get -o yaml` hits
+  `GET .../yaml` (not the JSON read model). This is honored by
+  `PrintWorkflowRunYamlAsync` in `MohistCliCommands.Workflow.Reads.cs`.
+- `BuildArchive` in `MohistCliCommands.Issue.Lifecycle.cs` already establishes
+  the local-failure pattern for required args: declare with
+  `Arity = ArgumentArity.ZeroOrOne` + `DefaultValueFactory = _ => null`, then
+  have the `SetAction` handler check `string.IsNullOrWhiteSpace(value)` and
+  print `<arg-name> is required`. Same pattern was applied to `RunIdArg` in
+  `MohistCliCommands.Workflow.cs` so the existing `"<run-id> is required"`
+  path inside `BuildGet` becomes reachable (previously System.CommandLine's
+  required-arg parse error fired first and the handler never ran).
+- `MohistCliCommands.OutputOption(defaultValue: ..., formats: ...)` lets you
+  set per-command default. Most commands default to `json`; a few (`agent
+  create/list/get/...`, `issue session ...`, `system info`, `opencode
+  models`) default to `table`. We use `defaultValue: "table"` for `get` so
+  `mo workflow get <runId>` (and its `show` alias) renders the table summary
+  view by default — matching the spec's "default table renders the summary"
+  requirement.
+- Help output from System.CommandLine surfaces aliases comma-joined on the
+  canonical row, e.g. `get, show <run-id>`. Don't assert the bare
+  `<verb> <arg>` substring alone — that's only correct for non-aliased
+  commands. For aliased commands assert the full row, e.g.
+  `get, show <run-id>`.
+- Aliases registered via `cmd.Aliases.Add` do NOT cause System.CommandLine to
+  emit separate subcommand rows — the alias only appears in the alias
+  annotation on the canonical row. This is exactly what we want for the spec
+  scenario "show is a transitional alias of get" — only `get` is a positional
+  subcommand.
+
+## Decisions / Discoveries
+
+1. **`show` becomes a name alias of `get` (D5, alias strategy D1)**: single
+   `System.CommandLine.Command` whose constructor takes `"get"`, with
+   `cmd.Aliases.Add("show")`. Handler is shared by construction. This is the
+   existing pattern (`rm` on label, etc.), no new mechanism.
+2. **`status` is hard-deleted (D1 redundant-command rule)**: `BuildStatus`
+   removed from `MohistCliCommands.Workflow.Reads.cs` and from the group
+   registration in `MohistCliCommands.Workflow.cs`. The associated table
+   shape `MohistCliApi.TableShape.WorkflowRunStatus` and its
+   `RenderWorkflowRunStatus` method were removed together — they had no
+   other caller. The class-level `WorkflowRunsDetail` comment was updated so
+   `show` is described as the alias, not the primary; the comment also no
+   longer mentions `status` (the now-removed redundant command).
+3. **`RunIdArg` becomes `ZeroOrOne`**: required-arg behavior was hiding the
+   custom `"<run-id> is required"` local-failure message — System.CommandLine
+   would emit its own `"Required argument missing for command: 'get'"` and
+   the SetAction path was unreachable. Mirrors `BuildArchive`'s precedent.
+4. **`get -o` defaults to `table`**: per
+   `workflow-run-reads/spec.md#get-is-the-canonical-single-resource-read-for-a-workflow-run`
+   "default table output renders the summary view". Previously the default
+   was `json` (inherited from the global `OutputOption(defaultValue: "json")`
+   default). Setting `defaultValue: "table"` only for the `get` command —
+   does NOT touch the global default, leaves every other command's JSON
+   default intact.
+5. **Class-level doc comment updated**: describes `show` as the alias of
+   `get`, mentions `show` exists "so scripts written against the
+   previously-landed surface (see #381 / issue-386 D5) keep working", and
+   records that the redundant `status` command was removed. Counts the
+   remaining four reads (get, variables, events, list-sessions).
+
+## Test plan
+
+`CliWorkflowReads.cs` was rewritten:
+
+- Kept the `WorkflowHelp_DoesNotExposeSingleSessionSubActions`,
+  `Variables_*`, `Events_*`, `ListSessions_*`, and `ReadCommands_*` tests
+  basically intact (with `ReadCommands_*` adding the `show` alias row and
+  dropping the `status` row).
+- Renamed `Show_*` tests to `Get_*` (canonical) for the bare-GET, table,
+  yaml, help, and missing-run paths.
+- Added three `Show_IsAliasOfGet_*` parity tests that run the same scenario
+  under both names with a shared canned response, capturing requests after
+  each invocation and asserting identical (method, URI) pairs, stdout, stderr,
+  exit code. This is the alias-parity scenario from the spec
+  (`show behaves identically to get`) enforced by diffing requests
+  programmatically — closes "alias cannot diverge" into a behavioral test.
+- Added `Status_IsNotARegisteredSubcommand` and `Status_IsNotAdvertisedInWorkflowHelp`
+  to assert `status` is gone (no requests issued, no help row).
+- Added `Get_MissingRunId_FailsLocallyWithoutHttp` to assert the local
+  `"<run-id> is required"` failure path now reachable via
+  `Arity.ZeroOrOne`.
+- Added `Show_Help_DocumentsYamlOutputFormat` for the alias's help block.
+- Replaced `Show_InvalidOutputFormat_*` → `Get_InvalidOutputFormat_*`.
+
+Test harness helper `RunUnderBothNames` is a small local utility used by all
+three parity tests; it captures the request list after each invocation
+(`handler.Requests.Skip(canonicalRequests.Count)`) and diffs them.
+
+## Verification
+
+`dotnet test packages/cli/tests/Mohist.Cli.Tests` final tally:
+
+- Before task: 725 pass, 0 fail
+- After task: 729 pass, 3 fail (same 3 pre-existing `CliReferenceDocsSpecs`
+  failures on master related to `docs/cli-reference.md` text mismatches
+  covered by other items in this issue + T-006 finalization — out of scope
+  for T-001).
+
+CLI Workflow Reads suite: 31/31 pass.
+
+Manual smoke tests:
+
+- `mo workflow get <runId>` hits `/api/workflow-runs/{runId}` (or `/yaml` with `-o yaml`)
+- `mo workflow show <runId>` — identical behaviour (same handler)
+- `mo workflow status` — fails as unrecognized command
+- `mo workflow get` (no runId) — prints `<run-id> is required` to stderr,
+  exits non-zero, no HTTP request
+
+## Gotchas for next tasks
+
+- **`RunIdArg` is now `Argument<string?>`** with `Arity.ZeroOrOne`. All
+  existing call sites already handle a nullable return via
+  `string.IsNullOrWhiteSpace(runId)` checks inside `SetAction`. No callers
+  needed updating — verified by a clean dotnet build with TreatWarningsAsErrors.
+- The server-side `WorkflowRunStatus` enum (in `WorkflowRun.cs`) is a
+  separate concept from the CLI's `TableShape.WorkflowRunStatus` we removed
+  here. Do NOT confuse them.
+- The web's `WorkflowRunStatus` (TS type alias for the WorkflowRunStatus enum)
+  is also separate.
+- The `MohistCliApi.TableShape.WorkflowRunStatus` enum value was only used by
+  `BuildStatus`. Confirmed via `grep` before deletion — no other
+  code/dispatch path referenced it.
+- The doc-string failure tests in `CliReferenceDocsSpecs.cs` will be
+  reconciled by T-006 (gap-table cleanup) + the per-task docs updates that
+  fall out of items 4-6 (when their corresponding tasks ship). Do NOT touch
+  them in T-001.

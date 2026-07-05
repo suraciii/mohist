@@ -16,8 +16,7 @@ internal static partial class WorkflowCommands
         workflow.Subcommands.Add(BuildPause(api));
         workflow.Subcommands.Add(BuildStop(api));
 
-        workflow.Subcommands.Add(BuildShow(api));
-        workflow.Subcommands.Add(BuildStatus(api));
+        workflow.Subcommands.Add(BuildGet(api));
         workflow.Subcommands.Add(BuildVariables(api));
         workflow.Subcommands.Add(BuildEvents(api));
         workflow.Subcommands.Add(BuildListSessions(api));
@@ -28,7 +27,12 @@ internal static partial class WorkflowCommands
     private static string WorkflowRunPath(string runId, string suffix = "") =>
         $"/api/workflow-runs/{MohistCliCommands.Escape(runId)}{(suffix.StartsWith('/') ? suffix : (suffix.Length == 0 ? string.Empty : "/" + suffix))}";
 
-    private static Argument<string> RunIdArg() => new("run-id") { Description = "Workflow run id" };
+    private static Argument<string?> RunIdArg() => new("run-id")
+    {
+        Description = "Workflow run id",
+        Arity = ArgumentArity.ZeroOrOne,
+        DefaultValueFactory = _ => null,
+    };
 
     private static Option<string> FromStageOption() =>
         new("--from-stage", "-s")
