@@ -1,0 +1,44 @@
+## Codebase Patterns
+
+- Server `VariableBundle.Patch` (`packages/server/src/Mohist.Server/Workflow/Domain/VariableBundle.cs:78`) already implements null-delete / omitted-preserve correctly. The contract is exercised by `packages/server/tests/Mohist.Server.Tests/Specs/Foundation/VariableBundleSpecs.cs` (top-level, nested `agent.*`, stage-scoped variants all covered).
+- Server VariableBundleSpecs test conventions (must match when adding new specs):
+  - Raw JSON via `""" ... """` raw-string literals for both base and overlay
+  - Each spec prefixed with three `[Trait(...)]` decorations: `Speed=Unit`, `Sut=Foundation`, then `[Fact]`
+  - Assertion: `using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText()); doc.RootElement.GetProperty("agent")` + `Assert.False(agent.TryGetProperty("variant", out _));` for the "absent key" invariant
+  - Use `JsonSerializer.Deserialize<JsonElement>(...)` for the `VariableBundle` ctor
+- Runner `composeRequestedModel` lives in `packages/runner/src/actions/acp/model-resolution.ts:25` (private; exported surface is `resolveRequestedModel`). Variant-absent/empty/variant-present behavior is exercised end-to-end by `packages/runner/tests/acp/session-strategies.spec.ts`:
+  - Line 57 `VariantInAgentBlock_AcpSessionStarts_DeliversComposedSlashModelIdBeforePrompt` — `variant: "high"` → `model/high` modelId
+  - Line 75 `EmptyVariant_AcpSessionStarts_DeliversBareModelIdWithoutTrailingSlash` — `variant: "   "` whitespace → bare model id, split length 2 (own name + 1 slash = 2 segments meaning literal `/` is allowed but `model/high` is not produced; the spec asserts no trailing `/`)
+  - Line 85 `NoVariant_AcpSessionStarts_DeliversBareModelId` — top-level `with.model` only (no variant anywhere) → bare model id, no suffix
+  - No standalone `*model-resolution*` spec exists in `packages/runner/tests/`; the contract is tested via the session-strategies test only.
+- Pre-existing test failure unrelated to this issue: `EpicDocumentationSpecs.SurfaceDocs_StayAlignedWithEpicCliAndWebUiCopy` fails on every run because docs/cli-reference.md (or whatever doc it parses) doesn't contain the substring `"mo epic create <title> [options]"` — a docs/CLI surface drift. Verified by `git stash` + re-running that single test: still fails. NOT introduced by issue-288 work; do not "fix" inside T-001.
+
+## T-001 — Lock workflow-profile variables null-delete contract for agent.variant
+
+Outcome: 4 new specs added in `VariableBundleSpecs.cs`, runner coverage confirmed, no production source touched.
+
+### What landed
+1. `Patch_AgentVariantNullOverlay_RemovesAgentVariantKey` — base `{ type, model, variant: "high" }`, overlay `variant: null`, assert merged `agent` has no `variant` key but keeps `type` + `model`.
+2. `Patch_AgentModelOverlay_OmittingVariant_PreservesAgentVariant` — base `variant: "high"`, overlay sets `model` only (no `variant` key at all), assert merged preserves `variant: "high"` unchanged.
+3. `Patch_AgentVariantNullOverlay_OnBaseWithoutVariant_IsNoOp` — base has no `variant` key, overlay sends `variant: null`, assert merged has no `variant` key (no null stored, no spurious key).
+4. `Patch_AgentVariantNullOverlay_OnStageScopedBase_RemovesOnlyThatStageVariant` (extra, not strictly required by AC#1-3 but locks the stage-scope leg of the same contract; the proposal/IssueModelSelector stage fix in T-002 depends on this exact semantic) — two stages, PATCH overlay null-deletes only the targeted stage's variant, sibling stage keeps it.
+
+### What's verified green (no changes needed)
+- Runner `model-resolution.ts` variant-absent composition: already covered by existing `session-strategies.spec.ts` tests at lines 57/75/85. All 48 session-strategies specs green. The contract the Web fix relies on (`composeRequestedModel` returns bare `model` with no `/<variant>` suffix when variant is absent/empty/undefined, and `model/<variant>` when present) is locked at the integration boundary.
+- Server `VariableBundle.Patch` (`VariableBundle.cs:78`) production code unchanged. `VariableBundle.DeepMerge` (`VariableBundle.cs:150`) already implements the `null = delete leaf, omitted = preserve` semantics that the new specs exercise.
+
+### Decisions / gotchas for later tasks
+- **Do not** "extend" or "fix" `composeRequestedModel` in runner — it's already correct given an absent variant. Bug is purely Web payload shape.
+- **Do not** add a 5th agent.variant test in `IssueModelSelector.test.tsx` that re-asserts the server merge contract — server-side coverage is the right home for that contract; web tests should assert the *payload* shape (variant: null emitted), not the merge result.
+- **Do not** try to fix the Epic CLI doc test failure inside this task; it's a separate docs drift unrelated to model-variant-clearing. If a later task surfaces it, route to a dedicated docs-sync task.
+- Stage-scope test (#4) is intentionally adjacent to the top-level trio because T-002's `handleSetStageModel` PATCH will pass through the same `VariableBundle.DeepMerge` path with a stage-scoped payload; locking that path here means T-002 can stay narrowly focused on the Web handler change.
+
+### Verification run
+- `dotnet test .../Mohist.Server.Tests.csproj --filter "FullyQualifiedName~VariableBundleSpecs"` → 36/36 pass (32 existing + 4 new), Duration 39ms.
+- `npm test` (root) → 3979 pass / 1 pre-existing failure (EpicDocumentationSpecs, unrelated) / 12 skipped / 3992 total.
+- `npm test -w packages/runner` → 924/924 pass across 69 test files.
+- `npm test -w packages/runner -- tests/acp/session-strategies.spec.ts` → 48/48 pass.
+
+### Diff footprint
+- Modified: `packages/server/tests/Mohist.Server.Tests/Specs/Foundation/VariableBundleSpecs.cs` (+173 lines, only adds spec methods; no edits to existing tests; no production code touched).
+- No commit yet — staged for the T-001 commit on `mohist/run-wr_543aed6011a44fcfa09cb634b2cdaa5d`.

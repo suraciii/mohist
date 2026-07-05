@@ -714,4 +714,177 @@ public class VariableBundleSpecs
         Assert.True(new StageVariables().IsEmpty);
         Assert.False(new StageVariables(JsonSerializer.Deserialize<JsonElement>("{}")).IsEmpty);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_AgentVariantNullOverlay_RemovesAgentVariantKey()
+    {
+        var @base = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "agent": {
+                "type": "opencode",
+                "model": "openai/gpt-4.1",
+                "variant": "high"
+              }
+            }
+            """));
+
+        var overlay = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "agent": {
+                "type": "opencode",
+                "model": "openai/gpt-4.1",
+                "variant": null
+              }
+            }
+            """));
+
+        var result = VariableBundle.Patch(@base, overlay);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("openai/gpt-4.1", agent.GetProperty("model").GetString());
+        Assert.False(agent.TryGetProperty("variant", out _));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_AgentModelOverlay_OmittingVariant_PreservesAgentVariant()
+    {
+        var @base = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "agent": {
+                "type": "opencode",
+                "model": "openai/gpt-4.1",
+                "variant": "high"
+              }
+            }
+            """));
+
+        var overlay = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "agent": {
+                "type": "opencode",
+                "model": "openai/gpt-5"
+              }
+            }
+            """));
+
+        var result = VariableBundle.Patch(@base, overlay);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("openai/gpt-5", agent.GetProperty("model").GetString());
+        Assert.Equal("high", agent.GetProperty("variant").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_AgentVariantNullOverlay_OnBaseWithoutVariant_IsNoOp()
+    {
+        var @base = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "agent": {
+                "type": "opencode",
+                "model": "openai/gpt-4.1"
+              }
+            }
+            """));
+
+        var overlay = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "agent": {
+                "type": "opencode",
+                "model": "openai/gpt-4.1",
+                "variant": null
+              }
+            }
+            """));
+
+        var result = VariableBundle.Patch(@base, overlay);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("openai/gpt-4.1", agent.GetProperty("model").GetString());
+        Assert.False(agent.TryGetProperty("variant", out _));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_AgentVariantNullOverlay_OnStageScopedBase_RemovesOnlyThatStageVariant()
+    {
+        var @base = new VariableBundle(
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plan"] = new(JsonSerializer.Deserialize<JsonElement>("""
+                {
+                  "agent": {
+                    "type": "opencode",
+                    "model": "openai/gpt-4.1",
+                    "variant": "max"
+                  }
+                }
+                """)),
+                ["check"] = new(JsonSerializer.Deserialize<JsonElement>("""
+                {
+                  "agent": {
+                    "type": "opencode",
+                    "model": "openai/gpt-5",
+                    "variant": "high"
+                  }
+                }
+                """))
+            });
+
+        var overlay = new VariableBundle(
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plan"] = new(JsonSerializer.Deserialize<JsonElement>("""
+                {
+                  "agent": {
+                    "type": "opencode",
+                    "model": "anthropic/claude-sonnet-4-5",
+                    "variant": null
+                  }
+                }
+                """))
+            });
+
+        var result = VariableBundle.Patch(@base, overlay);
+
+        Assert.NotNull(result.Stages);
+        Assert.Equal(2, result.Stages!.Count);
+
+        var planVars = result.Stages!["plan"].Vars;
+        Assert.NotNull(planVars);
+        using var planDoc = JsonDocument.Parse(planVars!.Value.GetRawText());
+        var planAgent = planDoc.RootElement.GetProperty("agent");
+        Assert.Equal("anthropic/claude-sonnet-4-5", planAgent.GetProperty("model").GetString());
+        Assert.False(planAgent.TryGetProperty("variant", out _));
+
+        var checkVars = result.Stages!["check"].Vars;
+        Assert.NotNull(checkVars);
+        using var checkDoc = JsonDocument.Parse(checkVars!.Value.GetRawText());
+        var checkAgent = checkDoc.RootElement.GetProperty("agent");
+        Assert.Equal("high", checkAgent.GetProperty("variant").GetString());
+    }
 }
