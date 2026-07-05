@@ -225,6 +225,42 @@ describe('IssueModelSelector default-model variant chips', () => {
     expect(Object.prototype.hasOwnProperty.call(valueArg, 'variant')).toBe(true)
   })
 
+  it('clears the issue default override variant when Use default is clicked', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude', 'openai/gpt-4'],
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
+    mocks.useOpencodeModel.mockReturnValue({ data: { model: 'openai/gpt-4', variant: null } })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: { agent: { model: 'anthropic/claude', variant: 'high' } },
+      stages: {},
+    })
+    renderSelector({ currentModel: 'anthropic/claude' })
+
+    const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-trigger'))
+    fireEvent.click(trigger)
+
+    const clearButton = await waitFor(() => screen.getByRole('button', { name: /Use default/i }))
+    fireEvent.click(clearButton)
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(
+        42,
+        'agent',
+        { model: null, variant: null },
+        'proj_test',
+      )
+    })
+    const valueArg = mocks.patchIssueWorkflowDefinitionVar.mock.calls[0]?.[2] as Record<string, unknown>
+    expect(valueArg).toHaveProperty('variant', null)
+    expect(Object.prototype.hasOwnProperty.call(valueArg, 'variant')).toBe(true)
+  })
+
   it('highlights the active variant chip for the currently selected default model', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
@@ -483,6 +519,78 @@ describe('IssueModelSelector per-stage variant chips', () => {
 
     const targetedStage = mocks.patchIssueWorkflowStageDefinitionVar.mock.calls[0]?.[1]
     expect(targetedStage).toBe('plan')
+
+    const allStageCalls = mocks.patchIssueWorkflowStageDefinitionVar.mock.calls.map((c) => c[1])
+    expect(allStageCalls).not.toContain('check')
+  })
+
+  it('clears the stage override variant when a stage override is cleared', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude'],
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: {},
+      stages: { build: { vars: { agent: { model: 'anthropic/claude', variant: 'high' } } } },
+    })
+    renderSelector({ currentStageModels: { build: 'anthropic/claude' } })
+
+    openAdvanced()
+    const clearButton = await waitFor(() => screen.getByTitle('Clear'))
+    fireEvent.click(clearButton)
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowStageDefinitionVar).toHaveBeenCalledWith(
+        42,
+        'build',
+        'agent',
+        { model: null, variant: null },
+        'proj_test',
+      )
+    })
+    const valueArg = mocks.patchIssueWorkflowStageDefinitionVar.mock.calls[0]?.[3] as Record<string, unknown>
+    expect(valueArg).toHaveProperty('variant', null)
+    expect(Object.prototype.hasOwnProperty.call(valueArg, 'variant')).toBe(true)
+  })
+
+  it('clearing a stage override only clears the targeted stage variant', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude'],
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: {},
+      stages: {
+        plan: { vars: { agent: { model: 'anthropic/claude', variant: 'max' } } },
+        check: { vars: { agent: { model: 'anthropic/claude', variant: 'high' } } },
+      },
+    })
+    renderSelector({ currentStageModels: { plan: 'anthropic/claude', check: 'anthropic/claude' } })
+
+    openAdvanced()
+    const clearButtons = await waitFor(() => screen.getAllByTitle('Clear'))
+    fireEvent.click(clearButtons[0])
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowStageDefinitionVar).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.patchIssueWorkflowStageDefinitionVar).toHaveBeenCalledWith(
+      42,
+      'plan',
+      'agent',
+      { model: null, variant: null },
+      'proj_test',
+    )
 
     const allStageCalls = mocks.patchIssueWorkflowStageDefinitionVar.mock.calls.map((c) => c[1])
     expect(allStageCalls).not.toContain('check')
