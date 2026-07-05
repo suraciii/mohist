@@ -6,7 +6,7 @@
 
 - 删除无任何调用方的 `normalizeMaterializePayload` 及其 helper 死代码（`parseSetVars`/`parseOutputs`/`parseJsonObject`/`readString`/`readNullableString`/`readNullableNumber`，约 75 行）。
 - git 输出解析器（`parseDiffFiles`/`splitDiffByFile`/`parseCommits`/`parseAheadBehind`/`parseNumstatTotal`）提取为独立模块，使其可直接单测。
-- workspace 路径解析（`resolveWorkspaceQuery`/`isUnderRunnerRoot`/`WorkspaceQuery` 类型）提取到独立模块；顺带消解 `workspace-registry.ts` 的 `isPathUnder` 循环 import workaround（`runner-signalr.ts:271-279`）与 `runtime/cleanup-loop.ts:1` 的跨层 import。
+- workspace 路径解析（`resolveWorkspaceQuery`/`isUnderRunnerRoot`/`WorkspaceQuery` 类型）提取到独立模块；顺带消解 `workspace-registry.ts` 的 `isPathUnder` 循环 import workaround（`runtime/workspace-registry.ts:271-279`）与 `runtime/cleanup-loop.ts:1` 的跨层 import。
 - session-target 解析（`resolveSessionTarget` + 顶层 `workflowRunId`/`sessionName` legacy 回退）提取为独立模块。
 - 连接存活/重连 helper（`probeLiveness`/`forceReconnect`/`notifyReconnected`）提取到 `liveness-probe.ts`。
 - handler 注册按簇拆分为 `register*Handlers(connection, deps)`：git 查询（`GetDiff`/`GetCommits`/`GetCommitDiff`/`GetWorkspaceStatus`/`GetFileContent`）、workspace 移除（`RemoveWorkspace`）、followup（`ReceiveFollowup`）、cancel（`CancelAgentSession`）、workflow-run-status（`ReceiveWorkflowRunStatus`）。
