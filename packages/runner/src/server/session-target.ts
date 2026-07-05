@@ -9,8 +9,40 @@
 // for T-004 in `openspec/changes/issue-313/tasks.json` and the spec
 // scenarios in `specs/runner-signalr-push-handlers/spec.md` ("Session
 // target resolution discriminates on target.kind with legacy fallback").
+//
+// `FollowupTarget` / `FollowupTargetResolver` were originally declared
+// inside `runner-signalr.ts` for `RunnerSignalRClientOptions`. They are
+// moved here in T-008 (design P7) because both `registerFollowupHandler`
+// and `registerCancelHandler` need them on their respective deps surface,
+// and keeping them next to the `SessionTarget` resolver they wrap keeps
+// the type graph simple (the types live where the discriminator they
+// depend on lives).
 
+import type { ClientSideConnection } from "@agentclientprotocol/sdk"
 import type { SessionTarget } from "../runtime/acp-connection.js"
+
+/**
+ * The resolver's return value. Carries the live `ClientSideConnection`
+ * (the runner-side ACP session manager opens it once and reuses it across
+ * followups / cancels) and the resolved ACP session id + projectId.
+ * `connection.prompt` is the fire-and-forget target for followups;
+ * `connection.cancel?.bind(connection)` is the cancel notification
+ * surface for `CancelAgentSession`.
+ */
+export interface FollowupTarget {
+  readonly connection: ClientSideConnection
+  readonly sessionId: string
+  readonly projectId: string
+}
+
+/**
+ * The runner-side resolver turns a discriminated `SessionTarget`
+ * (issue-129 T-004) into a live `FollowupTarget`, or `null` when no
+ * ACP session is registered for the target. Both `ReceiveFollowup` and
+ * `CancelAgentSession` call into this resolver; a single registration
+ * keeps the wire-decoding logic in one place.
+ */
+export type FollowupTargetResolver = (target: SessionTarget) => FollowupTarget | null
 
 /**
  * Discriminated session target carried in the unified
