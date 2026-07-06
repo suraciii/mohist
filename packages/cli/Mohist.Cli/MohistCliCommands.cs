@@ -11,7 +11,6 @@ internal static class MohistCliCommands
     {
         var root = new RootCommand("Mohist CLI");
 
-        root.Subcommands.Add(BuildStatusCommand(api));
         root.Subcommands.Add(BuildLogsCommand(api));
         root.Subcommands.Add(InfoCommands.Build(provider));
         root.Subcommands.Add(SystemCommands.Build(api));
@@ -214,13 +213,6 @@ internal static class MohistCliCommands
             if (!string.IsNullOrWhiteSpace(value))
                 parts.Add($"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}");
         }
-    }
-
-    private static Command BuildStatusCommand(MohistCliApi api)
-    {
-        var cmd = new Command("status", "Show server status");
-        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/status?all=true"));
-        return cmd;
     }
 
     private static Command BuildLogsCommand(MohistCliApi api)

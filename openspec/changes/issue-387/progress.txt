@@ -1,0 +1,28 @@
+## T-001 — Relocate `mo status` to `mo project status`
+
+### What landed
+
+- `MohistCliCommands.cs`: deleted the root `BuildStatusCommand` private factory (was at line 219) and the corresponding `root.Subcommands.Add(BuildStatusCommand(api))` registration. `BuildLogsCommand` and `BuildUseCommand` are intentionally **left in place** — they belong to T-002 and T-003 respectively and will be removed by their own tasks.
+- `MohistCliCommands.Project.cs`: added `BuildStatus` as a peer of `list`/`create`/`show`/`use`/`delete`/`workflow` under the `project` group. The factory is private static, identical handler shape (`api.PrintGetAsync("/api/status?all=true")`), endpoint string byte-identical to the legacy command.
+- `tests/Mohist.Cli.Tests/CliProjectStatusCommandSpecs.cs`: 6 new specs covering the spec scenarios (`project-status/spec.md`) plus the legacy `mo status` non-resolution assertion required by acceptance criteria.
+
+### Codebase patterns
+
+- `Mohist.Cli` is `internal` and exposed to the test assembly via `Properties/AssemblyInfo.cs:InternalsVisibleTo("Mohist.Cli.Tests")`. `MohistCliApi.ServerUnavailableMessage` is `internal const` and is reachable from the spec.
+- `RecordingHttpHandler` captures the request **before** calling the responder (see `Support/RecordingHttpHandler.cs:25-36`), so a responder that throws `HttpRequestException` still records the request. The server-unreachable spec asserts on `handler.Requests.Single()` with the legacy endpoint, not `Assert.Empty`.
+- `PrintGetAsync` (and `PrintPostAsync` / `PrintPutAsync` / `PrintDeleteAsync`) print `ServerUnavailableMessage` and return 1 when `SendAsync` swallows an `HttpRequestException` (default `printServerUnavailable: true`). The server-unreachable spec asserts on this exact text via `MohistCliApi.ServerUnavailableMessage`.
+- For help-rendering assertions on System.CommandLine output, a `Command` without an `Argument` renders as `  <name>   <description>` (no `<arg>` token). A `Command` with an `Argument` renders as `  <name> <arg>   <description>`. The "no positional `project` argument" assertion uses `Assert.DoesNotContain("status <", stdout)` which catches any future regression where someone re-introduces an argument.
+- For help-rendering assertions on options, `--project` and `--project-id` are advertised in option tables when present. The spec asserts `Assert.DoesNotContain("--project", stdout)` and `Assert.DoesNotContain("--project-id", stdout)`.
+- The legacy `mo status` non-resolution follows the same pattern as `CliWorkflowReads.cs:413-424` (`Status_IsNotARegisteredSubcommand`): System.CommandLine surfaces a parse error, returns non-zero, and no request is issued.
+
+### Test results
+
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter "FullyQualifiedName~CliProjectStatusCommandSpecs"` → 6 / 6 passed.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj` (full CLI suite) → 797 / 800 passed; 3 failures are pre-existing in `CliReferenceDocsSpecs` (verified by `git stash` + re-run before any change: same 3 failures, all `CliReference_…` asserting on `docs/cli-reference.md` content that T-006 will update). No regressions introduced.
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors. `TreatWarningsAsErrors` is on by default; clean build holds.
+
+### Decisions / notes for later tasks
+
+- I did **not** add the `mo project status` description text to the spec — I left it as `"Show server status across all projects"` (slightly more specific than the legacy `"Show server status"`). The change is purely documentation; behavior is unchanged. If a future task wants the description to match the legacy byte-for-byte, this is the single line to revisit.
+- `BuildStatus` is placed between `BuildDelete` and `ProjectWorkflowCommands.Build` in the registration order. System.CommandLine's help renders subcommands in registration order, so `mo project --help` will list `list / create / show / use / delete / status / workflow` — `status` is grouped next to `delete` (both project-management actions) rather than next to `workflow` (the resource subgroup). This matches the alphabetical-ish flow already used in the file.
+- The 3 pre-existing `CliReferenceDocsSpecs` failures are in T-006's scope and will be closed by that task's doc-sync step. T-001 deliberately did not touch `docs/cli-reference.md` — that would over-step the T-001 boundary and partially complete T-006.
