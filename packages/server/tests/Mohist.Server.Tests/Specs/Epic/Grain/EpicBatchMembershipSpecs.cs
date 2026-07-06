@@ -21,10 +21,11 @@ using Xunit;
 namespace Mohist.Server.Tests.Specs.Epic.Grain;
 
 /// <summary>
-/// Fake-based specs covering T-003: batch link / unlink with per-issue
+/// Fake-based specs covering batch link / unlink with per-issue
 /// outcomes, partial-failure semantics, de-duplication, idempotency,
-/// the cross-epic active-membership invariant, and the post-commit
-/// event persistence inherited from T-001.
+/// the cross-epic active-membership invariant, the post-commit
+/// event persistence inherited from T-001, and the issue-392 wake-up
+/// behavior for done epics (open issue wakes, closed epic rejects).
 /// </summary>
 public class EpicBatchMembershipSpecs
 {

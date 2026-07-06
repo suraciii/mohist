@@ -298,8 +298,12 @@ public class EpicGrain : Grain, IEpicGrain
             {
                 // Concurrent claim won the race — surface as conflict and
                 // continue with the remaining batch items so the rest of
-                // the request still processes.
+                // the request still processes. Re-fetch the epic row so
+                // subsequent iterations see the committed DB state (not the
+                // detached in-memory snapshot left by ChangeTracker.Clear()).
                 db.ChangeTracker.Clear();
+                row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId)
+                    ?? throw new InvalidOperationException($"Epic {epicId} not found");
                 var owner = await GetActiveMembershipOwnerAsync(projectId, item.IssueId, epicId);
                 if (owner is not null)
                 {

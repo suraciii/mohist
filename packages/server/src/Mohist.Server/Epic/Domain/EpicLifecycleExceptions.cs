@@ -105,7 +105,7 @@ public class EpicClosedCannotLinkException : InvalidOperationException
     public string EpicId { get; }
 
     public EpicClosedCannotLinkException(string epicId)
-        : base($"Epic {epicId} is closed; reopen to running before linking issues.")
+        : base($"Epic {epicId} is closed; reopen before linking issues.")
     {
         EpicId = epicId;
     }

@@ -11,11 +11,13 @@ using Xunit;
 namespace Mohist.Server.Tests.Specs.Epic.Api;
 
 /// <summary>
-/// Integration specs for the batch link/unlink endpoints introduced by
-/// T-003. Exercises:
+/// Integration specs for the batch link/unlink endpoints.
+/// Exercises:
 /// <list type="bullet">
 /// <item>POST /{id}/issues:batch — per-issue outcomes, partial failure,
-/// dedup, idempotency, mixed number/id resolution, conflict reporting.</item>
+/// dedup, idempotency, mixed number/id resolution, conflict reporting,
+/// and the issue-392 closed-epic whole-batch rejection (409
+/// EPIC_CLOSED_CANNOT_LINK).</item>
 /// <item>POST /{id}/issues:batch-unlink — per-issue unlink outcomes,
 /// idempotent for non-members, leaves other memberships intact.</item>
 /// <item>Single-issue link/unlink routes remain unchanged.</item>
