@@ -26,3 +26,34 @@
 - I did **not** add the `mo project status` description text to the spec — I left it as `"Show server status across all projects"` (slightly more specific than the legacy `"Show server status"`). The change is purely documentation; behavior is unchanged. If a future task wants the description to match the legacy byte-for-byte, this is the single line to revisit.
 - `BuildStatus` is placed between `BuildDelete` and `ProjectWorkflowCommands.Build` in the registration order. System.CommandLine's help renders subcommands in registration order, so `mo project --help` will list `list / create / show / use / delete / status / workflow` — `status` is grouped next to `delete` (both project-management actions) rather than next to `workflow` (the resource subgroup). This matches the alphabetical-ish flow already used in the file.
 - The 3 pre-existing `CliReferenceDocsSpecs` failures are in T-006's scope and will be closed by that task's doc-sync step. T-001 deliberately did not touch `docs/cli-reference.md` — that would over-step the T-001 boundary and partially complete T-006.
+
+## T-002 — Relocate `mo logs` to `mo system logs` and reframe system group as application diagnostics
+
+### What landed
+
+- `MohistCliCommands.cs`: deleted the root `BuildLogsCommand` private factory and its `root.Subcommands.Add(BuildLogsCommand(api))` registration (the latter was the first line of the root `Build` body, immediately above `InfoCommands.Build`). `BuildUseCommand` is intentionally **left in place** — it belongs to T-003.
+- `MohistCliCommands.System.cs`: added `BuildLogs` as a peer of `BuildInfo` under the `system` group. The factory is private static, identical handler shape (`api.PrintGetAsync("/api/logs/tail")`), endpoint string byte-identical to the legacy command. Also reframed the group description to anchor the application-vs-operational distinction explicitly: "Application diagnostics. 'mo system logs' reports application logs (the Mohist server's own log tail), distinct from 'mo server logs' which reports operational/service-manager logs (systemd journal or scheduled-task output). Distinct from 'mo info', which reports the CLI binary's own local environment and install source."
+- `tests/Mohist.Cli.Tests/CliSystemLogsCommandSpecs.cs`: 7 new specs covering the spec scenarios (`system-logs/spec.md`) plus the legacy `mo logs` non-resolution assertion required by acceptance criteria.
+
+### Codebase patterns (carry-over from T-001, reinforced here)
+
+- The legacy `mo logs` non-resolution follows the same pattern as T-001: System.CommandLine surfaces a parse error, returns non-zero, and no HTTP request is issued.
+- System.CommandLine's `Command.Description` text is shown verbatim on the parent group's `--help` output (between the parent command name line and the subcommand list). Asserting on the group description with `Assert.Contains("application logs", stdout, StringComparison.OrdinalIgnoreCase)` is reliable; case-insensitive match is needed because System.CommandLine may re-case the description in some terminal contexts.
+- The `mo server logs` description lives in `MohistCliCommands.Server.cs:91` ("View server service logs") — the spec assertions on `mo system logs --help` reference "mo server logs" by literal string to pin the application-vs-operational distinction the user will see in help.
+
+### Ordering notes for T-005
+
+- T-002 lands `logs` in the `system` group while `info` is **still** there (T-005 removes `info`). After T-002, `mo system --help` lists both `info` and `logs`; after T-005, only `logs`. This is consistent with design D3 — the group description is reframed around `logs` (application diagnostics) and survives `info` being moved out without further churn. T-005 should NOT touch the group description; it only needs to remove `BuildInfo` from `SystemCommands.Build`.
+
+### Test results
+
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter "FullyQualifiedName~CliSystemLogsCommandSpecs"` → 7 / 7 passed.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj` (full CLI suite) → 804 / 807 passed; the 3 failures are the same pre-existing `CliReferenceDocsSpecs` failures from T-001 (verified by `git stash` + re-run before this change). Net delta: +7 new passing tests, 0 regressions.
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors. Clean build holds.
+- `CliSystemInfoCommandSpecs.System_Help_ListsInfoSubcommand` still passes — `info` and `logs` are siblings in the `system` group, both advertised by `mo system --help`.
+
+### Decisions / notes for later tasks
+
+- The `mo system logs` description text is `"Show recent application logs (Mohist server's own log tail). For operational/service-manager logs (systemd journal), use 'mo server logs'."` — slightly more verbose than the legacy `"Show recent logs"` so the application-vs-operational distinction is visible at the command level too, not just the group level. This is a documentation-only change; behavior is byte-identical. A future task could re-verify if the legacy byte-for-byte wording is needed.
+- `BuildLogs` is registered **after** `BuildInfo` in the system group (logs at the bottom), so `mo system --help` lists `info` first then `logs`. After T-005, only `logs` will be listed.
+- The 3 pre-existing `CliReferenceDocsSpecs` failures remain in T-006's scope; T-002 deliberately did not touch `docs/cli-reference.md`.
