@@ -58,7 +58,7 @@ public class CliRunnerCommandSpecs
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains("list", stdout, StringComparison.Ordinal);
-        Assert.Contains("install", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n  install ", stdout, StringComparison.Ordinal);
         Assert.Contains("start", stdout, StringComparison.Ordinal);
         Assert.Contains("stop", stdout, StringComparison.Ordinal);
         Assert.Contains("status", stdout, StringComparison.Ordinal);
@@ -662,7 +662,7 @@ public class CliRunnerCommandSpecs
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains("show", stdout, StringComparison.Ordinal);
-        Assert.Contains("install", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n  install ", stdout, StringComparison.Ordinal);
         Assert.Contains("start", stdout, StringComparison.Ordinal);
         Assert.Contains("stop", stdout, StringComparison.Ordinal);
         Assert.Contains("status", stdout, StringComparison.Ordinal);
