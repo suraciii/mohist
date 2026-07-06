@@ -99,3 +99,14 @@ public class EpicDuplicateLinkedIssueException : InvalidOperationException
         IssueNumber = issueNumber;
     }
 }
+
+public class EpicClosedCannotLinkException : InvalidOperationException
+{
+    public string EpicId { get; }
+
+    public EpicClosedCannotLinkException(string epicId)
+        : base($"Epic {epicId} is closed; reopen before linking issues.")
+    {
+        EpicId = epicId;
+    }
+}

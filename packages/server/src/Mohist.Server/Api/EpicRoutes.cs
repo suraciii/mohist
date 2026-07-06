@@ -74,6 +74,10 @@ public static class EpicRoutes
             {
                 await grain.LinkIssueAsync(issue.Id, issue.Number, pid);
             }
+            catch (EpicClosedCannotLinkException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "EPIC_CLOSED_CANNOT_LINK", new { epicId = ex.EpicId });
+            }
             catch (InvalidOperationException ex)
             {
                 if (ex.Message.Contains("already belongs"))
@@ -328,6 +332,12 @@ public static class EpicRoutes
         try
         {
             grainOutcomes = await grain.LinkIssuesAsync(resolvedItems, pid);
+        }
+        catch (EpicClosedCannotLinkException ex)
+        {
+            // Per spec: a batch link to a `closed` epic is rejected as a
+            // whole — no per-item outcomes are produced.
+            return ApiResults.Conflict(ex.Message, "EPIC_CLOSED_CANNOT_LINK", new { epicId = ex.EpicId });
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
         {

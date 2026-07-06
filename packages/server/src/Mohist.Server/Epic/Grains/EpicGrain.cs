@@ -75,20 +75,30 @@ public class EpicGrain : Grain, IEpicGrain
 
         var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
         if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
-        var targetIsTerminal = IsTerminalEpicStatus(row.Status);
-
-        // Cross-aggregate uniqueness invariant: an issue may belong to at
-        // most one non-terminal epic (idle/running/paused). Terminal target
-        // epics do not consume the active slot.
-        if (!targetIsTerminal && await GetActiveMembershipOwnerAsync(db, projectId, issueId, epicId) is { } conflict)
-        {
-            throw new InvalidOperationException(
-                $"Issue already belongs to Epic '{conflict.EpicId}' ({conflict.Title})");
-        }
 
         var alreadyLinkedToThisEpic = await db.EpicIssues.AsNoTracking()
             .AnyAsync(link => link.ProjectId == projectId && link.EpicId == epicId && link.IssueId == issueId);
         if (alreadyLinkedToThisEpic) return;
+
+        // Closed is a hard-stop for new links: the domain LinkIssue guard
+        // throws EpicClosedCannotLinkException before any row is added, and
+        // the HTTP layer maps it to 409 EPIC_CLOSED_CANNOT_LINK.
+        if (row.Status == EpicStatusName.Closed)
+        {
+            throw new EpicClosedCannotLinkException(epicId);
+        }
+
+        // Cross-aggregate uniqueness invariant: an issue may belong to at
+        // most one non-terminal epic (idle/running/paused). For a done
+        // target, the wake below flips the epic to running, so the active
+        // row we are about to insert will be a real non-terminal owner;
+        // the check therefore MUST run before the wake-up so we never
+        // create a duplicate row against another non-terminal epic.
+        if (await GetActiveMembershipOwnerAsync(db, projectId, issueId, epicId) is { } conflict)
+        {
+            throw new InvalidOperationException(
+                $"Issue already belongs to Epic '{conflict.EpicId}' ({conflict.Title})");
+        }
 
         var links = await db.EpicIssues.AsNoTracking()
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
@@ -104,7 +114,18 @@ public class EpicGrain : Grain, IEpicGrain
             IssueId = issueId,
             IssueNumber = issueNumber,
         });
-        if (!targetIsTerminal)
+
+        // Done + open issue wakes the epic to running in the same commit
+        // as the link row; the active-membership row is also created in
+        // that commit so autopilot sees the newly linked issue.
+        var wakeUpEpic = row.Status == EpicStatusName.Done
+            && await IsIssueOpenAsync(db, projectId, issueNumber);
+        if (wakeUpEpic)
+        {
+            domain.WakeFromDone(now.UtcDateTime);
+        }
+
+        if (row.Status != EpicStatusName.Done || wakeUpEpic)
         {
             db.EpicActiveIssues.Add(new EpicActiveIssueRow
             {
@@ -120,7 +141,7 @@ public class EpicGrain : Grain, IEpicGrain
         {
             await db.SaveChangesAsync();
         }
-        catch (DbUpdateException) when (!targetIsTerminal)
+        catch (DbUpdateException)
         {
             var owner = await GetActiveMembershipOwnerAsync(projectId, issueId, epicId);
             if (owner is not null)
@@ -131,6 +152,13 @@ public class EpicGrain : Grain, IEpicGrain
             throw;
         }
         await PersistEpicEventsAsync(domain, pending, now);
+
+        if (wakeUpEpic)
+        {
+            await TryStartNextAsync(db, projectId, epicId, row, await db.EpicIssues.AsNoTracking()
+                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+                .ToListAsync());
+        }
     }
 
     public async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
@@ -146,7 +174,17 @@ public class EpicGrain : Grain, IEpicGrain
 
         var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
         if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
-        var targetIsTerminal = IsTerminalEpicStatus(row.Status);
+
+        // Closed is a hard-stop for the whole batch: the domain LinkIssue
+        // guard throws EpicClosedCannotLinkException before any row is
+        // added, and the HTTP layer maps it to 409 EPIC_CLOSED_CANNOT_LINK.
+        // Rejecting before the loop (rather than per-item) matches the
+        // spec scenario "Batch link to a closed epic is rejected as a
+        // whole" — no per-item outcomes are produced.
+        if (row.Status == EpicStatusName.Closed)
+        {
+            throw new EpicClosedCannotLinkException(epicId);
+        }
 
         // De-duplicate the input by canonical internal issue id while
         // preserving the first occurrence's caller-supplied identifier so
@@ -173,6 +211,13 @@ public class EpicGrain : Grain, IEpicGrain
             .Select(link => link.IssueId)
             .ToHashSetAsync(StringComparer.Ordinal);
 
+        // Tracks whether THIS batch woke the epic from done to running
+        // (per the live row.Status observation). Once flipped, MapToRow
+        // updates row.Status in memory so subsequent items in the same
+        // batch take the normal non-terminal path — preventing a second
+        // WakeFromDone call (which would throw on a non-done epic).
+        var wasDoneAtEntry = row.Status == EpicStatusName.Done;
+
         var outcomes = new List<BatchMembershipOutcome>(dedupByIssueId.Count);
         foreach (var item in dedupByIssueId.Values)
         {
@@ -183,14 +228,26 @@ public class EpicGrain : Grain, IEpicGrain
                 continue;
             }
 
+            // Live per-item decision: row.Status is refreshed by MapToRow
+            // after every commit, so the second item sees the wake-up
+            // applied by the first and takes the non-terminal branch
+            // without re-invoking WakeFromDone. Per design D4 we do NOT
+            // pre-classify the batch or wake before any durable commit.
+            var targetIsTerminal = IsTerminalEpicStatus(row.Status);
+            var wakeUpEpic = row.Status == EpicStatusName.Done
+                && await IsIssueOpenAsync(db, projectId, item.IssueNumber);
+
             // Cross-aggregate uniqueness invariant: an issue may belong to
-            // at most one non-terminal epic. Terminal target epics do not
-            // consume the active slot, so a target-terminal link ignores
-            // the existing-membership ownership check (a conflict on a
-            // terminal-target link would be data corruption — the original
-            // single-link throws on the same condition; the batch surface
-            // mirrors that as a conflict outcome and skips.
-            if (!targetIsTerminal
+            // at most one non-terminal epic. For a done + open link, the
+            // wake-up below flips the epic to running, so the active row
+            // we are about to insert will be a real non-terminal owner —
+            // the check therefore MUST run before the wake-up so we never
+            // create a duplicate row against another non-terminal epic.
+            // For done + terminal-issue links and for non-terminal targets,
+            // we follow the same rule: only check when an active row would
+            // actually be inserted.
+            var willInsertActiveRow = wakeUpEpic || !targetIsTerminal;
+            if (willInsertActiveRow
                 && await GetActiveMembershipOwnerAsync(db, projectId, item.IssueId, epicId) is { } conflict)
             {
                 outcomes.Add(BatchMembershipOutcome.Conflict(
@@ -212,7 +269,16 @@ public class EpicGrain : Grain, IEpicGrain
                 IssueId = item.IssueId,
                 IssueNumber = item.IssueNumber,
             });
-            if (!targetIsTerminal)
+
+            // Done + open issue wakes the epic to running in the same
+            // commit as the link row; the active-membership row is also
+            // created in that commit so autopilot sees the new open work.
+            if (wakeUpEpic)
+            {
+                domain.WakeFromDone(now.UtcDateTime);
+            }
+
+            if (willInsertActiveRow)
             {
                 db.EpicActiveIssues.Add(new EpicActiveIssueRow
                 {
@@ -228,12 +294,16 @@ public class EpicGrain : Grain, IEpicGrain
             {
                 await db.SaveChangesAsync();
             }
-            catch (DbUpdateException) when (!targetIsTerminal)
+            catch (DbUpdateException) when (willInsertActiveRow)
             {
                 // Concurrent claim won the race — surface as conflict and
                 // continue with the remaining batch items so the rest of
-                // the request still processes.
+                // the request still processes. Re-fetch the epic row so
+                // subsequent iterations see the committed DB state (not the
+                // detached in-memory snapshot left by ChangeTracker.Clear()).
                 db.ChangeTracker.Clear();
+                row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId)
+                    ?? throw new InvalidOperationException($"Epic {epicId} not found");
                 var owner = await GetActiveMembershipOwnerAsync(projectId, item.IssueId, epicId);
                 if (owner is not null)
                 {
@@ -249,6 +319,19 @@ public class EpicGrain : Grain, IEpicGrain
             existingLinks.Add(item.IssueId);
             outcomes.Add(BatchMembershipOutcome.Linked(item.Identifier, item.IssueId, item.IssueNumber));
             await PersistEpicEventsAsync(domain, pending, now);
+        }
+
+        // Per design D4: if this batch woke the epic from done to running,
+        // invoke TryStartNextAsync exactly once so autopilot advances the
+        // newly linked open issue with no caller-issued start. The live
+        // row.Status check at the top of TryStartNextAsync is a no-op for
+        // non-running epics; the wasDoneAtEntry gate guards the intent.
+        if (wasDoneAtEntry && row.Status == EpicStatusName.Running)
+        {
+            var finalLinks = await db.EpicIssues.AsNoTracking()
+                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+                .ToListAsync();
+            await TryStartNextAsync(db, projectId, epicId, row, finalLinks);
         }
 
         return outcomes;
@@ -722,6 +805,16 @@ public class EpicGrain : Grain, IEpicGrain
                 && active.EpicId != currentEpicId
             select new ActiveMembershipOwner(active.EpicId, epic.Title)
         ).FirstOrDefaultAsync();
+    }
+
+    private static async Task<bool> IsIssueOpenAsync(MohistDbContext db, string projectId, int issueNumber)
+    {
+        var rows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Number == issueNumber)
+            .ToListAsync();
+        var byNumber = IssueRowMapper.ByNumber(rows, projectId, new[] { issueNumber });
+        if (!byNumber.TryGetValue(issueNumber, out var issue)) return false;
+        return issue.Status is not (IssueStatus.Done or IssueStatus.Cancelled);
     }
 
     private static async Task ReleaseActiveMembershipsAsync(MohistDbContext db, string projectId, string epicId)
