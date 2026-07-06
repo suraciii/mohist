@@ -23,7 +23,7 @@ namespace Mohist.Cli.Tests;
 public class CliSystemLogsCommandSpecs
 {
     [Fact]
-    public async Task System_Help_ListsLogsAlongsideInfo()
+    public async Task System_Help_ListsLogsSubcommand()
     {
         var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
 
@@ -32,11 +32,9 @@ public class CliSystemLogsCommandSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        // The new `logs` subcommand must be advertised.
+        // The new `logs` subcommand must be advertised. `info` was relocated
+        // to `server` by T-005 and is no longer a sibling under `system`.
         Assert.Contains("logs", stdout);
-        // `info` is still a sibling — T-005 will relocate it later; until
-        // then `system` exposes both, so the help must list both verbs.
-        Assert.Contains("info", stdout);
     }
 
     [Fact]

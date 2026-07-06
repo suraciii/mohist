@@ -139,7 +139,7 @@ internal static class NotifyCommands
     public static IHealthProbe HealthProbeOverride { get; set; } = new HttpHealthProbe();
 
     /// <summary>
-    /// Internal command flow used by <c>mo notify setup</c>. Splits
+    /// Internal command flow used by <c>mo notification setup</c>. Splits
     /// cleanly for unit-testing: <paramref name="healthProbe"/> can be
     /// swapped to a stub; <paramref name="secret"/> is computed once
     /// and handed to both sides so identity is structural, not
