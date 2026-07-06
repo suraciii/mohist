@@ -30,7 +30,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
-        var poll = await runner.PollAsync();
+        var poll = await runner.PollAsync(Services);
         Assert.Null(poll);
     }
 
@@ -78,10 +78,10 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
 
         var nextRunnerId = await RegisterRunnerAsync();
         var nextRunner = Grains.GetGrain<IRunnerGrain>(nextRunnerId);
-        Assert.Null(await nextRunner.PollAsync());
+        Assert.Null(await nextRunner.PollAsync(Services));
 
         var assignedRunner = Grains.GetGrain<IRunnerGrain>(r2);
-        var buildWork = await assignedRunner.PollAsync();
+        var buildWork = await assignedRunner.PollAsync(Services);
         Assert.NotNull(buildWork);
         Assert.StartsWith("compile.", buildWork.WorkId);
     }

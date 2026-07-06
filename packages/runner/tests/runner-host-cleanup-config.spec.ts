@@ -190,7 +190,7 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
   it("FetchesConfigOnEachCleanupTick_AndRunsEviction_WhenPollStays204", async () => {
     vi.useFakeTimers()
     // poll returns 204 (null) every call — the idle scenario.
-    mocks.poll.mockImplementation(async () => null)
+    mocks.poll.mockImplementation(async () => [])
     mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
     mocks.state.stubRunOnceResult = {
       retentionRemoved: 1,
@@ -233,7 +233,7 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
 
   it("FetchesConfigButEvictsNothing_WhenPolicyIsFullyUnconfigured", async () => {
     vi.useFakeTimers()
-    mocks.poll.mockImplementation(async () => null)
+    mocks.poll.mockImplementation(async () => [])
     // /config returns a policy with all-null fields — "null means do not evict".
     mocks.state.stubFetchConfigBehavior = async () => ({
       retentionDays: null,
@@ -277,7 +277,7 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
 
   it("SkipsCleanupTick_WhenFetchConfigThrows_BestEffortNextTickRetries", async () => {
     vi.useFakeTimers()
-    mocks.poll.mockImplementation(async () => null)
+    mocks.poll.mockImplementation(async () => [])
 
     mocks.state.stubFetchConfigBehavior = async () => {
       mocks.state.fetchAttempts += 1
@@ -329,7 +329,7 @@ describe("RunnerHost idle-system cleanup (issue-359 T-002)", () => {
 
   it("IssuesIndependentFetchPerTick_NoCachingAcrossTicks", async () => {
     vi.useFakeTimers()
-    mocks.poll.mockImplementation(async () => null)
+    mocks.poll.mockImplementation(async () => [])
     mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
 
     const RunnerHost = await importHost()

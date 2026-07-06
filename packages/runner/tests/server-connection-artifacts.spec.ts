@@ -260,7 +260,7 @@ describe("ServerConnection.poll", () => {
     )
     const connection = new ServerConnection(options())
 
-    const item = await connection.poll(new AbortController().signal)
+    const item = (await connection.poll(new AbortController().signal))[0]
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe("agent-job")
@@ -291,7 +291,7 @@ describe("ServerConnection.poll", () => {
     )
     const connection = new ServerConnection(options())
 
-    const item = await connection.poll(new AbortController().signal)
+    const item = (await connection.poll(new AbortController().signal))[0]
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe("agent-job")
@@ -322,7 +322,7 @@ describe("ServerConnection.poll", () => {
     )
     const connection = new ServerConnection(options())
 
-    const item = await connection.poll(new AbortController().signal)
+    const item = (await connection.poll(new AbortController().signal))[0]
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe("workflow")
@@ -353,7 +353,7 @@ describe("ServerConnection.poll", () => {
     )
     const connection = new ServerConnection(options())
 
-    const item = await connection.poll(new AbortController().signal)
+    const item = (await connection.poll(new AbortController().signal))[0]
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe("agent-job")

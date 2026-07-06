@@ -365,7 +365,7 @@ public class WorkflowArtifactUploadRouteSpecs
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
 
         var work = await TestWait.ForAsync(
-            () => runner.PollAsync(),
+            () => runner.PollAsync(_fixture.Services),
             value => value is not null,
             TimeSpan.FromSeconds(3),
             TimeSpan.FromMilliseconds(20),

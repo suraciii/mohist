@@ -536,68 +536,69 @@ public class AgentSessionLaunchRoutesSpecs
         for (var i = 0; i < attempts; i++)
         {
             using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            if (poll.StatusCode == HttpStatusCode.NoContent)
+            var dispatches = await poll.ReadDispatchElementsAsync();
+            PollSnapshot? match = null;
+            var others = new List<JsonElement>();
+            foreach (var data in dispatches)
             {
+                var polledSessionId = data.TryGetProperty("agentSessionId", out var sessionIdElement)
+                    && sessionIdElement.ValueKind != JsonValueKind.Null
+                    ? sessionIdElement.GetString()
+                    : null;
+                if (match is null && polledSessionId == expectedSessionId)
+                {
+                    var workId = data.GetProperty("workId").GetString() ?? string.Empty;
+                    var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement)
+                        && agentJobIdElement.ValueKind != JsonValueKind.Null
+                        ? agentJobIdElement.GetString()
+                        : null;
+                    var projectId = data.TryGetProperty("projectId", out var projectIdElement)
+                        && projectIdElement.ValueKind != JsonValueKind.Null
+                        ? projectIdElement.GetString()
+                        : null;
+                    var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement)
+                        && ownerKindElement.ValueKind != JsonValueKind.Null
+                        ? ownerKindElement.GetString()
+                        : null;
+                    match = new PollSnapshot(
+                        WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
+                        WorkId: workId,
+                        AgentJobId: agentJobId,
+                        ProjectId: projectId,
+                        AgentSessionId: polledSessionId,
+                        OwnerKind: ownerKind);
+                }
+                else
+                {
+                    others.Add(data);
+                }
+            }
+
+            foreach (var other in others)
+                await DrainDispatchElementAsync(runnerId, other);
+            if (dispatches.Count == 0)
                 await Task.Yield();
-                continue;
-            }
 
-            Assert.Equal(HttpStatusCode.OK, poll.StatusCode);
-            var raw = await poll.Content.ReadAsStringAsync();
-            if (string.IsNullOrWhiteSpace(raw)) continue;
-            using var doc = JsonDocument.Parse(raw);
-            var data = doc.RootElement;
-            var polledSessionId = data.TryGetProperty("agentSessionId", out var sessionIdElement)
-                && sessionIdElement.ValueKind != JsonValueKind.Null
-                ? sessionIdElement.GetString()
-                : null;
-            if (polledSessionId == expectedSessionId)
-            {
-                var workId = data.GetProperty("workId").GetString() ?? string.Empty;
-                var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement)
-                    && agentJobIdElement.ValueKind != JsonValueKind.Null
-                    ? agentJobIdElement.GetString()
-                    : null;
-                var projectId = data.TryGetProperty("projectId", out var projectIdElement)
-                    && projectIdElement.ValueKind != JsonValueKind.Null
-                    ? projectIdElement.GetString()
-                    : null;
-                var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement)
-                    && ownerKindElement.ValueKind != JsonValueKind.Null
-                    ? ownerKindElement.GetString()
-                    : null;
-                return new PollSnapshot(
-                    WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
-                    WorkId: workId,
-                    AgentJobId: agentJobId,
-                    ProjectId: projectId,
-                    AgentSessionId: polledSessionId,
-                    OwnerKind: ownerKind);
-            }
-
-            await DrainDispatchAsync(runnerId, raw);
+            if (match is not null) return match;
         }
 
         throw new InvalidOperationException($"No polled dispatch carrying AgentSessionId='{expectedSessionId}' after {attempts} attempts");
     }
 
-    private async Task DrainDispatchAsync(string runnerId, string? raw = null)
+    private async Task DrainDispatchAsync(string runnerId)
     {
-        if (raw is null)
+        for (var i = 0; i < 30; i++)
         {
-            for (var i = 0; i < 30; i++)
-            {
-                using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-                if (poll.StatusCode != HttpStatusCode.OK) return;
-                var body = await poll.Content.ReadAsStringAsync();
-                if (string.IsNullOrWhiteSpace(body)) return;
-                await DrainDispatchAsync(runnerId, body);
-            }
-            return;
+            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+            var dispatches = await poll.ReadDispatchElementsAsync();
+            if (dispatches.Count == 0) return;
+            foreach (var data in dispatches)
+                await DrainDispatchElementAsync(runnerId, data);
         }
+    }
 
-        using var doc = JsonDocument.Parse(raw);
-        var data = doc.RootElement;
+    private async Task DrainDispatchElementAsync(string runnerId, JsonElement data)
+    {
         var workId = data.GetProperty("workId").GetString();
         var ownerKind = data.TryGetProperty("ownerKind", out var ownerKindElement)
             && ownerKindElement.ValueKind != JsonValueKind.Null

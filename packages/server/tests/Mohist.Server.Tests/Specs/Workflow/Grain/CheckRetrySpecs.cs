@@ -59,7 +59,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r4, checks2, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -86,7 +86,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r4, checks2, "review-passed");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -264,7 +264,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         await ReportChecksFailAsync(r6, checks3, "check-1", "third fail");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r6);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
@@ -367,6 +367,6 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         await ReportChecksFailAsync(r2, checks, "check-1", "no retry");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
     }
 }

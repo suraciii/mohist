@@ -335,7 +335,7 @@ public class IssueCreationSpecs
         Assert.Equal("cancelled", info!.Status);
         Assert.Equal("cancelled", info.Health);
 
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(_services));
 
         var events = await GetWorkflowEventsAsync(workflowRunId);
         Assert.Single(events, e => e.Envelope.Type == "com.mohist.workflow.run.stopped");
@@ -1006,10 +1006,10 @@ public class IssueCreationSpecs
 
     private sealed record CreateIssueApiBlockerIssueDto(int Number, string Title);
 
-    private static async Task<WorkDispatch> PollWorkForWorkflowAsync(IRunnerGrain runner, string runnerId, string workflowRunId)
+    private async Task<WorkDispatch> PollWorkForWorkflowAsync(IRunnerGrain runner, string runnerId, string workflowRunId)
     {
         var work = await TestWait.ForAsync(
-            () => runner.PollAsync(),
+            () => runner.PollAsync(_services),
             value => string.Equals(value?.WorkflowRunId, workflowRunId, StringComparison.Ordinal),
             TimeSpan.FromSeconds(3),
             TimeSpan.FromMilliseconds(20),
@@ -1017,10 +1017,10 @@ public class IssueCreationSpecs
         return work!;
     }
 
-    private static async Task<WorkDispatch> PollAnyWorkAsync(IRunnerGrain runner, string runnerId)
+    private async Task<WorkDispatch> PollAnyWorkAsync(IRunnerGrain runner, string runnerId)
     {
         var work = await TestWait.ForAsync(
-            () => runner.PollAsync(),
+            () => runner.PollAsync(_services),
             value => value is not null,
             TimeSpan.FromSeconds(3),
             TimeSpan.FromMilliseconds(20),

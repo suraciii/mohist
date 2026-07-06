@@ -153,12 +153,12 @@ public class RunnerWorkflowStatusRouterSpecs
         public Task<bool> HasIncompleteTaskByIdAsync(string id) => Task.FromResult(false);
         public Task<Mohist.Server.Workflow.Grains.WorkflowAssignmentResult> AssignRunnerAsync(string runnerId) =>
             Task.FromResult(new Mohist.Server.Workflow.Grains.WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned));
-        public Task<WorkItem?> PollWorkAsync(string runnerId) =>
+        public Task<WorkItem?> ClaimNextAsync(string runnerId) =>
             Task.FromResult<WorkItem?>(null);
-        public Task<string?> ClaimAsync(string runnerId, string workId) =>
-            Task.FromResult<string?>(null);
-        public Task ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome) => Task.CompletedTask;
-        public Task ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome) => Task.CompletedTask;
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome)
+            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome)
+            => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task ReleaseStageLocksAsync(string stage, string reason) => Task.CompletedTask;
         public Task<bool> IsStoppedOrTerminalAsync() => Task.FromResult(true);
         public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);

@@ -304,12 +304,13 @@ export class RunnerHost {
 
     try {
       while (!signal.aborted) {
-        // Inner poll-and-execute: pull dispatches until the server returns
-        // no work, executing each concurrently.
-        while (!signal.aborted) {
-          const work = await this.connection.poll(signal, this.pollReport())
-          if (!work) break
+        // A single poll may return multiple dispatches (repair + new claims).
+        // Execute each concurrently, skipping re-deliveries the process
+        // already holds.
+        const works = await this.connection.poll(signal, this.pollReport())
 
+        for (const work of works) {
+          if (signal.aborted) break
           const key = workKey(work)
           // Re-delivery is the normal recovery path under at-least-once:
           // skip a work the process already holds (inFlight or awaitingAck)
@@ -322,13 +323,14 @@ export class RunnerHost {
           this.inFlight.set(key, { done })
         }
 
-        if (this.inFlight.size === 0) {
-          await delay(this.options.pollIntervalMs, signal)
-          continue
-        }
-
-        await Promise.race([
-          delay(this.options.pollIntervalMs, signal),
+        if (signal.aborted) break
+        // Pace the next round. With nothing in flight, sleep one interval
+        // before re-polling; with in-flight work, race the interval against
+        // any work settling so a freed slot re-polls promptly. The interval
+        // timer is owned here (rather than via `delay`) so that once the race
+        // settles, the timer is cleared and its promise resolved — no pending
+        // promise lingers to reject on a later abort and leak as unhandled.
+        await raceInterval(this.options.pollIntervalMs, signal, [
           ...[...this.inFlight.values()].map((e) => e.done),
         ])
       }
@@ -423,7 +425,12 @@ export class RunnerHost {
    */
   private async runAwaitingAckRetryLoop(signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
-      await delay(AWAITING_ACK_RETRY_INTERVAL_MS, signal)
+      // Wait one retry interval, or resolve promptly on abort (the loop then
+      // exits via the `while` condition). Resolving rather than rejecting
+      // keeps this loop's promise settled cleanly — a rejecting delay would
+      // propagate out and only be caught by `runWorkerPool`'s `finally` on a
+      // later tick, surfacing as an async-handled rejection during shutdown.
+      await raceInterval(AWAITING_ACK_RETRY_INTERVAL_MS, signal, [])
       if (signal.aborted) break
       // Snapshot keys to avoid mutation-during-iteration when reportOnce
       // deletes a successful entry.
@@ -816,5 +823,33 @@ async function delay(ms: number, signal: AbortSignal) {
       reject(signal.reason)
     }
     signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
+/**
+ * Race a poll-interval timer against in-flight work promises. Unlike
+ * {@link delay} wrapped in `Promise.race`, the interval timer is owned here:
+ * whichever racer settles first, the timer is cleared and its promise
+ * resolved, so no pending promise lingers to reject on a later abort and
+ * surface as an unhandled rejection. The `signal` aborts the wait promptly
+ * (resolving, since every caller re-checks `signal.aborted` afterwards).
+ */
+function raceInterval(ms: number, signal: AbortSignal, racers: Promise<unknown>[]): Promise<void> {
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }
+    const onAbort = done
+    if (signal.aborted) { done(); return }
+    timer = setTimeout(done, ms)
+    timer.unref?.()
+    signal.addEventListener("abort", onAbort, { once: true })
+    for (const r of racers) r.then(done, done)
   })
 }

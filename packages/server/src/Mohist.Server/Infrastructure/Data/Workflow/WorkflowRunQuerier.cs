@@ -113,6 +113,27 @@ public sealed class WorkflowRunQuerier
             .CountAsync(ct);
     }
 
+    /// <summary>
+    /// Epic #44: returns the ids of workflow runs currently in flight
+    /// (<c>Running</c>) and bound to <paramref name="runnerId"/> — the
+    /// <c>desired</c> set for poll reconciliation. The DispatchService loads
+    /// each to resolve its current workId and render a repair dispatch when
+    /// the runner's reported set does not include it. Filters at the DB layer;
+    /// never deserializes <c>State</c>.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> FindRunningAssignedToAsync(string runnerId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(runnerId))
+            return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.WorkflowRuns
+            .AsNoTracking()
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Running) && row.AssignedRunnerId == runnerId)
+            .Select(row => row.WorkflowRunId)
+            .ToListAsync(ct);
+    }
+
     // The STORED Status computed column is the lowercase JSON enum
     // value (D3). This helper is the single point that knows the
     // SQLite column == lowercase canonical form contract; every

@@ -34,7 +34,7 @@ public class WorkflowRunQuerierSpecs : WorkflowGrainSpecs
         await SeedWorkflowTemplateAsync(runnableWorkflowId, SingleStage(), projectId);
         await runnable.StartAsync(TestInput(projectId));
 
-        var work = await runner.PollAsync();
+        var work = await runner.PollAsync(Services);
 
         Assert.NotNull(work);
         Assert.Equal(runnableWorkflowId, work.WorkflowRunId);

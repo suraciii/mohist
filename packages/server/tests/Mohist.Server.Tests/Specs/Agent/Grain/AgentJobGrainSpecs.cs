@@ -394,7 +394,7 @@ public class AgentJobGrainSpecs
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
-        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync();
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(polled);
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled.OwnerKind);
         Assert.Equal(jobKey, polled.AgentJobId);
@@ -504,7 +504,7 @@ public class AgentJobGrainSpecs
         await job.SubmitAsync(input);
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
-        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync();
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
 
         Assert.NotNull(polled);
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled!.OwnerKind);
@@ -538,7 +538,7 @@ public class AgentJobGrainSpecs
         await job.SubmitAsync(MakeInput("raw prompt only", projectId, "/tmp/agent-job-raw-only"));
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
-        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync();
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
 
         Assert.NotNull(polled);
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled!.OwnerKind);
@@ -572,7 +572,7 @@ public class AgentJobGrainSpecs
         await job.SubmitAsync(input);
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
-        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync();
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
 
         Assert.NotNull(polled);
         Assert.Equal(projectId, polled!.ProjectId);
@@ -596,7 +596,7 @@ public class AgentJobGrainSpecs
         await job.SubmitAsync(input);
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
-        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync();
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
 
         Assert.NotNull(polled);
         Assert.Equal(projectId, polled!.ProjectId);
@@ -624,7 +624,7 @@ public class AgentJobGrainSpecs
         await job.SubmitAsync(input);
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
-        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync();
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
 
         Assert.NotNull(polled);
         Assert.Equal(projectId, polled!.ProjectId);

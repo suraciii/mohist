@@ -45,7 +45,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         _runnerId = await RegisterRunnerAsync();
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
 
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
@@ -107,7 +107,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         ]), maxWorkflowSlots: 2);
 
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId!);
-        var load = await runner.PollAsync();
+        var load = await runner.PollAsync(Services);
         Assert.NotNull(load);
         Assert.StartsWith("load-tasks.", load.WorkId);
 
@@ -117,11 +117,21 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
             ]));
         Assert.Equal(1, addResult.AddedCount);
 
-        Assert.Null(await runner.PollAsync());
+        // A concurrent poll while the load task is in flight must not abandon
+        // it. Under reconciliation such a poll (reporting nothing in flight)
+        // may repair-re-dispatch the same load task — that re-dispatch is the
+        // proof the task is retained, not abandoned. It must never dispatch
+        // the not-yet-ready dynamic task before load completes.
+        var concurrentPoll = await runner.PollAsync(Services);
+        if (concurrentPoll is not null)
+        {
+            Assert.Equal(load.WorkflowRunId, concurrentPoll.WorkflowRunId);
+            Assert.Equal(load.WorkId, concurrentPoll.WorkId);
+        }
 
-        await runner.ReportWorkflowResultAsync(_workflowId!, load.WorkId, new WorkResult("completed"));
+        await ReportAsync(_runnerId!, _workflowId!, load.WorkId, new WorkResult("completed"));
 
-        var dynamicTask = await runner.PollAsync();
+        var dynamicTask = await runner.PollAsync(Services);
         Assert.NotNull(dynamicTask);
         Assert.Equal(_workflowId, dynamicTask.WorkflowRunId);
         Assert.StartsWith("dynamic-1.", dynamicTask.WorkId);

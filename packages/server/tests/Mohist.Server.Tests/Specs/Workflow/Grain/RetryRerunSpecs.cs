@@ -124,7 +124,7 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "failed", "boom");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r1);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
 
         await workflow.RetryAsync();
 

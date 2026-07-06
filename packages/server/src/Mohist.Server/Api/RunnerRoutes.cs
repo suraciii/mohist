@@ -7,6 +7,7 @@ using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Api;
@@ -89,39 +90,58 @@ public static class RunnerRoutes
             return ApiResults.Ok(new RunnerSlotsPatchResponse(runnerId, req.Slots));
         });
 
-        // Batch 1 compat: the runner now sends its process-lifetime reported
-        // set ({ inFlight, awaitingAck }) in the poll body. The server accepts
-        // and currently ignores it — reconciliation (desired − reported) is a
-        // Batch 2 change (DispatchService). Accepting the body now means the
-        // new runner and the current server coexist during a rolling update
-        // with no behavior change; the moment Batch 2 lands, the reported set
-        // is already correct on the wire. An empty/absent body (old runner)
-        // is tolerated. ASP.NET minimal APIs do not require a body parameter
-        // to be bound — an unbound request body is simply not read.
-        group.MapPost("/poll", async (string runnerId, IGrainFactory grains) =>
+        // Reconciliation: the runner sends its process-lifetime reported set
+        // ({ inFlight, awaitingAck }) in the poll body; the stateless
+        // DispatchService computes desired − reported (repairs) plus new
+        // claims against spare capacity, and returns zero or more dispatches.
+        // An empty/absent body reports nothing — reconciliation is skipped and
+        // only new claims are served (the closeout safety net still applies).
+        group.MapPost("/poll", async (
+            string runnerId,
+            HttpRequest request,
+            IGrainFactory grains,
+            Mohist.Server.Runner.Services.DispatchService dispatch,
+            CancellationToken ct) =>
         {
-            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            var work = await runner.PollAsync();
-            if (work is null) return Results.NoContent();
+            RunnerPollRequest req = new([], []);
+            if (request.ContentLength is > 0)
+            {
+                try
+                {
+                    req = await request.ReadFromJsonAsync<RunnerPollRequest>(cancellationToken: ct)
+                        ?? new RunnerPollRequest([], []);
+                }
+                catch
+                {
+                    // Malformed body → treat as empty report (old/buggy client).
+                    req = new RunnerPollRequest([], []);
+                }
+            }
 
-            return Results.Ok(new WorkDispatchResponse(
-                work.WorkflowRunId,
-                work.WorkId,
-                work.Uses,
-                work.With,
-                work.Variables,
-                work.WorkType,
-                work.Stage,
-                work.Title,
-                work.Issue?.ProjectId ?? work.ProjectId,
-                work.Issue?.IssueId,
-                work.Issue?.IssueNumber,
-                work.Artifacts,
-                work.SetVars,
-                work.OwnerKind,
-                work.AgentJobId,
-                AgentSessionId: work.AgentSessionId,
-                Recovery: work.Recovery));
+            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+            var slots = await runner.GetSlotsAsync();
+            var response = await dispatch.PollAsync(runnerId, req, slots, ct);
+            if (response.Dispatches.Count == 0) return Results.NoContent();
+
+            return Results.Ok(new RunnerPollResponseDto(
+                response.Dispatches.Select(work => new WorkDispatchResponse(
+                    work.WorkflowRunId,
+                    work.WorkId,
+                    work.Uses,
+                    work.With,
+                    work.Variables,
+                    work.WorkType,
+                    work.Stage,
+                    work.Title,
+                    work.Issue?.ProjectId ?? work.ProjectId,
+                    work.Issue?.IssueId,
+                    work.Issue?.IssueNumber,
+                    work.Artifacts,
+                    work.SetVars,
+                    work.OwnerKind,
+                    work.AgentJobId,
+                    AgentSessionId: work.AgentSessionId,
+                    Recovery: work.Recovery)).ToList()));
         });
 
         // Dedicated runner config channel. Separate from /poll so runner-side
@@ -152,7 +172,18 @@ public static class RunnerRoutes
                 RunnerConfigJsonOptions);
         });
 
-        group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains) =>
+        // Report direct to the owning grain. Agent-job reports still flow
+        // through the runner grain (its ledger tracks the push-dispatched
+        // work and the closeout path). Workflow reports no longer touch the
+        // runner grain — translation is a stateless service, the workflow
+        // grain is the idempotent arbiter, and the runner retires the work
+        // from awaitingAck on Accepted or Stale (both are acks).
+        group.MapPost("/report", async (
+            string runnerId,
+            RunnerReportRequest req,
+            IGrainFactory grains,
+            Mohist.Server.Runner.Services.WorkflowReportService workflowReport,
+            CancellationToken ct) =>
         {
             var ownerKind = string.IsNullOrWhiteSpace(req.OwnerKind)
                 ? WorkDispatchOwnerKinds.Workflow
@@ -173,18 +204,25 @@ public static class RunnerRoutes
             }
 
             var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.AddTasks);
-            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            var report = string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal)
-                ? await runner.ReportAgentJobResultAsync(req.AgentJobId ?? string.Empty, req.WorkId, result)
-                : await runner.ReportWorkflowResultAsync(req.WorkflowRunId ?? string.Empty, req.WorkId, result);
 
+            // Agent-job: route through the runner grain (push-model ledger).
+            if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
+            {
+                var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+                var report = await runner.ReportAgentJobResultAsync(req.AgentJobId ?? string.Empty, req.WorkId, result);
+                return Results.Ok(new RunnerReportResponse(
+                    report.WorkflowRunId, report.WorkflowStatus, report.Tracked,
+                    report.Reason, report.OwnerKind, report.OwnerId));
+            }
+
+            // Workflow: report direct to the owning grain via the stateless
+            // report service (the runner grain no longer relays workflow
+            // reports). Accepted and Stale are both acks.
+            var (ack, workflowStatus) = await workflowReport.ReportAsync(
+                runnerId, req.WorkflowRunId ?? string.Empty, req.WorkId, result, ct);
+            var tracked = ack != "missing-workflow";
             return Results.Ok(new RunnerReportResponse(
-                report.WorkflowRunId,
-                report.WorkflowStatus,
-                report.Tracked,
-                report.Reason,
-                report.OwnerKind,
-                report.OwnerId));
+                req.WorkflowRunId ?? string.Empty, workflowStatus, tracked, ack, ownerKind, req.WorkflowRunId ?? string.Empty));
         });
 
         // Batch status query for the runner's convergence backstop. The
@@ -608,6 +646,14 @@ public record WorkDispatchResponse(
     /// </summary>
     string? AgentSessionId = null,
     string? Recovery = null);
+
+/// <summary>
+/// Poll response carrying zero or more dispatches. Replaces the old single-
+/// dispatch 200/204 contract: a reconciliation round may render repairs plus
+/// new claims, so the response is a list. An empty list is returned as HTTP
+/// 204 by the route handler.
+/// </summary>
+public record RunnerPollResponseDto(List<WorkDispatchResponse> Dispatches);
 
 /// <summary>
 /// Wire shape for the workspace cleanup policy that the server hands the

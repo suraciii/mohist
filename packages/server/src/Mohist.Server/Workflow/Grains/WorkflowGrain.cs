@@ -380,7 +380,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, runnerId);
     }
 
-    public async Task<WorkItem?> PollWorkAsync(string runnerId)
+    public async Task<WorkItem?> ClaimNextAsync(string runnerId)
     {
         if (_run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
             return null;
@@ -388,45 +388,42 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (!_run.IsAssignedTo(runnerId))
             return null;
 
-        // Offer: surface the next pending work WITHOUT transitioning it to
-        // Running, persisting, or acquiring the stage lock. The runner
-        // durably registers the work and calls ClaimAsync to confirm; only
-        // then does the task/check become Running. This makes
-        // "Running ⟺ durably claimed" a flow invariant instead of a
-        // reconciled one. The stage lock is also deferred to ClaimAsync so
-        // a failed claim (overtaken offer) never leaks a lock.
-        //
-        // Re-entry recovery is NOT handled here: the runner is the
-        // authoritative holder of work it has claimed, so it recovers
-        // in-flight work from its own dispatch snapshot (see
-        // RunnerGrain.RecoverHeldWorkflowWorkAsync). The workflow grain is
-        // never consulted to reconstruct a dispatch.
+        // Pick the next dispatchable work. No work means the run has nothing
+        // outstanding (idle / gated / between stages) — nothing to claim.
         var work = _run.NextWork();
         if (work is null)
             return null;
 
-        return _outcomeProcessor.BuildWorkItem(_run!, work);
-    }
-
-    public async Task<string?> ClaimAsync(string runnerId, string workId)
-    {
-        if (_run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
+        // Project to a WorkItem up front to resolve the work id (a task's
+        // definition id, or the deterministic checks-{stage} id) that the claim
+        // and the eventual report key on. BuildWorkItem is a pure projection —
+        // it does not mutate, so calling it before the claim is safe.
+        var item = _outcomeProcessor.BuildWorkItem(_run!, work);
+        if (item?.Id is null)
             return null;
+        var workId = item.Id;
 
-        if (!_run.IsAssignedTo(runnerId))
-            return null;
-
-        // Acquire the sequential stage lock as part of the claim, not the
-        // offer. A failed claim (lock contended or offer overtaken) must not
-        // leave the workflow holding a lock on a stage it never started.
+        // Acquire the sequential stage lock as part of the claim. A failed
+        // claim (lock contended) must not leave the workflow holding a lock on
+        // a stage it never started, so the lock is taken here, in the same
+        // single write that starts the work — there is no separate offer phase
+        // whose failure would need a rollback.
         var stage = _run.CurrentStageId;
         if (stage is not null && !await AcquireStageLocksIfNeededAsync(stage))
             return null;
 
-        var claimed = await _outcomeProcessor.ClaimWorkItemAsync(
+        // Single atomic write: mark the work Running, persist, dispatch events.
+        // ClaimWorkItemAsync is idempotent for an already-Running work (re-claim
+        // after a lost dispatch response): it returns the in-flight work id
+        // without re-transitioning. Returns null when the workId no longer maps
+        // to offerable work (the run advanced between NextWork and the claim).
+        var resolvedWorkId = await _outcomeProcessor.ClaimWorkItemAsync(
             _run!, workId, runnerId, events => CommitAsync(events));
 
-        return claimed;
+        if (resolvedWorkId is null)
+            return null;
+
+        return item;
     }
 
     public async Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)
@@ -463,13 +460,19 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count);
     }
 
-    public async Task ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome)
+    public async Task<ReportAck> ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome)
     {
-        if (_run is null || !_run.IsAssignedTo(runnerId)) return;
+        // Stale (an ack, not an error) covers every "no longer current" case:
+        // the run is gone, not assigned to this runner, or the workId no longer
+        // maps to a Running task the runner owns (already terminal, superseded
+        // by a rerun, advanced past). At-least-once reports make late/duplicate
+        // reports normal; the runner retires the work from awaitingAck on either
+        // Accepted or Stale. See design/workflow/scheduling.md §Report.
+        if (_run is null || !_run.IsAssignedTo(runnerId)) return ReportAck.Stale;
         var stage = _run.CurrentStage();
         var activeTask = stage.FindRunningTaskByWork(workId, runnerId);
         if (activeTask is null)
-            return;
+            return ReportAck.Stale;
 
         _log.LogInformation("Workflow {Id} received task outcome for {WorkId}: {Status} detail={Detail}",
             GrainKey, workId, outcome.Status, outcome.Detail ?? "(none)");
@@ -477,14 +480,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var events = await _outcomeProcessor.ProcessTaskOutcomeAsync(_run!, outcome, activeTask.Id, workId);
 
         await CommitAsync(events);
+        return ReportAck.Accepted;
     }
 
-    public async Task ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome)
+    public async Task<ReportAck> ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome)
     {
-        if (_run is null || !_run.IsAssignedTo(runnerId)) return;
+        if (_run is null || !_run.IsAssignedTo(runnerId)) return ReportAck.Stale;
         var currentStage = _run.CurrentStage();
         if (currentStage.ChecksWorkId is null || !string.Equals(currentStage.ChecksWorkId, workId, StringComparison.Ordinal))
-            return;
+            return ReportAck.Stale;
 
         _log.LogInformation("Workflow {Id} received check outcome for stage {Stage}: {Count} results",
             GrainKey, outcome.Stage, outcome.Results.Count);
@@ -493,6 +497,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _outcomeProcessor.ResetChecksRunningState(_run!);
 
         await CommitAsync(events);
+        return ReportAck.Accepted;
     }
 
     public Task DeactivateForTestAsync()

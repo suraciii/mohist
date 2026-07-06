@@ -96,34 +96,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task RunningTask_WithoutReport_TimesOutWithoutQueryingRunner()
-    {
-        // Regression for T-003: RunnerGrain enforces a control-plane
-        // WorkCompletionTimeout safety net via a persisted reminder. The
-        // scan uses the in-memory active set hydrated from the RunnerWorks
-        // ledger and never queries the runner process; a stuck work is
-        // synthesized as failed(reason=timeout) through the normal report
-        // channel.
-        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
-        var (work, runnerId) = await PollWorkAnyAsync();
-
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await AdvanceTimeKeepingRunnerOnlineAsync(runner, TimeSpan.FromMinutes(11));
-        await runner.CheckWorkTimeoutsAsync();
-
-        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
-        Assert.Null(await workflow.GetCurrentWorkIdAsync());
-
-        var run = await LoadRunAsync(work.WorkflowRunId);
-        var task = run.Stages.Single().Tasks.Single();
-        Assert.Equal(TaskRunStatus.Failed, task.Status);
-        Assert.NotNull(task.FinishedAt);
-        Assert.Equal("timeout", run.Failure?.Message);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
     public async Task Heartbeat_WithOnlineRunner_PreservesRunningTask()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
@@ -215,7 +187,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
         var runnerId = _runnerId!;
-        Assert.NotNull(await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync());
+        Assert.NotNull(await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(Services));
 
         await workflow.StopAsync("test-stop");
 
@@ -223,7 +195,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
 
         var run = await LoadRunAsync(_workflowId!);
         Assert.Equal(TaskRunStatus.Failed, run.Stages.Single().Tasks.Single().Status);

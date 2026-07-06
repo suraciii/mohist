@@ -455,7 +455,7 @@ public class AgentJobDispatchRouteSpecs
             await WaitForAgentJobStatusAsync(jobGrain, AgentJobStatus.Running, TimeSpan.FromSeconds(8));
             var workId = (await jobGrain.GetRuntimeSnapshotAsync()).CurrentWorkId!;
             var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            var polled = await runnerGrain.PollAsync();
+            var polled = await runnerGrain.PollAsync(_fixture.Services);
 
             Assert.NotNull(polled);
             Assert.Equal(workId, polled!.WorkId);
@@ -576,8 +576,8 @@ public class AgentJobDispatchRouteSpecs
             var workId = (await jobGrain.GetRuntimeSnapshotAsync()).CurrentWorkId!;
 
             using var httpResponse = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            Assert.Equal(HttpStatusCode.OK, httpResponse.StatusCode);
-            var httpBody = await httpResponse.Content.ReadFromJsonAsync<JsonElement>();
+            var httpBody = await httpResponse.ReadFirstDispatchElementAsync()
+                ?? throw new InvalidOperationException("Expected a dispatch from /poll");
             Assert.Equal(workId, httpBody.GetProperty("workId").GetString());
             Assert.Equal(WorkDispatchOwnerKinds.AgentJob, httpBody.GetProperty("ownerKind").GetString());
             Assert.Equal(jobKey, httpBody.GetProperty("agentJobId").GetString());

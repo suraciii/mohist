@@ -36,7 +36,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r2, check, "review");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -103,7 +103,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
         ]));
 
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId!);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
 
         await workflow.ApproveAsync();
 

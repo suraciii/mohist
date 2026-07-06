@@ -119,12 +119,15 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
 
         for (var attempt = 0; attempt < 50 && assigned.Count < expectedWorkflowIds.Count; attempt++)
         {
-            var work = await runner.PollAsync();
-            if (work is null) break;
-            if (!expectedWorkflowIds.Contains(work.WorkflowRunId))
-                continue;
-            if (assigned.Add(work.WorkflowRunId))
-                assignedWorkflowIds.Add(work.WorkflowRunId);
+            var round = await runner.PollAllAsync(Services);
+            if (round.Count == 0) break;
+            foreach (var work in round)
+            {
+                if (!expectedWorkflowIds.Contains(work.WorkflowRunId))
+                    continue;
+                if (assigned.Add(work.WorkflowRunId))
+                    assignedWorkflowIds.Add(work.WorkflowRunId);
+            }
         }
 
         Assert.Equal(3, assigned.Count);

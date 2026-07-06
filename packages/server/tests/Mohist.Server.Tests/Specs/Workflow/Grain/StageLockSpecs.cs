@@ -42,21 +42,21 @@ public class StageLockSpecs : WorkflowGrainSpecs
         await AssignWorkflowToRunnerAsync(workflow1Id, runner1Id);
         await AssignWorkflowToRunnerAsync(workflow2Id, runner2Id);
 
-        var wf1Plan = await runner1.PollAsync();
+        var wf1Plan = await runner1.PollAsync(Services);
         Assert.NotNull(wf1Plan);
         await ReportAsync(runner1Id, workflow1Id, wf1Plan.WorkId, new WorkResult("completed"));
 
-        var wf2Plan = await runner2.PollAsync();
+        var wf2Plan = await runner2.PollAsync(Services);
         Assert.NotNull(wf2Plan);
         await ReportAsync(runner2Id, workflow2Id, wf2Plan.WorkId, new WorkResult("completed"));
 
-        var firstIntegrate = await runner1.PollAsync();
+        var firstIntegrate = await runner1.PollAsync(Services);
         var firstRunnerId = runner1Id;
         var secondRunnerId = runner2Id;
         var secondWorkflowId = workflow2Id;
         if (firstIntegrate is null)
         {
-            firstIntegrate = await runner2.PollAsync();
+            firstIntegrate = await runner2.PollAsync(Services);
             firstRunnerId = runner2Id;
             secondRunnerId = runner1Id;
             secondWorkflowId = workflow1Id;
@@ -73,7 +73,7 @@ public class StageLockSpecs : WorkflowGrainSpecs
 
         var firstRunner = Grains.GetGrain<IRunnerGrain>(firstRunnerId);
         var secondRunner = Grains.GetGrain<IRunnerGrain>(secondRunnerId);
-        var blocked = await secondRunner.PollAsync();
+        var blocked = await secondRunner.PollAsync(Services);
         Assert.Null(blocked);
 
         state = await lockGrain.GetStateAsync();
@@ -81,24 +81,24 @@ public class StageLockSpecs : WorkflowGrainSpecs
         Assert.Contains(state!.Waiting, w => w.WorkflowRunId == secondWorkflowId);
 
         await ReportAsync(firstRunnerId, firstIntegrate.WorkflowRunId, firstIntegrate.WorkId, new WorkResult("completed"));
-        var firstMerge = await firstRunner.PollAsync();
+        var firstMerge = await firstRunner.PollAsync(Services);
         Assert.NotNull(firstMerge);
         Assert.Equal("integrate", firstMerge.Stage);
         Assert.StartsWith("integrate:merge.", firstMerge.WorkId);
 
-        blocked = await secondRunner.PollAsync();
+        blocked = await secondRunner.PollAsync(Services);
         Assert.Null(blocked);
 
         await ReportAsync(firstRunnerId, firstMerge.WorkflowRunId, firstMerge.WorkId, new WorkResult("completed"));
 
-        var secondIntegrate = await secondRunner.PollAsync();
+        var secondIntegrate = await secondRunner.PollAsync(Services);
         Assert.NotNull(secondIntegrate);
         Assert.Equal(secondWorkflowId, secondIntegrate.WorkflowRunId);
         Assert.Equal("integrate", secondIntegrate.Stage);
         Assert.StartsWith("integrate:archive-change.", secondIntegrate.WorkId);
 
         await ReportAsync(secondRunnerId, secondIntegrate.WorkflowRunId, secondIntegrate.WorkId, new WorkResult("completed"));
-        var secondMerge = await secondRunner.PollAsync();
+        var secondMerge = await secondRunner.PollAsync(Services);
         Assert.NotNull(secondMerge);
         Assert.StartsWith("integrate:merge.", secondMerge.WorkId);
         await ReportAsync(secondRunnerId, secondMerge.WorkflowRunId, secondMerge.WorkId, new WorkResult("completed"));
@@ -130,25 +130,25 @@ public class StageLockSpecs : WorkflowGrainSpecs
         await AssignWorkflowToRunnerAsync(workflow1Id, runner1Id);
         await AssignWorkflowToRunnerAsync(workflow2Id, runner2Id);
 
-        var wf1Plan = await runner1.PollAsync();
+        var wf1Plan = await runner1.PollAsync(Services);
         Assert.NotNull(wf1Plan);
         await ReportAsync(runner1Id, workflow1Id, wf1Plan.WorkId, new WorkResult("completed"));
 
-        var wf2Plan = await runner2.PollAsync();
+        var wf2Plan = await runner2.PollAsync(Services);
         Assert.NotNull(wf2Plan);
         await ReportAsync(runner2Id, workflow2Id, wf2Plan.WorkId, new WorkResult("completed"));
 
-        var wf1Integrate = await runner1.PollAsync();
+        var wf1Integrate = await runner1.PollAsync(Services);
         Assert.NotNull(wf1Integrate);
         await ReportAsync(runner1Id, workflow1Id, wf1Integrate.WorkId, new WorkResult("failed", "merge conflict"));
 
-        var wf2Integrate = await runner2.PollAsync();
+        var wf2Integrate = await runner2.PollAsync(Services);
         Assert.NotNull(wf2Integrate);
         Assert.Equal(workflow2Id, wf2Integrate.WorkflowRunId);
         Assert.Equal("integrate", wf2Integrate.Stage);
 
         await ReportAsync(runner2Id, workflow2Id, wf2Integrate.WorkId, new WorkResult("completed"));
-        var wf2Merge = await runner2.PollAsync();
+        var wf2Merge = await runner2.PollAsync(Services);
         Assert.NotNull(wf2Merge);
         await ReportAsync(runner2Id, workflow2Id, wf2Merge.WorkId, new WorkResult("completed"));
     }
@@ -186,15 +186,15 @@ public class StageLockSpecs : WorkflowGrainSpecs
         await AssignWorkflowToRunnerAsync(workflow1Id, runner1Id);
         await AssignWorkflowToRunnerAsync(workflow2Id, runner2Id);
 
-        var wf1Build = await runner1.PollAsync();
+        var wf1Build = await runner1.PollAsync(Services);
         Assert.NotNull(wf1Build);
         await ReportAsync(runner1Id, workflow1Id, wf1Build.WorkId, new WorkResult("completed"));
 
-        var wf2Build = await runner2.PollAsync();
+        var wf2Build = await runner2.PollAsync(Services);
         Assert.NotNull(wf2Build);
         await ReportAsync(runner2Id, workflow2Id, wf2Build.WorkId, new WorkResult("completed"));
 
-        var wf1Integrate = await runner1.PollAsync();
+        var wf1Integrate = await runner1.PollAsync(Services);
         Assert.NotNull(wf1Integrate);
 
         var lockGrain = Grains.GetGrain<IWorkflowStageLockGrain>(
@@ -213,7 +213,7 @@ public class StageLockSpecs : WorkflowGrainSpecs
         var stateAfter = await lockGrain.GetStateAsync();
         Assert.Null(stateAfter?.Owner);
 
-        var wf2Integrate = await runner2.PollAsync();
+        var wf2Integrate = await runner2.PollAsync(Services);
         Assert.NotNull(wf2Integrate);
         Assert.Equal(workflow2Id, wf2Integrate.WorkflowRunId);
         Assert.Equal("integrate", wf2Integrate.Stage);
@@ -245,27 +245,27 @@ public class StageLockSpecs : WorkflowGrainSpecs
         await AssignWorkflowToRunnerAsync(workflow1Id, runner1Id);
         await AssignWorkflowToRunnerAsync(workflow2Id, runner2Id);
 
-        var wf1Build = await runner1.PollAsync();
+        var wf1Build = await runner1.PollAsync(Services);
         Assert.NotNull(wf1Build);
         await ReportAsync(runner1Id, workflow1Id, wf1Build.WorkId, new WorkResult("completed"));
 
-        var wf2Build = await runner2.PollAsync();
+        var wf2Build = await runner2.PollAsync(Services);
         Assert.NotNull(wf2Build);
         await ReportAsync(runner2Id, workflow2Id, wf2Build.WorkId, new WorkResult("completed"));
 
-        var wf1Integrate = await runner1.PollAsync();
+        var wf1Integrate = await runner1.PollAsync(Services);
         Assert.NotNull(wf1Integrate);
         Assert.Equal("integrate", wf1Integrate.Stage);
 
         await wf1.StopAsync("stopped by test");
 
-        var wf2Integrate = await runner2.PollAsync();
+        var wf2Integrate = await runner2.PollAsync(Services);
         Assert.NotNull(wf2Integrate);
         Assert.Equal(workflow2Id, wf2Integrate.WorkflowRunId);
         Assert.Equal("integrate", wf2Integrate.Stage);
 
         await ReportAsync(runner2Id, workflow2Id, wf2Integrate.WorkId, new WorkResult("completed"));
-        var wf2Merge = await runner2.PollAsync();
+        var wf2Merge = await runner2.PollAsync(Services);
         Assert.NotNull(wf2Merge);
         await ReportAsync(runner2Id, workflow2Id, wf2Merge.WorkId, new WorkResult("completed"));
     }

@@ -98,7 +98,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         var agentJob = Grains.GetGrain<IAgentJobGrain>(agentJobId);
         await agentJob.AssignRunnerAsync(runnerId, workId);
 
-        var work = await runner.PollAsync();
+        var work = await runner.PollAsync(Services);
         Assert.NotNull(work);
         Assert.Equal(agentJobId, work.AgentJobId);
         Assert.Equal(workId, work.WorkId);
@@ -129,7 +129,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         var agentJob = Grains.GetGrain<IAgentJobGrain>(agentJobId);
         Assert.Equal(AgentJobStatus.Pending, await agentJob.GetStatusAsync());
 
-        var work = await runner.PollAsync();
+        var work = await runner.PollAsync(Services);
         Assert.Null(work);
     }
 
@@ -305,32 +305,6 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         Assert.Equal(AgentJobStatus.Pending, await orphanAgentJob.GetStatusAsync());
 
         Assert.Equal("invalid-work", assignment.Reason);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task ReportResult_WorkflowArm_ReportsToWorkflowGrain_AndReadsBackStatus_ByteEquivalent()
-    {
-        var workflow = await StartWorkflowAsync(SingleStage());
-        var runnerId = _runnerId!;
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-
-        var (work, _) = await PollWorkAnyAsync();
-        var report = await runner.ReportWorkflowResultAsync(work.WorkflowRunId, work.WorkId, new WorkResult("completed"));
-
-        Assert.True(report.Tracked);
-        Assert.Equal(work.WorkflowRunId, report.WorkflowRunId);
-        Assert.Equal("reported", report.Reason);
-        Assert.Equal(WorkDispatchOwnerKinds.Workflow, report.OwnerKind);
-        Assert.Equal(work.WorkflowRunId, report.OwnerId);
-        // After task completion with a check still pending, the run
-        // returns to Ready (runner assigned, dispatchable work = the
-        // check). Ready is no longer conflated with Running.
-        Assert.Equal("Ready", report.WorkflowStatus);
-
-        var orphanAgentJob = Grains.GetGrain<IAgentJobGrain>("workflow-report-orphan-agent-job");
-        Assert.Equal(AgentJobStatus.Pending, await orphanAgentJob.GetStatusAsync());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

@@ -10,14 +10,28 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task UnregisterAsync();
     Task HeartbeatAsync();
     Task HeartbeatRepairAsync(RunnerInfo info);
+    // Agent-job dispatch stays push-based (the job grain owns its single work
+    // item; there is no run to re-render from, and jobs are short-lived). The
+    // reconciliation model applies to workflow work; agent-job works are still
+    // pushed onto the runner and reported through this grain.
     Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work);
-    Task<WorkDispatch?> PollAsync();
-    Task<RunnerWorkReportResult> ReportWorkflowResultAsync(string workflowRunId, string workId, WorkResult result);
     Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result);
+    /// <summary>
+    /// Dequeues the next pending agent-job work pushed onto this runner.
+    /// Called by the DispatchService on each poll (agent-jobs are served
+    /// before workflow repair/claim). Returns null when none is pending.
+    /// </summary>
+    Task<WorkDispatch?> DequeueAssignedAgentJobAsync();
+    /// <summary>
+    /// Marks the runner present. Poll IS the heartbeat under the
+    /// reconciliation model (design/workflow/scheduling.md §Supervision): the
+    /// DispatchService calls this on every poll; the HTTP heartbeat degrades
+    /// to an info-refresh channel.
+    /// </summary>
+    Task TouchPresenceAsync();
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
     Task UpdateBuildGitHashAsync(string? buildGitHash);
     Task<RunnerInfo?> GetInfoAsync();
-    Task CheckWorkTimeoutsAsync();
 
     /// <summary>
     /// Returns the current persisted dispatch capacity (slots). Sourced
@@ -97,6 +111,32 @@ public static class WorkDispatchOwnerKinds
 {
     public const string Workflow = "workflow";
     public const string AgentJob = "agent-job";
+}
+
+/// <summary>
+/// The process's full level state, sent in every poll body. The DispatchService
+/// reconciles <c>desired − reported</c> to repair lost dispatches and decide
+/// new claims (design/workflow/scheduling.md §Poll Reconciliation).
+/// </summary>
+[GenerateSerializer]
+public sealed record RunnerPollRequest(
+    [property: Id(0)] List<string> InFlight,
+    [property: Id(1)] List<string> AwaitingAck)
+{
+    public RunnerPollRequest() : this([], []) { }
+}
+
+/// <summary>
+/// The dispatches rendered for this poll: repairs (desired − reported) plus
+/// new claims against spare capacity. Multiple dispatches per poll replace the
+/// old one-dispatch-per-poll limit (design/workflow/scheduling.md §Poll
+/// Reconciliation step ⑤).
+/// </summary>
+[GenerateSerializer]
+public sealed record RunnerPollResponse(
+    [property: Id(0)] List<WorkDispatch> Dispatches)
+{
+    public RunnerPollResponse() : this([]) { }
 }
 
 [GenerateSerializer]

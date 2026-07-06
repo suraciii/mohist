@@ -22,10 +22,20 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId);
-    Task<WorkItem?> PollWorkAsync(string runnerId);
-    Task<string?> ClaimAsync(string runnerId, string workId);
-    Task ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome);
-    Task ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome);
+    /// <summary>
+    /// The single write that starts work. Picks the run's next pending work,
+    /// acquires the sequential stage lock, marks the work Running with the
+    /// runner identity, and persists — one atomic transition on the
+    /// single-writer grain. Returns the claimed <see cref="WorkItem"/> (with its
+    /// resolved work id), or <c>null</c> when there is no dispatchable work, the
+    /// stage lock is contended, or the run is not Ready/Running/assigned to the
+    /// caller. There is no offer phase: a claim that never reaches the runner
+    /// needs no rollback — the work is Running and unreported, so the next poll
+    /// re-dispatches it.
+    /// </summary>
+    Task<WorkItem?> ClaimNextAsync(string runnerId);
+    Task<ReportAck> ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome);
+    Task<ReportAck> ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome);
 
     /// <summary>
     /// Releases the sequential stage lock owned by this workflow run for the
@@ -98,6 +108,23 @@ public enum WorkflowAssignmentStatus
 {
     Assigned,
     Rejected
+}
+
+/// <summary>
+/// The ack for an at-least-once report (<c>ReportTaskOutcomeAsync</c> /
+/// <c>ReportCheckOutcomeAsync</c>). <see cref="Accepted"/> means the owner
+/// consumed the outcome. <see cref="Stale"/> means the work was already
+/// terminal, not assigned to the caller, or otherwise no longer current — the
+/// result is discarded idempotently. Both are acks: the runner retires the work
+/// from <c>awaitingAck</c> on either (see <c>design/workflow/scheduling.md</c>
+/// §Report). A report for a work the owner does not recognize is Stale, never
+/// an error — late/duplicate reports are the normal case under at-least-once.
+/// </summary>
+[GenerateSerializer]
+public enum ReportAck
+{
+    Accepted,
+    Stale
 }
 
 [GenerateSerializer]

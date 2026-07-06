@@ -52,32 +52,11 @@ public class RunnerGrainTimeProviderSpecs : WorkflowGrainSpecs
         Assert.Equal(after, second.TakenAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task PollOneWorkflowAsync_RecordsTakeTimeFromFakeTimeProvider()
-    {
-        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
-        var runnerId = _runnerId!;
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-
-        var before = _fixture.TimeProvider.GetUtcNow();
-        var (work, _) = await PollWorkAnyAsync();
-
-        var runtime = await runner.GetRuntimeStateAsync();
-        var active = Assert.Single(runtime.ActiveWorks);
-        Assert.Equal(work.WorkId, active.WorkId);
-        Assert.Equal(before, active.TakenAt);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public void WorkflowOptions_ResolvesToTestConfiguredWorkCompletionTimeout()
-    {
-        var provider = _fixture.Cluster.GetSiloServiceProvider(null);
-        var options = provider.GetRequiredService<IOptions<WorkflowOptions>>().Value;
-
-        Assert.Equal(TimeSpan.FromMinutes(10), options.WorkCompletionTimeout);
-    }
+    // PollOneWorkflowAsync_RecordsTakeTimeFromFakeTimeProvider was removed:
+    // under the reconciliation model the runner grain holds no workflow work
+    // records, so it no longer records a take-time for dispatched workflow
+    // work. The workflow run owns that timing (task.StartedAt), set with real
+    // UTC time when the work is claimed — not the runner's injectable time
+    // provider. Agent-job work (above) still flows through the runner ledger
+    // and still records the fake-provider take-time.
 }
