@@ -99,7 +99,7 @@ internal static class UpdateCommands
 /// to <see cref="RunnerRefreshVerifier"/>. The facade itself only owns stage orchestration,
 /// finalization, and small resolution helpers.
 /// </summary>
-internal sealed partial class SourceCodeUpdater
+internal partial class SourceCodeUpdater
 {
     private static readonly TimeSpan ServerReadyTimeout = TimeSpan.FromSeconds(180);
     private static readonly TimeSpan RunnerActivePollInterval = TimeSpan.FromMilliseconds(500);
@@ -203,7 +203,7 @@ internal sealed partial class SourceCodeUpdater
         return await _operations.SyncSkillsAsync(repoRoot, sourceSkillData, dryRun, cancellationToken);
     }
 
-    public async Task<int> UpdateAllAsync(
+    public virtual async Task<int> UpdateAllAsync(
         string? repoRoot,
         bool dryRun,
         string? cliPath = null,

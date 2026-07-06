@@ -4,23 +4,101 @@ namespace Mohist.Cli.Tests.Support;
 /// No-op <see cref="IServiceInstaller"/> for tests that need to supply an
 /// installer collaborator without exercising real service management.
 /// Every method succeeds with exit code 0; runner probes report absent.
+/// Every invocation is also recorded so specs can assert call/no-call
+/// behavior of deleted or surviving command paths.
 /// </summary>
 internal sealed class FakeServiceInstaller : IServiceInstaller
 {
-    public Task<int> InstallServerAsync(ServiceInstallOptions options) => Task.FromResult(0);
-    public Task<int> InstallRunnerAsync(ServiceInstallOptions options) => Task.FromResult(0);
-    public Task<int> StartServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-    public Task<int> StopServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-    public Task<int> RestartServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-    public Task<int> StatusServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-    public Task<int> LogsServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-    public Task<int> UninstallServerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-    public Task<int> StartRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-    public Task<int> StopRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-    public Task<int> RestartRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-    public Task<int> StatusRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-    public Task<int> LogsRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
-    public Task<int> UninstallRunnerAsync(ServiceCommandOptions options) => Task.FromResult(0);
+    public List<string> Calls { get; } = new();
+    public List<ServiceInstallOptions> InstallServerCalls { get; } = new();
+    public List<ServiceInstallOptions> InstallRunnerCalls { get; } = new();
+
+    public Task<int> InstallServerAsync(ServiceInstallOptions options)
+    {
+        Calls.Add(nameof(InstallServerAsync));
+        InstallServerCalls.Add(options);
+        return Task.FromResult(0);
+    }
+
+    public Task<int> InstallRunnerAsync(ServiceInstallOptions options)
+    {
+        Calls.Add(nameof(InstallRunnerAsync));
+        InstallRunnerCalls.Add(options);
+        return Task.FromResult(0);
+    }
+
+    public Task<int> StartServerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(StartServerAsync));
+        return Task.FromResult(0);
+    }
+
+    public Task<int> StopServerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(StopServerAsync));
+        return Task.FromResult(0);
+    }
+
+    public Task<int> RestartServerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(RestartServerAsync));
+        return Task.FromResult(0);
+    }
+
+    public Task<int> StatusServerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(StatusServerAsync));
+        return Task.FromResult(0);
+    }
+
+    public Task<int> LogsServerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(LogsServerAsync));
+        return Task.FromResult(0);
+    }
+
+    public Task<int> UninstallServerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(UninstallServerAsync));
+        return Task.FromResult(0);
+    }
+
+    public Task<int> StartRunnerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(StartRunnerAsync));
+        return Task.FromResult(0);
+    }
+
+    public Task<int> StopRunnerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(StopRunnerAsync));
+        return Task.FromResult(0);
+    }
+
+    public Task<int> RestartRunnerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(RestartRunnerAsync));
+        return Task.FromResult(0);
+    }
+
+    public Task<int> StatusRunnerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(StatusRunnerAsync));
+        return Task.FromResult(0);
+    }
+
+    public Task<int> LogsRunnerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(LogsRunnerAsync));
+        return Task.FromResult(0);
+    }
+
+    public Task<int> UninstallRunnerAsync(ServiceCommandOptions options)
+    {
+        Calls.Add(nameof(UninstallRunnerAsync));
+        return Task.FromResult(0);
+    }
+
     public Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
     public Task<bool> IsRunnerInstalledAsync(string? unitDir = null) => Task.FromResult(false);
 }

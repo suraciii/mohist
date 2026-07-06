@@ -252,7 +252,6 @@ mo runner restart                  重启执行器受管服务
 mo runner list [--scope all|global|project]
 mo runner get <执行器id>
 mo runner status                    在线执行器摘要
-mo runner install                   安装执行器为受管服务
 mo runner uninstall                 卸载执行器受管服务
 ```
 
@@ -268,14 +267,10 @@ mo server health                    健康检查
 mo server info                      服务端系统诊断
 mo server status                    服务状态
 mo server logs                      服务日志（受管服务的运维日志）
-mo server install                   安装服务端为受管服务
-mo server update                    重新构建并重启服务端受管服务
 mo server uninstall                 卸载服务端受管服务
 ```
 
 `mo system logs`（应用日志）与 `mo server logs`（运维日志）内容不同：前者是应用输出，后者是 systemd/计划任务层日志。
-
-> **命令路径迁移**：旧的 `mo server install/update` 与 `mo install/update` 并存入口正在收敛——动词根只走 `mo install/update`（见「安装与升级」）。`mo server start/stop/restart` 不受影响，仍由本命令组承担。
 
 ## 系统诊断（只读）
 
@@ -319,7 +314,7 @@ mo skills sync
 
 ## 安装与升级（动词根集中）
 
-单一归属：动词根 `mo install` / `mo update`，无 `mo server install/update`、`mo runner install/update` 并存。
+装机与升级只走动词根 `mo install` / `mo update`。
 
 ```
 mo install server                   安装服务端为受管服务
@@ -331,15 +326,9 @@ mo update server                    仅升级服务端
 mo update runner                    仅升级执行器
 ```
 
-## 实装差距（命令面收敛中）
+## 实装差距
 
-命令面随各命令组改进 issue 逐步对齐到本文。当前实装与本文的已知差距：
-
-| 当前实装 | 本文 spec | 性质 |
-|---|---|---|
-| `mo server install/update`、`mo runner install/update` | `mo install/update` | 双入口合并 |
-
-未对齐处以代码为实装事实，但本文是目标。各差距对应 epic #40 下的子 issue。
+当前实装与本文无未收敛项。命令面随各命令组改进 issue 进一步对齐到本文。
 
 ## 典型工作流脚本
 

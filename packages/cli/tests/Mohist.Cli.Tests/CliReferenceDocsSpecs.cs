@@ -87,6 +87,12 @@ public class CliReferenceDocsSpecs
         // (newline-terminated in code blocks, backtick-wrapped in prose,
         // or as a gap-table row) to avoid false positives from substring
         // matches inside other text.
+        //
+        // T-001 of issue #388 extends the legacy guard with the install/
+        // update double-entry paths and the migration note that tracked
+        // that convergence. After the convergence lands the doc must not
+        // re-advertise any of these (the gap table is also gone — see
+        // `CliReference_DoesNotAdvertiseInstallUpdateDoubleEntry_GapTable`).
         string[] forbiddenLegacyPathRows =
         [
             "mo status",
@@ -94,11 +100,18 @@ public class CliReferenceDocsSpecs
             "mo use <project>",
             "mo notify setup",
             "mo system info",
+            "mo server install",
+            "mo server update",
+            "mo runner install",
         ];
         // None of the legacy paths may appear in the doc at all (this
         // document is the authoritative command surface).
         foreach (var legacy in forbiddenLegacyPathRows)
             Assert.DoesNotContain(legacy, doc);
+
+        // The convergence closes the gap the migration note tracked;
+        // the note must be gone with the gap.
+        Assert.DoesNotContain("命令路径迁移", doc);
 
         string[] topLevelCommands =
         [

@@ -10,11 +10,8 @@ internal static class ServerCommands
     {
         var server = new Command("server", "Server management");
         var installer = provider.GetRequiredService<IServiceInstaller>();
-        var updater = MohistCliCommands.ResolveSourceCodeUpdater(provider);
 
         server.Subcommands.Add(BuildHealth(api));
-        server.Subcommands.Add(BuildInstall(installer));
-        server.Subcommands.Add(BuildUpdate(updater));
         server.Subcommands.Add(BuildSystemd("start", installer.StartServerAsync, installer));
         server.Subcommands.Add(BuildSystemd("stop", installer.StopServerAsync, installer));
         server.Subcommands.Add(BuildSystemd("restart", installer.RestartServerAsync, installer));
@@ -52,44 +49,6 @@ internal static class ServerCommands
     {
         var cmd = new Command("health", "Check server health");
         cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/health"));
-        return cmd;
-    }
-
-    private static Command BuildInstall(IServiceInstaller installer)
-    {
-        var cmd = new Command("install", "Install server as a managed background service");
-        var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
-        var listenUrlOpt = new Option<string?>("--listen-url") { Description = "Server listen URL" };
-        var dryRunOpt = MohistCliCommands.DryRunOption();
-        var unitDirOpt = MohistCliCommands.UnitDirOption();
-        cmd.Options.Add(repoRootOpt);
-        cmd.Options.Add(unitDirOpt);
-        cmd.Options.Add(listenUrlOpt);
-        cmd.Options.Add(dryRunOpt);
-        cmd.SetAction(ctx =>
-        {
-            var dryRun = ctx.GetValue(dryRunOpt);
-            var unitDir = ctx.GetValue(unitDirOpt);
-            var repoRoot = ctx.GetValue(repoRootOpt);
-            var listenUrl = ctx.GetValue(listenUrlOpt);
-            return installer.InstallServerAsync(new ServiceInstallOptions(dryRun, unitDir, repoRoot, listenUrl, null, null));
-        });
-        return cmd;
-    }
-
-    private static Command BuildUpdate(SourceCodeUpdater updater)
-    {
-        var cmd = new Command("update", "Build current source and restart server service");
-        var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
-        var dryRunOpt = MohistCliCommands.DryRunOption();
-        cmd.Options.Add(repoRootOpt);
-        cmd.Options.Add(dryRunOpt);
-        cmd.SetAction(async ctx =>
-        {
-            var dryRun = ctx.GetValue(dryRunOpt);
-            var repoRoot = ctx.GetValue(repoRootOpt);
-            return await updater.UpdateServerAsync(repoRoot, dryRun);
-        });
         return cmd;
     }
 
@@ -140,7 +99,6 @@ internal static class RunnerCommands
         var installer = provider.GetRequiredService<IServiceInstaller>();
         var environment = provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance;
 
-        runner.Subcommands.Add(BuildInstall(installer));
         runner.Subcommands.Add(BuildSystemd("start", installer.StartRunnerAsync, installer));
         runner.Subcommands.Add(BuildSystemd("stop", installer.StopRunnerAsync, installer));
         runner.Subcommands.Add(BuildSystemd("restart", installer.RestartRunnerAsync, installer));
@@ -290,31 +248,6 @@ internal static class RunnerCommands
         if (string.Equals(raw, "project", StringComparison.OrdinalIgnoreCase))
             return MohistCliApi.RunnerScopeFilter.Project;
         return null;
-    }
-
-    private static Command BuildInstall(IServiceInstaller installer)
-    {
-        var cmd = new Command("install", "Install runner as a managed background service");
-        var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
-        var serverUrlOpt = new Option<string?>("--server-url") { Description = "Server URL" };
-        var runnerRootOpt = new Option<string?>("--runner-root") { Description = "Runner root path" };
-        var dryRunOpt = MohistCliCommands.DryRunOption();
-        var unitDirOpt = MohistCliCommands.UnitDirOption();
-        cmd.Options.Add(repoRootOpt);
-        cmd.Options.Add(unitDirOpt);
-        cmd.Options.Add(serverUrlOpt);
-        cmd.Options.Add(runnerRootOpt);
-        cmd.Options.Add(dryRunOpt);
-        cmd.SetAction(ctx =>
-        {
-            var dryRun = ctx.GetValue(dryRunOpt);
-            var unitDir = ctx.GetValue(unitDirOpt);
-            var repoRoot = ctx.GetValue(repoRootOpt);
-            var serverUrl = ctx.GetValue(serverUrlOpt);
-            var runnerRoot = ctx.GetValue(runnerRootOpt);
-            return installer.InstallRunnerAsync(new ServiceInstallOptions(dryRun, unitDir, repoRoot, null, serverUrl, runnerRoot));
-        });
-        return cmd;
     }
 
     private static Command BuildSystemd(

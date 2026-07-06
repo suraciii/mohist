@@ -121,7 +121,7 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null)
+    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null)
     {
         environment ??= SystemEnvironmentVariableProvider.Instance;
         var api = new MohistCliApi(http, output, error, fileSystem, commandExecutor, standardInput);
@@ -138,13 +138,21 @@ internal static class MohistCliCommands
         // specs never touch a real SQLite file (design/testing.md constraint 1).
         if (queryExecutor is not null)
             services.AddSingleton(queryExecutor);
-        services.AddSingleton<IServiceInstaller>(sp => OperatingSystem.IsWindows() ? new WindowsScheduledTaskInstaller(output, error, fileSystem, commandExecutor) : new SystemdServiceInstaller(output, error, fileSystem, commandExecutor));
+        // Production callers leave installer/updater null and the default
+        // SystemdServiceInstaller / WindowsScheduledTaskInstaller and a default
+        // SourceCodeUpdater are constructed. Tests inject fakes so install/update
+        // specs never touch real systemd/Task Scheduler/source rebuilds
+        // (design/testing.md constraint 1).
+        services.AddSingleton<IServiceInstaller>(installer ?? BuildDefaultInstaller(output, error, fileSystem, commandExecutor));
+        if (updater is not null)
+            services.AddSingleton(updater);
+        else
+            services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton(sp => new UpdateOperations(output, error, sp.GetRequiredService<IServiceInstaller>(), commandExecutor, fileSystem, environment));
         services.AddSingleton(new RuntimeConsistencyValidator(http, commandExecutor, fileSystem, environment, output));
         services.AddSingleton(new ServiceReadinessProbe(http, output));
         services.AddSingleton(new RunnerRefreshVerifier(http, commandExecutor, fileSystem));
         services.AddSingleton(new UpdateOutcomeReporter(http, output));
-        services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
         services.AddSingleton<InfoVerboseCollector>();
@@ -156,6 +164,11 @@ internal static class MohistCliCommands
         var parseConfig = new ParserConfiguration { ResponseFileTokenReplacer = null };
         return CommandLineParser.Parse(root, args, parseConfig).InvokeAsync(config);
     }
+
+    private static IServiceInstaller BuildDefaultInstaller(TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor)
+        => OperatingSystem.IsWindows()
+            ? new WindowsScheduledTaskInstaller(output, error, fileSystem, commandExecutor)
+            : new SystemdServiceInstaller(output, error, fileSystem, commandExecutor);
 
     internal static SourceCodeUpdater ResolveSourceCodeUpdater(IServiceProvider provider)
     {
