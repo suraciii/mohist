@@ -237,24 +237,16 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await TouchPresenceAsync();
     }
 
-    public async Task<WorkDispatch?> PollAsync(IReadOnlySet<InFlightWorkKey>? reportedInFlight = null)
+    public async Task<WorkDispatch?> PollAsync()
     {
         if (_status == RunnerStatus.Offline)
             throw new InvalidOperationException($"Runner '{RunnerId}' is offline");
 
         await TouchPresenceAsync();
 
-        // A Running work the process no longer reports has been lost
-        // (process restarted; its in-memory in-flight map is gone). Roll it
-        // back to Pending so the unified dequeue re-dispatches it. Old
-        // clients send no body → null → skip (falls back to the
-        // heartbeat-timeout synthesized-FAILURE path).
-        if (reportedInFlight is not null)
-            await RollbackLostWorkAsync(reportedInFlight);
-
-        var redispatched = await DequeuePendingWorkAsync();
-        if (redispatched is not null)
-            return redispatched;
+        var pending = await DequeueAssignedAgentJobAsync();
+        if (pending is not null)
+            return pending;
 
         if (await ActiveWorkflowCountAsync() >= MaxWorkflowSlots)
             return null;
@@ -756,146 +748,41 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             reason);
     }
 
-    /// <summary>
-    /// Detects works the runner process has lost (process restarted; its
-    /// in-memory in-flight map is gone) by comparing the held
-    /// <c>Running</c> works against the set of works the process reports as
-    /// in-flight. Any <c>Running</c> work absent from the report is rolled
-    /// back to <c>Pending</c> so the unified dequeue re-dispatches it.
-    ///
-    /// Safety: the process adds a work to its in-flight map synchronously
-    /// between receiving a dispatch and the next poll, so a first dispatch
-    /// can never be mistaken for a loss — the only way a held Running work
-    /// is absent from the report is that the process lost it.
-    /// </summary>
-    private async Task RollbackLostWorkAsync(IReadOnlySet<InFlightWorkKey> reported)
-    {
-        var changed = false;
-        foreach (var w in GetWorks().Where(x => x.Status == RunnerWorkStatus.Running).ToList())
-        {
-            var key = new InFlightWorkKey(w.OwnerKind, w.OwnerId, w.WorkId);
-            if (!reported.Contains(key))
-            {
-                _log.LogInformation(
-                    "Runner {RunnerId} rolling back lost work {WorkId} ({OwnerKind}/{OwnerId}) to Pending for re-dispatch",
-                    RunnerId, w.WorkId, w.OwnerKind, w.OwnerId);
-                w.Status = RunnerWorkStatus.Pending;
-                w.StartedAt = null;
-                changed = true;
-            }
-        }
-        if (changed) await PersistAsync();
-    }
-
-    /// <summary>
-    /// Unified dequeue for every <c>Pending</c> work, regardless of owner
-    /// kind. Workflow works reach Pending only via loss-and-rollback
-    /// (first dispatch happens in-band in PollOneWorkflowAsync); agent-job
-    /// works reach Pending via AssignAgentJobAsync. Dispatch order is
-    /// CreatedAt ascending so the oldest undelivered work is re-sent first.
-    /// </summary>
-    private async Task<WorkDispatch?> DequeuePendingWorkAsync()
+    private async Task<WorkDispatch?> DequeueAssignedAgentJobAsync()
     {
         while (true)
         {
-            var pendingWork = GetWorks()
-                .Where(w => w.Status == RunnerWorkStatus.Pending)
-                .OrderBy(w => w.CreatedAt)
-                .FirstOrDefault();
+            var pendingWork = GetWorks().FirstOrDefault(w =>
+                w.OwnerKind == WorkDispatchOwnerKinds.AgentJob && w.Status == RunnerWorkStatus.Pending);
 
             if (pendingWork is null)
                 return null;
 
-            var dispatch = pendingWork.OwnerKind switch
+            var agentJobId = pendingWork.OwnerId;
+            var workId = pendingWork.WorkId;
+            var job = GrainFactory.GetGrain<IAgentJobGrain>(agentJobId);
+            if (!await job.IsWorkRunnableAsync(RunnerId, workId))
             {
-                WorkDispatchOwnerKinds.AgentJob => await DispatchAgentJobWorkAsync(pendingWork),
-                WorkDispatchOwnerKinds.Workflow => await DispatchWorkflowWorkAsync(pendingWork),
-                _ => null,
-            };
+                _log.LogDebug(
+                    "Runner {Id} dropping work {WorkId} for agent-job {AgentJobId}: not runnable",
+                    RunnerId, workId, agentJobId);
+                TryRemoveWork(workId, WorkDispatchOwnerKinds.AgentJob, agentJobId);
+                await PersistAsync();
+                await MarkRunnerWorkTerminalAsync(
+                    WorkDispatchOwnerKinds.AgentJob,
+                    agentJobId,
+                    workId,
+                    LedgerRunnerWorkStatus.Failed,
+                    "not-runnable");
+                continue;
+            }
 
-            if (dispatch is null)
-                continue; // dropped (e.g. agent-job not runnable); loop for the next Pending.
-
-            return dispatch;
-        }
-    }
-
-    private async Task<WorkDispatch?> DispatchAgentJobWorkAsync(RunnerWork pendingWork)
-    {
-        var agentJobId = pendingWork.OwnerId;
-        var workId = pendingWork.WorkId;
-        var job = GrainFactory.GetGrain<IAgentJobGrain>(agentJobId);
-        if (!await job.IsWorkRunnableAsync(RunnerId, workId))
-        {
-            _log.LogDebug(
-                "Runner {Id} dropping work {WorkId} for agent-job {AgentJobId}: not runnable",
-                RunnerId, workId, agentJobId);
-            TryRemoveWork(workId, WorkDispatchOwnerKinds.AgentJob, agentJobId);
+            pendingWork.Status = RunnerWorkStatus.Running;
+            pendingWork.StartedAt = _timeProvider.GetUtcNow();
             await PersistAsync();
-            await MarkRunnerWorkTerminalAsync(
-                WorkDispatchOwnerKinds.AgentJob,
-                agentJobId,
-                workId,
-                LedgerRunnerWorkStatus.Failed,
-                "not-runnable");
-            return null;
+
+            return pendingWork.DispatchSnapshot!;
         }
-
-        pendingWork.Status = RunnerWorkStatus.Running;
-        pendingWork.StartedAt = _timeProvider.GetUtcNow();
-        await PersistAsync();
-
-        return pendingWork.DispatchSnapshot!;
-    }
-
-    /// <summary>
-    /// Re-dispatches a workflow work that was lost by the runner process
-    /// and rolled back to Pending. The work is still owned by this runner
-    /// (workflow-side status is Running, stage lock still held), so there
-    /// is no re-Claim — only the process execution context was lost. The
-    /// dispatch envelope is rebuilt from the WorkItem snapshot captured at
-    /// claim time.
-    /// </summary>
-    private async Task<WorkDispatch?> DispatchWorkflowWorkAsync(RunnerWork pendingWork)
-    {
-        if (pendingWork.WorkItemSnapshot is null)
-        {
-            // Snapshot missing (ledger-rebuilt shell after grain-state loss):
-            // cannot rebuild the dispatch. Drop the orphan; the workflow's
-            // own timeout/retry will recover.
-            _log.LogWarning(
-                "Runner {RunnerId} cannot re-dispatch workflow work {WorkId}: no WorkItem snapshot; dropping",
-                RunnerId, pendingWork.WorkId);
-            TryRemoveWork(pendingWork.WorkId, WorkDispatchOwnerKinds.Workflow, pendingWork.OwnerId);
-            await PersistAsync();
-            return null;
-        }
-
-        var run = await _workflowRuns.LoadAsync(pendingWork.OwnerId);
-        if (run is null)
-        {
-            _log.LogWarning(
-                "Runner {RunnerId} cannot re-dispatch workflow work {WorkId}: run {RunId} gone; dropping",
-                RunnerId, pendingWork.WorkId, pendingWork.OwnerId);
-            TryRemoveWork(pendingWork.WorkId, WorkDispatchOwnerKinds.Workflow, pendingWork.OwnerId);
-            await PersistAsync();
-            await MarkRunnerWorkTerminalAsync(
-                WorkDispatchOwnerKinds.Workflow,
-                pendingWork.OwnerId,
-                pendingWork.WorkId,
-                LedgerRunnerWorkStatus.Failed,
-                "run-missing");
-            return null;
-        }
-
-        var dispatch = await _translator.TranslateToDispatchAsync(
-            pendingWork.WorkItemSnapshot, pendingWork.OwnerId, run, RunnerId);
-
-        pendingWork.Status = RunnerWorkStatus.Running;
-        pendingWork.StartedAt = _timeProvider.GetUtcNow();
-        await PersistAsync();
-
-        return dispatch;
     }
 
     private List<RunnerWork> GetWorks()

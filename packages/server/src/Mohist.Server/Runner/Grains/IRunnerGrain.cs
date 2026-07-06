@@ -11,7 +11,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task HeartbeatAsync();
     Task HeartbeatRepairAsync(RunnerInfo info);
     Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work);
-    Task<WorkDispatch?> PollAsync(IReadOnlySet<InFlightWorkKey>? reportedInFlight = null);
+    Task<WorkDispatch?> PollAsync();
     Task<RunnerWorkReportResult> ReportWorkflowResultAsync(string workflowRunId, string workId, WorkResult result);
     Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result);
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
@@ -97,38 +97,6 @@ public static class WorkDispatchOwnerKinds
 {
     public const string Workflow = "workflow";
     public const string AgentJob = "agent-job";
-}
-
-/// <summary>
-/// Identity of a single in-flight work as reported by the runner process
-/// on each <c>PollAsync</c>. The grain compares its held <c>Running</c>
-/// works against this set: any <c>Running</c> work the process no longer
-/// reports has been lost (process restarted) and is rolled back to
-/// <c>Pending</c> for re-dispatch.
-///
-/// The wire format is the runner process's in-flight map key,
-/// <c>"ownerKind:ownerId:workId"</c>, parsed here. Owner identity is the
-/// workflow run id (workflow) or agent job id (agent-job).
-/// </summary>
-[GenerateSerializer]
-public readonly record struct InFlightWorkKey(
-    [property: Id(0)] string OwnerKind,
-    [property: Id(1)] string OwnerId,
-    [property: Id(2)] string WorkId)
-{
-    public static InFlightWorkKey Parse(string key)
-    {
-        var first = key.IndexOf(':');
-        var last = key.LastIndexOf(':');
-        if (first <= 0 || last <= first || last >= key.Length - 1)
-            throw new ArgumentException($"Malformed in-flight work key '{key}'", nameof(key));
-        return new InFlightWorkKey(
-            key[..first],
-            key[(first + 1)..last],
-            key[(last + 1)..]);
-    }
-
-    public override string ToString() => $"{OwnerKind}:{OwnerId}:{WorkId}";
 }
 
 [GenerateSerializer]

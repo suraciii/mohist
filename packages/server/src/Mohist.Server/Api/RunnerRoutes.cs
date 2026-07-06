@@ -89,26 +89,10 @@ public static class RunnerRoutes
             return ApiResults.Ok(new RunnerSlotsPatchResponse(runnerId, req.Slots));
         });
 
-        group.MapPost("/poll", async (string runnerId, HttpRequest request, IGrainFactory grains) =>
+        group.MapPost("/poll", async (string runnerId, IGrainFactory grains) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-
-            // The runner process reports the works it currently has in
-            // flight (its in-memory map keys) on every poll. The grain
-            // reconciles its held Running works against this set: a held
-            // work absent from the report was lost (process restarted) and
-            // is rolled back to Pending for re-dispatch. Old clients send
-            // no body → null → reconcile skipped (falls back to the
-            // heartbeat-timeout synthesized-FAILURE path).
-            HashSet<InFlightWorkKey>? reported = null;
-            if (request.ContentLength is > 0)
-            {
-                var body = await JsonSerializer.DeserializeAsync<RunnerPollRequest>(request.Body, JSON.Options);
-                if (body?.InFlight is { Length: > 0 } keys)
-                    reported = new HashSet<InFlightWorkKey>(keys.Select(InFlightWorkKey.Parse));
-            }
-
-            var work = await runner.PollAsync(reported);
+            var work = await runner.PollAsync();
             if (work is null) return Results.NoContent();
 
             return Results.Ok(new WorkDispatchResponse(
@@ -531,7 +515,6 @@ public record RunnerRegisterRequest(
     Dictionary<string, string[]>? CoderModelVariants = null);
 public record RunnerSlotsPatchRequest(int Slots);
 public record RunnerSlotsPatchResponse(string RunnerId, int Slots);
-public record RunnerPollRequest(string[]? InFlight = null);
 public record RunnerHeartbeatRequest(
     string[]? Capabilities = null,
     string? ProjectId = null,
