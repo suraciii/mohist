@@ -268,8 +268,41 @@ offer lost (GetNextWork returned, runner crashed before registering)  -> task st
 claim registered, then runner crashes before Claim()  -> runner holds a record for a still-PENDING task; workflow unaffected (task never left PENDING); the orphan record is cleared by the work-completion timeout (synthesized FAILED)
 report lost                      -> runner re-reports; workflow dedups (idempotent)
 work wedged / runaway            -> runner process progress-aware timeout -> reports FAILED
+runner process restarts mid-work -> process loses its in-memory in-flight map; next poll reports nothing held; grain rolls the lost work back to Pending and re-dispatches it from the WorkItem snapshot (no workflow call); see Resume below
 process dies mid-work (heartbeat lost) -> no report; RunnerGrain detects heartbeat loss -> synthesizes FAILED for outstanding works
 ```
+
+### Resume (process restart mid-work)
+
+The runner process is a stateless poller: it holds in-flight works only in
+process memory. When it restarts, that memory is gone. Recovery must detect
+the loss and re-dispatch, without consulting the workflow grain and without
+re-Claiming (the work is still this runner's — workflow-side status is
+Running, the stage lock is still held).
+
+The signal is **set membership**, not time. On every poll the process reports
+the works it currently has in flight (the keys of its in-memory map,
+`ownerKind:ownerId:workId`). The grain rolls back lost work:
+
+```
+held(Running) - reported(in-flight) = lost  ->  roll back to Pending  ->  re-dispatch
+```
+
+This is race-free because the process adds a work to its in-flight map
+synchronously between receiving a dispatch and its next poll. A first
+dispatch can therefore never be mistaken for a loss: the only way a held
+Running work is absent from the report is that the process lost it. No
+wall-clock, no timeout guessing.
+
+Re-dispatch rebuilds the dispatch envelope from the `WorkItem` snapshot
+captured at claim time (workflow) or returns the stored `DispatchSnapshot`
+(agent-job). Both owner kinds share one dequeue path (`Pending → Running`),
+ordered by `CreatedAt` so the oldest undelivered work is re-sent first.
+A first dispatch happens in-band (claim returns the dispatch the same poll);
+`Pending` for workflow works is reached only via loss-and-rollback.
+
+Old clients send no poll body → no reported set → rollback is skipped → the
+heartbeat-timeout synthesized-FAILURE path remains the safety net.
 
 Runner-loss detection must be persistent (Orleans reminder, not a grain timer) and keyed off persisted heartbeat state, so it survives silo restart and still catches a permanently-gone runner.
 
@@ -289,6 +322,6 @@ Before start (no runner): pending is normal; the workflow is claimable and waits
 - WorkItem 快照：runner 在 claim 时把 `WorkItem` 存入 `RunnerWork.WorkItemSnapshot`，report 结果时优先用快照组装 outcome 上下文，不再问 workflow grain 反查 item（`RecoverWorkItemFromActiveWorkAsync` 已删）。快照缺失时降级到 `RecoverWorkItemFromRun`（纯本地持久化 run 读取，仍不问 grain）。
 - `PollWorkAsync` 纯化为只 offer Pending work：删除 `GetActiveWorkForRunner` 重入分支（恢复不再由 workflow 提供）。
 - capacity gate 直接读 workflow 侧 `CountRunningAssignedToAsync`，删除 `RemoveStaleWorkflowWorksAsync` 预清理（容量以 workflow 侧 Running 行为准，不受 runner stale 记录影响）。
+- resume：runner process 在每次 poll 请求体里汇报自己 in-flight 的 work 集合（key 格式 `ownerKind:ownerId:workId`），grain 用 `held(Running) - reported` 算出丢失的 work，回退到 `Pending` 经统一 dequeue 重新派发（workflow 从 `WorkItemSnapshot` 重建 dispatch，agent-job 直返 `DispatchSnapshot`；不 re-Claim）。老 client 不带 body → 跳过 rollback，退化为 heartbeat 超时合成 FAILED。
 
-**未交付**：
-- runner process 重启后 resume execution：正文 Recovery 原则要求「runner grain 仍持有快照，next poll 重新派发，process resume」。当前 poll 协议无状态，runner grain 无法区分「process 仍在执行」与「process 已重启需要重新派发」，故暂不实现 process resume——process 崩溃仍走 heartbeat 超时 → 合成 FAILED 的现有失败路径。实现需要 poll 协议改动（让 process 声明 in-flight）或 heartbeat 中断检测，由后续 issue 推进。
+**未交付**：无（正文目标已全部落地）。
