@@ -148,14 +148,7 @@ function buildStageDuration(): StageDurationMetricsResponse {
 
 function buildQuality(): QualityMetricsResponse {
   return {
-    window7d: {
-      from: '2026-06-23T00:00:00Z',
-      to: '2026-06-30T00:00:00Z',
-      sampleCount: 4,
-      firstTimeRightRate: 0.75,
-      stages: [],
-    },
-    window30d: {
+    window: {
       from: '2026-06-01T00:00:00Z',
       to: '2026-07-01T00:00:00Z',
       sampleCount: 18,
@@ -455,5 +448,130 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     expect(mocks.useQualityMetrics).toHaveBeenLastCalledWith('90d')
     expect(mocks.useCostRollup).toHaveBeenLastCalledWith('90d')
     expect(mocks.useAgentUsage).toHaveBeenLastCalledWith('90d')
+  })
+
+  it('reflects the selected range on every retained chart window indicator', () => {
+    const rangeByCode = {
+      '7d': {
+        stage: { from: '2026-06-23T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00' },
+        cumulative: { rangeFrom: '2026-06-23', rangeTo: '2026-06-30' },
+        ftr: { from: '2026-06-23T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00' },
+        cost: { rangeFrom: '2026-06-23T00:00:00', rangeTo: '2026-06-30T23:59:59' },
+        qualityWindow: { from: '2026-06-23T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00', sampleCount: 5, firstTimeRightRate: 0.8, stages: [] },
+      },
+      '30d': {
+        stage: { from: '2026-06-01T00:00:00+00:00', to: '2026-07-01T00:00:00+00:00' },
+        cumulative: { rangeFrom: '2026-06-01', rangeTo: '2026-06-30' },
+        ftr: { from: '2026-06-01T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00' },
+        cost: { rangeFrom: '2026-06-01T00:00:00', rangeTo: '2026-06-29T23:59:59' },
+        qualityWindow: { from: '2026-06-01T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00', sampleCount: 25, firstTimeRightRate: 0.6, stages: [] },
+      },
+      '90d': {
+        stage: { from: '2026-04-02T00:00:00+00:00', to: '2026-07-01T00:00:00+00:00' },
+        cumulative: { rangeFrom: '2026-04-02', rangeTo: '2026-06-30' },
+        ftr: { from: '2026-04-02T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00' },
+        cost: { rangeFrom: '2026-04-02T00:00:00', rangeTo: '2026-06-30T23:59:59' },
+        qualityWindow: { from: '2026-04-02T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00', sampleCount: 60, firstTimeRightRate: 0.7, stages: [] },
+      },
+    }
+
+    function setupRange(range: '7d' | '30d' | '90d') {
+      const cfg = rangeByCode[range]
+      mocks.useStageDuration.mockReturnValue({
+        data: {
+          window: cfg.stage,
+          stages: [
+            { stage: 'plan', sampleCount: 3, averageSeconds: 1800, medianSeconds: 1500 },
+            { stage: 'build', sampleCount: 3, averageSeconds: 5400, medianSeconds: 4800 },
+          ],
+          flowEfficiencyRatio: 0.6,
+          waitBreakout: { averageApprovalGateWaitSeconds: 600, averageInactiveGapSeconds: 1200 },
+        },
+        isLoading: false,
+        isError: false,
+      })
+      mocks.useCumulativeFlow.mockReturnValue({
+        data: {
+          snapshots: [{ day: cfg.cumulative.rangeTo, backlog: 5, plan: 2, build: 1, check: 0, integrate: 0, done: 3 }],
+          rangeFrom: cfg.cumulative.rangeFrom,
+          rangeTo: cfg.cumulative.rangeTo,
+        },
+        isLoading: false,
+        isError: false,
+      })
+      mocks.useQualityMetrics.mockReturnValue({
+        data: {
+          window: cfg.qualityWindow,
+          trend: {
+            bucket: 'day',
+            from: cfg.ftr.from,
+            to: cfg.ftr.to,
+            points: [{ boundary: cfg.ftr.from, sampleCount: 3, firstTimeRightRate: 0.7, reworkRate: 0.1 }],
+          },
+        },
+        isLoading: false,
+        isError: false,
+      })
+      mocks.useAgentUsage.mockReturnValue({
+        data: {
+          rangeFrom: cfg.cost.rangeFrom,
+          rangeTo: cfg.cost.rangeTo,
+          bucketGranularity: 'day',
+          buckets: [{ bucketStart: cfg.cost.rangeFrom, bucketEnd: cfg.cost.rangeTo, inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 5, costCurrency: 'USD' }],
+          cumulativeCostPerShip: null,
+        },
+        isLoading: false,
+        isError: false,
+      })
+    }
+
+    function renderWithMocks(range: '7d' | '30d' | '90d') {
+      setupRange(range)
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      return render(
+        <QueryClientProvider client={queryClient}>
+          <ProjectProvider initialProjectId="proj-1" initialProjects={[TEST_PROJECT]}>
+            <MemoryRouter initialEntries={['/demo/insights']}>
+              <InsightsCharts range={range} />
+            </MemoryRouter>
+          </ProjectProvider>
+        </QueryClientProvider>,
+      )
+    }
+
+    const { rerender } = renderWithMocks('7d')
+    expect(screen.getByTestId('throughput-chart-window').textContent).toBe('7d')
+    expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('7d')
+    expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jun 23')
+    expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jun 30')
+    expect(screen.getByTestId('cumulative-flow-chart-window').textContent).toContain('Jun 23')
+    expect(screen.getByTestId('cumulative-flow-chart-window').textContent).toContain('Jun 30')
+    expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 23')
+    expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 30')
+    expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Jun 23')
+    expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Jun 30')
+
+    setupRange('90d')
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="proj-1" initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={['/demo/insights']}>
+            <InsightsCharts range="90d" />
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByTestId('throughput-chart-window').textContent).toBe('90d')
+    expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('90d')
+    expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Apr 2')
+    expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jul 1')
+    expect(screen.getByTestId('cumulative-flow-chart-window').textContent).toContain('Apr 2')
+    expect(screen.getByTestId('cumulative-flow-chart-window').textContent).toContain('Jun 30')
+    expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Apr 2')
+    expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 30')
+    expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Apr 2')
+    expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Jun 30')
   })
 })

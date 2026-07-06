@@ -42,8 +42,7 @@ function buildTrendData(): QualityMetricsResponse {
     makePoint('2026-06-07', 2, 1.0, 0.0),
   ]
   return {
-    window7d: makeWindow(10, 0.7),
-    window30d: makeWindow(20, 0.65),
+    window: makeWindow(20, 0.65),
     trend: {
       bucket: 'day',
       from: '2026-06-01T00:00:00+00:00',
@@ -91,8 +90,7 @@ describe('FtrTrendChart', () => {
   it('renders empty state with next action when trend is missing', () => {
     useQualityMetricsMock.mockReturnValue({
       data: {
-        window7d: makeWindow(10, 0.7),
-        window30d: makeWindow(20, 0.65),
+        window: makeWindow(20, 0.65),
       },
       isLoading: false,
       isError: false,
@@ -117,8 +115,7 @@ describe('FtrTrendChart', () => {
     }
     useQualityMetricsMock.mockReturnValue({
       data: {
-        window7d: makeWindow(0, null),
-        window30d: makeWindow(0, null),
+        window: makeWindow(0, null),
         trend: emptyTrend,
       },
       isLoading: false,
@@ -136,8 +133,7 @@ describe('FtrTrendChart', () => {
   it('treats an undefined trend as empty (graceful degradation against older server)', () => {
     useQualityMetricsMock.mockReturnValue({
       data: {
-        window7d: makeWindow(10, 0.7),
-        window30d: makeWindow(20, 0.65),
+        window: makeWindow(20, 0.65),
       } as QualityMetricsResponse,
       isLoading: false,
       isError: false,
@@ -381,8 +377,7 @@ describe('FtrTrendChart', () => {
     }
     useQualityMetricsMock.mockReturnValue({
       data: {
-        window7d: makeWindow(5, 0.8),
-        window30d: makeWindow(5, 0.8),
+        window: makeWindow(5, 0.8),
         trend: noReworkTrend,
       },
       isLoading: false,
@@ -518,8 +513,7 @@ describe('FtrTrendChart', () => {
   it('hides the window badge in the empty state when trend is missing', () => {
     useQualityMetricsMock.mockReturnValue({
       data: {
-        window7d: makeWindow(10, 0.7),
-        window30d: makeWindow(20, 0.65),
+        window: makeWindow(20, 0.65),
       },
       isLoading: false,
       isError: false,

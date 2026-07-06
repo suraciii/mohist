@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { DeliveryTimeMetricsResponse } from '../../../entities/issue'
 
+type RangeCode = '7d' | '30d' | '90d'
+
 const mockUseDeliveryTime = vi.fn()
 vi.mock('../../../entities/issue', () => ({
   useDeliveryTime: () => mockUseDeliveryTime(),
@@ -380,7 +382,59 @@ describe('CycleTimeChart', () => {
 
     render(<CycleTimeChart range="30d" />)
 
-    expect(screen.getByText('Cycle Time')).toBeInTheDocument()
+    expect(screen.getByText('Lead Time')).toBeInTheDocument()
+  })
+
+  it('renders the default lead-lens title aligned with the default lens caliber', () => {
+    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+
+    render(<CycleTimeChart range="30d" />)
+
+    const heading = screen.getByRole('heading', { level: 3, name: 'Lead Time' })
+    expect(heading).toBeInTheDocument()
+
+    expect(screen.getByTestId('cycle-time-lens-lead')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('cycle-time-lens-cycle')).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('updates the card title to match the active lens when switching to cycle', () => {
+    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+
+    render(<CycleTimeChart range="30d" />)
+
+    expect(screen.getByRole('heading', { level: 3, name: 'Lead Time' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
+
+    expect(screen.getByRole('heading', { level: 3, name: 'Cycle Time' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 3, name: 'Lead Time' })).not.toBeInTheDocument()
+  })
+
+  it('restores the lead-lens title when toggling back to lead', () => {
+    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+
+    render(<CycleTimeChart range="30d" />)
+
+    fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
+    expect(screen.getByRole('heading', { level: 3, name: 'Cycle Time' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('cycle-time-lens-lead'))
+    expect(screen.getByRole('heading', { level: 3, name: 'Lead Time' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 3, name: 'Cycle Time' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the section aria-label stable across lens switches (h3 tracks the lens instead)', () => {
+    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+
+    render(<CycleTimeChart range="30d" />)
+
+    expect(screen.getByTestId('cycle-time-chart')).toHaveAttribute('aria-label', 'Cycle Time')
+
+    fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
+    expect(screen.getByTestId('cycle-time-chart')).toHaveAttribute('aria-label', 'Cycle Time')
+
+    fireEvent.click(screen.getByTestId('cycle-time-lens-lead'))
+    expect(screen.getByTestId('cycle-time-chart')).toHaveAttribute('aria-label', 'Cycle Time')
   })
 
   // --- Post-completion edit safety ---
@@ -416,5 +470,31 @@ describe('CycleTimeChart', () => {
 
     expect(screen.getByTestId('cycle-time-chart-window')).toBeInTheDocument()
     expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
+  })
+
+  it.each<RangeCode>(['7d', '90d'])(
+    'renders the window badge with the %s range code under the lead lens',
+    (range) => {
+      mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+
+      render(<CycleTimeChart range={range} />)
+
+      const badge = screen.getByTestId('cycle-time-chart-window')
+      expect(badge).toBeInTheDocument()
+      expect(badge.textContent).toBe(range)
+    },
+  )
+
+  it('updates the window badge when the page range changes', () => {
+    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+
+    const { rerender } = render(<CycleTimeChart range="7d" />)
+    expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('7d')
+
+    rerender(<CycleTimeChart range="30d" />)
+    expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('30d')
+
+    rerender(<CycleTimeChart range="90d" />)
+    expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('90d')
   })
 })
