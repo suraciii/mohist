@@ -1,6 +1,6 @@
 namespace Mohist.Cli;
 
-internal sealed partial class SourceCodeUpdater
+internal partial class SourceCodeUpdater
 {
     private async Task<int> FinalizeAsync(UpdateContext context, int exitCode)
     {

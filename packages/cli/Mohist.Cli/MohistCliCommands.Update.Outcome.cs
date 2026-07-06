@@ -2,7 +2,7 @@ using System.Net.Http.Json;
 
 namespace Mohist.Cli;
 
-internal sealed partial class SourceCodeUpdater
+internal partial class SourceCodeUpdater
 {
     internal async Task<bool> PostCliOutcomeAsync(UpdateContext context, CancellationToken token)
     {
