@@ -22,6 +22,41 @@ export interface ReportResult {
 }
 
 /**
+ * The runner-process reported set is PROCESS-LIFETIME state, not per-poll.
+ * It tracks works the process is executing (`inFlight`) and works whose
+ * result has not yet been acked (`awaitingAck`). Both survive poll
+ * exceptions and connection resets: a poll that throws must not discard
+ * works still executing or awaiting ack, or the next poll's report will
+ * drop them and the server will re-dispatch — a rollback storm that
+ * duplicates execution and eventually fails works as runner-lost.
+ * (design/workflow/scheduling.md §Poll Reconciliation — Implementation
+ * constraint.)
+ */
+interface InFlightEntry {
+  /** The execution promise; resolves when the work settles (success or failure). */
+  done: Promise<void>
+}
+
+interface AwaitingAckEntry {
+  /** The result to (re-)report until the owner acks (Accepted or Stale). */
+  result: WorkItemResult
+  /** Monotonic attempt count, drives exponential backoff. */
+  attempts: number
+}
+
+/**
+ * Builds the work key used to dedupe in-flight / awaiting-ack tracking.
+ * `ownerKind:ownerId:workId`. The ownerId is the agentJobId for agent-job
+ * work, the workflowRunId for workflow work. Matches the server-side
+ * `workKey` convention (design/workflow/scheduling.md §Interfaces).
+ */
+function workKey(work: RenderedWorkItem): string {
+  const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
+  const ownerId = ownerKind === "agent-job" ? (work.agentJobId ?? "") : work.workflowRunId
+  return `${ownerKind}:${ownerId}:${work.workId}`
+}
+
+/**
  * Resolves the runner's build git hash from the on-disk build manifest.
  * Returns `null` when the manifest is missing or unreadable (treated as
  * unknown-identity, non-fatal).
@@ -56,6 +91,14 @@ export class RunnerHost {
   private sessionManager: AcpSessionManager = new AcpSessionManager()
   private sharedAcpConnection: SharedAcpConnection | null = null
   private workExecutor: WorkExecutor | null = null
+
+  // Process-lifetime reported set (see workKey/InFlightEntry doc above).
+  // These Maps outlive poll exceptions and reconnects: a work enters
+  // inFlight on dispatch, moves to awaitingAck when its result is ready,
+  // and leaves awaitingAck only when the owner acks (Accepted or Stale).
+  // The keys of both Maps together form the process's full poll report.
+  private readonly inFlight = new Map<string, InFlightEntry>()
+  private readonly awaitingAck = new Map<string, { work: RenderedWorkItem; entry: AwaitingAckEntry }>()
 
   constructor(private readonly options: RunnerOptions) {
     this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
@@ -253,42 +296,148 @@ export class RunnerHost {
   }
 
   private async runWorkerPool(signal: AbortSignal) {
-    const inFlight = new Map<string, Promise<void>>()
+    // The reported set (inFlight ∪ awaitingAck) is process-lifetime state
+    // declared on the host instance, so it survives poll exceptions and
+    // reconnects. The awaitingAck retry loop runs alongside the poll loop
+    // for the pool's whole lifetime; both are torn down together.
+    const retryLoop = this.runAwaitingAckRetryLoop(signal)
 
-    while (!signal.aborted) {
+    try {
       while (!signal.aborted) {
-        const work = await this.connection.poll(signal)
-        if (!work) break
+        // Inner poll-and-execute: pull dispatches until the server returns
+        // no work, executing each concurrently.
+        while (!signal.aborted) {
+          const work = await this.connection.poll(signal, this.pollReport())
+          if (!work) break
 
-        // In-flight key uses ownerKind + owner identity + workId so that
-        // an agent-job (workflowRunId = "") and a workflow can never
-        // collide on the same key, even if their workIds happened to match.
-        const ownerId = work.ownerKind === "agent-job"
-          ? (work.agentJobId ?? "")
-          : work.workflowRunId
-        const key = `${work.ownerKind ?? "workflow"}:${ownerId}:${work.workId}`
-        const run = this.executeAndReport(work, signal)
-          .catch((error) => {
-            console.error(`work ${work.workId} failed before report:`, error)
-          })
-          .finally(() => {
-            inFlight.delete(key)
-          })
-        inFlight.set(key, run)
+          const key = workKey(work)
+          // Re-delivery is the normal recovery path under at-least-once:
+          // skip a work the process already holds (inFlight or awaitingAck)
+          // rather than execute it twice. The server may re-dispatch a
+          // Running work it thinks we lost; if we still have it, we know
+          // better.
+          if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
+
+          const done = this.executeAndTransition(work, signal, key)
+          this.inFlight.set(key, { done })
+        }
+
+        if (this.inFlight.size === 0) {
+          await delay(this.options.pollIntervalMs, signal)
+          continue
+        }
+
+        await Promise.race([
+          delay(this.options.pollIntervalMs, signal),
+          ...[...this.inFlight.values()].map((e) => e.done),
+        ])
       }
 
-      if (inFlight.size === 0) {
-        await delay(this.options.pollIntervalMs, signal)
-        continue
-      }
+      // Drain in-flight executions on abort so the awaitingAck set is
+      // populated for any final best-effort drain.
+      await Promise.allSettled([...this.inFlight.values()].map((e) => e.done))
+    } finally {
+      await retryLoop
+    }
+  }
 
-      await Promise.race([
-        delay(this.options.pollIntervalMs, signal),
-        ...inFlight.values(),
-      ])
+  /**
+   * The process's full level state, sent in every poll body so the server
+   * can reconcile (Batch 2). In Batch 1 the server ignores the body; the
+   * value of sending it now is that the reported set is correct the moment
+   * the server starts consuming it, with no second runner-side change.
+   */
+  private pollReport(): { inFlight: string[]; awaitingAck: string[] } {
+    return {
+      inFlight: [...this.inFlight.keys()],
+      awaitingAck: [...this.awaitingAck.keys()],
+    }
+  }
+
+  /**
+   * Executes a work item to completion and transitions it through the
+   * reported-set lifecycle: inFlight (executing) → awaitingAck (result
+   * ready, not yet acked). The first report attempt is made here; a
+   * transport failure leaves the entry in awaitingAck for the retry loop.
+   * `signal` is the run-lifetime signal; reporting uses a fresh signal so
+   * a host teardown (SIGINT) still reaches the owner instead of aborting.
+   */
+  private async executeAndTransition(
+    work: RenderedWorkItem,
+    signal: AbortSignal,
+    key: string,
+  ): Promise<void> {
+    let result: WorkItemResult
+    try {
+      result = await this.executeWork(work, signal)
+    } catch (error) {
+      if (signal.aborted) return
+      console.error(`work ${work.workId} failed before report:`, error)
+      result = { status: "failed", message: String(error) }
     }
 
-    await Promise.allSettled(inFlight.values())
+    // Move to awaitingAck regardless of outcome. A transport failure on
+    // the first attempt is retried by the retry loop; the result is the
+    // final verdict (success or the failure captured above).
+    this.inFlight.delete(key)
+    this.awaitingAck.set(key, { work, entry: { result, attempts: 0 } })
+
+    try {
+      await this.reportOnce(key)
+    } catch (error) {
+      // First attempt failed; the retry loop owns subsequent attempts.
+      console.warn(`first report for work ${work.workId} failed; will retry`, error)
+    }
+  }
+
+  /**
+   * Reports a single awaitingAck entry. On ack (any non-throwing response
+   * from the owner — Accepted or Stale are both acks), removes the entry.
+   * Throws on transport failure so the caller (retry loop) can schedule
+   * the next attempt.
+   */
+  private async reportOnce(key: string): Promise<void> {
+    const held = this.awaitingAck.get(key)
+    if (!held) return
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS)
+    timeout.unref?.()
+    held.entry.attempts += 1
+    try {
+      await this.connection.report(held.work, held.entry.result, controller.signal)
+    } finally {
+      clearTimeout(timeout)
+    }
+    // Accepted or Stale both terminate the retry (the owner acked). Any
+    // other response shape from the legacy compat endpoint is also
+    // treated as an ack: the result is delivered, do not re-report.
+    this.awaitingAck.delete(key)
+  }
+
+  /**
+   * Periodically retries awaitingAck entries whose report transport has
+   * failed. Runs for the lifetime of the worker pool. The loop cadence is
+   * the retry interval — every tick re-attempts every outstanding entry.
+   * Fake-timer-friendly: the loop is driven by this delay, not a wall-clock
+   * deadline, so tests can drive it deterministically.
+   */
+  private async runAwaitingAckRetryLoop(signal: AbortSignal): Promise<void> {
+    while (!signal.aborted) {
+      await delay(AWAITING_ACK_RETRY_INTERVAL_MS, signal)
+      if (signal.aborted) break
+      // Snapshot keys to avoid mutation-during-iteration when reportOnce
+      // deletes a successful entry.
+      for (const key of [...this.awaitingAck.keys()]) {
+        if (signal.aborted) break
+        const held = this.awaitingAck.get(key)
+        if (!held) continue
+        try {
+          await this.reportOnce(key)
+        } catch (error) {
+          console.warn(`retry report for work ${held.work.workId} failed (attempt ${held.entry.attempts})`, error)
+        }
+      }
+    }
   }
 
   private async shutdownConnection() {
@@ -305,29 +454,19 @@ export class RunnerHost {
     }
   }
 
-  private async executeAndReport(work: RenderedWorkItem, signal: AbortSignal) {
-    // Capture the last known result for a best-effort drain report when the
-    // host is being torn down (SIGINT). Using a fresh AbortSignal (with a
-    // short timeout) gives the workflow an explicit runner report instead of
-    // leaving it waiting for a result which may never arrive.
-    let lastResult: WorkItemResult | undefined
-    let lastError: unknown
-    const reportDrain = async (status: "failed", message: string) => {
-      const drainController = new AbortController()
-      const drainTimeout = setTimeout(() => drainController.abort(), 2000)
-      try {
-        await this.connection.report(
-          work,
-          { status, message },
-          drainController.signal,
-        )
-      } catch (drainError) {
-        console.error("drain report failed for work", work.workId, drainError)
-      } finally {
-        clearTimeout(drainTimeout)
-      }
-    }
-
+  /**
+   * Executes a single work item to completion, flushing its task log, and
+   * returns the resulting {@link WorkItemResult}. Does NOT report — the
+   * caller ({@link executeAndTransition}) owns the report lifecycle and
+   * the awaitingAck transition so a transport failure is retried rather
+   * than lost. Throws on execution failure (including abort); the caller
+   * synthesises a `{ status: "failed" }` result from the thrown error.
+   *
+   * `signal` is the run-lifetime signal; on abort the work is abandoned
+   * (re-thrown) without a synthesized result — the caller checks
+   * `signal.aborted` before recording a failure.
+   */
+  private async executeWork(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
     // Owner-id mirrors `artifact-side-effects.ts:107`: agent-job
     // dispatches upload under `work.agentJobId`, workflow dispatches
     // under `work.workflowRunId`. Routing through a single uploadTaskLog
@@ -434,33 +573,24 @@ export class RunnerHost {
         sessionManager,
         null,
       )
+      const fallback = await createSharedAcpConnection(process.cwd())
       try {
-        const workspacePath = typeof work.variables?.workspace === "object" && work.variables.workspace !== null ? (work.variables.workspace as Record<string, unknown>).path : undefined
-        const fallback = await createSharedAcpConnection(typeof workspacePath === "string" ? workspacePath : process.cwd())
         executor.updateAcpConnection(fallback)
         const collector = new TaskLogCollector()
         const flushTrigger = startIncrementalFlushForCollector(collector)
         try {
           const execution = await executor.executeWithLog(work, signal, collector)
-          lastResult = execution.result
           execution.collector.setAppendListener(null)
           await flushTrigger.stop()
           await flushTaskLog(execution.collector)
-          await this.connection.report(work, lastResult, signal)
+          return execution.result
         } finally {
           collector.setAppendListener(null)
           await flushTrigger.stop()
-          await fallback.shutdown()
         }
-      } catch (error) {
-        lastError = error
-        if (signal.aborted) return
-        console.error("ephemeral ACP path failed for work", work.workId, error)
-        await this.connection.report(work, { status: "failed", message: String(error) }, signal).catch(async () => {
-          await reportDrain("failed", String(error))
-        })
+      } finally {
+        await fallback.shutdown()
       }
-      return
     }
 
     // Start the incremental flush trigger alongside executeWithLog and
@@ -482,7 +612,6 @@ export class RunnerHost {
     const flushTrigger = startIncrementalFlushForCollector(collector)
     try {
       const execution = await this.workExecutor.executeWithLog(work, signal, collector)
-      lastResult = execution.result
       // Detach the listener before stopping the timer so a stale
       // tick can never re-fire against a collector that the executor
       // has handed back to us for terminal flushing.
@@ -491,21 +620,13 @@ export class RunnerHost {
       // in-flight incremental upload to settle so terminal
       // reconciliation cannot overlap it.
       await flushTrigger.stop()
-      if (signal.aborted) return
-      // Flush BEFORE the report so the report carries the verdict while
-      // the (best-effort) upload runs in parallel with the verdict
+      if (signal.aborted) return execution.result
+      // Flush BEFORE the caller reports so the report carries the verdict
+      // while the (best-effort) upload runs in parallel with the verdict
       // round-trip. Errors are logged and swallowed — they never block
-      // or fail the report (design D6).
+      // or fail the result (design D6).
       await flushTaskLog(execution.collector)
-      await this.connection.report(work, lastResult, signal)
-    } catch (error) {
-      await flushTrigger.stop()
-      lastError = error
-      if (signal.aborted) return
-      console.error("executor failed for work", work.workId, error)
-      await this.connection.report(work, { status: "failed", message: String(error) }, signal).catch(async () => {
-        await reportDrain("failed", String(error))
-      })
+      return execution.result
     } finally {
       collector.setAppendListener(null)
       await flushTrigger.stop()
@@ -542,6 +663,23 @@ export class RunnerHost {
     }
   }
 }
+
+/**
+ * Timeout for a single report HTTP attempt. A report that does not
+ * complete within this window is aborted and retried by the awaitingAck
+ * loop. Long enough to absorb a slow owner under load, short enough that
+ * a wedged connection is retried rather than hung.
+ */
+const REPORT_TIMEOUT_MS = 10_000
+
+/**
+ * Polling interval for the awaitingAck retry loop. Each tick re-attempts
+ * every awaitingAck entry whose report transport previously failed. The
+ * loop cadence is the bound on how long a failed report waits before its
+ * next attempt. Fake-timer-friendly: driven by this delay, not a wall-clock
+ * deadline.
+ */
+const AWAITING_ACK_RETRY_INTERVAL_MS = 5_000
 
 const TASK_LOG_UPLOAD_TIMEOUT_MS = 250
 

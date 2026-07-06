@@ -313,18 +313,24 @@ skipped for them and presence-loss closeout remains the only safety net.
 
 ## 实装差距
 
-正文描述目标设计（对账模型）。当前实现是前一代边沿触发协议，差距由 epic #44「调度链路设计收敛」跟踪推进。
+正文描述目标设计（对账模型）。当前实现是前一代边沿触发协议，差距由 epic #44「调度链路设计收敛」跟踪推进，分两批落地。
 
-**现状机制（将被目标取代）**：
+**已落地（Batch 1 — runner 进程状态层）**：
+
+- runner 进程的 reported set（`inFlight ∪ awaitingAck`）已提升为进程生命期状态（`RunnerHost` 实例字段），跨 poll 异常与连接重置存活——这是 rollback-storm 根因的修复（见上「Implementation constraint — the reported set is process-lifetime state」）。
+- poll 已携带 body `{ inFlight: [workKey...], awaitingAck: [workKey...] }`；服务端 `/poll` 当前接受但忽略该 body（兼容入口），`desired − reported` 对账在 Batch 2 落地。
+- awaitingAck at-least-once：执行完成的结果进入 awaitingAck，report 传输失败时按重试循环周期重试，`Accepted` 与 `Stale` 都终止重试。不再把传输失败降级为 `failed` 业务结果。
+- 公平性查询列已就位：`WorkflowRun.ReadySince` + `WorkflowRunRow.ReadySince` 计算列 + `IX_WorkflowRuns_Status_ReadySince` 索引 + `FindAssignedToAsync` 已改为 `ORDER BY ReadySince ASC`。
+
+**仍待落地（Batch 2 — 服务端对账主体）**：
 
 - offer/claim 两阶段（`PollWorkAsync` + `ClaimAsync`）+ runner 侧 claim 前预登记与回滚 → 目标合并为 `ClaimNextAsync` 单次写。
 - RunnerGrain 双台账（grain persisted `_worksState` + `RunnerWorkStore` ledger）与 `WorkItemSnapshot`/dispatch 快照，以及 Hydrate / Reconfirm / orphan-drop 恢复分支 → 目标删除，run 即台账、dispatch 从 run 重渲染（现有降级路径 `RecoverWorkItemFromRun` 转正）。
-- 丢失恢复走 `RollbackLostWorkAsync`（回退 Pending）+ `DequeuePendingWorkAsync`（重派队列）双路径 → 目标统一为 `desired − reported` diff。
-- report 经 RunnerGrain 中继并记账；传输失败会被降级为 `failed` 业务结果，且 work 过早移出 in-flight 汇报（重复执行风险） → 目标 report 直达属主、awaitingAck at-least-once（issue #393）。
+- 服务端 `/poll` 消费 reported set 做 `desired − reported` diff → 新建 stateless `DispatchService` 统一补派 + 新 claim，runner 侧不再走 offer/claim。
+- report 经 RunnerGrain 中继并记账 → 目标直达属主（runner 已实现 awaitingAck；服务端 report 路由直达属主为 Batch 2，issue #393）。
 - 服务端 `WorkCompletionTimeout`（30 分钟墙钟 reminder）合成失败 → 目标删除，work 级 liveness 即 poll 汇报，兜底只剩 presence 关账。
 - presence 由 HTTP heartbeat + 每次 poll `TouchPresenceAsync`（每 poll 空写全局 registry）双通道维持 → 目标 poll 即心跳、registry 仅写变更。
-- 轮转公平性缺失：assigned 发现按 `WorkflowRunId` 字典序 → 目标 `ReadySince ASC`（需要状态迁移时间戳列）。
-- 每 poll 至多一个 dispatch → 目标一次 poll 可携带补派 + 新 claim 多个 dispatch。
+- 每 poll 至多一个 dispatch → 目标一次 poll 可携带补派 + 新 claim 多个 dispatch（runner 侧 `poll` 返回类型从单 `WorkDispatch` 改为 `{ dispatches: [...] }` 在 Batch 2）。
 
 **保持不变、无差距**：pull-only 交付、Assignment 唯一真相与 sticky 语义、claimable 的数据性质、stage lock 在 claim 时获取、WorkflowGrain 无 timer 不感知 runner、监督分层（进程管进度、控制平面只管存亡）。
 

@@ -101,7 +101,7 @@ public static partial class WorkflowRunExtensions
             if (current.Initialized)
                 current.Status = StageRunStatus.Running;
 
-            run.Status = ActiveOrWaitingForDispatchStatus(run);
+            ApplyActiveOrWaitingForDispatchStatus(run);
             return tasks.Count > 0 ? [new WorkflowRunResumed()] : [];
         }
 

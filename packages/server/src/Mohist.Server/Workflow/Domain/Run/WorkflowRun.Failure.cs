@@ -45,13 +45,13 @@ public static partial class WorkflowRunExtensions
 
                     current.RetryFailedTask(taskId);
                     run.Failure = null;
-                    run.Status = WaitingForDispatchStatus(run);
+                    ApplyWaitingForDispatchStatus(run);
                     return [new WorkflowRunResumed()];
                 }
                 case FailureReason.CheckUnrepaired:
                     current.RetryFailedCheck(current.Failure.CheckName);
                     run.Failure = null;
-                    run.Status = WaitingForDispatchStatus(run);
+                    ApplyWaitingForDispatchStatus(run);
                     return [new WorkflowRunResumed()];
                 case FailureReason.ContextExhaustion:
                     throw new InvalidOperationException($"Stage {current.Id} failure is context exhaustion; use compact or reset on the session before retrying");
@@ -131,7 +131,7 @@ public static partial class WorkflowRunExtensions
             };
             run.Stages[stageIdx] = newStage;
             run.Failure = null;
-            run.Status = WaitingForDispatchStatus(run);
+            ApplyWaitingForDispatchStatus(run);
             return [
                 new WorkflowRunResumed(),
                 new StageStarted(newStage.Id)
@@ -201,7 +201,7 @@ public static partial class WorkflowRunExtensions
 
             run.CurrentStageId = run.Stages[targetIdx].Id;
             run.Failure = null;
-            run.Status = WaitingForDispatchStatus(run);
+            ApplyWaitingForDispatchStatus(run);
 
             return [
                 new WorkflowRunResumed(),

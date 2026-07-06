@@ -22,6 +22,19 @@ public class WorkflowRunRow
     public string? AssignedRunnerId { get; set; }
 
     /// <summary>
+    /// VIRTUAL computed column projecting the persisted
+    /// <c>State.readySince</c> fairness ordering key (when the run last
+    /// (re-)entered Ready). Non-stored: the scheduler reads it only to ORDER
+    /// Ready runs round-robin (<c>ReadySince ASC</c>), never to filter. The
+    /// matching <c>IX_WorkflowRuns_Status_ReadySince</c> covering index is
+    /// declared in <c>MohistDbContext</c>. Typed as <see cref="DateTime"/> to
+    /// match <see cref="CreatedAt"/> — the SQLite EF provider cannot translate
+    /// <c>ORDER BY</c> over <c>DateTimeOffset</c>, only <c>DateTime</c>.
+    /// </summary>
+    [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
+    public DateTime? ReadySince { get; set; }
+
+    /// <summary>
     /// Issue-318 D3: STORED computed column mirroring the persisted
     /// <c>State.status</c> enum value, normalized to lowercase so the
     /// scheduler can filter on <c>status</c> at the database layer

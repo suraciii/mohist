@@ -23,8 +23,27 @@ export class ServerConnection {
     await this.post("unregister", undefined, signal)
   }
 
-  async poll(signal: AbortSignal): Promise<RenderedWorkItem | null> {
-    const response = await fetch(this.url("poll"), { method: "POST", signal })
+  /**
+   * Polls the server for the next dispatch. The body carries the process's
+   * full level state (`inFlight` + `awaitingAck` work keys) so the server
+   * can reconcile (Batch 2: desired − reported). In Batch 1 the server
+   * ignores the body; sending it now means the reported set is correct the
+   * moment the server starts consuming it, with no second runner change.
+   *
+   * Returns the single dispatched work item, or `null` when the server has
+   * nothing to hand over (HTTP 204). Multi-dispatch (`{ dispatches: [...] }`)
+   * is a Batch 2 server change; the runner will adapt then.
+   */
+  async poll(
+    signal: AbortSignal,
+    report: { inFlight: string[]; awaitingAck: string[] } = { inFlight: [], awaitingAck: [] },
+  ): Promise<RenderedWorkItem | null> {
+    const response = await fetch(this.url("poll"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(report),
+      signal,
+    })
     if (response.status === 204) return null
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
     const dispatch = (await response.json()) as WorkDispatchResponse

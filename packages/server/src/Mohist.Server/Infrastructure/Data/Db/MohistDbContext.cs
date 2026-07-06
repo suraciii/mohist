@@ -414,6 +414,13 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("json_extract(State, '$.metadata.createdAt')", stored: false);
             entity.Property(e => e.AssignedRunnerId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", stored: false);
+            // Fairness ordering key: when the run last (re-)entered Ready.
+            // VIRTUAL (non-stored) — read only to ORDER Ready runs
+            // round-robin (ReadySince ASC), never filtered on. JSON path is
+            // camelCase (Orleans JSON serialization). The COALESCE guards a
+            // PascalCase historical/projection path.
+            entity.Property(e => e.ReadySince)
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.readySince'), json_extract(State, '$.ReadySince'))", stored: false);
             // Issue-318 D3: STORED status computed column. Mirrors the
             // COALESCE path-robustness pattern used by IssueRow.ProjectId /
             // AgentRow.Status; LOWER normalizes the camelCase enum value
@@ -433,6 +440,12 @@ public class MohistDbContext : DbContext
             // status index is implied by EF through the column projection.
             entity.HasIndex(e => new { e.Status, e.AssignedRunnerId })
                 .HasDatabaseName("IX_WorkflowRuns_Status");
+            // Fairness: the scheduler serves Ready runs assigned to a runner in
+            // ReadySince ASC order. Composite covering index matches the filter
+            // (Status, AssignedRunnerId) plus the ordering key (ReadySince) so
+            // the round-robin scan is index-only.
+            entity.HasIndex(e => new { e.Status, e.AssignedRunnerId, e.ReadySince })
+                .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");
         });
 
         modelBuilder.Entity<WorkflowVariablesRow>(entity =>

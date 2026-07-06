@@ -122,11 +122,41 @@ public static class GrainTestConfig
         {
         }
 
+        // Epic #44: ReadySince VIRTUAL generated column (fairness ordering
+        // key). Fixtures that pre-create the schema without the migration
+        // (EnsureCreated path, or raw DDL) do not materialize it, so add it
+        // here idempotently. VIRTUAL so it is computed on read; the catch
+        // swallows the "duplicate column" / "generated column" errors a
+        // migration-built DB raises.
+        try
+        {
+            db.Database.ExecuteSqlRaw("""
+                ALTER TABLE "WorkflowRuns"
+                ADD COLUMN "ReadySince" TEXT NULL
+                GENERATED ALWAYS AS (COALESCE(json_extract("State", '$.readySince'), json_extract("State", '$.ReadySince'))) VIRTUAL;
+                """);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex) when (
+            ex.Message.Contains("duplicate column name", StringComparison.Ordinal)
+            || ex.Message.Contains("generated column", StringComparison.Ordinal))
+        {
+        }
+
         // The IX_WorkflowRuns_Status index is unconditional and
         // idempotent — CREATE INDEX IF NOT EXISTS skips the second
         // create on a T-004 DB.
         db.Database.ExecuteSqlRaw("""
             CREATE INDEX IF NOT EXISTS "IX_WorkflowRuns_Status" ON "WorkflowRuns" ("Status", "AssignedRunnerId");
+            """);
+
+        // Epic #44: fairness covering index for FindAssignedToAsync's
+        // ReadySince ASC round-robin. Idempotent; the column itself is
+        // declared in the DbContext model so EnsureCreated already
+        // materializes it — this only closes the gap for fixtures that
+        // pre-created the schema before this index existed.
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS "IX_WorkflowRuns_Status_ReadySince"
+            ON "WorkflowRuns" ("Status", "AssignedRunnerId", "ReadySince");
             """);
     }
 

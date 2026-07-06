@@ -89,6 +89,15 @@ public static class RunnerRoutes
             return ApiResults.Ok(new RunnerSlotsPatchResponse(runnerId, req.Slots));
         });
 
+        // Batch 1 compat: the runner now sends its process-lifetime reported
+        // set ({ inFlight, awaitingAck }) in the poll body. The server accepts
+        // and currently ignores it — reconciliation (desired − reported) is a
+        // Batch 2 change (DispatchService). Accepting the body now means the
+        // new runner and the current server coexist during a rolling update
+        // with no behavior change; the moment Batch 2 lands, the reported set
+        // is already correct on the wire. An empty/absent body (old runner)
+        // is tolerated. ASP.NET minimal APIs do not require a body parameter
+        // to be bound — an unbound request body is simply not read.
         group.MapPost("/poll", async (string runnerId, IGrainFactory grains) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);

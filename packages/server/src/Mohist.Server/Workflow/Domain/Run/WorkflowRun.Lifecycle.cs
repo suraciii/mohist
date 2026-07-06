@@ -93,9 +93,9 @@ public static partial class WorkflowRunExtensions
             if (current.Status == StageRunStatus.Pending)
                 current.Status = StageRunStatus.Running;
 
-            run.Status = wasPaused
+            SetStatus(run, wasPaused
                 ? ActiveOrWaitingForDispatchStatus(run)
-                : WorkflowRunStatus.Pending;
+                : WorkflowRunStatus.Pending);
             run.StartedAt ??= DateTimeOffset.UtcNow;
             return wasPaused
                 ? [new WorkflowRunResumed()]
@@ -119,7 +119,7 @@ public static partial class WorkflowRunExtensions
             if (current.Status == StageRunStatus.Pending)
                 current.Status = StageRunStatus.Running;
 
-            run.Status = ActiveOrWaitingForDispatchStatus(run);
+            ApplyActiveOrWaitingForDispatchStatus(run);
             return [new WorkflowRunResumed()];
         }
 
