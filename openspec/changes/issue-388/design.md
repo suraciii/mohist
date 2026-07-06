@@ -70,7 +70,11 @@ issue-387 的 `CliRootCommandShapeSpecs.cs` 已建立"删路径"的标准验证�
 - **被删路径守卫**：`mo server install` / `mo server update` / `mo runner install` 三条，各一例，断言解析失败 + 非零退出 + installer/updater 未被调用。installer 是否被调用通过 fake（`Support/FakeServiceInstaller.cs` 已存在）观测；updater 通过断言无 HTTP 请求 / 无命令执行观测。
 - **`mo runner update` 不变量守卫**（D3）：同形一例。
 - **动词根行为不变守卫**：`mo install server/runner`、`mo update server/runner` 各保留/新增一例，断言仍命中同一个 installer/updater 方法（用 fake 记录调用参数）。
-- **现存正向 help 断言翻转**：`CliRunnerCommandSpecs.RunnerHelp_ListsListSubcommand`（行 61）当前断言 `Assert.Contains("install", stdout)`——合并后须改为 `DoesNotContain`，否则会编译过但测试红。这是本 issue 最容易遗漏的回归点。
+- **现存正向 help 断言翻转**：`CliRunnerCommandSpecs` 当前有**两处** `Assert.Contains("install", stdout)` 断言跑 `mo runner --help`，合并后都须改为 `DoesNotContain`，否则会编译过但测试红。这是本 issue 最容易遗漏的回归点：
+  - `RunnerHelp_ListsListSubcommand`（行 61）
+  - `RunnerShow_HelpText_ListsShowAndExistingSubcommands`（行 665）
+  
+  两处都断言 `mo runner --help` 广告 `install`，合并后 `install` 不再被广告，故两处都必须翻转。
 - **资源组子命令存活守卫**：`mo server --help` / `mo runner --help` 断言非装机子命令仍被广告、install/update 不被广告（install/update-single-entry spec 已列）。
 
 **Alternative considered:** 只跑 `--help` 文本断言，不跑被删路径的解析失败用例。否决——help 文本是可发现性信号，但"调用被删路径不产生副作用"是契约的核心，必须有用例钉死（与 issue-387 同标准）。
@@ -90,7 +94,7 @@ issue-387 的 `CliRootCommandShapeSpecs.cs` 已建立"删路径"的标准验证�
 
 - **[破坏使用被删路径的脚本/CI/SSH 会话]** → release/changelog 提示迁移到动词根 `mo install <组件>` / `mo update <组件>`。无数据/状态副作用（删除发生在命令注册层，被删路径调用即解析失败，不会留下半完成的装机/升级），破坏是"命令找不到"而非"行为异常"，用户侧诊断成本低。
 - **[遗漏对被删私有方法的引用]** → `TreatWarningsAsErrors` + 编译失败兜底；私有方法 `BuildInstall` / `BuildUpdate` 仅在各自 `Build` 内被引用，无外部消费者。
-- **[正向 help 断言翻转遗漏（D4）]** → `CliRunnerCommandSpecs` 现有断言 `Contains("install")` 在合并后会红；这是强制信号而非静默回归。实现时须主动改为 `DoesNotContain`。
+- **[正向 help 断言翻转遗漏（D4）]** → `CliRunnerCommandSpecs` 现有两处 `Contains("install")` 断言（行 61、行 665）在合并后会红；这是强制信号而非静默回归。实现时须主动把两处都改为 `DoesNotContain`。
 - **[`mo runner update` 未来被误加回]** → D3 的显式不变量守卫会在 CI 第一时间报红。
 - **[文档与代码漂移]** → `CliReferenceDocsSpecs` 的 forbidden-legacy-row 守卫会阻止差距行/迁移提示/资源段装机行残留。
 
