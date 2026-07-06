@@ -65,3 +65,68 @@ issue-391 progress notes (working memory — appended as work proceeds)
 - The `AgentJobInput` contract — `AgentInstructions: agent.Instructions, AgentConfig: agent.AgentConfig?.Clone()` — preserves the two-layer prompt composition (Agent identity + rendered ResponsePrompt → `Prompt`).
 - The subscription's `Rendered ResponsePrompt` replaces the manual `prompt`; everything else (workspace path, project id, session metadata) is identical. The session metadata carries the two trigger labels; manual launches do not.
 
+## T-002 — AgentSubscription 聚合 + Store + CRUD API
+
+**Outcome**: Done. All 4093 server tests pass; new `AgentSubscriptionStoreSpecs` (20 unit tests) + `AgentSubscriptionRoutesSpecs` (27 integration tests) all green; `dotnet test Mohist.sln` green.
+
+**Key files**:
+- New `packages/server/src/Mohist.Server/Agent/Domain/AgentSubscription.cs` (the aggregate: `Id/ProjectId/AgentId/Name/Filter{Type,Source?,Subject?}/ResponsePrompt/Priority?/Status/CreatedAt/UpdatedAt` + `SubscriptionStatus` const + `SubscriptionFilter` record).
+- New `packages/server/src/Mohist.Server/Infrastructure/Data/Agent/AgentSubscriptionRow.cs` (EF row — `FilterType/FilterSource/FilterSubject` are flat columns per D2; structured, not a JSON blob).
+- New `packages/server/src/Mohist.Server/Agent/Services/AgentSubscriptionStore.cs` (`IScopedService`; `CreateAsync/GetAsync/ListByAgentAsync/ListByProjectAsync/UpdateAsync/ArchiveAsync/RestoreAsync/DeleteAsync`; raises `AgentSubscriptionNameConflictException` on the unique-name conflict).
+- New `packages/server/src/Mohist.Server/Agent/Services/AgentSubscriptionDto.cs` (wire DTO with nested `AgentSubscriptionFilterDto`).
+- New `packages/server/src/Mohist.Server/Agent/Services/AgentSubscriptionQuerier.cs` (`ToDto` projection; ISO-8601 timestamps like `AgentQuerier.ToInfo`).
+- New `packages/server/src/Mohist.Server/Api/AgentSubscriptionRoutes.cs` (CRUD + `archive`/`restore`; addresses `projects/{projectRef}/agents/{agentRef}/subscriptions`; reuses `AgentRefResolver` and `ProjectResolutionEndpointFilter`).
+- Modified `MohistDbContext.cs` (added `DbSet<AgentSubscriptionRow>`, OnModelCreating block with 3 indexes: `IX_AgentSubscriptions_ProjectId` + `IX_AgentSubscriptions_ProjectId_AgentId` + `UX_AgentSubscriptions_AgentId_Name`).
+- New migration `20260706024335_AddAgentSubscriptionsTable.cs` (+ Designer) — creates the `AgentSubscriptions` table with the three indexes.
+- Modified `MohistApiRegistration.cs` (registered `app.MapAgentSubscriptionRoutes()` next to the Agent launch routes).
+
+**DI wiring**: `AgentSubscriptionStore` is auto-registered as scoped via the existing `IScopedService` convention — no manual line needed in `MohistServiceRegistration.cs` (T-001 already documented this pattern for `AgentLauncher`). `AgentSubscriptionQuerier` is a static class.
+
+**API surface (T-002 scope only)**:
+- `POST   /api/projects/{projectRef}/agents/{agentRef}/subscriptions` → 201 + DTO; 400 on missing required field; 409 `agent_archived` when owning Agent is archived; 409 `subscription_name_conflict` on same-Agent name clash; 404 on missing project/agent.
+- `GET    /api/projects/{projectRef}/agents/{agentRef}/subscriptions` → 200 array of DTOs (active + archived); 404 on missing agent.
+- `GET    /api/projects/{projectRef}/agents/{agentRef}/subscriptions/{subscriptionId}` → 200; 404 on cross-project, cross-agent, or unknown.
+- `PATCH  /api/projects/{projectRef}/agents/{agentRef}/subscriptions/{subscriptionId}` → 200; only fields present in body are touched; `priority: null` clears; 409 on rename clash; bumps `UpdatedAt`.
+- `POST   /api/projects/{projectRef}/agents/{agentRef}/subscriptions/{subscriptionId}/archive` → 200 (idempotent — re-archives return the same row without bumping `UpdatedAt`); 404 on cross-owner.
+- `POST   /api/projects/{projectRef}/agents/{agentRef}/subscriptions/{subscriptionId}/restore` → 200 (idempotent same shape); 404 on cross-owner.
+- `DELETE /api/projects/{projectRef}/agents/{agentRef}/subscriptions/{subscriptionId}` → 200; 404 on cross-owner. Already-running sessions are unaffected (architectural — see T-003 dispatch test plan).
+
+**Filter model — structured sub-fields (per D2)**: stored as three columns (`FilterType`, `FilterSource`, `FilterSubject`). The `Filter.Source`/`Filter.Subject` semantics are exact-match only when non-null; null means "no constraint". The dispatch handler in T-003 will supply the matcher that consumes these columns. The wire DTO ships `Filter.{type, source, subject}` so the Web UI (T-004) and CLI (T-005) can render the constraints without re-parsing.
+
+**Store tests** at `Specs/Agent/Services/AgentSubscriptionStoreSpecs.cs` cover:
+- Persistence of `Id/ProjectId/AgentId/Name/FilterType/FilterSource/Priority/Status` + initial `active` status + `CreatedAt = UpdatedAt`.
+- `priority: null` persistence; required-field rejection at the API layer for missing name/filter.type/responsePrompt.
+- Name-uniqueness within an Agent (409 `subscription_name_conflict`); same name across Agents allowed.
+- Project isolation (`ListByAgentAsync` + `ListByProjectAsync` only return rows matching the requested project).
+- `UpdateAsync` partial mutation (only listed fields touched) + `priority` reset to null + duplicate-name 409 + missing-id null.
+- `ArchiveAsync` / `RestoreAsync` toggling `Status` + bumping `UpdatedAt`; idempotency (re-archive / re-restore returns the row without bumping).
+- `DeleteAsync` row removal + missing-id false + return-on-existence.
+
+**Routes tests** at `Specs/Agent/Api/AgentSubscriptionRoutesSpecs.cs` cover:
+- CRUD happy-path shape (status codes, DTO fields, ISO-8601 timestamps).
+- Required-field validation at the API layer (400 missing name/filter.type/responsePrompt).
+- Filter null-Source/Subject accepted on creation and round-trips through `Get`/`Show`.
+- Archived Agent rejects new subscription with `code = "agent_archived"` and leaves the listing empty.
+- Unknown Agent / unknown Project return 404.
+- Cross-Project / cross-Agent subscription address returns 404 (scoping guarantee from spec).
+- Name-uniqueness 409 leaves the original untouched.
+- Same name on different Agents both persist.
+- `Patch` partial mutation + priority reset to null + duplicate-rename 409 leaves the target untouched.
+- `Archive` / `Restore` toggle status + advance `UpdatedAt`; double-archive is idempotent.
+- `Delete` removes the subscription and leaves a 404 on re-show; siblings + owning Agent `UpdatedAt` are untouched.
+
+**Gotchas / decisions recorded**:
+- **SQLite DateTimeOffset ordering**: `ListByAgentAsync` / `ListByProjectAsync` materialize the candidate set then `OrderByDescending(UpdatedAt).ThenBy(Id, Ordinal)` in memory — SQLite cannot `ORDER BY DateTimeOffset` (same pattern as `InboxQuerier.cs:39-55`). Subscription volume per Agent/Project is small, so this pass is cheap; the `(ProjectId, AgentId)` compound index still narrows the SQL predicate efficiently.
+- **Idempotent status transitions**: `Archive`/`Restore` check the current `Status` and either bump `UpdatedAt` (true transition) or no-op return the row. Spec acceptance requires "identity and fields SHALL be preserved across both transitions" — the idempotency check makes repeated toggles a noop rather than advancing the timestamp spuriously.
+- **`UpdateAsync` field set**: HTTP `PATCH` is bound via a custom `BindAsync` that returns an `IReadOnlySet<string>` of field names that were literally present in the JSON body. This lets the route distinguish "not provided" from "explicitly null". `priority: null` is honoured as a clear-to-default; absence of `priority` keeps the stored value.
+- **Spec endpoint** integrates with the project's `ApiTestClient.GetDataAsync<T>`/`PostDataAsync<T>`/`PatchDataAsync<T>` helpers — same shape as `AgentDefinitionApiSpecs.cs`.
+- **No FK to `Agents` table**: agents are stored as JSON-blob rows (`AgentRow.State`), so a real FK can't be defined. The store enforces ownership by carrying `(ProjectId, AgentId)` and the route layer enforces project/agent scope at lookup time. This matches the existing `Agent` aggregate shape (no schema FK exists for `Project` either).
+- **Status filter payload normalization**: `null`/empty `Source`/`Subject` strings are normalized to `null` at the route layer so the persistence layer can rely on a single representation ("null = no constraint").
+
+## T-002 → T-003 hand-off notes
+
+- T-003 dispatch handler will need to read `subscription.Filter` (Type + nullable Source + nullable Subject) and apply exact-match semantics for Source/Subject against the CloudEvent envelope (`evt.Source`, `evt.Subject`).
+- `AgentSubscriptionStore.ListByProjectAsync(projectId, ct)` returns the full candidate set — T-003 will need to compose with the live Agent status filter (`Status == active`) at dispatch time.
+- The `subs_*` id prefix is reserved for subscription identity. T-003 dispatch handler can pass `subscription.Id` directly as the `trigger-subscription-id` label.
+- `UpdateAsync` writes also need to bump `UpdatedAt` (already implemented). The dispatch handler may want to time-arbitrate on `UpdatedAt` in future (out of scope for T-002).
+

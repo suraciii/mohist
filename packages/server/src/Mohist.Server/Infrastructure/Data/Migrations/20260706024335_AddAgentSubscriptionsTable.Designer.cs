@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -10,9 +11,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(MohistDbContext))]
-    partial class MohistDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260706024335_AddAgentSubscriptionsTable")]
+    partial class AddAgentSubscriptionsTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -1498,11 +1501,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", true);
 
-                    b.Property<DateTime?>("ReadySince")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.readySince'), json_extract(State, '$.ReadySince'))", false);
-
                     b.Property<string>("State")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1520,9 +1518,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("Status", "AssignedRunnerId")
                         .HasDatabaseName("IX_WorkflowRuns_Status");
-
-                    b.HasIndex("Status", "AssignedRunnerId", "ReadySince")
-                        .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");
 
                     b.HasIndex("MetadataProjectId", "AssignedRunnerId", "CreatedAt");
 
