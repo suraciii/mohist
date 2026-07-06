@@ -333,6 +333,12 @@ public static class EpicRoutes
         {
             grainOutcomes = await grain.LinkIssuesAsync(resolvedItems, pid);
         }
+        catch (EpicClosedCannotLinkException ex)
+        {
+            // Per spec: a batch link to a `closed` epic is rejected as a
+            // whole — no per-item outcomes are produced.
+            return ApiResults.Conflict(ex.Message, "EPIC_CLOSED_CANNOT_LINK", new { epicId = ex.EpicId });
+        }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
         {
             return ApiResults.NotFound(ex.Message);

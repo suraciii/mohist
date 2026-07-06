@@ -356,6 +356,44 @@ public class EpicBatchMembershipApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task BatchLink_OnClosedEpic_Returns409EpicClosedCannotLink_NoPerItemOutcomes()
+    {
+        // Spec: 'Batch link to a closed epic is rejected as a whole' —
+        // the request is rejected with 409 EPIC_CLOSED_CANNOT_LINK, no
+        // per-item linked/conflict outcomes are produced, and no link
+        // rows are created.
+        var project = await CreateProjectAsync();
+        var epic = await CreateEpicAsync(project.Id, "closed-batch");
+        var issueA = await CreateIssueAsync(project.Id, "a");
+        var issueB = await CreateIssueAsync(project.Id, "b");
+
+        // Drive the epic into `closed` through the public close route
+        // (no terminal issues required — we just need to flip status).
+        // First link a terminal issue so close doesn't release any
+        // active memberships in flight; the close path itself accepts
+        // any non-terminal epic per design D3.
+        await LinkIssueAsync(project.Id, epic, issueA);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/epics/{epic.Id}/issues:batch",
+            new { issueIds = new[] { issueA.Number.ToString(), issueB.Number.ToString() } });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var raw = await response.Content.ReadAsStringAsync();
+        var envelope = JsonSerializer.Deserialize<JsonElement>(raw);
+        Assert.Equal("EPIC_CLOSED_CANNOT_LINK", envelope.GetProperty("code").GetString());
+
+        // The epic stays closed and no link row was added for the
+        // second issue (the first was already linked before close).
+        var detail = await _client.GetDataAsync<EpicDetailDtoLike>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.Single(detail.LinkedIssues);
+        Assert.Equal(issueA.Id, detail.LinkedIssues[0].Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task SingleLinkEndpoint_RemainsUnchanged_AfterBatchEndpointAdded()
     {
         var project = await CreateProjectAsync();

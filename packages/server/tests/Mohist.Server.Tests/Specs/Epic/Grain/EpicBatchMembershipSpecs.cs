@@ -340,6 +340,229 @@ public class EpicBatchMembershipSpecs
         Assert.Empty(targetLinks);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssuesAsync_DoneEpic_BatchWithOpenIssue_WakesToRunning_Atomically()
+    {
+        // Spec: 'Batch containing at least one open issue wakes a done
+        // epic to running' — the wake-up is persisted atomically with the
+        // successful link(s).
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_target", status: EpicStatusName.Done, number: 1);
+        await SeedIssueAsync(database, issueId: "issue_open", issueNumber: 1, status: IssueStatus.Backlog);
+        await SeedIssueAsync(database, issueId: "issue_open_b", issueNumber: 2, status: IssueStatus.Backlog);
+
+        var grains = new RecordingGrainFactory(database.Factory);
+        var grain = grains.GetEpicGrain($"{ProjectId}:epic_target");
+
+        var outcomes = await grain.LinkIssuesAsync(
+        [
+            new BatchMembershipRequestItem("1", "issue_open", 1),
+            new BatchMembershipRequestItem("2", "issue_open_b", 2),
+        ], ProjectId);
+
+        Assert.Equal(2, outcomes.Count);
+        Assert.All(outcomes, o => Assert.Equal("linked", o.Status));
+
+        await using var verify = database.CreateDbContext();
+        var row = await verify.Epics.AsNoTracking().SingleAsync(e => e.Id == "epic_target");
+        Assert.Equal(EpicStatusName.Running, row.Status);
+        var active = await verify.EpicActiveIssues.AsNoTracking()
+            .Where(a => a.ProjectId == ProjectId && a.EpicId == "epic_target")
+            .ToListAsync();
+        Assert.Equal(2, active.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssuesAsync_DoneEpic_BatchWithOnlyTerminalIssues_StaysDone_NoWake()
+    {
+        // Spec: 'Batch containing only terminal issues leaves a done epic
+        // done' — no wake, no active-membership rows inserted.
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_target", status: EpicStatusName.Done, number: 1);
+        await SeedIssueAsync(database, issueId: "issue_done", issueNumber: 1, status: IssueStatus.Done);
+        await SeedIssueAsync(database, issueId: "issue_cancelled", issueNumber: 2, status: IssueStatus.Cancelled);
+
+        var grain = CreateGrain(database.Factory, $"{ProjectId}:epic_target");
+
+        var outcomes = await grain.LinkIssuesAsync(
+        [
+            new BatchMembershipRequestItem("1", "issue_done", 1),
+            new BatchMembershipRequestItem("2", "issue_cancelled", 2),
+        ], ProjectId);
+
+        Assert.Equal(2, outcomes.Count);
+        Assert.All(outcomes, o => Assert.Equal("linked", o.Status));
+
+        await using var verify = database.CreateDbContext();
+        var row = await verify.Epics.AsNoTracking().SingleAsync(e => e.Id == "epic_target");
+        Assert.Equal(EpicStatusName.Done, row.Status);
+        Assert.Empty(await verify.EpicActiveIssues.AsNoTracking()
+            .Where(a => a.ProjectId == ProjectId && a.EpicId == "epic_target")
+            .ToListAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssuesAsync_ClosedEpic_ThrowsEpicClosedCannotLinkException_NoRowsCreated()
+    {
+        // Spec: 'Batch link to a closed epic is rejected as a whole' —
+        // the domain throws before the loop, no per-item outcomes are
+        // produced and no link rows are created.
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_target", status: EpicStatusName.Closed, number: 1);
+        await SeedIssueAsync(database, issueId: "issue_open", issueNumber: 1, status: IssueStatus.Backlog);
+        await SeedIssueAsync(database, issueId: "issue_open_b", issueNumber: 2, status: IssueStatus.Backlog);
+
+        var grain = CreateGrain(database.Factory, $"{ProjectId}:epic_target");
+
+        var ex = await Assert.ThrowsAsync<EpicClosedCannotLinkException>(
+            () => grain.LinkIssuesAsync(
+            [
+                new BatchMembershipRequestItem("1", "issue_open", 1),
+                new BatchMembershipRequestItem("2", "issue_open_b", 2),
+            ], ProjectId));
+        Assert.Equal("epic_target", ex.EpicId);
+
+        await using var verify = database.CreateDbContext();
+        Assert.Empty(await verify.EpicIssues.AsNoTracking()
+            .Where(l => l.ProjectId == ProjectId && l.EpicId == "epic_target")
+            .ToListAsync());
+        Assert.Empty(await verify.EpicActiveIssues.AsNoTracking()
+            .Where(a => a.ProjectId == ProjectId && a.EpicId == "epic_target")
+            .ToListAsync());
+        var row = await verify.Epics.AsNoTracking().SingleAsync(e => e.Id == "epic_target");
+        Assert.Equal(EpicStatusName.Closed, row.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssuesAsync_DoneEpic_MixedOpenAndTerminalBatch_WakesOnce_OnlyFirstOpenLinkWakes()
+    {
+        // Acceptance: within one batch, wake fires at most once (on the
+        // first open link); subsequent open links in the same batch do
+        // not re-invoke WakeFromDone. The live row.Status observation
+        // (refreshed by MapToRow after each commit) makes later items
+        // take the normal non-terminal path.
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_target", status: EpicStatusName.Done, number: 1);
+        await SeedIssueAsync(database, issueId: "issue_terminal_first", issueNumber: 1, status: IssueStatus.Done);
+        await SeedIssueAsync(database, issueId: "issue_open_first", issueNumber: 2, status: IssueStatus.Backlog);
+        await SeedIssueAsync(database, issueId: "issue_open_second", issueNumber: 3, status: IssueStatus.Backlog);
+
+        var grains = new RecordingGrainFactory(database.Factory);
+        var grain = grains.GetEpicGrain($"{ProjectId}:epic_target");
+
+        var outcomes = await grain.LinkIssuesAsync(
+        [
+            new BatchMembershipRequestItem("1", "issue_terminal_first", 1),
+            new BatchMembershipRequestItem("2", "issue_open_first", 2),
+            new BatchMembershipRequestItem("3", "issue_open_second", 3),
+        ], ProjectId);
+
+        Assert.Equal(3, outcomes.Count);
+        Assert.All(outcomes, o => Assert.Equal("linked", o.Status));
+
+        await using var verify = database.CreateDbContext();
+        var row = await verify.Epics.AsNoTracking().SingleAsync(e => e.Id == "epic_target");
+        Assert.Equal(EpicStatusName.Running, row.Status);
+        // Both open issues got active rows; the terminal-issue link did not.
+        var active = await verify.EpicActiveIssues.AsNoTracking()
+            .Where(a => a.ProjectId == ProjectId && a.EpicId == "epic_target")
+            .OrderBy(a => a.IssueNumber)
+            .ToListAsync();
+        Assert.Equal(2, active.Count);
+        Assert.Equal(new[] { 2, 3 }, active.Select(a => a.IssueNumber).ToArray());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssuesAsync_DoneEpic_BatchWake_PartialFailureLeavesEpicRunning()
+    {
+        // Design risk: per-item persistence means a batch to a `done`
+        // epic that wakes on item 1 then fails on item 3 leaves the
+        // epic `running` with items 2 linked and 3 unlinked. This is
+        // the correct outcome — the epic *does* have open work; the
+        // failed item returns a conflict outcome and the caller can
+        // retry just that item.
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_target", status: EpicStatusName.Done, number: 1);
+        await SeedEpicAsync(database, epicId: "epic_owner", status: EpicStatusName.Running, number: 2);
+        await SeedIssueAsync(database, issueId: "issue_a", issueNumber: 1, status: IssueStatus.Backlog);
+        await SeedIssueAsync(database, issueId: "issue_b", issueNumber: 2, status: IssueStatus.Backlog);
+        // issue_b is already actively owned by epic_owner — the second
+        // batch item will hit the cross-aggregate ownership invariant.
+        await using (var seed = database.CreateDbContext())
+        {
+            seed.EpicActiveIssues.Add(new EpicActiveIssueRow
+            {
+                ProjectId = ProjectId,
+                IssueId = "issue_b",
+                EpicId = "epic_owner",
+                IssueNumber = 2,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var grains = new RecordingGrainFactory(database.Factory);
+        var grain = grains.GetEpicGrain($"{ProjectId}:epic_target");
+
+        var outcomes = await grain.LinkIssuesAsync(
+        [
+            new BatchMembershipRequestItem("1", "issue_a", 1),
+            new BatchMembershipRequestItem("2", "issue_b", 2),
+        ], ProjectId);
+
+        Assert.Equal(2, outcomes.Count);
+        Assert.Equal("linked", outcomes[0].Status);
+        Assert.Equal("conflict", outcomes[1].Status);
+
+        await using var verify = database.CreateDbContext();
+        var row = await verify.Epics.AsNoTracking().SingleAsync(e => e.Id == "epic_target");
+        Assert.Equal(EpicStatusName.Running, row.Status);
+        var links = await verify.EpicIssues.AsNoTracking()
+            .Where(l => l.ProjectId == ProjectId && l.EpicId == "epic_target")
+            .ToListAsync();
+        Assert.Single(links);
+        Assert.Equal("issue_a", links[0].IssueId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task LinkIssuesAsync_DoneEpic_BatchWake_AutopilotStartsNewlyLinkedOpenIssue()
+    {
+        // Spec: 'Autopilot advances the newly linked open issue after
+        // wake-up' applied to the batch path: TryStartNextAsync fires
+        // once after the loop when the epic ended `running` and was
+        // `done` at entry.
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_target", status: EpicStatusName.Done, number: 1);
+        await SeedIssueAsync(database, issueId: "issue_open", issueNumber: 1, status: IssueStatus.Backlog, canStart: true);
+        await SeedIssueAsync(database, issueId: "issue_open_b", issueNumber: 2, status: IssueStatus.Backlog, canStart: true);
+
+        var grains = new RecordingGrainFactory(database.Factory);
+        var grain = grains.GetEpicGrain($"{ProjectId}:epic_target");
+
+        await grain.LinkIssuesAsync(
+        [
+            new BatchMembershipRequestItem("1", "issue_open", 1),
+            new BatchMembershipRequestItem("2", "issue_open_b", 2),
+        ], ProjectId);
+
+        // Both issues are open + startable + non-in-progress; the
+        // batch tail-calls TryStartNextAsync exactly once and selects
+        // the earliest one.
+        var started = Assert.Single(grains.IssueStartCalls);
+        Assert.Equal("issue_open", started);
+    }
+
     private static EpicGrain CreateGrain(TestDbContextFactory factory, string grainKey) =>
         new(
             factory,
@@ -381,7 +604,8 @@ public class EpicBatchMembershipSpecs
         string projectId = ProjectId,
         string issueId = "issue_1",
         int issueNumber = 1,
-        IssueStatus status = IssueStatus.Backlog)
+        IssueStatus status = IssueStatus.Backlog,
+        bool canStart = true)
     {
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -391,7 +615,7 @@ public class EpicBatchMembershipSpecs
             Title = $"Issue {issueNumber}",
             Status = status,
             Priority = "p2",
-            IsDraft = false,
+            IsDraft = !canStart,
         };
         var json = IssueStore.Serialize(issue);
         await using var db = database.CreateDbContext();
@@ -532,5 +756,103 @@ public class EpicBatchMembershipSpecs
         public IAddressable GetGrain(GrainId grainId, GrainInterfaceType interfaceType) => throw new NotSupportedException();
         public IAddressable GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix = null) => throw new NotSupportedException();
         public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// Test double for <see cref="IGrainFactory"/> that records every
+    /// <c>IIssueGrain.StartWorkAsync</c> invocation, so batch wake-up
+    /// tests can assert the post-loop autopilot tail-call fires exactly
+    /// once when the batch woke a done epic.
+    /// </summary>
+    private sealed class RecordingGrainFactory : IGrainFactory
+    {
+        private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+        public List<string> IssueStartCalls { get; } = [];
+
+        public RecordingGrainFactory(IDbContextFactory<MohistDbContext> dbFactory)
+        {
+            _dbFactory = dbFactory;
+        }
+
+        public IEpicGrain GetEpicGrain(string grainKey) =>
+            new EpicGrain(
+                _dbFactory,
+                this,
+                new FakeTimeProvider(new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero)),
+                new NoopEventStore(),
+                NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
+
+        public IIssueGrain GetIssueGrain(string issueId) => new RecordingIssueGrain(this, issueId);
+
+        public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithStringKey
+        {
+            if (typeof(TGrainInterface) == typeof(IEpicGrain))
+                return (TGrainInterface)(object)GetEpicGrain(primaryKey);
+            if (typeof(TGrainInterface) == typeof(IIssueGrain))
+                return (TGrainInterface)(object)GetIssueGrain(primaryKey);
+            throw new NotSupportedException(typeof(TGrainInterface).FullName);
+        }
+
+        public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithGuidKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithIntegerKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithGuidCompoundKey => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix = null)
+            where TGrainInterface : IGrainWithIntegerCompoundKey => throw new NotSupportedException();
+        public TGrainObserverInterface CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj) where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+        public void DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj) where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, string grainPrimaryKey)
+        {
+            if (grainInterfaceType == typeof(IEpicGrain))
+                return GetEpicGrain(grainPrimaryKey);
+            if (grainInterfaceType == typeof(IIssueGrain))
+                return GetIssueGrain(grainPrimaryKey);
+            throw new NotSupportedException(grainInterfaceType.FullName);
+        }
+        public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+        public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+        public TGrainInterface GetGrain<TGrainInterface>(GrainId grainId) where TGrainInterface : IAddressable => throw new NotSupportedException();
+        public IAddressable GetGrain(GrainId grainId) => throw new NotSupportedException();
+        public IAddressable GetGrain(GrainId grainId, GrainInterfaceType interfaceType) => throw new NotSupportedException();
+        public IAddressable GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix = null) => throw new NotSupportedException();
+        public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingIssueGrain : IIssueGrain
+    {
+        private readonly RecordingGrainFactory _owner;
+        public RecordingIssueGrain(RecordingGrainFactory owner, string issueId)
+        {
+            _owner = owner;
+            IssueId = issueId;
+        }
+
+        public string IssueId { get; }
+
+        public Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null)
+            => throw new NotSupportedException();
+        public async Task<string> StartWorkAsync(Mohist.Server.Issue.Grains.WorkflowProjectContext? project = null)
+        {
+            _owner.IssueStartCalls.Add(IssueId);
+            return "wr_test";
+        }
+        public Task CompleteWorkAsync(string workflowRunId) => throw new NotSupportedException();
+        public Task CancelAsync() => throw new NotSupportedException();
+        public Task UpdateAsync(string title, string? body) => throw new NotSupportedException();
+        public Task UpdateFullAsync(Mohist.Server.Issue.Grains.UpdateIssueData data) => throw new NotSupportedException();
+        public Task ArchiveAsync() => throw new NotSupportedException();
+        public Task UnarchiveAsync() => throw new NotSupportedException();
+        public Task ReopenAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Grains.IssueWorkflowStatus?> GetWorkflowStatusAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Grains.IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task RemovePrerequisiteAsync(int prerequisiteNumber) => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Services.IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
+        public Task<Mohist.Server.Issue.Grains.IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null) => throw new NotSupportedException();
+        public Task DeactivateForTestAsync() => throw new NotSupportedException();
     }
 }
