@@ -57,3 +57,42 @@
 - The `mo system logs` description text is `"Show recent application logs (Mohist server's own log tail). For operational/service-manager logs (systemd journal), use 'mo server logs'."` — slightly more verbose than the legacy `"Show recent logs"` so the application-vs-operational distinction is visible at the command level too, not just the group level. This is a documentation-only change; behavior is byte-identical. A future task could re-verify if the legacy byte-for-byte wording is needed.
 - `BuildLogs` is registered **after** `BuildInfo` in the system group (logs at the bottom), so `mo system --help` lists `info` first then `logs`. After T-005, only `logs` will be listed.
 - The 3 pre-existing `CliReferenceDocsSpecs` failures remain in T-006's scope; T-002 deliberately did not touch `docs/cli-reference.md`.
+
+## T-003 — Remove duplicate root `mo use` so `mo project use` is the single entry
+
+### What landed
+
+- `MohistCliCommands.cs`: deleted the root `BuildUseCommand` private factory and its `root.Subcommands.Add(BuildUseCommand(api))` registration. The surviving `mo project use` factory (`ProjectCommands.BuildUse` at `MohistCliCommands.Project.cs:87-98`) is byte-identical to the deleted factory and continues to share the same `UseProjectAsync` handler — this task is pure deletion, no behavior change on `mo project use`.
+- `tests/Mohist.Cli.Tests/CliProjectUseCommandSpecs.cs`: 9 new specs covering every `project-use-single-entry` scenario plus the acceptance criteria that aren't naturally covered elsewhere:
+  - `Root_Help_NoLongerListsUseSubcommand`: `mo --help` no longer surfaces the bare `  use ` line. Anchored on `\n  use ` (with surrounding spaces) rather than the bare substring to avoid `repository`/`because` false-positives.
+  - `Project_Help_StillListsUseSubcommand`: positive companion — `mo project --help` still lists the surviving `use` entry.
+  - `ProjectUse_PostsUseEndpointAndPersistsActiveProjectAndPrintsConfirmation`: happy path — POSTs `/api/projects/<id>/use`, prints `Active project: <name> (<id>)`, persists `activeProjectId` to the local state file.
+  - `ProjectUse_IdentifierUrlEscapingProducesExpectedPath`: pins that the URI escape (`Uri.EscapeDataString(identifier)`) lands on the wire as `%20`.
+  - `ProjectUse_NoIdentifier_FailsToParseAndExitsNonZero`: missing `<project>` arg is a parse error.
+  - `ProjectUse_ServerRejects_LetsLocalStateUnmodifiedAndExitsNonZero`: 404 → exit 4 (`MohistCliApi.FailureExitCode` maps NotFound → 4), state file never written.
+  - `ProjectUse_ServerRejection_WithExistingState_LeavesActiveProjectIdUnmodified`: regression guard — a failed `use` must not clobber a previously persisted `activeProjectId`.
+  - `ProjectUse_ServerUnreachable_EmitsLegacyGuidanceAndDoesNotModifyState`: `HttpRequestException` → exit 1 + `ServerUnavailableMessage` + no state.
+  - `LegacyRootUse_NoLongerResolvesAndExitsNonZero`: D1 verification — `mo use <project>` is no longer a registered subcommand, parse error, no request issued.
+
+### Codebase patterns (carry-over from T-001/T-002, new for T-003)
+
+- The legacy `mo use` non-resolution follows the same pattern as `CliWorkflowReads.cs:413-424` (`Status_IsNotARegisteredSubcommand`) and the T-001 `LegacyRootStatus_NoLongerResolvesAndExitsNonZero` / T-002 `LegacyRootLogs_NoLongerResolvesAndExitsNonZero` specs: System.CommandLine surfaces a parse error, the runner returns non-zero, no HTTP request is issued.
+- For help-rendering assertions on System.CommandLine output, the canonical entry row is `  <name>   <description>` — anchored assertions like `\n  use ` and `\n  project ` are reliable across the help blocks. Bare `Assert.Contains("use", stdout)` is unreliable because `use` is a substring of `repository`, `because`, etc. T-001's `CliProjectStatusCommandSpecs.Project_Help_ListsStatusAlongsideOtherVerbs` gets away with `Assert.Contains("use", stdout)` only because it asserts every project verb is listed — the noise is dominated by the legit hits. New top-level help assertions should anchor.
+- `CliTestHarness.Create()` writes the project state file to the real `Path.Combine(Environment.GetFolderPath(UserProfile), ".mohist", "cli-state.json")` path on the `FakeFileSystem`. To assert side-effects on the state file, call `fs.Exists(statePath)` and `fs.ReadAllText(statePath)` with the same path the API resolves (`ProjectStatePathOverride` is the entry point but defaults to the same path when unset, which is the harness case).
+- `UseProjectAsync` (at `MohistCliApi.cs:878`) writes `{}`-shaped JSON for the empty `new { }` body via `PostDataAsync`. The recording handler captures that as `Body = "{}"`, not empty string — tests that assert "empty body" must match the real byte output.
+- `UseProjectAsync` writes `{"activeProjectId":"<id>"}` to the state file (via `JsonObject` round-tripped through `ToJsonString(JsonOptions)`); the spec asserts on substring anchors rather than full-string equality to stay robust against JSON-property-order changes from `System.Text.Json`.
+- `MohistCliApi.FailureExitCode(HttpStatusCode.NotFound)` returns `4`, not `1` — server-side NotFound is distinguished from network-unreachable to help scripts distinguish "wrong id" vs "server down". The rejection spec asserts `4` specifically; the unreachable spec asserts `1`. Both are exit-non-zero as the acceptance criteria require.
+
+### Test results
+
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter "FullyQualifiedName~CliProjectUseCommandSpecs"` → 9 / 9 passed.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj` (full CLI suite) → 813 / 816 passed; the 3 failures are the same pre-existing `CliReferenceDocsSpecs` failures from T-001 / T-002 (verified by `git stash` + re-run before this change). Net delta: +9 new passing tests, 0 regressions.
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors. Clean build holds.
+- `CliProjectStatusCommandSpecs.Project_Help_ListsStatusAlongsideOtherVerbs` still passes — `use` is still listed under `project --help` (which contains the substring `use` six times via `repository`/`because` etc.; T-001's anchor-less assertion is preserved).
+
+### Decisions / notes for later tasks
+
+- The 3 pre-existing `CliReferenceDocsSpecs` failures remain in T-006's scope. T-003 deliberately did not touch `docs/cli-reference.md`.
+- The `Body == "{}"` vs `Body == ""` distinction is the kind of detail that bit me mid-test — it's worth recording so future endpoint-relocation specs know to inspect `RecordingHttpHandler.CapturedRequest.Body` against the actual serialized form the handler emits, not against "empty object literal" intuition.
+- `Assert.Contains("use", stdout)` for help output is a false-positive trap (`repository`/`because`). T-006's root-shape guard (`CliRootCommandShapeSpecs`) should use anchored assertions like the new T-003 spec does.
+- After T-001 / T-002 / T-003 the surviving legacy bare-verb removals are T-004 (`mo notify setup` → `mo notification setup`) and T-005 (`mo system info` → `mo server info`). T-005 will also leave the `system` group as logs-only — same pattern as T-002 leaves it logs+info until T-005 lands.
