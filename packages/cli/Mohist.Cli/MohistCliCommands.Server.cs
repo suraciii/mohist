@@ -21,8 +21,31 @@ internal static class ServerCommands
         server.Subcommands.Add(BuildSystemd("status", installer.StatusServerAsync, installer));
         server.Subcommands.Add(BuildLogs(installer));
         server.Subcommands.Add(BuildSystemd("uninstall", installer.UninstallServerAsync, installer));
+        server.Subcommands.Add(BuildInfo(api));
 
         return server;
+    }
+
+    private static Command BuildInfo(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "info",
+            "Show server-side system diagnostics (identity, source, install, update, services, paths). Distinct from 'mo info' (CLI-local environment).");
+
+        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
+
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var output = ctx.GetValue(outputOpt);
+            var (mode, exit) = api.ResolveOutputMode(output);
+
+            if (exit != 0) return Task.FromResult(exit);
+
+            return api.PrintSystemInfoAsync(mode);
+        });
+
+        return cmd;
     }
 
     private static Command BuildHealth(MohistCliApi api)

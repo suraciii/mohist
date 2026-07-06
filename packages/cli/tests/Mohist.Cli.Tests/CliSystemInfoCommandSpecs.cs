@@ -64,7 +64,7 @@ public class CliSystemInfoCommandSpecs
     }
 
     [Fact]
-    public async Task SystemInfo_Table_RendersAllSixSections()
+    public async Task ServerInfo_Table_RendersAllSixSections()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -74,7 +74,7 @@ public class CliSystemInfoCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["system", "info"], output, error, fileSystem, executor, env);
+            http, ["server", "info"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -109,7 +109,7 @@ public class CliSystemInfoCommandSpecs
     }
 
     [Fact]
-    public async Task SystemInfo_Json_EmitsRawServerPayloadVerbatim()
+    public async Task ServerInfo_Json_EmitsRawServerPayloadVerbatim()
     {
         var payload = SystemInfoPayload();
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
@@ -120,7 +120,7 @@ public class CliSystemInfoCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["system", "info", "-o", "json"], output, error, fileSystem, executor, env);
+            http, ["server", "info", "-o", "json"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -144,13 +144,13 @@ public class CliSystemInfoCommandSpecs
     }
 
     [Fact]
-    public async Task SystemInfo_ServerDown_PrintsNoticeToStderrAndLocalSubsetToStdout()
+    public async Task ServerInfo_ServerDown_PrintsNoticeToStderrAndLocalSubsetToStdout()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             throw new HttpRequestException("connection refused"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["system", "info"], output, error, fileSystem, executor, env);
+            http, ["server", "info"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stderr = error.ToString();
@@ -163,13 +163,13 @@ public class CliSystemInfoCommandSpecs
     }
 
     [Fact]
-    public async Task SystemInfo_ServerDownJson_PrintsPartialJsonWithCliVersion()
+    public async Task ServerInfo_ServerDownJson_PrintsPartialJsonWithCliVersion()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             throw new HttpRequestException("connection refused"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["system", "info", "-o", "json"], output, error, fileSystem, executor, env);
+            http, ["server", "info", "-o", "json"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("Server is not running", error.ToString());
@@ -181,13 +181,13 @@ public class CliSystemInfoCommandSpecs
     }
 
     [Fact]
-    public async Task SystemInfo_Help_DisambiguatesFromMoInfo()
+    public async Task ServerInfo_Help_DisambiguatesFromMoInfo()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["system", "info", "--help"], output, error, fileSystem, executor, env);
+            http, ["server", "info", "--help"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
@@ -197,7 +197,21 @@ public class CliSystemInfoCommandSpecs
     }
 
     [Fact]
-    public async Task System_Help_ListsInfoSubcommand()
+    public async Task Server_Help_ListsInfoSubcommand()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["server", "--help"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("info", stdout);
+    }
+
+    [Fact]
+    public async Task System_Help_NoLongerListsInfo()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
@@ -207,12 +221,34 @@ public class CliSystemInfoCommandSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("info", stdout);
-        Assert.Contains("mo info", stdout, StringComparison.Ordinal);
+        // After T-005 the `info` subcommand is relocated from `system` to
+        // `server`. `mo system --help` must no longer list `info` as a
+        // subcommand — only `logs` (the application-log tail) remains.
+        // We assert against the canonical System.CommandLine help row layout
+        // `  <name>   <description>` (anchored with leading newline + spaces
+        // to avoid false positives from `mo info` showing in the parent
+        // group description, which still mentions `mo info`).
+        Assert.DoesNotContain("\n  info ", stdout);
     }
 
     [Fact]
-    public async Task SystemInfo_Table_HandlesNullOptionalFieldsWithoutThrowing()
+    public async Task LegacySystemInfo_NoLongerResolvesAndExitsNonZero()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["system", "info"], output, error, fileSystem, executor, env);
+
+        // Per D1 (no aliases retained) the legacy `mo system info` path is
+        // removed outright — System.CommandLine surfaces a parse error and
+        // the runner returns non-zero. No HTTP request must be issued.
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ServerInfo_Table_HandlesNullOptionalFieldsWithoutThrowing()
     {
         var payload = new
         {
@@ -240,7 +276,7 @@ public class CliSystemInfoCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = payload })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["system", "info"], output, error, fileSystem, executor, env);
+            http, ["server", "info"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();

@@ -43,9 +43,9 @@ public class CliNotifySetupCommandSpecs : IDisposable
     }
 
     [Fact]
-    public void NotifyRoot_Help_ListsSetupSubcommand()
+    public void NotificationRoot_Help_ListsSetupSubcommand()
     {
-        var exitCode = Run(["notify", "--help"], out var output, out _);
+        var exitCode = Run(["notification", "--help"], out var output, out _);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("setup", output.ToString());
@@ -54,7 +54,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
     [Fact]
     public void NotifySetup_Help_DocumentsAllOptions()
     {
-        var exitCode = Run(["notify", "setup", "--help"], out var output, out _);
+        var exitCode = Run(["notification", "setup", "--help"], out var output, out _);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
@@ -72,7 +72,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
         NotifyCommands.HealthProbeOverride = new StubProbe(success: false, reason: "connection refused");
 
         var (exitCode, stdout, stderr) = await RunAsync(
-            httpHandler, fileSystem, executor, ["notify", "setup"]);
+            httpHandler, fileSystem, executor, ["notification", "setup"]);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("Hermes webhook platform is not started", stderr);
@@ -94,7 +94,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             new FakeFileSystem(),
             new FakeCommandExecutor(),
-            ["notify", "setup"]);
+            ["notification", "setup"]);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("Hermes webhook platform is not started", stderr);
@@ -111,7 +111,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup", "--health-base", "127.0.0.1:8644"]);
+            ["notification", "setup", "--health-base", "127.0.0.1:8644"]);
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(stdout);
@@ -150,7 +150,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup"]);
+            ["notification", "setup"]);
 
         Assert.Equal(0, exitCode);
         Assert.Empty(stderr);
@@ -175,7 +175,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup", "--platform", "telegram"]);
+            ["notification", "setup", "--platform", "telegram"]);
 
         Assert.Equal(0, exitCode);
         Assert.Empty(stderr);
@@ -203,7 +203,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup", "--platform", platform]);
+            ["notification", "setup", "--platform", platform]);
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(stdout);
@@ -224,7 +224,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup"]);
+            ["notification", "setup"]);
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(stdout);
@@ -246,7 +246,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup"]);
+            ["notification", "setup"]);
 
         Assert.Equal(0, exitCode);
         Assert.Empty(stderr);
@@ -271,7 +271,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup", "--platform", "weixin", "--deliver-chat-id", "wx-user-123"]);
+            ["notification", "setup", "--platform", "weixin", "--deliver-chat-id", "wx-user-123"]);
 
         Assert.Equal(0, exitCode);
         Assert.Empty(stderr);
@@ -295,7 +295,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup", "--platform", "weixin"]);
+            ["notification", "setup", "--platform", "weixin"]);
 
         Assert.Equal(0, exitCode);
         Assert.Empty(stderr);
@@ -318,7 +318,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup"],
+            ["notification", "setup"],
             stdin);
 
         Assert.Equal(0, exitCode);
@@ -340,7 +340,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             executor,
-            ["notify", "setup"],
+            ["notification", "setup"],
             stdin);
 
         Assert.Equal(0, exitCode);
@@ -361,7 +361,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup"],
+            ["notification", "setup"],
             stdin);
 
         Assert.Equal(0, exitCode);
@@ -390,7 +390,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup"],
+            ["notification", "setup"],
             stdin);
 
         Assert.Equal(0, exitCode);
@@ -417,7 +417,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup"]);
+            ["notification", "setup"]);
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(stdout);
@@ -438,7 +438,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             executor,
-            ["notify", "setup"],
+            ["notification", "setup"],
             stdin);
 
         Assert.NotEqual(0, exitCode);
@@ -458,7 +458,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             executor,
-            ["notify", "setup", "--platform", "telegram"]);
+            ["notification", "setup", "--platform", "telegram"]);
 
         Assert.Empty(executor.Invocations);
     }
@@ -474,7 +474,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
             new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { }))),
             fileSystem,
             new FakeCommandExecutor(),
-            ["notify", "setup"]);
+            ["notification", "setup"]);
 
         Assert.Single(fileSystem.Files);
         var onlyPath = fileSystem.Files.Keys.Single();
@@ -556,6 +556,21 @@ public class CliNotifySetupCommandSpecs : IDisposable
         Assert.Equal(
             "http://127.0.0.1:8644/health",
             NotifyCommands.BuildHealthUrl("http://127.0.0.1:8644/"));
+    }
+
+    [Fact]
+    public async Task LegacyRootNotify_NoLongerResolvesAndExitsNonZero()
+    {
+        // Per D1 (no aliases retained) the legacy `mo notify` root path is
+        // removed outright — System.CommandLine surfaces a parse error and
+        // the runner returns non-zero. No HTTP request must be issued.
+        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["notify"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 
     private const string ExistingHermesJson = """

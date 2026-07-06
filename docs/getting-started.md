@@ -74,7 +74,7 @@ Web UI 上：
 
 ```bash
 mo project create my-app --path /path/to/your/repo
-mo use my-app
+mo project use my-app
 ```
 
 ## 6. 创建第一个 Issue

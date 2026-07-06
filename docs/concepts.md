@@ -12,13 +12,13 @@
 
 - 每个 Project 关联一个 git 仓库（path + base branch）
 - Project 内的所有 issue 共享这个仓库
-- 同时只能有一个 active project（CLI 用 `mo use` 切换）
+- 同时只能有一个 active project（CLI 用 `mo project use` 切换）
 - 不同 Project 的数据完全隔离
 
 ```bash
 mo project create my-app --path /path/to/repo
-mo use my-app
-mo status   # 查看当前 project
+mo project use my-app
+mo project status   # 查看当前 project
 ```
 
 **多个 Project 的场景**：你有 side project A、side project B，分别建 Project，按需切换。

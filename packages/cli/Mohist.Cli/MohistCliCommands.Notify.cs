@@ -10,7 +10,7 @@ using System.Text.Json.Nodes;
 namespace Mohist.Cli;
 
 /// <summary>
-/// <c>mo notify</c> command group. Provides <c>setup</c>, a guided
+/// <c>mo notification</c> command group. Provides <c>setup</c>, a guided
 /// configuration command that probes the Hermes webhook platform,
 /// generates one shared secret, writes Mohist's outbound
 /// <c>Mohist:Notifications:Hermes</c> config directly to
@@ -60,9 +60,9 @@ internal static class NotifyCommands
 
     public static Command Build(MohistCliApi api)
     {
-        var notify = new Command("notify", "Notification platform guides");
-        notify.Subcommands.Add(BuildSetup(api));
-        return notify;
+        var notification = new Command("notification", "Notification platform guides");
+        notification.Subcommands.Add(BuildSetup(api));
+        return notification;
     }
 
     private static Command BuildSetup(MohistCliApi api)
@@ -139,7 +139,7 @@ internal static class NotifyCommands
     public static IHealthProbe HealthProbeOverride { get; set; } = new HttpHealthProbe();
 
     /// <summary>
-    /// Internal command flow used by <c>mo notify setup</c>. Splits
+    /// Internal command flow used by <c>mo notification setup</c>. Splits
     /// cleanly for unit-testing: <paramref name="healthProbe"/> can be
     /// swapped to a stub; <paramref name="secret"/> is computed once
     /// and handed to both sides so identity is structural, not
