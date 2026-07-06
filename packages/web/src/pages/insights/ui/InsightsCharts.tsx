@@ -4,7 +4,6 @@ import type { InsightsRange } from '../model/insights-range'
 import { EpicProgressList } from '../panels/EpicProgressList'
 import { ThroughputChart } from '../panels/ThroughputChart'
 import { CompletionTrend } from '../panels/CompletionTrend'
-import { CumulativeFlowChart } from '../panels/CumulativeFlowChart'
 import { CycleTimeChart } from '../panels/CycleTimeChart'
 import { StageDurationChart } from '../panels/StageDurationChart'
 import { QualityPanel } from '../panels/QualityPanel'
@@ -31,7 +30,6 @@ const CHART_GROUPS: readonly GroupSpec[] = [
         <EpicProgressList />
         <ThroughputChart range={range} />
         <CompletionTrend range={range} />
-        <CumulativeFlowChart range={range} />
       </>
     ),
   },

@@ -1,0 +1,54 @@
+## T-001 (cumulative-flow 读面端到端移除)
+
+### 范围落地
+- web: 删除 `entities/issue/api/cumulative-flow.ts` + `.test.ts`、
+  `pages/insights/panels/CumulativeFlowChart.tsx` + `.test.tsx`；
+  从 `entities/issue/index.ts` 移除 `cumulativeFlowQueryKey` /
+  `fetchCumulativeFlow` / `useCumulativeFlow` / `CumulativeFlowDayDto` /
+  `CumulativeFlowResponse` 导出；
+  从 `pages/insights/ui/InsightsCharts.tsx` 的 `CHART_GROUPS` 摘除
+  `CumulativeFlowChart` 引用（import + render 节点）；同步从
+  `InsightsCharts.test.tsx` 移除 `useCumulativeFlow` mock / 7d+90d 范围断言 /
+  `cumulative-flow-chart-window` badge 断言 / `buildCumulativeFlow` 工厂 /
+  range-mirror 测试中 `cumulative` 配置块；更新 `产出` 组测试期望为
+  `[productivity-epic-list, throughput-chart, productivity-trend]` 三件套。
+- server: 删除 `Api/IssueRoutes.CumulativeFlow.cs`、
+  `Issue/Services/CumulativeFlowQuerier.cs`；
+  从 `Api/IssueRoutes.cs` 移除 `projectIssues.MapIssueCumulativeFlow()` 调用；
+  从 `Api/IssueRoutes.Dtos.cs` 移除 `CumulativeFlowResponse` /
+  `CumulativeFlowDayDto` record 及对应的 XML doc；
+  从 `IssueMetricsApiSpecs.cs` 删除全部 8 个 `CumulativeFlow_*` spec + 1 个
+  `[InlineData("cumulative-flow?range=bad")]` 行 + `SeedStagePopulationSnapshotAsync`
+  helper + 2 个 `private sealed record` 测试 DTO + 1 个孤儿 using
+  `Mohist.Server.Infrastructure.Data.StagePopulation`。
+
+### 验证结果
+- `npm run typecheck -w packages/web` ✅
+- `npm run test:run -w packages/web` ✅ 4322 通过 / 1 跳过（pre-existing）
+- `npm test`（server）✅ 4038 通过 / 12 跳过（pre-existing）/ 0 失败
+  - xUnit 2 分 21 秒；CumulativeFlow_* spec 已从结果中消失，未影响其他 metrics
+    spec；`Mohist.sln` 在 `TreatWarningsAsErrors` 下零警告通过。
+
+### 仍存在但不在本任务范围的 cumulative-flow 痕迹
+（按 design D4 / task 划分，留给 T-003 处理）
+- `packages/server/src/Mohist.Server/Infrastructure/Data/StagePopulation/StagePopulationSnapshotRow.cs` — 实体留存，但注释提到"the persisted cache the CFD reads"，T-003 删除实体时一并清理。
+- `packages/server/src/Mohist.Server/Events/Hosting/StagePopulationSnapshotService.cs` — 每日写入的 BackgroundService，无读者（reader 已被本任务删除）但 design D4 决定由 T-003 一并删除 writer+表+migration。
+- `packages/server/tests/Mohist.Server.Tests/Support/MohistIntegrationFixture.cs` 242-260 行 — `CREATE TABLE IF NOT EXISTS "StagePopulationSnapshots"` 块连同注释（T-003 删表时同步删除，避免 fixture 残留孤儿表）。
+- `packages/web/src/pages/insights/ui/InsightsCharts.tsx` 仍渲染 `EpicProgressList`（在产出组）— T-002 的范围。
+
+### 学到/复用的模式
+- server partial class 文件删除（`IssueRoutes.CumulativeFlow.cs`）安全
+  —— partial class 的其他部分（`IssueRoutes.cs`、`IssueRoutes.Dtos.cs`）继续
+  编译无碍；DTO 删完后文件末尾保留 trailing newline 跟其它 record 块风格一致。
+- ASP.NET Core 删 endpoint mapper 是硬删除（`MapIssueCumulativeFlow()` 移除后
+  `/api/projects/{projectRef}/issues/metrics/cumulative-flow` 自动 404），
+  不需要写 redirect 或 410。
+- web vitest 中 `vi.hoisted` mock 数组加新 hook 容易漏 `mockClear()` —— 重
+  写范围测试时务必把所有用过的 mock 列在 `mockClear()` 清单里（漏一个
+  `useCumulativeFlow.mockClear()` 会让本测试期望在初始 mock 状态下断言失败）。
+- 集成 spec 删 inline data 行时记得在 InlineData 之间留 \n+\n 风格一致 —— 用
+  Python 脚本做批量删行后用 `awk` 复查，保留单一空行。
+- `MohistIntegrationFixture.cs` 用 raw SQL `CREATE TABLE IF NOT EXISTS` 而不是
+  EF migration，所以删 `DbSet<StagePopulationSnapshotRow>` 时必须同时改 fixture，
+  否则生产迁移和测试 fixture 漂移（design D4 风险项已点名）—— 本任务不动这块，
+  T-003 同提交处理。
