@@ -98,6 +98,10 @@ POST poll
 workKey = ownerKind:ownerId:workId
 ```
 
+`workKey` is split on the first and last `:` so that `workId` may itself
+contain `:` (e.g. `recover:rebase.1`). `ownerId` is the workflow run id
+(workflow) or agent job id (agent-job).
+
 Delivery is pull. Discovery is store queries, not grain calls. There is no
 push from WorkflowGrain to runner, and no relay grain between the process
 and the owner of a work.
@@ -155,6 +159,16 @@ in-flight map synchronously between receiving a dispatch and its next poll,
 so a freshly delivered dispatch can never be mistaken for a loss. The only
 way a Running work is absent from the report is that the process never had
 it or lost it — both want a re-dispatch.
+
+**Implementation constraint — the reported set is process-lifetime state.**
+The process's reported set (`inFlight ∪ awaitingAck`) must survive poll
+exceptions and connection resets. A poll that throws must not discard works
+still executing or awaiting ack. If the reported set were scoped to the poll
+loop (e.g. a method-local map abandoned when the poll call rejects), then
+any transient poll failure would make every held work vanish from the
+report and be re-dispatched — a rollback storm that duplicates execution
+and eventually fails works as `runner-lost`. The reported set belongs to
+the process, not to a single poll attempt.
 
 ## Claim
 
