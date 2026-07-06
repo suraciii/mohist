@@ -35,7 +35,7 @@ Runner 启动后会：
 ## 检查 Runner 状态
 
 ```bash
-mo status
+mo project status
 # 输出包含 runner 状态
 ```
 
@@ -105,7 +105,7 @@ Runner 有最大并发限制（默认 8）。意思是：
 ### Runner 日志
 
 ```bash
-mo logs                  # server + runner 混合
+mo runner logs                  # runner 受管服务的运维日志
 # 或直接看 runner 进程的 stdout
 ```
 

@@ -126,7 +126,7 @@ mo issue start 42
 
 **前置条件**：
 - Issue 在 backlog
-- Runner 已连接（`mo status` 看 runner 状态）
+- Runner 已连接（`mo project status` 看 runner 状态）
 - 没超过并发上限（默认 8）
 
 ## 等审批时

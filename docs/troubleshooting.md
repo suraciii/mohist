@@ -128,7 +128,7 @@ mo issue rebase <n>     # 尝试自动 rebase
 
 ```bash
 # 确保 server 和 runner 都起来了
-mo status
+mo project status
 
 mo issue resume <n>
 ```
@@ -143,7 +143,7 @@ mo issue resume <n>
 
 ```bash
 mo issue sessions <n>   # 看最后一行
-mo logs                 # 看系统级日志
+mo system logs          # 看应用级日志（Mohist server 自身的 log tail）
 ```
 
 **解决**：
@@ -212,7 +212,7 @@ mo issue rebase <n>     # 主动 rebase
 别一次启动 20 个 issue 超过 capacity。会排队但你看不到。
 
 ```bash
-mo status   # 看 capacity 使用
+mo project status   # 看 capacity 使用
 ```
 
 ### 5. 定期清理 worktree
@@ -232,7 +232,7 @@ git worktree prune
 mo issue logs <n>
 mo issue events <n>
 mo issue sessions <n>
-mo logs
+mo system logs
 
 # 还不行
 # Web UI → Logs 页 → 找 error 级别日志

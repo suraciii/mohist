@@ -11,8 +11,6 @@ internal static class MohistCliCommands
     {
         var root = new RootCommand("Mohist CLI");
 
-        root.Subcommands.Add(BuildStatusCommand(api));
-        root.Subcommands.Add(BuildLogsCommand(api));
         root.Subcommands.Add(InfoCommands.Build(provider));
         root.Subcommands.Add(SystemCommands.Build(api));
         root.Subcommands.Add(ServerCommands.Build(api, provider));
@@ -21,7 +19,6 @@ internal static class MohistCliCommands
         root.Subcommands.Add(UpdateCommands.Build(provider));
         root.Subcommands.Add(SkillsCommands.Build(provider));
         root.Subcommands.Add(WorkflowCommands.Build(api));
-        root.Subcommands.Add(BuildUseCommand(api));
         root.Subcommands.Add(ProjectCommands.Build(api));
         root.Subcommands.Add(RepositoryCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));
@@ -214,32 +211,5 @@ internal static class MohistCliCommands
             if (!string.IsNullOrWhiteSpace(value))
                 parts.Add($"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}");
         }
-    }
-
-    private static Command BuildStatusCommand(MohistCliApi api)
-    {
-        var cmd = new Command("status", "Show server status");
-        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/status?all=true"));
-        return cmd;
-    }
-
-    private static Command BuildLogsCommand(MohistCliApi api)
-    {
-        var cmd = new Command("logs", "Show recent logs");
-        cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/logs/tail"));
-        return cmd;
-    }
-
-    private static Command BuildUseCommand(MohistCliApi api)
-    {
-        var cmd = new Command("use", "Set active project");
-        var identifierArg = new Argument<string>("project") { Description = "Project name or ID" };
-        cmd.Arguments.Add(identifierArg);
-        cmd.SetAction(ctx =>
-        {
-            var identifier = ctx.GetValue(identifierArg);
-            return api.UseProjectAsync(identifier!);
-        });
-        return cmd;
     }
 }

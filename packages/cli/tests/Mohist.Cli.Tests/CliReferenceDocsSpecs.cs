@@ -79,19 +79,41 @@ public class CliReferenceDocsSpecs
     {
         var doc = ReadRepoText("docs/cli-reference.md");
 
-        string[] topLevelCommands =
+        // T-006 of issue #387: the five legacy bare-verb / misnamed paths
+        // (`mo status`, `mo logs`, `mo use <project>`, `mo notify setup`,
+        // `mo system info`) are migrated to canonical resource-group paths.
+        // The legacy strings must NOT appear in the doc; the canonical ones
+        // must. We anchor the negative assertions on common surface forms
+        // (newline-terminated in code blocks, backtick-wrapped in prose,
+        // or as a gap-table row) to avoid false positives from substring
+        // matches inside other text.
+        string[] forbiddenLegacyPathRows =
         [
             "mo status",
             "mo logs",
-            "mo info",
+            "mo use <project>",
+            "mo notify setup",
             "mo system info",
+        ];
+        // None of the legacy paths may appear in the doc at all (this
+        // document is the authoritative command surface).
+        foreach (var legacy in forbiddenLegacyPathRows)
+            Assert.DoesNotContain(legacy, doc);
+
+        string[] topLevelCommands =
+        [
+            "mo info",
+            "mo project status",
+            "mo system logs",
+            "mo project use",
+            "mo notification setup",
+            "mo server info",
             "mo server start",
             "mo runner start",
             "mo install server",
             "mo update",
             "mo skills list",
             "mo project workflow profile list",
-            "mo use <project>",
             "mo project create",
             "mo repo list",
             "mo issue create",
