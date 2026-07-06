@@ -26,4 +26,4 @@ timeout: 600000                                                   → timeout: 6
 
 ## 其余 TBD
 
-TBD: dispatch 流程、runner 交互、check dispatch、ResolveTaskConfig 位置。
+Dispatch 流程、runner 交互（offer/claim 两阶段、dispatch 快照、恢复）见 [`scheduling.md`](scheduling.md)。check dispatch、ResolveTaskConfig 位置待补。
