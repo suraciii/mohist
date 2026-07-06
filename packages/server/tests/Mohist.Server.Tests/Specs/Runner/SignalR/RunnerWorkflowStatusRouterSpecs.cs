@@ -155,6 +155,8 @@ public class RunnerWorkflowStatusRouterSpecs
             Task.FromResult(new Mohist.Server.Workflow.Grains.WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned));
         public Task<WorkItem?> PollWorkAsync(string runnerId) =>
             Task.FromResult<WorkItem?>(null);
+        public Task<string?> ClaimAsync(string runnerId, string workId) =>
+            Task.FromResult<string?>(null);
         public Task ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome) => Task.CompletedTask;
         public Task ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome) => Task.CompletedTask;
         public Task ReleaseStageLocksAsync(string stage, string reason) => Task.CompletedTask;

@@ -350,19 +350,147 @@ public class WorkflowRunStatusTransitionSpecs
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
     }
 
+    // Regression for issue #387: HasInFlightWork must only look at the
+    // current stage. A completed prior stage may carry a residual
+    // ChecksWorkId (left behind by a stage that has since advanced); that
+    // residue does not mean work is in flight NOW, and treating it as such
+    // leaves the run on Running when it should fall to Ready, making it
+    // invisible to the runner's Ready/Pending-only dispatch query.
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void ReconcileReadyStatusWithInFlightWork_CorrectsReadyToRunning()
+    public void HasInFlightWork_IgnoresResidualChecksWorkIdOnCompletedStages()
     {
-        var run = BuildReadyRun();
+        var run = WorkflowRun.Create("wr_387", new WorkflowDefinition("spec/wf", [
+            new StageDefinition("build",
+                [new("compile", "Compile", "spec/t")],
+                [new("verify", "Verify", "spec/check")]),
+            new StageDefinition("integrate",
+                [new("merge", "Merge", "spec/t")],
+                [])
+        ]));
+        run.Start();
+        run.InitializeStage(
+            [new("compile", "Compile", "spec/t")],
+            [new("verify", "Verify", "spec/check")]);
+        run.AssignTo(RunnerId, DateTimeOffset.UtcNow);
+        run.StartTask("w-compile", RunnerId);
+        run.CompleteTask();
+        run.PassCheck(new CheckResult("verify", "pass"));
+        // Build has advanced; integrate is now current.
+        Assert.Equal("integrate", run.CurrentStageId);
+        run.InitializeStage([new("merge", "Merge", "spec/t")], []);
+
+        // Inject a stale ChecksWorkId on the now-completed build stage,
+        // simulating the leak observed in production. The current stage
+        // (integrate) has only pending work and nothing running.
+        run.Stages[0].ChecksWorkId = "checks-build:leaked";
+
+        Assert.False(run.HasInFlightWork(),
+            "residual ChecksWorkId on a completed stage must not count as in-flight work");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Theory]
+    [InlineData("pass")]
+    [InlineData("fail")]
+    [InlineData("pending")]
+    public void CheckOutcome_ClearsCurrentStageChecksWorkId(string outcome)
+    {
+        var run = BuildReadyRun(
+            [new("compile", "Compile", "spec/task")],
+            [new("build-ok", "Build OK", "spec/check")]);
+        // Simulate a dispatched check batch: ChecksWorkId set while Running.
+        run.CurrentStage().ChecksWorkId = "checks-build:abc";
+        run.CurrentStage().Checks[0].Status = StageCheckStatus.Running;
+
+        var result = new CheckResult("build-ok", outcome);
+        switch (outcome)
+        {
+            case "pass":
+                run.PassCheck(result);
+                break;
+            case "fail":
+                run.FailCheck(result);
+                break;
+            case "pending":
+                run.ResetCheck(result);
+                break;
+        }
+
+        Assert.Null(run.CurrentStage().ChecksWorkId);
+    }
+
+    // Offer/claim two-phase dispatch invariant (issue #387 follow-up):
+    // NextWork() is the offer — it must NOT mutate run state. The task stays
+    // Pending and the run stays Ready until a claim (StartTask) explicitly
+    // transitions it. This is what makes "Running ⟹ claimed" a flow
+    // invariant: there is no window where a task is Running without a runner
+    // having durably registered it.
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void NextWork_OfferDoesNotMutateRunState()
+    {
+        var run = BuildReadyRun(
+            [new("compile", "Compile", "spec/task")],
+            [new("build-ok", "Build OK", "spec/check")]);
+
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
+        var taskBefore = run.CurrentStage().Tasks[0];
+        Assert.Equal(TaskRunStatus.Pending, taskBefore.Status);
+
+        // Offer: NextWork returns the pending task but must not start it.
+        var offered = run.NextWork();
+
+        Assert.NotNull(offered);
+        Assert.Equal(TaskRunStatus.Pending, taskBefore.Status);
+        Assert.Null(taskBefore.RunnerId);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void StartTask_ClaimTransitionsPendingToRunning()
+    {
+        var run = BuildReadyRun(
+            [new("compile", "Compile", "spec/task")],
+            [new("build-ok", "Build OK", "spec/check")]);
+
+        run.NextWork(); // offer (no state change)
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
+
+        // Claim: StartTask is what transitions the task to Running.
         run.StartTask("work-1", RunnerId);
-        run.Status = WorkflowRunStatus.Ready;
 
-        var changed = run.ReconcileReadyStatusWithInFlightWork();
-
-        Assert.True(changed);
+        Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks[0].Status);
+        Assert.Equal(RunnerId, run.CurrentStage().Tasks[0].RunnerId);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
+    }
+
+    // Offer-then-crash recovery: if the runner takes the offer but crashes
+    // before claiming, the task is still Pending and the run is still Ready.
+    // A subsequent offer (new poll) re-offers the same work. No reconcile
+    // is needed because offer never persisted any "in-flight" state.
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void NextWork_OfferIsRepeatableBeforeClaim()
+    {
+        var run = BuildReadyRun(
+            [new("compile", "Compile", "spec/task")],
+            []);
+
+        var first = run.NextWork();
+        var second = run.NextWork();
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Equal(first!.WorkType, second!.WorkType);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
+        Assert.Equal(TaskRunStatus.Pending, run.CurrentStage().Tasks[0].Status);
     }
 
     private static WorkflowRun BuildAwaitingApprovalRun()

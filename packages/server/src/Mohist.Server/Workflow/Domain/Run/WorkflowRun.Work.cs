@@ -32,7 +32,11 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
 
-            var pendingTask = current.CurrentTask();
+            // Offer only Pending work. A Running task is already claimed by
+            // a runner and must not be re-offered; CurrentTask() (which
+            // includes Running) is deliberately not used here so the offer
+            // path never competes with an in-flight claim.
+            var pendingTask = current.Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Pending);
             if (pendingTask is not null)
                 return WorkflowWork.Task(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery);
 

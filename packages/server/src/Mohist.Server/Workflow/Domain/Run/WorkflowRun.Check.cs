@@ -44,6 +44,7 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             current.ScheduleCheckRepair(checkName, repairTasks, message, output);
+            current.ChecksWorkId = null;
             run.Failure = null;
             run.Status = WaitingForDispatchStatus(run);
             var taskIds = current.Tasks
@@ -64,6 +65,7 @@ public static partial class WorkflowRunExtensions
             check.FinishedAt = DateTimeOffset.UtcNow;
             check.Message = result.Message;
             check.Output = result.Output;
+            current.ChecksWorkId = null;
             var events = new List<WorkflowEvent>
             {
                 new CheckPassed(current.Id, check.Name, result.Message)
@@ -80,6 +82,7 @@ public static partial class WorkflowRunExtensions
             check.FinishedAt = DateTimeOffset.UtcNow;
             check.Message = result.Message;
             check.Output = result.Output;
+            current.ChecksWorkId = null;
             if (current.Failure is null)
             {
                 current.Failure = new FailureDetails(
@@ -105,6 +108,7 @@ public static partial class WorkflowRunExtensions
             check.FinishedAt = null;
             check.Message = result.Message;
             check.Output = result.Output;
+            current.ChecksWorkId = null;
             var events = new List<WorkflowEvent>
             {
                 new CheckPending(current.Id, check.Name, result.Message)

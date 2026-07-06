@@ -713,25 +713,27 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private async Task<WorkDispatch?> PollOneWorkflowAsync(IWorkflowGrain workflow, string workflowRunId)
     {
+        // Offer: PollWorkAsync returns pending work WITHOUT transitioning it
+        // to Running. The task/check stays Pending until we confirm the claim.
         var item = await workflow.PollWorkAsync(RunnerId);
         if (item is null) return null;
 
+        var workId = item.Id ?? throw new InvalidOperationException($"Workflow '{workflowRunId}' returned a work item without an id");
+        var takenAt = _timeProvider.GetUtcNow();
+
+        // Load the run snapshot once, up front — it's needed to build the
+        // dispatch regardless of claim outcome, and loading it before the
+        // claim avoids the situation where ClaimAsync succeeds (task marked
+        // Running on the workflow) but the run snapshot is missing, which
+        // would leave the runner unable to build a dispatch for work it
+        // already claimed.
         var run = await _workflowRuns.LoadAsync(workflowRunId);
         if (run is null) return null;
 
-        var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, RunnerId);
-        var issue = dispatch.Issue;
-        if (issue is null && run.Metadata?.Annotations is { } annotations
-            && annotations.TryGetValue("projectId", out var projectId)
-            && annotations.TryGetValue("issueId", out var issueId)
-            && annotations.TryGetValue("issueNumber", out var numberStr)
-            && int.TryParse(numberStr, out var number))
-        {
-            issue = new WorkIssueRef(projectId, issueId, number);
-        }
-
-        var workId = item.Id ?? throw new InvalidOperationException($"Workflow '{workflowRunId}' returned a work item without an id");
-        var takenAt = _timeProvider.GetUtcNow();
+        // Claim locally (durable): register the work in grain state + ledger
+        // BEFORE telling the workflow. This ordering guarantees that if the
+        // workflow subsequently marks the work Running, a runner record for
+        // it already exists — so "Running ⟺ durably claimed" holds.
         AddWork(new RunnerWork
         {
             WorkId = workId,
@@ -740,7 +742,6 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             WorkType = item.WorkType,
             Stage = item.Stage,
             Title = item.Title,
-            Issue = issue,
             Status = RunnerWorkStatus.Running,
             CreatedAt = takenAt,
         });
@@ -753,7 +754,57 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             takenAt,
             LedgerRunnerWorkStatus.Outstanding));
         await EnsureWorkTimeoutReminderAsync();
+
+        // Confirm the claim with the workflow. Only now does the task/check
+        // transition to Running. If confirmation fails (the offer was
+        // overtaken — another runner claimed it, or the stage advanced),
+        // roll back the local claim so we are not left tracking work the
+        // workflow does not consider ours.
+        var resolvedWorkId = await workflow.ClaimAsync(RunnerId, workId);
+        if (resolvedWorkId is null)
+        {
+            await RollbackClaimAsync(workflowRunId, workId, "claim-rejected");
+            return null;
+        }
+
+        var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, RunnerId);
+        var issue = dispatch.Issue;
+        if (issue is null && run.Metadata?.Annotations is { } annotations
+            && annotations.TryGetValue("projectId", out var projectId)
+            && annotations.TryGetValue("issueId", out var issueId)
+            && annotations.TryGetValue("issueNumber", out var numberStr)
+            && int.TryParse(numberStr, out var number))
+        {
+            issue = new WorkIssueRef(projectId, issueId, number);
+        }
+
+        // Backfill the issue ref on the tracked work now that the dispatch
+        // (which carries the resolved issue) has been built. The claim was
+        // registered without it because the work-item offer does not carry
+        // issue metadata; it is purely informational for status projection.
+        if (issue is not null)
+        {
+            var tracked = FindWork(workId, WorkDispatchOwnerKinds.Workflow, workflowRunId);
+            if (tracked is not null && tracked.Issue is null)
+            {
+                tracked.Issue = issue;
+                await PersistAsync();
+            }
+        }
+
         return dispatch;
+    }
+
+    private async Task RollbackClaimAsync(string workflowRunId, string workId, string reason)
+    {
+        TryRemoveWork(workId, WorkDispatchOwnerKinds.Workflow, workflowRunId);
+        await PersistAsync();
+        await MarkRunnerWorkTerminalAsync(
+            WorkDispatchOwnerKinds.Workflow,
+            workflowRunId,
+            workId,
+            LedgerRunnerWorkStatus.Failed,
+            reason);
     }
 
     private async Task<WorkDispatch?> DequeueAssignedAgentJobAsync()

@@ -154,11 +154,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         _run = await _runStore.LoadAsync(GrainKey);
-        if (_run is not null && _run.ReconcileReadyStatusWithInFlightWork())
-        {
-            await _runStore.SaveAsync(_run, ct);
-            _runDirty = false;
-        }
 
         // Self-heal persisted dirty state (#331-class): a run previously
         // stopped under the pre-fix code may have a Stopped run status with a
@@ -393,26 +388,49 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (!_run.IsAssignedTo(runnerId))
             return null;
 
-        var active = _outcomeProcessor.TryBuildActiveWorkItem(_run!, runnerId);
+        // Re-entry: if this runner already has a task in flight on the
+        // current stage, hand it back so the runner can recover its dispatch
+        // after a process restart. This is read-only — the task is already
+        // Running (claimed) and its dispatch is rebuilt from the persisted
+        // run. Only the assigned runner for this run reaches here, so the
+        // task's RunnerId necessarily matches.
+        var active = _readModel.GetActiveWorkForRunner(_run, runnerId);
         if (active is not null)
             return active;
 
-        if (_run.Status == WorkflowRunStatus.Running)
-            return null;
-
+        // Offer: surface the next pending work WITHOUT transitioning it to
+        // Running, persisting, or acquiring the stage lock. The runner
+        // durably registers the work and calls ClaimAsync to confirm; only
+        // then does the task/check become Running. This makes
+        // "Running ⟺ durably claimed" a flow invariant instead of a
+        // reconciled one. The stage lock is also deferred to ClaimAsync so
+        // a failed claim (overtaken offer) never leaks a lock.
         var work = _run.NextWork();
         if (work is null)
             return null;
 
-        if (!await AcquireStageLocksIfNeededAsync(work.Stage))
+        return _outcomeProcessor.BuildWorkItem(_run!, work);
+    }
+
+    public async Task<string?> ClaimAsync(string runnerId, string workId)
+    {
+        if (_run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
             return null;
 
-        var item = await _outcomeProcessor.ToWorkItemAsync(_run!, work, runnerId, events => CommitAsync(events));
-        if (item is null)
+        if (!_run.IsAssignedTo(runnerId))
             return null;
 
-        await SaveRunAsync();
-        return item;
+        // Acquire the sequential stage lock as part of the claim, not the
+        // offer. A failed claim (lock contended or offer overtaken) must not
+        // leave the workflow holding a lock on a stage it never started.
+        var stage = _run.CurrentStageId;
+        if (stage is not null && !await AcquireStageLocksIfNeededAsync(stage))
+            return null;
+
+        var claimed = await _outcomeProcessor.ClaimWorkItemAsync(
+            _run!, workId, runnerId, events => CommitAsync(events));
+
+        return claimed;
     }
 
     public async Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)
