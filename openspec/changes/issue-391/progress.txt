@@ -1,0 +1,67 @@
+issue-391 progress notes (working memory — appended as work proceeds)
+
+## Codebase Patterns
+
+- **Scope-of-test collection**: `MohistIntegration` (xunit `IClassFixture`-style collection) wires up `MohistIntegrationFixture` which boots a real `WebApplicationFactory<Program>` + Orleans silo + in-memory SQLite EF. Fast/cheap enough for the default `npm test`.
+- **Test traits convention**: every spec carries `[Trait(Traits.Speed.Name, Traits.Speed.Integration)]` + one or more `[Trait(Traits.Sut.Name, Traits.Sut.X)]` (Agent/Api/Workflow etc.). Speed gates the test selector (`Speed=Unit|Grain|Integration|Service`), Sut gates the bounded context.
+- **HttpClient helpers**: `_fixture.Client.PostAsJsonAsync/GetAsync/...`, plus `ApiTestClient.GetDataAsync<T>`, `PostOkAsync`, `PatchOkAsync`, `PostDataAsync<T>` (which unwraps `ApiResponse<T>` envelope). For manual envelopes (non-success) use the raw `PostAsJsonAsync` directly and read `ReadFromJsonAsync<JsonElement>`.
+- **GenericAgentSessionMetadata key conventions** (already extended by this task): `mohist.io/agent-id`, `mohist.io/agent-name`, `mohist.io/agent-launch/{issue-number|epic-number|repository|workspace-path}`, plus the new `mohist.io/trigger/event-id` + `mohist.io/trigger/subscription-id`. Sessions queryable via `AgentSessionQuery` + `AgentSessionQueryMetadataKeys.ProjectId` / `SourceKind = "agent-launch"`.
+- **Scoped lifetime follows `IssueQuerier` pattern**: concrete `AgentLauncher : IScopedService`, interface forward-registered in `MohistServiceRegistration` as `services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>())`. Bus-side handlers resolve via `IServiceScopeFactory` (same pattern as `InboxProjectionHandler`).
+- **Architecture rules exception noted** — Agent joined `domainsWithKnownCycles = { Issue, Workflow, Sessions, Runner, Agent }`. Justification: `AgentGrain → AgentQuerier (Services)` for `ToInfo` projection, and the shared `AgentLauncher (Services) → IAgentJobGrain (Grains)` for `SubmitAsync`. Both directional, both legitimate. If Agent ever moves its projection path out of `AgentGrain` (e.g. into a dedicated `AgentProjectionGrain`), the cycle closes and this exception can be removed.
+
+## T-001 — AgentLauncher extraction
+
+**Outcome**: Done. All 4046 server tests pass; targeted AgentLauncherSpecs (8) + AgentSessionLaunchRoutesSpecs (14) all green; `npm test` green.
+
+**Key files** (verbatim extraction per design D4):
+- New `packages/server/src/Mohist.Server/Agent/Services/IAgentLauncher.cs` (interface + `AgentLaunchResult` + `AgentLaunchContext` records).
+- New `packages/server/src/Mohist.Server/Agent/Services/AgentLauncher.cs` (concrete `IScopedService` implementation; calls `_sessions.NewSessionId → OpenAsync → build AgentJobInput → jobGrain.SubmitAsync`).
+- Modified `packages/server/src/Mohist.Server/Api/AgentSessionLaunchRoutes.cs` to delegate to `IAgentLauncher.LaunchAsync(agent, prompt, launchContext, triggerLabels: null, ct)`. HTTP route retained the three domain gates (whitespace prompt → 400; unresolved agent → 404; archived agent → 409 → `agent_archived`), and continues to compose the 201 response (sessionId/agentId/agentName/status/transcriptUrl).
+- Modified `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs` to register `IAgentLauncher` → `AgentLauncher` (scoped, forward-registered).
+
+**Trigger-label merging**: `AgentLauncher.WithTriggerLabels` uses the existing `AgentSessionMetadata.Merge` to layer the trigger labels over the `GenericAgentSessionMetadata.Metadata(...)` output. Manual path passes `null` and skips this branch entirely → no `mohist.io/trigger/*` label recorded (verified by `AgentLauncherSpecs.Launch_WithoutTriggerLabels_ProducesNoTriggerMetadataLabels`).
+
+**HTTP regression coverage** at `Specs/Agent/Api/AgentSessionLaunchRoutesSpecs.cs`:
+- 201 + identity/status/transcriptUrl shape (`Launch_ResolvesAgent_ComposesSnapshot_MintsSession_Returns201_WithIdentityAndStatus`)
+- Empty/whitespace prompt → 400 (`Launch_EmptyOrWhitespacePrompt_Returns400_WithoutCreatingSessionOrJob`, `[Theory]` for `""`, `"   "`, `"\t\n  "`)
+- Missing prompt field → 400 (`Launch_MissingPromptField_Returns400_WithoutCreatingSessionOrJob`)
+- Unknown agentRef → 404 (`Launch_UnknownAgent_Returns404_WithoutCreatingSessionOrJob`)
+- Archived agent → 409 with `code = agent_archived` (`Launch_ArchivedAgent_Returns409_WithoutCreatingSessionOrJob`)
+- Agent-ref name fallback (`Launch_ResolvesAgentByName_WhenAgentRefIsFriendlyName`)
+- Session metadata carries agent context refs (`Launch_RecordsContextRefs_OnSessionMetadata_AsPromptContextOnly`)
+- 201 launch → 200 on GET `metadata` + `transcript` (`Launch_GenericSession_IsReadableByProductMetadataAndTranscriptRoutes`)
+- Distinctness from `AgentJobController.ValidatePath` (`Launch_IsDistinctFromValidationOnlyAgentJobsRoute`)
+- Dispatch carries minted `AgentSessionId` verbatim, no `workflowRunId` (`Launch_PolledDispatch_CarriesMintedAgentSessionIdVerbatimWithNoWorkflowRunId`)
+- Completed AgentJob → session closed completed (`Launch_CompletedAgentJob_RecordsSessionClosedCompleted_AndResolvesCompletedStatus`)
+- AgentJob timeout → terminal failed (`Launch_AgentJobTimeout_TransitionsGenericSessionToTerminalFailedState`)
+
+**Launcher unit specs** at `Specs/Agent/Services/AgentLauncherSpecs.cs`:
+- trigger labels merged into session metadata (subscription-driven path)
+- no `mohist.io/trigger/*` keys on manual launch (`triggerLabels: null`, or empty dictionary)
+- blank prompt → `ArgumentException` *before* any grain call (no half-state), for `""`, `"   "`, `"\t\n  "`
+- `null` agent / `null` context → `ArgumentNullException`
+
+**Gotchas**:
+- `AgentLauncher` is `sealed` to keep the forward-registration typed and the seam explicit.
+- `OpenAgentSessionCommand.RunnerId` is intentionally `string.Empty` and `AgentRuntime = "opencode"` here; the route uses `WorkDir = context.WorkspacePath`. This is verbatim from the pre-T-001 route — *do not* tweak these values inside the extraction; pull them from the original signature.
+- `AgentJobInput.Uses = "mohist/acp-agent"` is also copied verbatim from the manual path. The shared contract assumption is "subscription-driven launches also go through Mohist's ACP runtime". If a subscription needs a different runtime, it must go through a different code path (out of scope of T-001).
+- `IAgentLauncher` takes the *resolved* `AgentInfo` (not the grain) so it stays path-agnostic. Archived-check belongs to the caller (so the launcher stays path-agnostic — T-003 dispatch handler will need to apply the same gate before invoking the launcher).
+
+## T-001 → T-003 hand-off notes
+
+- T-003 dispatch handler will resolve `IAgentLauncher` via `IServiceScopeFactory` (same pattern as `InboxProjectionHandler` resolving `IInboxSubscriptionStore`).
+- The handler MUST invoke the launcher as:
+    ```
+    await launcher.LaunchAsync(
+        agent,
+        renderedResponsePrompt,
+        new AgentLaunchContext(ProjectId: projectId /* nothing else */),
+        triggerLabels: new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GenericAgentSessionMetadata.TriggerEventId] = cloudEvent.Id,
+            [GenericAgentSessionMetadata.TriggerSubscriptionId] = subscription.Id,
+        });
+    ```
+- The `AgentJobInput` contract — `AgentInstructions: agent.Instructions, AgentConfig: agent.AgentConfig?.Clone()` — preserves the two-layer prompt composition (Agent identity + rendered ResponsePrompt → `Prompt`).
+- The subscription's `Rendered ResponsePrompt` replaces the manual `prompt`; everything else (workspace path, project id, session metadata) is identical. The session metadata carries the two trigger labels; manual launches do not.
+
