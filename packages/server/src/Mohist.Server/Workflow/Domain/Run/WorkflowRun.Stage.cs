@@ -64,12 +64,12 @@ public static partial class WorkflowRunExtensions
                 events.Add(new StageStarted(current.Id));
             }
 
-            run.Status = current.Status switch
+            SetStatus(run, current.Status switch
             {
                 StageRunStatus.Failed => WorkflowRunStatus.Failed,
                 StageRunStatus.AwaitingApproval => WorkflowRunStatus.AwaitingApproval,
                 _ => WaitingForDispatchStatus(run)
-            };
+            });
             return events;
         }
     }

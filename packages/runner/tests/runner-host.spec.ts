@@ -530,4 +530,152 @@ describe("RunnerHost", () => {
     await new Promise((r) => setTimeout(r, 30))
     expect(probeLiveness.mock.calls.length).toBe(probeCountAtShutdown)
   })
+
+  // =========================================================================
+  // Process-lifetime reported set (Batch 1): inFlight ∪ awaitingAck must
+  // survive poll exceptions and connection resets; re-dispatched works are
+  // skipped; awaitingAck retries until acked. These tests pin the fix for
+  // the rollback-storm root cause (design/workflow/scheduling.md §Poll
+  // Reconciliation — Implementation constraint).
+  // =========================================================================
+
+  it("PollBody_CarriesInFlightAndAwaitingAck_Keys", async () => {
+    vi.clearAllMocks()
+    getConnectionId.mockReturnValue("conn-1")
+    probeLiveness.mockResolvedValue(true)
+    forceReconnect.mockResolvedValue(undefined)
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    // report never resolves → the work stays in awaitingAck.
+    report.mockImplementation(() => new Promise(() => {}))
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    const controller = new AbortController()
+    const held = {
+      workflowRunId: "wr-held",
+      workId: "work-held",
+      workType: "task",
+      uses: "test/block",
+      ownerKind: "workflow",
+      variables: { workspace: { path: "/tmp/mohist-runner-test" } },
+    }
+    // First poll dispatches the held work; subsequent polls return null.
+    poll.mockResolvedValueOnce(held).mockResolvedValue(null)
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      projectId: "project-1",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    })
+    const run = host.run(controller.signal)
+
+    // Wait until a poll after the dispatch carries the work key in the
+    // awaitingAck set (execution completes quickly under the blocking
+    // action, then report never acks → it sits in awaitingAck).
+    await vi.waitFor(() => {
+      const bodies = poll.mock.calls
+        .filter((c) => c.length > 1 && c[1])
+        .map((c) => c[1] as { inFlight: string[]; awaitingAck: string[] })
+      expect(bodies.some((b) => b.awaitingAck.includes("workflow:wr-held:work-held"))).toBe(true)
+    }, { timeout: 5_000 })
+
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+  })
+
+  it("ReDispatchedWork_ReportedOnce_NotPerRedelivery", async () => {
+    vi.clearAllMocks()
+    getConnectionId.mockReturnValue("conn-1")
+    probeLiveness.mockResolvedValue(true)
+    forceReconnect.mockResolvedValue(undefined)
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    report.mockResolvedValue(undefined)
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    const controller = new AbortController()
+    const same = {
+      workflowRunId: "wr-dup",
+      workId: "work-dup",
+      workType: "task",
+      uses: "test/block",
+      ownerKind: "workflow",
+      variables: { workspace: { path: "/tmp/mohist-runner-test" } },
+    }
+    // The server re-dispatches the same work on three consecutive polls
+    // (the recovery path under at-least-once). The runner must dedupe:
+    // the work is reported at most once for the set of re-deliveries.
+    poll.mockResolvedValueOnce(same).mockResolvedValueOnce(same).mockResolvedValueOnce(same).mockResolvedValue(null)
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      projectId: "project-1",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    })
+    const run = host.run(controller.signal)
+
+    // Wait until all three re-dispatches have been polled.
+    await vi.waitFor(() => expect(poll.mock.calls.length).toBeGreaterThanOrEqual(4), { timeout: 5_000 })
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+
+    // The same work, re-delivered three times, is reported at most once.
+    // (Under the mock executor it may resolve quickly; the dedup guarantee
+    // is that re-delivery never produces a second report for the same key.)
+    const reportsForDup = report.mock.calls.filter((c) => c[0]?.workId === "work-dup")
+    expect(reportsForDup.length).toBeLessThanOrEqual(1)
+  })
+
+  it("AwaitingAck_RetriesReportUntilAcked", async () => {
+    vi.clearAllMocks()
+    getConnectionId.mockReturnValue("conn-1")
+    probeLiveness.mockResolvedValue(true)
+    forceReconnect.mockResolvedValue(undefined)
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    // First two report attempts fail; the third succeeds.
+    report
+      .mockRejectedValueOnce(new Error("transient"))
+      .mockRejectedValueOnce(new Error("transient"))
+      .mockResolvedValueOnce(undefined)
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    const controller = new AbortController()
+    const work = {
+      workflowRunId: "wr-retry",
+      workId: "work-retry",
+      workType: "task",
+      uses: "test/block",
+      ownerKind: "workflow",
+      variables: { workspace: { path: "/tmp/mohist-runner-test" } },
+    }
+    poll.mockResolvedValueOnce(work).mockResolvedValue(null)
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      projectId: "project-1",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    })
+    const run = host.run(controller.signal)
+
+    // The work is reported at least 3 times (first attempt + 2 retries
+    // driven by the awaitingAck loop at a 5s cadence). Allow generous
+    // headroom for the retry cadence.
+    await vi.waitFor(() => expect(report.mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 30_000 })
+
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+  }, 40_000)
 })

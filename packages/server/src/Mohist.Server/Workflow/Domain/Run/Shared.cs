@@ -98,9 +98,43 @@ public static partial class WorkflowRunExtensions
         }
     }
 
+    /// <summary>
+    /// Resolves the waiting-for-dispatch status. Does NOT mutate; callers that
+    /// assign the result to <see cref="WorkflowRun.Status"/> should route the
+    /// assignment through <see cref="SetStatus"/>, or use
+    /// <see cref="ApplyWaitingForDispatchStatus"/> directly, so that
+    /// <see cref="WorkflowRun.ReadySince"/> is seeded on Ready entry.
+    /// </summary>
     private static WorkflowRunStatus WaitingForDispatchStatus(WorkflowRun run) =>
         run.Assignment is null ? WorkflowRunStatus.Pending : WorkflowRunStatus.Ready;
 
     private static WorkflowRunStatus ActiveOrWaitingForDispatchStatus(WorkflowRun run) =>
         run.HasInFlightWork() ? WorkflowRunStatus.Running : WaitingForDispatchStatus(run);
+
+    /// <summary>
+    /// Applies <see cref="WaitingForDispatchStatus"/>, seeding
+    /// <see cref="WorkflowRun.ReadySince"/> whenever the run (re-)enters Ready.
+    /// Single chokepoint for every Ready transition driven by work draining or
+    /// stages advancing; <see cref="WorkflowAssignment.AssignTo"/> covers the
+    /// first Ready entry (assignment).
+    /// </summary>
+    private static void ApplyWaitingForDispatchStatus(WorkflowRun run)
+        => SetStatus(run, WaitingForDispatchStatus(run));
+
+    private static void ApplyActiveOrWaitingForDispatchStatus(WorkflowRun run)
+        => SetStatus(run, ActiveOrWaitingForDispatchStatus(run));
+
+    /// <summary>
+    /// Assigns <see cref="WorkflowRun.Status"/> and seeds
+    /// <see cref="WorkflowRun.ReadySince"/> (the fairness ordering key) at the
+    /// moment the run enters Ready. Leaving Ready does not clear it; re-entry
+    /// overwrites. Use this for every run-status assignment that may resolve to
+    /// Ready so seeding stays consistent.
+    /// </summary>
+    private static void SetStatus(WorkflowRun run, WorkflowRunStatus next)
+    {
+        if (next == WorkflowRunStatus.Ready && run.Status != WorkflowRunStatus.Ready)
+            run.ReadySince = DateTimeOffset.UtcNow;
+        run.Status = next;
+    }
 }

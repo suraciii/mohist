@@ -46,7 +46,7 @@ public static partial class WorkflowRunExtensions
             current.ScheduleCheckRepair(checkName, repairTasks, message, output);
             current.ChecksWorkId = null;
             run.Failure = null;
-            run.Status = WaitingForDispatchStatus(run);
+            ApplyWaitingForDispatchStatus(run);
             var taskIds = current.Tasks
                 .TakeLast(repairTasks.Count)
                 .Select(t => t.Id)

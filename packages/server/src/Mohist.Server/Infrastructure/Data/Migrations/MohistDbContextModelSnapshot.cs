@@ -1431,6 +1431,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", true);
 
+                    b.Property<DateTime?>("ReadySince")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.readySince'), json_extract(State, '$.ReadySince'))", false);
+
                     b.Property<string>("State")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1448,6 +1453,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("Status", "AssignedRunnerId")
                         .HasDatabaseName("IX_WorkflowRuns_Status");
+
+                    b.HasIndex("Status", "AssignedRunnerId", "ReadySince")
+                        .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");
 
                     b.HasIndex("MetadataProjectId", "AssignedRunnerId", "CreatedAt");
 

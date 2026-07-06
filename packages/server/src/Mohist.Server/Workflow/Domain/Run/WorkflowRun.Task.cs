@@ -94,7 +94,7 @@ public static partial class WorkflowRunExtensions
             current.Failure = null;
             current.Status = StageRunStatus.Running;
             run.Failure = null;
-            run.Status = WaitingForDispatchStatus(run);
+            ApplyWaitingForDispatchStatus(run);
 
             return [new TaskFailed(current.Id, task.Id, result.Reason)];
         }

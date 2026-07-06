@@ -56,6 +56,15 @@ public sealed class WorkflowRun
     public required List<StageRun> Stages { get; init; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
+    /// <summary>
+    /// When the run (re-)entered <see cref="WorkflowRunStatus.Ready"/>. Drives
+    /// fairness: the scheduler serves Ready runs in <c>ReadySince ASC</c> order,
+    /// so just-served runs re-queue at the tail with zero scheduler state (see
+    /// <c>design/workflow/scheduling.md</c> §Fairness). Maintained as a side
+    /// effect of entering Ready (see <c>WaitingForDispatchStatus</c>); leaving
+    /// Ready does not clear it, re-entering overwrites it.
+    /// </summary>
+    public DateTimeOffset? ReadySince { get; set; }
     public FailureDetails? Failure { get; set; }
     public WorkspaceIdentity? Workspace { get; set; }
     public List<ApprovalFeedback> Feedback { get; set; } = new();
