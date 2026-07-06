@@ -307,14 +307,15 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(claimedWorkId, claimedTask.WorkId);
     }
 
-    // Re-entry: a runner that already claimed a task and then lost its
-    // in-memory dispatch (process restart) must be able to re-poll and get
-    // the in-flight task back. NextWork() returns only Pending work, so this
-    // path is served by the active-work re-entry check, not the offer path.
+    // Re-entry recovery is no longer the workflow grain's responsibility.
+    // PollWorkAsync is a pure offer: it surfaces only Pending work. Once a
+    // task is claimed (Running), re-polling returns null — the runner
+    // rebuilds the dispatch from its own snapshot on recovery, never asking
+    // the workflow to reconstruct it.
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task PollWork_ReentryReturnsInFlightTaskToOwningRunner()
+    public async Task PollWork_OfferOnly_NoReentryForInFlightTask()
     {
         var runnerId = await RegisterRunnerAsync("reentry-runner");
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
@@ -326,11 +327,10 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var claimedWorkId = await workflow.ClaimAsync(runnerId, offered!.Id!);
         Assert.NotNull(claimedWorkId);
 
-        // Re-poll: the task is Running, so NextWork would not surface it.
-        // The re-entry path must hand it back so the runner can rebuild its
-        // dispatch after a restart.
+        // Re-poll: the task is Running, so the offer returns null. Recovery
+        // of in-flight work is the runner's own business (dispatch snapshot),
+        // not the workflow's.
         var reentered = await workflow.PollWorkAsync(runnerId);
-        Assert.NotNull(reentered);
-        Assert.Equal(claimedWorkId, reentered!.Id);
+        Assert.Null(reentered);
     }
 }

@@ -46,44 +46,6 @@ public sealed class WorkflowReadModel
             IssueNumber: ResolveIssueNumber());
     }
 
-    /// <summary>
-    /// Re-entry projection: returns the work item currently in flight on the
-    /// current stage for the given runner, so a runner that lost its in-memory
-    /// dispatch (e.g. after a process restart) can recover it by re-polling.
-    /// Read-only — the task/check is already Running (claimed). Returns
-    /// <c>null</c> when there is no in-flight work or it belongs to a
-    /// different runner.
-    /// </summary>
-    public WorkItem? GetActiveWorkForRunner(WorkflowRun run, string runnerId)
-    {
-        var currentStage = run.CurrentStage();
-        var runningTask = currentStage.RunningTask;
-        if (runningTask is not null)
-        {
-            if (!string.Equals(runningTask.RunnerId, runnerId, StringComparison.Ordinal))
-                return null;
-
-            return WorkItem.Task(
-                stage: currentStage.Id,
-                id: runningTask.WorkId ?? runningTask.Id,
-                title: runningTask.Title,
-                uses: runningTask.Uses,
-                with: runningTask.WithInput,
-                artifacts: runningTask.Artifacts,
-                setVars: runningTask.SetVars);
-        }
-
-        var checksWorkId = currentStage.ChecksWorkId;
-        if (checksWorkId is null)
-            return null;
-
-        var pendingChecks = currentStage.Checks
-            .Where(c => c.Status == StageCheckStatus.Pending)
-            .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
-            .ToList();
-        return WorkItem.Checks(currentStage.Id, checksWorkId, pendingChecks);
-    }
-
     public WorkflowFeedbackRecord? GetFeedback(string feedbackId)
     {
         var run = _owner.RunOrNull;

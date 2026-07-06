@@ -175,10 +175,10 @@ runner process     RunnerGrain                WorkflowGrain
 
 No forward call from WorkflowGrain to runner. The runner's assigned set is the discovery cache; WorkflowRun.Assignment is the truth.
 
-The dispatch snapshot stored at claim time is the full rendered dispatch
-(prompts, variables, payload). It is what the runner process needs to
-execute; storing it at claim means recovery needs nothing from the
-workflow grain.
+The snapshot stored at claim time is the `WorkItem` (the domain work
+descriptor). The runner uses it to assemble the report outcome context
+without consulting the workflow grain. The full dispatch envelope the
+runner process executes is re-rendered from the WorkItem on demand.
 
 ## Work State Machine
 
@@ -255,17 +255,19 @@ Retry + idempotency throughout. An assigned workflow never becomes claimable aga
 
 **Principle: the runner is the authoritative holder of work it has claimed. Recovery is the runner's own business — the workflow is not consulted.**
 
-At claim time the runner stores the full rendered dispatch as a snapshot
-alongside its work record. On any recovery the runner rebuilds the dispatch
-from its own snapshot; it never asks the workflow to reconstruct it.
+At claim time the runner stores the `WorkItem` as a snapshot alongside its
+work record. When the runner later reports the work's result, it uses its
+own snapshot to assemble the outcome context; it never asks the workflow
+grain to reconstruct the item. (The full dispatch envelope is re-rendered
+lazily from the WorkItem via `TranslateToDispatchAsync`, since rendering
+depends on profile state that may change.)
 
 ```text
 claim call lost                  -> runner retries AssignRunnerAsync (idempotent)
 offer lost (GetNextWork returned, runner crashed before registering)  -> task still PENDING; next poll re-offers (no dirty state)
-claim registered, then runner crashes before Claim()  -> runner holds a record for a still-PENDING task; the record is stale and cleared by timeout/stale sweep; workflow unaffected (task never left PENDING)
+claim registered, then runner crashes before Claim()  -> runner holds a record for a still-PENDING task; workflow unaffected (task never left PENDING); the orphan record is cleared by the work-completion timeout (synthesized FAILED)
 report lost                      -> runner re-reports; workflow dedups (idempotent)
 work wedged / runaway            -> runner process progress-aware timeout -> reports FAILED
-runner process restarts mid-work -> runner grain still holds the dispatch snapshot; next poll re-delivers it from the snapshot (no workflow call); runner process resumes execution
 process dies mid-work (heartbeat lost) -> no report; RunnerGrain detects heartbeat loss -> synthesizes FAILED for outstanding works
 ```
 
@@ -282,14 +284,11 @@ Before start (no runner): pending is normal; the workflow is claimable and waits
 
 正文描述目标设计。以下是与当前代码的差距，由后续 issue 推进落地。
 
-**已交付**（offer/claim 两阶段 dispatch）：
-- `GetNextWork`（offer）+ `Claim`（标 Running）两步；`Running ⟺ claimed` 由流程顺序保证。
-- offer 不改状态、不持久化、不取 lock；claim 落盘后才标 Running。
-- check workId 确定化（`checks-{stage}`），使 offer 可预知 workId。
+**已交付**：
+- offer/claim 两阶段 dispatch：`GetNextWork`（offer）+ `Claim`（标 Running）；`Running ⟺ claimed` 由流程顺序保证。offer 不改状态、不持久化、不取 lock；claim 落盘后才标 Running。check workId 确定化（`checks-{stage}`）。
+- WorkItem 快照：runner 在 claim 时把 `WorkItem` 存入 `RunnerWork.WorkItemSnapshot`，report 结果时优先用快照组装 outcome 上下文，不再问 workflow grain 反查 item（`RecoverWorkItemFromActiveWorkAsync` 已删）。快照缺失时降级到 `RecoverWorkItemFromRun`（纯本地持久化 run 读取，仍不问 grain）。
+- `PollWorkAsync` 纯化为只 offer Pending work：删除 `GetActiveWorkForRunner` 重入分支（恢复不再由 workflow 提供）。
+- capacity gate 直接读 workflow 侧 `CountRunningAssignedToAsync`，删除 `RemoveStaleWorkflowWorksAsync` 预清理（容量以 workflow 侧 Running 行为准，不受 runner stale 记录影响）。
 
-**未交付**（dispatch 快照自治恢复）：
-- workflow work 的 dispatch 快照尚未存储——`RunnerWork.DispatchSnapshot` 当前只填充 agent-job，workflow work 领取时不存。恢复仍走 `GetActiveWorkForRunner`（重入分支）和 `RecoverWorkItemFromActiveWorkAsync`/`RecoverWorkItemFromRun`（report 时重建），即恢复仍问 workflow。
-- `PollWorkAsync` 仍含 `GetActiveWorkForRunner` 重入分支（spec 要求 `GetNextWork` 只返回 Pending，恢复走快照）。
-- capacity gate 仍经 `RemoveStaleWorkflowWorksAsync` 预清理后读 `_worksState`（spec 要求直接读 workflow 侧 `CountRunningAssignedToAsync`，不受 runner stale 记录影响）。
-
-落地后删除：`GetActiveWorkForRunner`、`RecoverWorkItemFromActiveWorkAsync`/`RecoverWorkItemFromRun`/`RecoverActiveWorkflowWorkAsync`、`RemoveStaleWorkflowWorksAsync`。
+**未交付**：
+- runner process 重启后 resume execution：正文 Recovery 原则要求「runner grain 仍持有快照，next poll 重新派发，process resume」。当前 poll 协议无状态，runner grain 无法区分「process 仍在执行」与「process 已重启需要重新派发」，故暂不实现 process resume——process 崩溃仍走 heartbeat 超时 → 合成 FAILED 的现有失败路径。实现需要 poll 协议改动（让 process 声明 in-flight）或 heartbeat 中断检测，由后续 issue 推进。

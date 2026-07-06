@@ -1,3 +1,5 @@
+using Mohist.Server.Workflow.Domain.Run;
+
 namespace Mohist.Server.Runner.Grains;
 
 /// <summary>
@@ -39,6 +41,17 @@ public sealed class RunnerWork
     /// have no backing workflow grain to reconstruct from.
     /// </summary>
     [Id(10)] public WorkDispatch? DispatchSnapshot { get; set; }
+    /// <summary>
+    /// For workflow works: the <see cref="WorkItem"/> captured at claim
+    /// time. Lets the runner report the work's result without asking the
+    /// workflow grain to reconstruct the item — the runner is the
+    /// authoritative holder of work it has claimed, and recovery of the
+    /// report context is the runner's own business. Falls back to
+    /// <c>RecoverWorkItemFromRun</c> (a local persisted-run read) when the
+    /// snapshot is absent (e.g. a ledger-rebuilt shell after grain-state
+    /// loss); it never round-trips the workflow grain for the item.
+    /// </summary>
+    [Id(11)] public WorkItem? WorkItemSnapshot { get; set; }
 }
 
 /// <summary>
