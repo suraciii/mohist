@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, act } from '@testing-library/react'
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { createElement, type ReactNode } from 'react'
 import { dispatchAgentEvent } from '../../../entities/agent'
 import { deriveToolCallTitle, reconstructRoundsFromEvents, useSessionTimeline } from './useSessionTimeline'
@@ -359,5 +359,688 @@ describe('useSessionTimeline context health events', () => {
       contextWindowSize: 100_000,
       contextUsagePercent: null,
     })
+  })
+})
+
+describe('useSessionTimeline event-wiring integration', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('plan_round_start appends a round and marks the matching plan step running', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    expect(hook.result.current.rounds).toHaveLength(1)
+    expect(hook.result.current.rounds[0]).toMatchObject({
+      roundIndex: 0,
+      label: 'Proposal',
+      completedAt: null,
+      userText: '',
+      agentText: '',
+      thoughtText: '',
+      toolCalls: [],
+      recoveryEvents: [],
+      compactions: [],
+    })
+    expect(hook.result.current.rounds[0].startedAt).toBe('2024-01-01T00:00:00.000Z')
+
+    const step = hook.result.current.planProgress?.steps.find((s) => s.roundType === 'proposal')
+    expect(step?.status).toBe('running')
+  })
+
+  it('plan_round_start appends a step when roundType is not in BASE_PLAN_STEPS', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'custom-step',
+        roundLabel: 'Custom Step',
+        roundIndex: 7,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    const customStep = hook.result.current.planProgress?.steps.find((s) => s.roundType === 'custom-step')
+    expect(customStep).toMatchObject({
+      roundType: 'custom-step',
+      roundLabel: 'Custom Step',
+      roundIndex: 7,
+      status: 'running',
+    })
+  })
+
+  it('plan_round_start drops events for the wrong issueId or session', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '999',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Should be dropped',
+        roundIndex: 0,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    expect(hook.result.current.rounds).toHaveLength(0)
+    expect(hook.result.current.planProgress).toBeNull()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Should also be dropped',
+        roundIndex: 0,
+        coderSessionId: 'wrong-coder',
+      })
+    })
+
+    expect(hook.result.current.rounds).toHaveLength(0)
+  })
+
+  it('plan_round_complete stamps verdict and extends with auto-fix / re-self-review on FAIL', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'self-review',
+        roundLabel: 'Self Review',
+        roundIndex: 4,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('plan_round_complete', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'self-review',
+        roundIndex: 4,
+        duration: 1234,
+        verdict: 'FAIL',
+      })
+    })
+
+    const steps = hook.result.current.planProgress?.steps ?? []
+    const selfReview = steps.find((s) => s.roundType === 'self-review')
+    expect(selfReview).toMatchObject({
+      status: 'failed',
+      duration: 1234,
+      verdict: 'FAIL',
+    })
+    expect(steps.some((s) => s.roundType === 'auto-fix')).toBe(true)
+    expect(steps.some((s) => s.roundType === 're-self-review')).toBe(true)
+  })
+
+  it('plan_round_complete marks the step completed on PASS', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'specs',
+        roundLabel: 'Specs',
+        roundIndex: 1,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('plan_round_complete', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'specs',
+        roundIndex: 1,
+        duration: 500,
+        verdict: 'PASS',
+      })
+    })
+
+    const specs = hook.result.current.planProgress?.steps.find((s) => s.roundType === 'specs')
+    expect(specs).toMatchObject({
+      status: 'completed',
+      duration: 500,
+      verdict: 'PASS',
+    })
+  })
+
+  it('plan_round_complete does not duplicate auto-fix / re-self-review on repeated FAIL', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'self-review',
+        roundLabel: 'Self Review',
+        roundIndex: 4,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('plan_round_complete', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'self-review',
+        roundIndex: 4,
+        duration: 1234,
+        verdict: 'FAIL',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('plan_round_complete', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'self-review',
+        roundIndex: 4,
+        duration: 999,
+        verdict: 'FAIL',
+      })
+    })
+
+    const steps = hook.result.current.planProgress?.steps ?? []
+    const autoFixCount = steps.filter((s) => s.roundType === 'auto-fix').length
+    const reReviewCount = steps.filter((s) => s.roundType === 're-self-review').length
+    expect(autoFixCount).toBe(1)
+    expect(reReviewCount).toBe(1)
+  })
+
+  it('coder_recovery_status sets recoveryStatus, appends to last round, and clears on recovered', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_recovery_status', {
+        issueId: '123',
+        projectId: 'proj-1',
+        executionId: 'exec-1',
+        acpSessionId: 'acp-1',
+        status: 'recovering',
+        attempt: 2,
+        reason: 'lost contact',
+      })
+    })
+
+    expect(hook.result.current.recoveryStatus).toMatchObject({
+      status: 'recovering',
+      attempt: 2,
+      reason: 'lost contact',
+    })
+    expect(hook.result.current.rounds[0].recoveryEvents).toHaveLength(1)
+    expect(hook.result.current.rounds[0].recoveryEvents[0]).toMatchObject({
+      status: 'recovering',
+      attempt: 2,
+      reason: 'lost contact',
+    })
+
+    act(() => {
+      dispatchAgentEvent('coder_recovery_status', {
+        issueId: '123',
+        projectId: 'proj-1',
+        executionId: 'exec-1',
+        acpSessionId: 'acp-1',
+        status: 'recovered',
+        attempt: 2,
+      })
+    })
+
+    expect(hook.result.current.recoveryStatus).toBeNull()
+    expect(hook.result.current.rounds[0].recoveryEvents).toHaveLength(2)
+    expect(hook.result.current.rounds[0].recoveryEvents[1].status).toBe('recovered')
+  })
+
+  it('session.liveness probing maps to recovering and appends a recovery event with ordered attempt fallback', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('session.liveness', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        status: 'probing',
+        lastDataAt: '2024-01-01T00:00:00.000Z',
+        activeProbeVersion: 3,
+        probeDeadlineAt: '2024-01-01T00:00:30.000Z',
+      })
+    })
+
+    expect(hook.result.current.recoveryStatus).toMatchObject({
+      status: 'recovering',
+      attempt: 3,
+    })
+    expect(hook.result.current.rounds[0].recoveryEvents).toHaveLength(1)
+    expect(hook.result.current.rounds[0].recoveryEvents[0]).toMatchObject({
+      status: 'recovering',
+      attempt: 3,
+    })
+  })
+
+  it('session.liveness falls back through satisfiedProbeVersion then probeVersion then 1', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('session.liveness', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        status: 'probing',
+        lastDataAt: '2024-01-01T00:00:00.000Z',
+        satisfiedProbeVersion: 7,
+        probeVersion: 9,
+      })
+    })
+
+    expect(hook.result.current.recoveryStatus?.attempt).toBe(7)
+
+    act(() => {
+      dispatchAgentEvent('session.liveness', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        status: 'probing',
+        lastDataAt: '2024-01-01T00:00:00.000Z',
+        probeVersion: 9,
+      })
+    })
+
+    expect(hook.result.current.recoveryStatus?.attempt).toBe(9)
+
+    act(() => {
+      dispatchAgentEvent('session.liveness', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        status: 'probing',
+        lastDataAt: '2024-01-01T00:00:00.000Z',
+      })
+    })
+
+    expect(hook.result.current.recoveryStatus?.attempt).toBe(1)
+  })
+
+  it('session.liveness failed uses failureReason and clears recoveryStatus after the append', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('session.liveness', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        status: 'failed',
+        lastDataAt: '2024-01-01T00:00:00.000Z',
+        failureReason: 'no response',
+        probeVersion: 4,
+      })
+    })
+
+    expect(hook.result.current.recoveryStatus).toBeNull()
+    expect(hook.result.current.rounds[0].recoveryEvents).toHaveLength(1)
+    expect(hook.result.current.rounds[0].recoveryEvents[0]).toMatchObject({
+      status: 'failed',
+      attempt: 4,
+      reason: 'no response',
+    })
+  })
+
+  it('compaction_event appends to the last round and resets contextHealth from contextWindowUsedAfter', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('compaction_event', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        strategy: 'summary',
+        contextWindowUsedBefore: 950_000,
+        contextWindowUsedAfter: 400_000,
+        contextWindowSize: 1_000_000,
+        summary: 'Kept the original task instructions.',
+        recordedAt: '2024-01-01T00:00:05.000Z',
+      })
+    })
+
+    expect(hook.result.current.rounds[0].compactions).toHaveLength(1)
+    expect(hook.result.current.rounds[0].compactions[0]).toMatchObject({
+      strategy: 'summary',
+      contextWindowUsedBefore: 950_000,
+      contextWindowUsedAfter: 400_000,
+      contextWindowSize: 1_000_000,
+      summary: 'Kept the original task instructions.',
+      recordedAt: '2024-01-01T00:00:05.000Z',
+    })
+    expect(hook.result.current.contextHealth).toMatchObject({
+      status: null,
+      contextWindowUsed: 400_000,
+      contextWindowSize: 1_000_000,
+      contextUsagePercent: null,
+    })
+  })
+
+  it('com.mohist.agent-session.context-compacted appends a CompactionEntry to the last round and resets contextHealth', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('com.mohist.agent-session.context-compacted', {
+        issueId: '123',
+        projectId: 'proj-1',
+        strategy: 'summary',
+        contextWindowUsedBefore: 800_000,
+        contextWindowUsedAfter: 200_000,
+        contextWindowSize: 1_000_000,
+        summary: 'Pruned stale context.',
+        recordedAt: '2024-01-01T00:00:07.000Z',
+      })
+    })
+
+    expect(hook.result.current.rounds[0].compactions).toHaveLength(1)
+    expect(hook.result.current.rounds[0].compactions[0]).toMatchObject({
+      strategy: 'summary',
+      contextWindowUsedBefore: 800_000,
+      contextWindowUsedAfter: 200_000,
+      contextWindowSize: 1_000_000,
+      summary: 'Pruned stale context.',
+      recordedAt: '2024-01-01T00:00:07.000Z',
+    })
+    expect(hook.result.current.contextHealth).toMatchObject({
+      status: null,
+      contextWindowUsed: 200_000,
+      contextWindowSize: 1_000_000,
+      contextUsagePercent: null,
+    })
+  })
+
+  it('com.mohist.agent-session.context-compacted synthesizes a placeholder Compaction round when no round exists', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('com.mohist.agent-session.context-compacted', {
+        issueId: '123',
+        projectId: 'proj-1',
+        contextWindowUsedAfter: 100_000,
+        recordedAt: '2024-01-01T00:00:01.000Z',
+      })
+    })
+
+    expect(hook.result.current.rounds).toHaveLength(1)
+    expect(hook.result.current.rounds[0].label).toBe('Compaction')
+    expect(hook.result.current.rounds[0].compactions).toHaveLength(1)
+    expect(hook.result.current.rounds[0].compactions[0].recordedAt).toBe('2024-01-01T00:00:01.000Z')
+  })
+
+  it('com.mohist.agent-session.context-health-updated applies server-provided values verbatim', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('com.mohist.agent-session.context-health-updated', {
+        issueId: '123',
+        projectId: 'proj-1',
+        healthStatus: 'yellow',
+        contextUsagePercent: 65,
+        contextWindowUsed: 65_000,
+        contextWindowSize: 100_000,
+        recordedAt: '2024-01-01T00:00:00.000Z',
+      })
+    })
+
+    expect(hook.result.current.contextHealth).toMatchObject({
+      status: 'yellow',
+      contextWindowUsed: 65_000,
+      contextWindowSize: 100_000,
+      contextUsagePercent: 65,
+    })
+  })
+
+  it('tool_call.started → updated → completed share liveToolCallMapRef and map timeout to failed', () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('tool_call.started', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        toolName: 'read',
+        state: 'started',
+        toolCallId: 'call-1',
+        title: 'read',
+        rawInput: { file_path: 'src/index.ts' },
+      })
+    })
+
+    expect(hook.result.current.rounds[0].toolCalls).toHaveLength(1)
+    const startedEntry = hook.result.current.rounds[0].toolCalls[0]
+    expect(startedEntry).toMatchObject({
+      toolName: 'read',
+      state: 'started',
+      toolCallId: 'call-1',
+      title: 'read',
+      rawInput: '{"file_path":"src/index.ts"}',
+    })
+
+    act(() => {
+      dispatchAgentEvent('tool_call.updated', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        toolName: 'read',
+        state: 'timeout',
+        toolCallId: 'call-1',
+        rawOutput: { error: 'timed out' },
+      })
+    })
+
+    expect(hook.result.current.rounds[0].toolCalls).toHaveLength(1)
+    const updatedEntry = hook.result.current.rounds[0].toolCalls[0]
+    expect(updatedEntry.state).toBe('failed')
+    expect(updatedEntry.toolCallId).toBe('call-1')
+    expect(updatedEntry.rawOutput).toBe('{"error":"timed out"}')
+
+    act(() => {
+      dispatchAgentEvent('tool_call.completed', {
+        coderSessionId: 'coder-1',
+        acpSessionId: 'acp-1',
+        toolName: 'read',
+        state: 'completed',
+        toolCallId: 'call-1',
+        rawOutput: 'final-output',
+      })
+    })
+
+    expect(hook.result.current.rounds[0].toolCalls).toHaveLength(1)
+    expect(hook.result.current.rounds[0].toolCalls[0].state).toBe('completed')
+    expect(hook.result.current.rounds[0].toolCalls[0].rawOutput).toBe('final-output')
+  })
+
+  it('plan_session_update coalesces two events within 100ms into a single setRounds flush', async () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('plan_session_update', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundIndex: 0,
+        sessionUpdate: 'message.delta',
+        data: { text: 'hello ' },
+        coderSessionId: 'coder-1',
+      })
+      dispatchAgentEvent('plan_session_update', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundIndex: 0,
+        sessionUpdate: 'message.delta',
+        data: { text: 'world' },
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    expect(hook.result.current.rounds[0].agentText).toBe('')
+
+    await act(async () => {
+      vi.advanceTimersByTime(120)
+    })
+
+    expect(hook.result.current.rounds[0].agentText).toBe('hello world')
+  })
+
+  it('plan_session_update uses the rAF branch when at least 100ms has elapsed since the last flush', async () => {
+    const hook = renderTimelineHook()
+
+    act(() => {
+      dispatchAgentEvent('plan_round_start', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundLabel: 'Proposal',
+        roundIndex: 0,
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    act(() => {
+      dispatchAgentEvent('plan_session_update', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundIndex: 0,
+        sessionUpdate: 'message.delta',
+        data: { text: 'first ' },
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(120)
+    })
+
+    expect(hook.result.current.rounds[0].agentText).toBe('first ')
+
+    await act(async () => {
+      vi.advanceTimersByTime(200)
+    })
+
+    act(() => {
+      dispatchAgentEvent('plan_session_update', {
+        issueId: '123',
+        projectId: 'proj-1',
+        roundType: 'proposal',
+        roundIndex: 0,
+        sessionUpdate: 'message.delta',
+        data: { text: 'second' },
+        coderSessionId: 'coder-1',
+      })
+    })
+
+    expect(hook.result.current.rounds[0].agentText).toBe('first ')
+
+    await act(async () => {
+      vi.advanceTimersByTime(30)
+    })
+
+    expect(hook.result.current.rounds[0].agentText).toBe('first second')
   })
 })
