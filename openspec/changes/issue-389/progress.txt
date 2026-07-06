@@ -53,3 +53,59 @@
 
 - The chart's `aria-label="Cycle Time"` is kept stable on purpose. The section is the chart's identity in the page (one chart, one testid), not the current lens' label; the heading now serves as the dynamic caliber announcement. A screen reader walking the heading list hears the current caliber.
 - `screen.getByText('Lead Time')` would also match the `LensToggle` button text "Lead time" (case-insensitive substring match). The new tests use `getByRole('heading', { level: 3, name: 'Lead Time' })` to disambiguate heading from button, and assert `not.toBeInTheDocument()` on the previous caliber's heading to ensure exactly one caliber is shown.
+
+## T-003 — Quality Metrics single-window contract (server + web)
+
+### Scope confirmation
+
+#### Server side
+
+- `Api/IssueRoutes.Dtos.cs`: `QualityMetricsResponse` now `(QualityMetricsWindowDto Window, double? PreviousFirstTimeRightRate, int PreviousSampleCount, QualityTrendDto Trend)`. `Window7d`/`Window30d` removed. XML doc rewritten to describe the single range-driven contract.
+- `Api/IssueRoutes.QualityMetrics.cs`: `BuildResponse` maps the single `Window` straight through. `BuildTrend` now reads `trend.WindowFrom`/`trend.WindowTo` (was `Window30dFrom`/`Window30dTo`).
+- `Issue/Services/IssueMetricsQuerier.cs`:
+  - `QualityMetricsResult` is now `(QualityMetricsWindow Window, QualityPreviousWindow PreviousWindow, QualityTrend Trend)`.
+  - `QualityTrend` is now `(string Bucket, DateTimeOffset WindowFrom, DateTimeOffset WindowTo, IReadOnlyList<QualityTrendPoint> Points)`.
+  - `GetQualityAsync` drops the fixed 7-day lens (`window7d*` accumulator removed). `primaryDays = windowDays ?? 30` scales the primary window, the previous window, and the trend boundaries uniformly. FTR classification, per-stage rework, ship-time windowing, and trend bucketing are byte-for-byte unchanged.
+- `Specs/Issue/Api/IssueMetricsApiSpecs.cs`: every `payload.Window7d`/`payload.Window30d` reference retargeted to `payload.Window`. The three `RangeQuery_QualityEndpoint_*` tests were rewritten to assert the single-window contract:
+  - `RangeQuery_QualityEndpoint_OmittedDefaultsTo30DayPrimaryWindow` — omitted range yields a 30-day window, 30 trend buckets, trend span == window span.
+  - `RangeQuery_QualityEndpoint_90dScalesPrimaryPreviousAndTrend` — `range=90d` yields a 90-day window and 90 trend buckets.
+  - `RangeQuery_QualityEndpoint_7dScalesPrimaryPreviousAndTrend` — `range=7d` yields a 7-day window and 7 trend buckets.
+  - The legacy `Window7dStaysFixedAcrossRanges` and `OmittedReproduces30dPrimaryWindowAnd30TrendBuckets` are deleted (their assertions are no longer reachable under the new contract).
+  - The `AdditivePreservation` test was renamed to `ExistingWindowAndTrendUnchanged` and rewrites its window assertions to the single `Window` field.
+  - The local `QualityMetricsResponse` record nested in the spec was rewritten to `(QualityMetricsWindowDto Window, double? PreviousFirstTimeRightRate, int PreviousSampleCount, QualityTrendDto Trend)`.
+- `Specs/Issue/Querier/IssueMetricsQuerierSpecs.cs`: every `result.Window7d`/`result.Window30d` reference retargeted to `result.Window`. Trend accessor switched to `result.Trend.WindowFrom`/`WindowTo`. The "dual-window" tests that asserted both 7d and 30d scalars collapsed into single-window assertions (the underlying scenario — FTR classification + per-stage rework + trend bucketing — is preserved).
+
+#### Web side
+
+- `entities/issue/api/quality-metrics.ts`: `QualityMetricsResponse` now `{ window: QualityMetricsWindowDto, previousFirstTimeRightRate?: number | null, previousSampleCount?: number, trend?: QualityTrendDto }`. `window7d`/`window30d` removed.
+- `entities/issue/api/quality-metrics.test.ts`: fixture and assertion updates mirror the new shape.
+- `pages/insights/panels/QualityPanel.tsx`:
+  - The panel reads only `data.window`. The two-window render path is gone.
+  - `QualityWindow` sub-component is now single-instance. The hardcoded `"Last 7 days"` label is removed; the window title is `formatWindowTitle(window)` (exports "Mon D – Mon D" formatted `from – to`).
+  - Test IDs: `productivity-quality-window` (single), `productivity-quality-ftr`, `productivity-quality-ftr-sample`, `productivity-quality-stage-{stage}` (singular), `productivity-quality-stage-{stage}-{rate|sample|empty}`.
+  - The per-window empty branch is removed: when `window.sampleCount === 0` the entire panel renders the panel-level empty state ("No quality data yet — first-time-right and rework rates appear once issues ship within the trailing window.").
+  - `formatWindowTitle` is now exported so the tests can assert the title formatting helper directly.
+- `pages/insights/panels/QualityPanel.test.tsx`: rewrote the suite around the single-window contract. New scenarios:
+  - `'renders exactly one QualityWindow sourced from data.window with formatWindowTitle'` — verifies single window block + 60% FTR + per-stage rates + title is "Jun 1 – Jun 30" + asserts title does NOT contain "Last 7 days".
+  - `'uses the range-driven window span for the title across 7d / 30d / 90d'` — drives `range="90d"`, asserts title is "Apr 1 – Jun 30" from the response's `from`/`to`.
+  - `'renders the panel empty state when window.sampleCount is zero'` — covers spec scenario "Zero-sample window renders the empty state".
+  - `'renders the panel empty state when the hook returns no data'` — guards against undefined data.
+  - `'distinguishes a zero-sample window from a perfect first-time-right score'` — `n=5` with 1.0 FTR still renders the populated card (not empty).
+  - `'renders empty for a stage with enteredCount === 0 independently of other stages'` — preserves the per-stage empty branch for non-window sample counts.
+  - `'formatWindowTitle formats a window from-to as "Mon D – Mon D"'` — locks the formatter contract (acceptance of the helper as a stable API).
+- `pages/insights/panels/FtrTrendChart.test.tsx`: fixture-only updates; `makeWindow` now takes `window7d`/`window30d` is gone, replaced by a single `window`. The chart itself reads only `data.trend` (unchanged), so the assertion surface is unchanged.
+- `pages/insights/ui/InsightsCharts.test.tsx`: `buildQuality` fixture simplified to a single `window` field.
+
+### Verification
+
+- `dotnet test packages/server/tests/Mohist.Server.Tests` passes: `IssueMetricsQuerierSpecs` 72/72, `IssueMetricsApiSpecs` 66/66.
+- `npm run typecheck -w packages/web` passes.
+- `npm run test:run -w packages/web` passes: 293 test files, 4354 tests, 1 skipped (was 4353 in T-002; +1 from the new `formatWindowTitle` test).
+- All eight AC items satisfied. Aggregation algorithm (FTR classification, per-stage rework, ship-time windowing, trend bucketing) is preserved byte-for-byte — only the response shape and the removed fixed-7d lens change.
+
+### Gotchas
+
+- `QualityPanel.tsx` drops the per-window "No shipped issues in this window." branch because the single-window card either renders the populated surface or the panel-level empty state. The per-stage empty branch (when a stage's `enteredCount === 0` but the window is populated) is preserved — it is the discriminated empty state for per-stage rates inside a non-empty window.
+- The DTO rename `Window30dFrom`/`Window30dTo` → `WindowFrom`/`WindowTo` on `QualityTrend` (server-side record) cascades through `BuildTrend` (route), the local `QualityTrendDto` in the spec, and the querier spec assertions. All four sites updated together.
+- The DTO is intentionally named `Window` (not `primaryWindow`): the previous-window comparison already disambiguates its role with the `previous*` prefix; the primary window is the natural singular, no extra qualifier needed. Per design D3 A1.
+- Two trailing-newline fixes were needed (QualityPanel.tsx and QualityPanel.test.tsx) — both files had been written without a final newline, which the lint pre-commit hook flagged.

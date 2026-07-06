@@ -148,14 +148,7 @@ function buildStageDuration(): StageDurationMetricsResponse {
 
 function buildQuality(): QualityMetricsResponse {
   return {
-    window7d: {
-      from: '2026-06-23T00:00:00Z',
-      to: '2026-06-30T00:00:00Z',
-      sampleCount: 4,
-      firstTimeRightRate: 0.75,
-      stages: [],
-    },
-    window30d: {
+    window: {
       from: '2026-06-01T00:00:00Z',
       to: '2026-07-01T00:00:00Z',
       sampleCount: 18,

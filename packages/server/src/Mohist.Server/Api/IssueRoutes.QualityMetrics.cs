@@ -33,8 +33,7 @@ public static partial class IssueRoutes
 
     private static QualityMetricsResponse BuildResponse(IssueMetricsQuerier.QualityMetricsResult result) =>
         new(
-            Window7d: BuildWindow(result.Window7d),
-            Window30d: BuildWindow(result.Window30d),
+            Window: BuildWindow(result.Window),
             PreviousFirstTimeRightRate: result.PreviousWindow.FirstTimeRightRate,
             PreviousSampleCount: result.PreviousWindow.SampleCount,
             Trend: BuildTrend(result.Trend));
@@ -52,8 +51,8 @@ public static partial class IssueRoutes
     private static QualityTrendDto BuildTrend(IssueMetricsQuerier.QualityTrend trend) =>
         new(
             Bucket: trend.Bucket,
-            From: trend.Window30dFrom.ToString("o"),
-            To: trend.Window30dTo.ToString("o"),
+            From: trend.WindowFrom.ToString("o"),
+            To: trend.WindowTo.ToString("o"),
             Points: trend.Points
                 .Select(p => new QualityTrendPointDto(
                     Boundary: p.Boundary,

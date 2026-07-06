@@ -287,35 +287,38 @@ public sealed record ApprovalWaitMetricsWindowDto(
     string To);
 
 /// <summary>
-/// Response shape for the AI quality metrics endpoint. Both trailing
-/// windows are returned together so callers can compare recent and
-/// longer-term quality in one read. <see cref="Trend"/> is a strictly
-/// additive pre-sized per-day series across the trailing 30-day window.
+/// Response shape for the AI quality metrics endpoint. A single
+/// range-driven primary window is returned, replacing the prior
+/// dual-window (fixed 7d + range-driven 30d) contract. The primary
+/// window's span follows the page-level <c>range</c> query parameter
+/// (<c>7d</c>/<c>30d</c>/<c>90d</c>, default <c>30d</c>); the field
+/// name <see cref="Window"/> carries no fixed-day-count implication.
+/// <see cref="Trend"/> is a strictly additive pre-sized per-day series
+/// across the same span as <see cref="Window"/>.
 /// <para>
 /// <see cref="PreviousFirstTimeRightRate"/> and <see cref="PreviousSampleCount"/>
 /// are strictly additive: they carry the first-time-right rate over the
-/// immediately-preceding 30-day window (the window of the same length
-/// as the current 30-day window, immediately preceding it), using the
-/// identical ship-time windowing and FTR classification. <see cref="PreviousSampleCount"/>
-/// is the empty discriminator — when it is <c>0</c>, the previous window
-/// is empty (no shipped issues fell in it) and
-/// <see cref="PreviousFirstTimeRightRate"/> is <c>null</c>, structurally
+/// immediately-preceding window of the same length as <see cref="Window"/>,
+/// using the identical ship-time windowing and FTR classification.
+/// <see cref="PreviousSampleCount"/> is the empty discriminator — when it
+/// is <c>0</c>, the previous window is empty (no shipped issues fell in it)
+/// and <see cref="PreviousFirstTimeRightRate"/> is <c>null</c>, structurally
 /// distinguishable from a genuine <c>0</c> or <c>1</c> rate. The two
 /// windows are evaluated independently: the current window can be non-empty
 /// while the previous window is empty and vice-versa.
 /// </para>
 /// </summary>
 public sealed record QualityMetricsResponse(
-    QualityMetricsWindowDto Window7d,
-    QualityMetricsWindowDto Window30d,
+    QualityMetricsWindowDto Window,
     double? PreviousFirstTimeRightRate,
     int PreviousSampleCount,
     QualityTrendDto Trend);
 
 /// <summary>
-/// Per-day quality trend over the trailing 30-day window. <see cref="Points"/>
+/// Per-day quality trend over the trailing window. <see cref="Points"/>
 /// is dense — every day in the window is emitted, with null rates for
-/// buckets that contain no shipped issues.
+/// buckets that contain no shipped issues. The window span matches the
+/// range-driven primary <see cref="QualityMetricsResponse.Window"/>.
 /// </summary>
 public sealed record QualityTrendDto(
     string Bucket,
