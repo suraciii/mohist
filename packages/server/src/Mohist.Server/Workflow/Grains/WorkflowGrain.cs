@@ -388,16 +388,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (!_run.IsAssignedTo(runnerId))
             return null;
 
-        // Re-entry: if this runner already has a task in flight on the
-        // current stage, hand it back so the runner can recover its dispatch
-        // after a process restart. This is read-only — the task is already
-        // Running (claimed) and its dispatch is rebuilt from the persisted
-        // run. Only the assigned runner for this run reaches here, so the
-        // task's RunnerId necessarily matches.
-        var active = _readModel.GetActiveWorkForRunner(_run, runnerId);
-        if (active is not null)
-            return active;
-
         // Offer: surface the next pending work WITHOUT transitioning it to
         // Running, persisting, or acquiring the stage lock. The runner
         // durably registers the work and calls ClaimAsync to confirm; only
@@ -405,6 +395,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         // "Running ⟺ durably claimed" a flow invariant instead of a
         // reconciled one. The stage lock is also deferred to ClaimAsync so
         // a failed claim (overtaken offer) never leaks a lock.
+        //
+        // Re-entry recovery is NOT handled here: the runner is the
+        // authoritative holder of work it has claimed, so it recovers
+        // in-flight work from its own dispatch snapshot (see
+        // RunnerGrain.RecoverHeldWorkflowWorkAsync). The workflow grain is
+        // never consulted to reconstruct a dispatch.
         var work = _run.NextWork();
         if (work is null)
             return null;

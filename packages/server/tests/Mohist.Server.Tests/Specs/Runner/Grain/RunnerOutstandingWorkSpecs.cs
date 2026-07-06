@@ -105,8 +105,13 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
             oldWork.WorkId,
             new WorkResult("failed", "superseded"));
 
+        // The runner no longer asks the workflow to decide whether a tracked
+        // work is "stale" before reporting — it optimistically reports from
+        // its own snapshot and lets the workflow grain judge (a superseded
+        // task is no longer Running, so ReportTaskOutcomeAsync ignores it).
+        // The work record is still removed from the runner either way.
         Assert.True(report.Tracked);
-        Assert.Equal("stale-work", report.Reason);
+        Assert.Equal("reported", report.Reason);
 
         var runtime = await runner.GetRuntimeStateAsync();
         Assert.DoesNotContain(runtime.ActiveWorks, w =>

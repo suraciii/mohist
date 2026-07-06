@@ -139,6 +139,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 CreatedAt = w.CreatedAt,
                 StartedAt = w.StartedAt,
                 DispatchSnapshot = w.DispatchSnapshot,
+                WorkItemSnapshot = w.WorkItemSnapshot,
             })
             .ToList();
 
@@ -258,23 +259,10 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private async Task<int> ActiveWorkflowCountAsync()
     {
-        await RemoveStaleWorkflowWorksAsync();
-
-        var persistedCount = GetWorks()
-            .Where(w => w.OwnerKind == WorkDispatchOwnerKinds.Workflow && w.Status == RunnerWorkStatus.Running)
-            .Select(w => w.OwnerId)
-            .Distinct(StringComparer.Ordinal)
-            .Count();
-
-        if (persistedCount > 0)
-            return persistedCount;
-
-        // Issue-318 D4: under the new state machine the previous
-        // FindAssignedToAsync + GetCurrentWorkIdAsync fan-out collapsed to
-        // zero (Ready excludes in-flight work). The dispatch-capacity gate
-        // now reads status = Running AND AssignedRunnerId = <runner>
-        // directly via the STORED Status computed column (no grain
-        // round-trip, no State-deserialize).
+        // The capacity gate reads the workflow side directly: Running runs
+        // assigned to this runner. This is authoritative and unaffected by
+        // any stale work records the runner grain may still hold, so no
+        // pre-clean sweep is needed.
         return await _workflowRuns.CountRunningAssignedToAsync(RunnerId);
     }
 
@@ -335,17 +323,25 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
         if (trackedWork is not null)
         {
-            var item = await RecoverWorkItemFromActiveWorkAsync(workflow, workflowRunId, workId, run)
-                ?? RecoverWorkItemFromRun(workId, run);
+            // The WorkItem was captured at claim time as a snapshot, so the
+            // runner is self-sufficient here — it does not ask the workflow
+            // grain to reconstruct the item. Only when the snapshot is
+            // missing (a ledger-rebuilt shell after grain-state loss) does it
+            // fall back to the persisted run, which is also a local read.
+            // Dispatch rendering is not needed: TranslateResultAsync consumes
+            // only the WorkItem.
+            var item = trackedWork.WorkItemSnapshot ?? RecoverWorkItemFromRun(workId, run);
             if (item is not null)
-            {
-                var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, RunnerId);
-                trackedEntry = new RunnerWorkflowWork(item, dispatch, trackedWork.CreatedAt);
-            }
+                trackedEntry = new RunnerWorkflowWork(item, trackedWork.CreatedAt);
         }
         else
         {
-            trackedEntry = await RecoverActiveWorkflowWorkAsync(workflow, workflowRunId, workId, run);
+            var item = RecoverWorkItemFromRun(workId, run);
+            if (item is not null)
+            {
+                var takenAt = await ResolveTakenAtAsync(workflowRunId, workId);
+                trackedEntry = new RunnerWorkflowWork(item, takenAt);
+            }
         }
 
         if (trackedEntry is null)
@@ -412,24 +408,6 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             workflowRunId);
     }
 
-    private async Task<WorkItem?> RecoverWorkItemFromActiveWorkAsync(
-        IWorkflowGrain workflow,
-        string workflowRunId,
-        string workId,
-        WorkflowRun run)
-    {
-        var active = await workflow.GetActiveWorkAsync(workId);
-        if (active is null || !string.Equals(active.WorkId, workId, StringComparison.Ordinal))
-            return null;
-
-        return active.WorkType switch
-        {
-            WorkItemTypes.Task => RecoverActiveTaskWorkItem(run, active),
-            WorkItemTypes.Checks => RecoverActiveChecksWorkItem(run, active),
-            _ => null,
-        };
-    }
-
     private static WorkItem? RecoverWorkItemFromRun(string workId, WorkflowRun run)
     {
         var stage = run.CurrentStage();
@@ -461,49 +439,17 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         return null;
     }
 
-    private async Task<RunnerWorkflowWork?> RecoverActiveWorkflowWorkAsync(
-        IWorkflowGrain workflow,
-        string workflowRunId,
-        string workId,
-        WorkflowRun run)
+    private async Task<DateTimeOffset> ResolveTakenAtAsync(string workflowRunId, string workId)
     {
-        var item = await RecoverWorkItemFromActiveWorkAsync(workflow, workflowRunId, workId, run);
-        item ??= RecoverWorkItemFromRun(workId, run);
-        if (item is null) return null;
-
-        var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, RunnerId);
         var ledger = await _runnerWorks.FindAsync(
             RunnerId,
             WorkDispatchOwnerKinds.Workflow,
             workflowRunId,
             workId,
             CancellationToken.None);
-        var takenAt = ledger?.TakenAt
+        return ledger?.TakenAt
             ?? FindWork(workId, WorkDispatchOwnerKinds.Workflow, workflowRunId)?.CreatedAt
             ?? _timeProvider.GetUtcNow();
-        return new RunnerWorkflowWork(item, dispatch, takenAt);
-    }
-
-    private static WorkItem? RecoverActiveTaskWorkItem(WorkflowRun run, WorkflowActiveWorkView active)
-    {
-        var stage = run.Stages.FirstOrDefault(s => string.Equals(s.Id, active.Stage, StringComparison.Ordinal));
-        var task = stage?.Tasks.FirstOrDefault(t => string.Equals(t.WorkId ?? t.Id, active.WorkId, StringComparison.Ordinal));
-        return task is null
-            ? null
-            : WorkItem.Task(active.Stage, active.WorkId, task.Title, task.Uses, task.WithInput, task.Artifacts, task.SetVars);
-    }
-
-    private static WorkItem? RecoverActiveChecksWorkItem(WorkflowRun run, WorkflowActiveWorkView active)
-    {
-        var stage = run.Stages.FirstOrDefault(s => string.Equals(s.Id, active.Stage, StringComparison.Ordinal));
-        if (stage is null)
-            return null;
-
-        var pendingChecks = stage.Checks
-            .Where(c => c.Status == StageCheckStatus.Pending)
-            .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
-            .ToList();
-        return WorkItem.Checks(active.Stage, active.WorkId, pendingChecks);
     }
 
     public async Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result)
@@ -549,8 +495,6 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     public async Task<RunnerRuntimeState> GetRuntimeStateAsync()
     {
-        await RemoveStaleWorkflowWorksAsync();
-
         var activeWorks = GetWorks()
             .Select(ProjectActiveWorkFromRunerWork)
             .ToList();
@@ -679,8 +623,6 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private async Task<WorkDispatch?> PollAssignedOrAssignableWorkflowAsync()
     {
-        await RemoveStaleWorkflowWorksAsync();
-
         // Issue-318 D4: FindAssignedToAsync now filters at the DB layer on
         // status = Ready AND AssignedRunnerId = <runner>. Ready excludes
         // in-flight work, so every surfaced row is directly pickup-able —
@@ -778,18 +720,17 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             issue = new WorkIssueRef(projectId, issueId, number);
         }
 
-        // Backfill the issue ref on the tracked work now that the dispatch
-        // (which carries the resolved issue) has been built. The claim was
-        // registered without it because the work-item offer does not carry
-        // issue metadata; it is purely informational for status projection.
-        if (issue is not null)
+        // Capture the WorkItem snapshot so the runner can report the work
+        // later without consulting the workflow grain to reconstruct the
+        // item. Issue metadata is backfilled here too — the offer does not
+        // carry it.
+        var tracked = FindWork(workId, WorkDispatchOwnerKinds.Workflow, workflowRunId);
+        if (tracked is not null)
         {
-            var tracked = FindWork(workId, WorkDispatchOwnerKinds.Workflow, workflowRunId);
-            if (tracked is not null && tracked.Issue is null)
-            {
+            tracked.WorkItemSnapshot = item;
+            if (issue is not null && tracked.Issue is null)
                 tracked.Issue = issue;
-                await PersistAsync();
-            }
+            await PersistAsync();
         }
 
         return dispatch;
@@ -842,41 +783,6 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
             return pendingWork.DispatchSnapshot!;
         }
-    }
-
-    private async Task RemoveStaleWorkflowWorksAsync()
-    {
-        var stale = new List<RunnerWork>();
-        foreach (var work in GetWorks()
-            .Where(w => w.OwnerKind == WorkDispatchOwnerKinds.Workflow && w.Status == RunnerWorkStatus.Running)
-            .ToList())
-        {
-            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(work.OwnerId);
-            var active = await workflow.GetActiveWorkAsync(work.WorkId);
-            if (active is null || !string.Equals(active.WorkId, work.WorkId, StringComparison.Ordinal))
-                stale.Add(work);
-        }
-
-        if (stale.Count == 0)
-            return;
-
-        foreach (var work in stale)
-        {
-            TryRemoveWork(work.WorkId, work.OwnerKind, work.OwnerId);
-            await MarkRunnerWorkTerminalAsync(
-                work.OwnerKind,
-                work.OwnerId,
-                work.WorkId,
-                LedgerRunnerWorkStatus.Failed,
-                "stale-work");
-            _log.LogInformation(
-                "Runner {RunnerId} removed stale workflow work {WorkId} for {WorkflowRunId}",
-                RunnerId,
-                work.WorkId,
-                work.OwnerId);
-        }
-
-        await PersistAsync();
     }
 
     private List<RunnerWork> GetWorks()
@@ -1074,5 +980,4 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
 internal sealed record RunnerWorkflowWork(
     WorkItem Item,
-    WorkDispatch Dispatch,
     DateTimeOffset PolledAt);
