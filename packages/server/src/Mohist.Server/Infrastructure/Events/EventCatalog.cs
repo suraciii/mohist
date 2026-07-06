@@ -77,6 +77,16 @@ public static class EventCatalog
         ReverseDns.IssueCompleted,
         ReverseDns.IssueCancelled,
         ReverseDns.IssueWorkStarted,
+        ReverseDns.IssueCreated,
+        ReverseDns.IssueLabelsChanged,
+        ReverseDns.IssuePriorityChanged,
+        ReverseDns.IssueDraftChanged,
+        ReverseDns.IssuePrerequisiteAdded,
+        ReverseDns.IssuePrerequisiteRemoved,
+        ReverseDns.IssueWorkflowProfileChanged,
+        ReverseDns.IssueArchived,
+        ReverseDns.IssueUnarchived,
+        ReverseDns.IssueReopened,
         ReverseDns.InboxItemPersisted,
         ReverseDns.EpicCreated,
         ReverseDns.EpicUpdated,
@@ -134,6 +144,16 @@ public static class EventCatalog
         public const string IssueCompleted = "com.mohist.issue.completed";
         public const string IssueCancelled = "com.mohist.issue.cancelled";
         public const string IssueWorkStarted = "com.mohist.issue.work-started";
+        public const string IssueCreated = "com.mohist.issue.created";
+        public const string IssueLabelsChanged = "com.mohist.issue.labels-changed";
+        public const string IssuePriorityChanged = "com.mohist.issue.priority-changed";
+        public const string IssueDraftChanged = "com.mohist.issue.draft-changed";
+        public const string IssuePrerequisiteAdded = "com.mohist.issue.prerequisite-added";
+        public const string IssuePrerequisiteRemoved = "com.mohist.issue.prerequisite-removed";
+        public const string IssueWorkflowProfileChanged = "com.mohist.issue.workflow-profile-changed";
+        public const string IssueArchived = "com.mohist.issue.archived";
+        public const string IssueUnarchived = "com.mohist.issue.unarchived";
+        public const string IssueReopened = "com.mohist.issue.reopened";
 
         public const string EpicCreated = "com.mohist.epic.created";
         public const string EpicUpdated = "com.mohist.epic.updated";

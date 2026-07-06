@@ -76,7 +76,7 @@ public sealed class InMemoryEventBus : IEventPublisher
         var subs = Snapshot();
         foreach (var sub in subs)
         {
-            if (!Matches(sub.Type, evt.Type))
+            if (!CloudEventTypeMatcher.Matches(sub.Type, evt.Type))
                 continue;
 
             try
@@ -90,22 +90,6 @@ public sealed class InMemoryEventBus : IEventPublisher
                     sub.Handler.GetType().Name, evt.Type);
             }
         }
-    }
-
-    private static bool Matches(string pattern, string type)
-    {
-        foreach (var alternative in pattern.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (alternative == type) return true;
-            if (alternative == "*") return true;
-            if (alternative.EndsWith(".*", StringComparison.Ordinal))
-            {
-                var prefix = alternative[..^2];
-                if (type == prefix || type.StartsWith(prefix + ".", StringComparison.Ordinal))
-                    return true;
-            }
-        }
-        return false;
     }
 
     private static void ValidateType(string type)

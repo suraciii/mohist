@@ -14,7 +14,7 @@ public class AgentSubscription
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
-public sealed class SubscriptionFilter
+public sealed partial class SubscriptionFilter
 {
     public string Type { get; set; } = string.Empty;
     public string? Source { get; set; }
