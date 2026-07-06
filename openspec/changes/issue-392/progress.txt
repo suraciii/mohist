@@ -1,0 +1,50 @@
+progress.txt — issue-392 working memory
+
+## Codebase Patterns
+
+### Epic aggregate
+- Domain transitions live in `packages/server/src/Mohist.Server/Epic/Domain/Epic.Transitions.cs` (sealed partial class).
+- Each transition mutates `_status`, calls `Touch(now)`, records an `EpicStatusChanged` event with the string `EpicStatusName.*` constants.
+- Exceptions live in `packages/server/src/Mohist.Server/Epic/Domain/EpicLifecycleExceptions.cs` — all `InvalidOperationException` subclasses with `EpicId` / status fields.
+- Status literals: `EpicStatus` enum + `EpicStatusName.ToName` / `Parse` for the DB string form.
+- `EpicEvent` is a `union` type; tests use a manual `EpicEventAssertions.OfType<T>` (pattern-match) helper because `Enumerable.OfType<T>()` triggers CA2021 (empty sequence at compile time).
+- `Epic.LinkIssue` previously was status-agnostic (membership only); the T-001 change adds the `_status is EpicStatus.Closed → throw EpicClosedCannotLinkException` guard before the duplicate check.
+
+### EpicGrain
+- `EpicGrain.GrainKeyForTest` is the seam that lets unit tests instantiate the grain without Orleans (set the key, call methods).
+- `LinkIssueAsync` previously had a binary `targetIsTerminal` gate (`if (!targetIsTerminal)` around active-membership insert); T-001 replaces it with a three-way branch keyed on live `row.Status`.
+- `IsIssueOpenAsync(db, projectId, issueNumber)` is a new helper that uses `IssueRowMapper.ByNumber` (returns `Dictionary<int, Issue>`) and classifies via `issue.Status is not (Done or Cancelled)`.
+- Cross-aggregate ownership uniqueness check `GetActiveMembershipOwnerAsync` is hoisted above the wake-up so the uniqueness invariant is enforced before a done+open wake consumes an active slot.
+- After a successful wake commit, `LinkIssueAsync` tail-calls `TryStartNextAsync` so autopilot starts the just-linked open issue (mirrors `StartAsync` post-commit at L404-407).
+- The `DbUpdateException` catch (originally gating on `!targetIsTerminal`) is now unconditional since a wake-up also performs an active-membership insert and could race.
+- The `EpicClosedCannotLinkException` throw happens before any `db.EpicIssues.Add` so no rows are created on rejection.
+
+### Specs
+- Unit specs use `RecordingGrainFactory` (from `EpicProgressionSpecs.cs`) that records `IIssueGrain.StartWorkAsync` calls; it implements the full `IGrainFactory` interface (lots of `throw new NotSupportedException()` for unused paths).
+- Spec setup uses `TestDatabase` (in-memory SQLite, `Data Source=:memory:`) with `TestDbContextFactory` and `CreateFactory(params IInterceptor[])` for tests that need interceptors.
+- `SaveChangesInterceptor` lives in `Microsoft.EntityFrameworkCore.Diagnostics` (along with `DbContextEventData`, `InterceptionResult<T>`, `IInterceptor`).
+- `FakeTimeProvider` from `Microsoft.Extensions.Time.Testing` is injected into `EpicGrain`.
+- `SeedIssueAsync` writes JSON `IssueStore.Serialize(issue)` to the `IssueRow.State` column; `canStart` is controlled by `issue.IsDraft = !canStart`.
+- `IssueStatus` enum: `Backlog`, `InProgress`, `Done`, `Cancelled`.
+
+### Conventions to preserve
+- Domain rules live in the aggregate (`Epic.cs` / `Epic.Transitions.cs`); grain orchestrates persistence + cross-aggregate calls.
+- HTTP layer maps domain exceptions to 409 with distinct error codes (e.g. `EPIC_CLOSED_CANNOT_LINK`).
+- Tests use the spec track (product behavior) for end-to-end through the grain + DB; unit track only for pure-parsers.
+
+## T-001 decisions / gotchas
+
+- **Order of guards in `LinkIssueAsync`**: `alreadyLinkedToThisEpic` runs BEFORE the `closed` guard so re-linking to a closed epic stays idempotent (the issue was linked before close, so the early-return short-circuits).
+- **Ownership check hoist**: runs for `done` + open and non-terminal targets. The closed path throws before reaching the ownership check, so no behavior change there.
+- **Wake-up adds active row only when status was Done AND the issue is open**: the `if (row.Status != EpicStatusName.Done || wakeUpEpic)` guard ensures we don't insert an active row for terminal-issue links to done epics.
+- **Tail-call `TryStartNextAsync` reads `links` AFTER SaveChangesAsync**: the new row is in the change tracker, so the re-query includes it; `TryStartNextAsync` only cares about the issue numbers and statuses (it queries `db.Issues` separately).
+- **Test updates required**: several existing tests in `EpicMembershipSpecs` / `EpicBatchMembershipSpecs` linked issues to `closed` epics expecting success; per the new design, those tests now (a) flip to `done` and (b) seed the issue as `IssueStatus.Done` so the wake-up branch doesn't fire. The closed-link rejection is exercised in the new `EpicWakeUpSpecs.LinkIssueAsync_ClosedEpic_ThrowsEpicClosedCannotLinkException_NoRowsCreated` scenario.
+- **`LinkIssueAsync_DoneEpic_AlreadyLinked_IsIdempotent_NoStatusChange`** reuses the early-return for `alreadyLinkedToThisEpic` so the wake-up branch is not entered on re-link — this preserves the spec scenario "Idempotent re-link ... does not wake the epic".
+- **Rollback test uses an EF save interceptor**: `FailOnEpicActiveIssueInsertInterceptor` throws when an `EpicActiveIssueRow` is staged for the target epic. The epic stays `done`, no rows are persisted, and a retry with the regular factory performs the full wake-up.
+- **`WakeFromDone` uses `EpicAlreadyTerminalException`** for misuse (calling on non-done). Reusing the existing exception keeps the failure surface narrow and consistent with how `StartAsync`/`ResumeAsync` already raise the same exception on terminal inputs.
+- **No `EpicWoken` event**: per design D1, the wake emits only `EpicStatusChanged(done → running)`; no new event type. Consumers branch on the status literal, not on a wake-specific event.
+
+## Outstanding for next tasks
+
+- T-002: batch-link (`LinkIssuesAsync`) still has the old `targetIsTerminal` gate and the closed-handling path. It needs to (a) reject a closed target with `EpicClosedCannotLinkException` once before the loop, (b) replace the binary gate with a per-item live-`row.Status` decision so wake fires at most once per batch, (c) map the closed-rejection to 409 `EPIC_CLOSED_CANNOT_LINK` in the batch route.
+- T-003: pin invariant 2 (`MarkDone` / auto-done rejected while open linked issues exist) — pure test-add task.

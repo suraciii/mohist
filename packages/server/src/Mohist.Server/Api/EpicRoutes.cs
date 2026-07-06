@@ -74,6 +74,10 @@ public static class EpicRoutes
             {
                 await grain.LinkIssueAsync(issue.Id, issue.Number, pid);
             }
+            catch (EpicClosedCannotLinkException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "EPIC_CLOSED_CANNOT_LINK", new { epicId = ex.EpicId });
+            }
             catch (InvalidOperationException ex)
             {
                 if (ex.Message.Contains("already belongs"))

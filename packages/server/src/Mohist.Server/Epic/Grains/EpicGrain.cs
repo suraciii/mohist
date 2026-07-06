@@ -75,20 +75,30 @@ public class EpicGrain : Grain, IEpicGrain
 
         var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
         if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
-        var targetIsTerminal = IsTerminalEpicStatus(row.Status);
-
-        // Cross-aggregate uniqueness invariant: an issue may belong to at
-        // most one non-terminal epic (idle/running/paused). Terminal target
-        // epics do not consume the active slot.
-        if (!targetIsTerminal && await GetActiveMembershipOwnerAsync(db, projectId, issueId, epicId) is { } conflict)
-        {
-            throw new InvalidOperationException(
-                $"Issue already belongs to Epic '{conflict.EpicId}' ({conflict.Title})");
-        }
 
         var alreadyLinkedToThisEpic = await db.EpicIssues.AsNoTracking()
             .AnyAsync(link => link.ProjectId == projectId && link.EpicId == epicId && link.IssueId == issueId);
         if (alreadyLinkedToThisEpic) return;
+
+        // Closed is a hard-stop for new links: the domain LinkIssue guard
+        // throws EpicClosedCannotLinkException before any row is added, and
+        // the HTTP layer maps it to 409 EPIC_CLOSED_CANNOT_LINK.
+        if (row.Status == EpicStatusName.Closed)
+        {
+            throw new EpicClosedCannotLinkException(epicId);
+        }
+
+        // Cross-aggregate uniqueness invariant: an issue may belong to at
+        // most one non-terminal epic (idle/running/paused). For a done
+        // target, the wake below flips the epic to running, so the active
+        // row we are about to insert will be a real non-terminal owner;
+        // the check therefore MUST run before the wake-up so we never
+        // create a duplicate row against another non-terminal epic.
+        if (await GetActiveMembershipOwnerAsync(db, projectId, issueId, epicId) is { } conflict)
+        {
+            throw new InvalidOperationException(
+                $"Issue already belongs to Epic '{conflict.EpicId}' ({conflict.Title})");
+        }
 
         var links = await db.EpicIssues.AsNoTracking()
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
@@ -104,7 +114,18 @@ public class EpicGrain : Grain, IEpicGrain
             IssueId = issueId,
             IssueNumber = issueNumber,
         });
-        if (!targetIsTerminal)
+
+        // Done + open issue wakes the epic to running in the same commit
+        // as the link row; the active-membership row is also created in
+        // that commit so autopilot sees the newly linked issue.
+        var wakeUpEpic = row.Status == EpicStatusName.Done
+            && await IsIssueOpenAsync(db, projectId, issueNumber);
+        if (wakeUpEpic)
+        {
+            domain.WakeFromDone(now.UtcDateTime);
+        }
+
+        if (row.Status != EpicStatusName.Done || wakeUpEpic)
         {
             db.EpicActiveIssues.Add(new EpicActiveIssueRow
             {
@@ -120,7 +141,7 @@ public class EpicGrain : Grain, IEpicGrain
         {
             await db.SaveChangesAsync();
         }
-        catch (DbUpdateException) when (!targetIsTerminal)
+        catch (DbUpdateException)
         {
             var owner = await GetActiveMembershipOwnerAsync(projectId, issueId, epicId);
             if (owner is not null)
@@ -131,6 +152,13 @@ public class EpicGrain : Grain, IEpicGrain
             throw;
         }
         await PersistEpicEventsAsync(domain, pending, now);
+
+        if (wakeUpEpic)
+        {
+            await TryStartNextAsync(db, projectId, epicId, row, await db.EpicIssues.AsNoTracking()
+                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+                .ToListAsync());
+        }
     }
 
     public async Task<IReadOnlyList<BatchMembershipOutcome>> LinkIssuesAsync(
@@ -722,6 +750,16 @@ public class EpicGrain : Grain, IEpicGrain
                 && active.EpicId != currentEpicId
             select new ActiveMembershipOwner(active.EpicId, epic.Title)
         ).FirstOrDefaultAsync();
+    }
+
+    private static async Task<bool> IsIssueOpenAsync(MohistDbContext db, string projectId, int issueNumber)
+    {
+        var rows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Number == issueNumber)
+            .ToListAsync();
+        var byNumber = IssueRowMapper.ByNumber(rows, projectId, new[] { issueNumber });
+        if (!byNumber.TryGetValue(issueNumber, out var issue)) return false;
+        return issue.Status is not (IssueStatus.Done or IssueStatus.Cancelled);
     }
 
     private static async Task ReleaseActiveMembershipsAsync(MohistDbContext db, string projectId, string epicId)

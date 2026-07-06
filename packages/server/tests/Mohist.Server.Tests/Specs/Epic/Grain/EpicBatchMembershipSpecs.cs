@@ -155,10 +155,15 @@ public class EpicBatchMembershipSpecs
     [Fact]
     public async Task LinkIssuesAsync_AllTerminalMemberships_ClaimedWithoutConflict()
     {
+        // Per issue-392, linking to a `closed` epic is rejected outright,
+        // so the "terminal-only" epic half of this scenario uses `done`.
+        // The issue is also seeded as terminal so the wake-up branch in
+        // LinkIssueAsync does not flip the done epic to running and
+        // consume the active slot.
         var database = CreateDatabase();
-        await SeedEpicAsync(database, epicId: "epic_terminal", status: "closed", number: 1);
+        await SeedEpicAsync(database, epicId: "epic_terminal", status: "done", number: 1);
         await SeedEpicAsync(database, epicId: "epic_active", status: "idle", number: 2);
-        await SeedIssueAsync(database, issueId: "issue_terminal_only", issueNumber: 1);
+        await SeedIssueAsync(database, issueId: "issue_terminal_only", issueNumber: 1, status: IssueStatus.Done);
 
         var terminalGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_terminal");
         await terminalGrain.LinkIssueAsync("issue_terminal_only", 1, ProjectId);
@@ -259,10 +264,18 @@ public class EpicBatchMembershipSpecs
     [Fact]
     public async Task LinkIssuesAsync_OnTerminalEpic_RecordsIssueLinkedEvent()
     {
+        // Per issue-392, linking to a `closed` epic is rejected outright
+        // (EpicClosedCannotLinkException). To preserve the "terminal
+        // epic accepts links without affecting status" test surface here,
+        // we use a `done` target and a terminal issue (so the batch
+        // path's per-item `targetIsTerminal` check (still pre-issue-392)
+        // observes `done` as terminal and records the issue-linked event
+        // without inserting an active-membership row). The batch path's
+        // wake-up behaviour for `done` + open issue is the subject of T-002.
         var store = new RecordingEventStore();
         var database = CreateDatabase();
-        await SeedEpicAsync(database, epicId: "epic_t", status: "closed", number: 1);
-        await SeedIssueAsync(database, issueId: "issue_t", issueNumber: 1);
+        await SeedEpicAsync(database, epicId: "epic_t", status: "done", number: 1);
+        await SeedIssueAsync(database, issueId: "issue_t", issueNumber: 1, status: IssueStatus.Done);
 
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero));
         var grain = new EpicGrain(
