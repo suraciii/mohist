@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button } from '@/shared/ui/components/button'
-import type { ToolCallEntry, TaskProgressMap, LoopProgress } from '../../../entities/coder-session'
+import type { ToolCallEntry, LoopProgress } from '../../../entities/coder-session'
 import type { WorkflowStage } from '../../../entities/issue'
 import type { Round, RecoveryEvent, RecoveryStatus, PlanProgress, ContextHealthState } from '../model/useSessionTimeline'
 import { deriveToolCallTitle } from '../model/useSessionTimeline'
@@ -15,8 +15,6 @@ interface SessionTimelineProps {
   isLoading: boolean
   currentStage: WorkflowStage | string
   isLive: boolean
-  taskProgress: TaskProgressMap
-  loopProgress: LoopProgress | null
   recoveryStatus: RecoveryStatus | null
   planProgress: PlanProgress | null
   contextHealth?: ContextHealthState | null
@@ -501,8 +499,6 @@ export function SessionTimeline({
   isLoading,
   currentStage,
   isLive,
-  taskProgress,
-  loopProgress,
   recoveryStatus,
   planProgress,
   contextHealth,
@@ -525,7 +521,6 @@ export function SessionTimeline({
     )
   }
 
-  const taskEntries = Array.from(taskProgress.values())
   const showContextHealth = contextHealth != null
     && contextHealth.status != null
     && contextHealth.contextUsagePercent != null
@@ -574,10 +569,6 @@ export function SessionTimeline({
 
         {currentStage === 'plan' && planProgress && planProgress.steps.length > 0 && (
           <PlanProgressPanel planProgress={planProgress} />
-        )}
-
-        {currentStage === 'build' && taskEntries.length > 0 && (
-          <TaskProgressPanel tasks={taskEntries} loopProgress={loopProgress} />
         )}
 
         {recoveryStatus && (

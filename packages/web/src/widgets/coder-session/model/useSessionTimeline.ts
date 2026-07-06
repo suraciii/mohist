@@ -4,8 +4,6 @@ import { getAgentStatus } from '../../../entities/agent'
 import { onAgentEvent } from '../../../entities/agent'
 import type {
   ToolCallEntry,
-  TaskProgressMap,
-  LoopProgress,
   CoderSessionItem,
 } from '../../../entities/coder-session'
 import type { AgentDetailEventMap } from '../../../entities/agent'
@@ -206,8 +204,6 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
   const [rounds, setRounds] = useState<Round[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
-  const [taskProgress] = useState<TaskProgressMap>(new Map())
-  const [loopProgress] = useState<LoopProgress | null>(null)
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null)
   const [planProgress, setPlanProgress] = useState<PlanProgress | null>(null)
   const [contextHealth, setContextHealth] = useState<ContextHealthState | null>(null)
@@ -823,8 +819,6 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     rounds,
     isLoading: false,
     isStreaming,
-    taskProgress,
-    loopProgress,
     recoveryStatus,
     planProgress,
     contextHealth,
