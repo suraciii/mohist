@@ -1,14 +1,12 @@
 import type { ReactNode } from 'react'
 import { ChartGroup } from './ChartGroup'
 import type { InsightsRange } from '../model/insights-range'
-import { EpicProgressList } from '../panels/EpicProgressList'
 import { ThroughputChart } from '../panels/ThroughputChart'
 import { CompletionTrend } from '../panels/CompletionTrend'
 import { CycleTimeChart } from '../panels/CycleTimeChart'
 import { StageDurationChart } from '../panels/StageDurationChart'
 import { QualityPanel } from '../panels/QualityPanel'
 import { FtrTrendChart } from '../panels/FtrTrendChart'
-import { InvestmentPanel } from '../panels/InvestmentPanel'
 import { CostTrendChart } from '../panels/CostTrendChart'
 
 type DimensionId = 'output' | 'delivery' | 'quality' | 'investment'
@@ -27,7 +25,6 @@ const CHART_GROUPS: readonly GroupSpec[] = [
     question: '你交付了多少？',
     render: (range) => (
       <>
-        <EpicProgressList />
         <ThroughputChart range={range} />
         <CompletionTrend range={range} />
       </>
@@ -61,7 +58,6 @@ const CHART_GROUPS: readonly GroupSpec[] = [
     question: '花了多少？',
     render: (range) => (
       <>
-        <InvestmentPanel range={range} />
         <CostTrendChart range={range} />
       </>
     ),

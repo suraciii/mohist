@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   useCompletionThroughput: vi.fn(),
   useDeliveryTime: vi.fn(),
   useQualityMetrics: vi.fn(),
-  useCostRollup: vi.fn(),
   useStageDuration: vi.fn(),
 }))
 
@@ -23,14 +22,6 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     useDeliveryTime: mocks.useDeliveryTime,
     useQualityMetrics: mocks.useQualityMetrics,
     useStageDuration: mocks.useStageDuration,
-  }
-})
-
-vi.mock('../../../entities/agent', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/agent')>()
-  return {
-    ...actual,
-    useCostRollup: mocks.useCostRollup,
   }
 })
 
@@ -60,7 +51,6 @@ beforeEach(() => {
   mocks.useCompletionThroughput.mockReturnValue({ data: undefined, isLoading: false })
   mocks.useDeliveryTime.mockReturnValue({ data: undefined, isLoading: false })
   mocks.useQualityMetrics.mockReturnValue({ data: undefined, isLoading: false })
-  mocks.useCostRollup.mockReturnValue({ data: undefined, isLoading: false })
   mocks.useStageDuration.mockReturnValue({ data: undefined, isLoading: false })
 })
 
@@ -106,6 +96,19 @@ describe('InsightsPage structure', () => {
       'investment',
     ])
     expect(screen.queryByTestId('insights-chart-placeholder')).not.toBeInTheDocument()
+  })
+
+  it('does not render the removed Investment or In-progress Epic progress panels', () => {
+    renderPage()
+
+    expect(screen.queryByTestId('productivity-investment')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-toggle')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-total-cost')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-cost-per-ship')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-done-issues')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-epic-list')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-epic-list-item-0')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-epic-list-bar-0')).not.toBeInTheDocument()
   })
 })
 

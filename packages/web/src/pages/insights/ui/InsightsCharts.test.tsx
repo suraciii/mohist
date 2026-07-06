@@ -11,7 +11,7 @@ import type {
   QualityMetricsResponse,
   StageDurationMetricsResponse,
 } from '../../../entities/issue'
-import type { AgentCostRollupDto, AgentUsageTimeseriesDto } from '../../../entities/agent'
+import type { AgentUsageTimeseriesDto } from '../../../entities/agent'
 
 const mocks = vi.hoisted(() => ({
   useCompletionThroughput: vi.fn(),
@@ -19,8 +19,6 @@ const mocks = vi.hoisted(() => ({
   useDeliveryTime: vi.fn(),
   useStageDuration: vi.fn(),
   useQualityMetrics: vi.fn(),
-  useEpics: vi.fn(),
-  useCostRollup: vi.fn(),
   useAgentUsage: vi.fn(),
 }))
 
@@ -36,19 +34,10 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
   }
 })
 
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
-  return {
-    ...actual,
-    useEpics: mocks.useEpics,
-  }
-})
-
 vi.mock('../../../entities/agent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/agent')>()
   return {
     ...actual,
-    useCostRollup: mocks.useCostRollup,
     useAgentUsage: mocks.useAgentUsage,
   }
 })
@@ -155,23 +144,6 @@ function buildQuality(): QualityMetricsResponse {
   }
 }
 
-function buildCostRollup(): AgentCostRollupDto {
-  return {
-    totalCost: { amount: 500, currency: 'USD', sampleCount: 50 },
-    todayCost: { amount: 5, currency: 'USD', sampleCount: 1 },
-    doneIssuesCount: 12,
-    costPerShip: { amount: 42, currency: 'USD', sampleCount: 12 },
-    currentWindow: {
-      spend: { amount: 182, currency: 'USD', sampleCount: 5 },
-      perIssueCost: { amount: 36, currency: 'USD', sampleCount: 5 },
-    },
-    previousWindow: {
-      spend: { amount: 150, currency: 'USD', sampleCount: 3 },
-      perIssueCost: { amount: 50, currency: 'USD', sampleCount: 3 },
-    },
-  }
-}
-
 function buildAgentUsage(): AgentUsageTimeseriesDto {
   return {
     rangeFrom: '2026-06-01T00:00:00',
@@ -190,31 +162,6 @@ function buildAgentUsage(): AgentUsageTimeseriesDto {
   }
 }
 
-function buildEpics() {
-  return [
-    {
-      id: 'epic-1',
-      projectId: 'proj-1',
-      number: 1,
-      title: 'Auth refactor',
-      status: 'in_progress',
-      priority: 'high',
-      progress: { completed: 4, total: 10 },
-      updatedAt: '2026-06-30T00:00:00Z',
-    },
-    {
-      id: 'epic-2',
-      projectId: 'proj-1',
-      number: 2,
-      title: 'Search overhaul',
-      status: 'in_progress',
-      priority: 'medium',
-      progress: { completed: 2, total: 6 },
-      updatedAt: '2026-06-30T00:00:00Z',
-    },
-  ]
-}
-
 import { InsightsCharts } from './InsightsCharts'
 
 beforeEach(() => {
@@ -224,8 +171,6 @@ beforeEach(() => {
   mocks.useDeliveryTime.mockReturnValue({ data: buildDeliveryTime(), isLoading: false, isError: false })
   mocks.useStageDuration.mockReturnValue({ data: buildStageDuration(), isLoading: false, isError: false })
   mocks.useQualityMetrics.mockReturnValue({ data: buildQuality(), isLoading: false, isError: false })
-  mocks.useEpics.mockReturnValue({ data: buildEpics(), isLoading: false, isError: false })
-  mocks.useCostRollup.mockReturnValue({ data: buildCostRollup(), isLoading: false, isError: false })
   mocks.useAgentUsage.mockReturnValue({ data: buildAgentUsage(), isLoading: false, isError: false })
 })
 
@@ -253,20 +198,32 @@ describe('InsightsCharts four fixed dimension groups', () => {
 
     expect(screen.queryByTestId('insights-chart-placeholder')).not.toBeInTheDocument()
   })
+
+  it('does not render the removed Investment or In-progress Epic progress panels', () => {
+    renderCharts()
+
+    expect(screen.queryByTestId('productivity-investment')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-toggle')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-total-cost')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-cost-per-ship')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-done-issues')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-epic-list')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-epic-list-item-0')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-epic-list-bar-0')).not.toBeInTheDocument()
+  })
 })
 
 describe('InsightsCharts group structure', () => {
-  it('renders the 产出 group with its three charts in fixed order (EpicProgressList first)', () => {
+  it('renders the 产出 group with Throughput and Completion Trend in fixed order', () => {
     renderCharts()
 
     const group = screen.getAllByTestId('insights-chart-group').find(
       (g) => g.getAttribute('data-dimension') === 'output',
     )!
     const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
-    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="throughput-chart"], [data-testid="productivity-trend"], [data-testid="productivity-epic-list"]'))
+    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="throughput-chart"], [data-testid="productivity-trend"]'))
 
     expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
-      'productivity-epic-list',
       'throughput-chart',
       'productivity-trend',
     ])
@@ -315,16 +272,15 @@ describe('InsightsCharts group structure', () => {
     expect(question.textContent).toBe('一次做对了吗？')
   })
 
-  it('renders the 投入 group with its two charts', () => {
+  it('renders the 投入 group with only Cost Trend', () => {
     renderCharts()
 
     const group = screen.getAllByTestId('insights-chart-group').find(
       (g) => g.getAttribute('data-dimension') === 'investment',
     )!
     const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
-    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="productivity-investment"], [data-testid="cost-trend-chart"]'))
+    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="cost-trend-chart"]'))
     expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
-      'productivity-investment',
       'cost-trend-chart',
     ])
 
@@ -372,15 +328,13 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     )
   }
 
-  it('forwards the range to every chart panel hook (except useEpics)', () => {
+  it('forwards the range to every chart panel hook', () => {
     mocks.useCompletionThroughput.mockClear()
     mocks.useCompletionTrend.mockClear()
     mocks.useDeliveryTime.mockClear()
     mocks.useStageDuration.mockClear()
     mocks.useQualityMetrics.mockClear()
-    mocks.useCostRollup.mockClear()
     mocks.useAgentUsage.mockClear()
-    mocks.useEpics.mockClear()
 
     renderChartsWithRange('7d')
 
@@ -389,10 +343,7 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     expect(mocks.useDeliveryTime).toHaveBeenCalledWith('7d')
     expect(mocks.useStageDuration).toHaveBeenCalledWith('7d')
     expect(mocks.useQualityMetrics).toHaveBeenCalledWith('7d')
-    expect(mocks.useCostRollup).toHaveBeenCalledWith('7d')
     expect(mocks.useAgentUsage).toHaveBeenCalledWith('7d')
-
-    expect(mocks.useEpics).not.toHaveBeenCalledWith('7d')
   })
 
   it('re-applies the new range when the prop changes from 30d to 90d', () => {
@@ -401,7 +352,6 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     mocks.useDeliveryTime.mockClear()
     mocks.useStageDuration.mockClear()
     mocks.useQualityMetrics.mockClear()
-    mocks.useCostRollup.mockClear()
     mocks.useAgentUsage.mockClear()
 
     const { rerender } = renderChartsWithRange('30d')
@@ -423,7 +373,6 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     expect(mocks.useDeliveryTime).toHaveBeenLastCalledWith('90d')
     expect(mocks.useStageDuration).toHaveBeenLastCalledWith('90d')
     expect(mocks.useQualityMetrics).toHaveBeenLastCalledWith('90d')
-    expect(mocks.useCostRollup).toHaveBeenLastCalledWith('90d')
     expect(mocks.useAgentUsage).toHaveBeenLastCalledWith('90d')
   })
 

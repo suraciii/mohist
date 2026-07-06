@@ -52,3 +52,78 @@
   EF migration，所以删 `DbSet<StagePopulationSnapshotRow>` 时必须同时改 fixture，
   否则生产迁移和测试 fixture 漂移（design D4 风险项已点名）—— 本任务不动这块，
   T-003 同提交处理。
+
+## T-002 (Investment/Epic panel 删除 + 四维度重排)
+
+### 范围落地
+- 删除 `pages/insights/panels/InvestmentPanel.tsx` + `.test.tsx`、
+  `pages/insights/panels/EpicProgressList.tsx` + `.test.tsx`。
+- 编辑 `pages/insights/ui/InsightsCharts.tsx`：从 `CHART_GROUPS.render` 摘除
+  `EpicProgressList`（产出组）与 `InvestmentPanel`（投入组）；同时移除对应
+  import；保留四组 skeleton（id/title/question/顺序）不变。
+- 编辑 `pages/insights/ui/InsightsCharts.test.tsx`：
+  - 删除 `useEpics` mock + `vi.mock('../../../entities/epic')` 块（InsightsCharts
+    不再消费 Epic 数据，EpicListPage 仍独立消费 useEpics）。
+  - 删除 `useCostRollup` mock + `vi.mock('../../../entities/agent')` 中
+    `useCostRollup` 项 + `buildCostRollup()` factory + `AgentCostRollupDto`
+    类型 import（InsightsCharts 唯一 `useCostRollup` 消费方即 InvestmentPanel，
+    本任务删除后 Insights 渲染树零消费者；FactoryStatusHeadline 仍消费该 hook
+    不受影响）。
+  - 删除 `buildEpics()` factory。
+  - 产出组断言收紧为 `[throughput-chart, productivity-trend]`（两件套原顺序）。
+  - 投入组断言收紧为 `[cost-trend-chart]`（单件套）。
+  - "forwards the range" 测试去掉 `(except useEpics)` 限定，去掉
+    `useCostRollup.mockClear()` 与 `useCostRollup` 断言、`useEpics.mockClear()`
+    与 `useEpics` 反向断言。
+  - 新增 "does not render the removed Investment or In-progress Epic progress
+    panels" 测试：用 `queryByTestId` 显式锁死 productivity-investment /
+    productivity-investment-toggle / productivity-investment-total-cost /
+    productivity-investment-cost-per-ship / productivity-investment-done-issues /
+    productivity-epic-list / productivity-epic-list-item-0 /
+    productivity-epic-list-bar-0 全部不出现在 document 中。
+- 编辑 `pages/insights/ui/InsightsPage.test.tsx`：
+  - 同样清理 `useCostRollup` mock 与 `vi.mock('../../../entities/agent')` 块
+    （InvestmentPanel 删后 InsightsPage 渲染树零消费方）。
+  - 新增同样的 "does not render the removed Investment or In-progress Epic
+    progress panels" 测试锁死页面级缺失。
+
+### 不变项
+- `entities/agent` 中 `useCostRollup` hook + endpoint + DTO 完全保留，
+  `FactoryStatusHeadline` 消费行为不变（`src/widgets/factory-status/ui/
+  FactoryStatusHeadline.tsx:21`）；FactoryStatusHeadline 自己的测试
+  (`FactoryStatusHeadline.test.tsx`) 不受影响，仍 14 用例通过。
+- `entities/epic` 中 `useEpics` hook + endpoint + DTO 完全保留，`EpicListPage`
+  消费行为不变；EpicListPage 测试 64 用例 + DashboardPage 17 用例 + 整体
+  FactoryStatus/Dashboard/Epics 目录 97 用例全部通过。
+- CHART_GROUPS 四组 skeleton（output/delivery/quality/investment 的 id、title、
+  question、顺序）按 design D3 完全不动；本任务只在 render 内做减法。
+- 时间范围选择器、`throughput-chart-window` 等保留图表 testid 不变。
+- Cumulative-flow 相关删除（T-001 已落地）未回滚。
+
+### 验证结果
+- `npm run typecheck -w packages/web` ✅（零警告）
+- `npm run test:run -w packages/web` ✅ 4308 通过 / 1 跳过 / 0 失败
+  - InsightsCharts.test.tsx 12 用例全过（含新加的 absence 断言与收紧后的
+    两件套 / 单件套断言）
+  - InsightsPage.test.tsx 9 用例全过（含新加的页面级 absence 断言）
+  - FactoryStatusHeadline.test.tsx / DashboardPage.test.tsx / EpicListPage.test.tsx
+    及其所属目录共 97 用例全过，验证 useCostRollup / useEpics 非 insights 消费
+    方行为不变。
+- 文件级 deletion：`git rm` 一次性提交四个 panel 文件，无残留引用
+  （rg 复查 productivity-investment / productivity-epic-list 仅命中新测试中
+  的 `not.toBeInTheDocument` 反向断言）。
+
+### 学到/复用的模式
+- panel 删除后其唯一数据 hook（InvestmentPanel → useCostRollup）在 insights 测
+  试里变成 dead mock —— 不仅要删测试断言，还要清掉 `vi.mock` 与工厂函数，否
+  则会出现 "mock 没人调用" 的静默死代码（即使测试通过也会让未来的读者误以为
+  Insights 仍依赖该 hook）。FactoryStatusHeadline 等非 insights 消费方的测试
+  不受影响，所以是 insights 测试本地清理而非全包清理。
+- 四组 skeleton 在 #389 已编码，本任务不需要任何 schema 改动 —— InsightsCharts
+  的 `CHART_GROUPS` 数组本身就是 render-only 描述，删除 panel = 删 import + 从
+  render 节点摘除元素，其它一切（id/title/question/order）自动保留。规模 30 行
+  以内。
+- 与 T-001 共改 InsightsCharts.tsx / InsightsCharts.test.tsx 的依赖通过：
+  T-001 先摘 CumulativeFlowChart 后落地提交，本任务再摘 EpicProgressList +
+  InvestmentPanel，避免两者同时编辑同一文件造成 rebase 冲突。InsightsPage.test.tsx
+  本任务独立处理（无 cumulative-flow 痕迹，零冲突）。
