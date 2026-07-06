@@ -143,10 +143,22 @@ public sealed partial class Epic
         RecordEvent(new EpicReopened());
     }
 
+    public void WakeFromDone(DateTime? now = null)
+    {
+        if (_status is not EpicStatus.Done)
+            throw new EpicAlreadyTerminalException(EpicStatusName.ToName(_status), EpicStatusName.Running);
+        var oldStatus = _status;
+        _status = EpicStatus.Running;
+        Touch(now);
+        RecordEvent(new EpicStatusChanged(EpicStatusName.ToName(oldStatus), EpicStatusName.ToName(_status)));
+    }
+
     public void LinkIssue(string issueId, int issueNumber, DateTime? now = null)
     {
         if (string.IsNullOrWhiteSpace(issueId))
             throw new ArgumentException("Issue id is required", nameof(issueId));
+        if (_status is EpicStatus.Closed)
+            throw new EpicClosedCannotLinkException(Id);
         if (_linkedIssueNumbers.ContainsKey(issueId)) return;
         if (_linkedIssueNumbers.ContainsValue(issueNumber))
             throw new EpicDuplicateLinkedIssueException(issueNumber);

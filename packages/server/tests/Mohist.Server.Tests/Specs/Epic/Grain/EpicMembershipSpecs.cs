@@ -97,11 +97,16 @@ public class EpicMembershipSpecs
     {
         // Issue-179: terminal-epic memberships do NOT block re-homing
         // an issue into a new non-terminal epic; the terminal row stays
-        // so the membership history is preserved.
+        // so the membership history is preserved. Per issue-392 the
+        // terminal epic is `done` (linking to `closed` is rejected
+        // outright) and the linked issue must be terminal so the
+        // wake-up branch does not flip the done epic to running and
+        // consume the active-membership slot before the active epic
+        // can re-home the issue.
         var database = CreateDatabase();
-        await SeedEpicAsync(database, epicId: "epic_terminal", status: "closed", number: 1);
+        await SeedEpicAsync(database, epicId: "epic_terminal", status: "done", number: 1);
         await SeedEpicAsync(database, epicId: "epic_active", status: "idle", number: 2);
-        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1);
+        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1, status: IssueStatus.Done);
 
         var terminalGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_terminal");
         await terminalGrain.LinkIssueAsync("issue_1", 1, ProjectId);
@@ -132,7 +137,13 @@ public class EpicMembershipSpecs
     public async Task LinkIssueAsync_IssueInTerminalEpic_CanLinkToRunningOrPausedEpic()
     {
         // Both "running" and "paused" are non-terminal; the terminal-only
-        // exception must apply to each.
+        // exception must apply to each. Per issue-392, a `done` epic
+        // holding a non-terminal issue wakes itself to running and
+        // therefore consumes the active-membership slot — a second
+        // non-terminal epic CANNOT claim the same issue. To still
+        // exercise the "re-home from terminal to running/paused" path
+        // here, the linked issue must be terminal (no wake, so the
+        // done epic stays `done` and does not consume an active slot).
         await RunReHomeFromTerminalAsync("running");
         await RunReHomeFromTerminalAsync("paused");
 
@@ -141,7 +152,7 @@ public class EpicMembershipSpecs
             var database = CreateDatabase();
             await SeedEpicAsync(database, epicId: "epic_done", status: "done", number: 1);
             await SeedEpicAsync(database, epicId: $"epic_{targetStatus}", status: targetStatus, number: 2);
-            await SeedIssueAsync(database, issueId: $"issue_{targetStatus}", issueNumber: 1);
+            await SeedIssueAsync(database, issueId: $"issue_{targetStatus}", issueNumber: 1, status: IssueStatus.Done);
 
             var terminalGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_done");
             await terminalGrain.LinkIssueAsync($"issue_{targetStatus}", 1, ProjectId);
@@ -165,11 +176,22 @@ public class EpicMembershipSpecs
     public async Task LinkIssueAsync_IssueInTerminalEpic_LinkToAnotherTerminalEpic_AlsoAllowed()
     {
         // Sanity: linking into a second terminal epic is also fine —
-        // there is no invariant on terminal memberships.
+        // there is no invariant on terminal memberships. Per
+        // issue-392, however, two outcomes now restrict this scenario:
+        //   1) linking to a `closed` epic is rejected outright, so the
+        //      closed-link half is exercised separately (see
+        //      EpicMembershipSpecs and EpicLifecycleSpecs);
+        //   2) linking an open issue to a `done` epic wakes that epic
+        //      to running, which consumes the active-membership slot,
+        //      so a SECOND `done` epic cannot link the same open issue
+        //      (it would be rejected by the active-membership invariant).
+        // To exercise the "terminal-link to two terminal epics" path
+        // without triggering either outcome, both epics must be `done`
+        // and the issue must already be terminal (no wake).
         var database = CreateDatabase();
         await SeedEpicAsync(database, epicId: "epic_done_1", status: "done", number: 1);
-        await SeedEpicAsync(database, epicId: "epic_done_2", status: "closed", number: 2);
-        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1);
+        await SeedEpicAsync(database, epicId: "epic_done_2", status: "done", number: 2);
+        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1, status: IssueStatus.Done);
 
         var grainDone1 = CreateGrain(database.Factory, $"{ProjectId}:epic_done_1");
         var grainDone2 = CreateGrain(database.Factory, $"{ProjectId}:epic_done_2");
@@ -224,12 +246,15 @@ public class EpicMembershipSpecs
     {
         // The terminal row must NOT be mutated by a rejected second
         // non-terminal link; the terminal membership is preserved as
-        // part of the membership history.
+        // part of the membership history. Per issue-392, the
+        // "terminal" half is a `done` epic (linking to `closed` is
+        // rejected outright) and the linked issue must be terminal so
+        // the wake-up branch does not fire.
         var database = CreateDatabase();
-        await SeedEpicAsync(database, epicId: "epic_terminal", status: "closed", number: 1);
+        await SeedEpicAsync(database, epicId: "epic_terminal", status: "done", number: 1);
         await SeedEpicAsync(database, epicId: "epic_active_a", status: "idle", number: 2);
         await SeedEpicAsync(database, epicId: "epic_active_b", status: "running", number: 3);
-        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1);
+        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1, status: IssueStatus.Done);
 
         var terminalGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_terminal");
         var activeAGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_active_a");
@@ -293,11 +318,15 @@ public class EpicMembershipSpecs
     {
         // Even after the unique-index relaxation, UnlinkIssueAsync must
         // still remove exactly one link and leave other memberships
-        // (including terminal-epic ones) untouched.
+        // (including terminal-epic ones) untouched. Per issue-392 the
+        // terminal epic is `done` (linking to `closed` is rejected
+        // outright) and the linked issue must be terminal so the
+        // wake-up branch does not flip the done epic to running and
+        // consume the active-membership slot.
         var database = CreateDatabase();
-        await SeedEpicAsync(database, epicId: "epic_terminal", status: "closed", number: 1);
+        await SeedEpicAsync(database, epicId: "epic_terminal", status: "done", number: 1);
         await SeedEpicAsync(database, epicId: "epic_active", status: "idle", number: 2);
-        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1);
+        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1, status: IssueStatus.Done);
 
         var terminalGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_terminal");
         var activeGrain = CreateGrain(database.Factory, $"{ProjectId}:epic_active");
