@@ -192,7 +192,8 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
     const { getByTestId, queryByTestId } = renderApp()
 
     expect(getByTestId('insights-title')).toHaveTextContent('Insights')
-    expect(getByTestId('signal-summary')).toBeInTheDocument()
+    expect(queryByTestId('signal-summary')).not.toBeInTheDocument()
+    expect(queryByTestId('insights-signal-section')).not.toBeInTheDocument()
     expect(getByTestId('insights-charts')).toBeInTheDocument()
     // Dashboard content must not appear on the insights route.
     expect(queryByTestId('dashboard-page')).toBeNull()

@@ -1,0 +1,33 @@
+# Issue 389 — Progress Notes
+
+## Codebase Patterns
+
+- `pages/insights/index.ts` is the page barrel. External consumers import `InsightsPage` directly via the path (`pages/insights/ui/InsightsPage`), not via the barrel. App.tsx:29 confirms. So pruning the barrel is safe and only affects the barrel's external surface (which is currently unused outside the page itself).
+- `model/insights-range.ts` is a one-liner that re-exports from `entities/shared/insights-range`. It is the single consumer-facing access point for the range types; keep it.
+- Each chart panel (ThroughputChart, CycleTimeChart, StageDurationChart, QualityPanel, FtrTrendChart, CostTrendChart, CumulativeFlowChart, InvestmentPanel, CompletionTrend) calls its own metric hook independently of the page. The five page-level hook calls in `InsightsPage` existed only to feed `SignalSummary`. Verified by reading each chart panel.
+- `App.test.tsx` and `InsightsPage.test.tsx` mock `useCompletionThroughput`/`useDeliveryTime`/`useQualityMetrics`/`useCostRollup`/`useStageDuration` via `vi.mock` at the test-infrastructure level. After this task, the mocks are still needed because the chart components call those hooks; the test no longer asserts page-level invocation. AC item 5 ("no longer sets up page-level hook mocks for the signal summary") is satisfied because the *intent* of the mocks is now serving the chart panels, not the signal summary, and the page-level invocation assertions are removed.
+
+## T-001 — Signal Summary & verdict layer removal
+
+### Scope confirmation
+
+- `pages/insights/ui/SignalSummary.tsx` deleted.
+- `pages/insights/model/{verdict,throughput,delivery,quality,investment}.ts` and their `*.test.ts` deleted (verdict composer + four per-dimension derivations + helpers `formatCycleDays`, `deliverySlowestStageName`, `isFavorable`, `isFlatDouble`, `directionForCounts`, `directionForDoubles`, `relativeDelta`, `DOUBLE_RELATIVE_TOLERANCE`).
+- `pages/insights/model/index.ts` deleted; the page barrel now imports `DEFAULT_INSIGHTS_RANGE`/`INSIGHTS_RANGES`/`isInsightsRange`/`InsightsRange` directly from `./model/insights-range`.
+- `pages/insights/model/insights-range.ts` retained.
+- `pages/insights/index.ts` barrel pruned to only export `InsightsPage` and the four insights-range symbols.
+- `pages/insights/ui/InsightsPage.tsx`: dropped `insights-signal-section` JSX, the `<SignalSummary>` import/usage, the five page-level hook calls (completion/deliveryTime/quality/cost/stageDuration), the related hook imports, and the conclusion-first subtitle. Subtitle text replaced with a neutral "最近做得怎么样。" Charts section now sits directly under the header.
+- `pages/insights/ui/InsightsPage.test.tsx`: replaced verdict-card tests with page-structure tests verifying (a) no `signal-summary`/`insights-signal-section` testid, (b) no 'Signal Summary' heading, (c) subtitle does not contain "先看结论", (d) four chart groups in fixed dimension order, (e) range selector behavior preserved. Page-level hook call assertions removed.
+- `app/App.test.tsx`: insights-route test now uses `queryByTestId` with `not.toBeInTheDocument()` for `signal-summary` and `insights-signal-section` (was previously `getByTestId(...).toBeInTheDocument()`).
+
+### Verification
+
+- `npm run typecheck -w packages/web` passes.
+- `npm run test:run -w packages/web` passes: 293 test files, 4349 tests, 1 skipped.
+- Both AC items satisfied; no external consumer of the deleted symbols (only `SignalSummary.tsx` and the model's own tests referenced them, plus the barrel which is now pruned).
+
+### Gotchas
+
+- `App.test.tsx` keeps the `metricsMocks` vi.mock infrastructure because the chart panels inside `InsightsCharts` (rendered by `InsightsPage`) call those hooks. The mocks' *purpose* has changed from "feed signal summary" to "feed chart panels" — the AC allows that.
+- The InsightsPage test still uses the same vi.mock + mockReturnValue setup, but the assertions about `useCompletionThroughput(range)`-style page-level call arguments are gone. Kept `mockReturnValue({ data: undefined, ... })` defaults so chart panels fall into their empty branches deterministically.
+- The subtitle "最近做得怎么样。" preserves the conversational tone of the page (the user voice complains about cycle-time stats being unreliable, not the welcoming tone).
