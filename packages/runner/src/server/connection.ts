@@ -23,8 +23,17 @@ export class ServerConnection {
     await this.post("unregister", undefined, signal)
   }
 
-  async poll(signal: AbortSignal): Promise<RenderedWorkItem | null> {
-    const response = await fetch(this.url("poll"), { method: "POST", signal })
+  async poll(signal: AbortSignal, inFlight: string[] = []): Promise<RenderedWorkItem | null> {
+    const response = await fetch(this.url("poll"), {
+      method: "POST",
+      signal,
+      // Report the works currently in flight in this process. The server
+      // reconciles its held Running works against this set: a held work the
+      // process no longer reports was lost (process restarted) and is rolled
+      // back for re-dispatch. Empty array on the first poll.
+      headers: inFlight.length > 0 ? { "content-type": "application/json" } : undefined,
+      body: inFlight.length > 0 ? JSON.stringify({ inFlight }) : undefined,
+    })
     if (response.status === 204) return null
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
     const dispatch = (await response.json()) as WorkDispatchResponse

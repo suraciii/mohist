@@ -257,7 +257,7 @@ export class RunnerHost {
 
     while (!signal.aborted) {
       while (!signal.aborted) {
-        const work = await this.connection.poll(signal)
+        const work = await this.connection.poll(signal, [...inFlight.keys()])
         if (!work) break
 
         // In-flight key uses ownerKind + owner identity + workId so that
