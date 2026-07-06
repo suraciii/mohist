@@ -5,6 +5,8 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { setPrefersReducedMotion } from '../../../../tests/setup'
 import type { CompletionTrendResponse } from '../../../entities/issue'
 
+type RangeCode = '7d' | '30d' | '90d'
+
 const mockUseCompletionThroughput = vi.fn()
 vi.mock('../../../entities/issue', () => ({
   useCompletionThroughput: () => mockUseCompletionThroughput(),
@@ -414,5 +416,31 @@ describe('ThroughputChart', () => {
     const badge = screen.getByTestId('throughput-chart-window')
     expect(badge).toBeInTheDocument()
     expect(badge.textContent).toBe('30d')
+  })
+
+  it.each<RangeCode>(['7d', '90d'])(
+    'renders the throughput window badge with the %s range code',
+    (range) => {
+      mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
+
+      render(<ThroughputChart range={range} />)
+
+      const badge = screen.getByTestId('throughput-chart-window')
+      expect(badge).toBeInTheDocument()
+      expect(badge.textContent).toBe(range)
+    },
+  )
+
+  it('updates the throughput window badge when the page range changes', () => {
+    mockUseCompletionThroughput.mockReturnValue({ data: buildThroughputData(), isLoading: false, isError: false })
+
+    const { rerender } = render(<ThroughputChart range="7d" />)
+    expect(screen.getByTestId('throughput-chart-window').textContent).toBe('7d')
+
+    rerender(<ThroughputChart range="30d" />)
+    expect(screen.getByTestId('throughput-chart-window').textContent).toBe('30d')
+
+    rerender(<ThroughputChart range="90d" />)
+    expect(screen.getByTestId('throughput-chart-window').textContent).toBe('90d')
   })
 })

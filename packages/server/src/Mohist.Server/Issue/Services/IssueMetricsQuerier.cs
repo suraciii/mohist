@@ -280,19 +280,21 @@ public class IssueMetricsQuerier : IScopedService
         double? FirstTimeRightRate);
 
     /// <summary>
-    /// The result of <see cref="GetQualityAsync"/>. Both the current 30-day
-    /// window and the immediately-preceding 30-day window are returned
-    /// together so callers can derive a percentage-point delta in a single
-    /// read. <see cref="Window7d"/> and <see cref="Trend"/> are preserved
-    /// unchanged. <see cref="PreviousWindow"/> is strictly additive: it is
-    /// the previous-window FTR rate plus its <see cref="QualityPreviousWindow.SampleCount"/>
-    /// discriminator; the existing 7-day and 30-day single-point rates,
-    /// the per-stage rework rates, and the per-bucket trend series are
-    /// unchanged.
+    /// The result of <see cref="GetQualityAsync"/>. The range-driven
+    /// primary window, the immediately-preceding window of the same
+    /// length, and the per-day trend over the primary window are
+    /// returned together so callers can derive a percentage-point
+    /// delta and visualize within-window movement in a single read.
+    /// <see cref="Window"/> replaces the prior dual-window contract
+    /// (fixed <c>Window7d</c> + range-driven <c>Window30d</c>); the
+    /// per-stage rework rates, the ship-time windowing, and the
+    /// per-bucket trend series are unchanged. <see cref="PreviousWindow"/>
+    /// is strictly additive: it carries the previous-window FTR rate
+    /// plus its <see cref="QualityPreviousWindow.SampleCount"/>
+    /// discriminator.
     /// </summary>
     public sealed record QualityMetricsResult(
-        QualityMetricsWindow Window7d,
-        QualityMetricsWindow Window30d,
+        QualityMetricsWindow Window,
         QualityPreviousWindow PreviousWindow,
         QualityTrend Trend);
 
@@ -309,14 +311,15 @@ public class IssueMetricsQuerier : IScopedService
         double? ReworkRate);
 
     /// <summary>
-    /// The pre-sized 30-day daily trend returned alongside the trailing
-    /// window scalars. <see cref="Points"/> has length 30, anchored on
-    /// <see cref="Window30dFrom"/> and ordered oldest-first.
+    /// The pre-sized daily trend returned alongside the trailing window
+    /// scalars. <see cref="Points"/> has length equal to the primary
+    /// window length, anchored on <see cref="WindowFrom"/> and ordered
+    /// oldest-first.
     /// </summary>
     public sealed record QualityTrend(
         string Bucket,
-        DateTimeOffset Window30dFrom,
-        DateTimeOffset Window30dTo,
+        DateTimeOffset WindowFrom,
+        DateTimeOffset WindowTo,
         IReadOnlyList<QualityTrendPoint> Points);
 
     /// <summary>
@@ -441,12 +444,15 @@ public class IssueMetricsQuerier : IScopedService
 
     /// <summary>
     /// Aggregates AI quality signals (first-time-right rate and per-stage
-    /// rework rate) over trailing 7-day and 30-day windows. Only issues
+    /// rework rate) over a single range-driven primary window. Only issues
     /// whose status is <see cref="IssueStatus.Done"/> participate. Window
     /// membership is anchored on the <c>com.mohist.issue.work-completed</c>
     /// event time, matching <see cref="GetCompletionBucketsAsync"/>. Rates
     /// are computed from existing workflow-run state and durable check events;
-    /// no new data collection is introduced.
+    /// no new data collection is introduced. The primary window's length
+    /// follows <paramref name="windowDays"/> (default <c>30</c>); the
+    /// immediately-preceding window of the same length and the per-day trend
+    /// over the primary window scale with the same length.
     /// </summary>
     public async Task<QualityMetricsResult> GetQualityAsync(
         string projectId,
@@ -455,15 +461,12 @@ public class IssueMetricsQuerier : IScopedService
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        var window7dFrom = now.AddDays(-7);
-        var window7dTo = now;
-
         var primaryDays = windowDays ?? 30;
-        var window30dFrom = now.AddDays(-primaryDays);
-        var window30dTo = now;
+        var windowFrom = now.AddDays(-primaryDays);
+        var windowTo = now;
 
-        var previous30dFrom = now.AddDays(-2 * primaryDays);
-        var previous30dTo = window30dFrom;
+        var previousFrom = now.AddDays(-2 * primaryDays);
+        var previousTo = windowFrom;
 
         var today = DateOnly.FromDateTime(now.UtcDateTime.Date);
         var trendStart = today.AddDays(-(primaryDays - 1));
@@ -528,9 +531,8 @@ public class IssueMetricsQuerier : IScopedService
         var allRunIds = runIdsByIssue.Values.SelectMany(ids => ids).ToArray();
         var (runs, eventFactsByRun) = await LoadAndPairWorkflowRunsAsync(db, allRunIds);
 
-        var window7d = new QualityAccumulator();
-        var window30d = new QualityAccumulator();
-        var previous30d = new QualityFirstTimeRightAccumulator();
+        var window = new QualityAccumulator();
+        var previous = new QualityFirstTimeRightAccumulator();
 
         foreach (var issue in issues)
         {
@@ -563,28 +565,24 @@ public class IssueMetricsQuerier : IScopedService
                 ? (false, new Dictionary<string, bool>(StringComparer.Ordinal))
                 : ClassifyRuns(lifecycleRuns, lifecycleEvents);
 
-            if (shipTime >= window7dFrom && shipTime <= window7dTo)
-                Accumulate(window7d, isFirstTimeRight, stageRework);
-
-            if (shipTime >= window30dFrom && shipTime <= window30dTo)
+            if (shipTime >= windowFrom && shipTime <= windowTo)
             {
-                Accumulate(window30d, isFirstTimeRight, stageRework);
+                Accumulate(window, isFirstTimeRight, stageRework);
 
                 var shipDay = DateOnly.FromDateTime(shipTime.UtcDateTime.Date);
                 if (trendIndexByBoundary.TryGetValue(shipDay, out var trendIdx))
                     Accumulate(trendBuckets[trendIdx], isFirstTimeRight, stageRework);
             }
-            else if (shipTime >= previous30dFrom && shipTime < previous30dTo)
+            else if (shipTime >= previousFrom && shipTime < previousTo)
             {
-                Accumulate(previous30d, isFirstTimeRight);
+                Accumulate(previous, isFirstTimeRight);
             }
         }
 
         return new QualityMetricsResult(
-            BuildWindow(window7dFrom, window7dTo, window7d),
-            BuildWindow(window30dFrom, window30dTo, window30d),
-            BuildPreviousWindow(previous30d),
-            BuildTrend(window30dFrom, window30dTo, trendBoundaries, trendBuckets));
+            BuildWindow(windowFrom, windowTo, window),
+            BuildPreviousWindow(previous),
+            BuildTrend(windowFrom, windowTo, trendBoundaries, trendBuckets));
     }
 
     /// <summary>
@@ -1333,8 +1331,8 @@ public class IssueMetricsQuerier : IScopedService
     }
 
     private QualityTrend BuildTrend(
-        DateTimeOffset window30dFrom,
-        DateTimeOffset window30dTo,
+        DateTimeOffset windowFrom,
+        DateTimeOffset windowTo,
         IReadOnlyList<DateOnly> boundaries,
         IReadOnlyList<QualityTrendAccumulator> buckets)
     {
@@ -1358,8 +1356,8 @@ public class IssueMetricsQuerier : IScopedService
 
         return new QualityTrend(
             Bucket: "day",
-            Window30dFrom: window30dFrom,
-            Window30dTo: window30dTo,
+            WindowFrom: windowFrom,
+            WindowTo: windowTo,
             Points: points);
     }
 

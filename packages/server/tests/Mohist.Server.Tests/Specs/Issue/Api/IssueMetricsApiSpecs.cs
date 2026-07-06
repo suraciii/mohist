@@ -464,18 +464,14 @@ public class IssueMetricsApiSpecs
         response.EnsureSuccessStatusCode();
 
         var payload = await ReadDataAsync<QualityMetricsResponse>(response);
-        Assert.NotNull(payload.Window7d);
-        Assert.NotNull(payload.Window30d);
+        Assert.NotNull(payload.Window);
 
-        Assert.Equal(1, payload.Window7d.SampleCount);
-        Assert.Equal(0.0, payload.Window7d.FirstTimeRightRate);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
-
-        Assert.Equal(1, payload.Window30d.SampleCount);
-        Assert.NotNull(payload.Window30d.FirstTimeRightRate);
+        Assert.Equal(1, payload.Window.SampleCount);
+        Assert.Equal(0.0, payload.Window.FirstTimeRightRate);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -490,14 +486,12 @@ public class IssueMetricsApiSpecs
         response.EnsureSuccessStatusCode();
 
         var payload = await ReadDataAsync<QualityMetricsResponse>(response);
-        Assert.Equal(0, payload.Window7d.SampleCount);
-        Assert.Null(payload.Window7d.FirstTimeRightRate);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Equal(0, payload.Window30d.SampleCount);
-        Assert.Null(payload.Window30d.FirstTimeRightRate);
+        Assert.Equal(0, payload.Window.SampleCount);
+        Assert.Null(payload.Window.FirstTimeRightRate);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "plan" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -528,18 +522,17 @@ public class IssueMetricsApiSpecs
         response.EnsureSuccessStatusCode();
 
         var payload = await ReadDataAsync<QualityMetricsResponse>(response);
-        Assert.NotNull(payload.Window7d);
-        Assert.NotNull(payload.Window30d);
+        Assert.NotNull(payload.Window);
         Assert.NotNull(payload.Trend);
 
         Assert.Equal("day", payload.Trend.Bucket);
         Assert.Equal(30, payload.Trend.Points.Length);
-        Assert.Equal(payload.Window30d.From, payload.Trend.From);
-        Assert.Equal(payload.Window30d.To, payload.Trend.To);
+        Assert.Equal(payload.Window.From, payload.Trend.From);
+        Assert.Equal(payload.Window.To, payload.Trend.To);
 
         var shippedBoundary = shipTime.UtcDateTime.Date.ToString("yyyy-MM-dd");
         var shippedPoint = Assert.Single(payload.Trend.Points, p => p.Boundary == shippedBoundary);
-        Assert.Equal(1, payload.Window30d.SampleCount);
+        Assert.Equal(1, payload.Window.SampleCount);
         Assert.Equal(1, shippedPoint.SampleCount);
         Assert.Equal(0.0, shippedPoint.FirstTimeRightRate);
         Assert.Equal(1.0, shippedPoint.ReworkRate);
@@ -576,10 +569,8 @@ public class IssueMetricsApiSpecs
             Assert.Null(p.FirstTimeRightRate);
             Assert.Null(p.ReworkRate);
         });
-        Assert.Equal(0, payload.Window7d.SampleCount);
-        Assert.Null(payload.Window7d.FirstTimeRightRate);
-        Assert.Equal(0, payload.Window30d.SampleCount);
-        Assert.Null(payload.Window30d.FirstTimeRightRate);
+        Assert.Equal(0, payload.Window.SampleCount);
+        Assert.Null(payload.Window.FirstTimeRightRate);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -625,8 +616,8 @@ public class IssueMetricsApiSpecs
 
         var payload = await ReadDataAsync<QualityMetricsResponse>(response);
         // Current 30d window: 1 sample, FTR = 0.0 (build had a repair).
-        Assert.Equal(1, payload.Window30d.SampleCount);
-        Assert.Equal(0.0, payload.Window30d.FirstTimeRightRate);
+        Assert.Equal(1, payload.Window.SampleCount);
+        Assert.Equal(0.0, payload.Window.FirstTimeRightRate);
         // Previous 30d window: 1 sample, FTR = 1.0 (no repairs).
         Assert.Equal(1, payload.PreviousSampleCount);
         Assert.Equal(1.0, payload.PreviousFirstTimeRightRate);
@@ -634,7 +625,7 @@ public class IssueMetricsApiSpecs
         // a single read from the two rates.
         Assert.Equal(
             1.0 - 0.0,
-            payload.PreviousFirstTimeRightRate!.Value - payload.Window30d.FirstTimeRightRate!.Value,
+            payload.PreviousFirstTimeRightRate!.Value - payload.Window.FirstTimeRightRate!.Value,
             precision: 5);
     }
 
@@ -668,8 +659,8 @@ public class IssueMetricsApiSpecs
 
         var payload = await ReadDataAsync<QualityMetricsResponse>(response);
         // Current window is populated.
-        Assert.Equal(1, payload.Window30d.SampleCount);
-        Assert.Equal(1.0, payload.Window30d.FirstTimeRightRate);
+        Assert.Equal(1, payload.Window.SampleCount);
+        Assert.Equal(1.0, payload.Window.FirstTimeRightRate);
         // Previous window is empty — discriminator sampleCount is 0
         // and the rate is null (NOT a fabricated 0.0 / 1.0).
         Assert.Equal(0, payload.PreviousSampleCount);
@@ -736,14 +727,14 @@ public class IssueMetricsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task QualityMetrics_AdditivePreservation_ExistingWindowsAndTrendUnchanged()
+    public async Task QualityMetrics_AdditivePreservation_ExistingWindowAndTrendUnchanged()
     {
         // The previous-window addition must be strictly additive: the
-        // existing window7d/window30d/Trend shapes are preserved
-        // byte-for-byte for a consumer that does not read the
-        // previous-window fields. Seed an issue 1 day ago so it
-        // falls in both 7d and 30d and the trend has a populated
-        // point, exactly as `ShippedIssuesWithRepairs` does.
+        // existing Window/Trend shapes are preserved byte-for-byte for
+        // a consumer that does not read the previous-window fields.
+        // Seed an issue 1 day ago so it falls in the 30-day primary
+        // window and the trend has a populated point, exactly as
+        // `ShippedIssuesWithRepairs` does.
         var project = await CreateProjectAsync($"quality-additive-{Guid.NewGuid():N}");
         var now = _fixture.TimeProvider.GetUtcNow();
         var shipTime = now.AddDays(-1);
@@ -763,25 +754,20 @@ public class IssueMetricsApiSpecs
         response.EnsureSuccessStatusCode();
 
         var payload = await ReadDataAsync<QualityMetricsResponse>(response);
-        // Existing window7d preserved.
-        Assert.Equal(1, payload.Window7d.SampleCount);
-        Assert.Equal(0.0, payload.Window7d.FirstTimeRightRate);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
-        // Existing window30d preserved.
-        Assert.Equal(1, payload.Window30d.SampleCount);
-        Assert.Equal(0.0, payload.Window30d.FirstTimeRightRate);
-        Assert.Contains(payload.Window30d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
-        Assert.Contains(payload.Window30d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        // Existing primary window preserved.
+        Assert.Equal(1, payload.Window.SampleCount);
+        Assert.Equal(0.0, payload.Window.FirstTimeRightRate);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
         // Existing trend series preserved (30 dense per-day buckets).
         Assert.NotNull(payload.Trend);
         Assert.Equal("day", payload.Trend.Bucket);
         Assert.Equal(30, payload.Trend.Points.Length);
-        Assert.Equal(payload.Window30d.From, payload.Trend.From);
-        Assert.Equal(payload.Window30d.To, payload.Trend.To);
-        // New previous-window fields: empty result (no previous-window
+        Assert.Equal(payload.Window.From, payload.Trend.From);
+        Assert.Equal(payload.Window.To, payload.Trend.To);
+        // Previous-window fields: empty result (no previous-window
         // issues seeded). The previous-window addition does not touch
         // any existing field.
         Assert.Equal(0, payload.PreviousSampleCount);
@@ -1663,40 +1649,12 @@ public class IssueMetricsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task RangeQuery_QualityEndpoint_Window7dStaysFixedAcrossRanges()
+    public async Task RangeQuery_QualityEndpoint_OmittedDefaultsTo30DayPrimaryWindow()
     {
-        // Quality double-window: `Window7d` is always a fixed 7-day
-        // short-term lens regardless of the selected range.
-        var project = await CreateProjectAsync($"range-q-7dfixed-{Guid.NewGuid():N}");
-
-        using var omit = await _client.GetAsync(
-            $"/api/projects/{project.Id}/issues/metrics/quality");
-        omit.EnsureSuccessStatusCode();
-        var omitPayload = await ReadDataAsync<QualityMetricsResponse>(omit);
-        var omit7dFrom = DateTimeOffset.Parse(omitPayload.Window7d.From);
-        var omit7dTo = DateTimeOffset.Parse(omitPayload.Window7d.To);
-        Assert.Equal(TimeSpan.FromDays(7), omit7dTo - omit7dFrom);
-
-        using var r90 = await _client.GetAsync(
-            $"/api/projects/{project.Id}/issues/metrics/quality?range=90d");
-        r90.EnsureSuccessStatusCode();
-        var r90Payload = await ReadDataAsync<QualityMetricsResponse>(r90);
-        var r907dFrom = DateTimeOffset.Parse(r90Payload.Window7d.From);
-        var r907dTo = DateTimeOffset.Parse(r90Payload.Window7d.To);
-        Assert.Equal(TimeSpan.FromDays(7), r907dTo - r907dFrom);
-        // Window7d is identical between omit and range=90d.
-        Assert.Equal(omit7dFrom, r907dFrom);
-        Assert.Equal(omit7dTo, r907dTo);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task RangeQuery_QualityEndpoint_OmittedReproduces30dPrimaryWindowAnd30TrendBuckets()
-    {
-        // Omit-equality: Window30d = 30 days, Trend = 30 daily buckets,
-        // PreviousSampleCount discriminator untouched. This is the
-        // back-compat shape for Dashboard consumers.
+        // Single-window contract: omitting `range` produces a 30-day
+        // primary window with 30 daily trend buckets. The previous-
+        // window discriminator stays untouched. There is no fixed
+        // 7-day window.
         var project = await CreateProjectAsync($"range-q-omit-{Guid.NewGuid():N}");
 
         using var response = await _client.GetAsync(
@@ -1704,16 +1662,16 @@ public class IssueMetricsApiSpecs
         response.EnsureSuccessStatusCode();
         var payload = await ReadDataAsync<QualityMetricsResponse>(response);
 
-        var window30dFrom = DateTimeOffset.Parse(payload.Window30d.From);
-        var window30dTo = DateTimeOffset.Parse(payload.Window30d.To);
-        Assert.Equal(TimeSpan.FromDays(30), window30dTo - window30dFrom);
+        var windowFrom = DateTimeOffset.Parse(payload.Window.From);
+        var windowTo = DateTimeOffset.Parse(payload.Window.To);
+        Assert.Equal(TimeSpan.FromDays(30), windowTo - windowFrom);
 
         Assert.Equal(30, payload.Trend.Points.Length);
         // Trend span == primary window.
         var trendFrom = DateTimeOffset.Parse(payload.Trend.From);
         var trendTo = DateTimeOffset.Parse(payload.Trend.To);
-        Assert.Equal(window30dFrom, trendFrom);
-        Assert.Equal(window30dTo, trendTo);
+        Assert.Equal(windowFrom, trendFrom);
+        Assert.Equal(windowTo, trendTo);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -1721,9 +1679,9 @@ public class IssueMetricsApiSpecs
     [Fact]
     public async Task RangeQuery_QualityEndpoint_90dScalesPrimaryPreviousAndTrend()
     {
-        // `range=90d` makes the primary (Window30d slot) window 90d,
-        // the previous window 90d, and the trend 90 daily buckets —
-        // while Window7d stays a fixed 7-day lens.
+        // Single-window contract: `range=90d` makes the primary window
+        // 90d and the trend 90 daily buckets. There is no fixed 7-day
+        // window field on the response.
         var project = await CreateProjectAsync($"range-q-90d-{Guid.NewGuid():N}");
 
         using var response = await _client.GetAsync(
@@ -1731,19 +1689,42 @@ public class IssueMetricsApiSpecs
         response.EnsureSuccessStatusCode();
         var payload = await ReadDataAsync<QualityMetricsResponse>(response);
 
-        var window7dFrom = DateTimeOffset.Parse(payload.Window7d.From);
-        var window7dTo = DateTimeOffset.Parse(payload.Window7d.To);
-        Assert.Equal(TimeSpan.FromDays(7), window7dTo - window7dFrom);
-
-        var window30dFrom = DateTimeOffset.Parse(payload.Window30d.From);
-        var window30dTo = DateTimeOffset.Parse(payload.Window30d.To);
-        Assert.Equal(TimeSpan.FromDays(90), window30dTo - window30dFrom);
+        var windowFrom = DateTimeOffset.Parse(payload.Window.From);
+        var windowTo = DateTimeOffset.Parse(payload.Window.To);
+        Assert.Equal(TimeSpan.FromDays(90), windowTo - windowFrom);
 
         Assert.Equal(90, payload.Trend.Points.Length);
         var trendFrom = DateTimeOffset.Parse(payload.Trend.From);
         var trendTo = DateTimeOffset.Parse(payload.Trend.To);
-        Assert.Equal(window30dFrom, trendFrom);
-        Assert.Equal(window30dTo, trendTo);
+        Assert.Equal(windowFrom, trendFrom);
+        Assert.Equal(windowTo, trendTo);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RangeQuery_QualityEndpoint_7dScalesPrimaryPreviousAndTrend()
+    {
+        // Single-window contract: `range=7d` makes the primary window
+        // 7d and the trend 7 daily buckets. Confirms that the primary
+        // window tracks the range across the full range selector
+        // (7d/30d/90d).
+        var project = await CreateProjectAsync($"range-q-7d-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality?range=7d");
+        response.EnsureSuccessStatusCode();
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+
+        var windowFrom = DateTimeOffset.Parse(payload.Window.From);
+        var windowTo = DateTimeOffset.Parse(payload.Window.To);
+        Assert.Equal(TimeSpan.FromDays(7), windowTo - windowFrom);
+
+        Assert.Equal(7, payload.Trend.Points.Length);
+        var trendFrom = DateTimeOffset.Parse(payload.Trend.From);
+        var trendTo = DateTimeOffset.Parse(payload.Trend.To);
+        Assert.Equal(windowFrom, trendFrom);
+        Assert.Equal(windowTo, trendTo);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -2420,8 +2401,7 @@ public class IssueMetricsApiSpecs
     private sealed record QualityTrendPointDto(string Boundary, int SampleCount, double? FirstTimeRightRate, double? ReworkRate);
     private sealed record QualityTrendDto(string Bucket, string From, string To, QualityTrendPointDto[] Points);
     private sealed record QualityMetricsResponse(
-        QualityMetricsWindowDto Window7d,
-        QualityMetricsWindowDto Window30d,
+        QualityMetricsWindowDto Window,
         double? PreviousFirstTimeRightRate,
         int PreviousSampleCount,
         QualityTrendDto Trend);

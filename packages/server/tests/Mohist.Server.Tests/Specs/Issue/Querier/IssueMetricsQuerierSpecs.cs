@@ -587,10 +587,10 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Equal(1, result.Window7d.SampleCount);
-        Assert.Equal(1.0, result.Window7d.FirstTimeRightRate);
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Equal(1, result.Window.SampleCount);
+        Assert.Equal(1.0, result.Window.FirstTimeRightRate);
+        Assert.Contains(result.Window.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(result.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -615,10 +615,10 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Equal(1, result.Window7d.SampleCount);
-        Assert.Equal(0.0, result.Window7d.FirstTimeRightRate);
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        Assert.Equal(1, result.Window.SampleCount);
+        Assert.Equal(0.0, result.Window.FirstTimeRightRate);
+        Assert.Contains(result.Window.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(result.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -644,9 +644,9 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Equal(1, result.Window7d.SampleCount);
-        Assert.Equal(1.0, result.Window7d.FirstTimeRightRate);
-        var plan = Assert.Single(result.Window7d.Stages, s => s.Stage == "plan");
+        Assert.Equal(1, result.Window.SampleCount);
+        Assert.Equal(1.0, result.Window.FirstTimeRightRate);
+        var plan = Assert.Single(result.Window.Stages, s => s.Stage == "plan");
         Assert.Equal(1, plan.EnteredCount);
         Assert.Equal(0.0, plan.ReworkRate);
     }
@@ -674,12 +674,12 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1);
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1);
-        var check = Assert.Single(result.Window7d.Stages, s => s.Stage == "check");
+        Assert.Contains(result.Window.Stages, s => s.Stage == "plan" && s.EnteredCount == 1);
+        Assert.Contains(result.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 1);
+        var check = Assert.Single(result.Window.Stages, s => s.Stage == "check");
         Assert.Equal(0, check.EnteredCount);
         Assert.Null(check.ReworkRate);
-        var integrate = Assert.Single(result.Window7d.Stages, s => s.Stage == "integrate");
+        var integrate = Assert.Single(result.Window.Stages, s => s.Stage == "integrate");
         Assert.Equal(0, integrate.EnteredCount);
         Assert.Null(integrate.ReworkRate);
     }
@@ -711,10 +711,8 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Equal(1, result.Window7d.SampleCount);
-        Assert.Equal(2, result.Window30d.SampleCount);
-        Assert.Equal(1.0, result.Window7d.FirstTimeRightRate);
-        Assert.Equal(1.0, result.Window30d.FirstTimeRightRate);
+        Assert.Equal(2, result.Window.SampleCount);
+        Assert.Equal(1.0, result.Window.FirstTimeRightRate);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -733,14 +731,12 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Equal(0, result.Window7d.SampleCount);
-        Assert.Null(result.Window7d.FirstTimeRightRate);
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
-        Assert.Equal(0, result.Window30d.SampleCount);
-        Assert.Null(result.Window30d.FirstTimeRightRate);
+        Assert.Equal(0, result.Window.SampleCount);
+        Assert.Null(result.Window.FirstTimeRightRate);
+        Assert.Contains(result.Window.Stages, s => s.Stage == "plan" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(result.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(result.Window.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(result.Window.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -773,11 +769,11 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        var plan = Assert.Single(result.Window7d.Stages, s => s.Stage == "plan");
+        var plan = Assert.Single(result.Window.Stages, s => s.Stage == "plan");
         Assert.Equal(2, plan.EnteredCount);
         Assert.Equal(0.5, plan.ReworkRate);
 
-        var integrate = Assert.Single(result.Window7d.Stages, s => s.Stage == "integrate");
+        var integrate = Assert.Single(result.Window.Stages, s => s.Stage == "integrate");
         Assert.Equal(1, integrate.EnteredCount);
         Assert.Equal(0.0, integrate.ReworkRate);
     }
@@ -811,12 +807,12 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Equal(1, result.Window7d.SampleCount);
-        Assert.Equal(0.0, result.Window7d.FirstTimeRightRate);
-        var plan = Assert.Single(result.Window7d.Stages, s => s.Stage == "plan");
+        Assert.Equal(1, result.Window.SampleCount);
+        Assert.Equal(0.0, result.Window.FirstTimeRightRate);
+        var plan = Assert.Single(result.Window.Stages, s => s.Stage == "plan");
         Assert.Equal(1, plan.EnteredCount);
         Assert.Equal(1.0, plan.ReworkRate);
-        var build = Assert.Single(result.Window7d.Stages, s => s.Stage == "build");
+        var build = Assert.Single(result.Window.Stages, s => s.Stage == "build");
         Assert.Equal(1, build.EnteredCount);
         Assert.Equal(0.0, build.ReworkRate);
     }
@@ -849,18 +845,12 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Equal(1, result.Window7d.SampleCount);
-        Assert.Equal(0.0, result.Window7d.FirstTimeRightRate);
-        Assert.Equal(1, result.Window30d.SampleCount);
-        Assert.Equal(0.0, result.Window30d.FirstTimeRightRate);
+        Assert.Equal(1, result.Window.SampleCount);
+        Assert.Equal(0.0, result.Window.FirstTimeRightRate);
 
-        var check7d = Assert.Single(result.Window7d.Stages, s => s.Stage == "check");
-        Assert.Equal(1, check7d.EnteredCount);
-        Assert.Equal(1.0, check7d.ReworkRate);
-
-        var check30d = Assert.Single(result.Window30d.Stages, s => s.Stage == "check");
-        Assert.Equal(1, check30d.EnteredCount);
-        Assert.Equal(1.0, check30d.ReworkRate);
+        var check = Assert.Single(result.Window.Stages, s => s.Stage == "check");
+        Assert.Equal(1, check.EnteredCount);
+        Assert.Equal(1.0, check.ReworkRate);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -891,10 +881,10 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Equal(1, result.Window7d.SampleCount);
-        Assert.Equal(0.0, result.Window7d.FirstTimeRightRate);
+        Assert.Equal(1, result.Window.SampleCount);
+        Assert.Equal(0.0, result.Window.FirstTimeRightRate);
 
-        var check = Assert.Single(result.Window7d.Stages, s => s.Stage == "check");
+        var check = Assert.Single(result.Window.Stages, s => s.Stage == "check");
         Assert.Equal(1, check.EnteredCount);
         Assert.Equal(1.0, check.ReworkRate);
     }
@@ -917,9 +907,9 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Equal(1, result.Window7d.SampleCount);
-        Assert.Equal(0.0, result.Window7d.FirstTimeRightRate);
-        Assert.All(result.Window7d.Stages, stage => Assert.Equal(0, stage.EnteredCount));
+        Assert.Equal(1, result.Window.SampleCount);
+        Assert.Equal(0.0, result.Window.FirstTimeRightRate);
+        Assert.All(result.Window.Stages, stage => Assert.Equal(0, stage.EnteredCount));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -944,9 +934,9 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Equal(1, result.Window7d.SampleCount);
-        Assert.Equal(0.0, result.Window7d.FirstTimeRightRate);
-        Assert.All(result.Window7d.Stages, stage => Assert.Equal(0, stage.EnteredCount));
+        Assert.Equal(1, result.Window.SampleCount);
+        Assert.Equal(0.0, result.Window.FirstTimeRightRate);
+        Assert.All(result.Window.Stages, stage => Assert.Equal(0, stage.EnteredCount));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -974,10 +964,10 @@ public class IssueMetricsQuerierSpecs
         var resultA = await service.GetQualityAsync(projectA.Id, now);
         var resultB = await service.GetQualityAsync(projectB.Id, now);
 
-        Assert.Equal(1, resultA.Window7d.SampleCount);
-        Assert.Equal(1.0, resultA.Window7d.FirstTimeRightRate);
-        Assert.Equal(1, resultB.Window7d.SampleCount);
-        Assert.Equal(0.0, resultB.Window7d.FirstTimeRightRate);
+        Assert.Equal(1, resultA.Window.SampleCount);
+        Assert.Equal(1.0, resultA.Window.FirstTimeRightRate);
+        Assert.Equal(1, resultB.Window.SampleCount);
+        Assert.Equal(0.0, resultB.Window.FirstTimeRightRate);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -1001,8 +991,8 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal("2026-05-21", result.Trend.Points[0].Boundary);
         Assert.Equal("2026-06-19", result.Trend.Points[^1].Boundary);
         // Window matches the scalar 30d window.
-        Assert.Equal(result.Window30d.From, result.Trend.Window30dFrom);
-        Assert.Equal(result.Window30d.To, result.Trend.Window30dTo);
+        Assert.Equal(result.Window.From, result.Trend.WindowFrom);
+        Assert.Equal(result.Window.To, result.Trend.WindowTo);
         // No issues shipped: every bucket is the empty result (null rates).
         Assert.All(result.Trend.Points, p =>
         {
@@ -1035,7 +1025,7 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        Assert.Equal(1, result.Window30d.SampleCount);
+        Assert.Equal(1, result.Window.SampleCount);
         var leadingPoint = Assert.Single(result.Trend.Points, p => p.Boundary == "2026-05-21");
         Assert.Equal(1, leadingPoint.SampleCount);
         Assert.Equal(1.0, leadingPoint.FirstTimeRightRate);
@@ -1132,10 +1122,10 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal(1.0, day.ReworkRate);
         // The scalar 30d stage rates stay per-stage (sum > 1) so the
         // test is unambiguous about which surface is being read.
-        var plan30d = Assert.Single(result.Window30d.Stages, s => s.Stage == "plan");
-        var build30d = Assert.Single(result.Window30d.Stages, s => s.Stage == "build");
-        Assert.Equal(1.0, plan30d.ReworkRate);
-        Assert.Equal(1.0, build30d.ReworkRate);
+        var plan = Assert.Single(result.Window.Stages, s => s.Stage == "plan");
+        var build = Assert.Single(result.Window.Stages, s => s.Stage == "build");
+        Assert.Equal(1.0, plan.ReworkRate);
+        Assert.Equal(1.0, build.ReworkRate);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -1332,14 +1322,12 @@ public class IssueMetricsQuerierSpecs
         var service = scope.ServiceProvider.GetRequiredService<IssueMetricsQuerier>();
         var result = await service.GetQualityAsync(project.Id, now);
 
-        // The 7d / 30d window contract is untouched by the trend
-        // addition — same SampleCount, same FTR rate, same stages.
-        Assert.Equal(1, result.Window7d.SampleCount);
-        Assert.Equal(1.0, result.Window7d.FirstTimeRightRate);
-        Assert.Equal(1, result.Window30d.SampleCount);
-        Assert.Equal(1.0, result.Window30d.FirstTimeRightRate);
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
-        Assert.Contains(result.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        // The primary window is untouched by the trend addition —
+        // same SampleCount, same FTR rate, same stages.
+        Assert.Equal(1, result.Window.SampleCount);
+        Assert.Equal(1.0, result.Window.FirstTimeRightRate);
+        Assert.Contains(result.Window.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(result.Window.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
         // The trend lives on the same read, dense 30-day.
         Assert.Equal(30, result.Trend.Points.Count);
         var day = Assert.Single(result.Trend.Points, p => p.SampleCount > 0);

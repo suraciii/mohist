@@ -51,17 +51,7 @@ describe('useQualityMetrics', () => {
         JSON.stringify({
           success: true,
           data: {
-            window7d: {
-              from: '2026-06-20T00:00:00+00:00',
-              to: '2026-06-27T00:00:00+00:00',
-              sampleCount: 5,
-              firstTimeRightRate: 0.8,
-              stages: [
-                { stage: 'plan', enteredCount: 5, reworkRate: 0.2 },
-                { stage: 'build', enteredCount: 4, reworkRate: 0 },
-              ],
-            },
-            window30d: {
+            window: {
               from: '2026-05-28T00:00:00+00:00',
               to: '2026-06-27T00:00:00+00:00',
               sampleCount: 20,
@@ -83,10 +73,8 @@ describe('useQualityMetrics', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [calledPath] = fetchMock.mock.calls[0]
     expect(calledPath).toBe('/api/projects/proj-1/issues/metrics/quality')
-    expect(data.window7d.sampleCount).toBe(5)
-    expect(data.window7d.firstTimeRightRate).toBe(0.8)
-    expect(data.window30d.sampleCount).toBe(20)
-    expect(data.window30d.firstTimeRightRate).toBe(0.75)
+    expect(data.window.sampleCount).toBe(20)
+    expect(data.window.firstTimeRightRate).toBe(0.75)
   })
 
   it('uses a 60 second staleTime', () => {
@@ -158,8 +146,7 @@ describe('useQualityMetrics range threading', () => {
         JSON.stringify({
           success: true,
           data: {
-            window7d: { from: '2026-05-25T00:00:00+00:00', to: '2026-06-01T00:00:00+00:00', sampleCount: 0, firstTimeRightRate: null, stages: [] },
-            window30d: { from: '2026-03-03T00:00:00+00:00', to: '2026-06-01T00:00:00+00:00', sampleCount: 0, firstTimeRightRate: null, stages: [] },
+            window: { from: '2026-03-03T00:00:00+00:00', to: '2026-06-01T00:00:00+00:00', sampleCount: 0, firstTimeRightRate: null, stages: [] },
           },
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -187,8 +174,7 @@ describe('useQualityMetrics range threading', () => {
         JSON.stringify({
           success: true,
           data: {
-            window7d: { from: '2026-06-20T00:00:00+00:00', to: '2026-06-27T00:00:00+00:00', sampleCount: 0, firstTimeRightRate: null, stages: [] },
-            window30d: { from: '2026-05-28T00:00:00+00:00', to: '2026-06-27T00:00:00+00:00', sampleCount: 0, firstTimeRightRate: null, stages: [] },
+            window: { from: '2026-05-28T00:00:00+00:00', to: '2026-06-27T00:00:00+00:00', sampleCount: 0, firstTimeRightRate: null, stages: [] },
           },
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
