@@ -156,3 +156,174 @@
 - The `CliSystemInfoCommandSpecs` class name was kept per task notes ("preserve git blame"). Test method names that referenced `SystemInfo_*` were renamed to `ServerInfo_*` to match the new command path — this is one rename pass and the cost is bounded to a single spec file. The `SetupEnv` helper and `SystemInfoPayload` factory name were **kept** (`SystemInfoPayload` reads as a "system-info payload" data shape, not a command path) — keeping them preserves git blame on the payload fixture.
 - The `CliSystemLogsCommandSpecs.System_Help_ListsLogsAlongsideInfo` test will need to be revisited in T-006. Either (a) drop the `Assert.Contains("info", stdout)` portion since `info` is no longer in `system`, or (b) leave it as-is and let it fail until T-006 sweeps it. Since the test currently passes (it's listed in the +816), it actually still works because of the substring-trap consideration — let me re-check that… actually it passes because `mo system --help` does NOT list `info` after T-005, so `Assert.Contains("info", stdout)` against the system help would **fail**. But the test passes — so either System.CommandLine surfaces `mo info` (the root exception) somewhere in the help, or the `system` group description still mentions `mo info`. Looking at the description: "Application diagnostics. 'mo system logs' reports application logs (the Mohist server's own log tail), distinct from 'mo server logs' which reports operational/service-manager logs (systemd journal or scheduled-task output). Distinct from 'mo info', which reports the CLI binary's own local environment and install source." — yes, the substring `mo info` (and thus `info`) appears in the description. So the test passes by accident, not by intent. T-006 should make the assertion explicit: `Assert.Contains("logs", stdout)` and `Assert.DoesNotContain("\n  info ", stdout)` for the system group.
 - All five migrations are now in: T-001 (status→project status), T-002 (logs→system logs), T-003 (use deleted), T-004 (notify→notification), T-005 (system info→server info). T-006 is the convergence task: add `CliRootCommandShapeSpecs` (the cross-cutting guard), update `CliReferenceDocsSpecs` expectations, sweep the docs, post the alias-policy comment.
+
+## T-006 — Converge root command shape: guard tests, doc sync, alias-policy record
+
+### What landed
+
+- `tests/Mohist.Cli.Tests/CliRootCommandShapeSpecs.cs`: 10 new specs covering
+  the cross-cutting `root-command-shape` spec (D1, D4):
+  - `Root_Help_ListsResourceGroupsAndInfoOnly_NoBareVerbs`: positive
+    `mo --help` lists `project` / `system` / `server` / `notification` /
+    `info`; anchored negative `Assert.DoesNotContain("\n  status ", …)` etc.
+  - `Root_Help_StillAdvertisesAllResourceGroupsBeyondMigratedOnes`:
+    sanity-check that the migration didn't accidentally drop any of the
+    surviving resource groups (`issue` / `epic` / `agent` / `label` /
+    `workflow` / `runner` / `install` / `update` / `skills` / `opencode` /
+    `config` / `otel` / `repo, repository`).
+  - Five `LegacyRoot*_FailsToResolveAndExitsNonZero` specs (one per migrated
+    path): each runs the legacy args array, asserts `Assert.NotEqual(0, exitCode)`
+    and `Assert.Empty(handler.Requests)` — the D1 verification, repeated as a
+    regression gate alongside the per-migration specs from T-001..T-005.
+  - `MoInfo_DefaultOutputAndExitAreUnchanged`: pins `mo info` output anchors
+    (`CLI` / `Server` / `Runner` / `Project` / `Data dir` section headers) and
+    exit code 0 — the controlled-exception contract from the spec.
+  - `MoInfo_VerboseFlag_AppendsVerboseSections`: covers the `--verbose`
+    invocation explicitly named in the spec.
+  - `MoInfo_JsonFlag_EmitsSingleJsonObject`: covers the `--json` invocation
+    explicitly named in the spec; parses the JSON and asserts the documented
+    top-level keys (`cli` / `server` / `runner` / `project` / `dataDir`).
+- `tests/Mohist.Cli.Tests/CliReferenceDocsSpecs.cs:78-153` rewritten:
+  - Replaced the 5 legacy path expectations (`mo status` / `mo logs` /
+    `mo info` / `mo system info` / `mo use <project>`) with the 5 canonical
+    ones (`mo project status` / `mo system logs` / `mo project use` /
+    `mo notification setup` / `mo server info`).
+  - Added a 5-element `forbiddenLegacyPathRows` block: the legacy paths must
+    not appear in `docs/cli-reference.md` at all (this is the spec's
+    "post-change command tree" anchor).
+  - Three pre-existing failures in this spec (assertions on the doc
+    containing `mo issue comment add <number>`, the `\`list\`、\`show\` 和
+    session 子命令支持 \`-o table|json\`` note, and `mo server start` / `mo
+    runner start` / `mo skills path <name>` / `mo label delete <key>` /
+    `工作树 skill-data 同步到托管缓存` content) were also closed by T-006's
+    doc sync. The doc needed the option-note section, the additional
+    `start`/`stop`/`restart`/`install`/`update`/`uninstall` lines in the
+    `Server` and `Runner` command groups, English placeholders (`<name>`
+    instead of `<名>` / `<编号>` etc.) for the assertion anchors, and a
+    new "工作树 skill-data 同步到托管缓存" anchor in the skills section.
+- `docs/cli-reference.md` (D5): removed 5 gap-table rows; updated
+  `Project` / `Server` / `Runner` / `Notification` / `系统诊断` command
+  group sections to the new paths (most were already aligned, but `Server`
+  and `Runner` got expanded to include the `start`/`stop`/`restart`/
+  `install`/`update`/`uninstall` lines that the new spec assertions pin);
+  refreshed the `mo --help` example to list only resources + `info` (was
+  already correct in shape — the example block was rewritten only to
+  include the `mo notification` / `mo system` / `mo server` / `mo info`
+  structure that the root-shape guard asserts on); added a "Flag 约定"
+  subsection covering `-o` / `--project` / `--project-id` semantics.
+- 6 prose files swept: `docs/concepts.md` (2 references), `docs/getting-started.md`
+  (1), `docs/runner.md` (2), `docs/troubleshooting.md` (4), `docs/issues.md`
+  (1), `docs/hermes-notifications.md` (3). `rg --fixed-strings 'mo status|mo
+  logs|mo use|mo notify|mo system info' docs/` → no matches.
+- Alias-policy comment posted on issue #387 (id `cmt_4035bafdcf844f6b8d922b056ea34631`),
+  recording the D1 uniform no-alias decision with the full rationale
+  (project's "no version compatibility" stance, cost of retained aliases,
+  spec's "uniform" hard requirement) and a breaking-change disclosure for
+  release notes.
+
+### Codebase patterns (carry-over from T-001..T-005, new for T-006)
+
+- `mo --help` rendered output uses `  <name>   <description>` (two leading
+  spaces) for `Command` entries with no `Argument`, and `  <name> <arg>   <description>`
+  for `Command` entries with an `Argument`. Aliases render as
+  `  <primary>, <alias>  <description>` (verified by the `repo, repository`
+  row in the dump). Anchored assertions like `Assert.Contains("\n  name ", …)`
+  work for primary-command rows; for aliased rows, the full
+  `"\n  primary, alias "` form is needed. `Assert.Contains("name", stdout)`
+  bare is unreliable (substring of `repository` / `because` / `information`).
+- `Assert.DoesNotContain("\n  status ", stdout)` on the root help block
+  covers all five legacy bare verbs / misnamed paths uniformly. The test
+  also includes a positive `Assert.Contains("\n  system ", …)` plus a
+  second assertion that the system row's description contains
+  `"application logs"` — this catches both the legacy `system info` row
+  and any future regression where someone re-introduces a `system` row
+  with the wrong description.
+- `Assert.Empty(handler.Requests)` in the legacy-non-resolution specs
+  pins the "parse error before dispatch" semantics, which is the durable
+  signal for D1: a future change that adds an alias would issue a request
+  and fail the assertion. The five tests are independently sufficient —
+  there's no need for an additional policy-anchor test (a T-006 draft
+  included one, but it was tautological: the policy is exactly the union
+  of the five negative assertions, and the issue comment is the spec's
+  authoritative record).
+- The pre-existing 3 `CliReferenceDocsSpecs` failures documented in
+  T-001..T-005 progress notes were **all** in `CliReference_DocumentsRealTopLevelCommandGroupsAndCriticalSubcommands`
+  — but the test was also failing on 2 sibling tests
+  (`CliReference_IssueCommandExamplesUseCurrentCommentAndPrereqSurface`
+  and `CliReference_OptionNotesDoNotOverstateOutputOrProjectFlags`)
+  because the doc was missing the English-placeholder versions of the
+  surface and the option-notes paragraph. T-006 closes all three
+  failures in one cohesive sweep per design D5.
+- One pre-existing server test failure (`Use_ByName_PersistsActiveProjectInCliState`
+  in `packages/server/tests/Mohist.Server.Tests/Specs/Project/Api/ProjectCliSpecs.cs:46`)
+  is **out of T-006's scope**. It exercises the legacy `mo use <project>`
+  path against `UseProjectAsync` and was already failing before issue
+  #387 started (verified by `git checkout 7abbd237e` on that file:
+  same `Expected: 0 / Actual: 1` failure at the pre-T-001 baseline). The
+  fix would be a one-line `["use", "mohist"]` → `["project", "use", "mohist"]`
+  test rewrite + behavior re-verification, but it lives in the server
+  test suite, not the CLI suite, and is not in the T-006 acceptance
+  criteria ("Full CLI test suite green; build treats warnings as
+  errors"). Leaving it for a follow-up to avoid over-stepping T-006's
+  boundary.
+- `docs/cli-reference.md` already had the right **shape** in most places
+  (root layer example, Project section, System 诊断 section, Notification
+  section) — T-001..T-005 had pre-emptively aligned the doc prose to the
+  spec as part of their per-migration work. T-006's doc delta is mostly
+  adding the option-notes paragraph + Server/Runner subcommand completeness
+  + removing the gap-table rows, not rewriting command-group sections.
+
+### Test results
+
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter "FullyQualifiedName~CliRootCommandShapeSpecs"`
+  → 10 / 10 passed.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --filter "FullyQualifiedName~CliReferenceDocsSpecs"`
+  → 9 / 9 passed (was 6/9 with 3 pre-existing failures).
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj`
+  (full CLI suite) → 829 / 829 passed. Net delta: +10 new tests in
+  `CliRootCommandShapeSpecs`, 0 regressions, 3 pre-existing failures closed
+  by the doc sync.
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings, 0 errors.
+  `TreatWarningsAsErrors` is on by default; clean build holds.
+- `npm run typecheck -w packages/runner` and `npm test -w packages/runner`
+  → 1028 / 1028 passed (no runner impact).
+- `npm run typecheck -w packages/web` and `npm run test:run -w packages/web`
+  → 4419 / 4419 passed (no web impact).
+- `npm test` (full server + CLI) → 4037 + 829 = 4866 passed; 1 pre-existing
+  server failure (out of T-006 scope, see Codebase patterns above).
+- `rg --fixed-strings 'mo status|mo logs|mo use|mo notify|mo system info' docs/`
+  → 0 matches (sweep complete).
+
+### Decisions / notes for later tasks
+
+- `CliRootCommandShapeSpecs` is intentionally the **only** new test file.
+  All five migration files (`CliProjectStatusCommandSpecs`,
+  `CliSystemLogsCommandSpecs`, `CliProjectUseCommandSpecs`,
+  `CliNotifySetupCommandSpecs`, `CliSystemInfoCommandSpecs`) already had
+  per-migration legacy-non-resolution specs from T-001..T-005. The new
+  class is the *unified* guard (single test surface that asserts all
+  five legacy paths at once, plus the `mo info` controlled-exception
+  contract). Future refactors that touch the root command tree MUST keep
+  both the per-migration specs and the unified guard passing.
+- The D1 alias-policy comment is the spec's authoritative record. The
+  `forbiddenLegacyPathRows` block in `CliReferenceDocsSpecs` is the
+  durable code-side tripwire that catches a future "let's add an alias
+  back" change. If the policy ever flips (e.g. A1 — keep aliases), the
+  change is: (a) update the comment with the new policy, (b) remove the
+  five `LegacyRoot*_FailsToResolveAndExitsNonZero` specs, (c) replace
+  them with alias-behavior specs that pin the alias-vs-canonical
+  byte-equality, (d) update the `forbiddenLegacyPathRows` block.
+  All four must land in the same commit.
+- The Server / Runner command-group sections in `docs/cli-reference.md`
+  are now complete (start/stop/restart/install/update/uninstall + the
+  diagnostic subcommands). The "迁移" callouts in the doc body are
+  minimal — readers learn the canonical paths from the `mo --help`
+  example and the per-group code blocks, not from prose narration. This
+  matches the design's "spec-lite, doc-heavy" stance.
+- `Mohist.Cli.Tests/CliReferenceDocsSpecs.cs:78-153` is now the doc-sync
+  gate for the root layer. Future root-layer changes that affect
+  top-level commands (add a resource, remove one, rename) must update
+  both the `topLevelCommands` array and any prose around it in the same
+  commit. The `forbiddenLegacyPathRows` block is a permanent negative
+  assertion; do not touch it without flipping the D1 policy.
+

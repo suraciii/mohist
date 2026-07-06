@@ -64,14 +64,14 @@ mo update server
 You can also bootstrap a first config with the guided command:
 
 ```bash
-mo notify setup --platform telegram
+mo notification setup --platform telegram
 # For a platform without a default home channel (e.g. weixin):
-mo notify setup --platform weixin --deliver-chat-id "<your-weixin-chat-id>"
+mo notification setup --platform weixin --deliver-chat-id "<your-weixin-chat-id>"
 ```
 
 It probes the Hermes webhook port, generates a shared secret, writes the Mohist
 section above, and prints the matching `hermes webhook subscribe` command to run
-(with the chat id folded in when supplied). See `mo notify setup --help` for flags.
+(with the chat id folded in when supplied). See `mo notification setup --help` for flags.
 
 ## Hermes Setup
 

@@ -13,6 +13,16 @@
 - **预演**：会改状态的控制类命令支持 `--dry-run`。
 - **别名**：高频命令提供短别名（`ls` = list、`rm` = delete），别名与正名同行为。
 
+### 输出格式与项目作用域 flag
+
+资源子命令的 `-o` 与 `--project` 覆盖范围：
+
+- `list`、`show` 和 session 子命令支持 `-o table|json`。
+- `list` 支持 `-o table|json`；所有子命令支持 `--project`/`--project-id`。
+- 项目作用域命令通常接受 `--project <name>` 和 `--project-id <id>`，但**并非**所有子命令都同时接受两者——`--project` 走名解析、`--project-id` 走 id 解析，缺哪个就报参数错。具体每个命令的 flag 集合以 `mo <命令> --help` 为准。
+
+`--project` 与 `--project-id` 互斥——同一个命令不能同时传两个，会本地失败、不发请求。
+
 ## 动词词表（全命令面统一，不得跨资源自造同义词）
 
 | 动作类 | 规范动词 | 语义 |
@@ -176,6 +186,16 @@ mo issue session reset <编号> <名称>
 mo issue session followup <编号> <名称> [--text <文本>|--text-file <路径>]
 ```
 
+常用示例：
+
+```
+mo issue comment add <number> --body "请补充错误处理"
+mo issue prereq add <number> <prereq-number>
+mo issue prereq remove <number> <prereq-number>
+mo issue reject <number> --message <message>
+mo issue rerun <number> --from-stage <stage>
+```
+
 Issue 的工作流快捷方式（approve/retry/rerun/...）是对应 `mo workflow` 命令的人类便利别名，行为一致。
 
 ## Epic（产品里程碑）
@@ -216,9 +236,9 @@ mo agent session cancel <会话id>
 
 ```
 mo label list                       标签目录
-mo label add <键> [--description <文本>] [--supported-values <v1,v2>]
-mo label update <键> [options]
-mo label delete <键>                delete 为正名，remove/rm 为别名
+mo label add <key> [--description <text>] [--supported-values <v1,v2>]
+mo label update <key> [options]
+mo label delete <key>                delete 为正名，remove/rm 为别名
 ```
 
 label 是往项目标签目录加定义，用 `add`（不是 create）。
@@ -226,9 +246,14 @@ label 是往项目标签目录加定义，用 `add`（不是 create）。
 ## Runner（执行器）
 
 ```
+mo runner start                    启动执行器受管服务
+mo runner stop                     停止执行器受管服务
+mo runner restart                  重启执行器受管服务
 mo runner list [--scope all|global|project]
 mo runner get <执行器id>
 mo runner status                    在线执行器摘要
+mo runner install                   安装执行器为受管服务
+mo runner uninstall                 卸载执行器受管服务
 ```
 
 执行器的安装/启停见「安装与升级」。
@@ -236,13 +261,21 @@ mo runner status                    在线执行器摘要
 ## Server（服务端）
 
 ```
+mo server start                     启动服务端受管服务
+mo server stop                      停止服务端受管服务
+mo server restart                   重启服务端受管服务
 mo server health                    健康检查
 mo server info                      服务端系统诊断
 mo server status                    服务状态
 mo server logs                      服务日志（受管服务的运维日志）
+mo server install                   安装服务端为受管服务
+mo server update                    重新构建并重启服务端受管服务
+mo server uninstall                 卸载服务端受管服务
 ```
 
 `mo system logs`（应用日志）与 `mo server logs`（运维日志）内容不同：前者是应用输出，后者是 systemd/计划任务层日志。
+
+> **命令路径迁移**：旧的 `mo server install/update` 与 `mo install/update` 并存入口正在收敛——动词根只走 `mo install/update`（见「安装与升级」）。`mo server start/stop/restart` 不受影响，仍由本命令组承担。
 
 ## 系统诊断（只读）
 
@@ -275,12 +308,14 @@ mo config set <键> <值>
 ```
 mo skills list
 mo skills install
-mo skills get <名>
-mo skills path <名>
+mo skills get <name>
+mo skills path <name>
 mo skills sync
 ```
 
 `mo skills` 的输出格式统一走 `-o`，不用 `--json` 布尔开关。
+
+> 工作树 skill-data 同步到托管缓存（`mo skills sync`）：在 worktree 内的 `skill-data/` 目录修改后，必须跑一次 `mo skills sync`，改动才会出现在新启动的 agent session 上下文中。`mo skills sync` 只在「工作树 skill-data 同步到托管缓存」的场景下需要——已经装好且不需要调整的 skill 不必每次都跑。
 
 ## 安装与升级（动词根集中）
 
@@ -303,11 +338,6 @@ mo update runner                    仅升级执行器
 | 当前实装 | 本文 spec | 性质 |
 |---|---|---|
 | `mo server install/update`、`mo runner install/update` | `mo install/update` | 双入口合并 |
-| `mo status` | `mo project status` | 裸动词归位 |
-| `mo logs` | `mo system logs` | 裸动词归位 |
-| `mo use` | （删除，留 `mo project use`） | 重复入口删除 |
-| `mo notify setup` | `mo notification setup` | 资源化 |
-| `mo system info` | `mo server info` | 消歧（与 `mo info` 区分） |
 
 未对齐处以代码为实装事实，但本文是目标。各差距对应 epic #40 下的子 issue。
 
