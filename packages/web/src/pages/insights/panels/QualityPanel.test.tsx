@@ -132,7 +132,7 @@ describe('QualityPanel', () => {
       }),
     })
 
-    renderPanel()
+    const { container } = renderPanel()
 
     const section = screen.getByTestId('productivity-quality')
     expect(section).toHaveAttribute('data-state', 'empty')
@@ -142,6 +142,26 @@ describe('QualityPanel', () => {
     expect(empty.textContent ?? '').toMatch(/no quality data yet/i)
 
     expect(screen.queryByTestId('productivity-quality-ftr')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-quality-window')).not.toBeInTheDocument()
+    expect(container.querySelectorAll('[data-testid^="productivity-quality-stage-"]')).toHaveLength(0)
+  })
+
+  it('does not fabricate a precise FTR percentage when window.sampleCount is zero', () => {
+    useQualityMetricsMock.mockReturnValue({
+      data: makeQualityResponse({
+        window: makeWindow(0, 0.42, [
+          makeStage('plan', 0, 0.18),
+          makeStage('build', 0, 0.05),
+        ]),
+      }),
+    })
+
+    const { container } = renderPanel()
+
+    expect(screen.getByTestId('productivity-quality-empty')).toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-quality-ftr')).not.toBeInTheDocument()
+    expect(container.textContent).not.toContain('42%')
+    expect(container.textContent).not.toMatch(/1[78]%|2[0-9]%/)
   })
 
   it('renders the panel empty state when the hook returns no data', () => {

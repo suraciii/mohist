@@ -109,3 +109,125 @@
 - The DTO rename `Window30dFrom`/`Window30dTo` → `WindowFrom`/`WindowTo` on `QualityTrend` (server-side record) cascades through `BuildTrend` (route), the local `QualityTrendDto` in the spec, and the querier spec assertions. All four sites updated together.
 - The DTO is intentionally named `Window` (not `primaryWindow`): the previous-window comparison already disambiguates its role with the `previous*` prefix; the primary window is the natural singular, no extra qualifier needed. Per design D3 A1.
 - Two trailing-newline fixes were needed (QualityPanel.tsx and QualityPanel.test.tsx) — both files had been written without a final newline, which the lint pre-commit hook flagged.
+
+## T-004 — Cross-chart window indicator & empty-state floor
+
+### Audit result
+
+Reviewed all seven retained charts against the `insights-chart-presentation` spec
+(R1: data matches range, R2: window indicator exists, R3: empty state on zero
+samples). The floor was already met by the existing chart code per design D4; the
+sole architectural gap (QualityPanel dual-window + hardcoded "Last 7 days" label)
+was closed by T-003. This task's deliverable is the minimal test assertions that
+lock the cross-cutting contract across the seven panels.
+
+### Per-chart coverage status (before T-004)
+
+- **CycleTimeChart**: `cycle-time-chart-window` badge (range code) — only 30d
+  asserted. Empty state: covered.
+- **StageDurationChart**: `stage-duration-chart-window` (date range from
+  `data.window.from/to`). Window change across ranges: not tested. Empty state:
+  covered.
+- **ThroughputChart**: `throughput-chart-window` badge (range code) — only 30d
+  asserted (range-change test exists only in `InsightsPage.test.tsx`). Empty
+  state: covered.
+- **CumulativeFlowChart**: `cumulative-flow-chart-window` (date range from
+  `data.rangeFrom/rangeTo`). Range scaling: not tested across all ranges. Empty
+  state: covered.
+- **FtrTrendChart**: `ftr-trend-chart-window` (date range from
+  `trend.from/trend.to`). Range scaling: not tested across all ranges. Empty
+  state: covered.
+- **CostTrendChart**: `cost-trend-chart-window` (date range from
+  `data.rangeFrom/rangeTo`). Range scaling: not tested across all ranges. Empty
+  state: covered.
+- **QualityPanel**: window title (h4 with `formatWindowTitle(window)`). Cross-
+  range: covered by existing test
+  ("uses the range-driven window span for the title across 7d / 30d / 90d").
+  Empty state: covered (sampleCount===0, undefined hook data), but the R3 sub-
+  rule "MUST NOT render a precise value without sample-size context" was not
+  explicitly asserted.
+- Hook-level range forwarding: covered by `InsightsCharts.test.tsx`
+  ("forwards the range to every chart panel hook (except useEpics)" and
+  "re-applies the new range when the prop changes from 30d to 90d").
+
+### Gap-fill scope
+
+Four minimal assertion surfaces added — no chart code was touched, no DTO was
+touched, no architectural change.
+
+1. **`CycleTimeChart.test.tsx`** — two new tests added next to the existing
+   window-annotation block:
+   - `it.each<RangeCode>('renders the window badge with the %s range code under
+     the lead lens')` over `7d` and `90d` (parallel to existing 30d test). Plus
+   - `it('updates the window badge when the page range changes')` — render-
+     rerender pattern asserting 7d → 30d → 90d transition.
+
+2. **`ThroughputChart.test.tsx`** — same shape: `it.each` over 7d/90d for the
+   badge text and a rerender-based range-change test.
+
+3. **`InsightsCharts.test.tsx`** — one new test in the existing
+   "range forwarding to panel hooks" describe block:
+   `it('reflects the selected range on every retained chart window
+   indicator')`. It mocks each panel's hook with `range`-scaled window data
+   (7d → "Jun 23 – Jun 30", 90d → "Apr 2 – Jul 1") and asserts all six badges
+   (throughput, cycle-time, stage-duration, cumulative-flow, ftr-trend,
+   cost-trend) update across the range switch. The QualityPanel window title
+   is intentionally not in scope of *this* test (it has its own cross-range
+   coverage) — the spec accepts "date-range label, range code, or caption",
+   and the panel title is a valid date-range label. The two range-code badges
+   assert the code itself; the four data-driven badges assert their rendered
+   `from – to` text.
+
+4. **`QualityPanel.test.tsx`** — existing
+   "renders the panel empty state when window.sampleCount is zero" extended to
+   also assert the window title block (`productivity-quality-window`) is
+   absent and no stage rows are emitted when the panel renders its empty
+   branch (R3 sub-rule: no precise value without sample-size context). New
+   test: `it('does not fabricate a precise FTR percentage when
+   window.sampleCount is zero')` — server returns `firstTimeRightRate: 0.42`
+   with two non-zero stage rates on a `sampleCount: 0` window; the test
+   asserts the container's text contains no `42%` and no 1x%/2x% percentages,
+   locking R3's "MUST NOT render a precise value" boundary.
+
+### Verification
+
+- `npm run typecheck -w packages/web` passes.
+- `npm run test:run -w packages/web`: 293 test files, 4362 tests, 1 skipped
+  (was 4354 in T-003; +8 from this task — 3 in CycleTimeChart, 3 in
+  ThroughputChart, 1 in InsightsCharts, 1 in QualityPanel).
+- `dotnet test packages/server/tests/Mohist.Server.Tests` still passes: 4038
+  passed, 12 skipped (no server change in this task). `IssueMetricsApiSpecs`
+  66/66 still green.
+
+### Gotchas
+
+- The `InsightsCharts` cross-chart test is constructed in two phases because
+  `vi.mock` mocks do not survive a `rerender` cleanly when the mock returns
+  are re-set after the initial render: `setupRange('7d')` then render; then
+  `setupRange('90d')` followed by `rerender` updates all five hook mocks at
+  once. This is the only way to assert "the chart panel re-renders reflect
+  the new range" without spinning up another `react-query` QueryClient +
+  waitFor loop.
+- `FtrTrendChart` only emits its window badge when `trend && bucketCount > 0`,
+  so the new mock has to include at least one trend point for the badge to
+  render. The quality trend fixture provides a single point with
+  `sampleCount: 3` so `bucketCount > 0` holds, and the badge text comes from
+  `trend.from`/`trend.to` (the same fields QualityPanel's window and the
+  badge share via the panel's design).
+- `QualityPanel`'s "no precise value on sampleCount===0" assertion scopes its
+  `not.toMatch(/1[78]%|2[0-9]%/)` to the two stage fixture rates (18% and
+  25%); it deliberately does not over-constrain the empty-state copy text so
+  future copy edits don't have to touch the test.
+- The spec AC mentions "Stage Duration and Throughput keep their existing empty
+  state behavior unchanged." Both tests for those panels already assert:
+  - Throughput empty: "renders empty state when buckets are empty" +
+    "renders empty state for the server zero-sample shape" + new 7d/90d
+    badge test (no new empty state copy assertions added; the existing tests
+    cover the floor).
+  - StageDuration empty: "renders empty state when no stages are reached" +
+    "renders empty state when all stages have null values for the active
+    lens" + "hides the window badge in the empty state".
+
+  Both panels remain behaviorally identical to pre-T-004 except for the added
+  range-code coverage — no chart code was touched.
+
