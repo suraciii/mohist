@@ -380,7 +380,59 @@ describe('CycleTimeChart', () => {
 
     render(<CycleTimeChart range="30d" />)
 
-    expect(screen.getByText('Cycle Time')).toBeInTheDocument()
+    expect(screen.getByText('Lead Time')).toBeInTheDocument()
+  })
+
+  it('renders the default lead-lens title aligned with the default lens caliber', () => {
+    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+
+    render(<CycleTimeChart range="30d" />)
+
+    const heading = screen.getByRole('heading', { level: 3, name: 'Lead Time' })
+    expect(heading).toBeInTheDocument()
+
+    expect(screen.getByTestId('cycle-time-lens-lead')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('cycle-time-lens-cycle')).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('updates the card title to match the active lens when switching to cycle', () => {
+    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+
+    render(<CycleTimeChart range="30d" />)
+
+    expect(screen.getByRole('heading', { level: 3, name: 'Lead Time' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
+
+    expect(screen.getByRole('heading', { level: 3, name: 'Cycle Time' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 3, name: 'Lead Time' })).not.toBeInTheDocument()
+  })
+
+  it('restores the lead-lens title when toggling back to lead', () => {
+    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+
+    render(<CycleTimeChart range="30d" />)
+
+    fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
+    expect(screen.getByRole('heading', { level: 3, name: 'Cycle Time' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('cycle-time-lens-lead'))
+    expect(screen.getByRole('heading', { level: 3, name: 'Lead Time' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 3, name: 'Cycle Time' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the section aria-label stable across lens switches (h3 tracks the lens instead)', () => {
+    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+
+    render(<CycleTimeChart range="30d" />)
+
+    expect(screen.getByTestId('cycle-time-chart')).toHaveAttribute('aria-label', 'Cycle Time')
+
+    fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
+    expect(screen.getByTestId('cycle-time-chart')).toHaveAttribute('aria-label', 'Cycle Time')
+
+    fireEvent.click(screen.getByTestId('cycle-time-lens-lead'))
+    expect(screen.getByTestId('cycle-time-chart')).toHaveAttribute('aria-label', 'Cycle Time')
   })
 
   // --- Post-completion edit safety ---

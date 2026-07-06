@@ -31,3 +31,25 @@
 - `App.test.tsx` keeps the `metricsMocks` vi.mock infrastructure because the chart panels inside `InsightsCharts` (rendered by `InsightsPage`) call those hooks. The mocks' *purpose* has changed from "feed signal summary" to "feed chart panels" — the AC allows that.
 - The InsightsPage test still uses the same vi.mock + mockReturnValue setup, but the assertions about `useCompletionThroughput(range)`-style page-level call arguments are gone. Kept `mockReturnValue({ data: undefined, ... })` defaults so chart panels fall into their empty branches deterministically.
 - The subtitle "最近做得怎么样。" preserves the conversational tone of the page (the user voice complains about cycle-time stats being unreliable, not the welcoming tone).
+
+## T-002 — Delivery card title tracks the active lens
+
+### Scope confirmation
+
+- `pages/insights/panels/CycleTimeChart.tsx`: the card `<h3>` now renders `{lens === 'lead' ? 'Lead Time' : 'Cycle Time'}` so the title always names the plotted caliber. Default lens remains `'lead'` (`useState<DurationLens>('lead')` unchanged), so first paint shows "Lead Time" out of the box. SVG axis label (`{lens === 'lead' ? 'Lead time' : 'Cycle time'} (days)`) and the section's `aria-label="Cycle Time"` are intentionally untouched — only the visible heading moves with the lens.
+- `pages/insights/panels/CycleTimeChart.test.tsx`: existing `'Cycle Time'` heading assertion retargeted to `'Lead Time'` (now correct for the default lead lens). Added three new assertions:
+  - `'renders the default lead-lens title aligned with the default lens caliber'` — locks the lead default + heading text together (covers spec scenario "Default lens and title agree").
+  - `'updates the card title to match the active lens when switching to cycle'` — toggle to cycle, heading flips to "Cycle Time" and "Lead Time" is gone (covers "Switching the lens reflects the new caliber in the title area").
+  - `'restores the lead-lens title when toggling back to lead'` — toggle cycle→lead, heading reverts (covers "Switching back restores the original caliber in the title area").
+  - Also added `'keeps the section aria-label stable across lens switches'` to lock the boundary — only the h3 tracks the lens, the section label is the chart's identity, not its current lens.
+
+### Verification
+
+- `npm run typecheck -w packages/web` passes.
+- `npm run test:run -w packages/web` passes: 293 test files, 4353 tests, 1 skipped (was 4349 in T-001; +4 from this task).
+- All four acceptance criteria met. No call-site or DTO changes were needed — the lens-coupled heading is a local render decision inside `CycleTimeChart`.
+
+### Gotchas
+
+- The chart's `aria-label="Cycle Time"` is kept stable on purpose. The section is the chart's identity in the page (one chart, one testid), not the current lens' label; the heading now serves as the dynamic caliber announcement. A screen reader walking the heading list hears the current caliber.
+- `screen.getByText('Lead Time')` would also match the `LensToggle` button text "Lead time" (case-insensitive substring match). The new tests use `getByRole('heading', { level: 3, name: 'Lead Time' })` to disambiguate heading from button, and assert `not.toBeInTheDocument()` on the previous caliber's heading to ensure exactly one caliber is shown.

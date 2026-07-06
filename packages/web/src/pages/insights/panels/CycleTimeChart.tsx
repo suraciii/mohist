@@ -99,7 +99,7 @@ export function CycleTimeChart({ range }: { range: InsightsRange }) {
     <section data-testid="cycle-time-chart" aria-label="Cycle Time">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Cycle Time
+          {lens === 'lead' ? 'Lead Time' : 'Cycle Time'}
         </h3>
         <div className="flex items-center gap-2">
           <span
