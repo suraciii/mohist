@@ -252,30 +252,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task Activation_ReconcilesReadyRunWithInFlightWorkToRunning()
-    {
-        var workflowId = $"wf-ready-inflight-{Guid.NewGuid():N}";
-        _workflowId = workflowId;
-        var run = WorkflowRun.Create(workflowId, SingleStage(checks: []));
-        run.Start();
-        run.InitializeStage([new("task-1", "Task 1", "spec/task")], []);
-        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
-        run.StartTask("work-1", "runner-1");
-        run.Status = WorkflowRunStatus.Ready;
-
-        var store = _fixture.Cluster.GetSiloServiceProvider(null)
-            .GetRequiredService<IWorkflowRunStore>();
-        await store.SaveAsync(run);
-
-        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-
-        Assert.Equal("Running", await workflow.GetRunStatusAsync());
-        Assert.Equal(WorkflowRunStatus.Running, (await LoadRunAsync(workflowId)).Status);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
     public async Task StoppedAssignedWorkflow_RequestWorkRejectsAsNotRunnable()
     {
         var runnerId = await RegisterRunnerAsync("stopped-assigned-runner");
@@ -294,5 +270,67 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync());
         var runtime = await runner.GetRuntimeStateAsync();
         Assert.DoesNotContain(_workflowId, runtime.ActiveWorks.Select(w => w.OwnerId));
+    }
+
+    // Offer/claim two-phase dispatch (issue #387 follow-up): PollWorkAsync is
+    // the offer — it returns work WITHOUT transitioning the task to Running.
+    // Only ClaimAsync (called by the runner after it durably registers the
+    // work) flips the task to Running. This makes "Running ⟺ durably
+    // claimed" a flow invariant with no reconcile.
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task PollWork_OffersWorkWithoutStarting_ClaimTransitionsToRunning()
+    {
+        var runnerId = await RegisterRunnerAsync("offer-claim-runner");
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        await AssignWorkflowToRunnerAsync(_workflowId!, runnerId);
+
+        // Offer: returns the pending task, but the task stays Pending.
+        var offered = await workflow.PollWorkAsync(runnerId);
+        Assert.NotNull(offered);
+        Assert.Equal(WorkItemTypes.Task, offered!.WorkType);
+
+        var runAfterOffer = await LoadRunAsync(_workflowId!);
+        var task = runAfterOffer.Stages.Single().Tasks.Single();
+        Assert.Equal(TaskRunStatus.Pending, task.Status);
+        Assert.Null(task.RunnerId);
+
+        // Claim: transitions the task to Running, sets runner id + work id.
+        var claimedWorkId = await workflow.ClaimAsync(runnerId, offered.Id!);
+        Assert.NotNull(claimedWorkId);
+
+        var runAfterClaim = await LoadRunAsync(_workflowId!);
+        var claimedTask = runAfterClaim.Stages.Single().Tasks.Single();
+        Assert.Equal(TaskRunStatus.Running, claimedTask.Status);
+        Assert.Equal(runnerId, claimedTask.RunnerId);
+        Assert.Equal(claimedWorkId, claimedTask.WorkId);
+    }
+
+    // Re-entry: a runner that already claimed a task and then lost its
+    // in-memory dispatch (process restart) must be able to re-poll and get
+    // the in-flight task back. NextWork() returns only Pending work, so this
+    // path is served by the active-work re-entry check, not the offer path.
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task PollWork_ReentryReturnsInFlightTaskToOwningRunner()
+    {
+        var runnerId = await RegisterRunnerAsync("reentry-runner");
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        await AssignWorkflowToRunnerAsync(_workflowId!, runnerId);
+
+        // Claim a task the normal way (offer + claim).
+        var offered = await workflow.PollWorkAsync(runnerId);
+        Assert.NotNull(offered);
+        var claimedWorkId = await workflow.ClaimAsync(runnerId, offered!.Id!);
+        Assert.NotNull(claimedWorkId);
+
+        // Re-poll: the task is Running, so NextWork would not surface it.
+        // The re-entry path must hand it back so the runner can rebuild its
+        // dispatch after a restart.
+        var reentered = await workflow.PollWorkAsync(runnerId);
+        Assert.NotNull(reentered);
+        Assert.Equal(claimedWorkId, reentered!.Id);
     }
 }

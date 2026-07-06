@@ -314,19 +314,19 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Generates a fresh checks work id, writes it to the current stage's
+    /// Writes the deterministic checks work id
+    /// (<see cref="ChecksWorkIdFor"/>) to the current stage's
     /// <c>ChecksWorkId</c>, marks each matching check Running with
-    /// <c>StartedAt</c> = now, and flips the run status to Running. The
-    /// checks work id format (<c>checks-{stage}:{guid}</c>) is preserved
-    /// verbatim — it appears in the event stream and is part of the
-    /// control-plane contract.
+    /// <c>StartedAt</c> = now, and flips the run status to Running. Called
+    /// by the claim path (<see cref="ClaimWorkItemAsync"/>) once a runner
+    /// has durably registered the work.
     /// </summary>
     /// <param name="run">The grain's current run, mutated in place.</param>
     /// <param name="stage">The current stage id.</param>
     /// <param name="items">The pending check items to dispatch.</param>
     public string MarkChecksRunning(WorkflowRun run, string stage, IReadOnlyList<CheckItem> items)
     {
-        var checksWorkId = $"checks-{stage}:{Guid.NewGuid():N}";
+        var checksWorkId = ChecksWorkIdFor(stage);
         var currentStage = run.CurrentStage();
         currentStage.ChecksWorkId = checksWorkId;
         var now = DateTimeOffset.UtcNow;
@@ -344,33 +344,28 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Projects a <see cref="WorkflowWork"/> produced by
-    /// <see cref="WorkflowRunExtensions.NextWork"/> into a
-    /// <see cref="WorkItem"/> for the runner. For a task work item, this
-    /// delegates to <see cref="MarkTaskRunningAsync"/>; for a checks work
-    /// item, this delegates to <see cref="MarkChecksRunning"/>. Returns
-    /// <c>null</c> for an unknown work type.
+    /// Builds a <see cref="WorkItem"/> for an offered work WITHOUT mutating
+    /// the run state. This is the offer-phase projection: it produces the
+    /// work item the runner takes away so it can durably claim it, but
+    /// leaves the task/check Pending and the run untouched. The state
+    /// transition to Running happens only when the runner calls back via
+    /// <c>ClaimAsync</c> (<see cref="ClaimWorkItemAsync"/>).
+    ///
+    /// The work id is deterministic so the same offer yields the same id
+    /// across calls: a task's id is its <see cref="TaskRun.Id"/>; a checks
+    /// batch's id is <c>checks-{stage}</c> (a stage has at most one
+    /// outstanding checks batch at a time — see <c>NextWork</c>).
     /// </summary>
-    /// <param name="run">The grain's current run, mutated in place for both variants.</param>
-    /// <param name="work">The next work item from the run's queue.</param>
-    /// <param name="runnerId">The runner claiming the work.</param>
-    /// <param name="commitAsync">The grain's <c>CommitAsync</c> callback used for task dispatch.</param>
-    public async Task<WorkItem?> ToWorkItemAsync(
-        WorkflowRun run,
-        WorkflowWork work,
-        string runnerId,
-        Func<IReadOnlyList<WorkflowEvent>, Task> commitAsync)
+    public WorkItem? BuildWorkItem(WorkflowRun run, WorkflowWork work)
     {
         switch (work.WorkType)
         {
             case "task":
             {
                 var t = (WorkflowWork.TaskData)work.Data;
-                var workId = await MarkTaskRunningAsync(run, t.Id, runnerId, commitAsync);
-                if (workId is null) return null;
                 return WorkItem.Task(
                     stage: work.Stage,
-                    id: workId,
+                    id: t.Id,
                     title: t.Title,
                     uses: t.Uses,
                     with: t.With,
@@ -381,8 +376,7 @@ public sealed class WorkflowOutcomeProcessor
             case "checks":
             {
                 var ch = (WorkflowWork.ChecksData)work.Data;
-                var checksWorkId = MarkChecksRunning(run, work.Stage, ch.Items);
-                return WorkItem.Checks(work.Stage, checksWorkId, ch.Items);
+                return WorkItem.Checks(work.Stage, ChecksWorkIdFor(work.Stage), ch.Items);
             }
             default:
                 return null;
@@ -390,47 +384,78 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Snapshot projection of the active work item when the same runner
-    /// re-polls while a task or checks batch is already in flight on its
-    /// behalf. Returns <c>null</c> when the active work belongs to a
-    /// different runner or when the stage has no in-flight work.
+    /// Claims an offered work item on behalf of a runner that has durably
+    /// registered it. This is the claim-phase counterpart of
+    /// <see cref="BuildWorkItem"/>: it performs the state transition to
+    /// Running (task via <see cref="WorkflowRunExtensions.StartTask"/>,
+    /// checks batch via <see cref="MarkChecksRunning"/>), persists it, and
+    /// returns the resolved work id the runner should use for reporting.
     ///
-    /// Mirrors the pre-extraction logic byte-for-byte: for a running task
-    /// the work id is <c>WorkId ?? Id</c>; for a checks batch the work
-    /// id is the stage's <c>ChecksWorkId</c> and the item list contains
-    /// every still-Pending check.
+    /// Idempotent: a claim for an already-Running work item succeeds and
+    /// returns the in-flight work id. Returns <c>null</c> when the work id
+    /// no longer maps to offerable work in the current stage (the offer was
+    /// overtaken — e.g. another runner claimed it, or the stage advanced).
     /// </summary>
-    /// <param name="run">The grain's current run; not mutated.</param>
-    /// <param name="runnerId">The runner re-polling the work item.</param>
-    public WorkItem? TryBuildActiveWorkItem(WorkflowRun run, string runnerId)
+    public async Task<string?> ClaimWorkItemAsync(
+        WorkflowRun run,
+        string workId,
+        string runnerId,
+        Func<IReadOnlyList<WorkflowEvent>, Task> commitAsync)
     {
         var currentStage = run.CurrentStage();
-        var runningTask = currentStage.RunningTask;
-        if (runningTask is not null)
-        {
-            if (!string.Equals(runningTask.RunnerId, runnerId, StringComparison.Ordinal))
-                return null;
 
-            return WorkItem.Task(
-                stage: currentStage.Id,
-                id: runningTask.WorkId ?? runningTask.Id,
-                title: runningTask.Title,
-                uses: runningTask.Uses,
-                with: runningTask.WithInput,
-                artifacts: runningTask.Artifacts,
-                setVars: runningTask.SetVars);
+        // Task claim: the offered work id equals the pending task's id.
+        var task = currentStage.Tasks.FirstOrDefault(t => t.Id == workId);
+        if (task is not null)
+        {
+            if (task.Status == TaskRunStatus.Running)
+            {
+                _owner.SetLastKnownRunnerId(runnerId);
+                return task.WorkId ?? task.Id;
+            }
+            if (task.Status != TaskRunStatus.Pending) return null;
+
+            var claimedWorkId = await MarkTaskRunningAsync(run, task.Id, runnerId, commitAsync);
+            return claimedWorkId;
         }
 
-        var checksWorkId = currentStage.ChecksWorkId;
-        if (checksWorkId is null)
-            return null;
+        // Checks claim: the offered work id is the deterministic checks id.
+        if (workId == ChecksWorkIdFor(currentStage.Id))
+        {
+            // If a batch is already running for this stage, claim is a no-op.
+            if (!string.IsNullOrWhiteSpace(currentStage.ChecksWorkId))
+            {
+                _owner.SetLastKnownRunnerId(runnerId);
+                return currentStage.ChecksWorkId;
+            }
 
-        var pendingChecks = currentStage.Checks
-            .Where(c => c.Status == StageCheckStatus.Pending)
-            .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
-            .ToList();
-        return WorkItem.Checks(currentStage.Id, checksWorkId, pendingChecks);
+            var items = currentStage.Checks
+                .Where(c => c.Status == StageCheckStatus.Pending)
+                .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
+                .ToList();
+            if (items.Count == 0) return null;
+
+            var checksWorkId = MarkChecksRunning(run, currentStage.Id, items);
+            // MarkChecksRunning only mutates in-memory state; persist the
+            // claimed checks batch (task claim persists itself via
+            // MarkTaskRunningAsync). Empty events: checks claim emits no
+            // workflow events, but the run state must be saved so the
+            // Running status and ChecksWorkId survive grain deactivation.
+            await commitAsync([]);
+            return checksWorkId;
+        }
+
+        return null;
     }
+
+    /// <summary>
+    /// Deterministic work id for a checks batch on the given stage. A stage
+    /// has at most one outstanding checks batch at a time (tasks always
+    /// precede checks in <c>NextWork</c>), so the stage id alone identifies
+    /// the batch. This keeps the id stable across re-offers without mutable
+    /// staging state on the grain (which is [Reentrant]).
+    /// </summary>
+    public static string ChecksWorkIdFor(string stage) => $"checks-{stage}";
 
     private static JsonElement? ParseOutputToJsonElement(string? output)
     {

@@ -37,10 +37,24 @@ public static partial class WorkflowRunExtensions
     {
         public bool IsTerminal() => run.Status.IsTerminal();
 
-        public bool HasInFlightWork() => run.Stages.Any(stage =>
-            stage.Tasks.Any(t => t.Status == TaskRunStatus.Running)
-            || !string.IsNullOrWhiteSpace(stage.ChecksWorkId)
-            || stage.Checks.Any(c => c.Status == StageCheckStatus.Running));
+        /// <summary>
+        /// True when the <see cref="CurrentStage"/> has work currently being
+        /// executed by a runner (a Running task, an open checks batch, or a
+        /// Running check). The workflow invariant is that at most one stage
+        /// executes at a time, so only the current stage can carry in-flight
+        /// work; scanning completed stages would make this predicate depend
+        /// on residual dispatch metadata (e.g. a stale <c>ChecksWorkId</c>)
+        /// that is irrelevant to whether work is in flight <em>now</em>.
+        /// </summary>
+        public bool HasInFlightWork()
+        {
+            if (run.CurrentStageId is null) return false;
+            var current = run.Stages.FirstOrDefault(s => string.Equals(s.Id, run.CurrentStageId, StringComparison.Ordinal));
+            if (current is null) return false;
+            return current.Tasks.Any(t => t.Status == TaskRunStatus.Running)
+                || !string.IsNullOrWhiteSpace(current.ChecksWorkId)
+                || current.Checks.Any(c => c.Status == StageCheckStatus.Running);
+        }
 
         public bool HasDispatchableWork()
         {
@@ -50,14 +64,6 @@ public static partial class WorkflowRunExtensions
 
             return current.Tasks.Any(t => t.Status == TaskRunStatus.Pending)
                 || current.Checks.Any(c => c.Status == StageCheckStatus.Pending);
-        }
-
-        public bool ReconcileReadyStatusWithInFlightWork()
-        {
-            if (run.Status != WorkflowRunStatus.Ready || !run.HasInFlightWork()) return false;
-
-            run.Status = WorkflowRunStatus.Running;
-            return true;
         }
 
         /// <summary>
