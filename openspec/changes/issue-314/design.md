@@ -139,11 +139,11 @@ Concrete deletions:
 - `SessionTimeline.tsx:504-505` — remove the two props from the destructured parameter list.
 - `SessionTimeline.tsx:528` — remove the `taskEntries` derivation.
 - `SessionTimeline.tsx:579-581` — remove the `currentStage === 'build' && taskEntries.length > 0` render branch and the `TaskProgressPanel` usage.
-- Keep `TaskProgressPanel` and `TaskStatusIcon` in the file — they are exported components that may still be referenced elsewhere; removing them is a separate decision (see Open Questions). The render branch is dead because its gate (`taskEntries.length > 0`) was always false.
+- Keep `TaskProgressPanel` (exported; no in-tree consumer besides the dead render branch) and `TaskStatusIcon` (local, not exported today) in the file — removing them is a separate decision (see Open Questions). The render branch is dead because its gate (`taskEntries.length > 0`) was always false.
 
 **Rationale:** the panel never rendered with a non-empty task list (the Map is never written), so the rendered DOM is observably identical before/after. `SessionTimeline.test.tsx` already passes `taskProgress={new Map()}` / `loopProgress={null}` in every fixture; those props are dropped in the same change.
 
-**Alternative considered:** also delete `TaskProgressPanel` and `TaskStatusIcon` from the file. Deferred — they are `export function`s and may have external references; a quick `rg` confirms no current import, but deleting exports is a contract change beyond this issue's dead-state scope.
+**Alternative considered:** also delete `TaskProgressPanel` and `TaskStatusIcon` from the file. Deferred — `TaskProgressPanel` is an `export function` whose removal is a contract change beyond this issue's dead-state scope (a quick `rg` confirms no current external import of the coder-session `TaskProgressPanel`; the similarly-named `widgets/issue-workflow/ui/TaskProgressPanel` is a separate component); `TaskStatusIcon` is a local (non-exported) function and could be removed, but is kept here to minimize churn.
 
 ### D7. External type/helper import paths preserved via re-export from `useSessionTimeline.ts`
 
@@ -189,7 +189,7 @@ Pure internal refactor — no data, protocol, API, or config change; no feature 
 
 ## Open Questions
 
-- **`TaskProgressPanel` / `TaskStatusIcon` after branch removal:** they remain as `export function`s in `SessionTimeline.tsx` with no remaining in-tree consumer. Delete in this issue, or defer to a follow-up cleanup issue? Current recommendation: defer (out of dead-state scope; removing exports is a contract change).
+- **`TaskProgressPanel` / `TaskStatusIcon` after branch removal:** `TaskProgressPanel` remains as an `export function` in `SessionTimeline.tsx` with no remaining in-tree consumer; `TaskStatusIcon` is a local (non-exported) function used only by `TaskProgressPanel`. Delete in this issue, or defer to a follow-up cleanup issue? Current recommendation: defer (out of dead-state scope; removing the `TaskProgressPanel` export is a contract change).
 - **Normalize `PlanProgressPanel` import path through the widget barrel:** currently bypasses the barrel with a direct `../../coder-session/model/useSessionTimeline` path. Out of scope here (Non-Goal: no public-API change); flag for a separate FSD-hygiene issue if desired.
 - **Combined `SessionTimelineState` reducer wrapper (D3 alternative):** folding the four `useState` slices into one `useReducer` would let the hook call a single `dispatch` per event. Semantically equivalent but a larger internal refactor than this issue scopes; defer to a follow-up if the hook's wiring layer is still too thick after this extraction.
 - **Relocate `flushPlanBuffer` / `scheduleFlush` / `handleToolEvent` into `model/session-timeline-batch.ts` (D5 alternative):** revisit if a future issue wants to shrink the hook further. Not required for the complexity-reduction target of this issue.

@@ -6,13 +6,13 @@
       "id": "T-001",
       "title": "Remove dead state taskProgress/loopProgress",
       "spec": "specs/session-timeline-events/spec.md#dead-state-taskprogress-and-loopprogress-are-removed",
-      "description": "Delete the never-set `taskProgress` (`TaskProgressMap`) and `loopProgress` (`LoopProgress`) `useState` declarations and return fields from useSessionTimeline.ts, and drop the corresponding props, `TaskProgressPanel` render branch (`currentStage === 'build' && taskEntries.length > 0`), `taskEntries` derivation, and `TaskProgressMap`/`LoopProgress` imports from SessionTimeline.tsx. Update SessionTimeline.test.tsx render fixtures to drop the two removed props. The rendered DOM is observably identical because the panel never rendered with a non-empty task list. Keep `TaskProgressPanel`/`TaskStatusIcon` as exports (deletion is out of scope).",
+      "description": "Delete the never-set `taskProgress` (`TaskProgressMap`) and `loopProgress` (`LoopProgress`) `useState` declarations and return fields from useSessionTimeline.ts, and drop the corresponding props, `TaskProgressPanel` render branch (`currentStage === 'build' && taskEntries.length > 0`), `taskEntries` derivation, and `TaskProgressMap`/`LoopProgress` imports from SessionTimeline.tsx. Update SessionTimeline.test.tsx render fixtures to drop the two removed props. The rendered DOM is observably identical because the panel never rendered with a non-empty task list. Keep `TaskProgressPanel` (exported) and `TaskStatusIcon` (local, not exported today) in the file (deletion is out of scope).",
       "acceptanceCriteria": [
         "useSessionTimeline.ts contains no `useState<TaskProgressMap>` or `useState<LoopProgress>` and its returned object has no `taskProgress` or `loopProgress` keys",
         "useSessionTimeline.ts drops `TaskProgressMap`/`LoopProgress` from the `entities/coder-session` import",
         "SessionTimeline.tsx props interface no longer mentions `taskProgress`/`loopProgress`, no longer imports `TaskProgressMap`/`LoopProgress`, and no longer renders the `TaskProgressPanel` element under any condition",
         "SessionTimeline.test.tsx render fixtures no longer pass `taskProgress`/`loopProgress` props",
-        "`TaskProgressPanel` and `TaskStatusIcon` remain exported from SessionTimeline.tsx (no contract change)",
+        "`TaskProgressPanel` remains exported from SessionTimeline.tsx and `TaskStatusIcon` remains in the file (no contract change; `TaskStatusIcon` is a local function, not exported today)",
         "`npm run typecheck -w packages/web` is green",
         "`npm run test:run -w packages/web` is green with no rendered-output regression"
       ],

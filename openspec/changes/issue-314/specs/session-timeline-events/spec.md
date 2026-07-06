@@ -1,6 +1,6 @@
 ### Requirement: Directly-extractable event reducers live in a React-independent module
 
-The session-timeline state machine SHALL move its directly-extractable event reducers — `plan_round_start`, `plan_round_complete`, `coder_recovery_status`, `session.liveness`, `usage.updated`, `context_health_update`, `compaction_event`, `com.mohist.agent-session.context-compacted`, `com.mohist.agent-session.context-health-updated` — into a new React-independent module `model/session-timeline-reducer.ts` as pure functions of shape `(prev, detail) => next`. The reducer module MUST NOT import React (`useEffect` / `useRef` / `useState` / `useCallback` / `useQuery`), MUST NOT touch the DOM (`requestAnimationFrame` / `window.setTimeout` / `Date.now`), and MUST NOT hold module-level mutable state. The hook `useSessionTimeline` SHALL become an event-wiring thin layer: it subscribes to `onAgentEvent`, runs the session-scoping predicates, and dispatches each matching event into the extracted reducer. The widget barrel (`widgets/coder-session/index.ts`) SHALL continue to re-export the shared types/helpers (`Round`, `RecoveryStatus`, `PlanProgress`, `ContextHealthState`, `deriveToolCallTitle`, `reconstructRoundsFromEvents`) the rest of the codebase imports today, routing them through the reducer module where they now live.
+The session-timeline state machine SHALL move its directly-extractable event reducers — `plan_round_start`, `plan_round_complete`, `coder_recovery_status`, `session.liveness`, `usage.updated`, `context_health_update`, `compaction_event`, `com.mohist.agent-session.context-compacted`, `com.mohist.agent-session.context-health-updated` — into a new React-independent module `model/session-timeline-reducer.ts` as pure functions of shape `(prev, detail, env) => next`, where `env` carries `{ now, isoNow, randomId }` injected by the hook so the reducers never touch the wall clock or non-deterministic sources. The reducer module MUST NOT import React (`useEffect` / `useRef` / `useState` / `useCallback` / `useQuery`), MUST NOT touch the DOM (`requestAnimationFrame` / `window.setTimeout` / `Date.now`), and MUST NOT hold module-level mutable state. The hook `useSessionTimeline` SHALL become an event-wiring thin layer: it subscribes to `onAgentEvent`, runs the session-scoping predicates, and dispatches each matching event into the extracted reducer. The existing import path `widgets/coder-session/model/useSessionTimeline` (used today by `SessionTimeline.tsx` and cross-widget by `PlanProgressPanel.tsx`; the widget barrel `widgets/coder-session/index.ts` does not re-export these symbols today) SHALL continue to resolve after relocation, with `useSessionTimeline.ts` re-exporting the shared types/helpers (`Round`, `RecoveryStatus`, `PlanProgress`, `ContextHealthState`, `deriveToolCallTitle`, `reconstructRoundsFromEvents`) from the reducer module where they now live. The widget barrel SHALL remain unchanged in this issue.
 
 #### Scenario: Reducer module has no React or DOM imports
 
@@ -13,7 +13,7 @@ The session-timeline state machine SHALL move its directly-extractable event red
 
 - **WHEN** the reducer module is inspected
 - **THEN** it SHALL export one pure reducer function for each of `plan_round_start`, `plan_round_complete`, `coder_recovery_status`, `session.liveness`, `usage.updated`, `context_health_update`, `compaction_event`, `com.mohist.agent-session.context-compacted`, and `com.mohist.agent-session.context-health-updated`
-- **AND** each reducer SHALL have the signature `(prev: <state slice>, detail: <event detail>) => <state slice>` returning a new value without mutating `prev`
+- **AND** each reducer SHALL have the uniform signature `(prev: <state slice>, detail: <event detail>, env: { now: number; isoNow: string; randomId: () => string }) => <state slice>` returning a new value without mutating `prev`, where `env` is injected by the hook
 
 #### Scenario: Hook dispatches into the extracted reducers
 
@@ -21,11 +21,12 @@ The session-timeline state machine SHALL move its directly-extractable event red
 - **THEN** the subscription body SHALL delegate the state transition to the matching reducer exported from `model/session-timeline-reducer.ts`
 - **AND** the hook SHALL retain only the session-scoping predicate and the `setX(updater)` wiring around that call
 
-#### Scenario: Widget barrel still re-exports shared types and helpers
+#### Scenario: Existing deep-path imports keep resolving after relocation
 
-- **WHEN** a downstream module imports `Round`, `RecoveryStatus`, `PlanProgress`, `ContextHealthState`, `deriveToolCallTitle`, or `reconstructRoundsFromEvents` from `widgets/coder-session`
+- **WHEN** a downstream module imports `Round`, `RecoveryStatus`, `PlanProgress`, `ContextHealthState`, `deriveToolCallTitle`, or `reconstructRoundsFromEvents` from `widgets/coder-session/model/useSessionTimeline`
 - **THEN** the import SHALL continue to resolve
-- **AND** the symbols SHALL be re-exported through the reducer module when they have been relocated there
+- **AND** `useSessionTimeline.ts` SHALL re-export those symbols from the reducer module where they now live
+- **AND** the widget barrel `widgets/coder-session/index.ts` SHALL remain unchanged (it does not re-export these symbols today)
 
 ### Requirement: The plan_session_update flush chain and shared tool-call ref coalescing are preserved
 
