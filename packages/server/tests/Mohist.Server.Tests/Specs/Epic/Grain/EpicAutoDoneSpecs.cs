@@ -377,6 +377,85 @@ public class EpicAutoDoneSpecs
         await Assert.ThrowsAnyAsync<Exception>(() => grain.SetStatusAsync("done"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task SetStatusAsync_Done_EpicWithOpenLinkedIssue_ThrowsNotReadyToMarkDoneAndStatusUnchanged()
+    {
+        // Invariant 2: explicit MarkDone must reject when any open
+        // linked issue exists. SetStatusAsync("done") is the user
+        // entry point; it must surface EpicNotReadyToMarkDoneException
+        // and leave the status unchanged. This is the symmetric pin
+        // to wake-up: open issues exhausted -> auto-done; new open
+        // issue linked -> wake. The flip side: an explicit MarkDone
+        // with open issues never silently flips to done.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var ex = await Assert.ThrowsAsync<EpicNotReadyToMarkDoneException>(
+            () => grain.SetStatusAsync("done"));
+        Assert.Equal("epic_1", ex.EpicId);
+        Assert.Equal(1, ex.OpenLinkedCount);
+
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("running", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AutoMarkDoneIfReadyAsync_EpicWithOpenLinkedIssue_IsNoOpAndStatusUnchanged()
+    {
+        // Invariant 2 (auto path): AutoMarkDoneIfReadyAsync must be a
+        // no-op when at least one open linked issue exists. The epic
+        // must not transition to done; status and event history stay
+        // untouched. Pairs with the explicit MarkDone rejection above
+        // to close the status-mirrors-reality loop.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "idle");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Backlog);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.AutoMarkDoneIfReadyAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("idle", result!.Status);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("idle", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ReconcileAfterTerminalAsync_EpicWithOpenLinkedIssue_DoesNotMarkDoneAndStatusUnchanged()
+    {
+        // Invariant 2 (reconcile-on-terminal-event path): the auto
+        // reconcile that fires when a linked issue reaches terminal
+        // must NOT flip the epic to done while an open linked issue
+        // remains. With status idle and an open linked issue, the
+        // reconcile path leaves the epic idle (no TryStartNextAsync
+        // is invoked because status != running) and never marks done.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "idle");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.ReconcileAfterTerminalAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("idle", result!.Status);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("idle", stored.Status);
+    }
+
     private static EpicGrain CreateGrain(TestDbContextFactory factory, string grainKey) =>
         new(
             factory,
