@@ -322,7 +322,8 @@ public class RunnerConfigApiSpecs
 
         using var response = await harness.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.ReadFirstDispatchElementAsync()
+            ?? throw new InvalidOperationException("Expected a dispatch from /poll");
         Assert.Equal(string.Empty, body.GetProperty("workflowRunId").GetString());
         Assert.Equal(workId, body.GetProperty("workId").GetString());
         Assert.Equal("mohist/acp-agent", body.GetProperty("uses").GetString());

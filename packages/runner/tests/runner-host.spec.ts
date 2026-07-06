@@ -125,7 +125,7 @@ describe("RunnerHost", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    poll.mockResolvedValue(null)
+    poll.mockResolvedValue([])
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
@@ -183,12 +183,12 @@ describe("RunnerHost", () => {
       variables: { workspace: { path: "/tmp/mohist-runner-test" } },
     })
     poll
-      .mockResolvedValueOnce(work("1"))
-      .mockResolvedValueOnce(work("2"))
-      .mockResolvedValueOnce(work("3"))
+      .mockResolvedValueOnce([work("1")])
+      .mockResolvedValueOnce([work("2")])
+      .mockResolvedValueOnce([work("3")])
       .mockImplementation(async () => {
         controller.abort()
-        return null
+        return []
       })
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
@@ -213,7 +213,7 @@ describe("RunnerHost", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    poll.mockResolvedValue(null)
+    poll.mockResolvedValue([])
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
@@ -243,7 +243,7 @@ describe("RunnerHost", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    poll.mockResolvedValue(null)
+    poll.mockResolvedValue([])
     let resolveSecondSignalR!: () => void
     const secondSignalR = new Promise<void>((resolve) => {
       resolveSecondSignalR = resolve
@@ -281,7 +281,7 @@ describe("RunnerHost", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    poll.mockResolvedValue(null)
+    poll.mockResolvedValue([])
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
@@ -312,7 +312,7 @@ describe("RunnerHost", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    poll.mockResolvedValue(null)
+    poll.mockResolvedValue([])
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
@@ -345,7 +345,7 @@ describe("RunnerHost", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    poll.mockResolvedValue(null)
+    poll.mockResolvedValue([])
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
@@ -415,7 +415,7 @@ describe("RunnerHost", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    poll.mockResolvedValue(null)
+    poll.mockResolvedValue([])
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
@@ -454,7 +454,7 @@ describe("RunnerHost", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    poll.mockResolvedValue(null)
+    poll.mockResolvedValue([])
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
@@ -499,7 +499,7 @@ describe("RunnerHost", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    poll.mockResolvedValue(null)
+    poll.mockResolvedValue([])
     let resolveFirstSignalR!: () => void
     const firstSignalR = new Promise<void>((resolve) => {
       resolveFirstSignalR = resolve
@@ -560,8 +560,8 @@ describe("RunnerHost", () => {
       ownerKind: "workflow",
       variables: { workspace: { path: "/tmp/mohist-runner-test" } },
     }
-    // First poll dispatches the held work; subsequent polls return null.
-    poll.mockResolvedValueOnce(held).mockResolvedValue(null)
+    // First poll dispatches the held work; subsequent polls return empty.
+    poll.mockResolvedValueOnce([held]).mockResolvedValue([])
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
@@ -595,7 +595,12 @@ describe("RunnerHost", () => {
     connect.mockResolvedValue(undefined)
     heartbeat.mockResolvedValue(undefined)
     disconnect.mockResolvedValue(undefined)
-    report.mockResolvedValue(undefined)
+    // The owner has not yet acked — the work stays in awaitingAck and is
+    // reported in every poll body. Under at-least-once the server may
+    // re-dispatch a work whose report is still in flight; the runner must
+    // skip re-deliveries of a work it still holds (inFlight or awaitingAck)
+    // rather than execute and report it again.
+    report.mockReturnValue(new Promise(() => {}))
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     const controller = new AbortController()
@@ -610,7 +615,7 @@ describe("RunnerHost", () => {
     // The server re-dispatches the same work on three consecutive polls
     // (the recovery path under at-least-once). The runner must dedupe:
     // the work is reported at most once for the set of re-deliveries.
-    poll.mockResolvedValueOnce(same).mockResolvedValueOnce(same).mockResolvedValueOnce(same).mockResolvedValue(null)
+    poll.mockResolvedValueOnce([same]).mockResolvedValueOnce([same]).mockResolvedValueOnce([same]).mockResolvedValue([])
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
@@ -627,9 +632,8 @@ describe("RunnerHost", () => {
     controller.abort()
     await expect(run).resolves.toBeUndefined()
 
-    // The same work, re-delivered three times, is reported at most once.
-    // (Under the mock executor it may resolve quickly; the dedup guarantee
-    // is that re-delivery never produces a second report for the same key.)
+    // The same work, re-delivered three times while its report is unacked,
+    // is reported at most once: re-delivery of a held work is skipped.
     const reportsForDup = report.mock.calls.filter((c) => c[0]?.workId === "work-dup")
     expect(reportsForDup.length).toBeLessThanOrEqual(1)
   })
@@ -658,7 +662,7 @@ describe("RunnerHost", () => {
       ownerKind: "workflow",
       variables: { workspace: { path: "/tmp/mohist-runner-test" } },
     }
-    poll.mockResolvedValueOnce(work).mockResolvedValue(null)
+    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",

@@ -33,7 +33,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task1.WorkId, "completed");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r1);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
@@ -113,7 +113,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         await workflow.StopAsync("user-stop");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r1);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

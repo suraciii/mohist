@@ -42,6 +42,12 @@ public abstract class WorkflowGrainSpecs
 
     protected IGrainFactory Grains => _fixture.Grains;
 
+    // The silo service provider for resolving stateless services
+    // (DispatchService) — needed because the runner grain no longer owns the
+    // poll verb. Specs route inline runner.PollAsync() calls through the
+    // DispatchTestExtensions.PollAsync(runner, Services) helper.
+    protected IServiceProvider Services => _fixture.Cluster.GetSiloServiceProvider(null);
+
     protected RecordingEventStore EventStore => _fixture.EventStore;
 
     protected WorkflowQuerier GetQuerier()
@@ -202,7 +208,8 @@ public abstract class WorkflowGrainSpecs
         await workflow.AssignRunnerAsync(runnerId);
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        Assert.NotNull(await runner.PollAsync());
+        var (assigned, _) = await PollWorkAsync(runnerId);
+        Assert.False(string.IsNullOrEmpty(assigned.WorkId));
     }
 
     protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAnyAsync()
@@ -213,9 +220,22 @@ public abstract class WorkflowGrainSpecs
     protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAsync(string runnerId)
     {
         await EnsureRunnerForCurrentWorkflowAsync(runnerId);
+        // Drive dispatch through the stateless DispatchService (the runner
+        // grain no longer owns a PollAsync). An empty reported set means the
+        // poll performs repair (none expected) + new claims only — exactly
+        // what a fresh runner needs to receive its first dispatch.
+        var dispatch = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var work = await TestWait.ForAsync(
-            () => runner.PollAsync(),
+        var slots = await runner.GetSlotsAsync();
+        WorkDispatch? work = null;
+        await TestWait.ForAsync(
+            async () =>
+            {
+                var resp = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], []), slots);
+                work = resp.Dispatches.FirstOrDefault();
+                return work;
+            },
             value => value is not null,
             TimeSpan.FromSeconds(3),
             TimeSpan.FromMilliseconds(20),
@@ -246,8 +266,10 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task ReportAsync(string runnerId, string workflowRunId, string workId, WorkResult result)
     {
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.ReportWorkflowResultAsync(workflowRunId, workId, result);
+        // Report direct to the owning workflow grain (the runner grain no
+        // longer relays workflow reports). The work item is reconstructed from
+        // the persisted run; translation mirrors the API /report route.
+        await ReportWorkflowDirectAsync(runnerId, workflowRunId, workId, result);
     }
 
     protected async Task ReportAsync(string runnerId, WorkDispatch work, string status, string? message = null)
@@ -283,6 +305,18 @@ public abstract class WorkflowGrainSpecs
         var results = passingCheckNames.Select(n => (n, "pass", (string?)null)).ToList();
         results.Add((failedCheckName, "fail", message));
         await ReportChecksAsync(runnerId, checksWork, results.ToArray());
+    }
+
+    /// <summary>
+    /// Reports a workflow work result direct to the owning grain, mirroring
+    /// the API /report route (translation is a stateless service). The runner
+    /// grain no longer relays workflow reports.
+    /// </summary>
+    protected async Task ReportWorkflowDirectAsync(string runnerId, string workflowRunId, string workId, WorkResult result)
+    {
+        await DispatchTestExtensions.ReportWorkflowDirectAsync(
+            Grains, _fixture.Cluster.GetSiloServiceProvider(null),
+            runnerId, workflowRunId, workId, result);
     }
 
     protected async Task<WorkflowRun> LoadRunAsync(string workflowId)

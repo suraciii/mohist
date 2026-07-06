@@ -426,7 +426,7 @@ public class ApiContractSpecs
             var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(wrId);
             await workflow.AssignRunnerAsync(runnerId);
             var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            await runner.PollAsync();
+            await runner.PollAsync(_fixture.Services);
 
             using var response = await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{number}/rebase", new { });
 

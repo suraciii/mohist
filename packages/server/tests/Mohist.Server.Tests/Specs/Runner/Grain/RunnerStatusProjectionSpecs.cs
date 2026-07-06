@@ -51,7 +51,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
             })));
         await workflow.AssignRunnerAsync(runnerId);
 
-        var work = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync();
+        var work = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(Services);
         Assert.NotNull(work);
         return work;
     }

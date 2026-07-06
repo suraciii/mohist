@@ -220,6 +220,8 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<WorkflowRunProfileManager>();
         siloBuilder.Services.AddScoped<WorkflowProfileManager>();
         siloBuilder.Services.AddScoped<WorkflowItemTranslator>();
+        siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.DispatchService>();
+        siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.WorkflowReportService>();
         siloBuilder.Services.AddScoped<WorkflowSessionHealthService>();
         siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
         siloBuilder.Services.AddScoped<EffectiveWorkflowProfileResolver>();
@@ -238,10 +240,10 @@ public static class GrainTestConfig
             opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
             opts.JobTimeout = TimeSpan.FromSeconds(10);
         });
-        siloBuilder.Services.Configure<WorkflowOptions>(opts =>
-        {
-            opts.WorkCompletionTimeout = TimeSpan.FromMinutes(10);
-        });
+        // WorkflowOptions is retained as a binding anchor; the former
+        // WorkCompletionTimeout knob has been removed (no server-side
+        // work-completion wall clock under the reconciliation model).
+        siloBuilder.Services.Configure<WorkflowOptions>(_ => { });
     }
 
     private static void DecorateReminderTable(IServiceCollection services)

@@ -196,7 +196,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     report.mockResolvedValue({})
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
-    poll.mockResolvedValueOnce(workWith({ workId: "work-live", agentJobId: "aj-live" })).mockImplementation(async () => null)
+    poll.mockResolvedValueOnce([workWith({ workId: "work-live", agentJobId: "aj-live" })]).mockImplementation(async () => [])
     const release = deferred()
     blockingAction.mockImplementationOnce(async ({ log }: { log?: { write: (source: string, text: string) => void } }) => {
       log?.write("action:test", "line before completion")
@@ -241,9 +241,9 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     poll
-      .mockResolvedValueOnce(workWith({ workId: "work-A", agentJobId: "aj-A" }))
-      .mockResolvedValueOnce(workWith({ workId: "work-B", agentJobId: "aj-B" }))
-      .mockImplementation(async () => null)
+      .mockResolvedValueOnce([workWith({ workId: "work-A", agentJobId: "aj-A" })])
+      .mockResolvedValueOnce([workWith({ workId: "work-B", agentJobId: "aj-B" })])
+      .mockImplementation(async () => [])
     const releases = new Map<string, ReturnType<typeof deferred>>()
     blockingAction.mockImplementation(async ({ workId, log }: { workId: string; log?: { write: (source: string, text: string) => void } }) => {
       const release = deferred()
@@ -271,8 +271,13 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     // per-work append → threshold(1) → flush microtask chain runs for
     // each. Under fake timers this is deterministic regardless of how
     // many other test processes share the host CPU.
+    // flushCycles drives both poll cycles (work-A, work-B) and the per-work
+    // append → threshold(1) → flush microtask chain. Assert directly on the
+    // flushed state — under fake timers, vi.waitFor's internal polling timer
+    // is not advanced by advanceTimersByTimeAsync, so relying on it makes the
+    // test order-dependent across files that share the fake/real timer state.
     await flushCycles(1, 4)
-    await vi.waitFor(() => expect(uploadTaskLog.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
+    expect(uploadTaskLog.mock.calls.length).toBeGreaterThanOrEqual(2)
 
     for (const call of uploadTaskLog.mock.calls) {
       const [, workId, batch] = call as [string, string, { entries: Array<{ text: string }> }]
@@ -298,7 +303,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     report.mockResolvedValue({})
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
-    poll.mockResolvedValueOnce(workWith({ workId: "work-fallback", agentJobId: "aj-fallback" })).mockImplementation(async () => null)
+    poll.mockResolvedValueOnce([workWith({ workId: "work-fallback", agentJobId: "aj-fallback" })]).mockImplementation(async () => [])
     const release = deferred()
     createSharedAcpConnection
       .mockRejectedValueOnce(new Error("shared ACP unavailable"))
@@ -360,7 +365,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     report.mockResolvedValue({})
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
-    poll.mockResolvedValueOnce(workWith()).mockImplementation(async () => null)
+    poll.mockResolvedValueOnce([workWith()]).mockImplementation(async () => [])
 
     const controller = new AbortController()
     const host = buildHost()
@@ -405,7 +410,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     report.mockResolvedValue({})
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
-    poll.mockResolvedValueOnce(workWith({ workflowRunId: "wf-fail", workId: "work-fail", agentJobId: "aj-fail" })).mockImplementation(async () => null)
+    poll.mockResolvedValueOnce([workWith({ workflowRunId: "wf-fail", workId: "work-fail", agentJobId: "aj-fail" })]).mockImplementation(async () => [])
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
     const controller = new AbortController()
@@ -445,7 +450,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     report.mockResolvedValue({})
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
-    poll.mockResolvedValueOnce(workWith({ workflowRunId: "wf-pending", workId: "work-pending", agentJobId: "aj-pending" })).mockImplementation(async () => null)
+    poll.mockResolvedValueOnce([workWith({ workflowRunId: "wf-pending", workId: "work-pending", agentJobId: "aj-pending" })]).mockImplementation(async () => [])
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
     const controller = new AbortController()
@@ -487,7 +492,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
       log?.write("action:rebase", "final line")
       return { status: "failed", message: "boom" }
     })
-    poll.mockResolvedValueOnce(workWith({ workflowRunId: "wf-verdict", workId: "work-verdict", agentJobId: "aj-verdict" })).mockImplementation(async () => null)
+    poll.mockResolvedValueOnce([workWith({ workflowRunId: "wf-verdict", workId: "work-verdict", agentJobId: "aj-verdict" })]).mockImplementation(async () => [])
 
     const controller = new AbortController()
     const host = new RunnerHost({

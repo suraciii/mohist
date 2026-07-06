@@ -51,7 +51,7 @@ public class RunnerStatusApiSpecs
         await workflow.AssignRunnerAsync(runnerId);
 
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        Assert.NotNull(await runner.PollAsync());
+        Assert.NotNull(await runner.PollAsync(_fixture.Services));
     }
 
     private async Task SeedWorkflowTemplateAsync(string workflowId, WorkflowDefinition definition, string projectId = "test-project")

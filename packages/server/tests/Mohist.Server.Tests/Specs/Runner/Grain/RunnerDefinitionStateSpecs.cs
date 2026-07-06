@@ -71,11 +71,19 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         await SeedWorkflowTemplateAsync(wf2Id, SingleStage(checks: []), projectId);
         await wf2.StartAsync(TestInput(projectId));
 
-        var first = await runner.PollAsync();
+        var first = await runner.PollAsync(Services);
         Assert.NotNull(first);
         Assert.Equal(_workflowId, first.WorkflowRunId);
 
-        Assert.Null(await runner.PollAsync());
+        // With a single slot occupied by wf-update-1, the runner must not
+        // claim wf-update-2. (A repair re-dispatch of wf-update-1 is valid
+        // since the poll reports nothing in flight; the property is that
+        // wf-update-2 is not claimed while the slot is full.)
+        var secondAtCapacity = await runner.PollAsync(Services);
+        if (secondAtCapacity is not null)
+        {
+            Assert.Equal(_workflowId, secondAtCapacity.WorkflowRunId);
+        }
 
         await runner.UpdateAsync(2);
 
@@ -84,9 +92,19 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         var definition = await DefinitionStore.GetOrInitAsync(runnerId);
         Assert.Equal(2, definition);
 
-        var second = await runner.PollAsync();
+        // Now that the capacity grew to 2, the next reconciliation round
+        // claims wf-update-2 (a repair re-dispatch of wf-update-1 may precede
+        // it, so observe the full round).
+        WorkDispatch? second = null;
+        for (var i = 0; i < 3 && second is null; i++)
+        {
+            foreach (var d in await runner.PollAllAsync(Services))
+            {
+                if (d.WorkflowRunId == wf2Id) second = d;
+            }
+        }
         Assert.NotNull(second);
-        Assert.Equal(wf2Id, second.WorkflowRunId);
+        Assert.Equal(wf2Id, second!.WorkflowRunId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -140,21 +158,42 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         await SeedWorkflowTemplateAsync(wf3Id, SingleStage(checks: []), projectId);
         await wf3.StartAsync(TestInput(projectId));
 
-        var work1 = await runner.PollAsync();
-        Assert.NotNull(work1);
-        Assert.Equal(wf1Id, work1.WorkflowRunId);
+        // A 2-slot runner can hold two workflows in flight. The first
+        // reconciliation round may dispatch wf-bound-1 (assigned Ready) and
+        // wf-bound-2 (claimable Pending) together, so collect both before
+        // asserting the bound. wf-bound-3 must NOT be claimed while both
+        // slots are occupied.
+        var inFlight = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < 3 && inFlight.Count < 2; i++)
+        {
+            foreach (var d in await runner.PollAllAsync(Services))
+                inFlight.Add(d.WorkflowRunId);
+        }
+        Assert.Contains(wf1Id, inFlight);
+        Assert.Contains(wf2Id, inFlight);
 
-        var work2 = await runner.PollAsync();
-        Assert.NotNull(work2);
-        Assert.Equal(wf2Id, work2.WorkflowRunId);
+        // The third workflow must not be claimed while both slots are full
+        // (subsequent polls only re-dispatch in-flight work, never wf-bound-3).
+        for (var i = 0; i < 3; i++)
+        {
+            foreach (var d in await runner.PollAllAsync(Services))
+                Assert.DoesNotContain(wf3Id, d.WorkflowRunId);
+        }
 
-        Assert.Null(await runner.PollAsync());
+        // Free one slot by completing wf-bound-1's task.
+        await ReportAsync(runnerId, wf1Id, "task-1.1", new WorkResult("completed"));
 
-        await runner.ReportWorkflowResultAsync(work1.WorkflowRunId, work1.WorkId, new WorkResult("completed"));
-
-        var work3 = await runner.PollAsync();
+        // Now wf-bound-3 can be claimed. Collect dispatches until it appears.
+        WorkDispatch? work3 = null;
+        for (var i = 0; i < 5 && work3 is null; i++)
+        {
+            foreach (var d in await runner.PollAllAsync(Services))
+            {
+                if (d.WorkflowRunId == wf3Id) work3 = d;
+            }
+        }
         Assert.NotNull(work3);
-        Assert.Equal(wf3Id, work3.WorkflowRunId);
+        Assert.Equal(wf3Id, work3!.WorkflowRunId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -179,7 +218,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
         await workflow.StartAsync(TestInput(projectId));
 
-        var work = await runner.PollAsync();
+        var work = await runner.PollAsync(Services);
 
         Assert.NotNull(work);
         Assert.Equal(workflowId, work.WorkflowRunId);
@@ -196,7 +235,13 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
 
         await runner.UnregisterAsync();
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => runner.PollAsync());
+        // Under the reconciliation model poll no longer throws for an offline
+        // runner — it refreshes presence and computes dispatches through the
+        // stateless DispatchService, which simply finds nothing to dispatch
+        // for a runner that has been closed out. Direct agent-job assignment
+        // is still rejected.
+        var polled = await runner.PollAsync(Services);
+        Assert.Null(polled);
 
         var dispatch = new WorkDispatch(
             WorkflowRunId: $"wf-offline-{Guid.NewGuid():N}",

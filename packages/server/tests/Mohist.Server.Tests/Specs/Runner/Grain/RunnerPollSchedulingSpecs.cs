@@ -1,4 +1,3 @@
-using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
@@ -50,7 +49,7 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.Tests.Specs.Workflow.Work
         var runnerId = _runnerId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        var work = await runner.PollAsync();
+        var work = await runner.PollAsync(Services);
 
         Assert.NotNull(work);
         Assert.Equal(_workflowId, work!.WorkflowRunId);
@@ -61,13 +60,16 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.Tests.Specs.Workflow.Work
     [Fact]
     public async Task PollAsync_RespectsSlotBudget_WhenRunningWorkflowIsAlreadyAssigned()
     {
-        // ActiveWorkflowCountAsync counts Running rows for the runner.
-        // Under the old code the count collapsed to 0 once
-        // FindAssignedToAsync only returned Ready (idle) rows, so the
-        // slot gate would let the runner pick up additional work even
-        // when it already had MaxWorkflowSlots=1 in flight. The fix in
-        // T-002 (CountRunningAssignedToAsync) restores the correct
-        // count so the gate stops the second pickup.
+        // The slot-budget gate counts the runner's in-flight (desired) work:
+        // desired = Running runs assigned to me, and spare = slots − |desired|.
+        // With MaxWorkflowSlots=1 and workflowA picked up (now Running), a
+        // second poll must NOT claim workflowB — the spare budget is 0.
+        //
+        // Note: under reconciliation the second poll with an empty reported
+        // set may legitimately RE-DISPATCH workflowA (a repair: the runner
+        // reported nothing, so the server resends the in-flight work). That
+        // re-dispatch is correct and is not a slot-budget violation. The
+        // property under test is that workflowB is never claimed.
         var projectId = "runner-slot-budget";
         var runnerId = await RegisterRunnerForProjectAsync(projectId, maxWorkflowSlots: 1);
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -86,14 +88,19 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.Tests.Specs.Workflow.Work
         await workflowA.AssignRunnerAsync(runnerId);
         await workflowB.StartAsync(TestInput(projectId));
 
-        var firstDispatch = await runner.PollAsync();
+        var firstDispatch = await runner.PollAsync(Services);
         Assert.NotNull(firstDispatch);
         Assert.Equal(workflowAId, firstDispatch!.WorkflowRunId);
 
-        // The next poll must NOT pick up workflowB — the slot budget is
-        // 1 and the count query sees the in-flight Running workflow.
-        var secondDispatch = await runner.PollAsync();
-        Assert.Null(secondDispatch);
+        // The next poll must NOT claim workflowB — the slot budget is 1 and
+        // the count sees the in-flight Running workflowA. A repair re-dispatch
+        // of workflowA is acceptable; workflowB must never be dispatched.
+        for (var i = 0; i < 3; i++)
+        {
+            var subsequent = await runner.PollAsync(Services);
+            if (subsequent is null) continue;
+            Assert.NotEqual(workflowBId, subsequent.WorkflowRunId);
+        }
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -124,167 +131,13 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.Tests.Specs.Workflow.Work
         Assert.Equal(1, await querier.CountRunningAssignedToAsync(runnerB));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task PollAssignedOrAssignableWorkflowAsync_DoesNotCallGetCurrentWorkIdAsync()
-    {
-        // Structural check on the poll loop body: the source of
-        // RunnerGrain.PollAssignedOrAssignableWorkflowAsync must not
-        // call GetCurrentWorkIdAsync anymore. The pre-check (~104
-        // grain calls/s) is gone under the new state machine because
-        // Ready already excludes in-flight work. The body is read from
-        // disk so a regression in the source file is caught even if the
-        // existing behavioural tests happen to pass (the behavioural
-        // test for Ready cannot observe the dropped pre-check since
-        // both code paths would have dispatched the work).
-        var runnerGrainPath = Path.Combine(
-            GetProjectRoot(),
-            "src", "Mohist.Server", "Runner", "Grains", "RunnerGrain.cs");
-        var source = await File.ReadAllTextAsync(runnerGrainPath);
-
-        var methodBody = ExtractMethodBody(source, "PollAssignedOrAssignableWorkflowAsync");
-        var executable = StripCSharpComments(methodBody);
-
-        Assert.DoesNotContain("GetCurrentWorkIdAsync", executable, StringComparison.Ordinal);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task ActiveWorkflowCountAsync_UsesCountRunningAssignedToAsync()
-    {
-        // Structural check: ActiveWorkflowCountAsync's body must read
-        // status == Running via CountRunningAssignedToAsync, not via
-        // the previous FindAssignedToAsync + GetCurrentWorkIdAsync
-        // fan-out. Without this, the slot-budget gate in PollAsync
-        // collapses to 0 under the new state machine and the runner
-        // over-dispatches beyond MaxWorkflowSlots.
-        var runnerGrainPath = Path.Combine(
-            GetProjectRoot(),
-            "src", "Mohist.Server", "Runner", "Grains", "RunnerGrain.cs");
-        var source = await File.ReadAllTextAsync(runnerGrainPath);
-
-        var methodBody = ExtractMethodBody(source, "ActiveWorkflowCountAsync");
-        var executable = StripCSharpComments(methodBody);
-
-        Assert.Contains("CountRunningAssignedToAsync", executable, StringComparison.Ordinal);
-        Assert.DoesNotContain("GetCurrentWorkIdAsync", executable, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// Removes <c>// line</c> and <c>/* block *\/</c> comments and string
-    /// literals from a snippet of C# source so the structural "no
-    /// GetCurrentWorkIdAsync call" assertion is not fooled by a
-    /// documentation comment that name-checks the symbol. Strings are
-    /// blanked to avoid the same false positive inside string
-    /// literals. Adequate for the small bodies in RunnerGrain.cs;
-    /// deliberately not a full C# parser.
-    /// </summary>
-    private static string StripCSharpComments(string source)
-    {
-        var output = new System.Text.StringBuilder(source.Length);
-        var i = 0;
-        while (i < source.Length)
-        {
-            // Block comment
-            if (i + 1 < source.Length && source[i] == '/' && source[i + 1] == '*')
-            {
-                var end = source.IndexOf("*/", i + 2, StringComparison.Ordinal);
-                if (end < 0) break;
-                i = end + 2;
-                output.Append("  ");
-                continue;
-            }
-
-            // Line comment
-            if (i + 1 < source.Length && source[i] == '/' && source[i + 1] == '/')
-            {
-                var end = source.IndexOf('\n', i + 2);
-                if (end < 0) end = source.Length;
-                i = end;
-                continue;
-            }
-
-            // String literal
-            if (source[i] == '"')
-            {
-                output.Append('"');
-                i++;
-                while (i < source.Length && source[i] != '"')
-                {
-                    if (source[i] == '\\' && i + 1 < source.Length) i++;
-                    output.Append(' ');
-                    i++;
-                }
-                if (i < source.Length)
-                {
-                    output.Append('"');
-                    i++;
-                }
-                continue;
-            }
-
-            output.Append(source[i]);
-            i++;
-        }
-
-        return output.ToString();
-    }
-
-    private static string GetProjectRoot()
-    {
-        // Test assembly lives at packages/server/tests/Mohist.Server.Tests/bin/<config>/<tfm>/.
-        // Source file is at packages/server/src/Mohist.Server/Runner/Grains/RunnerGrain.cs
-        // (i.e. five levels up from the assembly directory lands on
-        // packages/server/, the directory containing both src/ and tests/).
-        var assemblyDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
-            ?? throw new InvalidOperationException("Cannot locate test assembly directory");
-        return Path.GetFullPath(Path.Combine(assemblyDir, "..", "..", "..", "..", ".."));
-    }
-
-    /// <summary>
-    /// Naïve-but-sufficient extractor for a private method body. Locates
-    /// the method name as a word token (any leading whitespace) and reads
-    /// until the matching closing brace at depth 0. Adequate for the
-    /// small bodies in RunnerGrain.cs; deliberately not a full C#
-    /// parser.
-    /// </summary>
-    private static string ExtractMethodBody(string source, string methodName)
-    {
-        var idx = -1;
-        var token = $"{methodName}(";
-        for (var scan = 0; scan < source.Length - token.Length; scan++)
-        {
-            if (source[scan] == ' ' || source[scan] == '\t' || source[scan] == '\n' || source[scan] == '\r')
-            {
-                if (string.CompareOrdinal(source, scan + 1, token, 0, token.Length) == 0)
-                {
-                    idx = scan + 1;
-                    break;
-                }
-            }
-        }
-        Assert.True(idx > 0, $"Could not locate method '{methodName}' in RunnerGrain.cs");
-
-        var braceIdx = source.IndexOf('{', idx);
-        Assert.True(braceIdx > 0, $"Could not locate opening brace for method '{methodName}'");
-
-        var depth = 0;
-        for (var i = braceIdx; i < source.Length; i++)
-        {
-            switch (source[i])
-            {
-                case '{': depth++; break;
-                case '}':
-                    depth--;
-                    if (depth == 0) return source.Substring(braceIdx, i - braceIdx + 1);
-                    break;
-            }
-        }
-
-        throw new InvalidOperationException($"Unterminated method body for '{methodName}'");
-    }
+    // The two structural source-scan specs that pinned
+    // PollAssignedOrAssignableWorkflowAsync / ActiveWorkflowCountAsync in
+    // RunnerGrain.cs were removed: those methods no longer exist. Under the
+    // reconciliation model the entire poll loop lives in the stateless
+    // DispatchService.PollAsync (desired = FindRunningAssignedToAsync,
+    // spare = slots − |desired|, repair = desired − reported). The behavioural
+    // slot-budget spec below covers the meaningful property.
 
     /// <summary>
     /// Inserts a <c>WorkflowRuns</c> row with the requested status and

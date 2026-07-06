@@ -37,6 +37,13 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
     private IGrainFactory Grains => _fixture.Grains;
 
+    // The runner grain no longer relays workflow reports; report direct to the
+    // owning grain via the shared translator path (mirrors the API /report).
+    private async Task ReportAsync(string runnerId, string workflowRunId, string workId, WorkResult result)
+        => await DispatchTestExtensions.ReportWorkflowDirectAsync(
+            Grains, _fixture.Cluster.GetSiloServiceProvider(null),
+            runnerId, workflowRunId, workId, result);
+
     private async Task<string> RegisterRunnerAsync(int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
     {
         var runnerId = $"runner-{Guid.NewGuid():N}";
@@ -153,19 +160,19 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         _runnerId = runnerId;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        var work = await runner.PollAsync();
+        var work = await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(work);
         Assert.Equal(_workflowId, work.WorkflowRunId);
         Assert.StartsWith("task-1.", work.WorkId);
 
-        await runner.ReportWorkflowResultAsync(_workflowId!, work.WorkId, new WorkResult("completed"));
-        var check = await runner.PollAsync();
+        await ReportAsync(runnerId, _workflowId!, work.WorkId, new WorkResult("completed"));
+        var check = await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(check);
         Assert.Equal("checks", check.WorkType);
         Assert.StartsWith("checks-", check.WorkId);
-        await runner.ReportWorkflowResultAsync(_workflowId!, check.WorkId, new WorkResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
+        await ReportAsync(runnerId, _workflowId!, check.WorkId, new WorkResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
 
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null)));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -181,7 +188,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         _runnerId = runnerId;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null)));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -196,16 +203,16 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         _runnerId = runnerId;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        var work = await runner.PollAsync();
+        var work = await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(work);
-        await runner.ReportWorkflowResultAsync(_workflowId!, work.WorkId, new WorkResult("failed", "boom"));
+        await ReportAsync(runnerId, _workflowId!, work.WorkId, new WorkResult("failed", "boom"));
 
         var status = await workflow.GetRunStatusAsync();
         Assert.Equal("Failed", status);
 
         var anotherRunnerId = await RegisterRunnerAsync();
         var anotherRunner = Grains.GetGrain<IRunnerGrain>(anotherRunnerId);
-        Assert.Null(await anotherRunner.PollAsync());
+        Assert.Null(await anotherRunner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null)));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -220,21 +227,21 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         _runnerId = runnerId;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        var work = await runner.PollAsync();
+        var work = await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(work);
-        await runner.ReportWorkflowResultAsync(_workflowId!, work.WorkId, new WorkResult("failed", "boom"));
+        await ReportAsync(runnerId, _workflowId!, work.WorkId, new WorkResult("failed", "boom"));
 
         await workflow.RetryAsync();
 
-        var retryWork = await runner.PollAsync();
+        var retryWork = await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(retryWork);
         Assert.StartsWith("task-1.", retryWork.WorkId);
-        await runner.ReportWorkflowResultAsync(_workflowId!, retryWork.WorkId, new WorkResult("completed"));
+        await ReportAsync(runnerId, _workflowId!, retryWork.WorkId, new WorkResult("completed"));
 
-        var check = await runner.PollAsync();
+        var check = await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(check);
         Assert.Equal("checks", check.WorkType);
-        await runner.ReportWorkflowResultAsync(_workflowId!, check.WorkId, new WorkResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
+        await ReportAsync(runnerId, _workflowId!, check.WorkId, new WorkResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -254,7 +261,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         _runnerId = runnerId;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        var work = await runner.PollAsync();
+        var work = await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(work);
         Assert.Equal(_workflowId, work.WorkflowRunId);
     }
@@ -271,18 +278,18 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         _runnerId = runnerId;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        var task = await runner.PollAsync();
+        var task = await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(task);
-        await runner.ReportWorkflowResultAsync(_workflowId!, task.WorkId, new WorkResult("completed"));
+        await ReportAsync(runnerId, _workflowId!, task.WorkId, new WorkResult("completed"));
 
-        var check = await runner.PollAsync();
+        var check = await runner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(check);
         Assert.Equal("checks", check.WorkType);
-        await runner.ReportWorkflowResultAsync(_workflowId!, check.WorkId, new WorkResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
+        await ReportAsync(runnerId, _workflowId!, check.WorkId, new WorkResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
 
         var anotherRunnerId = await RegisterRunnerAsync();
         var anotherRunner = Grains.GetGrain<IRunnerGrain>(anotherRunnerId);
-        Assert.Null(await anotherRunner.PollAsync());
+        Assert.Null(await anotherRunner.PollAsync(_fixture.Cluster.GetSiloServiceProvider(null)));
     }
 
 }

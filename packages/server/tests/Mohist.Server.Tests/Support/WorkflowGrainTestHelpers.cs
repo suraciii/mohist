@@ -182,8 +182,11 @@ public static class WorkflowGrainTestHelpers
         await workflow.StartAsync(TestInput(grains, workflowId, projectId));
         await workflow.AssignRunnerAsync(runnerId);
 
-        var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-        Assert.NotNull(await runner.PollAsync());
+        // The runner grain no longer owns PollAsync (the stateless
+        // DispatchService computes dispatches, which needs a service provider
+        // this static helper does not hold). Callers that need a dispatch poll
+        // through their fixture's service provider; this helper only stages the
+        // assignment.
     }
 
     public static async Task<(WorkDispatch Work, string RunnerId)> PollWorkAsync(IGrainFactory grains, string connectionString, string runnerId, string workflowId)
@@ -198,49 +201,12 @@ public static class WorkflowGrainTestHelpers
             "test-host",
             TestProjectId(workflowId)));
 
-        var work = await TestWait.ForAsync(
-            () => runner.PollAsync(),
-            value => value is not null,
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromMilliseconds(20),
-            $"Runner '{runnerId}' to receive work for workflow '{workflowId}'");
-        return (work!, runnerId);
-    }
-
-    public static async Task ReportAsync(IGrainFactory grains, string runnerId, string workflowRunId, string workId, WorkResult result)
-    {
-        var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.ReportWorkflowResultAsync(workflowRunId, workId, result);
-    }
-
-    public static async Task ReportAsync(IGrainFactory grains, string runnerId, WorkDispatch work, WorkResult result)
-    {
-        await ReportAsync(grains, runnerId, work.WorkflowRunId, work.WorkId, result);
-    }
-
-    public static async Task ReportChecksAsync(IGrainFactory grains, string runnerId, WorkDispatch checksWork, params (string Name, string Status, string? Message)[] checkResults)
-    {
-        var output = JsonSerializer.Serialize(checkResults.Select(cr => new Dictionary<string, string?>
-        {
-            ["name"] = cr.Name,
-            ["status"] = cr.Status,
-            ["message"] = cr.Message,
-        }));
-        await ReportAsync(grains, runnerId, checksWork.WorkflowRunId, checksWork.WorkId, new WorkResult(
-            checkResults.All(cr => cr.Status == "pass") ? "pass" : "fail",
-            Output: output));
-    }
-
-    public static async Task ReportChecksPassAsync(IGrainFactory grains, string runnerId, WorkDispatch checksWork, params string[] checkNames)
-    {
-        await ReportChecksAsync(grains, runnerId, checksWork, checkNames.Select(n => (n, "pass", (string?)null)).ToArray());
-    }
-
-    public static async Task ReportChecksFailAsync(IGrainFactory grains, string runnerId, WorkDispatch checksWork, string failedCheckName, string message, params string[] passingCheckNames)
-    {
-        var results = passingCheckNames.Select(n => (n, "pass", (string?)null)).ToList();
-        results.Add((failedCheckName, "fail", message));
-        await ReportChecksAsync(grains, runnerId, checksWork, results.ToArray());
+        // The runner grain no longer owns PollAsync; the stateless DispatchService
+        // computes dispatches. This static helper is retained for parity with the
+        // instance helper in WorkflowGrainSpecs but is currently unused — callers
+        // use the instance helper which has fixture access for the service provider.
+        throw new NotSupportedException(
+            "Static PollWorkAsync requires a service provider for DispatchService; use the WorkflowGrainSpecs instance helper instead.");
     }
 
     public static WorkflowDefinition SingleStage(

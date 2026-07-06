@@ -62,7 +62,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r2, checks, "typecheck", "lint", "test");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -79,7 +79,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         await ReportChecksFailAsync(r2, checks, "lint", "lint errors", "typecheck", "test");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
 
         await (await StartWorkflowAsync(MultiCheckStage())).GetRunStatusAsync();
     }
@@ -134,7 +134,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, retried, "lint");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r3);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -193,7 +193,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r4, recheck, "typecheck", "lint");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -276,7 +276,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r1);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -316,6 +316,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r4, checks2, "typecheck", "test");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
     }
 }

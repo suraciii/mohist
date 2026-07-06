@@ -24,30 +24,32 @@ export class ServerConnection {
   }
 
   /**
-   * Polls the server for the next dispatch. The body carries the process's
-   * full level state (`inFlight` + `awaitingAck` work keys) so the server
-   * can reconcile (Batch 2: desired − reported). In Batch 1 the server
-   * ignores the body; sending it now means the reported set is correct the
-   * moment the server starts consuming it, with no second runner change.
-   *
-   * Returns the single dispatched work item, or `null` when the server has
-   * nothing to hand over (HTTP 204). Multi-dispatch (`{ dispatches: [...] }`)
-   * is a Batch 2 server change; the runner will adapt then.
+   * Polls the server for dispatches. The body carries the process's full level
+   * state (`inFlight` + `awaitingAck` work keys) so the server can reconcile
+   * (`desired − reported`): repair lost dispatches and serve new claims against
+   * spare capacity. The response is `{ dispatches: [...] }` carrying zero or
+   * more work items; an empty list (HTTP 204 or empty array) means nothing to
+   * do this round. Multi-dispatch replaces the old one-dispatch-per-poll limit.
    */
   async poll(
     signal: AbortSignal,
     report: { inFlight: string[]; awaitingAck: string[] } = { inFlight: [], awaitingAck: [] },
-  ): Promise<RenderedWorkItem | null> {
+  ): Promise<RenderedWorkItem[]> {
     const response = await fetch(this.url("poll"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(report),
       signal,
     })
-    if (response.status === 204) return null
+    if (response.status === 204) return []
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
-    const dispatch = (await response.json()) as WorkDispatchResponse
-    return toWorkItem(dispatch)
+    const payload = (await response.json()) as { dispatches?: WorkDispatchResponse[] } | WorkDispatchResponse
+    // Tolerate both the new envelope `{ dispatches: [...] }` and a legacy
+    // single-object response during a rolling update.
+    const list = Array.isArray(payload) ? payload
+      : "dispatches" in payload && Array.isArray(payload.dispatches) ? payload.dispatches
+      : [payload as WorkDispatchResponse]
+    return list.map(toWorkItem)
   }
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {

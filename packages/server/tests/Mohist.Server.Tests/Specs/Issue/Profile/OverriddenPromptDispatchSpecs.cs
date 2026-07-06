@@ -108,12 +108,9 @@ public class OverriddenPromptDispatchSpecs : IAsyncLifetime
             async () =>
             {
                 using var response = await _client.PostAsync($"/api/runner/{runnerId}/poll", null);
-                if (response.StatusCode == HttpStatusCode.NoContent)
+                var work = await response.ReadFirstDispatchAsync<WorkDispatchDto>();
+                if (work is null)
                     return (Work: (WorkDispatchDto?)null, Observed: string.Join("; ", observed));
-
-                response.EnsureSuccessStatusCode();
-                var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
-                    ?? throw new InvalidOperationException("Empty work dispatch");
 
                 if (work.ProjectId == projectId
                     && work.IssueNumber == issueNumber

@@ -977,9 +977,9 @@ public class AgentSessionSpecs
             await workflowBGrain.AssignRunnerAsync(runnerId);
 
             var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            var first = await runner.PollAsync();
+            var first = await runner.PollAsync(_fixture.Services);
             Assert.NotNull(first);
-            var second = await runner.PollAsync();
+            var second = await runner.PollAsync(_fixture.Services);
             Assert.NotNull(second);
 
             var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
@@ -1227,14 +1227,12 @@ public class AgentSessionSpecs
         for (var attempt = 0; attempt < 100; attempt++)
         {
             using var response = await _client.PostAsync($"/api/runner/{_runnerId}/poll", null);
-            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+            var work = await response.ReadFirstDispatchAsync<WorkDispatchDto>();
+            if (work is null)
             {
                 await Task.Yield();
                 continue;
             }
-            response.EnsureSuccessStatusCode();
-            var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
-                ?? throw new InvalidOperationException("Empty work dispatch");
 
             if (work.WorkType == "task" && work.Uses == "mohist/openspec-tasks")
             {

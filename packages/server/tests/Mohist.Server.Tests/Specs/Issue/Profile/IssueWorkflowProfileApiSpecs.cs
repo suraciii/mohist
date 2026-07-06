@@ -555,12 +555,10 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     private async Task<WorkDispatchDto?> PollMatchingWorkAsync(Func<WorkDispatchDto, bool> matches)
     {
         using var response = await _client.PostAsync($"/api/runner/{_runnerId}/poll", null);
-        if (response.StatusCode == HttpStatusCode.NoContent)
+        var work = await response.ReadFirstDispatchAsync<WorkDispatchDto>();
+        if (work is null)
             return null;
 
-        response.EnsureSuccessStatusCode();
-        var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
-            ?? throw new InvalidOperationException("Empty work dispatch");
         if (matches(work))
             return work;
 

@@ -329,24 +329,24 @@ public class WorkflowRetrySessionHealthGuardSpecs
     private async Task<WorkDispatchInfo?> PollMatchingTaskAsync(string runnerId, string workflowRunId)
     {
         var response = await _client.PostAsync($"/api/runner/{runnerId}/poll", null);
-        if (response.StatusCode == HttpStatusCode.NoContent)
+        var payload = await response.ReadFirstDispatchElementAsync();
+        if (payload is null)
             return null;
 
-        response.EnsureSuccessStatusCode();
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var dispatchedWorkflowRunId = payload.GetProperty("workflowRunId").GetString();
+        var data = payload.Value;
+        var dispatchedWorkflowRunId = data.GetProperty("workflowRunId").GetString();
         if (string.Equals(dispatchedWorkflowRunId, workflowRunId, StringComparison.Ordinal))
         {
             return new WorkDispatchInfo(
-                payload.GetProperty("workId").GetString()!,
-                payload.GetProperty("stage").GetString() ?? "build",
-                payload.TryGetProperty("title", out var t) ? t.GetString() : null);
+                data.GetProperty("workId").GetString()!,
+                data.GetProperty("stage").GetString() ?? "build",
+                data.TryGetProperty("title", out var t) ? t.GetString() : null);
         }
 
         await _client.PostOkAsync($"/api/runner/{runnerId}/report", new
         {
             workflowRunId = dispatchedWorkflowRunId,
-            workId = payload.GetProperty("workId").GetString(),
+            workId = data.GetProperty("workId").GetString(),
             status = "completed",
         });
         return null;

@@ -860,7 +860,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         var workflow = _grains.GetGrain<IWorkflowGrain>(wrId);
         await workflow.AssignRunnerAsync(runnerId);
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.PollAsync();
+        await runner.PollAsync(_fixture.Services);
 
         var project = await _grains.GetGrain<IProjectGrain>(projectId).GetAsync();
         var path = Mohist.Server.Infrastructure.Workspace.MohistWorkspaceLayout.IssueWorkspacePath(_fixture.RunnerRoot, project!.Name, number);

@@ -258,9 +258,9 @@ public class RuntimeEntrySpecs
             await workflowBGrain.AssignRunnerAsync(runnerId);
 
             var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            var first = await runner.PollAsync();
+            var first = await runner.PollAsync(_fixture.Services);
             Assert.NotNull(first);
-            var second = await runner.PollAsync();
+            var second = await runner.PollAsync(_fixture.Services);
             Assert.NotNull(second);
 
             var httpStatus = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");

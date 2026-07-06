@@ -233,7 +233,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, retried, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r3);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

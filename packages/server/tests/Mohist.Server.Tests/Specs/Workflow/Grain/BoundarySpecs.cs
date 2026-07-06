@@ -22,7 +22,7 @@ public class BoundarySpecs : WorkflowGrainSpecs
         ]));
 
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId!);
-        Assert.Null(await runner.PollAsync());
+        Assert.Null(await runner.PollAsync(Services));
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
@@ -57,11 +57,20 @@ public class BoundarySpecs : WorkflowGrainSpecs
 
         var (task, runnerId) = await PollWorkAnyAsync();
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var unknownReport = await runner.ReportWorkflowResultAsync(task.WorkflowRunId, "unknown-work", new WorkResult("failed", "wrong work"));
-        Assert.False(unknownReport.Tracked);
-        Assert.Equal("untracked", unknownReport.Reason);
+        // A report for unknown work goes direct to the owning grain, which
+        // discards it as Stale (the runner grain no longer relays/tracks). The
+        // current in-flight work is unaffected.
+        await ReportAsync(runnerId, task.WorkflowRunId, "unknown-work", new WorkResult("failed", "wrong work"));
 
-        Assert.Null(await runner.PollAsync());
+        // The unknown-work report was ignored as Stale. The current in-flight
+        // task is unaffected: a re-poll that reports nothing in flight may
+        // repair-re-dispatch the same task, but must never advance or drop it.
+        var repoll = await runner.PollAsync(Services);
+        if (repoll is not null)
+        {
+            Assert.Equal(task.WorkflowRunId, repoll.WorkflowRunId);
+            Assert.Equal(task.WorkId, repoll.WorkId);
+        }
 
         await ReportAsync(runnerId, task.WorkId, "completed");
         var (check, r2) = await PollWorkAnyAsync();

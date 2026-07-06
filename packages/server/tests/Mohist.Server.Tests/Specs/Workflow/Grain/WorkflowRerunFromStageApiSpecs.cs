@@ -296,7 +296,7 @@ public class WorkflowRerunFromStageApiSpecs
     {
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         var work = await TestWait.ForAsync(
-            () => runner.PollAsync(),
+            () => runner.PollAsync(_fixture.Services),
             value => value is not null,
             TimeSpan.FromSeconds(3),
             TimeSpan.FromMilliseconds(20),
@@ -306,8 +306,10 @@ public class WorkflowRerunFromStageApiSpecs
 
     private async Task ReportAsync(string runnerId, string wrId, string workId, string status)
     {
-        var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.ReportWorkflowResultAsync(wrId, workId, new WorkResult(status));
+        // The runner grain no longer relays workflow reports; report direct to
+        // the owning grain via the shared translator path (mirrors /report).
+        await DispatchTestExtensions.ReportWorkflowDirectAsync(
+            _grains, _services, runnerId, wrId, workId, new WorkResult(status));
     }
 
     private async Task<WorkflowRun> LoadRunAsync(string wrId)
