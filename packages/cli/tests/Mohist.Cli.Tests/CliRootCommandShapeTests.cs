@@ -17,7 +17,7 @@ namespace Mohist.Cli.Tests;
 //   - openspec/changes/issue-387/specs/root-command-shape/spec.md
 //   - openspec/changes/issue-387/design.md D1 (uniform no-alias policy),
 //     D4 (test strategy — root-shape guard is the new third class).
-public class CliRootCommandShapeSpecs
+public class CliRootCommandShapeTests
 {
     [Fact]
     public async Task Root_Help_ListsResourceGroupsAndInfoOnly_NoBareVerbs()

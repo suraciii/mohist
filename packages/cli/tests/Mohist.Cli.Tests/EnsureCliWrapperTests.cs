@@ -4,7 +4,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class EnsureCliWrapperSpecs
+public class EnsureCliWrapperTests
 {
     private static UpdateOperations BuildOperations(
         out StringWriter output,

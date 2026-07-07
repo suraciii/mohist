@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class SkillAssetSynchronizerSpecs
+public class SkillAssetSynchronizerTests
 {
     private const string SourceDir = "/repo/packages/cli/Mohist.Cli/skill-data";
     private const string ManagedDir = "/home/test/.mohist/cli/skill-data";

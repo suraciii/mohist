@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class SourceCodeUpdaterStructureSpecs
+public class SourceCodeUpdaterStructureTests
 {
     [Fact]
     public void Constructor_DependsOnCollaboratorsInsteadOfRawInfrastructureSet()

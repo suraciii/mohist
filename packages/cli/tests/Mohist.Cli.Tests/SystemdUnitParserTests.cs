@@ -4,7 +4,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class SystemdUnitParserSpecs
+public class SystemdUnitParserTests
 {
     [Fact]
     public void ParseSystemdShow_ReturnsKeyValueMap()
