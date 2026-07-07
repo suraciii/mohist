@@ -9,7 +9,7 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 
 public class EventBridgeSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task EventBridge_ReverseDnsStageStarted_ConnectionSubscribedToReverseDnsName_ReceivesEnvelope()
@@ -34,7 +34,7 @@ public class EventBridgeSpecs
         Assert.Equal(EventCatalog.ReverseDns.StageStarted, envelope.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task EventBridge_ReverseDnsStageStarted_ConnectionSubscribedToBothNames_Receives()
@@ -69,7 +69,7 @@ public class EventBridgeSpecs
         Assert.Equal(EventCatalog.ReverseDns.StageStarted, envelope.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task EventBridge_ReverseDnsStageStarted_UnsubscribedConnection_DoesNotReceive()
@@ -92,7 +92,7 @@ public class EventBridgeSpecs
         Assert.Empty(hub.Messages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task EventBridge_ReverseDnsAgentSessionRuntimeBound_TwoSubscribedConnections_BothReceive()

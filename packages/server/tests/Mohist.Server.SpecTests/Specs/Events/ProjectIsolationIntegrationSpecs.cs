@@ -20,7 +20,7 @@ public class ProjectIsolationIntegrationSpecs
 {
     private const string InboxHintType = "com.mohist.inbox.item-persisted";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InboxHint_ProjectA_ReachesProjectASession_NotProjectBSession()
@@ -54,7 +54,7 @@ public class ProjectIsolationIntegrationSpecs
         Assert.Equal("proj-A", envelope.Extensions?["projectid"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InboxHint_ProjectB_ReachesProjectBSession_NotProjectASession()
@@ -84,7 +84,7 @@ public class ProjectIsolationIntegrationSpecs
         Assert.Equal("conn-B", message.ConnectionId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InboxHint_EventWithoutProjectStamp_FallsBackToTypeOnlyMatching()
@@ -125,7 +125,7 @@ public class ProjectIsolationIntegrationSpecs
         Assert.Contains(hub.Messages, m => m.ConnectionId == "conn-B");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InboxHint_ReachesCrossProjectSession_WhenConnectionHasNoProjectAffinity()
@@ -162,7 +162,7 @@ public class ProjectIsolationIntegrationSpecs
         Assert.Contains("conn-cross", deliveredTo);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InboxHint_ManySessionsSubscribed_OnlyOwningProjectSessionsReceive()
@@ -207,7 +207,7 @@ public class ProjectIsolationIntegrationSpecs
         Assert.DoesNotContain("conn-B2", deliveredTo);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task LegacyEvent_NoProjectStamp_ReachesAllAffinitizedSessions()

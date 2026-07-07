@@ -20,7 +20,7 @@ namespace Mohist.Server.SpecTests.Specs.Events.Inbox;
 /// </summary>
 public class InboxProjectionHandlerSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowRunFailed_ProducesWorkflowFailedItemInOwningProject()
@@ -55,7 +55,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("Issue 42", item.IssueTitle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task StageApprovalRequested_ProducesApprovalRequestedItemInOwningProject()
@@ -87,7 +87,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal(42, item.IssueNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueWorkStarted_ProducesIssueStartedItemInOwningProject()
@@ -117,7 +117,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("Started", item.IssueTitle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueCompleted_ProducesIssueCompletedItemInOwningProject()
@@ -146,7 +146,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("Done", item.IssueTitle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task ReplayOfSameCloudEvent_DoesNotCreateSecondItem()
@@ -175,7 +175,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("evt-replay", item.SourceEventId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEventReplay_DoesNotCreateSecondItem()
@@ -206,7 +206,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("evt-wf-replay", item.SourceEventId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowStorePublishThenEventStoreReplay_DoesNotDuplicateInboxItem()
@@ -243,7 +243,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal(stored.Envelope.Id, item.SourceEventId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_LandsInProjectOwnedByRun_NotInOtherProjects()
@@ -275,7 +275,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("proj_a", aItems[0].ProjectId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_LandsInProjectOwnedByIssue_NotInOtherProjects()
@@ -304,7 +304,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("proj_a", aItems[0].ProjectId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_ProjectExtensionDisagreesWithLoadedIssue_SkipsWithoutLeakingToClaimedProject()
@@ -330,7 +330,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_b"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_NumberExtensionDisagreesWithLoadedIssue_SkipsWithoutThrowing()
@@ -355,7 +355,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_RunAnnotationsDisagreeWithLoadedIssue_SkipsWithoutLeakingToClaimedProject()
@@ -384,7 +384,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_b"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_RunIssueNumberDisagreesWithLoadedIssue_SkipsWithoutThrowing()
@@ -412,7 +412,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_MissingProjectIdExtension_SkipsWithoutThrowing()
@@ -438,7 +438,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_MissingIssueIdExtension_SkipsWithoutThrowing()
@@ -464,7 +464,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_MissingAnnotationsOnRun_SkipsWithoutThrowing()
@@ -489,7 +489,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_UnknownRunId_SkipsWithoutThrowing()
@@ -508,7 +508,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_MissingWorkflowRunIdInSource_SkipsWithoutThrowing()
@@ -529,7 +529,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(items);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task IssueEvent_UnknownIssueIdForTitle_SkipsWithoutThrowing()
@@ -549,7 +549,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task WorkflowEvent_TitleTakenFromIssueRowSnapshottedAtProjectionTime()
@@ -590,7 +590,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("Snapshot me", item.IssueTitle);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Filter_AcceptsAllFourTypes()
@@ -602,7 +602,7 @@ public class InboxProjectionHandlerSpecs
         Assert.True(handler.Filter(InboxProjectionTestSupport.BuildWorkflowEvent(EventCatalog.ReverseDns.StageApprovalRequested, "w", "e4")));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Filter_RejectsOtherEventTypes()
@@ -616,7 +616,7 @@ public class InboxProjectionHandlerSpecs
             data: null)));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task HasSubscriptionAttributeWithExpectedFourTypes()
@@ -632,7 +632,7 @@ public class InboxProjectionHandlerSpecs
             attr!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task DistinctEvents_ProduceDistinctItemsAcrossKinds()
@@ -675,7 +675,7 @@ public class InboxProjectionHandlerSpecs
         }, kinds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_EnabledKind_CreatesItem()
@@ -703,7 +703,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal(NotificationKinds.IssueCompleted, item.NotificationKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_DisabledKind_DoesNotCreateItem()
@@ -736,7 +736,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_DifferentDisabledKinds_EachPreventsItsOwnKind()
@@ -767,7 +767,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_MissingSubscription_CreatesItem()
@@ -793,7 +793,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal(NotificationKinds.IssueStarted, item.NotificationKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_DisabledKind_LeavesExistingItemsUntouched()
@@ -840,7 +840,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal(NotificationKinds.WorkflowFailed, item.NotificationKind);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_ReEnabledKind_CreatesItemForSubsequentEvent()
@@ -892,7 +892,7 @@ public class InboxProjectionHandlerSpecs
         Assert.Equal("evt-after-reenable", item.SourceEventId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Subscription_ReplayingDisabledKindEvent_RemainsNoOp()
