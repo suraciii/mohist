@@ -155,9 +155,9 @@ public class RunnerWorkflowStatusRouterSpecs
             Task.FromResult(new Mohist.Server.Workflow.Grains.WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned));
         public Task<WorkItem?> ClaimNextAsync(string workerId) =>
             Task.FromResult<WorkItem?>(null);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReportTaskOutcomeAsync(string workerId, string workId, TaskOutcome outcome)
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReportCheckOutcomeAsync(string workerId, string workId, CheckOutcome outcome)
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task ReleaseStageLocksAsync(string stage, string reason) => Task.CompletedTask;
         public Task<bool> IsStoppedOrTerminalAsync() => Task.FromResult(true);

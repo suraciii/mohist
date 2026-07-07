@@ -80,8 +80,8 @@ IWorkflowGrain
   AssignWorkerAsync(workerId) -> Assigned | Rejected   # idempotent arbiter; sets Assignment
   ClaimNextAsync(workerId)    -> WorkItem | null       # single write: pick NextWork,
                                                        # acquire stage lock, mark Running, persist
-  ReportTaskOutcomeAsync(workerId, workId, outcome)  -> Accepted | Stale
-  ReportCheckOutcomeAsync(workerId, workId, outcome) -> Accepted | Stale
+  ReceiveTaskReportAsync(workerId, workId, report)  -> Accepted | Stale
+  ReceiveCheckReportAsync(workerId, workId, report) -> Accepted | Stale
 
 IRunnerGrain
   RegisterAsync(info)          # first contact / info refresh

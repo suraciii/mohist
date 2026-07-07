@@ -22,7 +22,7 @@ namespace Mohist.Server.Tests.Specs.Runner.Services;
 /// RunnerGrain composes to translate between the control plane's domain
 /// work items and the runner-process dispatch envelopes. Covers both the
 /// out-direction (<c>WorkItem → WorkDispatch</c>) and the in-direction
-/// (<c>WorkResult → TaskOutcome | CheckOutcome</c>). Acceptance gate for T-003
+/// (<c>WorkResult → TaskReport | CheckReport</c>). Acceptance gate for T-003
 /// design decisions D1/D2/D4/D7 (work item protocol + translation externalization).
 /// </summary>
 public class WorkflowItemTranslatorSpecs : IAsyncLifetime
@@ -227,13 +227,13 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
     }
 
     // =========================================================================
-    // In-direction: WorkResult → TaskOutcome | CheckOutcome
+    // In-direction: WorkResult → TaskReport | CheckReport
     // =========================================================================
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task TranslateResult_PassedTaskWithoutDeclaredArtifacts_PassesWithOutput()
+    public async Task TranslateResult_SucceededTaskWithoutDeclaredArtifacts_SucceedsWithOutput()
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-1";
@@ -241,10 +241,10 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
         var result = new WorkResult("completed", Output: "{\"ok\":true}");
 
-        var outcome = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = await _translator.TranslateResultAsync(item, result, runId, run);
 
-        var task = Assert.IsType<WorkflowItemTranslator.InboundOutcome.Task>(outcome);
-        Assert.Equal(OutcomeStatus.Passed, task.Value.Status);
+        var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
+        Assert.Equal(TaskReportStatus.Succeeded, task.Value.Status);
         Assert.Equal("task-1.1", task.Value.WorkId);
         Assert.Equal("{\"ok\":true}", task.Value.Output);
         Assert.Null(task.Value.Detail);
@@ -261,20 +261,20 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
         var result = new WorkResult("failed", "runner-exit-42");
 
-        var outcome = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = await _translator.TranslateResultAsync(item, result, runId, run);
 
-        var task = Assert.IsType<WorkflowItemTranslator.InboundOutcome.Task>(outcome);
-        Assert.Equal(OutcomeStatus.Failed, task.Value.Status);
+        var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
+        Assert.Equal(TaskReportStatus.Failed, task.Value.Status);
         Assert.Equal("runner-exit-42", task.Value.Detail);
-        // Failure has only two states (Passed | Failed) — confirms the
+        // Task report has only two states (Succeeded | Failed) — confirms the
         // protocol's no-extraneous-states guarantee.
-        Assert.True(task.Value.Status is OutcomeStatus.Passed or OutcomeStatus.Failed);
+        Assert.True(task.Value.Status is TaskReportStatus.Succeeded or TaskReportStatus.Failed);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task TranslateResult_PassedTaskMissingDeclaredArtifacts_PassesWithoutArtifacts()
+    public async Task TranslateResult_SucceededTaskMissingDeclaredArtifacts_SucceedsWithoutArtifacts()
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-3";
@@ -283,17 +283,17 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
             artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]));
         var result = new WorkResult("completed", Output: "{}");
 
-        var outcome = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = await _translator.TranslateResultAsync(item, result, runId, run);
 
-        var task = Assert.IsType<WorkflowItemTranslator.InboundOutcome.Task>(outcome);
-        Assert.Equal(OutcomeStatus.Passed, task.Value.Status);
+        var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
+        Assert.Equal(TaskReportStatus.Succeeded, task.Value.Status);
         Assert.Null(task.Value.Artifacts);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task TranslateResult_PassedTaskWithUploadIds_RecordsArtifactReferences()
+    public async Task TranslateResult_SucceededTaskWithUploadIds_RecordsArtifactReferences()
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-4";
@@ -324,10 +324,10 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
             artifacts: new TaskArtifactCapture([new TaskArtifactDeclaration("review.md")]));
         var result = new WorkResult("completed", Output: "{}", ArtifactUploadIds: [uploadId]);
 
-        var outcome = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = await _translator.TranslateResultAsync(item, result, runId, run);
 
-        var task = Assert.IsType<WorkflowItemTranslator.InboundOutcome.Task>(outcome);
-        Assert.Equal(OutcomeStatus.Passed, task.Value.Status);
+        var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
+        Assert.Equal(TaskReportStatus.Succeeded, task.Value.Status);
         Assert.NotNull(task.Value.Artifacts);
         Assert.Single(task.Value.Artifacts);
         Assert.Equal("review.md", task.Value.Artifacts[0].Path);
@@ -350,9 +350,9 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         });
         var result = new WorkResult("fail", Output: output);
 
-        var outcome = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = await _translator.TranslateResultAsync(item, result, runId, run);
 
-        var checks = Assert.IsType<WorkflowItemTranslator.InboundOutcome.Checks>(outcome);
+        var checks = Assert.IsType<WorkflowItemTranslator.InboundReport.Checks>(report);
         Assert.Equal("build", checks.Value.Stage);
         Assert.Equal(2, checks.Value.Results.Count);
         Assert.Equal("check-1", checks.Value.Results[0].Name);
@@ -377,14 +377,14 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
         var result = new WorkResult("failed", "runner-lost");
 
-        var outcome = await _translator.TranslateResultAsync(item, result, runId, run);
+        var report = await _translator.TranslateResultAsync(item, result, runId, run);
 
-        var task = Assert.IsType<WorkflowItemTranslator.InboundOutcome.Task>(outcome);
-        Assert.Equal(OutcomeStatus.Failed, task.Value.Status);
+        var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
+        Assert.Equal(TaskReportStatus.Failed, task.Value.Status);
         Assert.Equal("runner-lost", task.Value.Detail);
-        // No additional OutcomeStatus variant — confirms the protocol's
+        // No additional TaskReportStatus variant — confirms the protocol's
         // two-state invariant from the acceptance criteria.
-        Assert.Equal(2, System.Enum.GetValues<OutcomeStatus>().Length);
+        Assert.Equal(2, System.Enum.GetValues<TaskReportStatus>().Length);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -452,21 +452,21 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void OutcomeStatus_HasExactlyTwoStates_PassedAndFailed()
+    public void TaskReportStatus_HasExactlyTwoStates_SucceededAndFailed()
     {
-        // Protocol invariant: the only outcome states are Passed and Failed.
+        // Protocol invariant: the only report states are Succeeded and Failed.
         // Timeouts and runner-lost collapse into Failed + Detail; they are
         // NOT independent enum values.
-        var values = System.Enum.GetValues<OutcomeStatus>();
+        var values = System.Enum.GetValues<TaskReportStatus>();
         Assert.Equal(2, values.Length);
-        Assert.Contains(OutcomeStatus.Passed, values);
-        Assert.Contains(OutcomeStatus.Failed, values);
+        Assert.Contains(TaskReportStatus.Succeeded, values);
+        Assert.Contains(TaskReportStatus.Failed, values);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task TranslateResult_AllStatusAliases_CollapseToPassed()
+    public async Task TranslateResult_AllStatusAliases_CollapseToSucceeded()
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-status-alias";
@@ -475,10 +475,10 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
 
         foreach (var alias in new[] { "completed", "pass", "PASS", "Completed" })
         {
-            var outcome = await _translator.TranslateResultAsync(
+            var report = await _translator.TranslateResultAsync(
                 item, new WorkResult(alias), runId, run);
-            var task = Assert.IsType<WorkflowItemTranslator.InboundOutcome.Task>(outcome);
-            Assert.Equal(OutcomeStatus.Passed, task.Value.Status);
+            var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
+            Assert.Equal(TaskReportStatus.Succeeded, task.Value.Status);
         }
     }
 
@@ -492,11 +492,11 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var run = await SeedRunningWorkflowAsync(runId, projectId);
         var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null);
 
-        var outcome = await _translator.TranslateResultAsync(
+        var report = await _translator.TranslateResultAsync(
             item, new WorkResult("failed", "work-timeout"), runId, run);
-        var task = Assert.IsType<WorkflowItemTranslator.InboundOutcome.Task>(outcome);
+        var task = Assert.IsType<WorkflowItemTranslator.InboundReport.Task>(report);
 
-        Assert.Equal(OutcomeStatus.Failed, task.Value.Status);
+        Assert.Equal(TaskReportStatus.Failed, task.Value.Status);
         Assert.Equal("work-timeout", task.Value.Detail);
     }
 

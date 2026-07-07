@@ -468,14 +468,14 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 if (task is not null)
                 {
                     var workId = task.WorkId ?? task.Id;
-                    var outcome = new TaskOutcome(workId, OutcomeStatus.Failed, Output: null, Artifacts: null, Detail: "runner-lost", AddTasks: null);
-                    await workflow.ReportTaskOutcomeAsync(workerId, workId, outcome);
+                    var report = new TaskReport(workId, TaskReportStatus.Failed, Output: null, Artifacts: null, Detail: "runner-lost", AddTasks: null);
+                    await workflow.ReceiveTaskReportAsync(workerId, workId, report);
                     continue;
                 }
                 if (!string.IsNullOrWhiteSpace(stage.ChecksWorkId))
                 {
-                    var checksOutcome = new CheckOutcome(stage.Id, [new CheckResult(stage.Id, "failed", "runner-lost")]);
-                    await workflow.ReportCheckOutcomeAsync(workerId, stage.ChecksWorkId, checksOutcome);
+                    var checksReport = new CheckReport(stage.Id, [new CheckResult(stage.Id, "failed", "runner-lost")]);
+                    await workflow.ReceiveCheckReportAsync(workerId, stage.ChecksWorkId, checksReport);
                 }
             }
             catch (Exception ex)

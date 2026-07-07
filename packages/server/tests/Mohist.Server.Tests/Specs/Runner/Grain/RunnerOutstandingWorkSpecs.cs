@@ -10,9 +10,8 @@ namespace Mohist.Server.Tests.Specs.Runner.Grain;
 /// <summary>
 /// Coverage for T-004 (design D5): <see cref="RunnerGrain"/> must own the
 /// outstanding-work set for workflow work items, and on runner loss must
-/// drain that set by synthesizing a failed outcome through the normal
-/// <c>ReportWorkflowResultAsync</c> channel — not by calling a grain
-/// notification method on <see cref="IWorkflowGrain"/>.
+/// drain that set by synthesizing a failed report through the normal
+/// workflow report channel.
 /// </summary>
 [Collection("WorkflowGrain")]
 public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
@@ -37,11 +36,11 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task RunnerLoss_SynthesizesFailedTaskOutcome_ViaReportChannel()
+    public async Task RunnerLoss_SynthesizesFailedTaskReport_ViaReportChannel()
     {
         // Regression for T-004 (design D5): runner-loss closeout must go
-        // through the normal ReportWorkflowResultAsync channel. The grain
-        // sees the same TaskOutcome(Failed, Detail="runner-lost") that a
+        // through the normal workflow report channel. The grain
+        // sees the same TaskReport(Failed, Detail="runner-lost") that a
         // runner process would have sent if it had finished and reported
         // `failed` itself — there is no separate "runner lost" path on
         // the grain.
