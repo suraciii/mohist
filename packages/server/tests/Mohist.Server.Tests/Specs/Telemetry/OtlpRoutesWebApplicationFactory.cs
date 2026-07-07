@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services.SignalR;
@@ -68,6 +69,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.UseEnvironment(MohistHostEnvironment.Testing);
         _webRoot ??= CreateWebRoot();
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
         builder.UseSetting("Mohist:WebRoot", _webRoot);
@@ -91,8 +93,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
                 ["Mohist:AgentJob:JobTimeout"] = "00:00:08",
-                // 同 MohistIntegrationFixture：置空 Hermes webhook，避免测试把通知
-                // 投递到用户真实的聊天平台（见 MohistIntegrationFixture 注释）。
                 ["Mohist:Notifications:Hermes:WebhookUrl"] = null,
             });
         });

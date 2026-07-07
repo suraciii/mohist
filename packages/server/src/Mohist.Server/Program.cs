@@ -7,8 +7,7 @@ using Mohist.Server.Otel;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 加载 ~/.mohist/config.jsonc，环境变量（MOHIST__*）会自动覆盖它
-builder.Configuration.AddMohistConfigFile();
+builder.Configuration.AddMohistUserConfigFile(builder.Environment);
 
 // 注册文件日志 provider：把每条记录写为 NDJSON 到 ILogPathResolver.Resolve() 指定的目录。
 // 在主 builder 和 BuildAlternateApp 备用 builder 上都注册一遍，保证 OTLP 端口绑定失败时的
@@ -108,7 +107,7 @@ await finalApp.WaitForShutdownAsync();
 static WebApplication BuildAlternateApp(string[] args)
 {
     var fresh = WebApplication.CreateBuilder(args);
-    fresh.Configuration.AddMohistConfigFile();
+    fresh.Configuration.AddMohistUserConfigFile(fresh.Environment);
     fresh.Logging.AddFileLogger();
     var altMainHost = fresh.Configuration["urls"]
         ?? fresh.Configuration["ASPNETCORE_URLS"]
