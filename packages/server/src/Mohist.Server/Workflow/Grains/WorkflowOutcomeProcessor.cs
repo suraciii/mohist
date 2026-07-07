@@ -53,20 +53,20 @@ internal sealed class WorkflowOutcomeProcessor
                         _owner.GrainKey, feedbackId, currentTask.Id);
                 }
             }
-            var hasRecoveryTasks = outcome.AddTasks is { Count: > 0 };
-            events.AddRange(run.CompleteTask(advance: !hasRecoveryTasks));
+            var hasFollowUpTasks = outcome.AddTasks is { Count: > 0 };
+            events.AddRange(run.CompleteTask(advance: !hasFollowUpTasks));
 
-            if (hasRecoveryTasks && outcome.AddTasks is { Count: > 0 } addTasks)
+            if (hasFollowUpTasks && outcome.AddTasks is { Count: > 0 } addTasks)
             {
                 var taskDefs = addTasks.Select(t =>
                 {
                     var with = WorkflowDispatchHelpers.ParseWith(t.With);
                     return new TaskDefinition(t.Id, t.Title, t.Uses, with, t.Artifacts, t.SetVars, t.Recovery);
                 }).ToList();
-                var recoveryEvents = run.AddRuntimeTasks(taskDefs);
-                events.AddRange(recoveryEvents);
+                var followUpEvents = run.AddRuntimeTasks(taskDefs);
+                events.AddRange(followUpEvents);
                 _owner.Log.LogInformation(
-                    "Workflow {Id} task {TaskId} produced {Count} recovery tasks",
+                    "Workflow {Id} task {TaskId} produced {Count} follow-up tasks",
                     _owner.GrainKey, taskRunId, addTasks.Count);
             }
         }
@@ -158,7 +158,7 @@ internal sealed class WorkflowOutcomeProcessor
 
     public string MarkChecksRunning(WorkflowRun run, string stage, IReadOnlyList<CheckItem> items)
     {
-        var checksWorkId = ChecksWorkIdFor(stage);
+        var checksWorkId = WorkflowRunExtensions.ChecksWorkIdFor(stage);
         var currentStage = run.CurrentStage();
         currentStage.ChecksWorkId = checksWorkId;
         var now = DateTimeOffset.UtcNow;
@@ -199,7 +199,7 @@ internal sealed class WorkflowOutcomeProcessor
             case "checks":
             {
                 var ch = (WorkflowWork.ChecksData)work.Data;
-                return WorkItem.Checks(work.Stage, ChecksWorkIdFor(work.Stage), ch.Items);
+                return WorkItem.Checks(work.Stage, WorkflowRunExtensions.ChecksWorkIdFor(work.Stage), ch.Items);
             }
             default:
                 return null;
@@ -232,7 +232,7 @@ internal sealed class WorkflowOutcomeProcessor
             return claimedWorkId;
         }
 
-        if (workId == ChecksWorkIdFor(currentStage.Id))
+        if (workId == WorkflowRunExtensions.ChecksWorkIdFor(currentStage.Id))
         {
             if (!string.IsNullOrWhiteSpace(currentStage.ChecksWorkId))
             {
@@ -254,11 +254,6 @@ internal sealed class WorkflowOutcomeProcessor
 
         return null;
     }
-
-    /// <summary>
-    /// Stable work id for the single checks batch a stage can have in flight.
-    /// </summary>
-    public static string ChecksWorkIdFor(string stage) => $"checks-{stage}";
 
     private static JsonElement? ParseOutputToJsonElement(string? output)
     {

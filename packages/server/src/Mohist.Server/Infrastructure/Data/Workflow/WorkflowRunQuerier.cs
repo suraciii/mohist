@@ -117,7 +117,7 @@ public sealed class WorkflowRunQuerier
     /// Epic #44: returns the ids of workflow runs currently in flight
     /// (<c>Running</c>) and bound to <paramref name="workerId"/> — the
     /// <c>desired</c> set for poll reconciliation. The DispatchService loads
-    /// each to resolve its current workId and render a repair dispatch when
+    /// each to resolve its current workId and render a redelivery dispatch when
     /// the runner's reported set does not include it. Filters at the DB layer;
     /// never deserializes <c>State</c>.
     /// </summary>

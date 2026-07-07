@@ -236,11 +236,6 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned);
     }
 
-    /// <summary>
-    /// Dequeues the next pending agent-job work for this runner. Called by the
-    /// DispatchService on each poll (agent-jobs are served before workflow
-    /// repair/claim). Returns null when no agent-job work is pending.
-    /// </summary>
     public async Task<WorkDispatch?> DequeueAssignedAgentJobAsync()
     {
         while (true)

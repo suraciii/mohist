@@ -35,7 +35,7 @@ internal sealed class WorkflowReadModel
             WorkId: workId,
             WorkType: activeTask is not null ? "task" : "checks",
             Stage: stage,
-            TaskRunId: activeTask?.Id ?? $"checks-{stage}",
+            TaskRunId: activeTask?.Id ?? WorkflowRunExtensions.ChecksWorkIdFor(stage),
             Title: activeTask?.Title ?? "Stage checks",
             ProjectId: string.IsNullOrWhiteSpace(projectId) ? null : projectId,
             IssueId: issueId,

@@ -90,12 +90,6 @@ public static class RunnerRoutes
             return ApiResults.Ok(new RunnerSlotsPatchResponse(runnerId, req.Slots));
         });
 
-        // Reconciliation: the runner sends its process-lifetime reported set
-        // ({ inFlight, awaitingAck }) in the poll body; the stateless
-        // DispatchService computes desired − reported (repairs) plus new
-        // claims against spare capacity, and returns zero or more dispatches.
-        // An empty/absent body reports nothing — reconciliation is skipped and
-        // only new claims are served (the closeout safety net still applies).
         group.MapPost("/poll", async (
             string runnerId,
             HttpRequest request,
@@ -658,7 +652,7 @@ public record WorkDispatchResponse(
 
 /// <summary>
 /// Poll response carrying zero or more dispatches. Replaces the old single-
-/// dispatch 200/204 contract: a reconciliation round may render repairs plus
+/// dispatch 200/204 contract: a reconciliation round may render redeliveries plus
 /// new claims, so the response is a list. An empty list is returned as HTTP
 /// 204 by the route handler.
 /// </summary>

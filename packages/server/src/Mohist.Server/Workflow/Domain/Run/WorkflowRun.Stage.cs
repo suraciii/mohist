@@ -78,12 +78,6 @@ public static partial class WorkflowRunExtensions
         public TaskRun? RunningTask =>
             stage.Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Running);
 
-        public TaskRun? FindRunningTaskByWork(string workId, string workerId) =>
-            stage.Tasks.FirstOrDefault(t =>
-                t.Status == TaskRunStatus.Running
-                && string.Equals(t.WorkId, workId, StringComparison.Ordinal)
-                && string.Equals(t.WorkerId, workerId, StringComparison.Ordinal));
-
         internal bool IsAwaitingApproval => stage.ApprovalStatus is { Result: null };
 
         /// <summary>

@@ -84,11 +84,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var (task, r1) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.", task.WorkId);
 
-        // Under reconciliation, re-polling while the task is Running and the
-        // poll reports nothing in flight may legitimately re-dispatch the same
-        // task (a repair). The property under test is that the runner does not
-        // receive DIFFERENT/advance work before the task completes — the
-        // re-dispatch, if any, must be the same task.
         var runner = Grains.GetGrain<IRunnerGrain>(r1);
         var secondPoll = await runner.PollAsync(Services);
         if (secondPoll is not null)
@@ -220,10 +215,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(firstWork.WorkId, await workflow.GetCurrentWorkIdAsync());
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        // A re-poll that reports nothing in flight may repair-re-dispatch the
-        // same in-flight work; the assignment-idempotency property under test
-        // is already asserted above. Any re-dispatch here must be the same
-        // work, never a duplicate assignment.
         var repoll = await runner.PollAsync(Services);
         if (repoll is not null)
         {
@@ -316,27 +307,18 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(claimed.Id, claimedTask.WorkId);
     }
 
-    // Re-entry recovery is no longer the workflow grain's responsibility.
-    // ClaimNextAsync surfaces only dispatchable (Pending/Ready) work. Once a
-    // task is claimed (Running), the next claim returns null — the runner
-    // rebuilds the dispatch from its own snapshot on recovery, never asking
-    // the workflow to reconstruct it.
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task PollWork_OfferOnly_NoReentryForInFlightTask()
+    public async Task ClaimNextAsync_ReturnsNull_WhenTaskAlreadyRunning()
     {
         var runnerId = await RegisterRunnerAsync("reentry-runner");
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
         await AssignWorkflowToRunnerAsync(_workflowId!, runnerId);
 
-        // Claim the only pending task.
         var claimed = await workflow.ClaimNextAsync(runnerId);
         Assert.NotNull(claimed);
 
-        // Re-claim: the task is Running, so there is no dispatchable work.
-        // Recovery of in-flight work is the runner's own business (dispatch
-        // snapshot), not the workflow's.
         var reentered = await workflow.ClaimNextAsync(runnerId);
         Assert.Null(reentered);
     }

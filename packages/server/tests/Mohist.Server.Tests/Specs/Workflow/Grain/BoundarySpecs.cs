@@ -57,14 +57,8 @@ public class BoundarySpecs : WorkflowGrainSpecs
 
         var (task, runnerId) = await PollWorkAnyAsync();
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        // A report for unknown work goes direct to the owning grain, which
-        // discards it as Stale (the runner grain no longer relays/tracks). The
-        // current in-flight work is unaffected.
         await ReportAsync(runnerId, task.WorkflowRunId, "unknown-work", new WorkResult("failed", "wrong work"));
 
-        // The unknown-work report was ignored as Stale. The current in-flight
-        // task is unaffected: a re-poll that reports nothing in flight may
-        // repair-re-dispatch the same task, but must never advance or drop it.
         var repoll = await runner.PollAsync(Services);
         if (repoll is not null)
         {

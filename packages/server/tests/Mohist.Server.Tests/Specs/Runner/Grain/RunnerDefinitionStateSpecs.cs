@@ -75,10 +75,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         Assert.NotNull(first);
         Assert.Equal(_workflowId, first.WorkflowRunId);
 
-        // With a single slot occupied by wf-update-1, the runner must not
-        // claim wf-update-2. (A repair re-dispatch of wf-update-1 is valid
-        // since the poll reports nothing in flight; the property is that
-        // wf-update-2 is not claimed while the slot is full.)
         var secondAtCapacity = await runner.PollAsync(Services);
         if (secondAtCapacity is not null)
         {
@@ -92,9 +88,6 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
         var definition = await DefinitionStore.GetOrInitAsync(runnerId);
         Assert.Equal(2, definition);
 
-        // Now that the capacity grew to 2, the next reconciliation round
-        // claims wf-update-2 (a repair re-dispatch of wf-update-1 may precede
-        // it, so observe the full round).
         WorkDispatch? second = null;
         for (var i = 0; i < 3 && second is null; i++)
         {

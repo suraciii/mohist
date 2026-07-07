@@ -117,11 +117,6 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
             ]));
         Assert.Equal(1, addResult.AddedCount);
 
-        // A concurrent poll while the load task is in flight must not abandon
-        // it. Under reconciliation such a poll (reporting nothing in flight)
-        // may repair-re-dispatch the same load task — that re-dispatch is the
-        // proof the task is retained, not abandoned. It must never dispatch
-        // the not-yet-ready dynamic task before load completes.
         var concurrentPoll = await runner.PollAsync(Services);
         if (concurrentPoll is not null)
         {

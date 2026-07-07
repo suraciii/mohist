@@ -60,24 +60,10 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.Tests.Specs.Workflow.Work
     [Fact]
     public async Task PollAsync_RespectsSlotBudget_WhenRunningWorkflowIsAlreadyAssigned()
     {
-        // The slot-budget gate counts the runner's in-flight (desired) work:
-        // desired = Running runs assigned to me, and spare = slots − |desired|.
-        // With MaxWorkflowSlots=1 and workflowA picked up (now Running), a
-        // second poll must NOT claim workflowB — the spare budget is 0.
-        //
-        // Note: under reconciliation the second poll with an empty reported
-        // set may legitimately RE-DISPATCH workflowA (a repair: the runner
-        // reported nothing, so the server resends the in-flight work). That
-        // re-dispatch is correct and is not a slot-budget violation. The
-        // property under test is that workflowB is never claimed.
         var projectId = "runner-slot-budget";
         var runnerId = await RegisterRunnerForProjectAsync(projectId, maxWorkflowSlots: 1);
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        // Seed two workflows assigned to the same runner. The first
-        // gets picked up and runs to Running; the second is still
-        // Pending (unclaimed). After the first poll the runner should
-        // refuse the second because its slot budget is exhausted.
         var workflowAId = $"wf-running-{Guid.NewGuid():N}";
         var workflowBId = $"wf-pending-{Guid.NewGuid():N}";
         var workflowA = Grains.GetGrain<IWorkflowGrain>(workflowAId);
@@ -92,9 +78,6 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.Tests.Specs.Workflow.Work
         Assert.NotNull(firstDispatch);
         Assert.Equal(workflowAId, firstDispatch!.WorkflowRunId);
 
-        // The next poll must NOT claim workflowB — the slot budget is 1 and
-        // the count sees the in-flight Running workflowA. A repair re-dispatch
-        // of workflowA is acceptable; workflowB must never be dispatched.
         for (var i = 0; i < 3; i++)
         {
             var subsequent = await runner.PollAsync(Services);
@@ -108,11 +91,6 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.Tests.Specs.Workflow.Work
     [Fact]
     public async Task CountRunningAssignedToAsync_ReturnsRunningRowsForTheRunner()
     {
-        // Direct spec for the count query — three Running rows for
-        // runner A, one for runner B, one Ready for runner A, one
-        // terminal for runner A. The querier is the same one
-        // ActiveWorkflowCountAsync now uses, so its correctness is
-        // what keeps the slot gate honest.
         var prefix = $"count-{Guid.NewGuid():N}";
         var runnerA = $"{prefix}-runner-A";
         var runnerB = $"{prefix}-runner-B";
@@ -131,22 +109,6 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.Tests.Specs.Workflow.Work
         Assert.Equal(1, await querier.CountRunningAssignedToAsync(runnerB));
     }
 
-    // The two structural source-scan specs that pinned
-    // PollAssignedOrAssignableWorkflowAsync / ActiveWorkflowCountAsync in
-    // RunnerGrain.cs were removed: those methods no longer exist. Under the
-    // reconciliation model the entire poll loop lives in the stateless
-    // DispatchService.PollAsync (desired = FindRunningAssignedToAsync,
-    // spare = slots − |desired|, repair = desired − reported). The behavioural
-    // slot-budget spec below covers the meaningful property.
-
-    /// <summary>
-    /// Inserts a <c>WorkflowRuns</c> row with the requested status and
-    /// runner. Mirrors the schema the runner-grain reads at runtime:
-    /// State.status is camelCase via the JSON serializer and the
-    /// STORED Status computed column gets its value from a JSON extract
-    /// in the production migration (here populated via the trigger
-    /// installed by <c>GrainTestConfig.ApplyWorkflowRunsStatusSchemaFix</c>).
-    /// </summary>
     private async Task InsertStatusRowAsync(
         string workflowRunId,
         string status,
