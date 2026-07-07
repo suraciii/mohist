@@ -10,13 +10,15 @@ status: wip-not-implemented
 
 ## 它解决什么问题
 
-Mohist 是一条自动化软件生产流水线，issue 按 workflow 自治推进。但每到一个审批门，都得 owner 自己到场看一眼、点一下 approve——issue 多的时候，这个人工拦截点变成瓶颈。
+Mohist 是一条软件生产线。Workflow、issue、epic、runner、agent session 都会产生事件：阶段等待审批、任务失败、issue 完成、epic 没有可推进的 issue、runner 掉线等。
 
-你希望让 Agent 替你处理这类事：盯着某个事件，issue 一进入审批 Agent 自动醒来，按你写好的规则判断 approve 还是 reject。多数情况它自己 approve，少数把握不准的来问你。
+Agent 事件订阅让你把这些事件交给 Agent 响应。你配置一条订阅：匹配什么事件、由哪个 Agent 响应、响应时用什么提示词。事件发生后，Agent 自动启动，按提示词读取上下文并执行动作。
 
 > 用你的话说：「我实际上是在配置让一个 agent 监听某个 issue 的某个事件，事件发生时 agent 就会响应……判断逻辑写在提示词里，不写在程序里——我来负责把提示词写好。」
 
-这就是 Agent 事件订阅要做的事：**给 Agent 一个反应式能力，让它监听事件、按你配的规则自动响应**。判断逻辑归你的提示词，系统只负责把事件送到、把 Agent 启动起来。这不只是 Approval 一个场景——任何 Agent 监听任何事件、写任何反应逻辑，是通用能力。
+代理审批只是一个场景。这个能力的边界更大：**让 Agent 响应系统事件**。判断逻辑归你的提示词，系统负责匹配事件、启动 Agent、记录这次响应。
+
+Agent 在这里是代理人。它进入流水线上原本由 owner 负责的位置：owner 能审批，Agent 也能审批；owner 能分析失败、写总结、创建后续 issue，Agent 也通过同一套动作完成这些事。Agent 不是特殊通道。
 
 ## 两个心智模型
 
@@ -40,7 +42,7 @@ Mohist 是一条自动化软件生产流水线，issue 按 workflow 自治推进
 └─────────────────────────────────────────────────────┘
 ```
 
-- **第一层**对应你已有能力——配置 Agent 时写的 Instructions。它定义这个 Agent 是干什么的（比如「你是 owner 的代理审批人，review 要严谨，不确定就来问」）。
+- **第一层**对应你已有能力——配置 Agent 时写的 Instructions。它定义这个 Agent 是干什么的（比如「你是 owner 的代理人，负责审批 plan/check，review 要严谨，不确定就升级给 owner」）。
 - **第二层**是这个功能**新增**的。它定义「遇到某事件、此刻的反应」。同一个 Agent 可以挂多条订阅，每条配不同的响应提示词。
 
 **为什么不把反应逻辑也并进 Agent 指令？** 同一个 Agent 可能要响应多种事件。把所有反应塞进身份指令会让 Agent 定义膨胀、难复用。拆开：**身份归 Agent，反应归订阅**。
@@ -49,7 +51,7 @@ Mohist 是一条自动化软件生产流水线，issue 按 workflow 自治推进
 
 ### 2. 订阅是一等对象
 
-订阅是你可以独立增删启停、命名的东西，不是 Agent 配置里的一行。每条订阅声明三件事：**匹配什么事件**（一个过滤表达式）、**用什么响应提示词**、（可选）**优先级**。
+订阅是你可以独立增删启停、命名的东西，不是 Agent 配置里的一行。每条订阅声明：**匹配什么事件**（过滤表达式）、**用哪个 Agent 响应**、**用什么响应提示词**，以及必要时的优先级或响应方式。
 
 ## 订阅靠「过滤表达式」匹配事件
 
@@ -62,14 +64,18 @@ Mohist 是一条自动化软件生产流水线，issue 按 workflow 自治推进
 
 需要精确到某个 issue 时，在表达式里加事件来源的约束（比如「来源是 issue #42 的 workflow」）。这样「只盯某个关键 issue」和「兜底全局所有 issue」用的是同一套表达式机制，不再需要单独的「范围」字段。
 
-## 优先级：兜底与接管
+## 优先级与响应方式
 
-订阅可以指定优先级（也可以不指定）。优先级解决一个典型场景——**兜底 + 接管**：
+不同事件的响应方式不同。
+
+有些事件适合多条订阅同时响应，例如 issue 完成后，一个 Agent 写 release note，另一个 Agent 做交付总结，第三个 Agent 通知 owner。
+
+有些事件需要互斥处理，例如同一个审批点只能收到一个最终 approve / reject 决策。这类场景需要优先级解决**兜底 + 接管**：
 
 - 你有一个 Agent A，订阅某事件、配成**全局兜底**（低优先级），让大多数 issue 的事件都有人接。
 - 你特别关注 issue #42，给 Agent B 配一条**只针对它**的订阅（高优先级），让 B 接管、A 不响应。
 
-事件发生时，系统按优先级选**一个 Agent** 响应：高优先级接管，低优先级兜底。**一个事件只被一个 Agent 响应**——避免两个 Agent 同时 approve 同一个 issue。
+互斥响应时，系统按优先级选一个 Agent 响应，避免两个 Agent 同时审批同一个阶段。
 
 同一个 Agent 的多条订阅都命中同一事件是允许的（比如你给一个 Agent 配不同提示词应对不同子场景），系统在 Agent 内部按订阅优先级选一条触发。
 
@@ -79,17 +85,17 @@ Mohist 是一条自动化软件生产流水线，issue 按 workflow 自治推进
 
 **配订阅**（写第二层）——新增：对某个 Agent，创建一条订阅，写过滤表达式、写响应提示词、可选指定优先级。
 
-**写响应提示词是你的活，也是这个功能的核心**。系统不判断你写得对不对、安不安全，它只负责把事件送到、把 Agent 起来、把两层 prompt 拼对。响应提示词里可以用事件自带的占位符（哪个 workflow run、什么事件类型），Agent 拿到后自己去拉详情、做判断、执行动作。举个例子：
+响应提示词由你配置。系统不判断提示词是否正确或安全，只负责匹配事件、启动 Agent、拼接两层 prompt。响应提示词里可以用事件自带的占位符（哪个 workflow run、什么事件类型），Agent 拿到后自己去拉详情、做判断、执行动作。举个例子：
 
-> workflow run {{workflow_run_id}} 在 {{stage}} 阶段进入审批门。先 `mo workflow get {{workflow_run_id}} --json` 找到关联 issue，再 `mo issue show <number>` 读 proposal 和 tasks。如果 plan 清晰、tasks 可执行，执行 `mo workflow approve {{workflow_run_id}}` 并附一句理由。如果把握不准，执行 `mo workflow reject {{workflow_run_id}} -m "..."` 把疑问反馈回去。
+> workflow run {{workflow_run_id}} 在 {{stage}} 阶段等待审批。先 `mo workflow get {{workflow_run_id}} --json` 找到关联 issue，再 `mo issue show <number>` 读 proposal 和 tasks。如果 plan 清晰、tasks 可执行，执行 `mo workflow approve {{workflow_run_id}}` 并附一句理由。如果把握不准，执行 `mo workflow reject {{workflow_run_id}} -m "..."` 把疑问反馈回去。
 
-事件一到，Agent 自动醒来，按这段提示词行动。「多数自己 approve、少数找我」这个分流，是**你写的**，不是程序写死的。
+事件发生后，Agent 按这段提示词行动。多数自动 approve、少数升级给 owner，这个分流由响应提示词决定，不由 Workflow 写死。Workflow 只收到 approve / reject 决策，不关心审批者是谁。
 
 ## 可见性：知道谁响应了什么
 
 系统不做严格冲突拦截（不强制你把所有订阅优先级配得互不重叠），但提供**可见性**让你自己核对配置是否符合预期：
 
-- 从事件查：某次审批事件 → 是被哪个 Agent、哪条订阅响应的。
+- 从事件查：某次事件 → 是被哪个 Agent、哪条订阅响应的。
 - 从 Agent job 查：这个 Agent 这次执行 → 是响应哪个事件、哪条订阅触发的。
 
 兜底/接管配错了（你以为 B 接管结果 A 跑了），从可见性里能发现，然后你去调优先级。**配置正确性你负责，可观测性系统负责。**
@@ -98,24 +104,27 @@ Mohist 是一条自动化软件生产流水线，issue 按 workflow 自治推进
 
 | 场景 | 订阅的事件 | 响应提示词让 Agent 干什么 |
 |---|---|---|
-| Approval 自动处理 | 到达审批门 | review 产物，按规则 approve 或 reject |
+| 代理审批 | 阶段等待审批 | review 产物，按规则 approve 或 reject |
 | 失败兜底分析 | stage 失败 | 拉错误，分析根因，写进 issue comment |
-| 完成自动汇总 | issue 完成 | 汇总产出的 OpenSpec 产物，写 release note |
+| 完成自动汇总 | issue 完成 | 汇总产物，写 release note |
+| 后续工作生成 | issue 完成 / review 发现风险 | 创建 follow-up issue |
+| 产线维护 | runner 掉线 / epic running-but-idle | 分析原因，通知 owner 或创建维护 issue |
 
-三条订阅共用同一套机制，只是过滤表达式和响应提示词不同。**这就是「通用」的含义**。
+这些订阅共用同一套机制，只是过滤表达式、响应提示词和响应方式不同。
 
 ## 你和系统的责任边界
 
 | 归谁 | 负责 |
 |---|---|
-| **你** | 把响应提示词写好、写安全；用优先级正确表达兜底/接管意图 |
-| **系统** | 准确匹配事件、按优先级选一个 Agent 响应、正确拼 prompt 起 Agent；提供「事件↔Agent」双向可见性 |
-| **系统不负责** | 判断提示词对错；拦截 Agent 的 approve。Agent 走的是和手动审批一样的正规通道（详见[工作流详解](the-workflow.md)），系统不额外设防 |
+| **你** | 把响应提示词写好、写安全；用优先级和响应方式表达兜底、接管或并行响应 |
+| **系统** | 准确匹配事件、启动 Agent、记录事件与 Agent 响应之间的关系 |
+| **系统不负责** | 判断提示词对错；给 Agent 提供特殊审批通道。Agent 走的是和 owner、脚本一样的正规通道（详见[工作流详解](the-workflow.md)） |
 
 ## 还没定的几件事
 
-1. **审批可追溯性**：现在系统不记录是谁 approve 的——Agent 自动 approve 和你手动 approve，事后分不出来。让记录能区分「这条是 Agent 代签的」是后续工作，本特性 MVP 不做。
+1. **动作可追溯性**：Workflow 不关心审批者是谁，但审计视图需要能看出某次动作是由哪个 Agent session、脚本或用户发起。
 2. **配置入口**：订阅在 Web UI 的 Agent 详情页里配（Subscriptions 分区），还是单独的订阅管理页？CLI 要不要 `mo agent subscribe ...`？
 3. **过滤表达式的精确语法**：沿用现有 `|` 多选 + `.*` 通配的写法，还是引入更通用的多属性过滤语法，待技术方案定。
+4. **响应方式**：哪些事件默认 fan-out，哪些事件必须互斥，是否由订阅显式声明，待技术方案定。
 
 技术实现细节见 [`design/agent-subscriptions.md`](../design/agent-subscriptions.md)。

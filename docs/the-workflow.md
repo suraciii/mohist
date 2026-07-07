@@ -1,6 +1,6 @@
 # 工作流详解
 
-Mohist 默认的工作流由 5 个阶段组成。理解每个阶段做什么、产出什么、什么时候停，你才知道什么时候该介入。issue 的完整操作命令（创建、启动、审批、恢复等）见 [Issue 管理](issues.md)；自定义阶段、任务、审批策略见 [Workflow Profile](workflow-profiles.md)。
+Mohist 默认的工作流由 5 个阶段组成。理解每个阶段做什么、产出什么、什么时候停，你才知道审批和恢复动作在哪里发生。issue 的完整操作命令（创建、启动、审批、恢复等）见 [Issue 管理](issues.md)；自定义阶段、任务、审批策略见 [Workflow Profile](workflow-profiles.md)。
 
 ## 全景图
 
@@ -13,14 +13,14 @@ Draft ──start──▶ Plan ──approve──▶ Build ──auto──▶
                   (redo)                           (redo)
 ```
 
-每个阶段的产物都留在 `openspec/changes/<issue-number>-<slug>/` 下，作为审计记录。
+每个阶段的产物都留在 `openspec/changes/<issue-number>-<slug>/` 下，作为后续判断和追溯的证据。
 
 ## Draft（草稿）
 
 Issue 创建后的初始状态。这时：
 
 - 没有启动 workflow
-- AI 还没开始干活
+- Agent 还没开始执行
 - 可以编辑 title、body、labels、priority
 - 可以加 prerequisites（"等 #N 完成再开始"）
 
@@ -31,7 +31,7 @@ mo issue start <number>   # 启动 workflow，进入 Plan
 
 ## Plan（规划）
 
-AI 理解需求、规划怎么实现。这是**最重要的阶段**——规划错了后面全错。
+Agent 理解需求、规划怎么实现。这是**最重要的阶段**——规划错了后面全错。
 
 ### Plan 阶段做的事
 
@@ -43,7 +43,7 @@ AI 理解需求、规划怎么实现。这是**最重要的阶段**——规划�
 | `specs/` | capability spec 的具体改动（用户故事级别） |
 | `design.md` | 技术设计决策（如果有多种实现方式，写清楚选哪个、为什么） |
 | `tasks.json` | 接下来 Build 阶段要执行的步骤清单（含验收条件） |
-| `self-review.md` | AI 自己对 plan 的 review（"我考虑了 X、权衡了 Y、担心 Z"） |
+| `self-review.md` | Agent 自己对 plan 的 review（"我考虑了 X、权衡了 Y、担心 Z"） |
 
 ### Plan 阶段通常 5-20 分钟
 
@@ -54,18 +54,18 @@ AI 理解需求、规划怎么实现。这是**最重要的阶段**——规划�
 
 ### Plan 完成后
 
-Workflow **暂停**，等你审批：
+Workflow 进入审批点，等待 approve / reject 决策：
 
 ```bash
-mo issue approve <number>   # 同意 plan，进入 Build
-mo issue reject <number>    # 不同意，AI 重新 plan
+mo issue approve <number>   # 通过 plan，进入 Build
+mo issue reject <number>    # 打回，重新 plan
 ```
 
-审批前**一定要读** proposal.md 和 tasks.json。这是你拦截错误最廉价的时机。
+Workflow 不关心审批者是 owner、Agent 还是脚本。人工处理时，重点看 proposal.md 和 tasks.json；这是发现方向错误成本最低的位置。
 
 ## Build（实现）
 
-AI 按 tasks.json 里的步骤写代码。
+Agent 按 tasks.json 里的步骤写代码。
 
 ### Build 阶段做的事
 
@@ -77,29 +77,29 @@ AI 按 tasks.json 里的步骤写代码。
 
 ### Build 完成后
 
-**默认自动进入 Check**（不需要你审批）。如果你想在 Build 后停一下，要在 workflow profile 里把 build 的 `requiresApproval` 改为 `true`。
+**默认自动进入 Check**。如果你希望 Build 后也等待审批，要在 workflow profile 里把 build 的 `requiresApproval` 改为 `true`。
 
 ## Check（审查）
 
-AI 复审 Build 的产出，相当于内部 code review。
+Agent 复审 Build 的产出，相当于内部 code review。
 
 ### Check 阶段做的事
 
 - 跑完整测试套件
-- AI review 自己的 diff
+- Agent review 自己的 diff
 - 产出 `review.md`（review 结论 + 发现的问题 + 建议修复）
 - 如果发现问题，可能触发 re-build 修复
 
 ### Check 完成后
 
-Workflow **暂停**，等你审批。
+Workflow 进入审批点，等待 approve / reject 决策。
 
 ```bash
 mo issue approve <number>   # 进入 Integrate
 mo issue reject <number>    # 回到 Build 重做
 ```
 
-审批前读 `review.md`。AI 的 review 通常会暴露 Build 阶段没注意到的问题。
+人工处理时读 `review.md`。Agent 的 review 通常会暴露 Build 阶段没注意到的问题。
 
 ## Integrate（合并）
 
@@ -148,7 +148,7 @@ Draft ──────▶ Plan ──────▶ Build ──────�
                                                                   Archived
 ```
 
-任意阶段失败 → blocked → 你介入 → retry / resume / rerun / force-stop。
+任意阶段失败 → blocked → retry / resume / rerun / force-stop。
 
 ## 健康度（Health）
 
@@ -157,7 +157,7 @@ Draft ──────▶ Plan ──────▶ Build ──────�
 | Health | 含义 |
 |---|---|
 | `active` | 正在 workflow 里跑 |
-| `paused` | 暂停（你手动 stop 或等审批） |
+| `paused` | 暂停（手动 stop 或等待审批决策） |
 | `blocked` | 卡住了，需要你介入 |
 | `interrupted` | 进程崩了/重启了，进度保留，可以 resume |
 | `cancelled` | 你取消了，不会再跑 |
@@ -165,22 +165,22 @@ Draft ──────▶ Plan ──────▶ Build ──────�
 
 Web UI 上每个 issue card 会用颜色点显示 health。
 
-## 你什么时候需要介入？
+## 什么时候需要处理？
 
 四个时机：
 
-1. **Plan 完成** — 读 proposal/tasks，approve 或 reject
-2. **Check 完成** — 读 review，approve 或 reject
+1. **Plan 完成** — 审批点需要 approve 或 reject
+2. **Check 完成** — 审批点需要 approve 或 reject
 3. **Issue blocked** — 看原因，retry/rerun/stop
 4. **Issue interrupted** — Resume 继续
 
-其他时候你可以干别的事。这就是"自治"的含义。
+这些动作可以由 owner、脚本或 Agent 发起。Workflow 只关心审批动作本身和结果。
 
 ## 自定义 Workflow
 
 默认 workflow 不合口味？改它：
 
-- 想让 Build 也审批？改 profile 的 `requiresApproval`
+- 想让 Build 也等待审批？改 profile 的 `requiresApproval`
 - 想跳过 Check？自定义 profile 去掉这个 stage
 - 想加新的 stage（如 deploy）？扩展 profile yaml
 

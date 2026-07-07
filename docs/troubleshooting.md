@@ -21,7 +21,7 @@ mo issue show <number>
 | Health | 含义 | 你该做什么 |
 |---|---|---|
 | `active` | 正在跑 | 等 |
-| `paused` | 等审批或手动 stop | Approve / Reject / Resume |
+| `paused` | 等审批决策或手动 stop | Approve / Reject / Resume |
 | `blocked` | 失败了，需要介入 | 看下面"恢复动作" |
 | `interrupted` | 进程崩了/重启了 | Resume |
 | `cancelled` | 终态（你 close 了） | Reopen（如需要） |
@@ -224,6 +224,17 @@ git worktree list
 # 清理已完成 issue 的 worktree
 git worktree prune
 ```
+
+### 6. 关注反复失败的模式
+
+如果多个 issue 反复在同一类任务上 blocked，不要只逐个 retry。常见原因是：
+
+- issue 输入不够清楚，Plan 经常跑偏
+- 测试慢、不稳定，Check 经常误伤
+- 模块边界混乱，Agent 难以在短上下文里完成修改
+- workflow profile 不适合当前任务类型
+
+这类问题会拖慢整条生产线。优先修输入模板、测试、模块边界或 workflow profile，再继续扩大并发。
 
 ## 找不到原因？
 

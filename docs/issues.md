@@ -29,7 +29,7 @@ mo issue create "Critical fix" --priority p0 --label kind=bug
 # 指定 workflow profile
 mo issue create "Implement search" --workflow-profile mohist/local
 
-# 指定 AI 模型
+# 指定模型
 mo issue create "Complex refactor" --model claude-sonnet-4
 ```
 
@@ -47,7 +47,7 @@ body 质量**决定 plan 质量**，plan 质量**决定整个 issue 的成败**�
 这个 issue 完成后，世界应该变成什么样？
 
 ## Non-goals
-明确不做什么（避免 AI 顺手做太多）
+明确不做什么（避免 Agent 顺手做太多）
 
 ## Acceptance criteria
 怎么算完成？（可验证的条件）
@@ -59,7 +59,7 @@ body 质量**决定 plan 质量**，plan 质量**决定整个 issue 的成败**�
 Add search
 ```
 
-AI 不知道你要搜什么、搜哪些字段、要不要高亮、要不要分页。结果 plan 写一堆你不需要的东西。
+Agent 不知道你要搜什么、搜哪些字段、要不要高亮、要不要分页。结果 plan 写一堆你不需要的东西。
 
 **正例**：
 
@@ -103,14 +103,14 @@ mo issue show 42
 
 Web UI 上点 issue card 进详情页，能看到：
 
-- 当前 stage、health、approval 状态
+- 当前 stage、health、审批状态
 - 完整 body 和 comments
 - Workflow timeline
 - Branch bar（当前分支状态）
 - Diff / commits 概览
 - Latest artifacts（plan/check 产物）
 - 操作按钮（Start / Approve / Reject / Stop / Retry / 等）
-- Coder sessions（AI 干活时的对话回放）
+- Coder sessions（Agent 执行时的对话回放）
 
 ## 启动 Issue
 
@@ -122,23 +122,23 @@ mo issue start 42
 
 1. Mohist 创建 `mo/issue-42` worktree 分支
 2. 进入 Plan 阶段
-3. AI 开始干活
+3. Agent 开始执行
 
 **前置条件**：
 - Issue 在 backlog
 - Runner 已连接（`mo project status` 看 runner 状态）
 - 没超过并发上限（默认 8）
 
-## 等审批时
+## 等待审批时
 
-Plan / Check 完成后，issue 进入 `awaiting approval`。这时 AI 不工作，等你决定：
+Plan / Check 完成后，issue 进入 `awaiting approval`。这表示 workflow 停在审批点，等待 approve / reject 决策：
 
 ```bash
 mo issue approve 42     # 通过，进下一阶段
-mo issue reject 42 --message "Missing error handling in proposal"  # 打回，AI 重做当前阶段
+mo issue reject 42 --message "Missing error handling in proposal"  # 打回，Agent 重做当前阶段
 ```
 
-**Reject 时的反馈**：`reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
+Workflow 不关心审批者是 owner、Agent 还是脚本。你手动处理时，`reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
 
 ```bash
 mo issue comment add 42 --body "Reject because: missing error handling in proposal"
@@ -156,7 +156,7 @@ mo issue comment add 42 --body "Looks good but check edge cases"
 
 Web UI 上 issue 详情页底部有 comment 区。
 
-Comment 是你和 AI 协作的**轻量通道**——AI 在 plan 阶段会读 comment 作为额外上下文。
+Comment 是你和 Agent 协作的**轻量通道**——Agent 在 plan 阶段会读 comment 作为额外上下文。
 
 ## Prerequisite（前置依赖）
 
@@ -229,7 +229,7 @@ mo issue update 42 --priority p1
 mo issue update 42 --label kind=bug --label area=web
 ```
 
-启动后的 issue 改 body 要谨慎——AI 已经基于旧 body 在工作。
+启动后的 issue 改 body 要谨慎——Agent 已经基于旧 body 在工作。
 
 ## CLI 完整命令一览
 

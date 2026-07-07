@@ -1,6 +1,6 @@
 # Workflow Profile
 
-Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"。当前 Mohist 自带 `mohist/local` 和 `mohist/github-pr`。只有当 profile 的描述和实际执行定义一致时，系统才会把它暴露给用户选择。
+Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"，包括阶段、任务、检查、恢复和审批点。当前 Mohist 自带 `mohist/local` 和 `mohist/github-pr`。只有当 profile 的描述和实际执行定义一致时，系统才会把它暴露给用户选择。
 
 ## 默认 Profile
 
@@ -39,7 +39,7 @@ stages:
           changeDir: ${{ openspecChangeDir }}
 
   - stage: build
-    requiresApproval: false      # 默认 build 不审批
+    requiresApproval: false      # 默认 build 不等待审批
     tasks:
       # 按 tasks.json 执行
 
@@ -47,7 +47,7 @@ stages:
     requiresApproval: true
     tasks:
       - id: review
-        # AI review 自己的产出
+        # Agent review 自己的产出
 
   - stage: integrate
     requiresApproval: false
@@ -63,7 +63,7 @@ stages:
 workflow runtime variables；check stage 在 `ai-review` 通过后用
 `mohist/push`（`forceWithLease: true`）把最新 commit 推到 PR head，
 再用 `mohist/mark-github-pr-ready` 把 PR 标记为 ready，最后用只读的
-`mohist/github-pr-status` check 确认 PR 状态并等待人工批准；integrate
+`mohist/github-pr-status` check 确认 PR 状态并等待审批决策；integrate
 stage 依次执行 `archive-change` → `push` → `merge-pr`，
 用 `mohist/github-pr-status` 的 `expect: merged` check 验证 PR 已合入。
 
@@ -232,14 +232,16 @@ agent 自动修并重新合并；不依赖 stage hook 或隐式边界动作。
 
 ### requiresApproval
 
-`true` = 阶段完成后暂停等你审批。
+`true` = 阶段完成后进入审批点，等待 approve / reject 决策。
 `false` = 阶段完成后自动进入下一阶段。
 
 默认：
-- Plan: `true`（必审批）
+- Plan: `true`（等待审批）
 - Build: `false`（自动跑）
-- Check: `true`（必审批）
+- Check: `true`（等待审批）
 - Integrate: `false`（自动合并）
+
+`requiresApproval` 的含义是阶段完成后需要审批。Workflow 只关心是否收到 approve / reject 决策，不关心审批者是 owner、脚本还是 Agent。
 
 ### tasks
 
@@ -275,15 +277,15 @@ Settings → Workflows → 选 profile → 编辑 yaml。
 
 ## 常见定制场景
 
-### 1. 让 Build 也审批
+### 1. 让 Build 也等待审批
 
-把 build stage 的 `requiresApproval` 改为 `true`。适合你想中间介入的场景。
+把 build stage 的 `requiresApproval` 改为 `true`。适合你需要在实现后、审查前增加一个审批点的场景。
 
 ### 2. 去掉 Check 阶段
 
-适合简单项目不想多一层审批。直接删掉 check stage 的整段。
+适合简单项目不想多一层审查。直接删掉 check stage 的整段。
 
-注意：去掉 check 意味着你信任 build 的产出，没有 AI 二次 review。
+注意：去掉 check 意味着你信任 build 的产出，没有 Agent 二次 review。
 
 ### 3. 加 deploy 阶段
 

@@ -202,7 +202,7 @@ Mohist posts JSON to `WebhookUrl` (camelCase, per CloudEvents/web convention):
   "stage": "plan",
   "failureReason": null,
   "suggestedAction": "approve 42",
-  "body": "Issue #42 在 plan 阶段等你审批。下一步:approve 42"
+  "body": "Issue #42 在 plan 阶段等待审批决策。下一步:approve 42"
 }
 ```
 
