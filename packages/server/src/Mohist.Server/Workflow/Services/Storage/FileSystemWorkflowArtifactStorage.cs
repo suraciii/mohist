@@ -16,11 +16,11 @@ namespace Mohist.Server.Workflow.Storage;
 /// </remarks>
 public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 {
-    public const string MetadataFileName = "metadata.json";
-    public const string FileContentName = "content";
-    public const string DirectoryFilesName = "files";
-    public const string StorageRootName = "artifacts";
-    public const string WorkflowSegment = "workflows";
+    public const string MetadataFileName = WorkflowArtifactStorageLayout.MetadataFileName;
+    public const string FileContentName = WorkflowArtifactStorageLayout.FileContentName;
+    public const string DirectoryFilesName = WorkflowArtifactStorageLayout.DirectoryFilesName;
+    public const string StorageRootName = WorkflowArtifactStorageLayout.StorageRootName;
+    public const string WorkflowSegment = WorkflowArtifactStorageLayout.WorkflowSegment;
 
     private readonly ILogger<FileSystemWorkflowArtifactStorage> _log;
     private readonly WorkflowArtifactDirectoryLimits _defaultLimits;
@@ -59,36 +59,16 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 
     public string ResolveAbsolutePath(string storagePath)
     {
-        if (string.IsNullOrWhiteSpace(storagePath))
-            throw new WorkflowArtifactStorageException("Storage path must be provided.");
-        var normalized = SanitizeRelativePath(storagePath);
-        return Path.GetFullPath(Path.Combine(_root, normalized.Replace('/', Path.DirectorySeparatorChar)));
+        var normalized = WorkflowArtifactStoragePath.Parse(storagePath);
+        return Path.GetFullPath(Path.Combine(_root, normalized.Value.Replace('/', Path.DirectorySeparatorChar)));
     }
 
     public string GenerateStoragePath(
         string workflowRunId,
         string taskRunId,
         string artifactId,
-        WorkflowArtifactStorageKind kind)
-    {
-        ValidateId(workflowRunId, nameof(workflowRunId));
-        ValidateId(taskRunId, nameof(taskRunId));
-        ValidateId(artifactId, nameof(artifactId));
-
-        var segments = new[]
-        {
-            WorkflowSegment,
-            workflowRunId,
-            "tasks",
-            taskRunId,
-            "artifacts",
-            artifactId,
-        };
-        var relative = string.Join('/', segments);
-        return kind == WorkflowArtifactStorageKind.Directory
-            ? relative + "/" + DirectoryFilesName
-            : relative + "/" + FileContentName;
-    }
+        WorkflowArtifactStorageKind kind) =>
+        WorkflowArtifactStoragePath.ForArtifact(workflowRunId, taskRunId, artifactId, kind).Value;
 
     public async Task<WorkflowArtifactStorageWriteResult> WriteFileAsync(
         string storagePath,
@@ -192,8 +172,8 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
                     throw new WorkflowArtifactStorageException(
                         $"Directory entry at index {index} is null.");
 
-                var normalizedRelative = SanitizeContainedRelativePath(entry.RelativePath);
-                if (!seenPaths.Add(normalizedRelative))
+                var containedPath = WorkflowArtifactContainedPath.Parse(entry.RelativePath);
+                if (!seenPaths.Add(containedPath.Value))
                     throw new WorkflowArtifactStorageException(
                         $"Directory entry '{entry.RelativePath}' appears more than once in a single write.");
 
@@ -206,7 +186,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 
                 totalBytes += entry.Size;
 
-                var destination = Path.Combine(filesRoot, normalizedRelative.Replace('/', Path.DirectorySeparatorChar));
+                var destination = Path.Combine(filesRoot, containedPath.Value.Replace('/', Path.DirectorySeparatorChar));
                 var resolvedDestination = Path.GetFullPath(destination);
                 if (!resolvedDestination.StartsWith(
                         EnsureTrailingSeparator(filesRoot),
@@ -218,7 +198,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
                 if (!string.IsNullOrEmpty(destinationDir))
                     Directory.CreateDirectory(destinationDir);
 
-                await using (var input = SafeOpenContent(entry, normalizedRelative))
+                await using (var input = SafeOpenContent(entry, containedPath.Value))
                 {
                     await WriteStreamAsync(resolvedDestination, input, entry.Size, cancellationToken)
                         .ConfigureAwait(false);
@@ -316,10 +296,10 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
     public Stream OpenDirectoryEntry(string storagePath, string relativePath)
     {
         var filesRoot = ResolveAbsoluteDirectoryFilesPath(storagePath);
-        var normalized = SanitizeContainedRelativePath(relativePath);
+        var normalized = WorkflowArtifactContainedPath.Parse(relativePath);
         var destination = Path.GetFullPath(Path.Combine(
             filesRoot,
-            normalized.Replace('/', Path.DirectorySeparatorChar)));
+            normalized.Value.Replace('/', Path.DirectorySeparatorChar)));
         var safeRoot = EnsureTrailingSeparator(filesRoot);
         if (!destination.StartsWith(safeRoot, StringComparison.Ordinal))
             throw new WorkflowArtifactStorageException(
@@ -508,68 +488,6 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
         }
     }
 
-    private static void ValidateId(string value, string paramName)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            throw new WorkflowArtifactStorageException($"{paramName} must be provided.");
-        foreach (var ch in value)
-        {
-            if (ch is '/' or '\\' or '\0' or ' ' or ':')
-                throw new WorkflowArtifactStorageException(
-                    $"{paramName} contains an unsafe character: '{ch}'.");
-        }
-        if (value == "." || value == "..")
-            throw new WorkflowArtifactStorageException(
-                $"{paramName} must not be a traversal segment.");
-    }
-
-    private static string SanitizeRelativePath(string storagePath)
-    {
-        if (string.IsNullOrWhiteSpace(storagePath))
-            throw new WorkflowArtifactStorageException("Storage path must be provided.");
-        var trimmed = storagePath.Replace('\\', '/');
-        while (trimmed.StartsWith("/"))
-            trimmed = trimmed[1..];
-        if (trimmed.Contains("..", StringComparison.Ordinal))
-            throw new WorkflowArtifactStorageException(
-                $"Storage path '{storagePath}' contains a traversal segment.");
-        if (trimmed.Contains("\0", StringComparison.Ordinal))
-            throw new WorkflowArtifactStorageException(
-                $"Storage path '{storagePath}' contains a NUL character.");
-        return trimmed;
-    }
-
-    private static string SanitizeContainedRelativePath(string relativePath)
-    {
-        if (string.IsNullOrWhiteSpace(relativePath))
-            throw new WorkflowArtifactStorageException("Contained relative path must be provided.");
-        var original = relativePath;
-        var trimmed = relativePath.Replace('\\', '/');
-        // Reject absolute-style paths up-front so the trimming
-        // below does not silently strip leading separators (which
-        // would let "/etc/passwd" become "etc/passwd").
-        if (trimmed.StartsWith("/") || Path.IsPathRooted(relativePath))
-            throw new WorkflowArtifactStorageException(
-                $"Contained relative path '{relativePath}' must be relative to the collection root.");
-        while (trimmed.StartsWith("/"))
-            trimmed = trimmed[1..];
-        if (trimmed.Length == 0)
-            throw new WorkflowArtifactStorageException("Contained relative path must be non-empty.");
-        if (trimmed.Contains("..", StringComparison.Ordinal))
-            throw new WorkflowArtifactStorageException(
-                $"Contained relative path '{relativePath}' contains a traversal segment.");
-        foreach (var segment in trimmed.Split('/'))
-        {
-            if (segment.Length == 0 || segment == "." || segment == "..")
-                throw new WorkflowArtifactStorageException(
-                    $"Contained relative path '{relativePath}' contains an invalid segment.");
-        }
-        if (trimmed.Contains("\0", StringComparison.Ordinal))
-            throw new WorkflowArtifactStorageException(
-                $"Contained relative path '{relativePath}' contains a NUL character.");
-        return trimmed;
-    }
-
     private static IEnumerable<string> EnumerateFilesSafe(string root)
     {
         // Refuse to follow symlinks. Directory.EnumerateFiles itself
@@ -592,20 +510,11 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 
     private static void PopulateIdentityMetadata(WorkflowArtifactStorageMetadata metadata, string storagePath)
     {
-        // Extract the canonical identity segments from the storage
-        // path so the metadata file is self-describing even if the
-        // caller does not yet know the workflow run / task run / id.
-        // The path layout is:
-        //   workflows/{workflowRunId}/tasks/{taskRunId}/artifacts/{artifactId}[/files|/content]
-        var segments = storagePath.Replace('\\', '/').Split('/');
-        if (segments.Length >= 6
-            && segments[0] == WorkflowSegment
-            && segments[2] == "tasks"
-            && segments[4] == "artifacts")
-        {
-            metadata.WorkflowRunId = segments[1];
-            metadata.TaskRunId = segments[3];
-            metadata.ArtifactId = segments[5];
-        }
+        if (WorkflowArtifactStoragePath.Parse(storagePath).TryReadIdentity() is not { } identity)
+            return;
+
+        metadata.WorkflowRunId = identity.WorkflowRunId;
+        metadata.TaskRunId = identity.TaskRunId;
+        metadata.ArtifactId = identity.ArtifactId;
     }
 }

@@ -6,11 +6,11 @@ namespace Mohist.Server.Workflow.Grains;
 /// <summary>
 /// Acquires and releases sequential stage locks for the grain-owned run.
 /// </summary>
-public sealed class WorkflowStageLockCoordinator
+internal sealed class WorkflowStageLockCoordinator
 {
-    private readonly WorkflowGrain _owner;
+    private readonly IWorkflowGrainContext _owner;
 
-    public WorkflowStageLockCoordinator(WorkflowGrain owner)
+    public WorkflowStageLockCoordinator(IWorkflowGrainContext owner)
     {
         _owner = owner;
     }
@@ -29,7 +29,7 @@ public sealed class WorkflowStageLockCoordinator
             throw new InvalidOperationException($"Workflow '{_owner.GrainKey}' stage '{stage}' requires resource '{resource}' but project id is missing");
 
         var key = WorkflowStageLockKeys.ForProjectResource(projectId, resource);
-        var lockGrain = _owner.GrainFactoryAccess.GetGrain<IWorkflowStageLockGrain>(key);
+        var lockGrain = _owner.Grains.GetGrain<IWorkflowStageLockGrain>(key);
         var result = await lockGrain.AcquireSequentialAsync(new StageLockRequest(_owner.GrainKey, stage, resource, projectId));
 
         return result.Acquired;
@@ -54,7 +54,7 @@ public sealed class WorkflowStageLockCoordinator
         if (string.IsNullOrWhiteSpace(projectId)) return;
 
         var key = WorkflowStageLockKeys.ForProjectResource(projectId, resource);
-        var lockGrain = _owner.GrainFactoryAccess.GetGrain<IWorkflowStageLockGrain>(key);
+        var lockGrain = _owner.Grains.GetGrain<IWorkflowStageLockGrain>(key);
         var result = await lockGrain.ReleaseAsync(new StageLockOwner(_owner.GrainKey, stage));
 
         // Pull scheduling rediscovers assignable runs from persisted state.
