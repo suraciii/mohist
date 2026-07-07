@@ -14,6 +14,7 @@ internal interface IWorkflowGrainContext
     IGrainFactory Grains { get; }
     WorkflowSessionHealthService SessionHealthGate { get; }
     ILogger Log { get; }
+    DateTimeOffset Now();
 
     void CacheAssignedWorkerId(string? workerId);
     Task SaveAsync();

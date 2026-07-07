@@ -137,7 +137,8 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.Tests.Specs.Work
             new WorkflowDefinition("spec/workflow",
             [new StageDefinition("build",
                 [new TaskDefinition("task-1", "Task 1", "spec/task")],
-                [])]));
+                [])]),
+            DateTimeOffset.UnixEpoch);
         run.Stages.Clear();
         run.Stages.Add(new StageRun
         {

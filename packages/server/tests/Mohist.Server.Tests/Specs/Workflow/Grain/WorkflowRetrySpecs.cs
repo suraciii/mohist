@@ -310,8 +310,8 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task LegacyApprovalRejectedWithoutWorkflowFailure_UserViewsWorkflowStatus_RerunActionIsAvailable()
     {
-        var run = WorkflowRun.Create("legacy-approval-rejected", ApprovalStage());
-        run.Start();
+        var run = WorkflowRun.Create("legacy-approval-rejected", ApprovalStage(), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         var stage = run.CurrentStage();
         stage.Initialized = true;
         stage.Status = StageRunStatus.Failed;

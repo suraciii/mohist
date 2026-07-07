@@ -6,7 +6,7 @@ public static partial class WorkflowRunExtensions
 {
     extension(WorkflowRun run)
     {
-        public IReadOnlyList<WorkflowEvent> ProcessCheckResults(List<CheckResultAction> actions)
+        public IReadOnlyList<WorkflowEvent> ProcessCheckResults(List<CheckResultAction> actions, DateTimeOffset now)
         {
             var events = new List<WorkflowEvent>();
             foreach (var a in actions)
@@ -14,25 +14,25 @@ public static partial class WorkflowRunExtensions
                 switch (a.Action)
                 {
                     case "pass":
-                        events.AddRange(run.PassCheck(a.Result));
+                        events.AddRange(run.PassCheck(a.Result, now));
                         break;
                     case "pending":
-                        events.AddRange(run.ResetCheck(a.Result));
+                        events.AddRange(run.ResetCheck(a.Result, now));
                         break;
                     case "fail":
-                        events.AddRange(run.FailCheck(a.Result));
+                        events.AddRange(run.FailCheck(a.Result, now));
                         return events;
                 }
             }
             return events;
         }
 
-        public IReadOnlyList<WorkflowEvent> PassCheck(CheckResult result)
+        public IReadOnlyList<WorkflowEvent> PassCheck(CheckResult result, DateTimeOffset now)
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
             check.Status = StageCheckStatus.Passed;
-            check.FinishedAt = DateTimeOffset.UtcNow;
+            check.FinishedAt = now;
             check.Message = result.Message;
             check.Output = result.Output;
             current.ChecksWorkId = null;
@@ -40,16 +40,16 @@ public static partial class WorkflowRunExtensions
             {
                 new CheckPassed(current.Id, check.Name, result.Message)
             };
-            events.AddRange(run.Advance());
+            events.AddRange(run.Advance(now));
             return events;
         }
 
-        public IReadOnlyList<WorkflowEvent> FailCheck(CheckResult result)
+        public IReadOnlyList<WorkflowEvent> FailCheck(CheckResult result, DateTimeOffset now)
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
             check.Status = StageCheckStatus.Failed;
-            check.FinishedAt = DateTimeOffset.UtcNow;
+            check.FinishedAt = now;
             check.Message = result.Message;
             check.Output = result.Output;
             current.ChecksWorkId = null;
@@ -69,7 +69,7 @@ public static partial class WorkflowRunExtensions
             ];
         }
 
-        public IReadOnlyList<WorkflowEvent> ResetCheck(CheckResult result)
+        public IReadOnlyList<WorkflowEvent> ResetCheck(CheckResult result, DateTimeOffset now)
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
@@ -87,7 +87,7 @@ public static partial class WorkflowRunExtensions
             // so the run is no longer in-flight. With the worker still
             // assigned, it lands on Ready so the next poll re-dispatches
             // the check work.
-            events.AddRange(run.Advance());
+            events.AddRange(run.Advance(now));
             return events;
         }
     }

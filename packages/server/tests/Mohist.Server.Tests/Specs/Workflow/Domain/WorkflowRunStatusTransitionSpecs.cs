@@ -37,7 +37,7 @@ public class WorkflowRunStatusTransitionSpecs
     {
         var run = CreateRun();
 
-        var events = run.Start();
+        var events = run.Start(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Pending, run.Status);
         Assert.NotEqual(WorkflowRunStatus.Ready, run.Status);
@@ -66,7 +66,7 @@ public class WorkflowRunStatusTransitionSpecs
     {
         var run = BuildReadyRun();
 
-        run.StartTask("work-1", WorkerId);
+        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
         Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks.Single().Status);
@@ -82,9 +82,9 @@ public class WorkflowRunStatusTransitionSpecs
             new("compile", "Compile", "spec/task"),
             new("test", "Test", "spec/task")
         ], checks: []);
-        run.StartTask("work-1", WorkerId);
+        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
 
-        run.CompleteTask();
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.Equal(TaskRunStatus.Pending, run.CurrentStage().Tasks[1].Status);
@@ -100,10 +100,10 @@ public class WorkflowRunStatusTransitionSpecs
             new("compile", "Compile", "spec/task"),
             new("test", "Test", "spec/task")
         ], checks: []);
-        run.StartTask("work-1", WorkerId);
+        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
         run.Assignment = null;
 
-        run.CompleteTask();
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Pending, run.Status);
         Assert.Equal(TaskRunStatus.Pending, run.CurrentStage().Tasks[1].Status);
@@ -115,9 +115,9 @@ public class WorkflowRunStatusTransitionSpecs
     public void CompleteTask_WithNoRemainingWork_CompletesRun()
     {
         var run = BuildReadyRun(checks: []);
-        run.StartTask("work-1", WorkerId);
+        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
 
-        run.CompleteTask();
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Completed, run.Status);
     }
@@ -130,7 +130,7 @@ public class WorkflowRunStatusTransitionSpecs
         var pending = BuildPendingRun();
         var ready = BuildReadyRun();
         var running = BuildReadyRun();
-        running.StartTask("work-1", WorkerId);
+        running.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
 
         pending.Pause();
         ready.Pause();
@@ -147,10 +147,10 @@ public class WorkflowRunStatusTransitionSpecs
     public void Resume_WithInFlightWork_ReturnsToRunning()
     {
         var run = BuildReadyRun();
-        run.StartTask("work-1", WorkerId);
+        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
         run.Pause();
 
-        run.Resume();
+        run.Resume(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
     }
@@ -163,7 +163,7 @@ public class WorkflowRunStatusTransitionSpecs
         var run = BuildReadyRun();
         run.Pause();
 
-        run.Resume();
+        run.Resume(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
     }
@@ -175,7 +175,7 @@ public class WorkflowRunStatusTransitionSpecs
     {
         var run = BuildAwaitingApprovalRun();
 
-        var events = run.Approve();
+        var events = run.Approve(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.Equal("build", run.CurrentStageId);
@@ -188,9 +188,9 @@ public class WorkflowRunStatusTransitionSpecs
     public void FailTask_LandsOnFailed()
     {
         var run = BuildReadyRun();
-        run.StartTask("work-1", WorkerId);
+        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
 
-        run.FailTask(new TaskResult("failed", "boom"));
+        run.FailTask(new TaskResult("failed", "boom"), DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
     }
@@ -233,7 +233,7 @@ public class WorkflowRunStatusTransitionSpecs
     public void Stop_FromRunningStage_LeavesApprovalStatusUnchanged()
     {
         var run = BuildReadyRun();
-        run.StartTask("work-1", WorkerId);
+        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
         var current = run.CurrentStage();
         Assert.False(current.IsAwaitingApproval);
         Assert.Null(current.ApprovalStatus);
@@ -327,7 +327,7 @@ public class WorkflowRunStatusTransitionSpecs
     {
         var run = BuildAwaitingApprovalRun();
 
-        run.Reject("not enough detail");
+        run.Reject("not enough detail", DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
     }
@@ -350,18 +350,19 @@ public class WorkflowRunStatusTransitionSpecs
             new StageDefinition("integrate",
                 [new("merge", "Merge", "spec/t")],
                 [])
-        ]));
-        run.Start();
+        ]), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage(
             [new("compile", "Compile", "spec/t")],
-            [new("verify", "Verify", "spec/check")]);
+            [new("verify", "Verify", "spec/check")],
+            DateTimeOffset.UnixEpoch);
         run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
-        run.StartTask("w-compile", WorkerId);
-        run.CompleteTask();
-        run.PassCheck(new CheckResult("verify", "pass"));
+        run.StartTask("w-compile", WorkerId, DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("verify", "pass"), DateTimeOffset.UnixEpoch);
         // Build has advanced; integrate is now current.
         Assert.Equal("integrate", run.CurrentStageId);
-        run.InitializeStage([new("merge", "Merge", "spec/t")], []);
+        run.InitializeStage([new("merge", "Merge", "spec/t")], [], DateTimeOffset.UnixEpoch);
 
         // Inject a stale ChecksWorkId on the now-completed build stage,
         // simulating the leak observed in production. The current stage
@@ -391,13 +392,13 @@ public class WorkflowRunStatusTransitionSpecs
         switch (checkStatus)
         {
             case "pass":
-                run.PassCheck(result);
+                run.PassCheck(result, DateTimeOffset.UnixEpoch);
                 break;
             case "fail":
-                run.FailCheck(result);
+                run.FailCheck(result, DateTimeOffset.UnixEpoch);
                 break;
             case "pending":
-                run.ResetCheck(result);
+                run.ResetCheck(result, DateTimeOffset.UnixEpoch);
                 break;
         }
 
@@ -445,7 +446,7 @@ public class WorkflowRunStatusTransitionSpecs
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
         // Claim: StartTask is what transitions the task to Running.
-        run.StartTask("work-1", WorkerId);
+        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
 
         Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks[0].Status);
         Assert.Equal(WorkerId, run.CurrentStage().Tasks[0].WorkerId);
@@ -470,7 +471,7 @@ public class WorkflowRunStatusTransitionSpecs
 
         Assert.NotNull(first);
         Assert.NotNull(second);
-        Assert.Equal(first!.WorkType, second!.WorkType);
+        Assert.Equal(first!.GetType(), second!.GetType());
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.Equal(TaskRunStatus.Pending, run.CurrentStage().Tasks[0].Status);
     }
@@ -480,13 +481,13 @@ public class WorkflowRunStatusTransitionSpecs
         var run = WorkflowRun.Create("wr_approval", new WorkflowDefinition("spec/workflow", [
             new StageDefinition("plan", [new("draft", "Draft", "spec/task")], [new("plan-ok", "Plan OK", "spec/check")], RequiresApproval: true),
             new StageDefinition("build", [new("compile", "Compile", "spec/task")], [])
-        ]));
-        run.Start();
-        run.InitializeStage([new("draft", "Draft", "spec/task")], [new("plan-ok", "Plan OK", "spec/check")]);
+        ]), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
+        run.InitializeStage([new("draft", "Draft", "spec/task")], [new("plan-ok", "Plan OK", "spec/check")], DateTimeOffset.UnixEpoch);
         run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
-        run.StartTask("work-1", WorkerId);
-        run.CompleteTask();
-        run.PassCheck(new CheckResult("plan-ok", "pass"));
+        run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("plan-ok", "pass"), DateTimeOffset.UnixEpoch);
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
         return run;
     }
@@ -508,8 +509,8 @@ public class WorkflowRunStatusTransitionSpecs
         var taskList = tasks ?? [new("compile", "Compile", "spec/task")];
         var checkList = checks ?? [new("build-ok", "Build OK", "spec/check")];
         var run = CreateRun(taskList, checkList);
-        run.Start();
-        run.InitializeStage(taskList, checkList);
+        run.Start(DateTimeOffset.UnixEpoch);
+        run.InitializeStage(taskList, checkList, DateTimeOffset.UnixEpoch);
         Assert.Equal(WorkflowRunStatus.Pending, run.Status);
         return run;
     }
@@ -522,6 +523,6 @@ public class WorkflowRunStatusTransitionSpecs
             new StageDefinition("build",
                 tasks ?? [new("compile", "Compile", "spec/task")],
                 checks ?? [new("build-ok", "Build OK", "spec/check")])
-        ]));
+        ]), DateTimeOffset.UnixEpoch);
     }
 }

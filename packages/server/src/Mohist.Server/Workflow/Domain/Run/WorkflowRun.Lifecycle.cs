@@ -11,6 +11,7 @@ public static partial class WorkflowRunExtensions
         public static WorkflowRun Create(
             string id,
             WorkflowDefinition definition,
+            DateTimeOffset now,
             WorkflowRunMetadata? metadata = null)
         {
             if (definition.Stages.Count == 0)
@@ -29,24 +30,17 @@ public static partial class WorkflowRunExtensions
             return new WorkflowRun
             {
                 Id = id,
-                Metadata = metadata ?? new WorkflowRunMetadata(null, DateTimeOffset.UtcNow),
+                Metadata = metadata ?? new WorkflowRunMetadata(null, now),
                 Status = WorkflowRunStatus.Created,
                 CurrentStageId = stages[0].Id,
                 Stages = stages,
             };
         }
 
-        /// <summary>
-        /// Create overload that takes the narrow <see cref="WorkflowStructure"/>
-        /// projection exposed by <c>WorkflowProfileManager.LoadStructureAsync</c>.
-        /// The grain uses this so it never has to touch a full
-        /// <see cref="WorkflowDefinition"/>; tasks, checks, and lock behavior
-        /// are pulled in only when a stage actually initializes via
-        /// <c>LoadStageSpecsAsync</c>.
-        /// </summary>
         public static WorkflowRun Create(
             string id,
             WorkflowStructure structure,
+            DateTimeOffset now,
             WorkflowRunMetadata? metadata = null)
         {
             if (structure.Stages.Count == 0)
@@ -65,7 +59,7 @@ public static partial class WorkflowRunExtensions
             return new WorkflowRun
             {
                 Id = id,
-                Metadata = metadata ?? new WorkflowRunMetadata(null, DateTimeOffset.UtcNow),
+                Metadata = metadata ?? new WorkflowRunMetadata(null, now),
                 Status = WorkflowRunStatus.Created,
                 CurrentStageId = stages[0].Id,
                 Stages = stages,
@@ -83,7 +77,7 @@ public static partial class WorkflowRunExtensions
                 ?? throw new InvalidOperationException($"Current stage {run.CurrentStageId} not found");
         }
 
-        public IReadOnlyList<WorkflowEvent> Start()
+        public IReadOnlyList<WorkflowEvent> Start(DateTimeOffset now)
         {
             if (run.Status != WorkflowRunStatus.Created && run.Status != WorkflowRunStatus.Paused)
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}");
@@ -95,8 +89,9 @@ public static partial class WorkflowRunExtensions
 
             SetStatusAndTrackReadySince(run, wasPaused
                 ? ActiveOrWaitingForDispatchStatus(run)
-                : WorkflowRunStatus.Pending);
-            run.StartedAt ??= DateTimeOffset.UtcNow;
+                : WorkflowRunStatus.Pending,
+                now);
+            run.StartedAt ??= now;
             return wasPaused
                 ? [new WorkflowRunResumed()]
                 : [new WorkflowRunStarted(), new StageStarted(current.Id)];
@@ -110,7 +105,7 @@ public static partial class WorkflowRunExtensions
             return [new WorkflowRunPaused()];
         }
 
-        public IReadOnlyList<WorkflowEvent> Resume()
+        public IReadOnlyList<WorkflowEvent> Resume(DateTimeOffset now)
         {
             if (run.Status != WorkflowRunStatus.Paused)
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}, resume requires Paused");
@@ -119,7 +114,7 @@ public static partial class WorkflowRunExtensions
             if (current.Status == StageRunStatus.Pending)
                 current.Status = StageRunStatus.Running;
 
-            ApplyActiveOrWaitingForDispatchStatus(run);
+            ApplyActiveOrWaitingForDispatchStatus(run, now);
             return [new WorkflowRunResumed()];
         }
 

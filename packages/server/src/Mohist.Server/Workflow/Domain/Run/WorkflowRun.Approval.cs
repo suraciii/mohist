@@ -98,7 +98,7 @@ public static partial class WorkflowRunExtensions
 
     extension(WorkflowRun run)
     {
-        public IReadOnlyList<WorkflowEvent> Approve()
+        public IReadOnlyList<WorkflowEvent> Approve(DateTimeOffset now)
         {
             var current = run.CurrentStage();
             if (!current.IsAwaitingApproval)
@@ -108,17 +108,17 @@ public static partial class WorkflowRunExtensions
             current.ApprovalStatus = new ApprovalStatus(
                 "approved",
                 current.ApprovalStatus!.RequestedAt,
-                DateTimeOffset.UtcNow.ToString("O"));
+                now.ToString("O"));
             current.Status = StageRunStatus.Completed;
             var events = new List<WorkflowEvent>
             {
                 new StageApprovalResolved(stageId, ApprovalResult.Approved)
             };
-            events.AddRange(run.Advance());
+            events.AddRange(run.Advance(now));
             return events;
         }
 
-        public IReadOnlyList<WorkflowEvent> Reject(string? reason = null)
+        public IReadOnlyList<WorkflowEvent> Reject(string? reason, DateTimeOffset now)
         {
             var current = run.CurrentStage();
             if (!current.IsAwaitingApproval)
@@ -127,7 +127,7 @@ public static partial class WorkflowRunExtensions
             current.ApprovalStatus = new ApprovalStatus(
                 "rejected",
                 current.ApprovalStatus!.RequestedAt,
-                DateTimeOffset.UtcNow.ToString("O"));
+                now.ToString("O"));
             current.Failure = new FailureDetails(FailureReason.ApprovalRejected, current.Id, Message: reason);
             run.Failure = current.Failure;
             current.Status = StageRunStatus.Failed;
@@ -139,7 +139,11 @@ public static partial class WorkflowRunExtensions
             ];
         }
 
-        public IReadOnlyList<WorkflowEvent> RequestChanges(string body, TaskDefinition? feedbackTask = null)
+        public IReadOnlyList<WorkflowEvent> RequestChanges(
+            string body,
+            string feedbackId,
+            DateTimeOffset now,
+            TaskDefinition? feedbackTask = null)
         {
             if (string.IsNullOrWhiteSpace(body))
                 throw new ArgumentException("Feedback body is required", nameof(body));
@@ -151,14 +155,13 @@ public static partial class WorkflowRunExtensions
             if (!current.Initialized)
                 throw new InvalidOperationException($"Cannot request changes: stage {current.Id} is not initialized");
 
-            var feedbackId = $"fb_{Guid.NewGuid():N}";
             var feedback = new ApprovalFeedback(
                 Id: feedbackId,
                 WorkflowRunId: run.Id,
                 Stage: current.Id,
                 Body: body,
                 Status: ApprovalFeedbackStatus.Open,
-                CreatedAt: DateTimeOffset.UtcNow);
+                CreatedAt: now);
 
             run.Feedback.Add(feedback);
 
@@ -168,6 +171,7 @@ public static partial class WorkflowRunExtensions
 
             var runtimeEvents = run.AddRuntimeTask(
                 resolvedTask,
+                now,
                 stage: current.Id,
                 invalidateChecks: true,
                 causedByFeedbackId: feedbackId);
@@ -177,7 +181,7 @@ public static partial class WorkflowRunExtensions
             return events;
         }
 
-        public ApprovalFeedback? ResolveFeedback(string feedbackId, string taskId, string? output)
+        public ApprovalFeedback? ResolveFeedback(string feedbackId, string taskId, string? output, DateTimeOffset now)
         {
             var feedback = run.Feedback.FirstOrDefault(f => f.Id == feedbackId);
             if (feedback is null) return null;
@@ -187,7 +191,7 @@ public static partial class WorkflowRunExtensions
             {
                 Status = ApprovalFeedbackStatus.Resolved,
                 ResolutionTaskId = taskId,
-                ResolvedAt = DateTimeOffset.UtcNow,
+                ResolvedAt = now,
                 ResolutionSummary = ExtractResolutionSummary(output),
             };
 

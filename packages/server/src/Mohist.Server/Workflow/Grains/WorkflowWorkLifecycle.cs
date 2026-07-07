@@ -20,8 +20,9 @@ internal sealed class WorkflowWorkLifecycle
     /// artifact before the producing task closes.
     /// </summary>
     public async Task<IReadOnlyList<WorkflowEvent>> ApplyTaskReportAsync(
-        WorkflowRun run, TaskReport report, string taskRunId, string workId)
+        WorkflowRun run, TaskReport report, string taskRunId)
     {
+        var now = _owner.Now();
         var currentStage = run.CurrentStage();
         var currentTask = currentStage?.Tasks.FirstOrDefault(t => t.Id == taskRunId);
         var events = new List<WorkflowEvent>();
@@ -30,7 +31,7 @@ internal sealed class WorkflowWorkLifecycle
         {
             foreach (var a in report.Artifacts)
             {
-                events.Add(new WorkflowArtifactRecorded(_owner.GrainKey, taskRunId, a.Path, DateTimeOffset.UtcNow));
+                events.Add(new WorkflowArtifactRecorded(_owner.GrainKey, taskRunId, a.Path, now));
             }
         }
 
@@ -40,7 +41,7 @@ internal sealed class WorkflowWorkLifecycle
                 currentTask.Output = ParseOutputToJsonElement(report.Output);
             if (currentTask?.CausedByFeedbackId is { } feedbackId)
             {
-                var resolved = run.ResolveFeedback(feedbackId, currentTask.Id, report.Output);
+                var resolved = run.ResolveFeedback(feedbackId, currentTask.Id, report.Output, now);
                 if (resolved is not null)
                 {
                     _owner.Log.LogInformation(
@@ -49,7 +50,7 @@ internal sealed class WorkflowWorkLifecycle
                 }
             }
             var hasFollowUpTasks = report.AddTasks is { Count: > 0 };
-            events.AddRange(run.CompleteTask(advance: !hasFollowUpTasks));
+            events.AddRange(run.CompleteTask(now, advance: !hasFollowUpTasks));
 
             if (hasFollowUpTasks && report.AddTasks is { Count: > 0 } addTasks)
             {
@@ -58,7 +59,7 @@ internal sealed class WorkflowWorkLifecycle
                     var with = WorkflowDispatchHelpers.ParseWith(t.With);
                     return new TaskDefinition(t.Id, t.Title, t.Uses, with, t.Artifacts, t.SetVars, t.Recovery);
                 }).ToList();
-                var followUpEvents = run.AddRuntimeTasks(taskDefs);
+                var followUpEvents = run.AddRuntimeTasks(taskDefs, now);
                 events.AddRange(followUpEvents);
                 _owner.Log.LogInformation(
                     "Workflow {Id} task {TaskId} produced {Count} follow-up tasks",
@@ -69,7 +70,7 @@ internal sealed class WorkflowWorkLifecycle
         {
             if (currentTask is not null) currentTask.Output = ParseOutputToJsonElement(report.Output);
             var taskResult = new TaskResult("failed", report.Detail ?? report.Output);
-            events.AddRange(run.FailTask(taskResult));
+            events.AddRange(run.FailTask(taskResult, now));
         }
 
         return events;
@@ -77,6 +78,7 @@ internal sealed class WorkflowWorkLifecycle
 
     public Task<IReadOnlyList<WorkflowEvent>> ApplyCheckReportAsync(WorkflowRun run, CheckReport report)
     {
+        var now = _owner.Now();
         var actions = new List<CheckResultAction>(report.Results.Count);
 
         foreach (var cr in report.Results)
@@ -96,7 +98,7 @@ internal sealed class WorkflowWorkLifecycle
             }
         }
 
-        return Task.FromResult<IReadOnlyList<WorkflowEvent>>(run.ProcessCheckResults(actions));
+        return Task.FromResult<IReadOnlyList<WorkflowEvent>>(run.ProcessCheckResults(actions, now));
     }
 
     public async Task AbandonRunningWorkAsync(WorkflowRun run, string reason)
@@ -112,7 +114,7 @@ internal sealed class WorkflowWorkLifecycle
         var runningTask = run.CurrentStage().RunningTask;
         if (runningTask is not null)
         {
-            var events = run.FailTaskForStopped(reason);
+            var events = run.FailTaskForStopped(reason, _owner.Now());
             await _owner.SaveAsyncWithEvents(events);
             return;
         }
@@ -139,7 +141,8 @@ internal sealed class WorkflowWorkLifecycle
         }
 
         var workId = logicalTaskId;
-        var events = run.StartTask(workId, workerId);
+        var now = _owner.Now();
+        var events = run.StartTask(workId, workerId, now);
         await _owner.SaveAsyncWithEvents(events);
         foreach (var e in events)
             await _owner.DispatchEvent(e);
@@ -153,7 +156,7 @@ internal sealed class WorkflowWorkLifecycle
         var checksWorkId = WorkflowRunExtensions.ChecksWorkIdFor(stage);
         var currentStage = run.CurrentStage();
         currentStage.ChecksWorkId = checksWorkId;
-        var now = DateTimeOffset.UtcNow;
+        var now = _owner.Now();
         foreach (var item in items)
         {
             var check = currentStage.Checks.FirstOrDefault(c => c.Name == item.Name);
@@ -169,11 +172,10 @@ internal sealed class WorkflowWorkLifecycle
 
     public WorkItem? BuildClaimableWorkItem(WorkflowRun run, WorkflowWork work)
     {
-        switch (work.WorkType)
+        switch (work)
         {
-            case "task":
+            case WorkflowTaskWork t:
             {
-                var t = (WorkflowWork.TaskData)work.Data;
                 return WorkItem.Task(
                     stage: work.Stage,
                     id: t.Id,
@@ -184,9 +186,8 @@ internal sealed class WorkflowWorkLifecycle
                     setVars: t.SetVars,
                     recovery: t.Recovery);
             }
-            case "checks":
+            case WorkflowChecksWork ch:
             {
-                var ch = (WorkflowWork.ChecksData)work.Data;
                 return WorkItem.Checks(work.Stage, WorkflowRunExtensions.ChecksWorkIdFor(work.Stage), ch.Items);
             }
             default:

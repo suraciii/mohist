@@ -88,16 +88,16 @@ public static partial class WorkflowRunExtensions
     private static WorkflowRunStatus ActiveOrWaitingForDispatchStatus(WorkflowRun run) =>
         run.HasInFlightWork() ? WorkflowRunStatus.Running : WaitingForDispatchStatus(run);
 
-    private static void ApplyWaitingForDispatchStatus(WorkflowRun run)
-        => SetStatusAndTrackReadySince(run, WaitingForDispatchStatus(run));
+    private static void ApplyWaitingForDispatchStatus(WorkflowRun run, DateTimeOffset now)
+        => SetStatusAndTrackReadySince(run, WaitingForDispatchStatus(run), now);
 
-    private static void ApplyActiveOrWaitingForDispatchStatus(WorkflowRun run)
-        => SetStatusAndTrackReadySince(run, ActiveOrWaitingForDispatchStatus(run));
+    private static void ApplyActiveOrWaitingForDispatchStatus(WorkflowRun run, DateTimeOffset now)
+        => SetStatusAndTrackReadySince(run, ActiveOrWaitingForDispatchStatus(run), now);
 
-    private static void SetStatusAndTrackReadySince(WorkflowRun run, WorkflowRunStatus next)
+    private static void SetStatusAndTrackReadySince(WorkflowRun run, WorkflowRunStatus next, DateTimeOffset now)
     {
         if (next == WorkflowRunStatus.Ready && run.Status != WorkflowRunStatus.Ready)
-            run.ReadySince = DateTimeOffset.UtcNow;
+            run.ReadySince = now;
         run.Status = next;
     }
 }

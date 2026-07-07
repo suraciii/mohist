@@ -58,7 +58,7 @@ public sealed class WorkflowRun
     /// fairness: the scheduler serves Ready runs in <c>ReadySince ASC</c> order,
     /// so just-served runs re-queue at the tail with zero scheduler state (see
     /// <c>design/workflow/scheduling.md</c> §Fairness). Maintained as a side
-    /// effect of entering Ready (see <c>SetStatusAndTrackReadySince</c>);
+    /// effect of entering Ready;
     /// leaving Ready does not clear it, re-entering overwrites it.
     /// </summary>
     public DateTimeOffset? ReadySince { get; set; }

@@ -14,11 +14,12 @@ public class WorkflowRunRuntimeVariableSpecs
     [Fact]
     public void TaskRun_Output_StoresAsJsonElement()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStage());
-        run.Start();
+        var run = WorkflowRun.Create("wr_1", SingleStage(), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         var events = run.InitializeStage(
             [new("task-1", "Task 1", "spec/task")],
-            [new("check-1", "Check 1", "spec/check")]);
+            [new("check-1", "Check 1", "spec/check")],
+            DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "task-1");
         var outputJson = JsonSerializer.Deserialize<JsonElement>("{\"prNumber\":42,\"prUrl\":\"https://github.com/test/pr/42\"}");
 
@@ -35,7 +36,7 @@ public class WorkflowRunRuntimeVariableSpecs
     [Fact]
     public void TaskRun_Output_NullByDefault()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStage());
+        var run = WorkflowRun.Create("wr_1", SingleStage(), DateTimeOffset.UnixEpoch);
 
         var task = new TaskRun
         {
@@ -54,11 +55,12 @@ public class WorkflowRunRuntimeVariableSpecs
     [Fact]
     public void TaskRun_Output_RetryOverwrites()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStage());
-        run.Start();
+        var run = WorkflowRun.Create("wr_1", SingleStage(), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         var events = run.InitializeStage(
             [new("task-1", "Task 1", "spec/task")],
-            [new("check-1", "Check 1", "spec/check")]);
+            [new("check-1", "Check 1", "spec/check")],
+            DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "task-1");
 
         var first = JsonSerializer.Deserialize<JsonElement>("{\"name\":\"first\"}");
@@ -76,13 +78,14 @@ public class WorkflowRunRuntimeVariableSpecs
     [Fact]
     public void Serialization_RoundTripsTaskOutput()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStage());
-        run.Start();
+        var run = WorkflowRun.Create("wr_1", SingleStage(), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         var events = run.InitializeStage(
             [new("task-1", "Task 1", "spec/task")],
-            [new("check-1", "Check 1", "spec/check")]);
+            [new("check-1", "Check 1", "spec/check")],
+            DateTimeOffset.UnixEpoch);
         run.AssignTo("worker-1", DateTimeOffset.UtcNow);
-        var events2 = run.StartTask("work-1", "worker-1");
+        var events2 = run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "task-1");
         task.Output = JsonSerializer.Deserialize<JsonElement>("{\"prNumber\":42}");
 

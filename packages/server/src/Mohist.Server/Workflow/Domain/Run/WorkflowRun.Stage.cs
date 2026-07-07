@@ -9,7 +9,8 @@ public static partial class WorkflowRunExtensions
     {
         public IReadOnlyList<WorkflowEvent> InitializeStage(
             IReadOnlyList<TaskDefinition> tasks,
-            List<CheckDefinition> checks)
+            List<CheckDefinition> checks,
+            DateTimeOffset now)
         {
             var current = run.CurrentStage();
             if (current.Initialized) return [];
@@ -31,17 +32,17 @@ public static partial class WorkflowRunExtensions
                 .ToList();
             current.Initialized = true;
             current.Status = StageRunStatus.Running;
-            return run.Advance();
+            return run.Advance(now);
         }
 
-        private IReadOnlyList<WorkflowEvent> Advance()
+        private IReadOnlyList<WorkflowEvent> Advance(DateTimeOffset now)
         {
             if (run.Status == WorkflowRunStatus.Paused) return [];
             var events = new List<WorkflowEvent>();
 
             var current = run.CurrentStage();
             var statusBefore = current.Status;
-            current.TryRequestApproval();
+            current.TryRequestApproval(now);
             if (statusBefore != StageRunStatus.AwaitingApproval && current.Status == StageRunStatus.AwaitingApproval)
                 events.Add(new StageApprovalRequested(current.Id));
 
@@ -52,7 +53,7 @@ public static partial class WorkflowRunExtensions
                 if (idx >= run.Stages.Count)
                 {
                     run.Status = WorkflowRunStatus.Completed;
-                    run.CompletedAt = DateTimeOffset.UtcNow;
+                    run.CompletedAt = now;
                     events.Add(new WorkflowRunCompleted());
                     return events;
                 }
@@ -68,7 +69,7 @@ public static partial class WorkflowRunExtensions
                 StageRunStatus.Failed => WorkflowRunStatus.Failed,
                 StageRunStatus.AwaitingApproval => WorkflowRunStatus.AwaitingApproval,
                 _ => WaitingForDispatchStatus(run)
-            });
+            }, now);
             return events;
         }
     }
@@ -108,11 +109,11 @@ public static partial class WorkflowRunExtensions
             return stage.Checks.All(c => c.Status == StageCheckStatus.Passed);
         }
 
-        private void TryRequestApproval()
+        private void TryRequestApproval(DateTimeOffset now)
         {
             if (stage.RequiresApproval && stage.ApprovalStatus is null && stage.HasNoPendingTasksAndPassedChecks())
             {
-                stage.ApprovalStatus = new ApprovalStatus(null, DateTimeOffset.UtcNow.ToString("O"), null);
+                stage.ApprovalStatus = new ApprovalStatus(null, now.ToString("O"), null);
                 stage.Status = StageRunStatus.AwaitingApproval;
                 return;
             }

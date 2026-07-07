@@ -4,25 +4,21 @@ using Mohist.Server.Workflow.Domain;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public sealed record WorkflowWork
-{
-    public string Stage { get; init; }
-    public string WorkType { get; init; }
-    public object Data { get; init; }
+public abstract record WorkflowWork(string Stage);
 
-    private WorkflowWork(string stage, string workType, object data)
-    {
-        Stage = stage;
-        WorkType = workType;
-        Data = data;
-    }
+public sealed record WorkflowTaskWork(
+    string Stage,
+    string Id,
+    string Title,
+    string? Uses,
+    Dictionary<string, JsonElement?>? With,
+    TaskArtifactCapture? Artifacts = null,
+    Dictionary<string, string>? SetVars = null,
+    RecoveryDefinition? Recovery = null) : WorkflowWork(Stage);
 
-    public static WorkflowWork Task(string stage, string id, string title, string? uses, Dictionary<string, JsonElement?>? with, TaskArtifactCapture? artifacts = null, Dictionary<string, string>? setVars = null, RecoveryDefinition? recovery = null) => new(stage, "task", new TaskData(id, title, uses, with, artifacts, setVars, recovery));
-    public static WorkflowWork Checks(string stage, List<CheckItem> items) => new(stage, "checks", new ChecksData(items));
-
-    public sealed record TaskData(string Id, string Title, string? Uses, Dictionary<string, JsonElement?>? With, TaskArtifactCapture? Artifacts = null, Dictionary<string, string>? SetVars = null, RecoveryDefinition? Recovery = null);
-    public sealed record ChecksData(List<CheckItem> Items);
-}
+public sealed record WorkflowChecksWork(
+    string Stage,
+    List<CheckItem> Items) : WorkflowWork(Stage);
 
 public sealed record WorkflowActiveWork(WorkItem Item, string? TaskRunId)
 {
@@ -43,7 +39,7 @@ public static partial class WorkflowRunExtensions
 
             var pendingTask = NextUnclaimedTask(current);
             if (pendingTask is not null)
-                return WorkflowWork.Task(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery);
+                return new WorkflowTaskWork(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery);
 
             var pendingChecks = current.Checks
                 .Where(c => c.Status == StageCheckStatus.Pending)
@@ -51,7 +47,7 @@ public static partial class WorkflowRunExtensions
                 .ToList();
 
             if (pendingChecks.Any())
-                return WorkflowWork.Checks(current.Id, pendingChecks);
+                return new WorkflowChecksWork(current.Id, pendingChecks);
 
             return null;
         }
@@ -85,13 +81,15 @@ public static partial class WorkflowRunExtensions
 
         public IReadOnlyList<WorkflowEvent> AddRuntimeTask(
             TaskDefinition task,
+            DateTimeOffset now,
             string? stage = null,
             bool invalidateChecks = false,
             string? causedByFeedbackId = null)
-            => run.AddRuntimeTasks([task], stage, invalidateChecks, causedByFeedbackId);
+            => run.AddRuntimeTasks([task], now, stage, invalidateChecks, causedByFeedbackId);
 
         public IReadOnlyList<WorkflowEvent> AddRuntimeTasks(
             IReadOnlyList<TaskDefinition> tasks,
+            DateTimeOffset now,
             string? stage = null,
             bool invalidateChecks = false,
             string? causedByFeedbackId = null)
@@ -133,7 +131,7 @@ public static partial class WorkflowRunExtensions
             if (current.Initialized)
                 current.Status = StageRunStatus.Running;
 
-            ApplyActiveOrWaitingForDispatchStatus(run);
+            ApplyActiveOrWaitingForDispatchStatus(run, now);
             return tasks.Count > 0 ? [new WorkflowRunResumed()] : [];
         }
 

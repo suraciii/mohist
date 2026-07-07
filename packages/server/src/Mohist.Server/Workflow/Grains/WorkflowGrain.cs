@@ -28,6 +28,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     private readonly IWorkflowRunStore _runStore;
     private readonly WorkflowProfileManager _profileManager;
     private readonly WorkflowSessionHealthService _sessionHealth;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<WorkflowGrain> _log;
     private readonly WorkflowReadModel _readModel;
     private readonly WorkflowStageLockCoordinator _stageLockCoordinator;
@@ -40,11 +41,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         IWorkflowRunStore runStore,
         WorkflowProfileManager profileManager,
         WorkflowSessionHealthService sessionHealth,
+        TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
         _profileManager = profileManager;
         _sessionHealth = sessionHealth;
+        _timeProvider = timeProvider;
         _log = log;
         _readModel = new WorkflowReadModel(this);
         _stageLockCoordinator = new WorkflowStageLockCoordinator(this);
@@ -58,6 +61,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     IGrainFactory IWorkflowGrainContext.Grains => GrainFactory;
     WorkflowSessionHealthService IWorkflowGrainContext.SessionHealthGate => _sessionHealth;
     ILogger IWorkflowGrainContext.Log => _log;
+    DateTimeOffset IWorkflowGrainContext.Now() => Now();
     void IWorkflowGrainContext.CacheAssignedWorkerId(string? workerId) => _cachedAssignedWorkerId = workerId;
     Task IWorkflowGrainContext.SaveAsync() => SaveRunAsync();
     Task IWorkflowGrainContext.SaveAsyncWithEvents(IReadOnlyList<WorkflowEvent> events) => SaveRunAsync(events);
@@ -102,11 +106,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
             var projectId = metadata?.Annotations?.GetValueOrDefault("projectId");
             var issueId = metadata?.Annotations?.GetValueOrDefault("issueId");
             var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueId);
-            _run = WorkflowRun.Create(GrainKey, structure, metadata ?? BuildRunMetadata(null));
+            _run = WorkflowRun.Create(GrainKey, structure, Now(), metadata ?? BuildRunMetadata(null));
             _run.Workspace = input?.Workspace;
         }
 
-        var events = _run.Start();
+        var events = _run.Start(Now());
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
@@ -115,7 +119,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     public async Task ResumeAsync()
     {
         EnsureRun();
-        var events = _run.Resume();
+        var events = _run.Resume(Now());
         _log.LogInformation("Workflow {Id} resumed, stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
     }
@@ -148,7 +152,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     public async Task ApproveAsync()
     {
         EnsureRun();
-        var events = _run.Approve();
+        var events = _run.Approve(Now());
         _log.LogInformation("Workflow {Id} approved at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
     }
@@ -162,8 +166,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         var feedbackTask = config is null
             ? WorkflowRunExtensions.BuildDefaultFeedbackTask(stage.Id)
             : WorkflowRunExtensions.ResolveFeedbackTask(config, stage.Id);
-        var events = _run.RequestChanges(body, feedbackTask);
-        var feedbackId = _run.Feedback.Last().Id;
+        var feedbackId = CreateFeedbackId();
+        var events = _run.RequestChanges(body, feedbackId, Now(), feedbackTask);
         _log.LogInformation("Workflow {Id} requested changes at stage={Stage}: feedback={FeedbackId}", GrainKey, stage.Id, feedbackId);
         await CommitAsync(events);
         return feedbackId;
@@ -193,7 +197,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         }
 
         await ReleaseCurrentStageLocksAsync("retried");
-        var events = _run.Retry();
+        var events = _run.Retry(Now());
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
     }
@@ -202,7 +206,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     {
         EnsureRun();
         await ReleaseCurrentStageLocksAsync("rerun");
-        var events = _run.Rerun();
+        var events = _run.Rerun(Now());
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
     }
@@ -213,7 +217,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         IReadOnlyList<WorkflowEvent> events;
         try
         {
-            events = _run.RerunFromStage(stageId);
+            events = _run.RerunFromStage(stageId, Now());
         }
         catch (WorkflowControlRejectionException ex)
         {
@@ -237,7 +241,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
             throw new InvalidOperationException("Runtime task requires title");
 
         var with = WorkflowDispatchHelpers.ParseWith(task.With);
-        var events = _run.AddRuntimeTask(new TaskDefinition(task.Id, task.Title, task.Uses, with, Recovery: task.Recovery), task.Stage, task.InvalidateChecks);
+        var events = _run.AddRuntimeTask(
+            new TaskDefinition(task.Id, task.Title, task.Uses, with, Recovery: task.Recovery),
+            Now(),
+            task.Stage,
+            task.InvalidateChecks);
 
         var stage = _run.CurrentStageId ?? "unknown";
         _log.LogInformation("Workflow {Id} added runtime task {TaskId} at stage={Stage}", GrainKey, task.Id, stage);
@@ -273,7 +281,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
             return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
         if (_run.Assignment is null)
         {
-            _run.AssignTo(workerId, DateTimeOffset.UtcNow);
+            _run.AssignTo(workerId, Now());
             _cachedAssignedWorkerId = workerId;
             await SaveRunAsync();
         }
@@ -335,7 +343,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
             tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, WorkflowDispatchHelpers.ParseWith(t.With)));
         }
 
-        var events = _run.AddRuntimeTasks(tasksToInsert);
+        var events = _run.AddRuntimeTasks(tasksToInsert, Now());
 
         _log.LogInformation("Workflow {Id} added {Count} tasks in stage {Stage}",
             GrainKey, tasksToInsert.Count, current.Id);
@@ -355,7 +363,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         _log.LogInformation("Workflow {Id} received task report for {WorkId}: {Status} detail={Detail}",
             GrainKey, workId, report.Status, report.Detail ?? "(none)");
 
-        var events = await _workLifecycle.ApplyTaskReportAsync(_run!, report, activeWork.TaskRunId, workId);
+        var events = await _workLifecycle.ApplyTaskReportAsync(_run!, report, activeWork.TaskRunId);
 
         await CommitAsync(events);
         return ReportAck.Accepted;
@@ -491,7 +499,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)
     {
         if (input is null) return null;
-        return new WorkflowRunMetadata(input.Name, DateTimeOffset.UtcNow, input.Labels, input.Annotations);
+        return new WorkflowRunMetadata(input.Name, Now(), input.Labels, input.Annotations);
     }
 
     private async Task ClearStoppedRunStaleApprovalGateAsync(CancellationToken ct)
@@ -540,4 +548,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
             throw;
         }
     }
+
+    private DateTimeOffset Now() => _timeProvider.GetUtcNow();
+
+    private static string CreateFeedbackId() => $"fb_{Guid.NewGuid():N}";
 }

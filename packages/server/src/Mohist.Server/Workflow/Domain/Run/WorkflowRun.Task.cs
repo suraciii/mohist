@@ -5,7 +5,7 @@ public static partial class WorkflowRunExtensions
 {
     extension(WorkflowRun run)
     {
-        public IReadOnlyList<WorkflowEvent> StartTask(string workId, string workerId)
+        public IReadOnlyList<WorkflowEvent> StartTask(string workId, string workerId, DateTimeOffset now)
         {
             if (run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}, start task requires Ready or Running");
@@ -16,27 +16,27 @@ public static partial class WorkflowRunExtensions
             if (task is null) return [];
 
             task.Status = TaskRunStatus.Running;
-            task.StartedAt = DateTimeOffset.UtcNow;
+            task.StartedAt = now;
             task.WorkId = workId;
             task.WorkerId = workerId;
             run.Status = WorkflowRunStatus.Running;
             return [new TaskStarted(current.Id, task.Id, workerId)];
         }
 
-        public IReadOnlyList<WorkflowEvent> CompleteTask(bool advance = true)
+        public IReadOnlyList<WorkflowEvent> CompleteTask(DateTimeOffset now, bool advance = true)
         {
             var current = run.CurrentStage();
             var task = current.CurrentTask();
             if (task is null || task.Status != TaskRunStatus.Running) return [];
 
-            task.FinishedAt = DateTimeOffset.UtcNow;
+            task.FinishedAt = now;
             task.Status = TaskRunStatus.Completed;
             var events = new List<WorkflowEvent>
             {
                 new TaskCompleted(current.Id, task.Id)
             };
             if (advance)
-                events.AddRange(run.Advance());
+                events.AddRange(run.Advance(now));
             return events;
         }
 
@@ -51,13 +51,13 @@ public static partial class WorkflowRunExtensions
         /// independence of <see cref="WorkflowRunStatus"/> and
         /// <see cref="TaskRunStatus"/> state machines.
         /// </summary>
-        public IReadOnlyList<WorkflowEvent> FailTask(TaskResult result)
+        public IReadOnlyList<WorkflowEvent> FailTask(TaskResult result, DateTimeOffset now)
         {
             var current = run.CurrentStage();
             var task = current.CurrentTask();
             if (task is null || task.Status != TaskRunStatus.Running) return [];
 
-            task.FinishedAt = DateTimeOffset.UtcNow;
+            task.FinishedAt = now;
             task.Status = TaskRunStatus.Failed;
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: result.Reason);
             run.Failure = current.Failure;
@@ -70,14 +70,14 @@ public static partial class WorkflowRunExtensions
             ];
         }
 
-        public IReadOnlyList<WorkflowEvent> FailTaskForStopped(string reason)
+        public IReadOnlyList<WorkflowEvent> FailTaskForStopped(string reason, DateTimeOffset now)
         {
             var current = run.CurrentStage();
             var task = current.CurrentTask();
             if (task is null || task.Status != TaskRunStatus.Running) return [];
 
             var message = string.IsNullOrWhiteSpace(reason) ? "stopped" : reason;
-            task.FinishedAt = DateTimeOffset.UtcNow;
+            task.FinishedAt = now;
             task.Status = TaskRunStatus.Failed;
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: message);
             run.Failure = current.Failure;
