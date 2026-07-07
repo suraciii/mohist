@@ -7,11 +7,11 @@ namespace Mohist.Server.Workflow.Grains;
 /// stages may advance immediately, so one commit can materialize multiple
 /// newly started stages.
 /// </summary>
-public sealed class WorkflowStageInitializer
+internal sealed class WorkflowStageInitializer
 {
-    private readonly WorkflowGrain _owner;
+    private readonly IWorkflowGrainContext _owner;
 
-    public WorkflowStageInitializer(WorkflowGrain owner)
+    public WorkflowStageInitializer(IWorkflowGrainContext owner)
     {
         _owner = owner;
     }

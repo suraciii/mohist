@@ -1,7 +1,5 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
@@ -38,11 +36,11 @@ public sealed class WorkflowArtifactUploadService : IScopedService
     /// <summary>
     /// Directory upload envelope content type.
     /// </summary>
-    public const string DirectoryContentType = "application/x-mohist-artifact-directory";
+    public const string DirectoryContentType = WorkflowArtifactDirectoryEnvelopeReader.ContentType;
 
     private static readonly TimeSpan CleanupWarningThreshold = TimeSpan.FromMinutes(5);
 
-    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly WorkflowArtifactPendingUploadRepository _pendingUploads;
     private readonly IWorkflowArtifactStorage _storage;
     private readonly IWorkflowArtifactUploadWorkContextResolver _workContextResolver;
     private readonly ILogger<WorkflowArtifactUploadService> _log;
@@ -75,7 +73,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
         TimeProvider time,
         TimeSpan pendingTtl)
     {
-        _dbFactory = dbFactory;
+        _pendingUploads = new WorkflowArtifactPendingUploadRepository(dbFactory);
         _storage = storage;
         _workContextResolver = workContextResolver;
         _log = log;
@@ -104,40 +102,20 @@ public sealed class WorkflowArtifactUploadService : IScopedService
 
         var context = work.Context!;
 
-        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-
-        var existing = await db.WorkflowArtifactPendingUploads
-            .FirstOrDefaultAsync(p =>
-                p.WorkflowRunId == context.WorkflowRunId
-                && p.WorkId == context.WorkId
-                && p.TaskRunId == context.TaskRunId
-                && p.Path == request.Path,
-                cancellationToken)
+        var key = new WorkflowArtifactPendingUploadKey(
+            context.WorkflowRunId,
+            context.WorkId,
+            context.TaskRunId,
+            request.Path);
+        var existing = await _pendingUploads.FindByKeyAsync(key, cancellationToken)
             .ConfigureAwait(false);
 
         if (existing is not null)
-        {
-            if (HashesMatch(existing.ContentHash, request.ContentHash))
-            {
-                _log.LogDebug(
-                    "Pending artifact upload {UploadId} for {Path} already exists; returning existing id (idempotent retry)",
-                    existing.UploadId, request.Path);
-                return WorkflowArtifactUploadResult.Idempotent(ToInfo(existing));
-            }
-
-            return WorkflowArtifactUploadResult.ConflictResult(new WorkflowArtifactUploadConflict(
-                UploadId: existing.UploadId,
-                WorkflowRunId: existing.WorkflowRunId,
-                WorkId: existing.WorkId,
-                TaskRunId: existing.TaskRunId,
-                Path: existing.Path,
-                ExistingContentHash: existing.ContentHash,
-                IncomingContentHash: request.ContentHash));
-        }
+            return ExistingUploadResult(existing, request.ContentHash);
 
         var now = _time.GetUtcNow();
         var uploadId = NewUploadId();
-        var kind = IsDirectoryContentType(request.ContentType)
+        var kind = WorkflowArtifactDirectoryEnvelopeReader.IsDirectoryContentType(request.ContentType)
             ? "directory"
             : "file";
         var pending = new WorkflowArtifactPendingUploadRow
@@ -172,7 +150,8 @@ public sealed class WorkflowArtifactUploadService : IScopedService
             int? fileCount = null;
             if (kind == "directory")
             {
-                var envelope = await ReadDirectoryEnvelopeAsync(content, request.Size, cancellationToken)
+                var envelope = await WorkflowArtifactDirectoryEnvelopeReader
+                    .ReadAsync(content, request.Size, cancellationToken)
                     .ConfigureAwait(false);
                 fileCount = envelope.Entries.Count;
                 writeResult = await _storage.WriteDirectoryAsync(
@@ -219,41 +198,12 @@ public sealed class WorkflowArtifactUploadService : IScopedService
                 pending.Size = writeResult.Size;
             }
 
-            db.WorkflowArtifactPendingUploads.Add(pending);
-            try
+            var committed = await _pendingUploads.TryCreateAsync(pending, cancellationToken)
+                .ConfigureAwait(false);
+            if (!committed.WasCreated)
             {
-                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
-            {
-                // Lost a race to another concurrent upload with the
-                // same idempotency key. Re-read and either return the
-                // existing row (idempotent) or surface the conflict.
-                db.ChangeTracker.Clear();
-                var racer = await db.WorkflowArtifactPendingUploads
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(p =>
-                        p.WorkflowRunId == context.WorkflowRunId
-                        && p.WorkId == context.WorkId
-                        && p.TaskRunId == context.TaskRunId
-                        && p.Path == request.Path,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                if (racer is null) throw;
-
                 SafeRemoveStorageDirectory(writeResult.StoragePath);
-
-                if (HashesMatch(racer.ContentHash, request.ContentHash))
-                    return WorkflowArtifactUploadResult.Idempotent(ToInfo(racer));
-
-                return WorkflowArtifactUploadResult.ConflictResult(new WorkflowArtifactUploadConflict(
-                    UploadId: racer.UploadId,
-                    WorkflowRunId: racer.WorkflowRunId,
-                    WorkId: racer.WorkId,
-                    TaskRunId: racer.TaskRunId,
-                    Path: racer.Path,
-                    ExistingContentHash: racer.ContentHash,
-                    IncomingContentHash: request.ContentHash));
+                return ExistingUploadResult(committed.Row, request.ContentHash);
             }
         }
         catch (InvalidDataException ex)
@@ -310,104 +260,26 @@ public sealed class WorkflowArtifactUploadService : IScopedService
         return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsDirectoryContentType(string? contentType)
+    private WorkflowArtifactUploadResult ExistingUploadResult(
+        WorkflowArtifactPendingUploadRow existing,
+        string? incomingContentHash)
     {
-        if (string.IsNullOrWhiteSpace(contentType)) return false;
-        return string.Equals(contentType, DirectoryContentType, StringComparison.OrdinalIgnoreCase);
-    }
+        if (HashesMatch(existing.ContentHash, incomingContentHash))
+        {
+            _log.LogDebug(
+                "Pending artifact upload {UploadId} for {Path} already exists; returning existing id (idempotent retry)",
+                existing.UploadId, existing.Path);
+            return WorkflowArtifactUploadResult.Idempotent(ToInfo(existing));
+        }
 
-    /// <summary>
-    /// Reads the directory envelope produced by the runner and
-    /// converts it into a list of <see cref="WorkflowArtifactDirectoryEntryInput"/>.
-    /// The envelope is a JSON object of the shape
-    /// <c>{ kind: "directory", files: [{ path, size, data: &lt;base64&gt; }] }</c>.
-    /// The runner encodes the directory as a single multipart file
-    /// part for transport and the server decodes it here so the
-    /// multipart endpoint remains file-only.
-    /// </summary>
-    private static async Task<DirectoryEnvelope> ReadDirectoryEnvelopeAsync(
-        Stream content,
-        long declaredSize,
-        CancellationToken cancellationToken)
-    {
-        byte[] bytes;
-        await using (var ms = new MemoryStream())
-        {
-            await content.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
-            bytes = ms.ToArray();
-        }
-        if (declaredSize >= 0 && bytes.LongLength != declaredSize)
-        {
-            throw new InvalidDataException(
-                $"Directory envelope size mismatch: declared {declaredSize} bytes, read {bytes.LongLength} bytes.");
-        }
-        DirectoryEnvelopeEnvelope? envelope;
-        try
-        {
-            envelope = JsonSerializer.Deserialize<DirectoryEnvelopeEnvelope>(bytes, JSON.Options);
-        }
-        catch (JsonException ex)
-        {
-            throw new InvalidDataException(
-                $"Directory upload content is not a valid artifact envelope: {ex.Message}", ex);
-        }
-        if (envelope is null || !string.Equals(envelope.Kind, "directory", StringComparison.Ordinal))
-        {
-            throw new InvalidDataException(
-                "Directory upload envelope must declare kind: \"directory\".");
-        }
-        if (envelope.Files is null || envelope.Files.Count == 0)
-        {
-            throw new InvalidDataException(
-                "Directory upload envelope must contain at least one contained file.");
-        }
-        var entries = new List<WorkflowArtifactDirectoryEntryInput>(envelope.Files.Count);
-        foreach (var file in envelope.Files)
-        {
-            if (file is null) continue;
-            if (string.IsNullOrWhiteSpace(file.Path))
-                throw new InvalidDataException("Directory entry path is required.");
-            byte[] data;
-            try
-            {
-                data = Convert.FromBase64String(file.Data ?? string.Empty);
-            }
-            catch (FormatException ex)
-            {
-                throw new InvalidDataException(
-                    $"Directory entry '{file.Path}' data is not valid base64: {ex.Message}", ex);
-            }
-            entries.Add(new WorkflowArtifactDirectoryEntryInput
-            {
-                RelativePath = file.Path,
-                Size = file.Size ?? data.LongLength,
-                ContentType = file.ContentType,
-                OpenContent = () => new MemoryStream(data, writable: false),
-            });
-        }
-        return new DirectoryEnvelope(entries);
-    }
-
-    private sealed record DirectoryEnvelope(IReadOnlyList<WorkflowArtifactDirectoryEntryInput> Entries);
-
-    private sealed class DirectoryEnvelopeEnvelope
-    {
-        public string? Kind { get; set; }
-        public List<DirectoryEnvelopeFile>? Files { get; set; }
-    }
-
-    private sealed class DirectoryEnvelopeFile
-    {
-        public string? Path { get; set; }
-        public long? Size { get; set; }
-        public string? ContentType { get; set; }
-        public string? Data { get; set; }
-    }
-
-    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
-    {
-        return ex.InnerException?.Message.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase) == true
-            || ex.InnerException?.Message.Contains("constraint", StringComparison.OrdinalIgnoreCase) == true;
+        return WorkflowArtifactUploadResult.ConflictResult(new WorkflowArtifactUploadConflict(
+            UploadId: existing.UploadId,
+            WorkflowRunId: existing.WorkflowRunId,
+            WorkId: existing.WorkId,
+            TaskRunId: existing.TaskRunId,
+            Path: existing.Path,
+            ExistingContentHash: existing.ContentHash,
+            IncomingContentHash: incomingContentHash));
     }
 
     private void SafeRemoveStorageDirectory(string storagePath)

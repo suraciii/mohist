@@ -20,7 +20,7 @@ using Orleans.Runtime;
 namespace Mohist.Server.Workflow.Grains;
 
 [Reentrant]
-public class WorkflowGrain : Grain, IWorkflowGrain
+public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
 {
     private WorkflowRun? _run;
     /// <summary>
@@ -38,20 +38,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private readonly WorkflowStageInitializer _stageInitializer;
     private readonly WorkflowOutcomeProcessor _outcomeProcessor;
 
-    // Narrow surface for in-grain helpers. Saves and event dispatch stay on
-    // the grain so ETag reload and event reactions keep one boundary.
-    internal WorkflowRun? RunOrNull => _run;
-    internal string GrainKey => this.GetPrimaryKeyString();
-    internal WorkflowProfileManager ProfileManager => _profileManager;
-    internal IGrainFactory GrainFactoryAccess => GrainFactory;
-    internal WorkflowSessionHealthService SessionHealthGate => _sessionHealth;
-    internal ILogger<WorkflowGrain> Log => _log;
-    internal void SetLastKnownRunnerId(string? runnerId) => _lastKnownRunnerId = runnerId;
-    internal Task SaveAsync() => SaveRunAsync();
-    internal Task SaveAsyncWithEvents(IReadOnlyList<WorkflowEvent> events) => SaveRunAsync(events);
-    internal Task DispatchEvent(WorkflowEvent e) => On(e);
-    internal Task ReleaseCurrentStageLocks(string reason) =>
-        _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
+    private string GrainKey => this.GetPrimaryKeyString();
 
     public WorkflowGrain(
         IWorkflowRunStore runStore,
@@ -68,6 +55,22 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _stageInitializer = new WorkflowStageInitializer(this);
         _outcomeProcessor = new WorkflowOutcomeProcessor(this);
     }
+
+    WorkflowRun? IWorkflowGrainContext.RunOrNull => _run;
+    string IWorkflowGrainContext.GrainKey => GrainKey;
+    WorkflowProfileManager IWorkflowGrainContext.ProfileManager => _profileManager;
+    IGrainFactory IWorkflowGrainContext.Grains => GrainFactory;
+    WorkflowSessionHealthService IWorkflowGrainContext.SessionHealthGate => _sessionHealth;
+    ILogger IWorkflowGrainContext.Log => _log;
+    void IWorkflowGrainContext.SetLastKnownRunnerId(string? runnerId) => _lastKnownRunnerId = runnerId;
+    Task IWorkflowGrainContext.SaveAsync() => SaveRunAsync();
+    Task IWorkflowGrainContext.SaveAsyncWithEvents(IReadOnlyList<WorkflowEvent> events) => SaveRunAsync(events);
+    Task IWorkflowGrainContext.DispatchEvent(WorkflowEvent e) => On(e);
+    Task IWorkflowGrainContext.ReleaseCurrentStageLocks(string reason) =>
+        _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
+    string IWorkflowGrainContext.GetProjectId() => GetProjectId();
+    string? IWorkflowGrainContext.GetIssueId() => GetIssueId();
+    string? IWorkflowGrainContext.GetIssueNumber() => GetIssueNumber();
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {

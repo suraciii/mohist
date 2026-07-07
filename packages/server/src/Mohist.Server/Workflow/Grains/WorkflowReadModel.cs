@@ -5,11 +5,11 @@ namespace Mohist.Server.Workflow.Grains;
 /// <summary>
 /// Read-side projections over the grain-owned <see cref="WorkflowRun"/>.
 /// </summary>
-public sealed class WorkflowReadModel
+internal sealed class WorkflowReadModel
 {
-    private readonly WorkflowGrain _owner;
+    private readonly IWorkflowGrainContext _owner;
 
-    public WorkflowReadModel(WorkflowGrain owner)
+    public WorkflowReadModel(IWorkflowGrainContext owner)
     {
         _owner = owner;
     }

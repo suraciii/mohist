@@ -11,11 +11,11 @@ namespace Mohist.Server.Workflow.Grains;
 /// the commit and event-dispatch boundary; this helper mutates the supplied
 /// run and returns or commits events through grain-owned callbacks.
 /// </summary>
-public sealed class WorkflowOutcomeProcessor
+internal sealed class WorkflowOutcomeProcessor
 {
-    private readonly WorkflowGrain _owner;
+    private readonly IWorkflowGrainContext _owner;
 
-    public WorkflowOutcomeProcessor(WorkflowGrain owner)
+    public WorkflowOutcomeProcessor(IWorkflowGrainContext owner)
     {
         _owner = owner;
     }
