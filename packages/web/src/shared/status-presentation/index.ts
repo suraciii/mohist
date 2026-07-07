@@ -27,6 +27,7 @@ export type StatusKind =
   | 'approval'
   | 'runner'
   | 'severity'
+  | 'context-health'
 
 export interface StatusTreatment {
   readonly container: string
@@ -93,6 +94,12 @@ const SEVERITY: FamilyReservation = {
   DEBUG: 'muted',
 }
 
+const CONTEXT_HEALTH: FamilyReservation = {
+  green: 'success',
+  yellow: 'warning',
+  red: 'danger',
+}
+
 const RESERVATIONS: Record<StatusKind, FamilyReservation> = {
   'issue-health': ISSUE_HEALTH,
   'workflow-run': WORKFLOW_RUN,
@@ -100,6 +107,7 @@ const RESERVATIONS: Record<StatusKind, FamilyReservation> = {
   approval: APPROVAL,
   runner: RUNNER,
   severity: SEVERITY,
+  'context-health': CONTEXT_HEALTH,
 }
 
 export function familyFor(kind: StatusKind, state: string | null | undefined): SemanticFamily {

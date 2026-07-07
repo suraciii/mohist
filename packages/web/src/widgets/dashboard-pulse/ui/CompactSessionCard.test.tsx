@@ -263,10 +263,11 @@ describe('CompactSessionCard', () => {
     expect(screen.queryByTestId('active-session-anomalies')).not.toBeInTheDocument()
   })
 
-  it('stages use the STAGE_COLORS map for plan stage', () => {
+  it('stages use the dark-aware STAGE_COLORS map for plan stage', () => {
     renderCard(makeCard({ issueStage: 'Plan' }))
     const stage = screen.getByTestId('pulse-compact-stage')
     expect(stage.className).toContain('bg-blue-100')
+    expect(stage.className).toContain('dark:bg-blue-900/40')
   })
 
   it('renders a context-usage trend mini-chart when the activity source carries a usage history', () => {

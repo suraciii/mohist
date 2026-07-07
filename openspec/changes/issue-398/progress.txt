@@ -94,3 +94,95 @@
 - **T-005 (Button variants) is unaffected** by this layer. T-001's `success` /
   `warning` / `outline` variants remain the right primitive for action buttons;
   T-002's StatusPill is for *status* surfaces only.
+
+## Status-surface-consistency notes (T-003)
+
+- **Every divergent helper is now a delegate or deletion.** `statusBadge()`,
+  `WorkflowRunStatusPill`, `IssueCard`'s `StatusPill`, `RunnerList`,
+  `RunnerSummary`, `ContextHealthIndicator`, `ContextHealthBar`, `StatusBar`,
+  `AttentionHero`, `TaskProgressPanel`, `ReviewReportModal`, `ReviewSummary`,
+  `CompactSessionCard`'s status-bearing surfaces, `EventTimelineRow` markers,
+  and `RuntimeToastHost` toasts all resolve through `statusTreatment(...)`.
+  The divergent maps (`STATUS_PILL_PAIRS`, `STATUS_CONFIG`,
+  `PRESENTATION_BY_STATUS`) are deleted. `LEVEL_COLORS`/`LEVEL_CHIP_COLORS`
+  are kept as frozen thin shims over `getLevelColors(...)` /
+  `getLevelChipColors(...)` so legacy indexed lookups keep working without
+  the layer being aware of the four levels' shapes.
+
+- **`context-health` joined the family reservation as a new `StatusKind`.**
+  `green → success`, `yellow → warning`, `red → danger`. The kind lives in
+  `shared/status-presentation/index.ts` alongside the existing kinds. It
+  is exercised by `contrast.spec.ts` (added to `COVERAGE`) and
+  `index.test.ts` (new `context-health kind` describe block).
+
+- **`data-family` hook is the equivalence-spec anchor.** Every rewritten
+  surface now sets a `data-family={treatment.family}` attribute. The
+  cross-surface equivalence spec reads this attribute and asserts that
+  `familyFor(kind, state)` is identical across paired widgets. This
+  makes the spec robust to treatment-class evolution (catches divergence
+  in *family*, not exact class strings).
+
+- **Cross-surface spec covers all four required pairs.** workflow-run via
+  `WorkflowRunStatusPill` and `StatusBar` (StatusBar was added in this
+  task — it was missing from the existing pair coverage); runner via
+  `RunnerList` and `RunnerSummary` (idle/busy agree; stale/offline
+  intentionally share a `stale` summary composite); issue-health via
+  `statusBadge()` (the delegate) and `IssueCard`'s `StatusPill`;
+  context-health via `ContextHealthIndicator` and `ContextHealthBar`.
+  Each pair asserts the shared `familyFor` value matches across both
+  widgets and matches the data-family hook on the rendered DOM.
+
+- **CompactSessionCard stage-identity palette is documented dark-aware
+  (categorical, not state).** `bg-purple-100 text-purple-700
+  dark:bg-purple-900/40 dark:text-purple-200` etc. The categorical
+  identity stays out of the semantic families (per design D6: priority
+  and categorical identity overload the meaning reservation). The
+  cross-surface spec asserts the chip carries a `dark:` counterpart.
+
+- **AttentionHero runner-down keeps a solid `danger` fill** for at-a-glance
+  prominence (design risk note). The rest of the row uses the soft
+  `bg-danger-subtle` treatment.
+
+- **`runtime-toast` mapping.** `success → workflow-run.completed`,
+  `error → workflow-run.failed`, `warning → workflow-run.awaiting-approval`,
+  `info → workflow-run.running`, `transport (and default) → runner.offline`.
+  All five tones now carry `data-family`, and the host's
+  `role="alert"` (error) and `role="status"` (other tones) ARIA contracts
+  are preserved verbatim. No raw `bg-emerald-*`/`bg-amber-*`/`bg-red-*`/
+  `bg-blue-*`/`bg-slate-*` palette classes remain on toast surfaces.
+
+## Gotchas (T-003)
+
+- **`StatusBar` doesn't have an external call site for the four counts as
+  children**, but the `data-testid="status-bar-{key}"` hooks the test
+  relies on are rendered conditionally inside `StatusBar`. The test
+  forces the counts to render with non-zero values (`active={1}` etc.)
+  rather than relying on a default.
+- **`runner.status === 'offline'` renders muted on `RunnerList` but
+  `stale` family on `RunnerSummary` (the composite "Runner stale/offline"
+  state).** This is intentional — the summary's job is to surface
+  "needs attention" rather than enumerate granular states; the
+  per-runner row carries the granular family. The cross-surface spec
+  asserts the *runner row* agrees with `familyFor('runner', state)` and
+  accepts either summary composite for stale/offline as long as it
+  routes through the shared layer.
+- **`ReactRouter/MemoryRouter` is required** for `RunnerList`,
+  `IssueCard`, `AttentionHero`, `CompactSessionCard` because each
+  pulls from `useProject` / `useNavigate`. The cross-surface spec
+  wraps each in `<MemoryRouter><ProjectProvider>...</ProjectProvider></MemoryRouter>`.
+
+## Handoff Notes for Downstream Tasks (post-T-003)
+
+- T-004 will consume the `success`/`warning`/`info`/`danger` family
+  reservation as it converts `label-colors.ts` and `stage-colors.ts`.
+  The risk mapping (`low → success`, `medium → warning`, `high → danger`)
+  is the only place where T-004 should call `statusTreatment(...)`
+  directly; everything else should consume `familyFor(...)` to get the
+  family string without resolving the full treatment.
+- T-005's action-button variants are unaffected by T-003; they live
+  in `shared/ui/components/button.tsx` and read the same token classes
+  that the status layer routes through.
+- **Cross-surface equivalence spec location:** colocated at
+  `packages/web/src/shared/status-presentation/cross-surface.equivalence.spec.tsx`.
+  It imports directly from the layer; widgets do not need to expose
+  test hooks beyond the `data-family` attribute they already set.

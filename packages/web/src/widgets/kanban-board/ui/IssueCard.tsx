@@ -10,6 +10,7 @@ import { getPriorityStripColor, getLabelStyle, formatPriority, getPriorityStyle,
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { getStageColors } from '../model/stage-colors'
+import { statusTreatment, type StatusKind, type StatusTreatment } from '@/shared/status-presentation'
 
 export const APPROVAL_STAGES = new Set<string>([WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check])
 
@@ -73,13 +74,18 @@ const STATUS_PILL_LABEL: Record<NonNullable<StatusIndicator>, string> = {
   drift: 'Drift',
 }
 
-export const STATUS_PILL_PAIRS: Record<NonNullable<StatusIndicator>, { bg: string; text: string }> = {
-  blocked: { bg: '#ffe2e2', text: '#9f0712' },
-  cancelled: { bg: '#e5e7eb', text: '#364153' },
-  approval: { bg: '#fef3c6', text: '#973c00' },
-  running: { bg: '#dbeafe', text: '#193cb8' },
-  waiting: { bg: '#fffbeb', text: '#973c00' },
-  drift: { bg: '#ffedd4', text: '#9f2d00' },
+interface IndicatorBinding {
+  kind: StatusKind
+  state: string
+}
+
+const INDICATOR_TO_TREATMENT: Record<NonNullable<StatusIndicator>, IndicatorBinding> = {
+  blocked: { kind: 'issue-health', state: IssueHealth.Blocked },
+  cancelled: { kind: 'issue-health', state: IssueHealth.Cancelled },
+  approval: { kind: 'approval', state: 'awaiting' },
+  running: { kind: 'workflow-run', state: 'running' },
+  waiting: { kind: 'workflow-run', state: 'awaiting-approval' },
+  drift: { kind: 'workflow-run', state: 'drift' },
 }
 
 function DraftPill() {
@@ -111,77 +117,26 @@ function StatusPill({
       : baseLabel
   const stagePrefixId = `${indicator}-${stageLabel ?? 'none'}-${progressLabel ?? 'none'}`
 
-  if (indicator === 'blocked') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center gap-1 rounded-full bg-red-100 text-red-800 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-700" />
-        {fullLabel}
-      </span>
-    )
-  }
-  if (indicator === 'cancelled') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center rounded-full bg-gray-200 text-gray-700 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        {fullLabel}
-      </span>
-    )
-  }
-  if (indicator === 'approval') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-700" />
-        {fullLabel}
-      </span>
-    )
-  }
-  if (indicator === 'running') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-800 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-700 animate-pulse" />
-        {fullLabel}
-      </span>
-    )
-  }
-  if (indicator === 'waiting') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center rounded-full bg-amber-50 text-amber-800 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        {fullLabel}
-      </span>
-    )
-  }
-  if (indicator === 'drift') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-800 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-700" />
-        {fullLabel}
-      </span>
-    )
-  }
-  return null
+  const binding = INDICATOR_TO_TREATMENT[indicator]
+  const treatment: StatusTreatment = statusTreatment(binding.kind, binding.state)
+  const dotClass = treatment.dot
+  const showDot = indicator !== 'cancelled' && indicator !== 'waiting'
+  const animate = indicator === 'running' ? 'animate-pulse' : ''
+
+  return (
+    <span
+      data-testid="status-pill"
+      data-stage-fold-id={stagePrefixId}
+      data-indicator={indicator}
+      data-family={treatment.family}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${treatment.container}`}
+    >
+      {showDot && (
+        <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass} ${animate}`} aria-hidden="true" />
+      )}
+      {fullLabel}
+    </span>
+  )
 }
 
 function WorkflowStagePill({ issue }: { issue: Issue }) {
@@ -348,15 +303,22 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               <WorkflowStageProgressIndicator progress={issue.workflowStageProgress} />
             </>
           )}
-          {isIntegrateWithFailure && (
-            <span
-              data-testid="integration-badge"
-              className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-800 px-2 py-0.5 text-[10px] font-semibold"
-            >
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-700 animate-pulse" />
-              {issue.blockedReason ? 'Integration Failed' : 'Integrating'}
-            </span>
-          )}
+          {isIntegrateWithFailure && (() => {
+            const integrationTreatment = statusTreatment(
+              issue.blockedReason ? 'workflow-run' : 'workflow-stage',
+              issue.blockedReason ? 'failed' : 'running',
+            )
+            return (
+              <span
+                data-testid="integration-badge"
+                data-family={integrationTreatment.family}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${integrationTreatment.container}`}
+              >
+                <span className={`inline-block h-1.5 w-1.5 rounded-full ${integrationTreatment.dot} animate-pulse`} aria-hidden="true" />
+                {issue.blockedReason ? 'Integration Failed' : 'Integrating'}
+              </span>
+            )
+          })()}
           {showArchiveButton && isDone && (
             <Button
               variant="ghost"

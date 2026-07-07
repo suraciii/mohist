@@ -17,6 +17,7 @@ import { formatDuration } from '@/shared/lib/format-duration'
 import { useAgentStatus, type AgentStatus } from '../../../entities/agent'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { cn } from '@/shared/lib/utils'
+import { statusTreatment, type StatusTreatment } from '@/shared/status-presentation'
 
 const APPROVAL_LABEL = 'Approval needed'
 
@@ -83,22 +84,36 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
 
   const isPending = approveMutation.isPending || resumeMutation.isPending
   const totalCount = items.length + (runnerDown ? 1 : 0)
+  // The hero "needs attention" surface uses the warning family per
+  // design D2 (`awaiting-approval`/`blocked` → warning). Background,
+  // border, and label all derive from the same family.
+  const heroTreatment = statusTreatment('workflow-run', 'awaiting-approval')
 
   return (
     <section
       data-testid="dashboard-zone-attention"
       data-zone="attention"
+      data-family={heroTreatment.family}
       aria-label="Attention"
-      className="rounded-lg border border-amber-200 bg-amber-50/60 p-4"
+      className={cn('rounded-lg border p-4', heroTreatment.container, 'border-warning-border')}
     >
       <div className="flex items-center gap-2 mb-3">
-        <span className="inline-flex items-center justify-center size-6 rounded-full bg-amber-500 text-white">
+        <span className={cn(
+          'inline-flex items-center justify-center size-6 rounded-full text-white',
+          // Solid warning fill keeps the "needs attention" glyph prominent
+          // at-a-glance (design risk note: blocking signals must remain
+          // visually prominent in dark mode).
+          'bg-warning',
+        )}>
           <AlertTriangleIcon className="size-3.5" />
         </span>
-        <span className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+        <span className={cn(
+          'text-xs font-semibold uppercase tracking-wide',
+          heroTreatment.text,
+        )}>
           Needs attention
         </span>
-        <span className="text-xs text-amber-700/80 font-medium">({totalCount})</span>
+        <span className="text-xs text-warning/80 font-medium">({totalCount})</span>
       </div>
       <ApprovalWaitSummary approvalWait={approvalWait} />
       <ul className="flex flex-col gap-2" data-testid="attention-items">
@@ -145,14 +160,24 @@ function AttentionItemRow({
 }: AttentionItemRowProps) {
   const showApprove = isApprovalItem(item)
   const showResume = isResumableItem(item)
+  // Items on this surface map to the same warning family as the hero
+  // (approval/blocked/drift → warning). The row's container / text /
+  // border all derive from one treatment so the row cannot disagree
+  // with the hero.
+  const itemTreatment: StatusTreatment = statusTreatment('workflow-run', 'awaiting-approval')
   return (
     <li
       data-testid="attention-item"
       data-issue-number={item.issueNumber}
       data-label={item.label}
-      className="flex items-center gap-3 rounded-md bg-background px-3 py-2 border border-amber-200/80"
+      data-family={itemTreatment.family}
+      className={cn(
+        'flex items-center gap-3 rounded-md px-3 py-2 border',
+        'bg-background',
+        itemTreatment.border,
+      )}
     >
-      <span className="font-mono font-semibold text-amber-700 text-sm">
+      <span className={cn('font-mono font-semibold text-sm', itemTreatment.text)}>
         #{item.issueNumber}
       </span>
       <span className="font-medium text-foreground text-sm">{item.label}</span>
@@ -168,7 +193,7 @@ function AttentionItemRow({
         <Link
           to={toProjectPath(`/issues/${item.issueNumber}`)}
           data-testid="attention-item-link"
-          className="text-xs text-amber-700 hover:underline"
+          className={cn('text-xs hover:underline', itemTreatment.text)}
         >
           Open
         </Link>
@@ -180,8 +205,8 @@ function AttentionItemRow({
             disabled={isPending}
             onClick={() => onApprove(item.issueNumber)}
             className={cn(
-              'inline-flex items-center gap-1 rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white',
-              'hover:bg-amber-700 disabled:opacity-50 disabled:pointer-events-none',
+              'inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white',
+              'bg-warning hover:bg-warning/80 disabled:opacity-50 disabled:pointer-events-none',
             )}
           >
             <CheckCircle2Icon className="size-3" />
@@ -196,8 +221,8 @@ function AttentionItemRow({
             disabled={isPending}
             onClick={() => onResume(item.issueNumber)}
             className={cn(
-              'inline-flex items-center gap-1 rounded-md bg-foreground/90 px-2 py-1 text-xs font-medium text-background',
-              'hover:bg-foreground disabled:opacity-50 disabled:pointer-events-none',
+              'inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-background',
+              'bg-foreground/90 hover:bg-foreground disabled:opacity-50 disabled:pointer-events-none',
             )}
           >
             <PlayIcon className="size-3" />
@@ -215,25 +240,36 @@ interface RunnerDownEntryProps {
 }
 
 function RunnerDownEntry({ agentStatus, toProjectPath }: RunnerDownEntryProps) {
+  // Runner-down is the most-severe state on this surface; route through
+  // the danger family. The glyph deliberately keeps a solid `danger`
+  // fill (per design risk note: blocking signals must stay prominent
+  // even in dark mode), while the row's softer treatment keeps the
+  // border/text legible.
+  const dangerTreatment = statusTreatment('workflow-run', 'failed')
   return (
     <li
       data-testid="runner-down-entry"
-      className="flex items-center gap-3 rounded-md bg-red-50 px-3 py-2 border border-red-200"
+      data-family={dangerTreatment.family}
+      className={cn(
+        'flex items-center gap-3 rounded-md px-3 py-2 border',
+        dangerTreatment.container,
+        dangerTreatment.border,
+      )}
     >
-      <span className="inline-flex items-center justify-center size-5 rounded-full bg-red-500 text-white shrink-0">
+      <span className="inline-flex items-center justify-center size-5 rounded-full text-white shrink-0 bg-danger">
         <ShieldOffIcon className="size-3" />
       </span>
-      <span className="font-medium text-red-800 text-sm">Runner unavailable</span>
+      <span className={cn('font-medium text-sm', dangerTreatment.text)}>Runner unavailable</span>
       <span
         data-testid="runner-down-message"
-        className="text-red-700/80 text-sm truncate min-w-0 flex-1"
+        className={cn('text-sm truncate min-w-0 flex-1', 'text-danger/80')}
       >
         {agentStatus.runnerMessage ?? 'No runner is connected.'}
       </span>
       <Link
         to={toProjectPath('/activity')}
         data-testid="runner-down-link"
-        className="shrink-0 text-xs text-red-700 hover:underline"
+        className="shrink-0 text-xs text-danger hover:underline"
       >
         View runner status
       </Link>
@@ -270,22 +306,33 @@ function ApprovalWaitSummary({ approvalWait }: { approvalWait?: ApprovalWaitMetr
 }
 
 function AllClearState({ approvalWait }: AllClearStateProps) {
+  // "All clear" is the healthy/available runner reservation — same
+  // family as `runner.idle` / `workflow-run.completed`: `success`.
+  const treatment = statusTreatment('runner', 'idle')
   return (
     <section
       data-testid="dashboard-zone-attention"
       data-zone="attention"
+      data-family={treatment.family}
       aria-label="Attention"
-      className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4"
+      className={cn('rounded-lg border p-4', treatment.container, 'border-success-border')}
     >
       <div className="flex items-center gap-2 mb-2">
-        <span className="inline-flex items-center justify-center size-6 rounded-full bg-emerald-500 text-white">
+        <span className={cn(
+          'inline-flex items-center justify-center size-6 rounded-full text-white',
+          // Solid success fill keeps the all-clear glyph prominent.
+          'bg-success',
+        )}>
           <CheckCircle2Icon className="size-3.5" />
         </span>
-        <span className="text-sm font-semibold text-emerald-800 uppercase tracking-wide">
+        <span className={cn(
+          'text-sm font-semibold uppercase tracking-wide',
+          treatment.text,
+        )}>
           All clear
         </span>
       </div>
-      <p className="text-sm text-emerald-700/80 mb-3">
+      <p className={cn('text-sm mb-3', 'text-success/80')}>
         Nothing needs your attention right now.
       </p>
       <ApprovalWaitSummary approvalWait={approvalWait} />

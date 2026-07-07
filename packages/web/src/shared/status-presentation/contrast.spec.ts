@@ -52,6 +52,9 @@ const COVERAGE: Coverage[] = [
   { kind: 'severity', state: 'WARN' },
   { kind: 'severity', state: 'INFO' },
   { kind: 'severity', state: 'DEBUG' },
+  { kind: 'context-health', state: 'green' },
+  { kind: 'context-health', state: 'yellow' },
+  { kind: 'context-health', state: 'red' },
 ]
 
 const THEMES: Theme[] = ['light', 'dark']

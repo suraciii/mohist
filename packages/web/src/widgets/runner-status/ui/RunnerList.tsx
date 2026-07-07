@@ -5,14 +5,15 @@ import { useRunners } from '../../../entities/runner'
 import { useProjectPath } from '../../../entities/project'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components/card'
 import { Badge } from '@/shared/ui/components/badge'
+import { statusTreatment } from '@/shared/status-presentation'
 
 const RUNNER_START_HINT = 'npx mohist runner'
 
-const STATUS_CONFIG: Record<RunnerStatusRow['status'], { dot: string; badge: string; label: string }> = {
-  idle: { dot: 'bg-emerald-500', badge: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20', label: 'idle' },
-  busy: { dot: 'bg-blue-500', badge: 'bg-blue-50 text-blue-700 ring-blue-600/20', label: 'busy' },
-  stale: { dot: 'bg-amber-500', badge: 'bg-amber-50 text-amber-700 ring-amber-600/20', label: 'stale' },
-  offline: { dot: 'bg-gray-400', badge: 'bg-gray-50 text-gray-500 ring-gray-600/20', label: 'offline' },
+const STATUS_LABEL: Record<RunnerStatusRow['status'], string> = {
+  idle: 'idle',
+  busy: 'busy',
+  stale: 'stale',
+  offline: 'offline',
 }
 
 function RunnerScopeLabel({ scope }: { scope: RunnerStatusRow['scope'] }) {
@@ -27,13 +28,16 @@ function RunnerScopeLabel({ scope }: { scope: RunnerStatusRow['scope'] }) {
 }
 
 function RunnerStatusBadge({ status }: { status: RunnerStatusRow['status'] }) {
-  const config = STATUS_CONFIG[status]
+  const treatment = statusTreatment('runner', status)
+  const container = `${treatment.container} ring-1 ring-inset ring-border`
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset ${config.badge}`}
+      data-status={status}
+      data-family={treatment.family}
+      className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs font-medium ${container}`}
     >
-      <span className={`inline-block h-1.5 w-1.5 rounded-full ${config.dot}`} aria-hidden="true" />
-      {config.label}
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${treatment.dot}`} aria-hidden="true" />
+      {STATUS_LABEL[status]}
     </span>
   )
 }
@@ -97,9 +101,23 @@ function ActiveWorkSummary({
 
 function CapacityIndicator({ used, total }: { used: number; total: number }) {
   const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0
-  const color = used >= total ? 'bg-amber-500' : used > 0 ? 'bg-blue-500' : 'bg-emerald-500'
+  // Map capacity saturation onto runner status meaning: empty capacity is
+  // healthy/available (`success`), partial load is `info`, fully saturated is
+  // `warning`. The dot class for the same family lives in
+  // `statusTreatment('runner', state).dot`, so the bar fill tracks the same
+  // family the runner's status pill renders.
+  const family = used >= total
+    ? 'warning'
+    : used > 0
+      ? 'info'
+      : 'success'
+  const dotClass = family === 'success'
+    ? 'bg-success'
+    : family === 'info'
+      ? 'bg-info'
+      : 'bg-warning'
   return (
-    <div className="flex items-center gap-2" data-testid="runner-capacity">
+    <div className="flex items-center gap-2" data-testid="runner-capacity" data-family={family}>
       <div className="flex items-center gap-1.5">
         <span className="text-xs tabular-nums text-muted-foreground">
           {used}/{total}
@@ -107,7 +125,7 @@ function CapacityIndicator({ used, total }: { used: number; total: number }) {
         <span className="text-xs text-muted-foreground">slots</span>
       </div>
       <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
-        <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full ${dotClass} transition-all`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   )
@@ -198,7 +216,7 @@ function RunnerRow({ row }: { row: RunnerStatusRow }) {
         )}
         {row.connectionState && (
           <span
-            className={`text-xs ${row.connectionState === 'connected' ? 'text-emerald-600' : 'text-muted-foreground'}`}
+            className={`text-xs ${row.connectionState === 'connected' ? 'text-success' : 'text-muted-foreground'}`}
           >
             {row.connectionState}
           </span>
@@ -209,7 +227,7 @@ function RunnerRow({ row }: { row: RunnerStatusRow }) {
       {/* Active work */}
       {activeWorks.length > 0 && (
         <div
-          className="mt-2 space-y-1 rounded-md bg-blue-50/50 px-2.5 py-1.5"
+          className="mt-2 space-y-1 rounded-md bg-info-subtle px-2.5 py-1.5"
           data-testid="runner-active-works"
           data-count={activeWorks.length}
         >

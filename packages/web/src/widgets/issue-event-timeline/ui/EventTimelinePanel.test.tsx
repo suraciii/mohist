@@ -264,7 +264,7 @@ describe('EventTimelinePanel', () => {
       }
     })
 
-    it('renders failure events with a colored marker accent but no full-row tinted background', () => {
+    it('renders failure events with a danger-family marker accent but no full-row tinted background', () => {
       vi.mocked(useEventTimeline).mockReturnValue({
         entries: [
           makeEntry({
@@ -283,11 +283,12 @@ describe('EventTimelinePanel', () => {
       expect(row.className).not.toContain('bg-red-50')
       expect(row.className).not.toContain('bg-red-50/80')
 
-      const marker = row.querySelector('span.bg-red-500')
+      const marker = row.querySelector('[data-testid="event-timeline-marker"]')
       expect(marker).not.toBeNull()
+      expect(marker?.className).toContain('bg-danger')
     })
 
-    it('renders attention-required events with a colored marker accent but no full-row tinted background', () => {
+    it('renders attention-required events with a warning-family marker accent but no full-row tinted background', () => {
       vi.mocked(useEventTimeline).mockReturnValue({
         entries: [
           makeEntry({
@@ -307,8 +308,9 @@ describe('EventTimelinePanel', () => {
       expect(row.className).not.toContain('bg-amber-50')
       expect(row.className).not.toContain('bg-amber-50/60')
 
-      const marker = row.querySelector('span.bg-amber-500')
+      const marker = row.querySelector('[data-testid="event-timeline-marker"]')
       expect(marker).not.toBeNull()
+      expect(marker?.className).toContain('bg-warning')
     })
 
     it('uses a neutral light background for expanded failure detail (no bg-gray-900)', () => {
@@ -331,7 +333,7 @@ describe('EventTimelinePanel', () => {
 
       const detail = screen.getByTestId('event-detail')
       expect(detail.className).not.toContain('bg-gray-900')
-      expect(detail.className).toContain('bg-gray-50')
+      expect(detail.className).toContain('bg-muted')
       expect(detail.textContent).toContain('compile error: foo.ts')
     })
 

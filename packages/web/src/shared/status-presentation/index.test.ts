@@ -113,6 +113,23 @@ describe('shared/status-presentation familyFor', () => {
     })
   })
 
+  describe('context-health kind', () => {
+    const cases: Array<[string, SemanticFamily]> = [
+      ['green', 'success'],
+      ['yellow', 'warning'],
+      ['red', 'danger'],
+    ]
+    it.each(cases)('%s -> %s', (state, expected) => {
+      expect(familyFor('context-health', state)).toBe(expected)
+    })
+
+    it('healthy (green) maps to success (so it does not collide with running/active)', () => {
+      expect(familyFor('context-health', 'green')).toBe('success')
+      // Distinct from workflow-run.running which uses info
+      expect(familyFor('context-health', 'green')).not.toBe(familyFor('workflow-run', 'running'))
+    })
+  })
+
   describe('unknown / unmapped state fallback', () => {
     it('returns muted for a brand-new workflow status', () => {
       expect(familyFor('workflow-run', 'paused-and-throttled')).toBe('muted')
