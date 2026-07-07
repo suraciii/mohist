@@ -427,7 +427,7 @@ public class WorkflowRunQuerierSchedulingSpecs
                 ["issueId"] = $"issue-{id}",
             });
 
-        var run = WorkflowRun.Create(id, BuildMinimalDefinition(), metadata);
+        var run = WorkflowRun.Create(id, BuildMinimalDefinition(), DateTimeOffset.UnixEpoch, metadata);
         run.Stages.Clear();
         run.Stages.Add(new StageRun
         {

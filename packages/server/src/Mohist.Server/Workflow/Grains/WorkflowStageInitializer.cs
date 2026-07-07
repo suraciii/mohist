@@ -51,7 +51,7 @@ internal sealed class WorkflowStageInitializer
                 _owner.GrainKey, pendingStart.Stage,
                 string.IsNullOrWhiteSpace(projectId) ? null : projectId,
                 string.IsNullOrWhiteSpace(issueId) ? null : issueId);
-            var initEvents = run.InitializeStage(stageDef.Tasks, stageDef.Checks);
+            var initEvents = run.InitializeStage(stageDef.Tasks, stageDef.Checks, _owner.Now());
             materialized.AddRange(initEvents);
         }
 

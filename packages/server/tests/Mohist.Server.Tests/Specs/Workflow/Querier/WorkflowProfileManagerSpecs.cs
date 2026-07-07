@@ -1386,9 +1386,10 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var run = WorkflowRun.Create(
             runId,
             definition,
+            DateTimeOffset.UnixEpoch,
             new WorkflowRunMetadata(
                 Name: null,
-                CreatedAt: DateTimeOffset.UtcNow,
+                CreatedAt: DateTimeOffset.UnixEpoch,
                 Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["projectId"] = projectId,

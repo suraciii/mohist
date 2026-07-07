@@ -172,8 +172,8 @@ public class WorkflowArtifactDomainSpecs
             Defaults: null,
             Artifacts: null);
 
-        var run = WorkflowRun.Create("wr_1", definition, new WorkflowRunMetadata(null, DateTimeOffset.UtcNow));
-        run.Start();
+        var run = WorkflowRun.Create("wr_1", definition, DateTimeOffset.UnixEpoch, new WorkflowRunMetadata(null, DateTimeOffset.UnixEpoch));
+        run.Start(DateTimeOffset.UnixEpoch);
 
         var json = JSON.Serialize(run);
 

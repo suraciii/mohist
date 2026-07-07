@@ -11,13 +11,14 @@ public class RuntimeVariableMergeSpecs
     [Fact]
     public void MergeTaskOutputsIntoPayload_IncludesNestedTasksOutputs()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStage());
-        run.Start();
+        var run = WorkflowRun.Create("wr_1", SingleStage(), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         var events = run.InitializeStage(
             [new("proposal", "Proposal", "spec/propose")],
-            [new("check-1", "Check 1", "spec/check")]);
+            [new("check-1", "Check 1", "spec/check")],
+            DateTimeOffset.UnixEpoch);
         run.AssignTo("runner-1", DateTimeOffset.UtcNow);
-        var events2 = run.StartTask("work-1", "runner-1");
+        var events2 = run.StartTask("work-1", "runner-1", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
         task.Status = TaskRunStatus.Completed;
         task.Output = JsonSerializer.Deserialize<JsonElement>("{\"openspecName\":\"issue-97\",\"changeDir\":\"openspec/changes/issue-97\"}");
@@ -38,13 +39,14 @@ public class RuntimeVariableMergeSpecs
     [Fact]
     public void MergeTaskOutputsIntoPayload_OnlyIncludesCompletedTasks()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStage());
-        run.Start();
+        var run = WorkflowRun.Create("wr_1", SingleStage(), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         var events = run.InitializeStage(
             [new("proposal", "Proposal", "spec/propose"), new("review", "Review", "spec/review")],
-            [new("check-1", "Check 1", "spec/check")]);
+            [new("check-1", "Check 1", "spec/check")],
+            DateTimeOffset.UnixEpoch);
         run.AssignTo("runner-1", DateTimeOffset.UtcNow);
-        var events2 = run.StartTask("work-1", "runner-1");
+        var events2 = run.StartTask("work-1", "runner-1", DateTimeOffset.UnixEpoch);
 
         var completed = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
         completed.Status = TaskRunStatus.Completed;
@@ -65,13 +67,14 @@ public class RuntimeVariableMergeSpecs
     [Fact]
     public void MergeTaskOutputsIntoPayload_SkipsNonObjectOutput()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStage());
-        run.Start();
+        var run = WorkflowRun.Create("wr_1", SingleStage(), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         var events = run.InitializeStage(
             [new("proposal", "Proposal", "spec/propose")],
-            [new("check-1", "Check 1", "spec/check")]);
+            [new("check-1", "Check 1", "spec/check")],
+            DateTimeOffset.UnixEpoch);
         run.AssignTo("runner-1", DateTimeOffset.UtcNow);
-        var events2 = run.StartTask("work-1", "runner-1");
+        var events2 = run.StartTask("work-1", "runner-1", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
         task.Status = TaskRunStatus.Completed;
         task.Output = JsonSerializer.Deserialize<JsonElement>("\"plain string\"");
@@ -85,7 +88,7 @@ public class RuntimeVariableMergeSpecs
     [Fact]
     public void MergeTaskOutputsIntoPayload_EmptyHistory_NoTasksKey()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStage());
+        var run = WorkflowRun.Create("wr_1", SingleStage(), DateTimeOffset.UnixEpoch);
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {

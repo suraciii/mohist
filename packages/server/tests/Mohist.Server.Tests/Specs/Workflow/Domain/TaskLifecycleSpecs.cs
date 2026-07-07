@@ -13,9 +13,9 @@ public class TaskLifecycleSpecs
     {
         var run = WorkflowRun.Create("wr_1", new WorkflowDefinition("spec/workflow", [
             new StageDefinition("build", [new("compile", "Compile", "spec/task")], [new("build-ok", "Build OK", "spec/check")])
-        ]));
-        run.Start();
-        run.InitializeStage([new("compile", "Compile", "spec/task")], [new("build-ok", "Build OK", "spec/check")]);
+        ]), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
+        run.InitializeStage([new("compile", "Compile", "spec/task")], [new("build-ok", "Build OK", "spec/check")], DateTimeOffset.UnixEpoch);
         run.AssignTo("worker-1", DateTimeOffset.UtcNow);
         return run;
     }
@@ -28,7 +28,7 @@ public class TaskLifecycleSpecs
         var run = BuildRun();
         var task = run.CurrentStage().Tasks[0];
 
-        var events = run.StartTask("work-1", "worker-1");
+        var events = run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
 
         Assert.Equal(TaskRunStatus.Running, task.Status);
         Assert.NotNull(task.StartedAt);
@@ -50,10 +50,10 @@ public class TaskLifecycleSpecs
     public void CompleteTask_SetsFinishedAtBeforeCompletingRunningTask()
     {
         var run = BuildRun();
-        run.StartTask("work-1", "worker-1");
+        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks[0];
 
-        var events = run.CompleteTask();
+        var events = run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(TaskRunStatus.Completed, task.Status);
         Assert.NotNull(task.StartedAt);
@@ -69,7 +69,7 @@ public class TaskLifecycleSpecs
         var run = BuildRun();
         var task = run.CurrentStage().Tasks[0];
 
-        var events = run.CompleteTask();
+        var events = run.CompleteTask(DateTimeOffset.UnixEpoch);
 
         Assert.Empty(events);
         Assert.Equal(TaskRunStatus.Pending, task.Status);
@@ -84,7 +84,7 @@ public class TaskLifecycleSpecs
         var run = BuildRun();
         var task = run.CurrentStage().Tasks[0];
 
-        var events = run.FailTask(new TaskResult("failed", "boom"));
+        var events = run.FailTask(new TaskResult("failed", "boom"), DateTimeOffset.UnixEpoch);
 
         Assert.Empty(events);
         Assert.Equal(TaskRunStatus.Pending, task.Status);
@@ -98,10 +98,10 @@ public class TaskLifecycleSpecs
     public void FailTaskForStopped_FailsRunningTaskWithStoppedReason()
     {
         var run = BuildRun();
-        run.StartTask("work-1", "worker-1");
+        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks[0];
 
-        var events = run.FailTaskForStopped("stopped");
+        var events = run.FailTaskForStopped("stopped", DateTimeOffset.UnixEpoch);
 
         Assert.Equal(TaskRunStatus.Failed, task.Status);
         Assert.NotNull(task.FinishedAt);

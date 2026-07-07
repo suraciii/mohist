@@ -102,7 +102,8 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
                     [new("task-1", "Task 1", "spec/task")],
                     [new("check-1", "Check 1", "spec/check")]),
             ]),
-            new WorkflowRunMetadata(null, DateTimeOffset.UtcNow, Annotations: annotations));
+            DateTimeOffset.UnixEpoch,
+            new WorkflowRunMetadata(null, DateTimeOffset.UnixEpoch, Annotations: annotations));
 
         await SeedProfileAsync(projectId, issueId, workflowRunId, run);
         return run;

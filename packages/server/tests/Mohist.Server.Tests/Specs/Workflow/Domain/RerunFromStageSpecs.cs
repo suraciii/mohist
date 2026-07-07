@@ -24,59 +24,62 @@ public class RerunFromStageSpecs
 
     private static WorkflowRun BuildRunAtStage(string currentStageId)
     {
-        var run = WorkflowRun.Create("wf-1", ThreeStageDefinition());
-        run.Start();
+        var run = WorkflowRun.Create("wf-1", ThreeStageDefinition(), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         var stageIdx = run.Stages.FindIndex(s => s.Id == currentStageId);
         for (var i = 0; i <= stageIdx; i++)
         {
             var stage = run.Stages[i];
             var def = ThreeStageDefinition().Stages[i];
-            run.InitializeStage(def.Tasks, def.Checks);
+            run.InitializeStage(def.Tasks, def.Checks, DateTimeOffset.UnixEpoch);
             if (run.Assignment is null)
                 run.AssignTo("worker-1", DateTimeOffset.UtcNow);
             if (i == stageIdx)
                 break;
 
-            run.StartTask(stage.Tasks.Single().Id, "worker-1");
-            run.CompleteTask();
-            run.PassCheck(new CheckResult(stage.Checks.Single().Name, "pass"));
+            run.StartTask(stage.Tasks.Single().Id, "worker-1", DateTimeOffset.UnixEpoch);
+            run.CompleteTask(DateTimeOffset.UnixEpoch);
+            run.PassCheck(new CheckResult(stage.Checks.Single().Name, "pass"), DateTimeOffset.UnixEpoch);
         }
         return run;
     }
 
     private static WorkflowRun BuildCompletedRun()
     {
-        var run = WorkflowRun.Create("wf-1", ThreeStageDefinition());
-        run.Start();
+        var run = WorkflowRun.Create("wf-1", ThreeStageDefinition(), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
 
         var plan = run.CurrentStage();
         run.InitializeStage(
             [new("draft", "Draft", "spec/task")],
-            [new("plan-ok", "Plan OK", "spec/check")]);
+            [new("plan-ok", "Plan OK", "spec/check")],
+            DateTimeOffset.UnixEpoch);
         run.AssignTo("worker-1", DateTimeOffset.UtcNow);
-        run.StartTask("draft.1", "worker-1");
-        run.CompleteTask();
-        run.PassCheck(new CheckResult("plan-ok", "pass"));
+        run.StartTask("draft.1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("plan-ok", "pass"), DateTimeOffset.UnixEpoch);
 
         var buildStage = run.Stages[1];
         run.CurrentStageId = buildStage.Id;
         buildStage.Status = StageRunStatus.Running;
         run.InitializeStage(
             [new("compile", "Compile", "spec/task")],
-            [new("build-ok", "Build OK", "spec/check")]);
-        run.StartTask("compile.1", "worker-1");
-        run.CompleteTask();
-        run.PassCheck(new CheckResult("build-ok", "pass"));
+            [new("build-ok", "Build OK", "spec/check")],
+            DateTimeOffset.UnixEpoch);
+        run.StartTask("compile.1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("build-ok", "pass"), DateTimeOffset.UnixEpoch);
 
         var integrateStage = run.Stages[2];
         run.CurrentStageId = integrateStage.Id;
         integrateStage.Status = StageRunStatus.Running;
         run.InitializeStage(
             [new("merge", "Merge", "spec/task")],
-            [new("merge-ok", "Merge OK", "spec/check")]);
-        run.StartTask("merge.1", "worker-1");
-        run.CompleteTask();
-        run.PassCheck(new CheckResult("merge-ok", "pass"));
+            [new("merge-ok", "Merge OK", "spec/check")],
+            DateTimeOffset.UnixEpoch);
+        run.StartTask("merge.1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("merge-ok", "pass"), DateTimeOffset.UnixEpoch);
 
         return run;
     }
@@ -94,7 +97,7 @@ public class RerunFromStageSpecs
         run.Status = WorkflowRunStatus.Failed;
         run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
 
-        var events = run.RerunFromStage("build");
+        var events = run.RerunFromStage("build", DateTimeOffset.UnixEpoch);
 
         // Target stage replaced
         var newBuild = run.Stages[1];
@@ -133,7 +136,7 @@ public class RerunFromStageSpecs
         run.Status = WorkflowRunStatus.Failed;
         run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
 
-        var events = run.RerunFromStage("build");
+        var events = run.RerunFromStage("build", DateTimeOffset.UnixEpoch);
 
         Assert.Equal("build", run.CurrentStageId);
         Assert.Null(run.Failure);
@@ -155,7 +158,7 @@ public class RerunFromStageSpecs
         run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
 
         var ex = Assert.Throws<WorkflowControlRejectionException>(() =>
-            run.RerunFromStage("nonexistent"));
+            run.RerunFromStage("nonexistent", DateTimeOffset.UnixEpoch));
 
         Assert.Equal("unknown_stage", ex.Code);
         Assert.NotNull(run.Failure);
@@ -173,7 +176,7 @@ public class RerunFromStageSpecs
         run.Failure = new FailureDetails(FailureReason.TaskFailed, "build", "compile.1");
 
         var ex = Assert.Throws<WorkflowControlRejectionException>(() =>
-            run.RerunFromStage("integrate"));
+            run.RerunFromStage("integrate", DateTimeOffset.UnixEpoch));
 
         Assert.Equal("stage_not_reached", ex.Code);
 
@@ -200,11 +203,11 @@ public class RerunFromStageSpecs
         run.Status = WorkflowRunStatus.Failed;
         run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
 
-        run.RerunFromStage("plan");
+        run.RerunFromStage("plan", DateTimeOffset.UnixEpoch);
         var stagesAfterPlanRerun = run.Stages.ToList();
 
         var ex = Assert.Throws<WorkflowControlRejectionException>(() =>
-            run.RerunFromStage("integrate"));
+            run.RerunFromStage("integrate", DateTimeOffset.UnixEpoch));
 
         Assert.Equal("stage_not_reached", ex.Code);
         Assert.Equal("plan", run.CurrentStageId);
@@ -224,7 +227,7 @@ public class RerunFromStageSpecs
         run.Status = WorkflowRunStatus.Failed;
         run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
 
-        run.RerunFromStage("integrate");
+        run.RerunFromStage("integrate", DateTimeOffset.UnixEpoch);
 
         Assert.Equal("integrate", run.CurrentStageId);
         Assert.Null(run.Failure);
@@ -254,7 +257,7 @@ public class RerunFromStageSpecs
         integrateStage.Tasks.Add(runningTask);
 
         var ex = Assert.Throws<WorkflowControlRejectionException>(() =>
-            run.RerunFromStage("build"));
+            run.RerunFromStage("build", DateTimeOffset.UnixEpoch));
 
         Assert.Equal("active_work_in_range", ex.Code);
         Assert.NotNull(run.Failure);
@@ -280,7 +283,7 @@ public class RerunFromStageSpecs
             Status = StageCheckStatus.Pending,
         });
 
-        run.RerunFromStage("build");
+        run.RerunFromStage("build", DateTimeOffset.UnixEpoch);
 
         var newBuild = run.Stages.Single(s => s.Id == "build");
         Assert.Empty(newBuild.Checks);
@@ -307,7 +310,7 @@ public class RerunFromStageSpecs
         });
 
         var ex = Assert.Throws<WorkflowControlRejectionException>(() =>
-            run.RerunFromStage("build"));
+            run.RerunFromStage("build", DateTimeOffset.UnixEpoch));
 
         Assert.Equal("active_work_in_range", ex.Code);
         Assert.NotNull(run.Failure);
@@ -337,7 +340,7 @@ public class RerunFromStageSpecs
         buildStage.Tasks.Add(runningTask);
 
         var ex = Assert.Throws<WorkflowControlRejectionException>(() =>
-            run.RerunFromStage("build"));
+            run.RerunFromStage("build", DateTimeOffset.UnixEpoch));
 
         Assert.Equal("active_work_in_range", ex.Code);
         Assert.NotNull(run.Failure);
@@ -352,7 +355,7 @@ public class RerunFromStageSpecs
         run.Status = WorkflowRunStatus.Failed;
         run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
 
-        var events = run.RerunFromStage("build");
+        var events = run.RerunFromStage("build", DateTimeOffset.UnixEpoch);
 
         Assert.Equal("build", run.CurrentStageId);
         Assert.Null(run.Failure);
@@ -369,7 +372,7 @@ public class RerunFromStageSpecs
         run.Status = WorkflowRunStatus.Failed;
         run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
 
-        var events = run.RerunFromStage("plan");
+        var events = run.RerunFromStage("plan", DateTimeOffset.UnixEpoch);
 
         // Target is plan
         Assert.Equal("plan", run.CurrentStageId);

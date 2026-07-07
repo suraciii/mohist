@@ -17,6 +17,8 @@ public class ApprovalFeedbackSpecs
         Converters = { new JsonStringEnumConverter() }
     };
 
+    private static string NextFeedbackId(WorkflowRun run) => $"fb_{run.Feedback.Count + 1}";
+
     private static WorkflowDefinition ApprovalStageDefinition() =>
         new("spec/workflow", [
             new StageDefinition("plan",
@@ -27,18 +29,16 @@ public class ApprovalFeedbackSpecs
 
     private static WorkflowRun BuildAwaitingApprovalRun()
     {
-        var run = WorkflowRun.Create("wf-1", ApprovalStageDefinition());
-        run.Start();
+        var run = WorkflowRun.Create("wf-1", ApprovalStageDefinition(), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage(
             [new("draft", "Draft", "spec/task")],
-            [new("plan-ok", "Plan OK", "spec/check")]);
+            [new("plan-ok", "Plan OK", "spec/check")],
+            DateTimeOffset.UnixEpoch);
         run.AssignTo("worker-1", DateTimeOffset.UtcNow);
-        // The new task lifecycle (PR #140) requires a task to transition through
-        // Pending → Running → Completed. Mirror that here before completing the
-        // draft task so the stage reaches AwaitingApproval.
-        run.StartTask("draft.1", "worker-1");
-        run.CompleteTask();
-        run.PassCheck(new CheckResult("plan-ok", "pass"));
+        run.StartTask("draft.1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("plan-ok", "pass"), DateTimeOffset.UnixEpoch);
         return run;
     }
 
@@ -52,7 +52,7 @@ public class ApprovalFeedbackSpecs
         Assert.Equal(StageRunStatus.AwaitingApproval, current.Status);
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
 
-        run.RequestChanges("please add a section on retry semantics");
+        run.RequestChanges("please add a section on retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
 
         Assert.Single(run.Feedback);
         var feedback = run.Feedback[0];
@@ -79,7 +79,7 @@ public class ApprovalFeedbackSpecs
     {
         var run = BuildAwaitingApprovalRun();
 
-        run.RequestChanges("needs more detail");
+        run.RequestChanges("needs more detail", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
 
         Assert.NotEqual(WorkflowRunStatus.Failed, run.Status);
         Assert.Null(run.Failure);
@@ -97,7 +97,7 @@ public class ApprovalFeedbackSpecs
         var current = run.CurrentStage();
         current.Checks[0].Message = "all green";
 
-        run.RequestChanges("revise");
+        run.RequestChanges("revise", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
 
         var feedbackTask = current.Tasks.Last();
         Assert.Equal("apply-feedback", feedbackTask.DefinitionId);
@@ -122,16 +122,17 @@ public class ApprovalFeedbackSpecs
             new StageDefinition("build",
                 [new("compile", "Compile", "spec/task")],
                 [new("build-ok", "Build OK", "spec/check")])
-        ]));
-        run.Start();
+        ]), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage(
             [new("compile", "Compile", "spec/task")],
-            [new("build-ok", "Build OK", "spec/check")]);
+            [new("build-ok", "Build OK", "spec/check")],
+            DateTimeOffset.UnixEpoch);
         run.AssignTo("worker-1", DateTimeOffset.UtcNow);
         var current = run.CurrentStage();
         Assert.Equal(StageRunStatus.Running, current.Status);
 
-        var ex = Assert.Throws<InvalidOperationException>(() => run.RequestChanges("body"));
+        var ex = Assert.Throws<InvalidOperationException>(() => run.RequestChanges("body", NextFeedbackId(run), DateTimeOffset.UnixEpoch));
         Assert.Contains("not awaiting approval", ex.Message);
     }
 
@@ -142,8 +143,8 @@ public class ApprovalFeedbackSpecs
     {
         var run = BuildAwaitingApprovalRun();
 
-        Assert.Throws<ArgumentException>(() => run.RequestChanges(""));
-        Assert.Throws<ArgumentException>(() => run.RequestChanges("   "));
+        Assert.Throws<ArgumentException>(() => run.RequestChanges("", NextFeedbackId(run), DateTimeOffset.UnixEpoch));
+        Assert.Throws<ArgumentException>(() => run.RequestChanges("   ", NextFeedbackId(run), DateTimeOffset.UnixEpoch));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -152,10 +153,10 @@ public class ApprovalFeedbackSpecs
     public void ApprovalFeedback_RoundTripsThroughWorkflowRunJson()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("add a quick start");
+        run.RequestChanges("add a quick start", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
 
         var run2 = BuildAwaitingApprovalRun();
-        run2.RequestChanges("and a troubleshooting section");
+        run2.RequestChanges("and a troubleshooting section", NextFeedbackId(run2), DateTimeOffset.UnixEpoch);
         run.Feedback.Add(run2.Feedback[0]);
 
         var json = JsonSerializer.Serialize(run, JsonOptions);
@@ -219,7 +220,7 @@ public class ApprovalFeedbackSpecs
     public void Approve_StillWorks_AfterRequestChanges()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("first revision");
+        run.RequestChanges("first revision", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
 
         // The apply-feedback runtime task added by RequestChanges needs to be
         // completed (Pending → Running → Completed) before the stage is ready
@@ -227,13 +228,13 @@ public class ApprovalFeedbackSpecs
         // the checks before asserting AwaitingApproval.
         var current = run.CurrentStage();
         var feedbackTask = current.Tasks.Last(t => t.CausedByFeedbackId is not null);
-        run.StartTask(feedbackTask.Id, "worker-1");
-        run.CompleteTask();
-        run.PassCheck(new CheckResult("plan-ok", "pass"));
+        run.StartTask(feedbackTask.Id, "worker-1", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("plan-ok", "pass"), DateTimeOffset.UnixEpoch);
 
         Assert.Equal(StageRunStatus.AwaitingApproval, current.Status);
 
-        run.Approve();
+        run.Approve(DateTimeOffset.UnixEpoch);
 
         Assert.Equal(StageRunStatus.Completed, current.Status);
         Assert.Null(run.Failure);
@@ -246,7 +247,7 @@ public class ApprovalFeedbackSpecs
     public void IsCurrentStageRetryableFailure_FalseWhenStageIsInActiveFeedbackLoop()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("revise");
+        run.RequestChanges("revise", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
 
         Assert.False(run.IsCurrentStageRetryableFailure());
     }
@@ -271,14 +272,15 @@ public class ApprovalFeedbackSpecs
             new StageDefinition("build",
                 [new("compile", "Compile", "spec/task")],
                 [new("build-ok", "Build OK", "spec/check")])
-        ]));
-        run.Start();
+        ]), DateTimeOffset.UnixEpoch);
+        run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage(
             [new("compile", "Compile", "spec/task")],
-            [new("build-ok", "Build OK", "spec/check")]);
+            [new("build-ok", "Build OK", "spec/check")],
+            DateTimeOffset.UnixEpoch);
         run.AssignTo("worker-1", DateTimeOffset.UtcNow);
-        run.StartTask("compile.1", "worker-1");
-        run.FailTask(new TaskResult("failed", "boom"));
+        run.StartTask("compile.1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.FailTask(new TaskResult("failed", "boom"), DateTimeOffset.UnixEpoch);
 
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
         Assert.True(run.IsCurrentStageRetryableFailure());
@@ -293,7 +295,7 @@ public class ApprovalFeedbackSpecs
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
         Assert.False(run.IsCurrentStageRetryableFailure());
 
-        run.RequestChanges("revise");
+        run.RequestChanges("revise", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.False(run.IsCurrentStageRetryableFailure());
     }
@@ -306,7 +308,7 @@ public class ApprovalFeedbackSpecs
         var run = BuildAwaitingApprovalRun();
         var current = run.CurrentStage();
 
-        run.RequestChanges("apply default");
+        run.RequestChanges("apply default", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
 
         var feedbackTask = current.Tasks.Last();
         Assert.Equal("apply-feedback", feedbackTask.DefinitionId);
@@ -336,7 +338,7 @@ public class ApprovalFeedbackSpecs
             Uses: "mohist/acp-agent",
             With: customWith);
 
-        run.RequestChanges("apply with custom task", customTask);
+        run.RequestChanges("apply with custom task", NextFeedbackId(run), DateTimeOffset.UnixEpoch, customTask);
 
         var feedbackTask = current.Tasks.Last();
         Assert.Equal("apply-feedback", feedbackTask.DefinitionId);
@@ -493,12 +495,12 @@ public class ApprovalFeedbackSpecs
     public void ResolveFeedback_OpenFeedback_TransitionsToResolved()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("explain retry semantics");
+        run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
         var feedbackId = run.Feedback[0].Id;
         var current = run.CurrentStage();
         var feedbackTask = current.Tasks.Last(t => t.DefinitionId == "apply-feedback");
 
-        var resolved = run.ResolveFeedback(feedbackId, feedbackTask.Id, "applied retry semantics");
+        var resolved = run.ResolveFeedback(feedbackId, feedbackTask.Id, "applied retry semantics", DateTimeOffset.UnixEpoch);
 
         Assert.NotNull(resolved);
         Assert.Equal(ApprovalFeedbackStatus.Resolved, resolved!.Status);
@@ -514,9 +516,9 @@ public class ApprovalFeedbackSpecs
     public void ResolveFeedback_UnknownFeedbackId_ReturnsNull()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("explain retry semantics");
+        run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
 
-        var resolved = run.ResolveFeedback("fb_missing", "apply-feedback.1", "summary");
+        var resolved = run.ResolveFeedback("fb_missing", "apply-feedback.1", "summary", DateTimeOffset.UnixEpoch);
 
         Assert.Null(resolved);
     }
@@ -527,11 +529,11 @@ public class ApprovalFeedbackSpecs
     public void ResolveFeedback_AlreadyResolved_IsIdempotent()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("explain retry semantics");
+        run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
         var feedbackId = run.Feedback[0].Id;
-        run.ResolveFeedback(feedbackId, "apply-feedback.1", "first summary");
+        run.ResolveFeedback(feedbackId, "apply-feedback.1", "first summary", DateTimeOffset.UnixEpoch);
 
-        var second = run.ResolveFeedback(feedbackId, "apply-feedback.1", "second summary");
+        var second = run.ResolveFeedback(feedbackId, "apply-feedback.1", "second summary", DateTimeOffset.UnixEpoch);
 
         Assert.NotNull(second);
         Assert.Equal("first summary", second!.ResolutionSummary);

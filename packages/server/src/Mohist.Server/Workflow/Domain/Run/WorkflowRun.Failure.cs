@@ -25,7 +25,7 @@ public static partial class WorkflowRunExtensions
             return current.Failure is not null;
         }
 
-        public IReadOnlyList<WorkflowEvent> Retry()
+        public IReadOnlyList<WorkflowEvent> Retry(DateTimeOffset now)
         {
             if (run.Status != WorkflowRunStatus.Failed)
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}, retry requires failed");
@@ -45,13 +45,13 @@ public static partial class WorkflowRunExtensions
 
                     current.RetryFailedTask(taskId);
                     run.Failure = null;
-                    ApplyWaitingForDispatchStatus(run);
+                    ApplyWaitingForDispatchStatus(run, now);
                     return [new WorkflowRunResumed()];
                 }
                 case FailureReason.CheckFailed:
                     current.RetryFailedCheck(current.Failure.CheckName);
                     run.Failure = null;
-                    ApplyWaitingForDispatchStatus(run);
+                    ApplyWaitingForDispatchStatus(run, now);
                     return [new WorkflowRunResumed()];
                 case FailureReason.ContextExhaustion:
                     throw new InvalidOperationException($"Stage {current.Id} failure is context exhaustion; use compact or reset on the session before retrying");
@@ -118,7 +118,7 @@ public static partial class WorkflowRunExtensions
             return true;
         }
 
-        public IReadOnlyList<WorkflowEvent> Rerun()
+        public IReadOnlyList<WorkflowEvent> Rerun(DateTimeOffset now)
         {
             var current = run.CurrentStage();
             var stageIdx = run.Stages.FindIndex(s => s.Id == current.Id);
@@ -131,14 +131,14 @@ public static partial class WorkflowRunExtensions
             };
             run.Stages[stageIdx] = newStage;
             run.Failure = null;
-            ApplyWaitingForDispatchStatus(run);
+            ApplyWaitingForDispatchStatus(run, now);
             return [
                 new WorkflowRunResumed(),
                 new StageStarted(newStage.Id)
             ];
         }
 
-        public IReadOnlyList<WorkflowEvent> RerunFromStage(string stageId)
+        public IReadOnlyList<WorkflowEvent> RerunFromStage(string stageId, DateTimeOffset now)
         {
             var targetIdx = run.Stages.FindIndex(s => s.Id == stageId);
             var currentIdx = run.Stages.FindIndex(s => s.Id == run.CurrentStageId);
@@ -201,7 +201,7 @@ public static partial class WorkflowRunExtensions
 
             run.CurrentStageId = run.Stages[targetIdx].Id;
             run.Failure = null;
-            ApplyWaitingForDispatchStatus(run);
+            ApplyWaitingForDispatchStatus(run, now);
 
             return [
                 new WorkflowRunResumed(),
