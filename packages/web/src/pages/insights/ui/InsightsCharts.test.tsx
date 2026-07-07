@@ -7,22 +7,18 @@ import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type {
   CompletionTrendResponse,
-  CumulativeFlowResponse,
   DeliveryTimeMetricsResponse,
   QualityMetricsResponse,
   StageDurationMetricsResponse,
 } from '../../../entities/issue'
-import type { AgentCostRollupDto, AgentUsageTimeseriesDto } from '../../../entities/agent'
+import type { AgentUsageTimeseriesDto } from '../../../entities/agent'
 
 const mocks = vi.hoisted(() => ({
   useCompletionThroughput: vi.fn(),
   useCompletionTrend: vi.fn(),
-  useCumulativeFlow: vi.fn(),
   useDeliveryTime: vi.fn(),
   useStageDuration: vi.fn(),
   useQualityMetrics: vi.fn(),
-  useEpics: vi.fn(),
-  useCostRollup: vi.fn(),
   useAgentUsage: vi.fn(),
 }))
 
@@ -32,18 +28,9 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     ...actual,
     useCompletionThroughput: mocks.useCompletionThroughput,
     useCompletionTrend: mocks.useCompletionTrend,
-    useCumulativeFlow: mocks.useCumulativeFlow,
     useDeliveryTime: mocks.useDeliveryTime,
     useStageDuration: mocks.useStageDuration,
     useQualityMetrics: mocks.useQualityMetrics,
-  }
-})
-
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
-  return {
-    ...actual,
-    useEpics: mocks.useEpics,
   }
 })
 
@@ -51,7 +38,6 @@ vi.mock('../../../entities/agent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/agent')>()
   return {
     ...actual,
-    useCostRollup: mocks.useCostRollup,
     useAgentUsage: mocks.useAgentUsage,
   }
 })
@@ -110,19 +96,6 @@ function buildCompletionTrend(): CompletionTrendResponse {
   }
 }
 
-function buildCumulativeFlow(): CumulativeFlowResponse {
-  return {
-    rangeFrom: '2026-04-02',
-    rangeTo: '2026-06-30',
-    snapshots: [
-      { day: '2026-04-02', backlog: 10, plan: 2, build: 1, check: 0, integrate: 0, done: 5 },
-      { day: '2026-05-01', backlog: 12, plan: 3, build: 2, check: 1, integrate: 0, done: 8 },
-      { day: '2026-05-30', backlog: 9, plan: 2, build: 3, check: 1, integrate: 1, done: 12 },
-      { day: '2026-06-29', backlog: 7, plan: 1, build: 2, check: 2, integrate: 1, done: 16 },
-    ],
-  }
-}
-
 function buildDeliveryTime(): DeliveryTimeMetricsResponse {
   return {
     points: [
@@ -171,23 +144,6 @@ function buildQuality(): QualityMetricsResponse {
   }
 }
 
-function buildCostRollup(): AgentCostRollupDto {
-  return {
-    totalCost: { amount: 500, currency: 'USD', sampleCount: 50 },
-    todayCost: { amount: 5, currency: 'USD', sampleCount: 1 },
-    doneIssuesCount: 12,
-    costPerShip: { amount: 42, currency: 'USD', sampleCount: 12 },
-    currentWindow: {
-      spend: { amount: 182, currency: 'USD', sampleCount: 5 },
-      perIssueCost: { amount: 36, currency: 'USD', sampleCount: 5 },
-    },
-    previousWindow: {
-      spend: { amount: 150, currency: 'USD', sampleCount: 3 },
-      perIssueCost: { amount: 50, currency: 'USD', sampleCount: 3 },
-    },
-  }
-}
-
 function buildAgentUsage(): AgentUsageTimeseriesDto {
   return {
     rangeFrom: '2026-06-01T00:00:00',
@@ -206,43 +162,15 @@ function buildAgentUsage(): AgentUsageTimeseriesDto {
   }
 }
 
-function buildEpics() {
-  return [
-    {
-      id: 'epic-1',
-      projectId: 'proj-1',
-      number: 1,
-      title: 'Auth refactor',
-      status: 'in_progress',
-      priority: 'high',
-      progress: { completed: 4, total: 10 },
-      updatedAt: '2026-06-30T00:00:00Z',
-    },
-    {
-      id: 'epic-2',
-      projectId: 'proj-1',
-      number: 2,
-      title: 'Search overhaul',
-      status: 'in_progress',
-      priority: 'medium',
-      progress: { completed: 2, total: 6 },
-      updatedAt: '2026-06-30T00:00:00Z',
-    },
-  ]
-}
-
 import { InsightsCharts } from './InsightsCharts'
 
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.useCompletionThroughput.mockReturnValue({ data: buildThroughput(), isLoading: false, isError: false })
   mocks.useCompletionTrend.mockReturnValue({ data: buildCompletionTrend(), isLoading: false, isError: false })
-  mocks.useCumulativeFlow.mockReturnValue({ data: buildCumulativeFlow(), isLoading: false, isError: false })
   mocks.useDeliveryTime.mockReturnValue({ data: buildDeliveryTime(), isLoading: false, isError: false })
   mocks.useStageDuration.mockReturnValue({ data: buildStageDuration(), isLoading: false, isError: false })
   mocks.useQualityMetrics.mockReturnValue({ data: buildQuality(), isLoading: false, isError: false })
-  mocks.useEpics.mockReturnValue({ data: buildEpics(), isLoading: false, isError: false })
-  mocks.useCostRollup.mockReturnValue({ data: buildCostRollup(), isLoading: false, isError: false })
   mocks.useAgentUsage.mockReturnValue({ data: buildAgentUsage(), isLoading: false, isError: false })
 })
 
@@ -270,23 +198,34 @@ describe('InsightsCharts four fixed dimension groups', () => {
 
     expect(screen.queryByTestId('insights-chart-placeholder')).not.toBeInTheDocument()
   })
+
+  it('does not render the removed Investment or In-progress Epic progress panels', () => {
+    renderCharts()
+
+    expect(screen.queryByTestId('productivity-investment')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-toggle')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-total-cost')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-cost-per-ship')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-investment-done-issues')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-epic-list')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-epic-list-item-0')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-epic-list-bar-0')).not.toBeInTheDocument()
+  })
 })
 
 describe('InsightsCharts group structure', () => {
-  it('renders the 产出 group with its four charts in fixed order (EpicProgressList first)', () => {
+  it('renders the 产出 group with Throughput and Completion Trend in fixed order', () => {
     renderCharts()
 
     const group = screen.getAllByTestId('insights-chart-group').find(
       (g) => g.getAttribute('data-dimension') === 'output',
     )!
     const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
-    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="throughput-chart"], [data-testid="productivity-trend"], [data-testid="cumulative-flow-chart"], [data-testid="productivity-epic-list"]'))
+    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="throughput-chart"], [data-testid="productivity-trend"]'))
 
     expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
-      'productivity-epic-list',
       'throughput-chart',
       'productivity-trend',
-      'cumulative-flow-chart',
     ])
 
     const heading = group.querySelector('[data-testid="insights-chart-group-title"]')!
@@ -333,16 +272,15 @@ describe('InsightsCharts group structure', () => {
     expect(question.textContent).toBe('一次做对了吗？')
   })
 
-  it('renders the 投入 group with its two charts', () => {
+  it('renders the 投入 group with only Cost Trend', () => {
     renderCharts()
 
     const group = screen.getAllByTestId('insights-chart-group').find(
       (g) => g.getAttribute('data-dimension') === 'investment',
     )!
     const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
-    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="productivity-investment"], [data-testid="cost-trend-chart"]'))
+    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="cost-trend-chart"]'))
     expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
-      'productivity-investment',
       'cost-trend-chart',
     ])
 
@@ -354,12 +292,11 @@ describe('InsightsCharts group structure', () => {
 })
 
 describe('InsightsCharts time-window annotations', () => {
-  it('renders the six D4 window badges in the populated state', () => {
+  it('renders the five D4 window badges in the populated state', () => {
     renderCharts()
 
     expect(screen.getByTestId('throughput-chart-window')).toBeInTheDocument()
     expect(screen.getByTestId('cycle-time-chart-window')).toBeInTheDocument()
-    expect(screen.getByTestId('cumulative-flow-chart-window')).toBeInTheDocument()
     expect(screen.getByTestId('stage-duration-chart-window')).toBeInTheDocument()
     expect(screen.getByTestId('ftr-trend-chart-window')).toBeInTheDocument()
     expect(screen.getByTestId('cost-trend-chart-window')).toBeInTheDocument()
@@ -391,39 +328,30 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     )
   }
 
-  it('forwards the range to every chart panel hook (except useEpics)', () => {
+  it('forwards the range to every chart panel hook', () => {
     mocks.useCompletionThroughput.mockClear()
     mocks.useCompletionTrend.mockClear()
-    mocks.useCumulativeFlow.mockClear()
     mocks.useDeliveryTime.mockClear()
     mocks.useStageDuration.mockClear()
     mocks.useQualityMetrics.mockClear()
-    mocks.useCostRollup.mockClear()
     mocks.useAgentUsage.mockClear()
-    mocks.useEpics.mockClear()
 
     renderChartsWithRange('7d')
 
     expect(mocks.useCompletionThroughput).toHaveBeenCalledWith('7d')
     expect(mocks.useCompletionTrend).toHaveBeenCalledWith('7d')
-    expect(mocks.useCumulativeFlow).toHaveBeenCalledWith('7d')
     expect(mocks.useDeliveryTime).toHaveBeenCalledWith('7d')
     expect(mocks.useStageDuration).toHaveBeenCalledWith('7d')
     expect(mocks.useQualityMetrics).toHaveBeenCalledWith('7d')
-    expect(mocks.useCostRollup).toHaveBeenCalledWith('7d')
     expect(mocks.useAgentUsage).toHaveBeenCalledWith('7d')
-
-    expect(mocks.useEpics).not.toHaveBeenCalledWith('7d')
   })
 
   it('re-applies the new range when the prop changes from 30d to 90d', () => {
     mocks.useCompletionThroughput.mockClear()
     mocks.useCompletionTrend.mockClear()
-    mocks.useCumulativeFlow.mockClear()
     mocks.useDeliveryTime.mockClear()
     mocks.useStageDuration.mockClear()
     mocks.useQualityMetrics.mockClear()
-    mocks.useCostRollup.mockClear()
     mocks.useAgentUsage.mockClear()
 
     const { rerender } = renderChartsWithRange('30d')
@@ -442,11 +370,9 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     )
 
     expect(mocks.useCompletionThroughput).toHaveBeenLastCalledWith('90d')
-    expect(mocks.useCumulativeFlow).toHaveBeenLastCalledWith('90d')
     expect(mocks.useDeliveryTime).toHaveBeenLastCalledWith('90d')
     expect(mocks.useStageDuration).toHaveBeenLastCalledWith('90d')
     expect(mocks.useQualityMetrics).toHaveBeenLastCalledWith('90d')
-    expect(mocks.useCostRollup).toHaveBeenLastCalledWith('90d')
     expect(mocks.useAgentUsage).toHaveBeenLastCalledWith('90d')
   })
 
@@ -454,21 +380,18 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     const rangeByCode = {
       '7d': {
         stage: { from: '2026-06-23T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00' },
-        cumulative: { rangeFrom: '2026-06-23', rangeTo: '2026-06-30' },
         ftr: { from: '2026-06-23T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00' },
         cost: { rangeFrom: '2026-06-23T00:00:00', rangeTo: '2026-06-30T23:59:59' },
         qualityWindow: { from: '2026-06-23T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00', sampleCount: 5, firstTimeRightRate: 0.8, stages: [] },
       },
       '30d': {
         stage: { from: '2026-06-01T00:00:00+00:00', to: '2026-07-01T00:00:00+00:00' },
-        cumulative: { rangeFrom: '2026-06-01', rangeTo: '2026-06-30' },
         ftr: { from: '2026-06-01T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00' },
         cost: { rangeFrom: '2026-06-01T00:00:00', rangeTo: '2026-06-29T23:59:59' },
         qualityWindow: { from: '2026-06-01T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00', sampleCount: 25, firstTimeRightRate: 0.6, stages: [] },
       },
       '90d': {
         stage: { from: '2026-04-02T00:00:00+00:00', to: '2026-07-01T00:00:00+00:00' },
-        cumulative: { rangeFrom: '2026-04-02', rangeTo: '2026-06-30' },
         ftr: { from: '2026-04-02T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00' },
         cost: { rangeFrom: '2026-04-02T00:00:00', rangeTo: '2026-06-30T23:59:59' },
         qualityWindow: { from: '2026-04-02T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00', sampleCount: 60, firstTimeRightRate: 0.7, stages: [] },
@@ -486,15 +409,6 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
           ],
           flowEfficiencyRatio: 0.6,
           waitBreakout: { averageApprovalGateWaitSeconds: 600, averageInactiveGapSeconds: 1200 },
-        },
-        isLoading: false,
-        isError: false,
-      })
-      mocks.useCumulativeFlow.mockReturnValue({
-        data: {
-          snapshots: [{ day: cfg.cumulative.rangeTo, backlog: 5, plan: 2, build: 1, check: 0, integrate: 0, done: 3 }],
-          rangeFrom: cfg.cumulative.rangeFrom,
-          rangeTo: cfg.cumulative.rangeTo,
         },
         isLoading: false,
         isError: false,
@@ -544,8 +458,6 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('7d')
     expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jun 23')
     expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jun 30')
-    expect(screen.getByTestId('cumulative-flow-chart-window').textContent).toContain('Jun 23')
-    expect(screen.getByTestId('cumulative-flow-chart-window').textContent).toContain('Jun 30')
     expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 23')
     expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 30')
     expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Jun 23')
@@ -567,8 +479,6 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('90d')
     expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Apr 2')
     expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jul 1')
-    expect(screen.getByTestId('cumulative-flow-chart-window').textContent).toContain('Apr 2')
-    expect(screen.getByTestId('cumulative-flow-chart-window').textContent).toContain('Jun 30')
     expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Apr 2')
     expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 30')
     expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Apr 2')
