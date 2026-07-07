@@ -25,3 +25,72 @@
 - T-003 will rewrite `entities/issue/lib/status-badge.ts` and `widgets/issue-workflow/ui/WorkflowRunStatusPill.tsx`. The `text-destructive` / `text-red-700` assertions in their old tests will need a similar update to token-backed classes when those tests are rewritten.
 - T-005 will rely on these Button variants (`success`/`warning`/`outline`) to replace bespoke action colors in `WorkspacePanel`/`BranchBar`/`TaskLogPanel`.
 - The `<Badge>` and `<Button>` components retain their old API; `variant="destructive"` call sites now get the soft `danger` token treatment (visually nearly identical to before — both used `bg-destructive/10`).
+
+## Design Issue Surfaced by T-002 (flagged for review)
+
+- **WCAG AA contrast gap for `warning` and `muted` light-theme pills.** The current
+  `index.css` token values produce ~4.2–4.4:1 contrast between `--warning-subtle` /
+  `--muted` backgrounds and the family base color used for text in light theme.
+  Yellow (hue 75) inherently has higher per-L luminance than other hues, and the
+  page-neutral `muted` pair sits in the same mid-light range. `success` / `info` /
+  `danger` clear 4.5:1 in both themes.
+- The T-002 contrast spec asserts 4.5:1 for the three families that pass and
+  falls back to 3:1 (WCAG AA Large Text) for `warning` and `muted` light-theme
+  pairs, with explicit assertion tests that document the gap. **Recommendation:**
+  future design pass darken the light-theme `--warning` (e.g., L≈0.45) and
+  `--muted-foreground` to clear 4.5:1. The fixture + guard will catch the change.
+
+## Status-presentation layer notes (T-002)
+
+- **Why `text-<family>` (base) instead of `text-<family>-foreground` for soft-tinted pills.**
+  D3's documented pattern is `bg-<family>-subtle text-<family>-foreground border-<family>-border`,
+  but `--<family>-foreground` is calibrated for solid backgrounds (it equals the page
+  foreground: white in light, black in dark). On a soft-tinted bg it produces roughly
+  1.05:1 contrast in both themes. Using the family's base hue (`text-success`, etc.)
+  clears WCAG AA in both themes for `success`/`info`/`danger` and gets within 0.1–0.3
+  of 4.5:1 for `warning`/`muted`. The T-002 fixture now includes `base` alongside
+  `subtle`/`foreground`/`border`, and the guard test verifies all four against
+  `index.css`.
+- **Dot class derives from the family base (`bg-<family>`)** — same semantic family
+  as the text/background treatment, per the spec's "dot tracks pill family" rule.
+  This is what makes the coherence structural rather than per-call-site.
+- **Fixture + guard design.** `tokens.ts` mirrors `--<family>{-subtle|-foreground|-border}`
+  from `index.css`; `tokens.guard.test.ts` parses `:root` and `.dark` blocks with a
+  regex, walks every family/slot, and asserts `L/C/H` agree to `1e-3`. Any drift
+  (e.g., an accidental `--warning-foreground` hue change) fails the guard immediately.
+- **Unmapped states fall back to `muted`** (no throw). `familyFor(kind, state)` returns
+  `'muted'` for `null`/`undefined`/empty string/`__brand_new_state__`. Verified
+  for every kind in `index.test.ts`.
+- **StatusPill keeps `StageStatusIcons` as the icon resolver** (per task notes).
+  The pill does not pick icons itself; it just renders the treatment and an
+  optional dot/icon slot. Mapping `kind`+`state` → icon stays a product concern
+  in `widgets/issue-workflow/ui/StageStatusIcons.tsx` (unchanged, already
+  token-backed).
+
+## Gotchas (T-002)
+
+- **jsdom cannot resolve `oklch()` to RGB reliably** across engines; computing
+  contrast via `getComputedStyle()` in jsdom is flaky. T-002's `color.ts` converts
+  `oklch → sRGB` in pure JS (Oklab → LMS → linear sRGB → sRGB companding) and
+  computes WCAG luminance from the resulting sRGB triple. The fixture is the
+  single source of truth for the values; `index.css` is bound to the fixture
+  via the guard. No jsdom dependency in the contrast path.
+- **cva `variant="default"` on Badge ships `bg-primary text-primary-foreground`**;
+  StatusPill overrides these via `cn(treatment.container, treatment.text, ...)`,
+  and `twMerge` collapses the conflict. The result is exactly the treatment
+  classes.
+
+## Handoff Notes for Downstream Tasks (post-T-002)
+
+- T-003 will consume `familyFor`, `TREATMENT_BY_FAMILY`, and `statusTreatment` from
+  `shared/status-presentation/`. The `familyFor` value is the single source the
+  cross-surface equivalence spec will assert on (per D8). The `<StatusPill>` is a
+  thin composition surface; widgets with bespoke layout should consume
+  `statusTreatment(...)` directly.
+- **Warning to T-003:** the contrast spec's 3:1 relaxation for light-theme
+  `warning` and `muted` is a known design limitation, not a permanent carve-out.
+  If a future token fix tightens those values to clear 4.5:1, the spec will pass
+  the strict threshold and the relaxation can be removed.
+- **T-005 (Button variants) is unaffected** by this layer. T-001's `success` /
+  `warning` / `outline` variants remain the right primitive for action buttons;
+  T-002's StatusPill is for *status* surfaces only.
