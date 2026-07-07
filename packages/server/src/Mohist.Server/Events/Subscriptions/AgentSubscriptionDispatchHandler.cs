@@ -51,13 +51,10 @@ namespace Mohist.Server.Events.Subscriptions;
 /// </para>
 /// <para>
 /// <b>Project resolution.</b> Issue events already stamp
-/// <c>extensions["projectid"]</c> (see <c>IssueGrain.PublishIssueEventsAsync</c>),
-/// so they resolve directly. Workflow events do NOT stamp the project id
-/// on the envelope today (non-goal: production-side change). The handler
-/// therefore applies a graceful skip for workflow events whose envelope
-/// does not carry <c>projectid</c> — the spec allows
-/// "Handler matches on envelope attributes only" so reading no business
-/// state and skipping is the only envelope-consistent choice.
+/// <c>extensions["projectid"]</c> (see <c>IssueGrain.PublishIssueEventsAsync</c>).
+/// Workflow events now stamp <c>extensions["projectid"]</c> at production time
+/// in <c>WorkflowRunStore.ToCloudEvent</c> using the run's metadata annotations.
+/// Events without a project id on the envelope are skipped gracefully.
 /// </para>
 /// </remarks>
 [Subscription(Type = "*")]
@@ -177,13 +174,9 @@ public sealed class AgentSubscriptionDispatchHandler : ICloudEventHandler
     /// <summary>
     /// Returns the project id stamped on the CloudEvent envelope. Issue
     /// events stamp <c>extensions["projectid"]</c> at production time in
-    /// <c>IssueGrain.PublishIssueEventsAsync</c>. Workflow events do not
-    /// currently stamp <c>projectid</c> on the envelope; rather than
-    /// reverse-query the workflow store (which would couple this
-    /// handler to a business domain), the handler degrades to "skip"
-    /// for events whose envelope cannot be resolved. The visible
-    /// subscription list therefore drives observability when an operator
-    /// wants to surface that gap.
+    /// <c>IssueGrain.PublishIssueEventsAsync</c>; workflow events stamp it
+    /// in <c>WorkflowRunStore.ToCloudEvent</c> from the run's metadata
+    /// annotations. Events whose envelope cannot be resolved are skipped.
     /// </summary>
     private static bool TryResolveProjectId(CloudEvent evt, out string projectId)
     {

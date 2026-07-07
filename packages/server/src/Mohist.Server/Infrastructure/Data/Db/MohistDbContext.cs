@@ -171,6 +171,14 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.LabelAgentLaunchWorkspacePath)
                 .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.WorkspacePath), stored: true);
 
+            // issue-391 T-003: trigger correlation labels for subscription-driven
+            // Agent launches. Stored computed columns keep the event↔session join
+            // queryable through the same label-index mechanism as other metadata.
+            entity.Property(e => e.LabelTriggerEventId)
+                .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.TriggerEventId), stored: true);
+            entity.Property(e => e.LabelTriggerSubscriptionId)
+                .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.TriggerSubscriptionId), stored: true);
+
             entity.HasIndex(e => new { e.LabelProjectId, e.CreatedAt }).HasDatabaseName("IX_AgentSessions_LabelProjectId_CreatedAt");
             entity.HasIndex(e => e.LabelSourceId).HasDatabaseName("IX_AgentSessions_LabelSourceId");
             entity.HasIndex(e => new { e.LabelSourceId, e.LabelSessionName }).HasDatabaseName("IX_AgentSessions_LabelSourceId_LabelSessionName");

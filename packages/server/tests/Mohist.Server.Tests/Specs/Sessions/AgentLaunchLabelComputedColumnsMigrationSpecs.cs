@@ -119,15 +119,14 @@ public class AgentLaunchLabelComputedColumnsMigrationSpecs
     [Fact]
     public async Task DatabaseMigrate_PopulatesComputedColumnsWithoutBackfill()
     {
-        // After the migration applies and SQLite rebuilds the table, the
-        // STORED computed columns derive values from the State JSON — no
-        // explicit backfill in Up. Insert a session with labels only in
-        // State JSON and read back the columns through EF.
+        // After the full migration chain applies and SQLite rebuilds the
+        // table, every STORED computed column derives values from the State
+        // JSON — no explicit backfill in any Up. Insert a session with labels
+        // only in State JSON and read back the columns through EF.
         await using var database = CreateDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            var migrator = setup.GetService<IMigrator>();
-            await migrator.MigrateAsync(MigrationName);
+            await setup.Database.MigrateAsync();
         }
 
         await using var ctx = database.CreateDbContext();
@@ -153,14 +152,12 @@ public class AgentLaunchLabelComputedColumnsMigrationSpecs
             status = new { createdAt = DateTime.UtcNow },
         }, Mohist.Server.Infrastructure.JSON.Options);
 
-        ctx.AgentSessions.Add(new AgentSessionRow
-        {
-            Id = "s_no_backfill",
-            State = stateJson,
-            Status = "opened",
-            CreatedAt = DateTime.UtcNow,
-        });
-        await ctx.SaveChangesAsync();
+        // Insert via raw SQL so the row can be added against the schema that
+        // exists at AddAgentLaunchLabelComputedColumns without requiring the
+        // newer trigger-label columns added in issue-391 T-003.
+        await ctx.Database.ExecuteSqlRawAsync(
+            "INSERT INTO AgentSessions (Id, State, Status, CreatedAt) VALUES ({0}, {1}, {2}, {3})",
+            "s_no_backfill", stateJson, "opened", DateTime.UtcNow);
 
         await using var read = database.CreateDbContext();
         var row = await read.AgentSessions.AsNoTracking().SingleAsync(r => r.Id == "s_no_backfill");
@@ -172,6 +169,10 @@ public class AgentLaunchLabelComputedColumnsMigrationSpecs
         Assert.Equal("22", row.LabelAgentLaunchEpicNumber);
         Assert.Equal("mohist/x", row.LabelAgentLaunchRepository);
         Assert.Equal("/work/bf", row.LabelAgentLaunchWorkspacePath);
+        // issue-391 T-003: trigger correlation columns exist but are null when
+        // the State JSON carries no trigger labels.
+        Assert.Null(row.LabelTriggerEventId);
+        Assert.Null(row.LabelTriggerSubscriptionId);
     }
 
     private static async Task<ISet<string>> ReadColumnNamesAsync(

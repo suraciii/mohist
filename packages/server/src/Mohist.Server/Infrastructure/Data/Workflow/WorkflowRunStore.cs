@@ -61,10 +61,11 @@ public class WorkflowRunStore : IWorkflowRunStore
         }
 
         // 2. insert + 3. publish: convert each event to a CloudEvent, persist via IEventStore, then publish
+        var projectId = run.Metadata?.Annotations?.GetValueOrDefault("projectId");
         foreach (var evt in events)
         {
             if (evt is null) continue;
-            var envelope = ToCloudEvent(evt, source);
+            var envelope = ToCloudEvent(evt, source, projectId);
             await _eventStore.AppendAsync(envelope, ct);
             try
             {
@@ -77,10 +78,13 @@ public class WorkflowRunStore : IWorkflowRunStore
         }
     }
 
-    private static CloudEvent ToCloudEvent(WorkflowEvent evt, string source)
+    private static CloudEvent ToCloudEvent(WorkflowEvent evt, string source, string? projectId)
     {
         var type = WorkflowEventSerializer.BusType(evt);
         var data = WorkflowEventSerializer.ToData(evt);
+        var extensions = string.IsNullOrWhiteSpace(projectId)
+            ? null
+            : new Dictionary<string, string>(StringComparer.Ordinal) { ["projectid"] = projectId };
         return new CloudEvent(
             id: Guid.NewGuid().ToString(),
             source: new Uri(source, UriKind.Relative),
@@ -88,7 +92,8 @@ public class WorkflowRunStore : IWorkflowRunStore
             time: DateTimeOffset.UtcNow,
             data: data,
             subject: null,
-            specVersion: SpecVersion);
+            specVersion: SpecVersion,
+            extensions: extensions);
     }
 
     public async Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default)

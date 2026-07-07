@@ -25,10 +25,10 @@ namespace Mohist.Server.Tests.Specs.Events.Subscriptions;
 ///         sessions are unaffected (spec
 ///         <c>agent-subscription-management#Lifecycle invariant</c>).</item>
 ///   <item>Envelope-only boundary: the handler reads
-///         <c>extensions["projectid"]</c> from the envelope and skips when
-///         absent (workflow events today do not stamp <c>projectid</c>;
-///         the handler degrades rather than reverse-querying the
-///         Workflow domain).</item>
+///         <c>extensions["projectid"]</c> from the envelope (issue events
+///         stamp it in <c>IssueGrain.PublishIssueEventsAsync</c>; workflow
+///         events stamp it in <c>WorkflowRunStore.ToCloudEvent</c> from the
+///         run's metadata annotations) and skips when absent.</item>
 /// </list>
 /// </summary>
 public class AgentSubscriptionDispatchHandlerSpecs
@@ -335,12 +335,39 @@ public class AgentSubscriptionDispatchHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
-    public async Task HandleAsync_WorkflowEventWithoutProjectIdExtension_DegradesToSkip()
+    public async Task HandleAsync_WorkflowEventWithProductionEnvelope_Dispatches()
     {
-        // The envelope-only boundary: workflow events currently do NOT
-        // stamp projectid on the envelope (production-side change is a
-        // non-goal of this feature). The handler therefore skips when the
-        // envelope cannot identify the project.
+        // WorkflowRunStore.ToCloudEvent now stamps projectid on the envelope
+        // from the run's metadata annotations, so production workflow events
+        // resolve and dispatch just like issue events.
+        var (recorder, scope) = Build();
+        await using var _ = scope;
+        await SeedProjectAsync(scope, "proj_a");
+        await SeedAgentAsync(scope, "proj_a", "agent_a", "agent-a");
+
+        await SeedSubscriptionAsync(scope, "proj_a", "agent_a",
+            name: "stage-watcher", filterType: "com.mohist.workflow.stage.*", priority: 5);
+
+        var evt = BuildWorkflowEvent(
+            type: EventCatalog.ReverseDns.StageApprovalRequested,
+            workflowRunId: "wr_1",
+            projectId: "proj_a");
+
+        await scope.Handler.HandleAsync(evt, CancellationToken.None);
+
+        var launch = Assert.Single(recorder.Calls);
+        Assert.Equal("agent_a", launch.Agent.Id);
+        Assert.Equal("proj_a", launch.Context.ProjectId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task HandleAsync_EventWithoutProjectIdExtension_DegradesToSkip()
+    {
+        // The envelope-only boundary: when an event (issue or workflow) does
+        // not carry projectid, the handler skips rather than reverse-querying
+        // any business domain.
         var (recorder, scope) = Build();
         await using var _ = scope;
         await SeedProjectAsync(scope, "proj_a");
