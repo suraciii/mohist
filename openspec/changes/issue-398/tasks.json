@@ -1,0 +1,123 @@
+{
+  "project": "mohist-local",
+  "description": "Unify the Mohist Web UI's parallel status-color systems onto one semantic-token-backed status-presentation layer with token-backed Badge/Button primitives and dark-mode-aware registries, so the same production state (issue health, workflow stage/run, approval, runner, severity) renders identically across dashboard, board, issue detail, activity, session, and runner surfaces in both light and dark theme. Pure presentation change, web-only, no domain/API/dependency change.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Token hue fix + semantic Badge/Button primitives + remove raw-red overrides",
+      "spec": "specs/theme-tokens/spec.md#token-hues-are-internally-consistent, specs/semantic-primitives/spec.md#badge-primitive-exposes-token-backed-semantic-variants, specs/semantic-primitives/spec.md#button-primitive-exposes-token-backed-semantic-variants, specs/semantic-primitives/spec.md#status-and-action-styling-is-expressed-through-primitives-not-ad-hoc-classes",
+      "description": "Normalize the light-theme `--warning` family to a single hue (75) in `app/styles/index.css`, then extend `badgeVariants` and `buttonVariants` (cva) in `shared/ui/components/badge.tsx` and `button.tsx` with soft-tinted, token-backed `success`/`warning`/`info`/`danger` variants mirroring the existing `destructive` shape (`bg-<family>-subtle text-<family>-foreground border-<family>-border`). Alias the existing `destructive` variant to the `danger` treatment so they cannot diverge, remove the `bg-red-600 text-white hover:bg-red-700` override layered on `AlertDialog`'s confirmation button (lines 49-51), and route `FieldError`'s text through the `danger` token instead of `text-red-700`. `--destructive` may remain as a CSS var for legacy reference but primitives no longer read it.",
+      "acceptanceCriteria": [
+        "Light-theme `--warning`, `--warning-subtle`, and `--warning-border` share one hue (75) in `app/styles/index.css`; dark-theme `--warning*` values remain hue-consistent",
+        "`Badge` renders `success`, `warning`, `info`, and `danger` variants whose class sets reference `bg-<family>-subtle` / `text-<family>-foreground` / `border-<family>-border` tokens and contain no raw `bg-emerald-100`/`bg-amber-100`/`bg-blue-100`/`bg-red-100` palette classes",
+        "`Button` renders the same four semantic variants backed by the semantic tokens, with no raw `bg-green-600`/`bg-amber-600`/`bg-red-600`/`bg-blue-600` palette classes",
+        "The `destructive` variant on both `Badge` and `Button` resolves to the `danger` treatment (alias) and is dark-mode-aware",
+        "`AlertDialog`'s destructive confirmation button is styled by the `destructive` variant alone and carries no `bg-red-600 text-white hover:bg-red-700` (or similar) className override",
+        "`FieldError` text color is backed by the `danger`/`destructive` token and no longer hardcodes `text-red-700`",
+        "Each semantic `Badge` and `Button` variant resolves to dark-theme token values when rendered in dark theme (no light-only combination)",
+        "Unit tests assert the new variant class sets reference the semantic tokens and that `destructive` aliases `danger`",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` are green"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "`app/styles/index.css` warning-hue normalization plus extended `badgeVariants`/`buttonVariants` in `shared/ui/components/{badge,button}.tsx`, de-overridden `AlertDialog`, token-backed `FieldError`, and passing primitive unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D3 + D5. Foundational: every later task consumes these variants and the consistent token families. Soft-tinted variants (not solid) match the established `destructive`/`secondary` aesthetic for a dense operational UI; do not introduce solid `bg-success text-success-foreground` variants."
+    },
+    {
+      "id": "T-002",
+      "title": "Shared status-presentation layer with full family reservation + contrast spec + token fixture guard",
+      "spec": "specs/status-presentation/spec.md#single-shared-mapping-from-domain-state-to-semantic-token-treatment, specs/status-presentation/spec.md#status-colors-are-reserved-strictly-for-state-meaning, specs/status-presentation/spec.md#dot-pill-and-marker-treatments-stay-coherent-within-a-state, specs/status-surface-consistency/spec.md#status-contrast-is-asserted-against-the-rendered-treatment",
+      "description": "Add `packages/web/src/shared/status-presentation/` exposing: (a) `familyFor(kind, state)` -> the single semantic-family source of truth (`success`/`warning`/`info`/`danger`/`muted`) for kinds `issue-health`, `workflow-run`, `workflow-stage`, `approval`, `runner`, `severity`, with the full reservation from design D2 (running/active/ready/busy->info; awaiting-approval/blocked->warning/danger fixed per state; interrupted/drift->warning; completed/done/idle/approved->success; failed/rejected->danger; pending/created/stopped/paused/cancelled/offline/unknown/debug->muted); (b) `TREATMENT_BY_FAMILY` -> the only place that names token utilities for status, yielding a frozen `{ container, text, border, dot }` record; (c) `statusTreatment(kind, state)` composing the two and falling back to the `muted`/unknown treatment for any unmapped state (no throw); (d) a thin `<StatusPill>` component (Badge + optional dot, optional icon via the existing `StageStatusIcons`) for the common pill shape. Co-locate a JS token fixture (`tokens.ts`) mirroring the `index.css` `success`/`warning`/`info`/`danger` `-subtle`/`-foreground`/`-border` values plus a guard unit test that parses `index.css` and fails if the fixture drifts. Add a contrast spec that computes WCAG AA (>= 4.5:1) for `statusTreatment(...)` across every covered indicator (at minimum `blocked`, `cancelled`, `approval`, `running`, `waiting`, `drift`, plus runner idle/busy/stale/offline and severity ERROR/WARN/INFO/DEBUG) in both light and dark theme, using the fixture — not jsdom oklch resolution.",
+      "acceptanceCriteria": [
+        "`shared/status-presentation/` exposes `familyFor`, `statusTreatment`, `TREATMENT_BY_FAMILY`, the `<StatusPill>` component, and the `tokens.ts` fixture as public API",
+        "`familyFor` returns the reserved family for every state listed in design D2 across all six kinds, and `success` is the only family used for the completed/done meaning",
+        "`statusTreatment` returns a frozen treatment record (`{ container, text, border, dot }`) whose every class is a semantic-token utility, and the dot class derives from the same family as the pill text/background",
+        "An unmapped state resolves to the `muted`/unknown treatment without throwing",
+        "`tokens.ts` mirrors the `index.css` values for the four families' `-subtle`/`-foreground`/`-border` tokens, and the guard unit test parses `index.css` and fails on any drift between the fixture and the stylesheet",
+        "The contrast spec asserts WCAG AA (>= 4.5:1) for `statusTreatment(...)` over every covered indicator in both light and dark theme, computing contrast from the fixture",
+        "Unit tests assert `familyFor` and `statusTreatment` results (including the dot-tracks-pill-family coherence and the unknown fallback)",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` are green"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "`packages/web/src/shared/status-presentation/` module (familyFor, TREATMENT_BY_FAMILY, statusTreatment, StatusPill, tokens.ts fixture) plus passing fixture-guard unit test and contrast spec",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D1 + D2 + D8 (contrast track + fixture guard). The thin `<StatusPill>` consumes the Badge semantic variants from T-001. Do NOT compute contrast by rendering in jsdom (oklch->rgb is flaky); use the fixture and bind it to `index.css` via the guard. Keep `StageStatusIcons` as the icon resolver — do not duplicate its logic. Unspecified-by-spec resolutions (`active`->info, `ready`->info, `pending`/`created`/`stopped`/`paused`->muted) are decided here per design D2; flag in commit message for design review."
+    },
+    {
+      "id": "T-003",
+      "title": "Collapse divergent per-widget status maps and rewire all covered surfaces onto the shared layer + cross-surface equivalence spec",
+      "spec": "specs/status-presentation/spec.md#existing-divergent-status-color-maps-are-collapsed-into-the-shared-layer, specs/status-surface-consistency/spec.md#the-same-domain-state-renders-identically-across-covered-surfaces, specs/status-surface-consistency/spec.md#dark-mode-has-no-light-only-status-combinations-on-covered-surfaces, specs/status-surface-consistency/spec.md#cross-surface-status-equivalence-is-asserted-by-spec, specs/status-surface-consistency/spec.md#existing-page-level-interactions-and-product-terms-are-preserved",
+      "description": "Remove or rewire every per-widget status-color author so it resolves through `statusTreatment(...)`: delegate `entities/issue/lib/status-badge.ts`'s `statusBadge()` to `statusTreatment('issue-health', health)` (keep `statusLabel()` unchanged); delete the per-status constants and `PRESENTATION_BY_STATUS` from `widgets/issue-workflow/ui/WorkflowRunStatusPill.tsx` (keep label/icon mapping); delete `STATUS_PILL_PAIRS` and the branch-per-indicator styling inside the `StatusPill` in `widgets/kanban-board/ui/IssueCard.tsx` and route both indicators through `statusTreatment(...)`; delete `STATUS_CONFIG` from `widgets/runner-status/ui/RunnerList.tsx` and rewire `RunnerSummary.tsx` through the same layer (eliminating the `emerald` vs `green` divergence); replace the green/yellow/red maps in `ContextHealthIndicator.tsx` and `ContextHealthBar.tsx` with `statusTreatment(...)`; route `shared/ui/StatusBar.tsx`, `shared/lib/log-levels.ts` (`LEVEL_COLORS`/`LEVEL_CHIP_COLORS`: ERROR->danger, WARN->warning, INFO->info, DEBUG->muted), `widgets/attention-hero/ui/AttentionHero.tsx`, `widgets/issue-workflow/ui/{TaskProgressPanel,ReviewReportModal,ReviewSummary}.tsx`, the failure/attention markers in `widgets/issue-event-timeline/`, and the status-bearing surfaces of `widgets/dashboard-pulse/ui/CompactSessionCard.tsx` through the layer. Add a cross-surface equivalence spec asserting that `familyFor(kind, state)` returns the same family regardless of which widget renders it (at minimum: workflow-run via `WorkflowRunStatusPill` and `StatusBar`; runner via `RunnerList` and `RunnerSummary`; issue-health via `statusBadge()` and `IssueCard`; context-health via `ContextHealthIndicator` and `ContextHealthBar`). Preserve all product terms (issue, workflow, stage, health, approval, runner, artifact, session, epic) and existing ARIA contracts (`role=\"alert\"`/`role=\"status\"`/`aria-live`) verbatim.",
+      "acceptanceCriteria": [
+        "`statusBadge()` returns a class set produced by `statusTreatment('issue-health', ...)` containing no raw `text-green-700`/`bg-amber-50`/`text-red-700`/`text-orange-700` classes; `statusLabel()` is unchanged",
+        "`WorkflowRunStatusPill` holds no per-status `bg-*`/`text-*`/`dot` presentation constants and resolves background/text/dot/icon from `statusTreatment('workflow-run', ...)`",
+        "`STATUS_PILL_PAIRS` and `STATUS_CONFIG` are deleted; `IssueCard`'s `StatusPill` and `RunnerList`/`RunnerSummary` resolve through `statusTreatment(...)`",
+        "Runner `idle` renders the `success` family on both `RunnerList` and `RunnerSummary` (no `emerald` vs `green` divergence); workflow `completed`, issue `done`, and dashboard `StatusBar` completed all render the `success` family (no `emerald`/`green`/`#22c55e` mix); context-health `green` renders consistently between `ContextHealthIndicator` and `ContextHealthBar` (no `bg-gray-400` vs `bg-green-500` divergence)",
+        "`LEVEL_COLORS`/`LEVEL_CHIP_COLORS` route ERROR/WARN/INFO/DEBUG through danger/warning/info/muted tokens; issue-event-timeline failure/attention markers route through `danger`/`warning` tokens (no raw `bg-red-500`/`bg-amber-500`)",
+        "No covered status surface (pill, badge, dot, marker, banner, toast) renders a light-only class combination in dark theme; blocking (`blocked`/`failed`) and approval (`awaiting-approval`) signals are at least as prominent in dark mode as in light",
+        "Cross-surface equivalence spec asserts `familyFor(kind, state)` is identical across the paired widgets listed above, and fails if any widget introduces a divergent hue family",
+        "All product terms and existing `role`/`aria-live` contracts on rewritten surfaces are preserved verbatim (no rename, no weakened semantics)",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` are green; the rewritten `StatusPill.contrast.test.ts` (now asserting the rendered treatment via T-002's fixture) passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Rewired status surfaces across `entities/issue/lib/status-badge.ts`, `widgets/{issue-workflow,kanban-board,runner-status,session-health,attention-hero,dashboard-pulse,issue-event-timeline}/ui/*`, `shared/ui/StatusBar.tsx`, `shared/lib/log-levels.ts`; deleted divergent maps (`STATUS_PILL_PAIRS`, `STATUS_CONFIG`, `PRESENTATION_BY_STATUS`); plus passing cross-surface equivalence spec and rewritten contrast test",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Design D4 + D8 (equivalence track). This is the largest task by surface count but is one functional module: 'every widget gets its status from the shared layer'. The contrast test (T-002's) already covers per-state WCAG AA; this task's equivalence spec covers cross-widget family drift. Keep `StageStatusIcons.tsx` unchanged (already token-backed reference). `AttentionHero` runner-down glyph keeps a solid `danger` fill for at-a-glance prominence (design risk note). Do not recolor diff added/removed lines or session-transcript line coloring (explicit non-goal)."
+    },
+    {
+      "id": "T-004",
+      "title": "Dark-mode-aware priority/risk/type/label/stage registries, free of inline hex",
+      "spec": "specs/theme-tokens/spec.md#priority-risk-and-label-color-registries-are-dark-mode-aware-and-free-of-inline-hex, specs/theme-tokens/spec.md#stage-accent-colors-are-dark-mode-aware",
+      "description": "Convert `shared/lib/label-colors.ts` registries off inline hex: route `RISK_COLORS` through the semantic families (`low`->success, `medium`->warning, `high`->danger) and `TYPE_LABEL_COLORS`/`TYPE_STRIP_COLORS` through families (`bug`->danger, `feature`->success, `enhancement`->info, `tech-debt`->muted, `performance`->warning); keep `PRIORITY_COLORS`/`PRIORITY_STRIP_COLORS`, `AREA_LABEL_COLORS`, and `URGENCY_LABEL_COLORS` as a documented light/dark-aware class-string palette (with `dark:` variants, preserving the current ordinal red/orange/yellow/green/gray hues for priority in both themes). Convert `widgets/kanban-board/model/stage-colors.ts` (`STAGE_COLORS` keyed by `IssueStatus`) to semantic families (Backlog->muted, InProgress->warning, Done->success, Cancelled->danger): drop the inline-hex `accent` consumed by inline `style`, render the accent via a token class instead, and make `labelClass`/`activeBg`/`activeBorder` the family's soft treatment. Convert `widgets/dashboard-pulse/ui/CompactSessionCard.tsx`'s local `STAGE_COLORS` (keyed by stage name build/plan/review/check/integrate) to a documented dark-aware class palette (categorical stage identity, not state — do not force onto semantic families). Replace every inline `style={{ backgroundColor: '#...' }}`/`style={{ color: '#...' }}` consumption in these covered surfaces with class-based treatment.",
+      "acceptanceCriteria": [
+        "`RISK_COLORS` renders `low`/`medium`/`high` with the success/warning/danger families respectively, using class strings (no inline hex)",
+        "`TYPE_LABEL_COLORS`/`TYPE_STRIP_COLORS` route bug/feature/enhancement/tech-debt/performance through danger/success/info/muted/warning families; strips reuse the same family foreground",
+        "`PRIORITY_COLORS`/`PRIORITY_STRIP_COLORS`, `AREA_LABEL_COLORS`, `URGENCY_LABEL_COLORS` are expressed as dark-mode-aware class strings (with `dark:` variants), preserve the current ordinal priority hues in both themes, and contain no inline hex literals (e.g. `#fee2e2`, `#ef4444`, `#22c55e`, `#dc2626`)",
+        "`STAGE_COLORS` in `widgets/kanban-board/model/stage-colors.ts` resolves Backlog/InProgress/Done/Cancelled to muted/warning/success/danger; `accent` is no longer an inline hex literal and is not consumed by an inline `style` attribute; `labelClass`/`activeBg`/`activeBorder` use token classes or the documented dark-aware palette (no raw `text-amber-700`/`bg-amber-50/60`/`text-green-700`)",
+        "`CompactSessionCard` stage-identity palette is dark-aware and hex-free (categorical identity, not forced onto semantic families)",
+        "Every priority/risk/type/label/stage chip renders legibly in dark theme (background, text, and where present strip color all resolve to dark-theme-aware values)",
+        "Unit tests assert the registry outputs are class strings (no `#` hex), risk maps to the mandated families, and priority/area/urgency outputs include dark-theme counterparts",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` are green"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Converted `shared/lib/label-colors.ts` and `widgets/kanban-board/model/stage-colors.ts`, hex-free `CompactSessionCard` stage palette, all inline `style` hex consumption removed from these surfaces, plus passing registry unit tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D6. Priority is ordinal, NOT state-meaningful — do NOT collapse it onto semantic families (p3 is not 'healthy'). Area/urgency are categorical labels, not state. Risk and type DO carry state meaning and join the families. Stage-colors (keyed by IssueStatus) IS status-bearing and routes through families; CompactSessionCard stage identity (keyed by stage name) is categorical and stays on a separate documented palette. Coordinate with T-003 where kanban board files are concerned — T-003 owns `IssueCard.tsx` (StatusPill), this task owns `model/stage-colors.ts` (column accent)."
+    },
+    {
+      "id": "T-005",
+      "title": "Standardize covered panel action buttons through Button variants",
+      "spec": "specs/semantic-primitives/spec.md#bespoke-action-button-styling-is-removed-from-covered-panels",
+      "description": "Remove bespoke color/border-color className overlays from action buttons in the covered panels so color is expressed only through `Button` variants: in `widgets/workspace/ui/WorkspacePanel.tsx` map the rebase-behind action to `variant=\"warning\"` (replacing `border-amber-300 bg-amber-50 text-amber-800`) and default/secondary actions to `variant=\"outline\"` (replacing `border-gray-300 bg-white text-gray-700`), with result banners reusing the success/danger/info families via `Badge` or token classes; apply the same mapping to `widgets/issue-workflow/ui/BranchBar.tsx` (same amber/gray overlay pattern across rebasing/behind/upstream-unknown/default states); in `widgets/issue-workflow/ui/TaskLogPanel.tsx` replace the local `slate`+`sky` action dialect with `outline`/`secondary` variants and the standard `--ring` focus ring (only the documented dark-terminal palette for the terminal body itself stays). Panels may still express layout (size, width, padding, gap) through `className` but not color or border-color.",
+      "acceptanceCriteria": [
+        "`WorkspacePanel` rebase action (both `behind` and not-`behind` states) and any secondary action select color treatment through a `Button` variant, with no bespoke `border-amber-300 bg-amber-50 text-amber-800` or `border-gray-300 bg-white text-gray-700` color className",
+        "`BranchBar` rebase action across all states (rebasing, behind, upstream-unknown, default) selects color through a `Button` variant, with no bespoke `border-amber-300`/`border-gray-300` color override",
+        "`TaskLogPanel` download button and source chips use `Button`/`Badge` variants (or the documented dark-terminal palette for the terminal body itself), with no hand-rolled `border-slate-300 bg-white text-slate-700` action styling",
+        "Disabled action buttons in these panels render the primitive's standard disabled treatment (pointer-events disabled, reduced opacity) with no per-call-site bespoke disabled class",
+        "No covered panel expresses color or border-color through `className` (layout properties like size/width/padding/gap remain allowed)",
+        "Action treatments remain legible in dark theme (no light-only combinations)",
+        "Unit/component tests assert the rewritten buttons carry only variant-driven color classes (no `border-amber-300`/`bg-amber-50`/`border-gray-300`/`bg-white`/`border-slate-300` color overlays) and that disabled state uses the primitive treatment",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` are green"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "De-overridden action buttons in `widgets/workspace/ui/WorkspacePanel.tsx`, `widgets/issue-workflow/ui/{BranchBar,TaskLogPanel}.tsx`, all color expressed through `Button` variants, plus passing component tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D7. Independent of the status-presentation layer (D1-D4) — depends only on T-001's Button variants. Sequenced last per the design migration plan (step 6) to keep the diff focused. The `warning`/`outline`/`secondary` variants cover the three action states (needs-attention, secondary, tertiary) without bespoke classes; the `slate`+`sky` dialect in TaskLogPanel is an accidental local divergence from the rest of the app."
+    }
+  ]
+}
