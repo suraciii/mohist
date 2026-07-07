@@ -64,4 +64,4 @@ coverage/
 tmp/
 temp/
 *.tmp
-packages/server/tests/Mohist.Server.Tests/TestResults/
+packages/server/tests/*/TestResults/
