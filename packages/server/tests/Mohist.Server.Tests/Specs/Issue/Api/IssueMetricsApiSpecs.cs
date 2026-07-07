@@ -4,7 +4,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
-using Mohist.Server.Infrastructure.Data.StagePopulation;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Domain;
@@ -29,6 +28,21 @@ public class IssueMetricsApiSpecs
     {
         _client = fixture.Client;
         _fixture = fixture;
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Theory]
+    [InlineData("cumulative-flow")]
+    [InlineData("cumulative-flow?range=30d")]
+    public async Task CumulativeFlowEndpoint_Removed_ReturnsNotFound(string queryString)
+    {
+        var project = await CreateProjectAsync($"cumulative-flow-removed-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/{queryString}");
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -1269,172 +1283,6 @@ public class IssueMetricsApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task CumulativeFlow_NoSnapshots_ReturnsEmptySeriesWithOmitDefaultWindow()
-    {
-        // No snapshot has landed for this project — the endpoint must
-        // still return 200 with a defined empty series, never an error
-        // and never a fabricated snapshot. The window bounds must be
-        // exactly the trailing-90-day window pinned by the server's
-        // omit-default (the prior D6 contract is preserved byte-for-byte
-        // when no `range` query parameter is supplied — see
-        // `CumulativeFlow_NoRangeQueryParameter_FallsBackTo90DayDefault`
-        // for the explicit omit-equality witness and the new
-        // range-driven assertions for non-default ranges).
-        var project = await CreateProjectAsync($"cf-empty-{Guid.NewGuid():N}");
-        var now = _fixture.TimeProvider.GetUtcNow();
-        var expectedFrom = now.UtcDateTime.Date.AddDays(-89).ToString("yyyy-MM-dd");
-        var expectedTo = now.UtcDateTime.Date.ToString("yyyy-MM-dd");
-
-        using var response = await _client.GetAsync(
-            $"/api/projects/{project.Id}/issues/metrics/cumulative-flow");
-        response.EnsureSuccessStatusCode();
-
-        var payload = await ReadDataAsync<CumulativeFlowResponse>(response);
-        Assert.Empty(payload.Snapshots);
-        Assert.Equal(expectedFrom, payload.RangeFrom);
-        Assert.Equal(expectedTo, payload.RangeTo);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CumulativeFlow_PopulatedProject_ReturnsOrderedSnapshotsWithPerStageCounts()
-    {
-        // Seed three consecutive daily snapshots with distinct per-stage
-        // counts so the test can prove (a) the endpoint reads the
-        // snapshot table directly, (b) the rows come back ordered
-        // oldest-first, and (c) every per-stage count is carried on
-        // each snapshot.
-        var project = await CreateProjectAsync($"cf-pop-{Guid.NewGuid():N}");
-        var now = _fixture.TimeProvider.GetUtcNow();
-        var day0 = now.UtcDateTime.Date.AddDays(-2);
-        var day1 = now.UtcDateTime.Date.AddDays(-1);
-        var day2 = now.UtcDateTime.Date;
-        var day0String = day0.ToString("yyyy-MM-dd");
-        var day1String = day1.ToString("yyyy-MM-dd");
-        var day2String = day2.ToString("yyyy-MM-dd");
-
-        await SeedStagePopulationSnapshotAsync(project.Id, day0String,
-            backlog: 5, plan: 1, build: 2, check: 0, integrate: 0, done: 3);
-        await SeedStagePopulationSnapshotAsync(project.Id, day1String,
-            backlog: 4, plan: 2, build: 1, check: 1, integrate: 0, done: 4);
-        await SeedStagePopulationSnapshotAsync(project.Id, day2String,
-            backlog: 6, plan: 1, build: 3, check: 2, integrate: 1, done: 5);
-
-        using var response = await _client.GetAsync(
-            $"/api/projects/{project.Id}/issues/metrics/cumulative-flow");
-        response.EnsureSuccessStatusCode();
-
-        var payload = await ReadDataAsync<CumulativeFlowResponse>(response);
-        Assert.Equal(3, payload.Snapshots.Length);
-
-        // Ordered oldest-first; the window bounds are independent of
-        // how many snapshots actually landed.
-        Assert.Equal(day0String, payload.Snapshots[0].Day);
-        Assert.Equal(day1String, payload.Snapshots[1].Day);
-        Assert.Equal(day2String, payload.Snapshots[2].Day);
-
-        Assert.Equal((5, 1, 2, 0, 0, 3),
-            (payload.Snapshots[0].Backlog, payload.Snapshots[0].Plan,
-             payload.Snapshots[0].Build, payload.Snapshots[0].Check,
-             payload.Snapshots[0].Integrate, payload.Snapshots[0].Done));
-        Assert.Equal((4, 2, 1, 1, 0, 4),
-            (payload.Snapshots[1].Backlog, payload.Snapshots[1].Plan,
-             payload.Snapshots[1].Build, payload.Snapshots[1].Check,
-             payload.Snapshots[1].Integrate, payload.Snapshots[1].Done));
-        Assert.Equal((6, 1, 3, 2, 1, 5),
-            (payload.Snapshots[2].Backlog, payload.Snapshots[2].Plan,
-             payload.Snapshots[2].Build, payload.Snapshots[2].Check,
-             payload.Snapshots[2].Integrate, payload.Snapshots[2].Done));
-
-        // Window bounds cover the omit-default 90-day trailing window
-        // pinned by the server (the prior D6 "fixed 90-day" behavior
-        // is preserved byte-for-byte when no `range` query parameter
-        // is supplied — see `CumulativeFlow_NoRangeQueryParameter_FallsBackTo90DayDefault`
-        // for the explicit omit-equality witness).
-        Assert.Equal(day0.AddDays(-87).ToString("yyyy-MM-dd"), payload.RangeFrom);
-        Assert.Equal(day2String, payload.RangeTo);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CumulativeFlow_SnapshotsOutsideTrailingWindow_AreExcluded()
-    {
-        // A snapshot older than the omit-default 90-day window must NOT
-        // appear in the series; only the in-window rows come back.
-        // This proves the omit path keeps the prior D6 "fixed 90-day"
-        // behavior byte-for-byte when no `range` query parameter is
-        // supplied. Range-driven behavior is asserted separately by
-        // `CumulativeFlow_RangeDrivesWindow_30dReturns30DaySeries` and
-        // `CumulativeFlow_RangeDrivesWindow_7dReturns7DaySeries`.
-        var project = await CreateProjectAsync($"cf-window-{Guid.NewGuid():N}");
-        var now = _fixture.TimeProvider.GetUtcNow();
-        var today = now.UtcDateTime.Date;
-        var insideDay = today.AddDays(-30).ToString("yyyy-MM-dd");
-        var edgeDay = today.AddDays(-89).ToString("yyyy-MM-dd");
-        var outsideDay = today.AddDays(-120).ToString("yyyy-MM-dd");
-        var farOutsideDay = today.AddDays(-365).ToString("yyyy-MM-dd");
-
-        await SeedStagePopulationSnapshotAsync(project.Id, insideDay,
-            backlog: 1, plan: 0, build: 0, check: 0, integrate: 0, done: 0);
-        await SeedStagePopulationSnapshotAsync(project.Id, edgeDay,
-            backlog: 2, plan: 0, build: 0, check: 0, integrate: 0, done: 0);
-        await SeedStagePopulationSnapshotAsync(project.Id, outsideDay,
-            backlog: 99, plan: 0, build: 0, check: 0, integrate: 0, done: 0);
-        await SeedStagePopulationSnapshotAsync(project.Id, farOutsideDay,
-            backlog: 99, plan: 0, build: 0, check: 0, integrate: 0, done: 0);
-
-        using var response = await _client.GetAsync(
-            $"/api/projects/{project.Id}/issues/metrics/cumulative-flow");
-        response.EnsureSuccessStatusCode();
-
-        var payload = await ReadDataAsync<CumulativeFlowResponse>(response);
-        var days = payload.Snapshots.Select(s => s.Day).ToArray();
-        Assert.Equal(2, days.Length);
-        Assert.Contains(insideDay, days);
-        Assert.Contains(edgeDay, days);
-        Assert.DoesNotContain(outsideDay, days);
-        Assert.DoesNotContain(farOutsideDay, days);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CumulativeFlow_UnknownProject_ReturnsNotFound()
-    {
-        // The 404 is produced by ProjectResolutionEndpointFilter
-        // before the handler runs — the response body is the
-        // filter's envelope, not the cumulative-flow payload.
-        using var response = await _client.GetAsync(
-            $"/api/projects/proj-cf-unknown-{Guid.NewGuid():N}/issues/metrics/cumulative-flow");
-
-        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CumulativeFlow_PreservesOtherMetricsEndpoints_StageDurationStillAvailable()
-    {
-        // The cumulative-flow read is strictly additive — adding it
-        // must not displace any existing project metrics endpoint.
-        // Pick the stage-duration endpoint as the witness since it
-        // shares the same route group prefix.
-        var project = await CreateProjectAsync($"cf-additive-{Guid.NewGuid():N}");
-
-        using var stageDuration = await _client.GetAsync(
-            $"/api/projects/{project.Id}/issues/metrics/stage-duration");
-        Assert.Equal(System.Net.HttpStatusCode.OK, stageDuration.StatusCode);
-
-        using var cumulativeFlow = await _client.GetAsync(
-            $"/api/projects/{project.Id}/issues/metrics/cumulative-flow");
-        Assert.Equal(System.Net.HttpStatusCode.OK, cumulativeFlow.StatusCode);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
     public async Task RangeQuery_OmittedOnCompletionDayEndpoint_ReproducesThirtyDayWindow()
     {
         // Omit-equality: omitting `range` reproduces the prior fixed
@@ -1525,7 +1373,6 @@ public class IssueMetricsApiSpecs
     [InlineData("stage-duration?range=bad")]
     [InlineData("quality?range=bad")]
     [InlineData("approval-wait?range=bad")]
-    [InlineData("cumulative-flow?range=bad")]
     public async Task RangeQuery_UnknownValue_ReturnsBadRequest(string queryString)
     {
         // Unknown range values are rejected with 400 by every endpoint
@@ -1725,96 +1572,6 @@ public class IssueMetricsApiSpecs
         var trendTo = DateTimeOffset.Parse(payload.Trend.To);
         Assert.Equal(windowFrom, trendFrom);
         Assert.Equal(windowTo, trendTo);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CumulativeFlow_NoRangeQueryParameter_FallsBackTo90DayDefault()
-    {
-        // Explicit omit-equality witness for the CFD: when no `range`
-        // query parameter is supplied, the window is exactly the
-        // trailing 90 days pinned by the omit-default (reproduces
-        // today's fixed 90-day window byte-for-byte).
-        var project = await CreateProjectAsync($"cf-omit-{Guid.NewGuid():N}");
-        var now = _fixture.TimeProvider.GetUtcNow();
-        var expectedFrom = now.UtcDateTime.Date.AddDays(-89).ToString("yyyy-MM-dd");
-        var expectedTo = now.UtcDateTime.Date.ToString("yyyy-MM-dd");
-
-        using var response = await _client.GetAsync(
-            $"/api/projects/{project.Id}/issues/metrics/cumulative-flow");
-        response.EnsureSuccessStatusCode();
-        var payload = await ReadDataAsync<CumulativeFlowResponse>(response);
-        Assert.Equal(expectedFrom, payload.RangeFrom);
-        Assert.Equal(expectedTo, payload.RangeTo);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CumulativeFlow_RangeDrivesWindow_30dReturns30DaySeries()
-    {
-        // Range-driven CFD: `range=30d` returns a 30-day trailing
-        // window, formally superseding the prior D6 "fixed, not
-        // user-configurable" contract.
-        var project = await CreateProjectAsync($"cf-30d-{Guid.NewGuid():N}");
-        var now = _fixture.TimeProvider.GetUtcNow();
-        var expectedFrom = now.UtcDateTime.Date.AddDays(-29).ToString("yyyy-MM-dd");
-        var expectedTo = now.UtcDateTime.Date.ToString("yyyy-MM-dd");
-
-        using var response = await _client.GetAsync(
-            $"/api/projects/{project.Id}/issues/metrics/cumulative-flow?range=30d");
-        response.EnsureSuccessStatusCode();
-        var payload = await ReadDataAsync<CumulativeFlowResponse>(response);
-        Assert.Equal(expectedFrom, payload.RangeFrom);
-        Assert.Equal(expectedTo, payload.RangeTo);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task CumulativeFlow_RangeDrivesWindow_7dReturns7DaySeries()
-    {
-        // Range-driven CFD: `range=7d` returns a 7-day trailing
-        // window. Sparse snapshots are acceptable; the empty/partial
-        // window is not an error.
-        var project = await CreateProjectAsync($"cf-7d-{Guid.NewGuid():N}");
-        var now = _fixture.TimeProvider.GetUtcNow();
-        var expectedFrom = now.UtcDateTime.Date.AddDays(-6).ToString("yyyy-MM-dd");
-        var expectedTo = now.UtcDateTime.Date.ToString("yyyy-MM-dd");
-
-        using var response = await _client.GetAsync(
-            $"/api/projects/{project.Id}/issues/metrics/cumulative-flow?range=7d");
-        response.EnsureSuccessStatusCode();
-        var payload = await ReadDataAsync<CumulativeFlowResponse>(response);
-        Assert.Equal(expectedFrom, payload.RangeFrom);
-        Assert.Equal(expectedTo, payload.RangeTo);
-    }
-
-    private async Task SeedStagePopulationSnapshotAsync(
-        string projectId,
-        string day,
-        int backlog,
-        int plan,
-        int build,
-        int check,
-        int integrate,
-        int done)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        db.StagePopulationSnapshots.Add(new StagePopulationSnapshotRow
-        {
-            ProjectId = projectId,
-            Day = day,
-            Backlog = backlog,
-            Plan = plan,
-            Build = build,
-            Check = check,
-            Integrate = integrate,
-            Done = done,
-        });
-        await db.SaveChangesAsync();
     }
 
     private DateTime DeliveryTimeCompletedAt() =>
@@ -2417,7 +2174,4 @@ public class IssueMetricsApiSpecs
         double? FlowEfficiencyRatio,
         StageDurationWaitBreakoutDto? WaitBreakout);
     private sealed record StageDurationMetricsWindowDto(string From, string To);
-
-    private sealed record CumulativeFlowDayDto(string Day, int Backlog, int Plan, int Build, int Check, int Integrate, int Done);
-    private sealed record CumulativeFlowResponse(CumulativeFlowDayDto[] Snapshots, string RangeFrom, string RangeTo);
 }

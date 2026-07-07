@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -10,9 +11,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(MohistDbContext))]
-    partial class MohistDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260706164309_DropStagePopulationSnapshotsTable")]
+    partial class DropStagePopulationSnapshotsTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -50,73 +53,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("ProjectId", "Status");
 
                     b.ToTable("Agents", (string)null);
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Agent.AgentSubscriptionRow", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AgentId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FilterSource")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FilterSubject")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FilterType")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("Priority")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ResponsePrompt")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId")
-                        .HasDatabaseName("IX_AgentSubscriptions_ProjectId");
-
-                    b.HasIndex("AgentId", "Name")
-                        .IsUnique()
-                        .HasDatabaseName("UX_AgentSubscriptions_AgentId_Name");
-
-                    b.HasIndex("ProjectId", "AgentId")
-                        .HasDatabaseName("IX_AgentSubscriptions_ProjectId_AgentId");
-
-                    b.ToTable("AgentSubscriptions", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicActiveIssueRow", b =>
@@ -992,16 +928,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/stage\"')", true);
 
-                    b.Property<string>("LabelTriggerEventId")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/trigger/event-id\"')", true);
-
-                    b.Property<string>("LabelTriggerSubscriptionId")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/trigger/subscription-id\"')", true);
-
                     b.Property<string>("LabelWorkId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
@@ -1471,11 +1397,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", true);
 
-                    b.Property<DateTime?>("ReadySince")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.readySince'), json_extract(State, '$.ReadySince'))", false);
-
                     b.Property<string>("State")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1493,9 +1414,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("Status", "AssignedRunnerId")
                         .HasDatabaseName("IX_WorkflowRuns_Status");
-
-                    b.HasIndex("Status", "AssignedRunnerId", "ReadySince")
-                        .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");
 
                     b.HasIndex("MetadataProjectId", "AssignedRunnerId", "CreatedAt");
 

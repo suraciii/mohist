@@ -92,11 +92,6 @@ public static class MohistServiceRegistration
         services.AddHostedService<EpicReconciliationService>();
         services.TryAddSingleton<IProcessStartTimeProvider, ProcessStartTimeProvider>();
         services.AddHostedService<SystemUpdateRecoveryService>();
-        services.AddOptions<StagePopulationSnapshotOptions>()
-            .Bind(configuration.GetSection(StagePopulationSnapshotOptions.SectionName))
-            .Validate(options => options.SnapshotPeriod > TimeSpan.Zero,
-                "Stage population snapshot period must be positive.");
-        services.AddHostedService<StagePopulationSnapshotService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
