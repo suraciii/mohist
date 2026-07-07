@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
@@ -75,6 +76,20 @@ public class MohistDbContext : DbContext
     {
     }
 
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        // issue-360 T-001 (pre-T-004): the three event tables gained a
+        // nullable DispatchedAt column + partial undelivered index ahead
+        // of the migration. T-004 materializes them on disk. Until then,
+        // suppress the pending-changes warning so every test fixture and
+        // the production host can migrate with the older snapshot. With
+        // T-004 landed the model matches the snapshot and the Ignore is a
+        // no-op.
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(
+            RelationalEventId.PendingModelChangesWarning));
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<ProjectRow>(entity =>
@@ -121,7 +136,11 @@ public class MohistDbContext : DbContext
                     raw => raw);
             entity.Property(e => e.Time)
                 .IsRequired();
+            entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(WorkflowRunEventRow.Type), nameof(WorkflowRunEventRow.Source), nameof(WorkflowRunEventRow.Id));
+            entity.HasIndex(e => new { e.Source, e.Id })
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_WorkflowRunEvents_Undelivered");
         });
 
         modelBuilder.Entity<AgentSessionRow>(entity =>
@@ -389,7 +408,11 @@ public class MohistDbContext : DbContext
                     raw => raw);
             entity.Property(e => e.Time)
                 .IsRequired();
+            entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(IssueEventRow.Type), nameof(IssueEventRow.Source), nameof(IssueEventRow.Id));
+            entity.HasIndex(e => new { e.Source, e.Id })
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_IssueEvents_Undelivered");
         });
 
         modelBuilder.Entity<EpicEventRow>(entity =>
@@ -427,7 +450,11 @@ public class MohistDbContext : DbContext
                     raw => raw);
             entity.Property(e => e.Time)
                 .IsRequired();
+            entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(EpicEventRow.Type), nameof(EpicEventRow.Source), nameof(EpicEventRow.Id));
+            entity.HasIndex(e => new { e.Source, e.Id })
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_EpicEvents_Undelivered");
         });
 
         modelBuilder.Entity<WorkflowRunRow>(entity =>

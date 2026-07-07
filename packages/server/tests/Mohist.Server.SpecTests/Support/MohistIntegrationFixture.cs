@@ -268,6 +268,13 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         // CountRunningAssignedToAsync) have the column and index they
         // expect. Idempotent — safe to call before/after Migrate().
         GrainTestConfig.ApplyWorkflowRunsStatusSchemaFix(db);
+
+        // issue-360 T-001 (pre-T-004): DispatchedAt column + partial
+        // undelivered indexes are model-only until T-004 scaffolds the
+        // migration. Apply the test-only DDL so fixtures using Migrate()
+        // (i.e. this one — Program.cs already Migrate()d on host startup)
+        // still get a working column / index. Idempotent.
+        GrainTestConfig.ApplyEventDeliverySchemaFix(db);
     }
 
     private static string CreateWebRoot()

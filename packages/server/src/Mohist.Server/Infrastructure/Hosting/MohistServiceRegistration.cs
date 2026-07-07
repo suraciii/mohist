@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Events.Hosting;
 using Mohist.Server.Events.Hub;
@@ -68,7 +69,18 @@ public static class MohistServiceRegistration
         services.AddMohistOpenTelemetry(configuration);
 
         services.AddDbContextFactory<MohistDbContext>(options =>
-            options.UseSqlite(connectionString));
+            options.UseSqlite(connectionString)
+                // issue-360 T-001 (pre-T-004): the three event tables
+                // gained a nullable DispatchedAt column + partial
+                // undelivered index ahead of the migration. T-004
+                // (AddEventDeliveryProgressAndDeadLetters) is the
+                // migration that materializes them on disk. Suppress the
+                // pending-changes warning here so a T-001-only build that
+                // pre-dates T-004 still migrates cleanly. With T-004
+                // landed, the model matches the snapshot and the warning
+                // is never generated, making this Ignore a no-op.
+                .ConfigureWarnings(w => w.Ignore(
+                    RelationalEventId.PendingModelChangesWarning)));
 
         services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>, IssueStore>();
         services.AddScoped<IStateStore<Mohist.Server.Agent.Domain.Agent>, AgentStore>();
