@@ -6,26 +6,26 @@ public static partial class WorkflowRunExtensions
 {
     extension(WorkflowRun run)
     {
-        public IReadOnlyList<WorkflowEvent> ProcessCheckResults(List<CheckResultAction> actions, DateTimeOffset now)
+        public IReadOnlyList<WorkflowEvent> ProcessCheckResults(IReadOnlyList<CheckResult> results, DateTimeOffset now)
         {
-            if (actions.Count == 0) return [];
+            if (results.Count == 0) return [];
 
             var current = run.CurrentStage();
             var events = new List<WorkflowEvent>();
             CheckFailed? firstFailure = null;
 
-            foreach (var a in actions)
+            foreach (var result in results)
             {
-                switch (a.Action)
+                switch (result.Status)
                 {
-                    case "pass":
-                        events.Add(run.ApplyPassedCheck(current, a.Result, now));
+                    case CheckResultStatus.Passed:
+                        events.Add(run.ApplyPassedCheck(current, result, now));
                         break;
-                    case "pending":
-                        events.Add(run.ApplyPendingCheck(current, a.Result));
+                    case CheckResultStatus.Pending:
+                        events.Add(run.ApplyPendingCheck(current, result));
                         break;
-                    case "fail":
-                        var failed = run.ApplyFailedCheck(current, a.Result, now);
+                    case CheckResultStatus.Failed:
+                        var failed = run.ApplyFailedCheck(current, result, now);
                         events.Add(failed);
                         firstFailure ??= failed;
                         break;
@@ -41,6 +41,19 @@ public static partial class WorkflowRunExtensions
 
             events.AddRange(run.Advance(now));
             return events;
+        }
+
+        public IReadOnlyList<WorkflowEvent> FailRunningChecks(string message, DateTimeOffset now)
+        {
+            var current = run.CurrentStage();
+            if (string.IsNullOrWhiteSpace(current.ChecksWorkId)) return [];
+
+            var results = current.Checks
+                .Where(c => c.Status == StageCheckStatus.Running)
+                .Select(c => new CheckResult(c.Name, CheckResultStatus.Failed, message))
+                .ToList();
+
+            return run.ProcessCheckResults(results, now);
         }
 
         public IReadOnlyList<WorkflowEvent> PassCheck(CheckResult result, DateTimeOffset now)

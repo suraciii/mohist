@@ -43,7 +43,7 @@ public static class WorkflowStatusMapper
 
         var pending = BuildPendingWork(run);
 
-        var effectiveFailure = run.Failure ?? CurrentStageFailure(run);
+        var effectiveFailure = run.EffectiveFailure();
         var failure = effectiveFailure is not null
             ? new FailureStatusView(
                 effectiveFailure.Reason.ToString(),
@@ -150,25 +150,16 @@ public static class WorkflowStatusMapper
         var failure = failureOverride ?? run.Failure;
         if (run.Status == WorkflowRunStatus.Failed && failure is not null)
         {
-            var taskId = failure.TaskId;
-            if (failure.Reason is FailureReason.TaskFailed)
+            var retry = run.RetryTarget(failure);
+            if (retry is not null)
             {
-                if (taskId is null && failure.Stage is not null)
-                {
-                    var failedStage = run.Stages.FirstOrDefault(s => s.Id == failure.Stage);
-                    taskId = failedStage?.Tasks.LastOrDefault(t => t.Status == TaskRunStatus.Failed)?.Id;
-                }
+                var title = retry.Reason is FailureReason.TaskFailed
+                    ? "Retry failed task"
+                    : "Retry failed check";
+                actions.Add(new AvailableActionView("retry", title, retry.Target));
+            }
 
-                if (taskId is not null)
-                {
-                    actions.Add(new AvailableActionView("retry", "Retry failed task", taskId));
-                }
-            }
-            else if (failure.Reason is FailureReason.CheckFailed && failure.CheckName is not null)
-            {
-                actions.Add(new AvailableActionView("retry", "Retry failed check", failure.CheckName));
-            }
-            else if (failure.Reason is FailureReason.ContextExhaustion)
+            if (failure.Reason is FailureReason.ContextExhaustion)
             {
                 actions.Add(new AvailableActionView("compact", "Compact session", failure.Stage));
                 actions.Add(new AvailableActionView("reset", "Reset session", failure.Stage));
@@ -187,21 +178,9 @@ public static class WorkflowStatusMapper
 
     public static PendingWorkView? BuildPendingWork(WorkflowRun run)
     {
-        if (run.CurrentStageId is null) return null;
-        if (run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running)) return null;
-        var stage = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
-        if (stage is null) return null;
-
-        var pendingTask = stage.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed));
-        if (pendingTask is not null)
-            return new PendingWorkView(pendingTask.Id, "task", stage.Id, pendingTask.Title, null);
-
-        if (stage.Checks.Count > 0 && stage.Checks.Any(c => c.Status != StageCheckStatus.Passed))
-            return new PendingWorkView("checks", "checks", stage.Id, "Checks", null);
-
-        return null;
+        var pending = run.CurrentPendingWork();
+        return pending is null
+            ? null
+            : new PendingWorkView(pending.Id, pending.WorkType, pending.Stage, pending.Title, null);
     }
-
-    private static FailureDetails? CurrentStageFailure(WorkflowRun run)
-        => run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId)?.Failure;
 }

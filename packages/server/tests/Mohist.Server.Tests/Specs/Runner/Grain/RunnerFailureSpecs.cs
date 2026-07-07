@@ -15,15 +15,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task RunnerUnregistersWithInFlightWork_SynthesizesRunnerLostFailure_ViaReportChannel()
+    public async Task RunnerUnregistersWithInFlightWork_FailsActiveWorkflowWork()
     {
-        // Regression for T-004 (design D5): when the runner unregisters with an
-        // outstanding workflow work item, RunnerGrain must drain the
-        // outstanding-work set and synthesize a `failed` result through the
-        // normal ReportWorkflowResultAsync channel. WorkflowGrain then sees
-        // an ordinary failed task with Detail="runner-lost" — exactly what a
-        // runner process would have sent if it had finished the work and
-        // reported `failed` itself.
         var workflow = await StartWorkflowAsync(SingleStage());
         var runnerId = _runnerId!;
         var (work, _) = await PollWorkAnyAsync();
@@ -47,11 +40,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RunnerUnregistersWithoutOutstandingWork_DoesNotFailAlreadyCompletedWork()
     {
-        // The report-channel closeout drains the runner-side outstanding-work
-        // set. When the runner has already reported (or never polled), the
-        // set is empty and nothing should be synthesized. This pins the
-        // "no work to fail" branch and proves the runner-loss path doesn't
-        // accidentally regress a normal completion.
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
         var (work, runnerId) = await PollWorkAnyAsync();
         await ReportAsync(runnerId, work.WorkId, "completed");
@@ -73,11 +61,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RunnerUnregisters_IsIdempotentForRunnerLoss()
     {
-        // Pin: a second UnregisterAsync on the same runner must not
-        // re-fail the task. The runner has already gone Offline after the
-        // first Unregister; the second call is a no-op for runner-loss
-        // closeout because the outstanding-work set was drained by the
-        // first call.
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
         var runnerId = _runnerId!;
         var (work, _) = await PollWorkAnyAsync();
@@ -119,12 +102,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task Reactivation_WithPersistedRunningTask_RecoversAssignmentButLeavesWorkDrainToRunnerSide()
     {
-        // After T-004, the workflow grain is purely a state ref for work
-        // results — it has no runner-lost timer, no reminder, no polling
-        // of the runner. Reactivation must therefore leave a persisted
-        // running task untouched (no automatic failure). The runner-loss
-        // closeout is the RunnerGrain's job and only fires from a live
-        // RunnerGrain during UnregisterAsync/handle-timeout.
         var workflowId = $"wf-orphan-{Guid.NewGuid():N}";
         var runnerId = $"offline-runner-{Guid.NewGuid():N}";
         var workflow = await StartWorkflowAsync(SingleStage(checks: []), workflowId);
@@ -147,11 +124,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var reactivatedWorkflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         Assert.Equal("Running", await reactivatedWorkflow.GetRunStatusAsync());
 
-        // After reactivation, the task remains Running — WorkflowGrain does
-        // not auto-fail because it has no timer/reminder. Runner-loss
-        // detection (the runner's responsibility) is intentionally not
-        // exercised here because the runner grain is offline and the
-        // notification path was deleted in T-004.
         run = await LoadRunAsync(workflowId);
         Assert.Equal(TaskRunStatus.Running, run.Stages.Single().Tasks.Single().Status);
     }
@@ -164,9 +136,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var runnerId = $"repair-runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        // A fresh grain is Offline with null _info, mirroring the state after the
-        // silo collects and reactivates it. A heartbeat carrying the full runner
-        // state must rebuild the runner info.
         await runner.HeartbeatRepairAsync(new RunnerInfo(
             runnerId,
             ["spec/*"],
@@ -200,18 +169,5 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var run = await LoadRunAsync(_workflowId!);
         Assert.Equal(TaskRunStatus.Failed, run.Stages.Single().Tasks.Single().Status);
         Assert.Equal("test-stop", run.Failure?.Message);
-    }
-
-    private async Task AdvanceTimeKeepingRunnerOnlineAsync(IRunnerGrain runner, TimeSpan duration)
-    {
-        var remaining = duration;
-        var step = TimeSpan.FromSeconds(30);
-        while (remaining > TimeSpan.Zero)
-        {
-            var next = remaining < step ? remaining : step;
-            _fixture.TimeProvider.Advance(next);
-            await runner.HeartbeatAsync();
-            remaining -= next;
-        }
     }
 }

@@ -25,7 +25,7 @@ namespace Mohist.Server.Runner.Grains;
 ///   <item><description>presence: lastSeen — poll IS the heartbeat (online/offline).</description></item>
 ///   <item><description>slots: capacity configuration (control-plane owned).</description></item>
 ///   <item><description>agent-job push dispatch + ledger (agent-jobs have no run to re-render from; they stay push-based).</description></item>
-///   <item><description>closeout: on presence loss, synthesize FAILED for the runner's outstanding agent-job works AND any workflow Running works (queried from the store), all via the normal report channel.</description></item>
+///   <item><description>closeout: on presence loss, fail active workflow work and the runner's outstanding agent-job works.</description></item>
 /// </list>
 /// No work-completion wall clock — work liveness is the runner process's
 /// poll report; the only server-side timer is presence expiry.
@@ -450,36 +450,13 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             try
             {
-                var run = await _workflowRuns.LoadAsync(workflowRunId);
-                if (run is null) continue;
-                var stage = run.CurrentStage();
-                var task = stage.RunningTask;
                 var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
-
-                if (task is not null)
-                {
-                    var workId = task.WorkId ?? task.Id;
-                    var report = new TaskReport(workId, TaskReportStatus.Failed, Output: null, Artifacts: null, Detail: "runner-lost", AddTasks: null);
-                    await workflow.ReceiveTaskReportAsync(workerId, workId, report);
-                    continue;
-                }
-                if (!string.IsNullOrWhiteSpace(stage.ChecksWorkId))
-                {
-                    var failedChecks = stage.Checks
-                        .Where(c => c.Status == StageCheckStatus.Running)
-                        .Select(c => new CheckResult(c.Name, "failed", "runner-lost"))
-                        .ToList();
-                    if (failedChecks.Count > 0)
-                    {
-                        var checksReport = new CheckReport(stage.Id, failedChecks);
-                        await workflow.ReceiveCheckReportAsync(workerId, stage.ChecksWorkId, checksReport);
-                    }
-                }
+                await workflow.FailActiveWorkAsync(workerId, "runner-lost");
             }
             catch (Exception ex)
             {
                 _log.LogWarning(ex,
-                    "Runner {RunnerId} failed to synthesize runner-lost for workflow {WorkflowId}",
+                    "Runner {RunnerId} failed to close active workflow work for workflow {WorkflowId}",
                     RunnerId, workflowRunId);
             }
         }

@@ -23,6 +23,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId);
     Task<WorkItem?> ClaimNextAsync(string workerId);
+    Task<ReportAck> FailActiveWorkAsync(string workerId, string message);
     Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report);
     Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);
 

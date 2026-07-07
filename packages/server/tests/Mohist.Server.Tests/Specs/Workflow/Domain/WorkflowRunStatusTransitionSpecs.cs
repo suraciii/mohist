@@ -359,7 +359,7 @@ public class WorkflowRunStatusTransitionSpecs
         run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
         run.StartTask("w-compile", WorkerId, DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
-        run.PassCheck(new CheckResult("verify", "pass"), DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("verify", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
         // Build has advanced; integrate is now current.
         Assert.Equal("integrate", run.CurrentStageId);
         run.InitializeStage([new("merge", "Merge", "spec/t")], [], DateTimeOffset.UnixEpoch);
@@ -376,10 +376,10 @@ public class WorkflowRunStatusTransitionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
-    [InlineData("pass")]
-    [InlineData("fail")]
-    [InlineData("pending")]
-    public void CheckReport_ClearsCurrentStageChecksWorkId(string checkStatus)
+    [InlineData(CheckResultStatus.Passed)]
+    [InlineData(CheckResultStatus.Failed)]
+    [InlineData(CheckResultStatus.Pending)]
+    public void CheckReport_ClearsCurrentStageChecksWorkId(CheckResultStatus checkStatus)
     {
         var run = BuildReadyRun(
             [new("compile", "Compile", "spec/task")],
@@ -391,13 +391,13 @@ public class WorkflowRunStatusTransitionSpecs
         var result = new CheckResult("build-ok", checkStatus);
         switch (checkStatus)
         {
-            case "pass":
+            case CheckResultStatus.Passed:
                 run.PassCheck(result, DateTimeOffset.UnixEpoch);
                 break;
-            case "fail":
+            case CheckResultStatus.Failed:
                 run.FailCheck(result, DateTimeOffset.UnixEpoch);
                 break;
-            case "pending":
+            case CheckResultStatus.Pending:
                 run.ResetCheck(result, DateTimeOffset.UnixEpoch);
                 break;
         }
@@ -487,7 +487,7 @@ public class WorkflowRunStatusTransitionSpecs
         run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
         run.StartTask("work-1", WorkerId, DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
-        run.PassCheck(new CheckResult("plan-ok", "pass"), DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
         return run;
     }

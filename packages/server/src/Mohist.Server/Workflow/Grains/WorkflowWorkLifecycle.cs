@@ -79,25 +79,7 @@ internal sealed class WorkflowWorkLifecycle
     public Task<IReadOnlyList<WorkflowEvent>> ApplyCheckReportAsync(WorkflowRun run, CheckReport report)
     {
         var now = _owner.Now();
-        var actions = new List<CheckResultAction>(report.Results.Count);
-
-        foreach (var cr in report.Results)
-        {
-            if (cr.Status == "pass")
-            {
-                actions.Add(new(cr, "pass"));
-            }
-            else if (cr.Status == "pending")
-            {
-                actions.Add(new(cr, "pending"));
-            }
-            else
-            {
-                actions.Add(new(cr, "fail"));
-            }
-        }
-
-        return Task.FromResult<IReadOnlyList<WorkflowEvent>>(run.ProcessCheckResults(actions, now));
+        return Task.FromResult<IReadOnlyList<WorkflowEvent>>(run.ProcessCheckResults(report.Results, now));
     }
 
     public async Task AbandonRunningWorkAsync(WorkflowRun run, string reason)

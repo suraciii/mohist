@@ -6,8 +6,42 @@ namespace Mohist.Server.Workflow.Domain.Run;
 
 public static partial class WorkflowRunExtensions
 {
+    public sealed record WorkflowRetryTarget(FailureReason Reason, string Target);
+
     extension(WorkflowRun run)
     {
+        public FailureDetails? EffectiveFailure()
+        {
+            if (run.Failure is not null) return run.Failure;
+            if (run.CurrentStageId is null) return null;
+            return run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId)?.Failure;
+        }
+
+        public WorkflowRetryTarget? RetryTarget(FailureDetails? failureOverride = null)
+        {
+            var failure = failureOverride ?? run.EffectiveFailure();
+            if (run.Status != WorkflowRunStatus.Failed || failure is null) return null;
+
+            if (failure.Reason is FailureReason.TaskFailed)
+            {
+                var taskId = failure.TaskId;
+                if (taskId is null && failure.Stage is not null)
+                {
+                    var failedStage = run.Stages.FirstOrDefault(s => s.Id == failure.Stage);
+                    taskId = failedStage?.Tasks.LastOrDefault(t => t.Status == TaskRunStatus.Failed)?.Id;
+                }
+
+                return taskId is not null
+                    ? new WorkflowRetryTarget(FailureReason.TaskFailed, taskId)
+                    : null;
+            }
+
+            if (failure.Reason is FailureReason.CheckFailed && failure.CheckName is not null)
+                return new WorkflowRetryTarget(FailureReason.CheckFailed, failure.CheckName);
+
+            return null;
+        }
+
         /// <summary>
         /// Non-mutating evaluation: returns true when the current stage is
         /// failed and represents a retryable failure that <see cref="Retry"/>
