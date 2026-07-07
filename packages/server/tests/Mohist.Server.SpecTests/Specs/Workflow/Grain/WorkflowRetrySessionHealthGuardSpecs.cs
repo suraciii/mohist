@@ -27,7 +27,7 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 ///   <item>End-to-end compact-then-retry path: after the user compacts the session, the retry guard sees fresh usage and proceeds.</item>
 /// </list>
 /// </summary>
-[Collection("MohistIntegration")]
+[Collection("IntegrationWorkflow")]
 public class WorkflowRetrySessionHealthGuardSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

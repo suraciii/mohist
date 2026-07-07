@@ -17,6 +17,8 @@ using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SystemInfo;
+using Orleans.Configuration;
+using Orleans.TestingHost;
 using Xunit;
 using EnvironmentAbstractions.TestHelpers;
 
@@ -29,6 +31,10 @@ public class MohistIntegrationFixture : IAsyncLifetime
     private string? _runnerRoot;
     private string? _systemUpdateStatePath;
     private string? _logsPath;
+    // Allocates distinct silo/gateway ports per fixture so multiple integration
+    // collections can run in parallel without fighting over 11111 / 30000.
+    // Pattern from dotnet/orleans test/Orleans.Runtime.Tests/LocalhostSiloTests.cs.
+    private TestClusterPortAllocator? _portAllocator;
 
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
@@ -52,7 +58,10 @@ public class MohistIntegrationFixture : IAsyncLifetime
         _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
         _logsPath = Path.Combine(Path.GetTempPath(), $"mohist-logs-{Guid.NewGuid():N}");
 
-        _factory = new MohistWebApplicationFactory(ConnectionString, _runnerRoot, _systemUpdateStatePath, _logsPath, TimeProvider);
+        _portAllocator = new TestClusterPortAllocator();
+        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
+
+        _factory = new MohistWebApplicationFactory(ConnectionString, _runnerRoot, _systemUpdateStatePath, _logsPath, TimeProvider, siloPort, gatewayPort);
         Client = _factory.CreateClient();
         await _factory.EnsureSchemaAsync();
     }
@@ -71,6 +80,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
             Directory.Delete(_factory.ArtifactStorageRoot, recursive: true);
         if (!string.IsNullOrWhiteSpace(_logsPath) && Directory.Exists(_logsPath))
             Directory.Delete(_logsPath, recursive: true);
+        _portAllocator?.Dispose();
     }
 }
 
@@ -83,6 +93,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly FakeTimeProvider _timeProvider;
     private readonly string _configPath;
     private readonly string _artifactStorageRoot;
+    private readonly int _siloPort;
+    private readonly int _gatewayPort;
     private string? _webRoot;
     // Keeper for the in-memory OtelDb override; disposed with the factory.
     private SqliteConnection? _otelKeeper;
@@ -94,13 +106,17 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         string connectionString,
         string runnerRoot,
         string systemUpdateStatePath,
-        FakeTimeProvider? timeProvider = null)
+        FakeTimeProvider? timeProvider = null,
+        int? siloPort = null,
+        int? gatewayPort = null)
         : this(
             connectionString,
             runnerRoot,
             systemUpdateStatePath,
             Path.Combine(Path.GetTempPath(), $"mohist-logs-{Guid.NewGuid():N}"),
-            timeProvider)
+            timeProvider,
+            siloPort,
+            gatewayPort)
     {
     }
 
@@ -109,7 +125,9 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         string runnerRoot,
         string systemUpdateStatePath,
         string logsPath,
-        FakeTimeProvider? timeProvider = null)
+        FakeTimeProvider? timeProvider = null,
+        int? siloPort = null,
+        int? gatewayPort = null)
     {
         _connectionString = connectionString;
         _runnerRoot = runnerRoot;
@@ -119,6 +137,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
         _artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_artifactStorageRoot);
+        _siloPort = siloPort ?? EndpointOptions.DEFAULT_SILO_PORT;
+        _gatewayPort = gatewayPort ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -131,6 +151,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
         builder.UseSetting("Mohist:ArtifactStorage:Root", _artifactStorageRoot);
         builder.UseSetting("Mohist:LogsPath", _logsPath);
+        builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.UseSetting("Mohist:Silo:GatewayPort", _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
@@ -142,6 +164,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = _artifactStorageRoot,
                 ["Mohist:LogsPath"] = _logsPath,
+                ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",
                 ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",

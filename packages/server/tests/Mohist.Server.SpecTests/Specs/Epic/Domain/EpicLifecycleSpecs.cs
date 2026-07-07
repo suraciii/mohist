@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Epic.Domain;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationWorkflow")]
 public class EpicLifecycleSpecs
 {
     private readonly HttpClient _client;

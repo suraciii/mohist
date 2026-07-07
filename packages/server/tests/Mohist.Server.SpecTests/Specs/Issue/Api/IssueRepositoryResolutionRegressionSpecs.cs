@@ -24,7 +24,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationIssue")]
 public class IssueRepositoryResolutionRegressionSpecs
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)

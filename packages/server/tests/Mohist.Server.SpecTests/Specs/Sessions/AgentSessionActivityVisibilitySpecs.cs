@@ -12,7 +12,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationSessions")]
 public class AgentSessionActivityVisibilitySpecs
 {
     private readonly MohistIntegrationFixture _fixture;

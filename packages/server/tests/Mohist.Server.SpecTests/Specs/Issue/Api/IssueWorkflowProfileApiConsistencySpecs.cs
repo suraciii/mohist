@@ -26,7 +26,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 ///     issue and the configured variables are preserved across a
 ///     profile-selection update
 /// </summary>
-[Collection("MohistIntegration")]
+[Collection("IntegrationIssue")]
 public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;

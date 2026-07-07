@@ -1481,7 +1481,7 @@ internal sealed class FakePromptFileStore : IPromptFileStore
     public string ReadAllText(string path) => _files[path];
 }
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationIssue")]
 public class MohistLocalWorkflowProfileStartWorkSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

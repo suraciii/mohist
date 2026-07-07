@@ -29,7 +29,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 ///
 /// Spec: <c>openspec/changes/issue-264/specs/http-api/spec.md</c>.
 /// </summary>
-[Collection("MohistIntegration")]
+[Collection("IntegrationIssue")]
 public class IssueArchivedDetailApiSpecs
 {
     private static readonly JsonSerializerOptions ReadJsonOptions = new()

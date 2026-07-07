@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -11,6 +12,7 @@ using Mohist.Server.Inbox;
 using Mohist.Server.Notifications;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Orleans.Configuration;
 using Orleans.Hosting;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
@@ -20,7 +22,13 @@ public static class MohistSiloRegistration
 {
     public static ISiloBuilder ConfigureMohistSilo(this ISiloBuilder silo, IConfiguration configuration)
     {
-        silo.UseLocalhostClustering();
+        // Default to the well-known localhost clustering ports, but allow tests to
+        // override them (via TestClusterPortAllocator) so multiple silos can coexist
+        // in one process without fighting over 11111 / 30000. See design/testing.md
+        // "并行与超时预算" and dotnet/orleans LocalhostSiloTests for the pattern.
+        var siloPort = configuration.GetValue<int?>("Mohist:Silo:SiloPort") ?? EndpointOptions.DEFAULT_SILO_PORT;
+        var gatewayPort = configuration.GetValue<int?>("Mohist:Silo:GatewayPort") ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
+        silo.UseLocalhostClustering(siloPort, gatewayPort);
         silo.AddActivityPropagation();
         silo.UseAdoNetReminderService(options =>
         {

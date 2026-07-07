@@ -128,7 +128,6 @@ flaky 的常见来源，逐一排除：
 - Spec 文件要能一眼看出"它在验证哪个产品能力"。读测试 = 读产品 spec。
 - 每条 spec 测一个产品切片，不要在一个文件里堆十几个不相关场景。
 - Fixture 启动成本与文件数相乘。能下沉到 unit 的，不要用 `MohistIntegrationFixture`（启动 `WebApplicationFactory` + Orleans silo + SQLite）只为断言一个纯函数。
-- 同一 fixture 的 collection `DisableParallelization = true`，意味着这些文件串行。串行集合越大，墙钟越慢。优先减少进入该集合的文件数。
 - 真实 `git init/commit` 循环（runner `executor-*.spec.ts`）每个测试 ~秒级。共享 fixture、减少 commit 次数，或换 fake git。
 
 参考预算：
@@ -139,7 +138,19 @@ flaky 的常见来源，逐一排除：
 | Spec | < 800 LOC（架构规则上限 24KB），< 500ms/测试 | < 500ms |
 | E2E（Playwright） | 单独 `npm run test:e2e`，不进默认 `npm test` | < 5s |
 
-### 5. 简洁、无冗余、读得出 spec
+并行与端口预算见下节。
+
+### 5. 并行与端口预算
+
+SpecTests 默认开 `parallelizeTestCollections`（xUnit 默认），按 collection 并行、collection 内串行。**最大并行度 = collection 数**，所以拆得越多越快——但每个并行 collection 都要起一个 silo，受端口预算约束。
+
+- **超时预算（硬约束）**：单个测试 ≤ 5s，单个 collection（一组串行类）≤ 2min。CI 用进程级超时兜底；xUnit 无原生 per-test timeout，靠拆 collection 让慢启动分摊到并行。
+- **禁止硬编码 clustering 端口**：`UseLocalhostClustering()` 默认 silo=11111 / gateway=30000。两个并行 silo 抢同一对端口 → host 构建卡死到 5min 超时（`Timed out waiting for the entry point to build the IHost`）。所有会并行的 silo fixture 必须用 `TestClusterPortAllocator` 分配随机端口，通过 `Mohist:Silo:SiloPort` / `Mohist:Silo:GatewayPort` 配置注入（`ConfigureMohistSilo` 读这两个 key，默认仍是 11111/30000，生产零影响）。
+- **官方依据**：`dotnet/orleans` `test/Orleans.Runtime.Tests/LocalhostSiloTests.cs` 用 `TestClusterPortAllocator.AllocateConsecutivePortPairs` + `UseLocalhostClustering(siloPort, gatewayPort)`。Orleans 自己的测试项目反而全局串行（`parallelizeTestCollections: false`）——因为 `TestCluster`/`InMemoryTransport` 是 `internal`，外部不可达。我们靠"随机端口 + 配置注入"绕开，能在 web 测试里拿到并行。
+- **collection 分配**：需要真实 silo 的 HTTP spec 按域分到 `IntegrationIssue` / `IntegrationApi` / `IntegrationSessions` / `IntegrationWorkflow` / `IntegrationRunner` / `IntegrationMisc` 等并行 collection（各 `ICollectionFixture<MohistIntegrationFixture>`，无 `DisableParallelization`）。操作进程全局资源的类（`RunnerRegistryKeys.Global`、`IManagementGrain.ForceActivationCollection`、跨类 `FakeTimeProvider.Advance`）留在串行 `MohistIntegration`（`DisableParallelization = true`）。
+- **同一 DI root**：`MohistIntegrationFixture` 通过 `WebApplicationFactory<Program>` 让 web 和 silo 共享一个 `IServiceCollection`，`InMemoryEventBus` 等单例天然单实例——跨 grain/web 的事件流动无需桥接。拆 collection 不破坏这一点，因为每个 collection 是独立进程内 host、独立 bus，互不干扰。
+
+### 6. 简洁、无冗余、读得出 spec
 
 - 测试体读起来就是产品规约：`Arrange minimal → Act → Assert observable outcome`。冗长的 setup 抽到 helper / fixture。
 - 同一产品能力不在两个文件里各写一遍。迁移式拆分完成后必须删旧文件，不允许新旧并存。
@@ -147,7 +158,7 @@ flaky 的常见来源，逐一排除：
 - "一次性回归"（`*RegressionSpecs` / `issue-N-regression`）只有在没有等价常规测试时保留；一旦等价覆盖存在，删掉回归文件，把"issue #N"写进常规测试的注释。
 - "一次性迁移"（`*MigrationSpecs`）带"release X 后删除"注释，到期删。
 
-### 6. 一个文件只测一个被测对象
+### 7. 一个文件只测一个被测对象
 
 轨道与放置见上节；这里只约束粒度。文件名、目录、`describe` 标题三者要一致表达"验证的是什么"，且一个文件只测一个被测对象。
 

@@ -14,6 +14,41 @@ namespace Mohist.Server.SpecTests.Support;
 [CollectionDefinition("MohistIntegration", DisableParallelization = true)]
 public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+// Parallel integration collections. Each shares one MohistIntegrationFixture
+// (one silo + one web host) whose silo/gateway ports are allocated via
+// TestClusterPortAllocator, so the collections run concurrently without
+// colliding on the well-known 11111 / 30000 ports. Within a collection the
+// classes still run serially (xUnit semantics), so max parallelism equals the
+// number of these collections. Classes that mutate process-global state
+// (RunnerRegistryKeys.Global, IManagementGrain.ForceActivationCollection,
+// cross-class FakeTimeProvider.Advance) stay in the serial MohistIntegration
+// collection above. See design/testing.md "并行与超时预算".
+
+[CollectionDefinition("IntegrationIssue")]
+public class IntegrationIssueCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("IntegrationApi")]
+public class IntegrationApiCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("IntegrationSessions")]
+public class IntegrationSessionsCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("IntegrationWorkflow")]
+public class IntegrationWorkflowCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("IntegrationRunner")]
+public class IntegrationRunnerCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("IntegrationMisc")]
+public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+// OTLP/query route specs. Each class builds its own OtlpRoutesWebApplicationFactory
+// (with TestClusterPortAllocator-assigned silo/gateway ports), so no shared
+// ICollectionFixture. Grouped in one collection so their two silos don't run
+// simultaneously against the same OtlpPort (14318) Kestrel listen option.
+[CollectionDefinition("IntegrationTelemetry")]
+public class IntegrationTelemetryCollection;
+
 [CollectionDefinition("MohistDb")]
 public class MohistDbCollection : ICollectionFixture<MohistDbFixture>;
 

@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationIssue")]
 public class IssuePatchRawPresenceMergeSpecs
 {
     private readonly HttpClient _client;

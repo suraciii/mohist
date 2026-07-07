@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Label.Api;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationMisc")]
 public class LabelCatalogApiSpecs
 {
     private readonly HttpClient _client;

@@ -19,7 +19,7 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 /// fixture (recording both <c>IEventPublisher</c> and
 /// <c>ITranscriptEventPublisher</c>).
 /// </summary>
-[Collection("MohistIntegration")]
+[Collection("IntegrationSessions")]
 public class AgentSessionContextExhaustionSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

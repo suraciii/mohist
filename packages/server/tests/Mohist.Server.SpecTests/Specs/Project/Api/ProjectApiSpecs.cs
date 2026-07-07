@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Project.Api;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationRunner")]
 public class ProjectApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
