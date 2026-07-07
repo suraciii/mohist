@@ -123,7 +123,7 @@ public class MigratedServicesRegistrationSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Theory]
     [MemberData(nameof(MigratedServices))]

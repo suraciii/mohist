@@ -27,7 +27,7 @@ public class AgentJobRoutesSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
@@ -48,7 +48,7 @@ public class AgentJobRoutesSpecs
         Assert.Contains("prompt", payload.GetProperty("error").GetString()!);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]

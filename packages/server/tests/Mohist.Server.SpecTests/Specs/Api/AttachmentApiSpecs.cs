@@ -199,7 +199,7 @@ public class AttachmentApiSpecs
         Assert.Null(row.ExpiresAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task UploadAsync_RejectsStreamThatExceedsDeclaredSizeLimit()
@@ -226,7 +226,7 @@ public class AttachmentApiSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CleanupExpiredPending_RemovesRowsAndStoredContent()
