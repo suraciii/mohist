@@ -3,12 +3,11 @@ using ArchUnitNET.Fluent;
 using ArchUnitNET.Loader;
 using ArchUnitNET.xUnit;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Tests.Support;
 using Xunit;
 using static ArchUnitNET.Fluent.ArchRuleDefinition;
 using static ArchUnitNET.Fluent.Slices.SliceRuleDefinition;
 
-namespace Mohist.Server.Tests.Architecture;
+namespace Mohist.Server.ArchTests;
 
 [Trait(Traits.Sut.Name, Traits.Sut.Architecture)]
 public class ArchitectureRules
