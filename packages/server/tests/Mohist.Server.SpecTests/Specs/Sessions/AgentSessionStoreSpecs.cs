@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+[Trait(Traits.Speed.Name, Traits.Speed.Service)]
 [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
 public class AgentSessionStoreSpecs : IAsyncLifetime
 {

@@ -13,7 +13,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
 {
     private const string MigrationId = "20260703140000_BackfillIssueLegacyArrayLabels";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_NonEmptyArrayLabels_RewrittenToEmptyObject()
@@ -34,7 +34,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         Assert.Equal("{}", await ReadLabelsRawAsync(verify, "issue_a"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_EmptyArrayLabels_RewrittenToEmptyObject()
@@ -54,7 +54,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         Assert.Equal("{}", await ReadLabelsRawAsync(verify, "issue_b"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_DictLabels_LeftUnchanged()
@@ -77,7 +77,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         Assert.Equal(stateBefore, await ReadStateAsync(verify, "issue_c"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_MixedBatch_RewritesArraysOnly_LeavesDictsAlone()
@@ -102,7 +102,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         Assert.Equal("""{"kind":"feature"}""", await ReadLabelsRawAsync(verify, "issue_dict"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_NonLabelsFields_Preserved()
@@ -132,7 +132,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         Assert.DoesNotContain("\"labels\":[\"bug\",\"design\"]", after);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_SecondRun_IsIdempotent()
@@ -156,7 +156,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         Assert.Contains("\"labels\":{}", afterSecond);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_OnEmptyIssuesTable_IsNoOp()
@@ -173,7 +173,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         Assert.Equal(0, await CountRowsAsync(verify, "Issues"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DatabaseMigrate_IncludesBackfillIssueLegacyArrayLabelsMigration()
@@ -186,7 +186,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         Assert.Contains(applied, m => m == MigrationId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RealMigrationPipeline_RewritesArrayLabelsThroughMigrationBuilder()
@@ -225,7 +225,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         Assert.Equal("""{"kind":"feature"}""", await ReadLabelsRawAsync(verify, "issue_real_dict"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void MigrationClass_DoesNotOverrideBuildTargetModel()

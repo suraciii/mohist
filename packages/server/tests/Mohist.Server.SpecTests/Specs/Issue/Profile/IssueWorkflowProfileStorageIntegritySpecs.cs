@@ -50,7 +50,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
 
     // ===================== Verification =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Verify_EmptyDataset_ReportsHealthy()
@@ -62,7 +62,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Empty(report.UnreachableIssueIds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Verify_RowsWithAgentInVars_AreReachable()
@@ -81,7 +81,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Equal("vars.agent", row.AgentPath);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Verify_RowsWithStageAgent_AreReachable()
@@ -108,7 +108,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Equal("stages.build.vars.agent", row.AgentPath);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Verify_RowWithEmptyVariables_IsReachable()
@@ -123,7 +123,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Null(row.AgentPath);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Verify_DayOneDataset_PassesWithoutMutatingRows()
@@ -161,7 +161,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Verify_CorruptVariablesJson_DoesNotThrow_AndStaysHealthy()
@@ -179,7 +179,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Null(row.AgentPath);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void InspectVariables_ReachableRow_ReportsAgentPath()
@@ -194,7 +194,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
 
     // ===================== Defensive copy =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void FoldAgentDataIntoBundle_WritesAgentAtVarsAgent()
@@ -217,7 +217,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Equal("opencode", agent.GetProperty("type").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void FoldAgentDataIntoBundle_WritesStageAgentAtStagesVarsAgent()
@@ -244,7 +244,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Equal("gpt-4o", checkDoc.RootElement.GetProperty("agent").GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void FoldAgentDataIntoBundle_PreservesExistingBundleFields()
@@ -268,7 +268,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Equal("mohist", doc.RootElement.GetProperty("mohist").GetProperty("system").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void TryValidate_RoundTrips_ForValidBundleJson()
@@ -284,7 +284,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Null(error);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Theory]
     [InlineData("")]
@@ -296,7 +296,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.NotNull(error);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DefensiveCopyVariables_WritesAgentToVarsAgent()
@@ -320,7 +320,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Equal("gpt-4o", agent.GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DefensiveCopyVariables_WritesStageAgentToStagesVarsAgent()
@@ -345,7 +345,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
             build.GetProperty("vars").GetProperty("agent").GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DefensiveCopyVariables_ValidatesBeforeCommitting()
@@ -371,7 +371,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Equal("updated", reparsed.Vars!.Value.GetProperty("agent").GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DefensiveCopyVariables_ValidationFailure_LeavesRowUntouched()
@@ -398,7 +398,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Equal(originalRow.UpdatedAt, afterRow.UpdatedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DefensiveCopyVariables_NoAgentData_ReturnsNullAndDoesNotWrite()
@@ -418,7 +418,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
         Assert.Equal(before.Variables, after.Variables);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DefensiveCopyVariables_UnknownIssue_Throws()
@@ -431,7 +431,7 @@ public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
                 stageAgentConfigs: null));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DefensiveCopyVariables_AfterCommit_VerificationReportsReachable()

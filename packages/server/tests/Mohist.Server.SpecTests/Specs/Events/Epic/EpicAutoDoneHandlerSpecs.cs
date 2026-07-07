@@ -20,7 +20,7 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 
 public class EpicAutoDoneHandlerSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_LastIssueCompletes_TransitionsEpicToDone()
@@ -44,7 +44,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:epic_1", grains.Calls[0].GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_RehomedIssue_DispatchesToNonTerminalEpic()
@@ -66,7 +66,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:epic_running", call.GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_IssueNotLinkedToAnyEpic_NoOpsAndDoesNotInvokeGrain()
@@ -87,7 +87,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("idle", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_EpicStillHasIncompleteIssues_StaysIdle()
@@ -111,7 +111,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("idle", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_PausedEpic_RemainsPausedNoAutoDone()
@@ -134,7 +134,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("on hold", stored.PauseReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_DuplicateWorkCompletedEvents_ConvergeToDoneAndNoErrors()
@@ -161,7 +161,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_DeliveredThroughInMemoryBus_TypedHandlerDispatches()
@@ -206,7 +206,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Single(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_MissingProjectIdExtension_NoOpsWithoutError()
@@ -232,7 +232,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task HandleAsync_HasSubscriptionAttributeWithExpectedType()
@@ -243,7 +243,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal(EventCatalog.ReverseDns.IssueCompleted, attr!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_HasSubscriptionAttributeOnCancelledType()
@@ -257,7 +257,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal(EventCatalog.ReverseDns.IssueCancelled, attr!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_CancelledIssue_InvokesReconcileOnOwningEpic()
@@ -283,7 +283,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:epic_1", call.GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_RehomedIssue_DispatchesToNonTerminalEpic()
@@ -305,7 +305,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("project_1:epic_running", call.GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_IssueNotLinkedToAnyEpic_NoOpsWithoutGrainCall()
@@ -323,7 +323,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_DuplicateCancelledEvents_AreIdempotent()
@@ -353,7 +353,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_TerminalEpic_StaysTerminalNoError()
@@ -381,7 +381,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_MissingProjectIdExtension_NoOpsWithoutError()
@@ -407,7 +407,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CancelledHandler_MissingIssueIdExtension_NoOpsWithoutError()
@@ -433,7 +433,7 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task BothHandlers_FireOnOutOfOrderTerminalSignals_Converge()

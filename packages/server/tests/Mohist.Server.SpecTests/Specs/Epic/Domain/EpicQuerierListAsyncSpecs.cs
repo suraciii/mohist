@@ -16,7 +16,7 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Domain;
 
 public class EpicQuerierListAsyncSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_DoesNotInvokeIssueQuerier()
@@ -36,7 +36,7 @@ public class EpicQuerierListAsyncSpecs
         Assert.True(epic.Progress.ReadyToMarkDone);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_IssuesSingleSelectRegardlessOfEpicCount()
@@ -72,7 +72,7 @@ public class EpicQuerierListAsyncSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_ProgressCountsDoneAndExcludesCancelled()
@@ -96,7 +96,7 @@ public class EpicQuerierListAsyncSpecs
         Assert.False(epic.Progress.ReadyToMarkDone);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_MixedDoneAndCancelled_ReadyToMarkDone_DeliveredCountCountsOnlyDone()
@@ -120,7 +120,7 @@ public class EpicQuerierListAsyncSpecs
         Assert.Equal(2, epic.Progress.TotalIssueCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_CancelledOnlyRemaining_ReadyToMarkDone()
@@ -143,7 +143,7 @@ public class EpicQuerierListAsyncSpecs
         Assert.Equal(2, epic.Progress.TotalIssueCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_EmptyEpic_YieldsZeroCounts()
@@ -160,7 +160,7 @@ public class EpicQuerierListAsyncSpecs
         Assert.False(epic.Progress.ReadyToMarkDone);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_AllArchivedLinkedIssues_YieldsZeroCounts()
@@ -179,7 +179,7 @@ public class EpicQuerierListAsyncSpecs
         Assert.False(epic.Progress.ReadyToMarkDone);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_NextIssue_SelectsHighestPriorityStartable()
@@ -199,7 +199,7 @@ public class EpicQuerierListAsyncSpecs
         Assert.Equal(2, epic.Progress.NextIssue!.Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_NextIssue_SerialSlotOccupiedByInProgress()
@@ -219,7 +219,7 @@ public class EpicQuerierListAsyncSpecs
         Assert.Equal("Waiting for #3 to complete", epic.Progress.NextIssueReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_UnmetPrerequisiteBlocksCanStart()
@@ -239,7 +239,7 @@ public class EpicQuerierListAsyncSpecs
         Assert.Equal(1, epic.Progress.NextIssue!.Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_DraftIssueIsNotStartable()
@@ -259,7 +259,7 @@ public class EpicQuerierListAsyncSpecs
         Assert.Equal(2, epic.Progress.NextIssue!.Number);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_BlockedInProgress_ReportedAsActive()
@@ -277,7 +277,7 @@ public class EpicQuerierListAsyncSpecs
         Assert.Empty(epic.Progress.BlockedIssues);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_OrdersByPriorityThenUpdatedAt()

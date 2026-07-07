@@ -9,7 +9,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Data;
 
 public class IssueDerivedColumnsSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DerivedColumn_TracksStateAfterUpdate()
@@ -43,7 +43,7 @@ public class IssueDerivedColumnsSpecs
         Assert.Equal("[4]", read.PrerequisiteNumbersJson);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DerivedColumn_MissingOrLegacyKeys_YieldNullSafely()

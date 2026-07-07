@@ -13,7 +13,7 @@ public class InboxSubscriptionStoreSpecs
 {
     private static readonly DateTimeOffset StartTime = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task GetAsync_NoStoredRow_ReturnsAllEnabledDefault()
@@ -29,7 +29,7 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(state.IssueCompletedEnabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task SetAsync_FirstWrite_PersistsNewRow()
@@ -53,7 +53,7 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(row.IssueCompletedEnabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task SetAsync_ThenGetAsync_ReturnsPersistedToggleStates()
@@ -76,7 +76,7 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(state.IssueCompletedEnabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task SetAsync_SecondWrite_MutatesExistingRowInPlace()
@@ -106,7 +106,7 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(row.IssueCompletedEnabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task SetAsync_SecondWrite_UpdatesUpdatedAt()
@@ -126,7 +126,7 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(secondUpdatedAt > firstUpdatedAt, "UpdatedAt should advance on second write");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task GetAsync_AfterDisablingAllKinds_ReturnsAllDisabled()
@@ -149,7 +149,7 @@ public class InboxSubscriptionStoreSpecs
         Assert.False(state.IssueCompletedEnabled);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task GetAsync_ProjectIsolation_ReturnsDefaultForOtherProject()
@@ -164,7 +164,7 @@ public class InboxSubscriptionStoreSpecs
         Assert.True(stateB.WorkflowFailedEnabled); // proj_b has no row → all-enabled
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task SetAsync_MissingProject_FailsForeignKey()

@@ -29,7 +29,7 @@ public class EpicMembershipSpecs
 {
     private const string ProjectId = "project_1";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_NewIssue_AddsEpicIssueRow()
@@ -48,7 +48,7 @@ public class EpicMembershipSpecs
         Assert.Equal(1, link.IssueNumber);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_SameEpicTwice_IsIdempotentAndDoesNotCreateDuplicate()
@@ -67,7 +67,7 @@ public class EpicMembershipSpecs
         Assert.Equal(1, count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_SameEpicAfterClose_IsIdempotentAndKeepsMembership()
@@ -90,7 +90,7 @@ public class EpicMembershipSpecs
         Assert.Equal(1, count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_IssueInTerminalEpic_CanLinkToNewNonTerminalEpic_AndKeepsTerminalMembership()
@@ -131,7 +131,7 @@ public class EpicMembershipSpecs
         Assert.Equal("epic_active", activeRow.EpicId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_IssueInTerminalEpic_CanLinkToRunningOrPausedEpic()
@@ -170,7 +170,7 @@ public class EpicMembershipSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_IssueInTerminalEpic_LinkToAnotherTerminalEpic_AlsoAllowed()
@@ -208,7 +208,7 @@ public class EpicMembershipSpecs
         Assert.Equal(new[] { "epic_done_1", "epic_done_2" }, rows.Select(r => r.EpicId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_SecondNonTerminalMembership_ThrowsDuplicate()
@@ -239,7 +239,7 @@ public class EpicMembershipSpecs
         Assert.Equal("epic_first", rows[0].EpicId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_TerminalPlusSecondNonTerminal_ThrowsDuplicate_AndKeepsTerminalRow()
@@ -277,7 +277,7 @@ public class EpicMembershipSpecs
         Assert.Equal("epic_terminal", rows[1].EpicId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ActiveMembershipSlot_PreventsTwoNonTerminalOwners_WhenPrechecksRace()
@@ -311,7 +311,7 @@ public class EpicMembershipSpecs
         await Assert.ThrowsAsync<DbUpdateException>(() => second.SaveChangesAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task UnlinkIssueAsync_RemovesOnlyThatMembership_AndLeavesOthersIntact()
@@ -343,7 +343,7 @@ public class EpicMembershipSpecs
         Assert.Equal("epic_terminal", remaining[0].EpicId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task UnlinkIssueAsync_OnMultiMemberEpic_RemovesOnlyTheSpecifiedMembership()
@@ -367,7 +367,7 @@ public class EpicMembershipSpecs
         Assert.Equal("issue_b", remaining[0].IssueId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task SetStatusAsync_Closed_PreservesEpicIssueRows()
@@ -401,7 +401,7 @@ public class EpicMembershipSpecs
         // model will surface them.
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task SetStatusAsync_Closed_ReleasesActiveMembershipSlot_ButKeepsHistoryRows()
@@ -422,7 +422,7 @@ public class EpicMembershipSpecs
             .ToListAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task SetStatusAsync_Done_PreservesEpicIssueRows()
@@ -445,7 +445,7 @@ public class EpicMembershipSpecs
         Assert.Equal(1, count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_IncludesClosedEpicWithRetainedMembers()

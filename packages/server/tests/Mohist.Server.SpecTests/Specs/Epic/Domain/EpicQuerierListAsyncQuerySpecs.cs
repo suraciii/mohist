@@ -16,7 +16,7 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Domain;
 
 public class EpicQuerierListAsyncQuerySpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_WithNoParams_SqlIsByteIdenticalToLegacyQuery()
@@ -34,7 +34,7 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Single(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_WithSearchTerm_FiltersByCaseInsensitiveTitleSubstring()
@@ -59,7 +59,7 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal(2, mixedCaseResult.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_WithSearchTerm_PassesBoundParameter_NotInterpolatedLiteral()
@@ -76,7 +76,7 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Contains("@projectId", only);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_SearchTreatsPercentAndUnderscoreAsLiteralText()
@@ -97,7 +97,7 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal("epic_underscore", underscoreResult[0].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_WithEmptyOrWhitespaceSearch_OmitsFilterClause()
@@ -121,7 +121,7 @@ public class EpicQuerierListAsyncQuerySpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_WithNullSearch_ReturnsAllEpicsRegardlessOfTitle()
@@ -137,7 +137,7 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal(2, result.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_SortPriorityAsc_OrdersP0BeforeP4()
@@ -157,7 +157,7 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal("epic_p4", result[2].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_SortUpdatedDesc_OrdersMostRecentlyUpdatedFirst()
@@ -179,7 +179,7 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal("epic_old", result[2].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_NoSortParams_YieldsLegacyPriorityAscThenUpdatedDesc()
@@ -199,7 +199,7 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal("epic_p2_old", result[2].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_SearchAndSortCompose_FiltersAndOrdersTogether()
@@ -219,7 +219,7 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal("epic_auth_old", result[1].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListAsync_UnknownSortOrDir_FallsBackToDefaultOrdering()
@@ -243,7 +243,7 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal("epic_p2", bothUnknown[1].Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public void ListAsync_SortTokensNonAlphanumeric_AreRejectedAndFallBackToDefault()
@@ -258,7 +258,7 @@ public class EpicQuerierListAsyncQuerySpecs
         Assert.Equal(EpicQuerier.DefaultOrderBy, dirOnly);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public void ListAsync_CreatedSortIsNotPartOfIssue94Contract()

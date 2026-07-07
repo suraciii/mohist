@@ -9,7 +9,7 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Domain;
 
 public class EpicIdleRenameMigrationSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Up_RenamesActiveRowsToIdle()
@@ -61,7 +61,7 @@ public class EpicIdleRenameMigrationSpecs
         Assert.Equal("idle", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Down_RestoresIdleRowsToActive()
@@ -120,7 +120,7 @@ public class EpicIdleRenameMigrationSpecs
         Assert.Equal("active", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public void Parse_LegacyActive_DefensivelyMapsToIdle()
@@ -133,7 +133,7 @@ public class EpicIdleRenameMigrationSpecs
         Assert.Equal(Mohist.Server.Epic.Domain.EpicStatus.Idle, parsed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task DatabaseMigrate_IncludesEpicIdleRenameMigration()

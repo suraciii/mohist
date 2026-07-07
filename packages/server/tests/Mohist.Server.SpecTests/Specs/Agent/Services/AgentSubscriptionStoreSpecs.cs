@@ -15,7 +15,7 @@ public class AgentSubscriptionStoreSpecs
 {
     private static readonly DateTimeOffset StartTime = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task CreateAsync_PersistsActiveSubscriptionWithProjectAgentAndTimestamps()
@@ -54,7 +54,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Equal(SubscriptionStatus.Active, row.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task CreateAsync_PriorityNull_PersistsAsNull()
@@ -69,7 +69,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Null(row.Priority);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task CreateAsync_DuplicateNameOnSameAgent_ThrowsNameConflict()
@@ -85,7 +85,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Equal("shared-name", ex.Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task CreateAsync_SameNameOnDifferentAgents_BothSucceed()
@@ -100,7 +100,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Equal(2, rows.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task GetAsync_ReturnsPersistedSubscription()
@@ -119,7 +119,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Equal("com.mohist.workflow.stage.*", loaded.Filter.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task GetAsync_MissingId_ReturnsNull()
@@ -132,7 +132,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Null(loaded);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ListByAgentAsync_ReturnsOrderedByUpdatedAtDescending()
@@ -150,7 +150,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Equal(new[] { "subs_newer", "subs_old" }, listed.Select(s => s.Id).ToArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ListByAgentAsync_FiltersOutOtherAgents()
@@ -167,7 +167,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Equal("subs_a", only.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ListByProjectAsync_ReturnsAllSubscriptionsForTheProject()
@@ -186,7 +186,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.All(listed, s => Assert.Equal("proj_a", s.ProjectId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task UpdateAsync_ChangesMutableFieldsAndAdvancesUpdatedAt()
@@ -223,7 +223,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.True(row.UpdatedAt > before, "UpdatedAt must advance on update");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task UpdateAsync_OnlyTouchesRequestedFields()
@@ -246,7 +246,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Equal("new-prompt", updated.ResponsePrompt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task UpdateAsync_PriorityReset_SetsNull()
@@ -267,7 +267,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Null(updated!.Priority);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task UpdateAsync_DuplicateName_ThrowsNameConflict()
@@ -283,7 +283,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Equal("first-name", ex.Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task UpdateAsync_MissingId_ReturnsNull()
@@ -302,7 +302,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Null(updated);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ArchiveAsync_SetsArchivedAndAdvancesUpdatedAt()
@@ -321,7 +321,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.True(archived.UpdatedAt > before);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ArchiveAsync_AlreadyArchived_IsIdempotentAndDoesNotAdvanceUpdatedAt()
@@ -342,7 +342,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Equal(snapshot, row.UpdatedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task RestoreAsync_SetsActiveAndAdvancesUpdatedAt()
@@ -362,7 +362,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.True(restored.UpdatedAt > before);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task DeleteAsync_RemovesRowAndReturnsTrue()
@@ -378,7 +378,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.Null(await ReadOptionalRowAsync(database, "subs_1"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task DeleteAsync_MissingId_ReturnsFalse()
@@ -391,7 +391,7 @@ public class AgentSubscriptionStoreSpecs
         Assert.False(removed);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task ListByAgentAsync_IncludesArchivedRowsAlongsideActive()

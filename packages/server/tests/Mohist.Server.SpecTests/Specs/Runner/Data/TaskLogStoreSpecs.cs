@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Data;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+[Trait(Traits.Speed.Name, Traits.Speed.Service)]
 [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
 public class TaskLogStoreSpecs : IAsyncLifetime
 {

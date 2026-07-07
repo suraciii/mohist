@@ -31,7 +31,7 @@ public class EpicBatchMembershipSpecs
 {
     private const string ProjectId = "project_1";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_NewIssues_AllLinked()
@@ -61,7 +61,7 @@ public class EpicBatchMembershipSpecs
         Assert.Equal(3, links.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_SameInternalIdRequestedTwice_AreDeduplicatedToOneLink()
@@ -91,7 +91,7 @@ public class EpicBatchMembershipSpecs
         Assert.Equal(1, count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_IssueInOtherNonTerminalEpic_ReportedAsConflict()
@@ -127,7 +127,7 @@ public class EpicBatchMembershipSpecs
         Assert.Equal("issue_clean", links[0].IssueId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_AlreadyLinkedIssue_ReportedAsAlreadyLinked_NoDuplicate()
@@ -151,7 +151,7 @@ public class EpicBatchMembershipSpecs
         Assert.Equal(1, count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_AllTerminalMemberships_ClaimedWithoutConflict()
@@ -183,7 +183,7 @@ public class EpicBatchMembershipSpecs
         Assert.Equal(2, links.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task UnlinkIssuesAsync_RemovesOnlyRequestedMembers_RemainingIntact()
@@ -216,7 +216,7 @@ public class EpicBatchMembershipSpecs
         Assert.Equal(new[] { "issue_c" }, remainingIds);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task UnlinkIssuesAsync_NotMember_ReportedAsWasNotAMember()
@@ -246,7 +246,7 @@ public class EpicBatchMembershipSpecs
         Assert.Empty(remaining);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_EmptyInput_ReturnsEmptyOutcomes()
@@ -260,7 +260,7 @@ public class EpicBatchMembershipSpecs
         Assert.Empty(outcomes);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_OnTerminalEpic_RecordsIssueLinkedEvent()
@@ -302,7 +302,7 @@ public class EpicBatchMembershipSpecs
         Assert.Equal(time.GetUtcNow(), evt.Envelope.Time);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_WhenActiveMembershipInsertFails_DoesNotPersistIssueLinkedEvent()
@@ -341,7 +341,7 @@ public class EpicBatchMembershipSpecs
         Assert.Empty(targetLinks);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_DoneEpic_BatchWithOpenIssue_WakesToRunning_Atomically()
@@ -375,7 +375,7 @@ public class EpicBatchMembershipSpecs
         Assert.Equal(2, active.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_DoneEpic_BatchWithOnlyTerminalIssues_StaysDone_NoWake()
@@ -406,7 +406,7 @@ public class EpicBatchMembershipSpecs
             .ToListAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_ClosedEpic_ThrowsEpicClosedCannotLinkException_NoRowsCreated()
@@ -440,7 +440,7 @@ public class EpicBatchMembershipSpecs
         Assert.Equal(EpicStatusName.Closed, row.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_DoneEpic_MixedOpenAndTerminalBatch_WakesOnce_OnlyFirstOpenLinkWakes()
@@ -481,7 +481,7 @@ public class EpicBatchMembershipSpecs
         Assert.Equal(new[] { 2, 3 }, active.Select(a => a.IssueNumber).ToArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_DoneEpic_BatchWake_PartialFailureLeavesEpicRunning()
@@ -534,7 +534,7 @@ public class EpicBatchMembershipSpecs
         Assert.Equal("issue_a", links[0].IssueId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssuesAsync_DoneEpic_BatchWake_AutopilotStartsNewlyLinkedOpenIssue()
