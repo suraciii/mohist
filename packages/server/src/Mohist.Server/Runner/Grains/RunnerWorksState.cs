@@ -1,6 +1,5 @@
-using Mohist.Server.Workflow.Domain.Run;
-
 namespace Mohist.Server.Runner.Grains;
+
 
 /// <summary>
 /// Status of a work item tracked by the runner grain.
@@ -37,21 +36,12 @@ public sealed class RunnerWork
     /// <summary>
     /// For agent-job works only: a snapshot of the dispatch envelope
     /// provided by the agent job grain. Needed to return the full
-    /// dispatch to the runner on <c>PollAsync</c> since agent jobs
-    /// have no backing workflow grain to reconstruct from.
+    /// dispatch to the runner on dequeue since agent jobs have no backing
+    /// workflow grain to reconstruct from. Workflow works live on the run
+    /// and are re-rendered by the stateless DispatchService, so they carry
+    /// no snapshot here.
     /// </summary>
     [Id(10)] public WorkDispatch? DispatchSnapshot { get; set; }
-    /// <summary>
-    /// For workflow works: the <see cref="WorkItem"/> captured at claim
-    /// time. Lets the runner report the work's result without asking the
-    /// workflow grain to reconstruct the item — the runner is the
-    /// authoritative holder of work it has claimed, and recovery of the
-    /// report context is the runner's own business. Falls back to
-    /// <c>RecoverWorkItemFromRun</c> (a local persisted-run read) when the
-    /// snapshot is absent (e.g. a ledger-rebuilt shell after grain-state
-    /// loss); it never round-trips the workflow grain for the item.
-    /// </summary>
-    [Id(11)] public WorkItem? WorkItemSnapshot { get; set; }
 }
 
 /// <summary>
