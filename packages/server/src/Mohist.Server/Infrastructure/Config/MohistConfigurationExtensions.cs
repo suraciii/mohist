@@ -1,4 +1,4 @@
-using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
 
 namespace Mohist.Server.Infrastructure.Config;
@@ -19,69 +19,30 @@ public static class MohistConfigurationExtensions
         if (!File.Exists(configPath))
             return builder;
 
-        // 读取并去除 JSONC 注释，然后作为标准 JSON 加载
-        var json = File.ReadAllText(configPath);
-        var cleaned = StripJsoncComments(json);
-
-        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(cleaned));
-        return builder.AddJsonStream(stream);
-    }
-
-    /// <summary>
-    /// 去除 JSONC 中的单行和多行注释。public so ConfigService can share this
-    /// implementation rather than maintain its own copy.
-    /// </summary>
-    public static string StripJsoncComments(string json)
-    {
-        var result = new System.Text.StringBuilder();
-        var i = 0;
-        while (i < json.Length)
+        // Use the configureSource overload so we have a direct reference to the
+        // JsonConfigurationSource and can wire OnLoadException at registration
+        // time. Set OnLoadException to ignore failures: a malformed config or a
+        // watcher error must never block startup or crash a running server.
+        // The framework's JsonConfigurationFileParser already enables
+        // CommentHandling = Skip + AllowTrailingCommas, so JSONC
+        // (// line comments, /* */ block comments, trailing commas) loads
+        // natively without any preprocessing.
+        builder.AddJsonFile(source =>
         {
-            // 多行注释 /* */
-            if (i + 1 < json.Length && json[i] == '/' && json[i + 1] == '*')
+            source.Path = configPath;
+            source.Optional = optional;
+            source.ReloadOnChange = reloadOnChange;
+            source.ResolveFileProvider();
+            source.OnLoadException = ctx =>
             {
-                i += 2;
-                while (i < json.Length - 1 && !(json[i] == '*' && json[i + 1] == '/'))
-                    i++;
-                i += 2;
-                continue;
-            }
+                ctx.Ignore = true;
+                Console.Error.WriteLine(
+                    $"[mohist-config] Failed to load/reload config file '{ctx.Provider}'; falling back to defaults/last-known-good. Error: {ctx.Exception.Message}");
+                // Build-time hook has no logger in scope, so Console.Error is
+                // the durable surface; this mirrors the OtelPortBindingLog precedent.
+            };
+        });
 
-            // 单行注释 //
-            if (i + 1 < json.Length && json[i] == '/' && json[i + 1] == '/')
-            {
-                while (i < json.Length && json[i] != '\n')
-                    i++;
-                continue;
-            }
-
-            // 字符串字面量 —— 原样保留
-            if (json[i] == '"')
-            {
-                result.Append(json[i]);
-                i++;
-                while (i < json.Length)
-                {
-                    result.Append(json[i]);
-                    if (json[i] == '\\' && i + 1 < json.Length)
-                    {
-                        i++;
-                        result.Append(json[i]);
-                    }
-                    else if (json[i] == '"')
-                    {
-                        i++;
-                        break;
-                    }
-                    i++;
-                }
-                continue;
-            }
-
-            result.Append(json[i]);
-            i++;
-        }
-
-        return result.ToString();
+        return builder;
     }
 }
