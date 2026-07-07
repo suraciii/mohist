@@ -30,7 +30,7 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Api;
 ///   <item><description>Structured error-code mapping: <c>unknown_stage</c>, <c>stage_not_reached</c>, <c>active_work_in_range</c>, <c>session_context_exhausted</c>.</description></item>
 /// </list>
 /// </summary>
-[Collection("MohistIntegration")]
+[Collection("IntegrationWorkflow")]
 public class WorkflowRunControlApiSpecs
 {
     private static readonly JsonSerializerOptions ReadJsonOptions = new(JsonSerializerDefaults.Web);

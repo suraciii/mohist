@@ -18,7 +18,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Subscriptions;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationRunner")]
 public class RunnerWorkflowTerminalStatusHandlerSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;

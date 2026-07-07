@@ -39,7 +39,7 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Services;
 ///   </item>
 /// </list>
 /// </summary>
-[Collection("MohistIntegration")]
+[Collection("IntegrationRunner")]
 public class AgentLauncherSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

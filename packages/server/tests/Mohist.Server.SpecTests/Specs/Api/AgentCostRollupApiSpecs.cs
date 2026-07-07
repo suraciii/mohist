@@ -13,7 +13,7 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationApi")]
 public class AgentCostRollupApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

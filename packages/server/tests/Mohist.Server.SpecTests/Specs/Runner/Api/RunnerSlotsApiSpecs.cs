@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationRunner")]
 public class RunnerSlotsApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

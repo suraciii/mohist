@@ -6,12 +6,14 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Otel;
 using Mohist.Server.SpecTests.Support;
+using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
 
 [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
 [Trait(Traits.Sut.Name, Traits.Sut.Telemetry)]
+[Collection("IntegrationTelemetry")]
 public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
 {
     private const int OtlpPort = 14318;
@@ -24,6 +26,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     private string _runnerRoot = null!;
     private string _systemUpdateStatePath = null!;
     private string _connectionString = null!;
+    private TestClusterPortAllocator? _portAllocator;
 
     public async Task InitializeAsync()
     {
@@ -35,11 +38,16 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
         Directory.CreateDirectory(_runnerRoot);
         _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-query-{Guid.NewGuid():N}.json");
 
+        _portAllocator = new TestClusterPortAllocator();
+        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
+
         _factory = new OtlpRoutesWebApplicationFactory(
             _connectionString,
             _runnerRoot,
             _systemUpdateStatePath,
-            OtlpPort);
+            OtlpPort,
+            siloPort,
+            gatewayPort);
         await _factory.EnsureSchemaAsync();
 
         _ = _factory.Services;
@@ -53,6 +61,7 @@ public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _factory?.Dispose();
+        _portAllocator?.Dispose();
         await _keeper.DisposeAsync();
         try { if (Directory.Exists(_runnerRoot)) Directory.Delete(_runnerRoot, recursive: true); } catch { }
         try { if (File.Exists(_systemUpdateStatePath)) File.Delete(_systemUpdateStatePath); } catch { }

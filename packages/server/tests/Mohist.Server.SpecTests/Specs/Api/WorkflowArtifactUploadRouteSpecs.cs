@@ -16,7 +16,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationApi")]
 public class WorkflowArtifactUploadRouteSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

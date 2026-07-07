@@ -19,7 +19,7 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 /// handler is exercised separately by <c>InboxProjectionHandlerSpecs</c>)
 /// and drives the routes through the test HTTP client.
 /// </summary>
-[Collection("MohistIntegration")]
+[Collection("IntegrationApi")]
 public class InboxApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

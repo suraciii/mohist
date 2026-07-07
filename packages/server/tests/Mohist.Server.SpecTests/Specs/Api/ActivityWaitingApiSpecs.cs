@@ -10,7 +10,7 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationApi")]
 public class ActivityWaitingApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

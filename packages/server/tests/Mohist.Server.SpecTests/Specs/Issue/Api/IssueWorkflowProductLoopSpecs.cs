@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("MohistIntegration")]
+[Collection("IntegrationIssue")]
 public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;

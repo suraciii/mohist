@@ -17,6 +17,7 @@ using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.SpecTests.Support;
+using Orleans.Configuration;
 using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
@@ -37,6 +38,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _artifactStorageRoot;
     private readonly SqliteConnection _otelKeeper;
     private readonly OtelDb _otelDb;
+    private readonly int _siloPort;
+    private readonly int _gatewayPort;
     private string? _webRoot;
 
     public int OtlpPort { get; }
@@ -45,12 +48,16 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         string connectionString,
         string runnerRoot,
         string systemUpdateStatePath,
-        int otlpPort = 4318)
+        int otlpPort = 4318,
+        int? siloPort = null,
+        int? gatewayPort = null)
     {
         _connectionString = connectionString;
         _runnerRoot = runnerRoot;
         _systemUpdateStatePath = systemUpdateStatePath;
         OtlpPort = otlpPort;
+        _siloPort = siloPort ?? EndpointOptions.DEFAULT_SILO_PORT;
+        _gatewayPort = gatewayPort ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
         // OTel ingester/query storage is backed by an in-memory shared-cache
         // SQLite database so the integration specs never touch a real otel.db
         // file (design/testing.md hard-constraint 1). The keeper connection
@@ -78,6 +85,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:ArtifactStorage:Root", _artifactStorageRoot);
         builder.UseSetting("Mohist:Otel:Port", OtlpPort.ToString());
         builder.UseSetting("Mohist:ServerUrl", "http://127.0.0.1:3456");
+        builder.UseSetting("Mohist:Silo:SiloPort", _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.UseSetting("Mohist:Silo:GatewayPort", _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
@@ -89,6 +98,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = _artifactStorageRoot,
                 ["Mohist:Otel:Port"] = OtlpPort.ToString(),
+                ["Mohist:Silo:SiloPort"] = _siloPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["Mohist:Silo:GatewayPort"] = _gatewayPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",
                 ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
