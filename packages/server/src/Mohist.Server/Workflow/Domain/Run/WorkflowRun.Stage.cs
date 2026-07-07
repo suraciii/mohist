@@ -63,7 +63,7 @@ public static partial class WorkflowRunExtensions
                 events.Add(new StageStarted(current.Id));
             }
 
-            SetStatus(run, current.Status switch
+            SetStatusAndTrackReadySince(run, current.Status switch
             {
                 StageRunStatus.Failed => WorkflowRunStatus.Failed,
                 StageRunStatus.AwaitingApproval => WorkflowRunStatus.AwaitingApproval,

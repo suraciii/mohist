@@ -43,7 +43,7 @@ public static partial class WorkflowRunExtensions
         /// Running check). The workflow invariant is that at most one stage
         /// executes at a time, so only the current stage can carry in-flight
         /// work; scanning completed stages would make this predicate depend
-        /// on residual dispatch metadata (e.g. a stale <c>ChecksWorkId</c>)
+        /// on stale dispatch metadata (e.g. a stale <c>ChecksWorkId</c>)
         /// that is irrelevant to whether work is in flight <em>now</em>.
         /// </summary>
         public bool HasInFlightWork()
@@ -67,26 +67,10 @@ public static partial class WorkflowRunExtensions
         }
 
         /// <summary>
-        /// Clears the current stage's residual awaiting-approval gate, when one
-        /// is present. Idempotent: returns <c>true</c> only when it actually
-        /// mutated state, so repeated activations do not write-amplify.
-        ///
-        /// Called from <see cref="WorkflowRunExtensions.Stop"/> before the run
-        /// is transitioned to <see cref="WorkflowRunStatus.Stopped"/>, and from
-        /// <c>WorkflowGrain.OnActivateAsync</c> over rehydrated state when the
-        /// run is already <see cref="WorkflowRunStatus.Stopped"/>. The guard is
-        /// the residual-gate predicate (<see cref="StageRun.IsAwaitingApproval"/>)
-        /// rather than the run status, so the same method serves both call
-        /// sites: at the <c>Stop()</c> site the run is not yet <c>Stopped</c>,
-        /// while the grain-activate caller scopes invocation to <c>Stopped</c>
-        /// runs so a live run genuinely awaiting approval is never disturbed.
-        ///
-        /// The stage is left as <see cref="StageRunStatus.Running"/> — matching
-        /// the <c>AddRuntimeTasks</c> approval-invalidation pattern and the
-        /// existing stop-from-Ready semantics. The run-level <c>Stopped</c> is
-        /// the authoritative terminal signal.
+        /// Clears an unresolved approval gate without resolving approval. The
+        /// stage remains Running; the run status is the terminal signal.
         /// </summary>
-        public bool ReconcileStoppedApprovalGate()
+        public bool ClearStaleApprovalGate()
         {
             if (run.CurrentStageId is null) return false;
             var current = run.Stages.FirstOrDefault(s => string.Equals(s.Id, run.CurrentStageId, StringComparison.Ordinal));
@@ -98,40 +82,19 @@ public static partial class WorkflowRunExtensions
         }
     }
 
-    /// <summary>
-    /// Resolves the waiting-for-dispatch status. Does NOT mutate; callers that
-    /// assign the result to <see cref="WorkflowRun.Status"/> should route the
-    /// assignment through <see cref="SetStatus"/>, or use
-    /// <see cref="ApplyWaitingForDispatchStatus"/> directly, so that
-    /// <see cref="WorkflowRun.ReadySince"/> is seeded on Ready entry.
-    /// </summary>
     private static WorkflowRunStatus WaitingForDispatchStatus(WorkflowRun run) =>
         run.Assignment is null ? WorkflowRunStatus.Pending : WorkflowRunStatus.Ready;
 
     private static WorkflowRunStatus ActiveOrWaitingForDispatchStatus(WorkflowRun run) =>
         run.HasInFlightWork() ? WorkflowRunStatus.Running : WaitingForDispatchStatus(run);
 
-    /// <summary>
-    /// Applies <see cref="WaitingForDispatchStatus"/>, seeding
-    /// <see cref="WorkflowRun.ReadySince"/> whenever the run (re-)enters Ready.
-    /// Single chokepoint for every Ready transition driven by work draining or
-    /// stages advancing; <see cref="WorkflowAssignment.AssignTo"/> covers the
-    /// first Ready entry (assignment).
-    /// </summary>
     private static void ApplyWaitingForDispatchStatus(WorkflowRun run)
-        => SetStatus(run, WaitingForDispatchStatus(run));
+        => SetStatusAndTrackReadySince(run, WaitingForDispatchStatus(run));
 
     private static void ApplyActiveOrWaitingForDispatchStatus(WorkflowRun run)
-        => SetStatus(run, ActiveOrWaitingForDispatchStatus(run));
+        => SetStatusAndTrackReadySince(run, ActiveOrWaitingForDispatchStatus(run));
 
-    /// <summary>
-    /// Assigns <see cref="WorkflowRun.Status"/> and seeds
-    /// <see cref="WorkflowRun.ReadySince"/> (the fairness ordering key) at the
-    /// moment the run enters Ready. Leaving Ready does not clear it; re-entry
-    /// overwrites. Use this for every run-status assignment that may resolve to
-    /// Ready so seeding stays consistent.
-    /// </summary>
-    private static void SetStatus(WorkflowRun run, WorkflowRunStatus next)
+    private static void SetStatusAndTrackReadySince(WorkflowRun run, WorkflowRunStatus next)
     {
         if (next == WorkflowRunStatus.Ready && run.Status != WorkflowRunStatus.Ready)
             run.ReadySince = DateTimeOffset.UtcNow;

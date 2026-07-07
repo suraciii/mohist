@@ -6,25 +6,20 @@ using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Grains;
 
-/// <summary>
-/// Handles workflow report transitions inside the grain. The grain remains
-/// the commit and event-dispatch boundary; this helper mutates the supplied
-/// run and returns or commits events through grain-owned callbacks.
-/// </summary>
-internal sealed class WorkflowReportProcessor
+internal sealed class WorkflowWorkLifecycle
 {
     private readonly IWorkflowGrainContext _owner;
 
-    public WorkflowReportProcessor(IWorkflowGrainContext owner)
+    public WorkflowWorkLifecycle(IWorkflowGrainContext owner)
     {
         _owner = owner;
     }
 
     /// <summary>
-    /// Applies a worker task report. Artifact events precede task completion
-    /// so history records the produced artifact before the producing task closes.
+    /// Artifact events precede task completion so history records the produced
+    /// artifact before the producing task closes.
     /// </summary>
-    public async Task<IReadOnlyList<WorkflowEvent>> ProcessTaskReportAsync(
+    public async Task<IReadOnlyList<WorkflowEvent>> ApplyTaskReportAsync(
         WorkflowRun run, TaskReport report, string taskRunId, string workId)
     {
         var currentStage = run.CurrentStage();
@@ -80,7 +75,7 @@ internal sealed class WorkflowReportProcessor
         return events;
     }
 
-    public Task<IReadOnlyList<WorkflowEvent>> ProcessCheckReportAsync(WorkflowRun run, CheckReport report)
+    public Task<IReadOnlyList<WorkflowEvent>> ApplyCheckReportAsync(WorkflowRun run, CheckReport report)
     {
         var actions = new List<CheckResultAction>(report.Results.Count);
 
@@ -104,14 +99,14 @@ internal sealed class WorkflowReportProcessor
         return Task.FromResult<IReadOnlyList<WorkflowEvent>>(run.ProcessCheckResults(actions));
     }
 
-    public async Task ClearExecutableStateAsync(WorkflowRun run, string reason)
+    public async Task AbandonRunningWorkAsync(WorkflowRun run, string reason)
     {
         await _owner.ReleaseCurrentStageLocks(reason);
 
         var currentStage = run.CurrentStage();
         if (currentStage is not null)
         {
-            ResetChecksRunningState(run);
+            RequeueRunningChecks(run);
         }
 
         var runningTask = run.CurrentStage().RunningTask;
@@ -139,7 +134,7 @@ internal sealed class WorkflowReportProcessor
         var currentTask = current.Tasks.FirstOrDefault(t => t.Id == logicalTaskId);
         if (currentTask?.Status == TaskRunStatus.Running)
         {
-            _owner.SetLastKnownWorkerId(workerId);
+            _owner.CacheAssignedWorkerId(workerId);
             return currentTask.WorkId ?? logicalTaskId;
         }
 
@@ -149,7 +144,7 @@ internal sealed class WorkflowReportProcessor
         foreach (var e in events)
             await _owner.DispatchEvent(e);
 
-        _owner.SetLastKnownWorkerId(workerId);
+        _owner.CacheAssignedWorkerId(workerId);
         return workId;
     }
 
@@ -172,11 +167,7 @@ internal sealed class WorkflowReportProcessor
         return checksWorkId;
     }
 
-    /// <summary>
-    /// Pure projection used before claiming. Work ids are stable: task id or
-    /// <c>checks-{stage}</c>.
-    /// </summary>
-    public WorkItem? BuildWorkItem(WorkflowRun run, WorkflowWork work)
+    public WorkItem? BuildClaimableWorkItem(WorkflowRun run, WorkflowWork work)
     {
         switch (work.WorkType)
         {
@@ -203,11 +194,7 @@ internal sealed class WorkflowReportProcessor
         }
     }
 
-    /// <summary>
-    /// Transitions the resolved work item to Running. Re-claiming already
-    /// running work returns the in-flight id.
-    /// </summary>
-    public async Task<string?> ClaimWorkItemAsync(
+    public async Task<string?> ClaimWorkAsync(
         WorkflowRun run,
         string workId,
         string workerId,
@@ -220,7 +207,7 @@ internal sealed class WorkflowReportProcessor
         {
             if (task.Status == TaskRunStatus.Running)
             {
-                _owner.SetLastKnownWorkerId(workerId);
+                _owner.CacheAssignedWorkerId(workerId);
                 return task.WorkId ?? task.Id;
             }
             if (task.Status != TaskRunStatus.Pending) return null;
@@ -233,7 +220,7 @@ internal sealed class WorkflowReportProcessor
         {
             if (!string.IsNullOrWhiteSpace(currentStage.ChecksWorkId))
             {
-                _owner.SetLastKnownWorkerId(workerId);
+                _owner.CacheAssignedWorkerId(workerId);
                 return currentStage.ChecksWorkId;
             }
 
@@ -267,7 +254,7 @@ internal sealed class WorkflowReportProcessor
         }
     }
 
-    public void ResetChecksRunningState(WorkflowRun run)
+    public void RequeueRunningChecks(WorkflowRun run)
     {
         var currentStage = run.CurrentStage();
         currentStage.ChecksWorkId = null;

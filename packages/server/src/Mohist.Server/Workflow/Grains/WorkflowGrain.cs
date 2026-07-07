@@ -23,11 +23,7 @@ namespace Mohist.Server.Workflow.Grains;
 public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
 {
     private WorkflowRun? _run;
-    /// <summary>
-    /// Non-authoritative worker cache for redelivery/reconciliation. Assignment
-    /// remains the only source of truth for active ownership.
-    /// </summary>
-    private string? _lastKnownWorkerId;
+    private string? _cachedAssignedWorkerId;
     private bool _runDirty;
     private readonly IWorkflowRunStore _runStore;
     private readonly WorkflowProfileManager _profileManager;
@@ -36,7 +32,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     private readonly WorkflowReadModel _readModel;
     private readonly WorkflowStageLockCoordinator _stageLockCoordinator;
     private readonly WorkflowStageInitializer _stageInitializer;
-    private readonly WorkflowReportProcessor _reportProcessor;
+    private readonly WorkflowWorkLifecycle _workLifecycle;
 
     private string GrainKey => this.GetPrimaryKeyString();
 
@@ -53,7 +49,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         _readModel = new WorkflowReadModel(this);
         _stageLockCoordinator = new WorkflowStageLockCoordinator(this);
         _stageInitializer = new WorkflowStageInitializer(this);
-        _reportProcessor = new WorkflowReportProcessor(this);
+        _workLifecycle = new WorkflowWorkLifecycle(this);
     }
 
     WorkflowRun? IWorkflowGrainContext.RunOrNull => _run;
@@ -62,7 +58,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     IGrainFactory IWorkflowGrainContext.Grains => GrainFactory;
     WorkflowSessionHealthService IWorkflowGrainContext.SessionHealthGate => _sessionHealth;
     ILogger IWorkflowGrainContext.Log => _log;
-    void IWorkflowGrainContext.SetLastKnownWorkerId(string? workerId) => _lastKnownWorkerId = workerId;
+    void IWorkflowGrainContext.CacheAssignedWorkerId(string? workerId) => _cachedAssignedWorkerId = workerId;
     Task IWorkflowGrainContext.SaveAsync() => SaveRunAsync();
     Task IWorkflowGrainContext.SaveAsyncWithEvents(IReadOnlyList<WorkflowEvent> events) => SaveRunAsync(events);
     Task IWorkflowGrainContext.DispatchEvent(WorkflowEvent e) => On(e);
@@ -76,15 +72,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     {
         _run = await _runStore.LoadAsync(GrainKey);
 
-        // Old stopped runs may still carry an awaiting-approval gate; reconcile
-        // only that terminal shape so live approval gates are untouched.
-        if (_run is not null && _run.Status == WorkflowRunStatus.Stopped && _run.ReconcileStoppedApprovalGate())
-        {
-            await _runStore.SaveAsync(_run, ct);
-            _runDirty = false;
-        }
+        await ClearStoppedRunStaleApprovalGateAsync(ct);
 
-        _lastKnownWorkerId = _run?.Assignment?.WorkerId;
+        _cachedAssignedWorkerId = _run?.Assignment?.WorkerId;
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -145,10 +135,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         if (_run.Status is not (WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
-        // Fail any in-flight task after the run is terminal.
         _ = _run.Stop();
 
-        await _reportProcessor.ClearExecutableStateAsync(_run!, reason ?? "stopped");
+        await _workLifecycle.AbandonRunningWorkAsync(_run!, reason ?? "stopped");
 
         await SaveRunAsync();
 
@@ -194,10 +183,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
             failedTaskId, stageId, GrainKey, _run,
             events => CommitAsync(events), "retry", default);
 
-        // A healthy gate means a previous context-exhaustion failure is no
-        // longer sticky; retry can use the normal task path again.
-        if (failure?.Reason == FailureReason.ContextExhaustion
-            && _run.ClearContextExhaustionFailure())
+        var contextExhaustionRecovered = failure?.Reason == FailureReason.ContextExhaustion
+            && _run.ClearContextExhaustionFailure();
+        if (contextExhaustionRecovered)
         {
             _log.LogInformation(
                 "Workflow {Id} retry: session context recovered; demoting ContextExhaustion failure to TaskFailed (task={TaskId}, stage={Stage})",
@@ -286,7 +274,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         if (_run.Assignment is null)
         {
             _run.AssignTo(workerId, DateTimeOffset.UtcNow);
-            _lastKnownWorkerId = workerId;
+            _cachedAssignedWorkerId = workerId;
             await SaveRunAsync();
         }
 
@@ -305,18 +293,16 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         if (work is null)
             return null;
 
-        var item = _reportProcessor.BuildWorkItem(_run!, work);
+        var item = _workLifecycle.BuildClaimableWorkItem(_run!, work);
         if (item?.Id is null)
             return null;
         var workId = item.Id;
 
-        // Lock and start in the same claim path; a contended lock leaves no
-        // workflow-owned lock to roll back.
         var stage = _run.CurrentStageId;
         if (stage is not null && !await AcquireStageLocksIfNeededAsync(stage))
             return null;
 
-        var resolvedWorkId = await _reportProcessor.ClaimWorkItemAsync(
+        var resolvedWorkId = await _workLifecycle.ClaimWorkAsync(
             _run!, workId, workerId, events => CommitAsync(events));
 
         if (resolvedWorkId is null)
@@ -361,8 +347,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
 
     public async Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report)
     {
-        // Stale is still an ack; late or duplicate reports are normal under
-        // at-least-once delivery. See design/workflow/scheduling.md Report.
         if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
         var activeWork = _run.FindActiveWork(workId, workerId);
         if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
@@ -371,7 +355,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         _log.LogInformation("Workflow {Id} received task report for {WorkId}: {Status} detail={Detail}",
             GrainKey, workId, report.Status, report.Detail ?? "(none)");
 
-        var events = await _reportProcessor.ProcessTaskReportAsync(_run!, report, activeWork.TaskRunId, workId);
+        var events = await _workLifecycle.ApplyTaskReportAsync(_run!, report, activeWork.TaskRunId, workId);
 
         await CommitAsync(events);
         return ReportAck.Accepted;
@@ -387,8 +371,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         _log.LogInformation("Workflow {Id} received check report for stage {Stage}: {Count} results",
             GrainKey, report.Stage, report.Results.Count);
 
-        var events = await _reportProcessor.ProcessCheckReportAsync(_run!, report);
-        _reportProcessor.ResetChecksRunningState(_run!);
+        var events = await _workLifecycle.ApplyCheckReportAsync(_run!, report);
+        _workLifecycle.RequeueRunningChecks(_run!);
 
         await CommitAsync(events);
         return ReportAck.Accepted;
@@ -413,7 +397,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
 
     public Task<string?> GetAssignedWorkerIdAsync()
     {
-        return Task.FromResult(_run?.Assignment?.WorkerId ?? _lastKnownWorkerId);
+        return Task.FromResult(_run?.Assignment?.WorkerId ?? _cachedAssignedWorkerId);
     }
 
     public Task<string?> GetCurrentWorkIdAsync()
@@ -446,9 +430,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     private Task ReleaseCurrentStageLocksAsync(string reason) =>
         _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
 
-    /// <summary>
-    /// Interface entrypoint for bus-driven sequential stage lock release.
-    /// </summary>
     public Task ReleaseStageLocksAsync(string stage, string reason) =>
         _stageLockCoordinator.ReleaseStageLocksAsync(stage, reason);
 
@@ -480,7 +461,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
             WorkflowRunStarted => Task.CompletedTask,
             WorkflowRunResumed => Task.CompletedTask,
             WorkflowRunPaused => Task.CompletedTask,
-            WorkflowRunStopped => OnWorkflowStoppedAsync(),
+            WorkflowRunStopped => Task.CompletedTask,
             WorkflowRunFailed => Task.CompletedTask,
             WorkflowRunCompleted => Task.CompletedTask,
             StageStarted => Task.CompletedTask,
@@ -498,12 +479,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
             WorkflowArtifactRecorded => Task.CompletedTask,
         };
 
-    private Task OnWorkflowStoppedAsync()
-    {
-        // Stopped side effects are owned by event subscribers.
-        return Task.CompletedTask;
-    }
-
     internal string GetProjectId() =>
         _run?.Metadata?.Annotations?.TryGetValue("projectId", out var v) == true ? v : "";
 
@@ -517,6 +492,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     {
         if (input is null) return null;
         return new WorkflowRunMetadata(input.Name, DateTimeOffset.UtcNow, input.Labels, input.Annotations);
+    }
+
+    private async Task ClearStoppedRunStaleApprovalGateAsync(CancellationToken ct)
+    {
+        if (_run is null || _run.Status != WorkflowRunStatus.Stopped || !_run.ClearStaleApprovalGate())
+            return;
+
+        await _runStore.SaveAsync(_run, ct);
+        _runDirty = false;
     }
 
     private async Task SaveRunAsync()

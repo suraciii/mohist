@@ -4,9 +4,6 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-/// <summary>
-/// Discriminator values for the work item variants the control plane surfaces.
-/// </summary>
 public static class WorkItemTypes
 {
     public const string Task = "task";
