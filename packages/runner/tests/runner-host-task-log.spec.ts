@@ -173,6 +173,20 @@ async function flushCycles(ms: number, cycles: number) {
   }
 }
 
+// Drain microtasks and advance fake timers until a predicate is satisfied.
+// Used instead of vi.waitFor under fake timers because waitFor's internal
+// polling timer is not advanced by advanceTimersByTimeAsync, which makes
+// timer-dependent assertions order-dependent across specs.
+async function drainUntil(predicate: () => boolean, label: string, maxTicks = 100) {
+  for (let i = 0; i < maxTicks; i += 1) {
+    if (predicate()) return
+    await flushMicrotasks()
+    if (predicate()) return
+    await vi.advanceTimersByTimeAsync(1)
+  }
+  throw new Error(`drainUntil timed out waiting for: ${label}`)
+}
+
 describe("RunnerHost task-log best-effort flush (T-003)", () => {
   // Drive the host loop with fake timers so the assertions never depend
   // on wall-clock scheduling (project rule: tests must not rely on real
@@ -240,15 +254,24 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     report.mockResolvedValue({})
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
+    // Dispatch both works in a single poll so they start concurrently.
+    // Using one batch removes the dependency on a second poll cycle and
+    // the race between timer advancement and action microtasks.
     poll
-      .mockResolvedValueOnce([workWith({ workId: "work-A", agentJobId: "aj-A" })])
-      .mockResolvedValueOnce([workWith({ workId: "work-B", agentJobId: "aj-B" })])
+      .mockResolvedValueOnce([
+        workWith({ workId: "work-A", agentJobId: "aj-A" }),
+        workWith({ workId: "work-B", agentJobId: "aj-B" }),
+      ])
       .mockImplementation(async () => [])
     const releases = new Map<string, ReturnType<typeof deferred>>()
+    const gate = deferred()
     blockingAction.mockImplementation(async ({ workId, log }: { workId: string; log?: { write: (source: string, text: string) => void } }) => {
       const release = deferred()
       releases.set(workId, release)
       log?.write("action:test", `line for ${workId}`)
+      // Block on a shared gate so the test can observe both incremental
+      // flushes before either work completes.
+      await gate.promise
       await release.promise
       return { status: "success", message: "ok" }
     })
@@ -267,17 +290,11 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     const run = host.run(controller.signal)
 
     await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
-    // Drain both poll cycles so work-A and work-B are dequeued, and the
-    // per-work append → threshold(1) → flush microtask chain runs for
-    // each. Under fake timers this is deterministic regardless of how
-    // many other test processes share the host CPU.
-    // flushCycles drives both poll cycles (work-A, work-B) and the per-work
-    // append → threshold(1) → flush microtask chain. Assert directly on the
-    // flushed state — under fake timers, vi.waitFor's internal polling timer
-    // is not advanced by advanceTimersByTimeAsync, so relying on it makes the
-    // test order-dependent across files that share the fake/real timer state.
-    await flushCycles(1, 4)
-    expect(uploadTaskLog.mock.calls.length).toBeGreaterThanOrEqual(2)
+    // Drain until both concurrent works have logged and their threshold-1
+    // incremental flushes have been uploaded. drainUntil advances fake
+    // timers and microtasks deterministically, avoiding the order-
+    // dependence that made the previous flushCycles/vi.waitFor mix flaky.
+    await drainUntil(() => uploadTaskLog.mock.calls.length >= 2, "two incremental uploads")
 
     for (const call of uploadTaskLog.mock.calls) {
       const [, workId, batch] = call as [string, string, { entries: Array<{ text: string }> }]
@@ -287,6 +304,7 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
       }
     }
 
+    gate.resolve()
     releases.get("work-A")?.resolve()
     releases.get("work-B")?.resolve()
     await vi.waitFor(() => expect(report).toHaveBeenCalledTimes(2), { timeout: 5_000 })

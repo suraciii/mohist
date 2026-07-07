@@ -5,31 +5,30 @@ using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Sessions.Grains;
-using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Api;
 
 /// <summary>
 /// Product launch endpoint for a generic AgentSession from a project-scoped
-/// Agent profile (issue-129 T-003). Distinct from the validation-only
-/// <c>POST /api/agent-jobs/validate</c> route, which remains a developer
-/// smoke-test surface and is not the product API.
+/// Agent profile (issue-129 T-003; refactored to shared
+/// <see cref="IAgentLauncher"/> in issue-391 T-001). Distinct from the
+/// validation-only <c>POST /api/agent-jobs/validate</c> route, which
+/// remains a developer smoke-test surface and is not the product API.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The handler resolves the Agent in the project via
-/// <see cref="AgentQuerier"/>, composes the Agent's
-/// <c>Instructions + AgentConfig</c> with the caller's prompt (and any
-/// optional context references) into an <see cref="AgentJobInput"/>
-/// snapshot, mints the sessionId up front via
-/// <see cref="IAgentSessionGrain.OpenAsync"/> with <c>source-kind =
-/// agent-launch</c> labels + agent id/name + context-ref annotations, then
-/// submits the <see cref="AgentJobGrain"/> carrying the minted sessionId,
-/// and returns <c>201 { sessionId, agentId, agentName, status, transcriptUrl }</c>.
+/// The route now delegates the canonical mint-session → open-generic-session
+/// → build-AgentJobInput → submit-to-grain pipeline to
+/// <see cref="IAgentLauncher"/>. The route keeps its three domain-level
+/// gates (whitespace prompt → 400; unresolved agent → 404; archived agent
+/// → 409) and composes the 201 response from
+/// <see cref="AgentLaunchResult"/> + the project-scoped transcript URL
+/// (a product surface owned by the API layer, not the launcher).
 /// </para>
 /// <para>
 /// Empty/whitespace prompt is rejected with 400 before any session or job
 /// is created; unknown agentRef is rejected with 404 before any session is
+/// created; archived agents are rejected with 409 before any session is
 /// created.
 /// </para>
 /// </remarks>
@@ -46,8 +45,7 @@ public static class AgentSessionLaunchRoutes
             string agentRef,
             AgentSessionLaunchRequest req,
             AgentQuerier agentQuerier,
-            AgentSessionResolver sessions,
-            IGrainFactory grains,
+            IAgentLauncher launcher,
             CancellationToken ct) =>
         {
             var prompt = req?.Prompt;
@@ -70,31 +68,18 @@ public static class AgentSessionLaunchRoutes
                 return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
             }
 
-            var sessionId = sessions.NewSessionId();
-            var context_ = BuildContext(project.Id, agent, prompt, req!);
-            var sessionGrain = sessions.GetGrain(sessionId);
-            await sessionGrain.OpenAsync(new OpenAgentSessionCommand(
-                RunnerId: string.Empty,
-                AgentRuntime: "opencode",
-                WorkDir: req!.Context?.WorkspacePath,
-                Metadata: GenericAgentSessionMetadata.Metadata(context_)));
-
-            var jobKey = $"agent-job-launch-{Guid.NewGuid():N}";
-            var jobGrain = grains.GetGrain<IAgentJobGrain>(jobKey);
-            var input = new AgentJobInput(
-                Prompt: prompt.Trim(),
-                Model: null,
-                WorkspacePath: req.Context?.WorkspacePath,
+            var launchContext = new AgentLaunchContext(
                 ProjectId: project.Id,
-                Uses: "mohist/acp-agent",
-                AgentId: agent.Id,
-                AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
-                AgentConfig: agent.AgentConfig?.Clone(),
-                AgentSessionId: sessionId);
+                IssueNumber: req!.Context?.IssueNumber,
+                EpicNumber: req.Context?.EpicNumber,
+                Repository: req.Context?.Repository,
+                WorkspacePath: req.Context?.WorkspacePath,
+                Title: null);
 
+            AgentLaunchResult result;
             try
             {
-                await jobGrain.SubmitAsync(input);
+                result = await launcher.LaunchAsync(agent, prompt, launchContext, triggerLabels: null, ct);
             }
             catch (ArgumentException ex)
             {
@@ -105,33 +90,15 @@ public static class AgentSessionLaunchRoutes
                 new ApiResponse<AgentSessionLaunchResponse>(
                     true,
                     new AgentSessionLaunchResponse(
-                        SessionId: sessionId,
-                        AgentId: agent.Id,
-                        AgentName: agent.Name,
+                        SessionId: result.SessionId,
+                        AgentId: result.AgentId,
+                        AgentName: result.AgentName,
                         Status: "inactive",
-                        TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-sessions/{Uri.EscapeDataString(sessionId)}/transcript")),
+                        TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-sessions/{Uri.EscapeDataString(result.SessionId)}/transcript")),
                 statusCode: 201);
         });
 
         return app;
-    }
-
-    private static GenericAgentSessionContext BuildContext(
-        string projectId,
-        AgentInfo agent,
-        string prompt,
-        AgentSessionLaunchRequest req)
-    {
-        var contextRefs = req.Context;
-        return new GenericAgentSessionContext(
-            ProjectId: projectId,
-            AgentId: agent.Id,
-            AgentName: agent.Name,
-            IssueNumber: contextRefs?.IssueNumber,
-            EpicNumber: contextRefs?.EpicNumber,
-            Repository: contextRefs?.Repository,
-            WorkspacePath: contextRefs?.WorkspacePath,
-            Title: null);
     }
 }
 

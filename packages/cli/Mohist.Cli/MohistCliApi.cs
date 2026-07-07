@@ -801,6 +801,8 @@ internal sealed class MohistCliApi
         AgentSessionList,
         AgentSessionShow,
         AgentSessionTranscript,
+        AgentSubscriptionList,
+        AgentSubscriptionShow,
         ProjectTemplateList,
         ProjectTemplateShow,
         ProjectWorkflowProfile,

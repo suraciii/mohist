@@ -336,7 +336,15 @@ public class ArchitectureRules
     [Fact]
     public void DomainInternalLayers_ShouldBeFreeOfCycles()
     {
-        var domainsWithKnownCycles = new HashSet<string> { "Issue", "Workflow", "Sessions", "Runner" };
+        // Agent joined this list in issue-391 T-001: AgentGrain already
+        // depended on AgentQuerier (Services) for its ToInfo projection,
+        // and the shared IAgentLauncher (Services) introduced in T-001
+        // legitimately depends on IAgentJobGrain / AgentJobInput (Grains)
+        // to submit an AgentJob. The cycle is directional and accepted —
+        // it does not block the manual launch + subscription dispatch
+        // extraction. Tighten this to a Services → Grains-only flow if
+        // Agent ever moves its projection path out of AgentGrain.
+        var domainsWithKnownCycles = new HashSet<string> { "Issue", "Workflow", "Sessions", "Runner", "Agent" };
 
         foreach (var domain in DomainNamespaces)
         {

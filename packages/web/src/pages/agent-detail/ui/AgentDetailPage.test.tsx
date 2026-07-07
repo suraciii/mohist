@@ -13,9 +13,15 @@ const mocks = vi.hoisted(() => ({
   agentError: false,
   sessions: [] as AgentSessionListItemDto[],
   sessionsLoading: false,
+  subscriptions: [] as Array<Record<string, unknown>>,
+  subscriptionsLoading: false,
+  subscriptionsSectionRendered: true,
   routeParams: { agentId: 'agent-1' },
   archiveMutateCalls: [] as Array<{ id: string; options: { onSuccess?: () => void } | undefined }>,
   unarchiveMutateCalls: [] as Array<string>,
+  archiveSubscriptionCalls: [] as Array<{ subscriptionId: string }>,
+  restoreSubscriptionCalls: [] as Array<{ subscriptionId: string }>,
+  deleteSubscriptionCalls: [] as Array<{ subscriptionId: string }>,
   archivePending: false,
   unarchivePending: false,
 }))
@@ -51,6 +57,32 @@ vi.mock('../../../entities/agent', () => ({
     },
     isPending: mocks.unarchivePending,
   }),
+  useAgentSubscriptions: () => ({
+    data: mocks.subscriptions,
+    isLoading: mocks.subscriptionsLoading,
+  }),
+  useCreateAgentSubscription: () => ({
+    mutate: () => {},
+    isPending: false,
+  }),
+  useArchiveAgentSubscription: () => ({
+    mutate: mocks.archiveSubscriptionCalls.push.bind(mocks.archiveSubscriptionCalls),
+    isPending: false,
+  }),
+  useRestoreAgentSubscription: () => ({
+    mutate: mocks.restoreSubscriptionCalls.push.bind(mocks.restoreSubscriptionCalls),
+    isPending: false,
+  }),
+  useDeleteAgentSubscription: () => ({
+    mutate: mocks.deleteSubscriptionCalls.push.bind(mocks.deleteSubscriptionCalls),
+    isPending: false,
+  }),
+  formatAgentSubscriptionFilter: (filter: { type: string; source: string | null; subject: string | null }) => {
+    const parts: string[] = [filter.type]
+    if (filter.source) parts.push(`source=${filter.source}`)
+    if (filter.subject) parts.push(`subject=${filter.subject}`)
+    return parts.join(', ')
+  },
   readAgentModelAndVariant: (agent: any) => {
     if (!agent?.agentConfig) return { model: null, variant: null }
     const cfg = agent.agentConfig as Record<string, unknown>
@@ -65,6 +97,17 @@ vi.mock('../../../shared/lib/useDocumentTitle', () => ({
 vi.mock('../../../widgets/agent-profile-editor/ui/AgentProfileEditor', () => ({
   AgentProfileEditor: ({ open }: { open: boolean }) =>
     open ? <div data-testid="agent-profile-editor" /> : null,
+}))
+
+vi.mock('../../../widgets/agent-subscriptions/ui/SubscriptionsSection', () => ({
+  SubscriptionsSection: ({ agent }: { agent: { id: string; status: string } }) =>
+    mocks.subscriptionsSectionRendered ? (
+      <div
+        data-testid="agent-subscriptions-section"
+        data-agent-id={agent.id}
+        data-agent-status={agent.status}
+      />
+    ) : null,
 }))
 
 function createQueryClient() {
@@ -128,9 +171,14 @@ describe('AgentDetailPage', () => {
     mocks.agentError = false
     mocks.sessions = []
     mocks.sessionsLoading = false
+    mocks.subscriptions = []
+    mocks.subscriptionsLoading = false
     mocks.routeParams = { agentId: 'agent-1' }
     mocks.archiveMutateCalls.length = 0
     mocks.unarchiveMutateCalls.length = 0
+    mocks.archiveSubscriptionCalls.length = 0
+    mocks.restoreSubscriptionCalls.length = 0
+    mocks.deleteSubscriptionCalls.length = 0
     mocks.archivePending = false
     mocks.unarchivePending = false
   })
@@ -293,6 +341,25 @@ describe('AgentDetailPage', () => {
       renderPage()
       const newSessionBtn = screen.getByTestId('agent-detail-new-session')
       expect(newSessionBtn).toBeDisabled()
+    })
+  })
+
+  describe('Subscriptions section wiring (T-004)', () => {
+    it('mounts the SubscriptionsSection for an active agent with its own data-agent-id', () => {
+      mocks.agent = makeAgent({ id: 'agent-42', status: 'active' })
+      renderPage()
+      const section = screen.getByTestId('agent-subscriptions-section')
+      expect(section).toBeInTheDocument()
+      expect(section).toHaveAttribute('data-agent-id', 'agent-42')
+      expect(section).toHaveAttribute('data-agent-status', 'active')
+    })
+
+    it('mounts the SubscriptionsSection for an archived agent and forwards the archived status', () => {
+      mocks.agent = makeAgent({ status: 'archived' })
+      renderPage()
+      const section = screen.getByTestId('agent-subscriptions-section')
+      expect(section).toBeInTheDocument()
+      expect(section).toHaveAttribute('data-agent-status', 'archived')
     })
   })
 })

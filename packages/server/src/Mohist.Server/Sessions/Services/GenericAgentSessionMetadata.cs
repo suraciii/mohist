@@ -64,6 +64,26 @@ public static class GenericAgentSessionMetadata
     /// </summary>
     public const string WorkspacePath = "mohist.io/agent-launch/workspace-path";
 
+    /// <summary>
+    /// Label key identifying the CloudEvent that triggered a subscription-driven
+    /// Agent launch. Recorded by <see cref="Mohist.Server.Agent.Services.IAgentLauncher"/>
+    /// when the subscription dispatch handler invokes it with non-null
+    /// <c>triggerLabels</c>; absent on manually launched sessions. Part of the
+    /// agent-subscription-visibility bidirectional link so that an event can
+    /// be looked up by id and the sessions it triggered can be enumerated.
+    /// </summary>
+    public const string TriggerEventId = "mohist.io/trigger/event-id";
+
+    /// <summary>
+    /// Label key identifying the AgentSubscription that won the event-level
+    /// arbitration and triggered this Agent launch. Recorded alongside
+    /// <see cref="TriggerEventId"/> by <see cref="Mohist.Server.Agent.Services.IAgentLauncher"/>;
+    /// absent on manually launched sessions. Together with
+    /// <see cref="TriggerEventId"/> this provides the forward link from session
+    /// back to the triggering event and the subscription that caused it.
+    /// </summary>
+    public const string TriggerSubscriptionId = "mohist.io/trigger/subscription-id";
+
     public static IReadOnlyDictionary<string, string> LookupLabels(GenericAgentSessionContext context) =>
         Labels(context);
 

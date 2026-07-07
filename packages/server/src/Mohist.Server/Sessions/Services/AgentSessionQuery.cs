@@ -125,6 +125,10 @@ public sealed class AgentSessionQuery : IScopedService
                 GenericAgentSessionMetadata.Repository => query.Where(s => s.LabelAgentLaunchRepository == value),
                 GenericAgentSessionMetadata.WorkspacePath => query.Where(s => s.LabelAgentLaunchWorkspacePath == value),
 
+                // issue-391 T-003: subscription trigger correlation labels.
+                GenericAgentSessionMetadata.TriggerEventId => query.Where(s => s.LabelTriggerEventId == value),
+                GenericAgentSessionMetadata.TriggerSubscriptionId => query.Where(s => s.LabelTriggerSubscriptionId == value),
+
                 _ => query.Where(_ => false),
             };
         }

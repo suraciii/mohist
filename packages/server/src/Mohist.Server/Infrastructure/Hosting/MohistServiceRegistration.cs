@@ -4,6 +4,7 @@ using Mohist.Server.Events.Hosting;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -53,6 +54,14 @@ public static class MohistServiceRegistration
     public static IServiceCollection ConfigureMohistServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddMohistConventionalServices();
+
+        // IAgentLauncher is an interface on top of the concrete
+        // AgentLauncher (registered by conventional services via
+        // IScopedService/AsSelf). Forward-registration so route handlers
+        // and bus-side dispatch handlers can depend on the interface
+        // without taking on the concrete type. Lifetime matches the
+        // concrete type — scoped, like IssueQuerier.
+        services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>());
 
         var connectionString = ResolveSqliteConnectionString(configuration);
 

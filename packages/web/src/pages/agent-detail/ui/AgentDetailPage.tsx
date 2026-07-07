@@ -26,6 +26,7 @@ import { Button } from '@/shared/ui/components/button'
 import { Badge } from '@/shared/ui/components/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/shared/ui/components/dialog'
 import { AgentProfileEditor } from '../../../widgets/agent-profile-editor/ui/AgentProfileEditor'
+import { SubscriptionsSection } from '../../../widgets/agent-subscriptions/ui/SubscriptionsSection'
 
 function formatTime(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -303,6 +304,8 @@ export function AgentDetailPage() {
                 <span className="text-xs text-muted-foreground/50 italic">No skills configured</span>
               )}
             </div>
+
+            <SubscriptionsSection agent={agent} />
 
             <div className="rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-medium text-foreground mb-3">Actions</h3>

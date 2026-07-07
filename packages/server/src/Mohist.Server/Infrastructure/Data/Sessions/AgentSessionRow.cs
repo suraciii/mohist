@@ -32,4 +32,11 @@ public class AgentSessionRow
     public string? LabelAgentLaunchEpicNumber { get; set; }
     public string? LabelAgentLaunchRepository { get; set; }
     public string? LabelAgentLaunchWorkspacePath { get; set; }
+
+    // Agent-subscription trigger correlation labels, issue-391 T-003.
+    // Stored computed columns projecting GenericAgentSessionMetadata.TriggerEventId
+    // and TriggerSubscriptionId so event-to-session visibility queries resolve
+    // via the same label-index path as other session metadata lookups.
+    public string? LabelTriggerEventId { get; set; }
+    public string? LabelTriggerSubscriptionId { get; set; }
 }

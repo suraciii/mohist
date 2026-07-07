@@ -1,0 +1,91 @@
+using Mohist.Server.Sessions.Services;
+
+namespace Mohist.Server.Agent.Services;
+
+/// <summary>
+/// Shared entry point for starting a generic AgentSession for an Agent
+/// profile. The HTTP manual launch path (<c>POST /api/projects/{...}/agents/{...}/sessions</c>)
+/// and the subscription dispatch handler (<c>AgentSubscriptionDispatchHandler</c>,
+/// issue-391 T-003) both go through this service so the mint-session → open →
+/// build-input → submit-to-grain chain and the resulting <see cref="GenericAgentSessionContext"/>
+/// metadata are composed exactly once and identically. Without this
+/// service, the two call sites would duplicate the AgentJob grain submission
+/// pipeline and the session metadata labels could drift, breaking the
+/// shared launch contract documented in <c>specs/agent-subscription-dispatch/spec.md#Subscription-triggered
+/// launch reuses the shared Agent launcher</c>.
+/// </summary>
+public interface IAgentLauncher
+{
+    /// <summary>
+    /// Mints a session id, opens a generic AgentSession with the launching
+    /// Agent's identity wired into <see cref="GenericAgentSessionContext"/>,
+    /// submits an <see cref="AgentJobGrain.AgentJobInput"/> carrying the
+    /// Agent's <c>Instructions</c> + <c>AgentConfig</c> snapshot plus the
+    /// provided prompt, and returns the resulting session identity.
+    /// </summary>
+    /// <param name="agent">
+    /// Resolved Agent read model. Must be a non-archived Agent; the
+    /// archived-rejection check is HTTP layer's responsibility (so the
+    /// launcher stays path-agnostic), but the snapshot fields
+    /// (<see cref="AgentInfo.Id"/>, <see cref="AgentInfo.Instructions"/>,
+    /// <see cref="AgentInfo.AgentConfig"/>) are captured verbatim here.
+    /// </param>
+    /// <param name="prompt">
+    /// Caller prompt or (for the subscription path) the rendered
+    /// <c>ResponsePrompt</c>. Whitespace-trimmed before being written into
+    /// <see cref="Grains.AgentJobInput.Prompt"/>.
+    /// </param>
+    /// <param name="context">
+    /// Launch context carrying the project id and any optional context
+    /// references (issue, epic, repository, workspace path) that are
+    /// recorded as generic-session labels/annotations.
+    /// </param>
+    /// <param name="triggerLabels">
+    /// Optional subscription-trigger labels merged into the session
+    /// metadata label set. <c>null</c> for the manual HTTP path (no
+    /// trigger metadata is recorded); the subscription dispatch handler
+    /// passes the <c>event-id</c>/<c>subscription-id</c> dictionary so
+    /// downstream visibility queries can resolve triggering event back
+    /// from session.
+    /// </param>
+    /// <param name="ct">Cancellation token propagated to grain calls.</param>
+    Task<AgentLaunchResult> LaunchAsync(
+        AgentInfo agent,
+        string prompt,
+        AgentLaunchContext context,
+        IReadOnlyDictionary<string, string>? triggerLabels = null,
+        CancellationToken ct = default);
+}
+
+/// <summary>
+/// Result of a generic AgentSession launch. Carries the minted
+/// session id (caller-observable identity) and the agent identity
+/// fields the HTTP manual launch path surfaces verbatim in its 201
+/// response. The <c>TranscriptUrl</c> is composed by the HTTP layer
+/// because it depends on route addressing, which the launcher does not own.
+/// </summary>
+public sealed record AgentLaunchResult(
+    string SessionId,
+    string AgentId,
+    string AgentName);
+
+/// <summary>
+/// Launch inputs the Agent-side caller hands to <see cref="IAgentLauncher"/>.
+/// Carries the project id and any optional context references recorded as
+/// generic-session metadata. Independent of the Agent identity, which the
+/// caller resolves separately and passes alongside.
+/// </summary>
+/// <remarks>
+/// Subscription-triggered launches do NOT populate the issue / epic /
+/// repository / workspace fields here. The Agent obtains issue identity
+/// itself via <c>mo workflow get</c> rather than receiving a pre-fetched
+/// ref on the session metadata (see spec
+/// <c>agent-subscription-dispatch#Triggered Agent pulls its own context</c>).
+/// </remarks>
+public sealed record AgentLaunchContext(
+    string ProjectId,
+    int? IssueNumber = null,
+    string? EpicNumber = null,
+    string? Repository = null,
+    string? WorkspacePath = null,
+    string? Title = null);
