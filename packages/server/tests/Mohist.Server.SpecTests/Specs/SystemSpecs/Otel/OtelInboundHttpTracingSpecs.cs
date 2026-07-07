@@ -60,7 +60,7 @@ public class OtelInboundHttpTracingSpecs
         Assert.Empty(inbound);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void ExcludeOtelIngestPath_ReturnsFalse_ForOtelPathPrefix()
