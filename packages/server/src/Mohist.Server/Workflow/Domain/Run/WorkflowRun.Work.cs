@@ -24,19 +24,24 @@ public sealed record WorkflowWork
     public sealed record ChecksData(List<CheckItem> Items);
 }
 
+public sealed record WorkflowActiveWork(WorkItem Item, string? TaskRunId)
+{
+    public string WorkId => Item.Id ?? string.Empty;
+    public bool IsTask => Item.IsTask;
+    public bool IsChecks => Item.IsChecks;
+}
+
 public static partial class WorkflowRunExtensions
 {
+    public static string ChecksWorkIdFor(string stage) => $"checks-{stage}";
+
     extension(WorkflowRun run)
     {
         public WorkflowWork? NextWork()
         {
             var current = run.CurrentStage();
 
-            // Offer only Pending work. A Running task is already claimed by
-            // a worker and must not be re-offered; CurrentTask() (which
-            // includes Running) is deliberately not used here so the offer
-            // path never competes with an in-flight claim.
-            var pendingTask = current.Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Pending);
+            var pendingTask = NextUnclaimedTask(current);
             if (pendingTask is not null)
                 return WorkflowWork.Task(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery);
 
@@ -49,6 +54,33 @@ public static partial class WorkflowRunExtensions
                 return WorkflowWork.Checks(current.Id, pendingChecks);
 
             return null;
+        }
+
+        public WorkflowActiveWork? CurrentActiveWorkFor(string workerId)
+        {
+            if (!run.IsAssignedTo(workerId)) return null;
+
+            var current = run.CurrentStage();
+            var task = current.RunningTask;
+            if (task is not null)
+            {
+                if (!string.Equals(task.WorkerId, workerId, StringComparison.Ordinal))
+                    return null;
+
+                return ActiveTask(current, task);
+            }
+
+            return ActiveChecks(current);
+        }
+
+        public WorkflowActiveWork? FindActiveWork(string workId, string workerId)
+        {
+            if (string.IsNullOrWhiteSpace(workId)) return null;
+
+            var active = run.CurrentActiveWorkFor(workerId);
+            return active is not null && string.Equals(active.WorkId, workId, StringComparison.Ordinal)
+                ? active
+                : null;
         }
 
         public IReadOnlyList<WorkflowEvent> AddRuntimeTask(
@@ -117,4 +149,31 @@ public static partial class WorkflowRunExtensions
             return current.Tasks.Any(t => t.Id == id && t.Status != TaskRunStatus.Completed);
         }
     }
+
+    private static WorkflowActiveWork ActiveTask(StageRun stage, TaskRun task)
+    {
+        var workId = task.WorkId ?? task.Id;
+        var item = WorkItem.Task(
+            stage.Id, workId, task.Title, task.Uses,
+            task.WithInput, task.Artifacts, task.SetVars, task.Recovery);
+        return new WorkflowActiveWork(item, task.Id);
+    }
+
+    private static WorkflowActiveWork? ActiveChecks(StageRun stage)
+    {
+        if (string.IsNullOrWhiteSpace(stage.ChecksWorkId))
+            return null;
+
+        var checks = stage.Checks
+            .Where(c => c.Status is StageCheckStatus.Pending or StageCheckStatus.Running)
+            .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
+            .ToList();
+
+        return new WorkflowActiveWork(
+            WorkItem.Checks(stage.Id, stage.ChecksWorkId, checks),
+            TaskRunId: null);
+    }
+
+    private static TaskRun? NextUnclaimedTask(StageRun stage) =>
+        stage.Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Pending);
 }

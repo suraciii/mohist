@@ -19,7 +19,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// <summary>
     /// Dequeues the next pending agent-job work pushed onto this runner.
     /// Called by the DispatchService on each poll (agent-jobs are served
-    /// before workflow repair/claim). Returns null when none is pending.
+    /// before workflow redelivery/claim). Returns null when none is pending.
     /// </summary>
     Task<WorkDispatch?> DequeueAssignedAgentJobAsync();
     /// <summary>
@@ -115,7 +115,7 @@ public static class WorkDispatchOwnerKinds
 
 /// <summary>
 /// The process's full level state, sent in every poll body. The DispatchService
-/// reconciles <c>desired − reported</c> to repair lost dispatches and decide
+/// reconciles <c>desired − reported</c> to redeliver lost dispatches and decide
 /// new claims (design/workflow/scheduling.md §Poll Reconciliation).
 /// </summary>
 [GenerateSerializer]
@@ -127,7 +127,7 @@ public sealed record RunnerPollRequest(
 }
 
 /// <summary>
-/// The dispatches rendered for this poll: repairs (desired − reported) plus
+/// The dispatches rendered for this poll: redeliveries (desired − reported) plus
 /// new claims against spare capacity. Multiple dispatches per poll replace the
 /// old one-dispatch-per-poll limit (design/workflow/scheduling.md §Poll
 /// Reconciliation step ⑤).

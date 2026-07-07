@@ -33,10 +33,6 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         Assert.NotNull(work1);
         Assert.Equal("wf-1", work1.WorkflowRunId);
 
-        // Under reconciliation a runner that does not report its in-flight
-        // work may legitimately receive a repair re-dispatch of wf-1. The
-        // property under test is that a second workflow (wf-2) is never
-        // claimed while the runner's single slot is occupied by wf-1.
         var work2 = await runner.PollAsync(Services);
         if (work2 is not null)
         {
@@ -64,10 +60,6 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         await SeedWorkflowTemplateAsync("wf-capacity-2", SingleStage(checks: []), projectId);
         await wf2.StartAsync(TestInput(projectId));
 
-        // A 2-slot runner must be able to hold both workflows in flight. A
-        // single reconciliation round can dispatch both at once (the assigned
-        // Ready wf-capacity-1 plus the claimable Pending wf-capacity-2), so
-        // observe the full dispatch list rather than one dispatch per poll.
         var dispatched = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < 3 && dispatched.Count < 2; i++)
         {
@@ -188,8 +180,8 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         // stays cheap (no per-poll registry fan-out).
         await ClearGlobalRunnerRegistryAsync();
         await ClearBacklogAsync();
-        var projectId = $"poll-repair-project-{Guid.NewGuid():N}";
-        var runnerId = await RegisterRunnerForProjectAsync(projectId, $"poll-repair-runner-{Guid.NewGuid():N}");
+        var projectId = $"poll-redelivery-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(projectId, $"poll-redelivery-runner-{Guid.NewGuid():N}");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
 

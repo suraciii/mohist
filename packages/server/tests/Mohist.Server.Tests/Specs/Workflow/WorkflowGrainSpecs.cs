@@ -220,10 +220,6 @@ public abstract class WorkflowGrainSpecs
     protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAsync(string runnerId)
     {
         await EnsureRunnerForCurrentWorkflowAsync(runnerId);
-        // Drive dispatch through the stateless DispatchService (the runner
-        // grain no longer owns a PollAsync). An empty reported set means the
-        // poll performs repair (none expected) + new claims only — exactly
-        // what a fresh runner needs to receive its first dispatch.
         var dispatch = _fixture.Cluster.GetSiloServiceProvider(null)
             .GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);

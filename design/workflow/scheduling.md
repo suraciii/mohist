@@ -4,7 +4,7 @@ include:
   - "Ownership model: which party holds which scheduling fact."
   - "Poll reconciliation: desired − reported diff dispatch."
   - "Claim as a single write; fairness via ReadySince round-robin."
-  - "Report ack semantics (at-least-once), supervision, recovery."
+  - "Report ack semantics (at-least-once), supervision, redelivery."
 exclude:
   - "WorkflowRun/domain model internals; keep them in the Domain Model chapter only."
   - "Database schemas, persistence implementation, migrations, and storage tables."
@@ -20,7 +20,7 @@ style:
 
 Level-triggered reconciliation. The scheduler keeps no memory of its own:
 every decision — dispatch, re-dispatch, fairness, closeout — is a stateless
-query over persisted state, repaired by the next poll.
+query over persisted state, reconciled by the next poll.
 
 ## Model
 
@@ -77,14 +77,14 @@ Running ⟹ reconciled within one poll period:
 
 ```text
 IWorkflowGrain
-  AssignRunnerAsync(runnerId) -> Assigned | Rejected   # idempotent arbiter; sets Assignment
-  ClaimNextAsync(runnerId)    -> WorkItem | null       # single write: pick NextWork,
+  AssignWorkerAsync(workerId) -> Assigned | Rejected   # idempotent arbiter; sets Assignment
+  ClaimNextAsync(workerId)    -> WorkItem | null       # single write: pick NextWork,
                                                        # acquire stage lock, mark Running, persist
-  ReportTaskOutcomeAsync(runnerId, workId, outcome)  -> Accepted | Stale
-  ReportCheckOutcomeAsync(runnerId, workId, outcome) -> Accepted | Stale
+  ReportTaskOutcomeAsync(workerId, workId, outcome)  -> Accepted | Stale
+  ReportCheckOutcomeAsync(workerId, workId, outcome) -> Accepted | Stale
 
 IRunnerGrain
-  RegisterAsync(info)          # first contact / info repair
+  RegisterAsync(info)          # first contact / info refresh
   slots get/update             # capacity config
   presence: touched by poll; persistent-reminder expiry -> offline + closeout
 ```
@@ -108,8 +108,8 @@ and the owner of a work.
 
 ## Poll Reconciliation
 
-One poll = one reconciliation round. First dispatch, recovery after process
-restart, and lost-response repair are all the same path: `desired − reported`.
+One poll = one reconciliation round. First dispatch, process-restart
+redelivery, and lost-response redelivery are all the same path: `desired − reported`.
 
 ```text
 runner process               DispatchService                     store / grains
@@ -123,7 +123,7 @@ runner process               DispatchService                     store / grains
     |                             |    WHERE assigned = me            |
     |                             |    (+ agent-job works assigned=me)|
     |                             |                                   |
-    |                             | ③ repair = desired − reported     |
+    |                             | ③ redelivery = desired − reported |
     |                             |    render each from persisted run |
     |                             |    (agent-job: owner snapshot)    |
     |                             |                                   |
@@ -136,7 +136,7 @@ runner process               DispatchService                     store / grains
     |                             |        null -> next candidate     |
     |                             |    still spare:                   |
     |                             |      claimable Pending runs       |
-    |                             |      → AssignRunner → ClaimNext   |
+    |                             |      → AssignWorker → ClaimNext   |
     |                             |                                   |
     | { dispatches[] }            |                                   |
     |<----------------------------|                                   |
@@ -144,7 +144,7 @@ runner process               DispatchService                     store / grains
     | execute concurrently        |                                   |
 ```
 
-Ordering within a poll: repair first (debts already owed), then serve
+Ordering within a poll: redelivery first (debts already owed), then serve
 already-assigned Ready runs, then claim new workflows — held work always
 precedes expansion.
 
@@ -158,7 +158,7 @@ Race-freedom of `desired − reported`: the process adds a work to its
 in-flight map synchronously between receiving a dispatch and its next poll,
 so a freshly delivered dispatch can never be mistaken for a loss. The only
 way a Running work is absent from the report is that the process never had
-it or lost it — both want a re-dispatch.
+it or lost it — both want redelivery.
 
 **Implementation constraint — the reported set is process-lifetime state.**
 The process's reported set (`inFlight ∪ awaitingAck`) must survive poll
@@ -187,7 +187,7 @@ A claim that fails (stage lock contended, state moved on) returns null;
 the DispatchService tries the next candidate this poll and the run is
 retried on later polls. A claim that succeeds but whose dispatch never
 reaches the process needs no handling: the work is Running and unreported,
-so the next poll re-dispatches it.
+so the next poll redelivers it.
 
 ## Fairness — round-robin from ReadySince
 
@@ -227,19 +227,19 @@ and executes whatever it is handed.
 
 ## Assignment
 
-Unchanged in substance. One workflow, one runner, sticky through idle,
+Unchanged in substance. One workflow, one worker, sticky through idle,
 gates, and work boundaries. Claimable is a data property, not a queue:
 
 ```text
 WorkflowRuns WHERE Assignment IS NULL AND Status = Pending   [AND ProjectId = @p]
 ```
 
-`AssignRunnerAsync` is the idempotent arbiter (unassigned+runnable → set;
-same runner → Assigned; other runner → Rejected; not runnable → Rejected).
+`AssignWorkerAsync` is the idempotent arbiter (unassigned+runnable → set;
+same worker → Assigned; other worker → Rejected; not runnable → Rejected).
 Optimistic claiming: concurrent runners may race a candidate; the arbiter
 admits one.
 
-Release is not automatic. A workflow assigned to a permanently lost runner
+Release is not automatic. A workflow assigned to a permanently lost worker
 is unblocked by an explicit operator reassign (tracked separately); on
 release its Running works are closed out and the run returns to claimable.
 
@@ -287,16 +287,16 @@ signal. The registry is written only on state or info change, never per
 poll. SignalR liveness probing serves the push transport only and takes no
 part in presence.
 
-## Recovery
+## Redelivery And Closeout
 
 Two paths, no per-failure rules:
 
 ```text
-every lost message        → repaired by the next poll's diff
+every lost message        → redelivered by the next poll's diff
 runner permanently gone   → presence expiry → closeout
 ```
 
-| failure | recovery |
+| failure | handling |
 |---|---|
 | dispatch response lost | next poll: desired − reported → re-dispatch |
 | process restart (memory gone) | same — empty report → full re-dispatch |
@@ -325,8 +325,8 @@ skipped for them and presence-loss closeout remains the only safety net.
 **已落地（Batch 2 — 服务端对账主体）**：
 
 - `PollWorkAsync` + `ClaimAsync` 两阶段合并为 `IWorkflowGrain.ClaimNextAsync` 单次写（Pending→Running + stage lock + persist 原子化）；runner 侧 offer/claim 预登记与回滚一并删除。
-- RunnerGrain workflow 双台账（grain persisted `_worksState` + `RunnerWorkStore` ledger）与 `WorkItemSnapshot`/dispatch 快照、Hydrate/Reconfirm/orphan-drop 恢复分支全部删除——run 即台账，dispatch 从 run 重渲染（`RenderRunningWorkAsync` 转正为 repair 路径）。
-- 服务端 `/poll` 消费 reported set 做 `desired − reported` diff：新建 stateless `DispatchService` 统一补派 + 新 claim，按四步（touch presence → desired → repair → spare claim），runner 侧不再走 offer/claim。
+- RunnerGrain workflow 双台账（grain persisted `_worksState` + `RunnerWorkStore` ledger）与 `WorkItemSnapshot`/dispatch 快照、Hydrate/Reconfirm/orphan-drop 恢复分支全部删除——run 即台账，dispatch 从 run 重渲染（当前为 redelivery 路径）。
+- 服务端 `/poll` 消费 reported set 做 `desired − reported` diff：新建 stateless `DispatchService` 统一补派 + 新 claim，按四步（touch presence → desired → redelivery → spare claim），runner 侧不再走 offer/claim。
 - report 直达属主：新建 `WorkflowReportService`，`/report` 对 workflow 直走属主 grain，不经 RunnerGrain 中继；RunnerGrain 仅保留 agent-job push 台账。
 - 服务端 `WorkCompletionTimeout`（30 分钟墙钟 reminder）删除；work 级 liveness 即 poll 汇报，兜底只剩 presence 关账。
 - presence 由 HTTP heartbeat + 每次 poll 空写 registry 的双通道，收敛为 poll 即心跳（`TouchPresenceAsync` 仅刷 `lastSeen`，registry 仅在 register/unregister/heartbeat-repair 时写）。

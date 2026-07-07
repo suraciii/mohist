@@ -24,7 +24,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
 {
     private WorkflowRun? _run;
     /// <summary>
-    /// Non-authoritative worker cache for recovery/reconciliation. Assignment
+    /// Non-authoritative worker cache for redelivery/reconciliation. Assignment
     /// remains the only source of truth for active ownership.
     /// </summary>
     private string? _lastKnownWorkerId;
@@ -76,7 +76,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     {
         _run = await _runStore.LoadAsync(GrainKey);
 
-        // Old stopped runs may still carry an awaiting-approval gate; repair
+        // Old stopped runs may still carry an awaiting-approval gate; reconcile
         // only that terminal shape so live approval gates are untouched.
         if (_run is not null && _run.Status == WorkflowRunStatus.Stopped && _run.ReconcileStoppedApprovalGate())
         {
@@ -364,15 +364,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         // Stale is still an ack; late or duplicate reports are normal under
         // at-least-once delivery. See design/workflow/scheduling.md Report.
         if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
-        var stage = _run.CurrentStage();
-        var activeTask = stage.FindRunningTaskByWork(workId, workerId);
-        if (activeTask is null)
+        var activeWork = _run.FindActiveWork(workId, workerId);
+        if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
             return ReportAck.Stale;
 
         _log.LogInformation("Workflow {Id} received task outcome for {WorkId}: {Status} detail={Detail}",
             GrainKey, workId, outcome.Status, outcome.Detail ?? "(none)");
 
-        var events = await _outcomeProcessor.ProcessTaskOutcomeAsync(_run!, outcome, activeTask.Id, workId);
+        var events = await _outcomeProcessor.ProcessTaskOutcomeAsync(_run!, outcome, activeWork.TaskRunId, workId);
 
         await CommitAsync(events);
         return ReportAck.Accepted;
@@ -381,8 +380,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     public async Task<ReportAck> ReportCheckOutcomeAsync(string workerId, string workId, CheckOutcome outcome)
     {
         if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
-        var currentStage = _run.CurrentStage();
-        if (currentStage.ChecksWorkId is null || !string.Equals(currentStage.ChecksWorkId, workId, StringComparison.Ordinal))
+        var activeWork = _run.FindActiveWork(workId, workerId);
+        if (activeWork is null || !activeWork.IsChecks)
             return ReportAck.Stale;
 
         _log.LogInformation("Workflow {Id} received check outcome for stage {Stage}: {Count} results",
