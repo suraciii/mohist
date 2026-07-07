@@ -16,7 +16,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 type: "TEXT",
                 nullable: true,
                 computedColumnSql: "json_extract(\"State\", '$.metadata.labels.\"mohist.io/trigger/event-id\"')",
-                stored: true);
+                stored: false);
 
             migrationBuilder.AddColumn<string>(
                 name: "LabelTriggerSubscriptionId",
@@ -24,7 +24,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 type: "TEXT",
                 nullable: true,
                 computedColumnSql: "json_extract(\"State\", '$.metadata.labels.\"mohist.io/trigger/subscription-id\"')",
-                stored: true);
+                stored: false);
         }
 
         /// <inheritdoc />
