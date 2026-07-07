@@ -127,3 +127,88 @@
   T-001 先摘 CumulativeFlowChart 后落地提交，本任务再摘 EpicProgressList +
   InvestmentPanel，避免两者同时编辑同一文件造成 rebase 冲突。InsightsPage.test.tsx
   本任务独立处理（无 cumulative-flow 痕迹，零冲突）。
+
+## T-003 (StagePopulation 写入管线端到端移除)
+
+### 范围落地
+- 删除 `Events/Hosting/StagePopulationSnapshotService.cs`（含
+  `StagePopulationSnapshotOptions`、`StagePopulationSnapshotCounts` 类）。
+- 删除 `Infrastructure/Data/StagePopulation/StagePopulationSnapshotRow.cs`；
+  整个 `Infrastructure/Data/StagePopulation/` 目录已无文件被清空（连目录一
+  并消失，因为是该目录唯一文件）。
+- 删除 `tests/.../Specs/Events/StagePopulationSnapshotServiceSpecs.cs`（24
+  个 Fact）。`IssueStageAttributionSpecs.cs` 保留，验证归因核心不被牵连。
+- `MohistServiceRegistration.cs` 移除 `services.AddOptions<StagePopulationSnapshotOptions>()
+  + services.AddHostedService<StagePopulationSnapshotService>()` 块（连同
+  options 的 Validate 约束一并消失）。
+- `MohistDbContext.cs` 移除 `using
+  Mohist.Server.Infrastructure.Data.StagePopulation;`、
+  `DbSet<StagePopulationSnapshotRow> StagePopulationSnapshots` 属性、
+  `modelBuilder.Entity<StagePopulationSnapshotRow>(...)` 块。
+- `MohistIntegrationFixture.cs` 移除
+  `CREATE TABLE IF NOT EXISTS "StagePopulationSnapshots" ...` raw-SQL 块连同
+  注释。fixture 不再创建表与 `UQ_StagePopulationSnapshots_ProjectId_Day` 索
+  引。
+- `MohistDbContextModelSnapshot.cs` 删除
+  `Mohist.Server.Infrastructure.Data.StagePopulation.StagePopulationSnapshotRow`
+  实体快照（37 行）。
+- 新增 EF migration `20260706164309_DropStagePopulationSnapshotsTable`：
+  - `Up`：`migrationBuilder.DropTable(name: "StagePopulationSnapshots")`。
+    EF Core 自动先 drop 唯一索引再 drop 表，无需显式 DropIndex 调用。
+  - `Down`：`CreateTable` 重建表（6 个 int 列、PK、）+ `CreateIndex`
+    `UQ_StagePopulationSnapshots_ProjectId_Day`（unique），与原
+    `20260702021109_AddStagePopulationSnapshotsTable` 一一对应（除列顺序）
+    —— 列顺序按 EF 生成的字典序而非原始 Add 迁移顺序，但 PK 复合主键 +
+    unique index 语义一致，Down 可完整回滚。
+- 新增对应 `DropStagePopulationSnapshotsTable.Designer.cs` 快照（mirror 当前
+  ModelSnapshot，不含 StagePopulationSnapshotRow 实体）。
+
+### 保留面
+- `Issue/Services/IssueStageAttribution.cs`（归因核心，纯静态类 + Kind 枚
+  举 + AttributionEvent record）—— IssueMetricsQuerier 的 stage-duration 流
+  程仍 `IssueStageAttribution.Attribute(...)` 调用（IssueMetricsQuerier.cs:1639）。
+- `tests/.../Specs/Issue/Services/IssueStageAttributionSpecs.cs` 全保留并
+  通过 —— 验证归因核心未被本次删除牵连。
+
+### 验证结果
+- `npm test` ✅
+  - server：`Mohist.Server.Tests.dll` 4013 通过 / 12 跳过 / 0 失败（xUnit
+    持续 2 分 31 秒；`StagePopulationSnapshotServiceSpecs` 24 个 Fact 已从
+    结果中消失，未引入回归）。
+  - runner：1028 通过 / 0 失败（与 T-003 互不依赖，零变化）。
+  - `dotnet build` 在 `TreatWarningsAsErrors` 下零警告通过 —— 删除 `using
+    Mohist.Server.Infrastructure.Data.StagePopulation;` 之后所有引用点清空，
+    无孤儿 using。
+- 残留 `StagePopulationSnapshot` 字符串引用复查：grep 显示该字符串仅存在于：
+  - `Migrations/20260702021109_AddStagePopulationSnapshotsTable.cs/.Designer.cs`
+    —— 历史迁移文件，immutable 不动。
+  - `Migrations/20260703091225_AddTaskLogTables.Designer.cs:1024`、`Migrations/20260704195319_AddEpicEvents.Designer.cs:1075`
+    —— 历史快照，immutable。
+  - `Migrations/20260706164309_DropStagePopulationSnapshotsTable.cs/.Designer.cs`
+    —— 本任务新增的 drop 迁移及其快照。
+  均为历史/迁移文件，对运行时不构成 API/数据依赖。
+
+### 学到/复用的模式
+- EF Core 的 `migrationBuilder.DropTable(name: ...)` 会自动先 drop 该表上
+  的索引（包括 unique 索引），无需显式写 `DropIndex` —— 生成的 SQL 在
+  SQLite 上行为正确。本任务不再额外 `DropIndex
+  UQ_StagePopulationSnapshots_ProjectId_Day`。
+- `Down` 重写时列顺序由 EF 按字典序序列化（D-B-D-I-P 而非 Add 迁移的
+  B-P-Build-Check-Done-I），但 PK 项目（ProjectId+Day）和 unique index 定义
+  完全保留，down-migrate-再 up-migrate 循环测试中表结构与索引语义等价。
+- `MohistIntegrationFixture` 与 EF migration 各管一半 schema 的风险点（T-001
+  progress 已记录）已在本任务内闭环：删 `DbSet<StagePopulationSnapshotRow>`
+  与 fixture `CREATE TABLE IF NOT EXISTS "StagePopulationSnapshots"` 块同
+  一次提交落地，未来 fixture 不会建出孤儿表（即使 raw SQL 与 EF 脱钩）。
+- `Remove-` 类清理任务（T-001 + T-003 累计删 1702 行）每次提交都应先跑整
+  树测试再 commit —— 这两任务的删除面重叠（T-001 删 CumulativeFlowQuerier
+  后，T-003 删 StagePopulationSnapshotService），中间没有任何 README 或
+  模板文件引用被触碰，dotnet 重编译即可一次性看到所有 nullable/using 报
+  错。
+- 复用 T-001 progress 提到的「MohistIntegrationFixture 用 raw SQL 管表须与
+  DbSet 移除同提交」设计风险 —— T-003 实操验证：单 commit 一次性删除
+  DbContext 的 `DbSet` + `modelBuilder.Entity` 配置 + ServiceRegistration
+  的 hosting 配置 + fixture 的 raw SQL，三块一起落地，零 fixture 残留。
+- 验证脚本模式：用 `grep -n "StagePopulation" MohistServiceRegistration.cs
+  MohistDbContext.cs MohistIntegrationFixture.cs` 直接检查三条目标文件无
+  残留引用，比 rigrep / 项目级 grep 更聚焦。
