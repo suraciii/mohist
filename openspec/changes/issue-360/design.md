@@ -131,7 +131,7 @@ LIMIT @limit;
 | `FailingHandler` | `TEXT(512)` | The handler identifier that exhausted retries. |
 | `ErrorMessage` | `TEXT` | Terminal error message. |
 | `ErrorStack` | `TEXT` nullable | Terminal stack trace, when available. |
-| `AttemptCount` | `INTEGER` | Rettries consumed at the point of dead-lettering. |
+| `AttemptCount` | `INTEGER` | Retries consumed at the point of dead-lettering. |
 | `DeadLetteredAt` | `DateTimeOffset` | When the DLQ row was written. |
 
 Indexes: `(DeadLetteredAt)` for chronological query; `(FailingHandler, DeadLetteredAt)` for per-handler ops inspection. No unique constraint — the same logical failure may legitimately produce multiple rows (spec `dead-letter-store:38-42`: a second write appends, never overwrites).
