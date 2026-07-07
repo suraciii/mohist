@@ -79,7 +79,7 @@ public class WorkflowRunQuerierSchedulingSpecs
             pendingId,
             projectId: prefix,
             status: "Pending",
-            assignedRunnerId: null,
+            assignedWorkerId: null,
             stateOverride: BuildPendingJson(pendingId, prefix));
 
         // Rows in every other status with valid JSON but an un-deserializable
@@ -100,7 +100,7 @@ public class WorkflowRunQuerierSchedulingSpecs
                 id,
                 projectId: prefix,
                 status: status,
-                assignedRunnerId: status == "Ready" ? $"{prefix}-corrupt-runner" : null,
+                assignedWorkerId: status == "Ready" ? $"{prefix}-corrupt-runner" : null,
                 stateOverride: $$"""
                     {"status":"{{status}}","corrupt":true}
                     """);
@@ -128,22 +128,22 @@ public class WorkflowRunQuerierSchedulingSpecs
             $"{prefix}-ready-A",
             projectId: prefix,
             status: "Ready",
-            assignedRunnerId: runnerA);
+            assignedWorkerId: runnerA);
         await InsertRowAsync(
             $"{prefix}-running-A",
             projectId: prefix,
             status: "Running",
-            assignedRunnerId: runnerA);
+            assignedWorkerId: runnerA);
         await InsertRowAsync(
             $"{prefix}-completed-A",
             projectId: prefix,
             status: "Completed",
-            assignedRunnerId: runnerA);
+            assignedWorkerId: runnerA);
         await InsertRowAsync(
             $"{prefix}-ready-B",
             projectId: prefix,
             status: "Ready",
-            assignedRunnerId: runnerB);
+            assignedWorkerId: runnerB);
 
         using var scope = _fixture.Services.CreateScope();
         var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
@@ -170,32 +170,32 @@ public class WorkflowRunQuerierSchedulingSpecs
             $"{prefix}-ready-A",
             projectId: prefix,
             status: "Ready",
-            assignedRunnerId: runnerA);
+            assignedWorkerId: runnerA);
         await InsertRowAsync(
             $"{prefix}-running-A",
             projectId: prefix,
             status: "Running",
-            assignedRunnerId: runnerA);
+            assignedWorkerId: runnerA);
         await InsertRowAsync(
             $"{prefix}-stopped-A",
             projectId: prefix,
             status: "Stopped",
-            assignedRunnerId: runnerA);
+            assignedWorkerId: runnerA);
         await InsertRowAsync(
             $"{prefix}-completed-A",
             projectId: prefix,
             status: "Completed",
-            assignedRunnerId: runnerA);
+            assignedWorkerId: runnerA);
         await InsertRowAsync(
             $"{prefix}-ready-B",
             projectId: prefix,
             status: "Ready",
-            assignedRunnerId: runnerB);
+            assignedWorkerId: runnerB);
         await InsertRowAsync(
             $"{prefix}-pending-B",
             projectId: prefix,
             status: "Pending",
-            assignedRunnerId: null);
+            assignedWorkerId: null);
 
         using var scope = _fixture.Services.CreateScope();
         var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
@@ -228,12 +228,12 @@ public class WorkflowRunQuerierSchedulingSpecs
             $"{prefix}-ready-valid-this",
             projectId: prefix,
             status: "Ready",
-            assignedRunnerId: runnerId);
+            assignedWorkerId: runnerId);
         await InsertRowAsync(
             $"{prefix}-ready-corrupt-other",
             projectId: prefix,
             status: "Ready",
-            assignedRunnerId: $"{prefix}-other-runner",
+            assignedWorkerId: $"{prefix}-other-runner",
             stateOverride: """
                 {"status":"Ready","corrupt":true}
                 """);
@@ -259,22 +259,22 @@ public class WorkflowRunQuerierSchedulingSpecs
             $"{prefix}-running-1",
             projectId: prefix,
             status: "Running",
-            assignedRunnerId: runnerA);
+            assignedWorkerId: runnerA);
         await InsertRowAsync(
             $"{prefix}-running-2",
             projectId: prefix,
             status: "Running",
-            assignedRunnerId: runnerA);
+            assignedWorkerId: runnerA);
         await InsertRowAsync(
             $"{prefix}-ready-A",
             projectId: prefix,
             status: "Ready",
-            assignedRunnerId: runnerA);
+            assignedWorkerId: runnerA);
         await InsertRowAsync(
             $"{prefix}-running-B",
             projectId: prefix,
             status: "Running",
-            assignedRunnerId: runnerB);
+            assignedWorkerId: runnerB);
 
         using var scope = _fixture.Services.CreateScope();
         var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
@@ -286,7 +286,7 @@ public class WorkflowRunQuerierSchedulingSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task EmptyRunnerId_ReturnsEmptyResults()
+    public async Task EmptyWorkerId_ReturnsEmptyResults()
     {
         using var scope = _fixture.Services.CreateScope();
         var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
@@ -329,7 +329,7 @@ public class WorkflowRunQuerierSchedulingSpecs
             .SingleOrDefault(i => i.GetDatabaseName() == "IX_WorkflowRuns_Status");
         Assert.NotNull(index);
         Assert.Equal(
-            new[] { "Status", "AssignedRunnerId" },
+            new[] { "Status", "AssignedWorkerId" },
             index!.Properties.Select(p => p.Name).ToArray());
     }
 
@@ -369,7 +369,7 @@ public class WorkflowRunQuerierSchedulingSpecs
                 id,
                 projectId: prefix,
                 status: status.ToString(),
-                assignedRunnerId: status == WorkflowRunStatus.Ready ? $"{prefix}-{suffix}-runner" : null,
+                assignedWorkerId: status == WorkflowRunStatus.Ready ? $"{prefix}-{suffix}-runner" : null,
                 stateOverride: status == WorkflowRunStatus.Pending
                     ? BuildPendingJson(id, prefix)
                     : null);
@@ -395,10 +395,10 @@ public class WorkflowRunQuerierSchedulingSpecs
         string workflowRunId,
         string projectId,
         string status,
-        string? assignedRunnerId,
+        string? assignedWorkerId,
         string? stateOverride = null)
     {
-        var state = stateOverride ?? BuildStatusJson(workflowRunId, projectId, status, assignedRunnerId);
+        var state = stateOverride ?? BuildStatusJson(workflowRunId, projectId, status, assignedWorkerId);
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         db.WorkflowRuns.Add(new WorkflowRunRow
@@ -410,13 +410,13 @@ public class WorkflowRunQuerierSchedulingSpecs
     }
 
     private static string BuildPendingJson(string id, string projectId) =>
-        BuildStatusJson(id, projectId, "Pending", assignedRunnerId: null);
+        BuildStatusJson(id, projectId, "Pending", assignedWorkerId: null);
 
     private static string BuildStatusJson(
         string id,
         string projectId,
         string status,
-        string? assignedRunnerId)
+        string? assignedWorkerId)
     {
         var metadata = new WorkflowRunMetadata(
             Name: null,
@@ -451,9 +451,9 @@ public class WorkflowRunQuerierSchedulingSpecs
         });
         run.CurrentStageId = "build";
         run.Status = Enum.Parse<WorkflowRunStatus>(status);
-        run.Assignment = assignedRunnerId is null
+        run.Assignment = assignedWorkerId is null
             ? null
-            : new WorkflowAssignment(assignedRunnerId, DateTimeOffset.UtcNow);
+            : new WorkflowAssignment(assignedWorkerId, DateTimeOffset.UtcNow);
 
         return JSON.Serialize(run);
     }

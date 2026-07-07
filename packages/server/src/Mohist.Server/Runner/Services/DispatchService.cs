@@ -53,6 +53,7 @@ public sealed class DispatchService : IScopedService
         CancellationToken ct = default)
     {
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
+        var workerId = runnerId;
         // ① poll IS heartbeat — refresh presence on every poll.
         await runner.TouchPresenceAsync();
         // The runner's project scopes claimable discovery so a poll does not
@@ -81,7 +82,7 @@ public sealed class DispatchService : IScopedService
 
         // ② desired: Running runs assigned to me (work in flight I should be
         // holding). Load each to resolve its workId.
-        var desiredRunIds = await _workflowRuns.FindRunningAssignedToAsync(runnerId, ct);
+        var desiredRunIds = await _workflowRuns.FindRunningAssignedToAsync(workerId, ct);
         var desiredKeys = new HashSet<string>(StringComparer.Ordinal);
 
         // ③ repair = desired − reported. A Running work the process does not
@@ -107,10 +108,10 @@ public sealed class DispatchService : IScopedService
 
         // Serve already-assigned Ready runs first (ReadySince ASC for
         // round-robin fairness), then claim new Pending runs.
-        foreach (var workflowRunId in await _workflowRuns.FindAssignedToAsync(runnerId, ct))
+        foreach (var workflowRunId in await _workflowRuns.FindAssignedToAsync(workerId, ct))
         {
             if (spare <= 0) break;
-            var d = await ClaimAndRenderAsync(workflowRunId, runnerId, ct);
+            var d = await ClaimAndRenderAsync(workflowRunId, runnerId, workerId, ct);
             if (d is null) continue;
             dispatches.Add(d);
             spare--;
@@ -127,10 +128,10 @@ public sealed class DispatchService : IScopedService
         {
             if (spare <= 0) break;
             var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
-            var assigned = await workflow.AssignRunnerAsync(runnerId);
+            var assigned = await workflow.AssignWorkerAsync(workerId);
             if (assigned.Status != WorkflowAssignmentStatus.Assigned) continue;
 
-            var d = await ClaimAndRenderAsync(workflowRunId, runnerId, ct);
+            var d = await ClaimAndRenderAsync(workflowRunId, runnerId, workerId, ct);
             if (d is null) continue;
             dispatches.Add(d);
             spare--;
@@ -205,10 +206,10 @@ public sealed class DispatchService : IScopedService
     /// run advanced, no dispatchable work) — the run is retried on later polls.
     /// </summary>
     private async Task<WorkDispatch?> ClaimAndRenderAsync(
-        string workflowRunId, string runnerId, CancellationToken ct)
+        string workflowRunId, string runnerId, string workerId, CancellationToken ct)
     {
         var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
-        var item = await workflow.ClaimNextAsync(runnerId);
+        var item = await workflow.ClaimNextAsync(workerId);
         if (item is null) return null;
 
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);

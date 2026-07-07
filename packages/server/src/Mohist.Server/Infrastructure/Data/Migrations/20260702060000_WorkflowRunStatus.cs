@@ -59,7 +59,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
     ///       <c>COALESCE($, $)</c> on <c>assignment.runnerId</c> /
     ///       <c>claim.runnerId</c> covers pre-rename rows whose binding
     ///       lived under the legacy <c>claim</c> field (the in-process
-    ///       shim in <c>WorkflowRunStore.MigrateAssignmentJson</c> covers
+    ///       shim in <c>WorkflowRunStore.MigrateLegacyWorkflowRunJson</c> covers
     ///       reads, but the SQL must work against the raw state).
     ///       Terminal (<c>completed</c> / <c>failed</c> / <c>stopped</c>) and
     ///       <c>paused</c> / <c>awaitingApproval</c> rows are already

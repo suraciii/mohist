@@ -26,7 +26,7 @@ public sealed class TaskRun
     public TaskRunStatus Status { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
-    public string? RunnerId { get; set; }
+    public string? WorkerId { get; set; }
     public string? WorkId { get; set; }
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
     public TaskArtifactCapture? Artifacts { get; init; }

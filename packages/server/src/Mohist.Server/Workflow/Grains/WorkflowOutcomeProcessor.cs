@@ -21,7 +21,7 @@ internal sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Applies a runner task outcome. Artifact events precede task completion
+    /// Applies a worker task outcome. Artifact events precede task completion
     /// so history records the produced artifact before the producing task closes.
     /// </summary>
     public async Task<IReadOnlyList<WorkflowEvent>> ProcessTaskOutcomeAsync(
@@ -131,7 +131,7 @@ internal sealed class WorkflowOutcomeProcessor
     public async Task<string?> MarkTaskRunningAsync(
         WorkflowRun run,
         string logicalTaskId,
-        string runnerId,
+        string workerId,
         Func<IReadOnlyList<WorkflowEvent>, Task> commitAsync)
     {
         var current = run.CurrentStage();
@@ -142,17 +142,17 @@ internal sealed class WorkflowOutcomeProcessor
         var currentTask = current.Tasks.FirstOrDefault(t => t.Id == logicalTaskId);
         if (currentTask?.Status == TaskRunStatus.Running)
         {
-            _owner.SetLastKnownRunnerId(runnerId);
+            _owner.SetLastKnownWorkerId(workerId);
             return currentTask.WorkId ?? logicalTaskId;
         }
 
         var workId = logicalTaskId;
-        var events = run.StartTask(workId, runnerId);
+        var events = run.StartTask(workId, workerId);
         await _owner.SaveAsyncWithEvents(events);
         foreach (var e in events)
             await _owner.DispatchEvent(e);
 
-        _owner.SetLastKnownRunnerId(runnerId);
+        _owner.SetLastKnownWorkerId(workerId);
         return workId;
     }
 
@@ -213,7 +213,7 @@ internal sealed class WorkflowOutcomeProcessor
     public async Task<string?> ClaimWorkItemAsync(
         WorkflowRun run,
         string workId,
-        string runnerId,
+        string workerId,
         Func<IReadOnlyList<WorkflowEvent>, Task> commitAsync)
     {
         var currentStage = run.CurrentStage();
@@ -223,12 +223,12 @@ internal sealed class WorkflowOutcomeProcessor
         {
             if (task.Status == TaskRunStatus.Running)
             {
-                _owner.SetLastKnownRunnerId(runnerId);
+                _owner.SetLastKnownWorkerId(workerId);
                 return task.WorkId ?? task.Id;
             }
             if (task.Status != TaskRunStatus.Pending) return null;
 
-            var claimedWorkId = await MarkTaskRunningAsync(run, task.Id, runnerId, commitAsync);
+            var claimedWorkId = await MarkTaskRunningAsync(run, task.Id, workerId, commitAsync);
             return claimedWorkId;
         }
 
@@ -236,7 +236,7 @@ internal sealed class WorkflowOutcomeProcessor
         {
             if (!string.IsNullOrWhiteSpace(currentStage.ChecksWorkId))
             {
-                _owner.SetLastKnownRunnerId(runnerId);
+                _owner.SetLastKnownWorkerId(workerId);
                 return currentStage.ChecksWorkId;
             }
 

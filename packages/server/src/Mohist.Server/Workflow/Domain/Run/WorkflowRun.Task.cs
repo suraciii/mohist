@@ -5,11 +5,11 @@ public static partial class WorkflowRunExtensions
 {
     extension(WorkflowRun run)
     {
-        public IReadOnlyList<WorkflowEvent> StartTask(string workId, string runnerId)
+        public IReadOnlyList<WorkflowEvent> StartTask(string workId, string workerId)
         {
             if (run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
                 throw new InvalidOperationException($"WorkflowRun is {run.Status}, start task requires Ready or Running");
-            run.RequireAssignedTo(runnerId);
+            run.RequireAssignedTo(workerId);
 
             var current = run.CurrentStage();
             var task = current.CurrentTask();
@@ -18,9 +18,9 @@ public static partial class WorkflowRunExtensions
             task.Status = TaskRunStatus.Running;
             task.StartedAt = DateTimeOffset.UtcNow;
             task.WorkId = workId;
-            task.RunnerId = runnerId;
+            task.WorkerId = workerId;
             run.Status = WorkflowRunStatus.Running;
-            return [new TaskStarted(current.Id, task.Id, runnerId)];
+            return [new TaskStarted(current.Id, task.Id, workerId)];
         }
 
         public IReadOnlyList<WorkflowEvent> CompleteTask(bool advance = true)

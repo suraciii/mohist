@@ -33,11 +33,11 @@ public class RerunFromStageSpecs
             var def = ThreeStageDefinition().Stages[i];
             run.InitializeStage(def.Tasks, def.Checks);
             if (run.Assignment is null)
-                run.AssignTo("runner-1", DateTimeOffset.UtcNow);
+                run.AssignTo("worker-1", DateTimeOffset.UtcNow);
             if (i == stageIdx)
                 break;
 
-            run.StartTask(stage.Tasks.Single().Id, "runner-1");
+            run.StartTask(stage.Tasks.Single().Id, "worker-1");
             run.CompleteTask();
             run.PassCheck(new CheckResult(stage.Checks.Single().Name, "pass"));
         }
@@ -53,8 +53,8 @@ public class RerunFromStageSpecs
         run.InitializeStage(
             [new("draft", "Draft", "spec/task")],
             [new("plan-ok", "Plan OK", "spec/check")]);
-        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
-        run.StartTask("draft.1", "runner-1");
+        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+        run.StartTask("draft.1", "worker-1");
         run.CompleteTask();
         run.PassCheck(new CheckResult("plan-ok", "pass"));
 
@@ -64,7 +64,7 @@ public class RerunFromStageSpecs
         run.InitializeStage(
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")]);
-        run.StartTask("compile.1", "runner-1");
+        run.StartTask("compile.1", "worker-1");
         run.CompleteTask();
         run.PassCheck(new CheckResult("build-ok", "pass"));
 
@@ -74,7 +74,7 @@ public class RerunFromStageSpecs
         run.InitializeStage(
             [new("merge", "Merge", "spec/task")],
             [new("merge-ok", "Merge OK", "spec/check")]);
-        run.StartTask("merge.1", "runner-1");
+        run.StartTask("merge.1", "worker-1");
         run.CompleteTask();
         run.PassCheck(new CheckResult("merge-ok", "pass"));
 

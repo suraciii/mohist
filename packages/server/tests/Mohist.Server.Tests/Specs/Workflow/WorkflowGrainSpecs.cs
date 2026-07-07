@@ -188,7 +188,7 @@ public abstract class WorkflowGrainSpecs
     protected async Task AssignWorkflowToRunnerAsync(string workflowId, string runnerId)
     {
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await workflow.AssignRunnerAsync(runnerId);
+        await workflow.AssignWorkerAsync(runnerId);
     }
 
     protected async Task AssignActiveWorkForTestAsync(
@@ -205,7 +205,7 @@ public abstract class WorkflowGrainSpecs
             tasks: [new("task-1", title ?? "Task 1", "spec/task")],
             checks: []), projectId);
         await workflow.StartAsync(TestInput(projectId));
-        await workflow.AssignRunnerAsync(runnerId);
+        await workflow.AssignWorkerAsync(runnerId);
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var (assigned, _) = await PollWorkAsync(runnerId);

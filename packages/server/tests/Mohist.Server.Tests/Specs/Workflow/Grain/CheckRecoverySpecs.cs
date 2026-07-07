@@ -39,7 +39,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task DispatchedCheckRunnerIdDerivesFromWorkflowAssignment()
+    public async Task DispatchedCheckWorkerIdDerivesFromWorkflowAssignment()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
         var (taskWork, runnerId) = await PollWorkAnyAsync();
@@ -49,7 +49,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();
 
-        Assert.Equal(runnerId, run.Assignment!.RunnerId);
+        Assert.Equal(runnerId, run.Assignment!.WorkerId);
         Assert.Equal(StageCheckStatus.Running, check.Status);
     }
 

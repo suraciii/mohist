@@ -23,7 +23,7 @@ public class RunnerWorkflowStatusRouterSpecs
         tracker.Register(RunnerId, "conn-1");
 
         var hub = new RecordingRunnerHubContext();
-        var workflow = new StubWorkflowGrain { AssignedRunnerId = RunnerId, Status = WorkflowRunStatus.Completed };
+        var workflow = new StubWorkflowGrain { AssignedWorkerId = RunnerId, Status = WorkflowRunStatus.Completed };
         var grains = new StubGrainFactory(workflow);
 
         var router = new RunnerWorkflowStatusRouter(hub, tracker, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
@@ -45,7 +45,7 @@ public class RunnerWorkflowStatusRouterSpecs
     {
         var tracker = new RunnerConnectionTracker();
         var hub = new RecordingRunnerHubContext();
-        var workflow = new StubWorkflowGrain { AssignedRunnerId = RunnerId, Status = WorkflowRunStatus.Stopped };
+        var workflow = new StubWorkflowGrain { AssignedWorkerId = RunnerId, Status = WorkflowRunStatus.Stopped };
         var grains = new StubGrainFactory(workflow);
 
         var router = new RunnerWorkflowStatusRouter(hub, tracker, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
@@ -63,7 +63,7 @@ public class RunnerWorkflowStatusRouterSpecs
         var tracker = new RunnerConnectionTracker();
         tracker.Register(RunnerId, "conn-1");
         var hub = new RecordingRunnerHubContext();
-        var workflow = new StubWorkflowGrain { AssignedRunnerId = null, Status = WorkflowRunStatus.Completed };
+        var workflow = new StubWorkflowGrain { AssignedWorkerId = null, Status = WorkflowRunStatus.Completed };
         var grains = new StubGrainFactory(workflow);
 
         var router = new RunnerWorkflowStatusRouter(hub, tracker, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
@@ -81,7 +81,7 @@ public class RunnerWorkflowStatusRouterSpecs
         var tracker = new RunnerConnectionTracker();
         tracker.Register(RunnerId, "conn-failed");
         var hub = new RecordingRunnerHubContext();
-        var workflow = new StubWorkflowGrain { AssignedRunnerId = RunnerId, Status = WorkflowRunStatus.Failed };
+        var workflow = new StubWorkflowGrain { AssignedWorkerId = RunnerId, Status = WorkflowRunStatus.Failed };
         var grains = new StubGrainFactory(workflow);
 
         var router = new RunnerWorkflowStatusRouter(hub, tracker, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
@@ -101,7 +101,7 @@ public class RunnerWorkflowStatusRouterSpecs
         var tracker = new RunnerConnectionTracker();
         tracker.Register(RunnerId, "conn-throws");
         var hub = new ThrowingHubContext();
-        var workflow = new StubWorkflowGrain { AssignedRunnerId = RunnerId, Status = WorkflowRunStatus.Completed };
+        var workflow = new StubWorkflowGrain { AssignedWorkerId = RunnerId, Status = WorkflowRunStatus.Completed };
         var grains = new StubGrainFactory(workflow);
 
         var router = new RunnerWorkflowStatusRouter(hub, tracker, grains, NullLogger<RunnerWorkflowStatusRouter>.Instance);
@@ -128,10 +128,10 @@ public class RunnerWorkflowStatusRouterSpecs
 
     private sealed class StubWorkflowGrain : IWorkflowGrain
     {
-        public string? AssignedRunnerId { get; set; }
+        public string? AssignedWorkerId { get; set; }
         public WorkflowRunStatus Status { get; set; }
 
-        public Task<string?> GetAssignedRunnerIdAsync() => Task.FromResult(AssignedRunnerId);
+        public Task<string?> GetAssignedWorkerIdAsync() => Task.FromResult(AssignedWorkerId);
         public Task<string?> GetRunStatusAsync() => Task.FromResult<string?>(Status.ToString());
 
         // Unused members — stubbed because the router only calls these two.
@@ -151,13 +151,13 @@ public class RunnerWorkflowStatusRouterSpecs
             Task.FromResult(new AddTasksBatchResult(string.Empty, string.Empty, 0));
         public Task<bool> HasIncompleteTaskWithUsesAsync(string uses) => Task.FromResult(false);
         public Task<bool> HasIncompleteTaskByIdAsync(string id) => Task.FromResult(false);
-        public Task<Mohist.Server.Workflow.Grains.WorkflowAssignmentResult> AssignRunnerAsync(string runnerId) =>
+        public Task<Mohist.Server.Workflow.Grains.WorkflowAssignmentResult> AssignWorkerAsync(string workerId) =>
             Task.FromResult(new Mohist.Server.Workflow.Grains.WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned));
-        public Task<WorkItem?> ClaimNextAsync(string runnerId) =>
+        public Task<WorkItem?> ClaimNextAsync(string workerId) =>
             Task.FromResult<WorkItem?>(null);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome)
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReportTaskOutcomeAsync(string workerId, string workId, TaskOutcome outcome)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
-        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome)
+        public Task<Mohist.Server.Workflow.Grains.ReportAck> ReportCheckOutcomeAsync(string workerId, string workId, CheckOutcome outcome)
             => Task.FromResult(Mohist.Server.Workflow.Grains.ReportAck.Stale);
         public Task ReleaseStageLocksAsync(string stage, string reason) => Task.CompletedTask;
         public Task<bool> IsStoppedOrTerminalAsync() => Task.FromResult(true);

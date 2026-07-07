@@ -17,7 +17,7 @@ public class WorkflowRunInvariantSpecs
         run.Start();
         run.InitializeStage([new("compile", "Compile", "spec/task")], []);
         if (assign)
-            run.AssignTo("runner-1", DateTimeOffset.UtcNow);
+            run.AssignTo("worker-1", DateTimeOffset.UtcNow);
         return run;
     }
 
@@ -28,7 +28,7 @@ public class WorkflowRunInvariantSpecs
         ]));
         run.Start();
         run.InitializeStage([new("compile", "Compile", "spec/task"), new("test", "Test", "spec/task")], []);
-        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
         return run;
     }
 
@@ -38,31 +38,31 @@ public class WorkflowRunInvariantSpecs
     public void SecondAssignmentRejectedWhenOneExists()
     {
         var run = BuildRun(assign: false);
-        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
-            run.AssignTo("runner-2", DateTimeOffset.UtcNow));
+            run.AssignTo("worker-2", DateTimeOffset.UtcNow));
 
         Assert.Contains("already assigned", ex.Message);
-        Assert.True(run.IsAssignedTo("runner-1"));
-        Assert.Equal("runner-1", run.Assignment!.RunnerId);
-        Assert.False(run.IsAssignedTo("runner-2"));
+        Assert.True(run.IsAssignedTo("worker-1"));
+        Assert.Equal("worker-1", run.Assignment!.WorkerId);
+        Assert.False(run.IsAssignedTo("worker-2"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void RunningTaskRunnerIdEqualsAssignmentRunnerId()
+    public void RunningTaskWorkerIdEqualsAssignmentWorkerId()
     {
         var run = BuildRun(assign: false);
-        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
 
-        run.StartTask("work-1", "runner-1");
+        run.StartTask("work-1", "worker-1");
         var task = run.CurrentStage().Tasks[0];
 
         Assert.Equal(TaskRunStatus.Running, task.Status);
-        Assert.Equal(run.Assignment!.RunnerId, task.RunnerId);
-        Assert.Equal("runner-1", task.RunnerId);
+        Assert.Equal(run.Assignment!.WorkerId, task.WorkerId);
+        Assert.Equal("worker-1", task.WorkerId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -113,7 +113,7 @@ public class WorkflowRunInvariantSpecs
         var run = BuildRun(requiresApproval: true);
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
-        run.StartTask("work-1", "runner-1");
+        run.StartTask("work-1", "worker-1");
         var events = run.CompleteTask();
 
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
@@ -129,7 +129,7 @@ public class WorkflowRunInvariantSpecs
         var run = BuildMultiTaskRun();
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
-        run.StartTask("work-1", "runner-1");
+        run.StartTask("work-1", "worker-1");
         run.CompleteTask();
 
         Assert.NotEqual(WorkflowRunStatus.Paused, run.Status);
@@ -143,7 +143,7 @@ public class WorkflowRunInvariantSpecs
     public void FailTaskIsPolicyReactionNotStatusDerivation()
     {
         var run = BuildRun();
-        run.StartTask("work-1", "runner-1");
+        run.StartTask("work-1", "worker-1");
         var task = run.CurrentStage().Tasks[0];
         Assert.Equal(TaskRunStatus.Running, task.Status);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
@@ -168,7 +168,7 @@ public class WorkflowRunInvariantSpecs
         var run = BuildMultiTaskRun();
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
-        run.StartTask("work-1", "runner-1");
+        run.StartTask("work-1", "worker-1");
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
         Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks[0].Status);
 

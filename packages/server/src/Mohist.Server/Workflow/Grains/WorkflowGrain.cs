@@ -24,10 +24,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
 {
     private WorkflowRun? _run;
     /// <summary>
-    /// Non-authoritative runner cache for recovery/reconciliation. Assignment
+    /// Non-authoritative worker cache for recovery/reconciliation. Assignment
     /// remains the only source of truth for active ownership.
     /// </summary>
-    private string? _lastKnownRunnerId;
+    private string? _lastKnownWorkerId;
     private bool _runDirty;
     private readonly IWorkflowRunStore _runStore;
     private readonly WorkflowProfileManager _profileManager;
@@ -62,7 +62,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     IGrainFactory IWorkflowGrainContext.Grains => GrainFactory;
     WorkflowSessionHealthService IWorkflowGrainContext.SessionHealthGate => _sessionHealth;
     ILogger IWorkflowGrainContext.Log => _log;
-    void IWorkflowGrainContext.SetLastKnownRunnerId(string? runnerId) => _lastKnownRunnerId = runnerId;
+    void IWorkflowGrainContext.SetLastKnownWorkerId(string? workerId) => _lastKnownWorkerId = workerId;
     Task IWorkflowGrainContext.SaveAsync() => SaveRunAsync();
     Task IWorkflowGrainContext.SaveAsyncWithEvents(IReadOnlyList<WorkflowEvent> events) => SaveRunAsync(events);
     Task IWorkflowGrainContext.DispatchEvent(WorkflowEvent e) => On(e);
@@ -84,7 +84,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
             _runDirty = false;
         }
 
-        _lastKnownRunnerId = _run?.Assignment?.RunnerId;
+        _lastKnownWorkerId = _run?.Assignment?.WorkerId;
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -270,35 +270,35 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         return Task.FromResult(_run.HasIncompleteTaskById(id));
     }
 
-    public async Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId)
+    public async Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId)
     {
         if (_run is null) return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "missing");
         if (_run.Status.IsTerminal() || _run.Status is WorkflowRunStatus.Created or WorkflowRunStatus.Paused or WorkflowRunStatus.AwaitingApproval)
             return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
         if (_run.Assignment is not null)
         {
-            if (!string.Equals(_run.Assignment.RunnerId, runnerId, StringComparison.Ordinal))
-                return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, _run.Assignment.RunnerId, "already-assigned");
-            return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, runnerId);
+            if (!string.Equals(_run.Assignment.WorkerId, workerId, StringComparison.Ordinal))
+                return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, _run.Assignment.WorkerId, "already-assigned");
+            return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, workerId);
         }
         if (_run.Status != WorkflowRunStatus.Pending || !_run.HasDispatchableWork())
             return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
         if (_run.Assignment is null)
         {
-            _run.AssignTo(runnerId, DateTimeOffset.UtcNow);
-            _lastKnownRunnerId = runnerId;
+            _run.AssignTo(workerId, DateTimeOffset.UtcNow);
+            _lastKnownWorkerId = workerId;
             await SaveRunAsync();
         }
 
-        return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, runnerId);
+        return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, workerId);
     }
 
-    public async Task<WorkItem?> ClaimNextAsync(string runnerId)
+    public async Task<WorkItem?> ClaimNextAsync(string workerId)
     {
         if (_run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
             return null;
 
-        if (!_run.IsAssignedTo(runnerId))
+        if (!_run.IsAssignedTo(workerId))
             return null;
 
         var work = _run.NextWork();
@@ -317,7 +317,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
             return null;
 
         var resolvedWorkId = await _outcomeProcessor.ClaimWorkItemAsync(
-            _run!, workId, runnerId, events => CommitAsync(events));
+            _run!, workId, workerId, events => CommitAsync(events));
 
         if (resolvedWorkId is null)
             return null;
@@ -359,13 +359,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         return new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count);
     }
 
-    public async Task<ReportAck> ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome)
+    public async Task<ReportAck> ReportTaskOutcomeAsync(string workerId, string workId, TaskOutcome outcome)
     {
         // Stale is still an ack; late or duplicate reports are normal under
         // at-least-once delivery. See design/workflow/scheduling.md Report.
-        if (_run is null || !_run.IsAssignedTo(runnerId)) return ReportAck.Stale;
+        if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
         var stage = _run.CurrentStage();
-        var activeTask = stage.FindRunningTaskByWork(workId, runnerId);
+        var activeTask = stage.FindRunningTaskByWork(workId, workerId);
         if (activeTask is null)
             return ReportAck.Stale;
 
@@ -378,9 +378,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         return ReportAck.Accepted;
     }
 
-    public async Task<ReportAck> ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome)
+    public async Task<ReportAck> ReportCheckOutcomeAsync(string workerId, string workId, CheckOutcome outcome)
     {
-        if (_run is null || !_run.IsAssignedTo(runnerId)) return ReportAck.Stale;
+        if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
         var currentStage = _run.CurrentStage();
         if (currentStage.ChecksWorkId is null || !string.Equals(currentStage.ChecksWorkId, workId, StringComparison.Ordinal))
             return ReportAck.Stale;
@@ -412,9 +412,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         return Task.FromResult(_run.IsTerminal());
     }
 
-    public Task<string?> GetAssignedRunnerIdAsync()
+    public Task<string?> GetAssignedWorkerIdAsync()
     {
-        return Task.FromResult(_run?.Assignment?.RunnerId ?? _lastKnownRunnerId);
+        return Task.FromResult(_run?.Assignment?.WorkerId ?? _lastKnownWorkerId);
     }
 
     public Task<string?> GetCurrentWorkIdAsync()

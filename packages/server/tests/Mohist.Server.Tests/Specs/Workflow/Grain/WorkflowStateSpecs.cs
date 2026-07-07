@@ -174,11 +174,11 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var (task, r1) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.", task.WorkId);
 
-        var duplicateAssignment = await workflow.AssignRunnerAsync("different-runner");
+        var duplicateAssignment = await workflow.AssignWorkerAsync("different-runner");
         Assert.Equal(WorkflowAssignmentStatus.Rejected, duplicateAssignment.Status);
         Assert.Equal("already-assigned", duplicateAssignment.Reason);
 
-        var assignedRunner = await workflow.GetAssignedRunnerIdAsync();
+        var assignedRunner = await workflow.GetAssignedWorkerIdAsync();
         Assert.Equal(r1, assignedRunner);
     }
 
@@ -192,13 +192,13 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var (work, ownerRunnerId) = await PollWorkAnyAsync();
         var otherRunnerId = await RegisterRunnerAsync();
 
-        var firstAttempt = await workflow.AssignRunnerAsync(otherRunnerId);
-        var secondAttempt = await workflow.AssignRunnerAsync(otherRunnerId);
+        var firstAttempt = await workflow.AssignWorkerAsync(otherRunnerId);
+        var secondAttempt = await workflow.AssignWorkerAsync(otherRunnerId);
         Assert.Equal(WorkflowAssignmentStatus.Rejected, firstAttempt.Status);
         Assert.Equal("already-assigned", firstAttempt.Reason);
         Assert.Equal(WorkflowAssignmentStatus.Rejected, secondAttempt.Status);
         Assert.Equal("already-assigned", secondAttempt.Reason);
-        Assert.Equal(ownerRunnerId, await workflow.GetAssignedRunnerIdAsync());
+        Assert.Equal(ownerRunnerId, await workflow.GetAssignedWorkerIdAsync());
         Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
 
     }
@@ -212,11 +212,11 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
         var (firstWork, runnerId) = await PollWorkAnyAsync();
 
-        var firstAttempt = await workflow.AssignRunnerAsync(runnerId);
-        var secondAttempt = await workflow.AssignRunnerAsync(runnerId);
+        var firstAttempt = await workflow.AssignWorkerAsync(runnerId);
+        var secondAttempt = await workflow.AssignWorkerAsync(runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, firstAttempt.Status);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, secondAttempt.Status);
-        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
+        Assert.Equal(runnerId, await workflow.GetAssignedWorkerIdAsync());
         Assert.Equal(firstWork.WorkId, await workflow.GetCurrentWorkIdAsync());
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -263,7 +263,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
         Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
-        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
+        Assert.Equal(runnerId, await workflow.GetAssignedWorkerIdAsync());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -280,7 +280,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         await AssignWorkflowToRunnerAsync(_workflowId!, runnerId);
         await workflow.StopAsync("test-stop");
 
-        var request = await workflow.AssignRunnerAsync(runnerId);
+        var request = await workflow.AssignWorkerAsync(runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Rejected, request.Status);
         Assert.Equal("not-runnable", request.Reason);
 
@@ -312,7 +312,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var runAfterClaim = await LoadRunAsync(_workflowId!);
         var claimedTask = runAfterClaim.Stages.Single().Tasks.Single();
         Assert.Equal(TaskRunStatus.Running, claimedTask.Status);
-        Assert.Equal(runnerId, claimedTask.RunnerId);
+        Assert.Equal(runnerId, claimedTask.WorkerId);
         Assert.Equal(claimed.Id, claimedTask.WorkId);
     }
 

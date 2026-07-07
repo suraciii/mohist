@@ -85,7 +85,7 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.Tests.Specs.Workflow.Work
         await SeedWorkflowTemplateAsync(workflowAId, SingleStage(checks: []), projectId);
         await SeedWorkflowTemplateAsync(workflowBId, SingleStage(checks: []), projectId);
         await workflowA.StartAsync(TestInput(projectId));
-        await workflowA.AssignRunnerAsync(runnerId);
+        await workflowA.AssignWorkerAsync(runnerId);
         await workflowB.StartAsync(TestInput(projectId));
 
         var firstDispatch = await runner.PollAsync(Services);

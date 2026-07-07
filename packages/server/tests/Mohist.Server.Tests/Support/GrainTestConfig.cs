@@ -142,11 +142,31 @@ public static class GrainTestConfig
         {
         }
 
+        try
+        {
+            db.Database.ExecuteSqlRaw("""
+                ALTER TABLE "WorkflowRuns"
+                ADD COLUMN "AssignedWorkerId" TEXT NULL
+                GENERATED ALWAYS AS (
+                    COALESCE(
+                        json_extract("State", '$.assignment.workerId'),
+                        json_extract("State", '$.assignment.runnerId'),
+                        json_extract("State", '$.claim.runnerId')
+                    )
+                ) VIRTUAL;
+                """);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex) when (
+            ex.Message.Contains("duplicate column name", StringComparison.Ordinal)
+            || ex.Message.Contains("generated column", StringComparison.Ordinal))
+        {
+        }
+
         // The IX_WorkflowRuns_Status index is unconditional and
         // idempotent — CREATE INDEX IF NOT EXISTS skips the second
         // create on a T-004 DB.
         db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS "IX_WorkflowRuns_Status" ON "WorkflowRuns" ("Status", "AssignedRunnerId");
+            CREATE INDEX IF NOT EXISTS "IX_WorkflowRuns_Status" ON "WorkflowRuns" ("Status", "AssignedWorkerId");
             """);
 
         // Epic #44: fairness covering index for FindAssignedToAsync's
@@ -156,7 +176,7 @@ public static class GrainTestConfig
         // pre-created the schema before this index existed.
         db.Database.ExecuteSqlRaw("""
             CREATE INDEX IF NOT EXISTS "IX_WorkflowRuns_Status_ReadySince"
-            ON "WorkflowRuns" ("Status", "AssignedRunnerId", "ReadySince");
+            ON "WorkflowRuns" ("Status", "AssignedWorkerId", "ReadySince");
             """);
     }
 

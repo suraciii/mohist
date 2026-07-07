@@ -15,10 +15,10 @@ public static class WorkItemTypes
 
 /// <summary>
 /// Domain-semantic work item returned by <c>IWorkflowGrain.ClaimNextAsync</c>.
-/// Carries declarations and unrendered templates only; the runner-side
+/// Carries declarations and unrendered templates only; the worker-side
 /// translator turns it into an executable dispatch.
 ///
-/// The shape mirrors the runner TS <c>WorkItem</c> so the runner can
+/// The shape mirrors the execution-plane <c>WorkItem</c> so the worker can
 /// hydrate its in-process type directly from the JSON returned by the
 /// control plane. Polymorphism is encoded as a single sealed record with
 /// a <see cref="WorkType"/> discriminator (task / checks) — Orleans
@@ -55,11 +55,11 @@ public sealed record WorkItem(
 }
 
 /// <summary>
-/// Domain outcome of a task the runner finished. Status is one of
+/// Domain outcome of a task the worker finished. Status is one of
 /// <see cref="OutcomeStatus.Passed"/> / <see cref="OutcomeStatus.Failed"/>.
 /// Timeouts and runner-loss collapses into <see cref="OutcomeStatus.Failed"/>
 /// + <see cref="Detail"/> (e.g. <c>"work-timeout"</c>, <c>"runner-lost"</c>).
-/// <see cref="Artifacts"/> are the bound artifact references the runner
+/// <see cref="Artifacts"/> are the bound artifact references the worker
 /// reported for this task; the grain consumes them to record
 /// <c>WorkflowArtifactRecorded</c> events.
 /// </summary>
@@ -74,7 +74,7 @@ public sealed record TaskOutcome(
 
 /// <summary>
 /// Domain outcome of a checks batch. Each <see cref="CheckResult"/> carries
-/// the canonical name, status, message, and optional output — the runner
+/// the canonical name, status, message, and optional output — the worker
 /// translator converts the raw <c>WorkResult.Output</c> JSON into this
 /// shape before the grain sees it.
 /// </summary>
@@ -90,9 +90,9 @@ public enum OutcomeStatus
 }
 
 /// <summary>
-/// Reference to a bound artifact as reported by the runner-side translator.
+/// Reference to a bound artifact as reported by the worker-side translator.
 /// The grain stores the recorded event without touching the upload pipeline
-/// — uploads were resolved on the runner side via
+/// — uploads were resolved on the worker side via
 /// <c>IWorkflowArtifactBindService</c>.
 /// </summary>
 [GenerateSerializer]

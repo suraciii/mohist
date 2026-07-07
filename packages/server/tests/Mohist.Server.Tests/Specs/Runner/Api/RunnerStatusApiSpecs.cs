@@ -48,7 +48,7 @@ public class RunnerStatusApiSpecs
             {
                 ["projectId"] = projectId,
             })));
-        await workflow.AssignRunnerAsync(runnerId);
+        await workflow.AssignWorkerAsync(runnerId);
 
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.NotNull(await runner.PollAsync(_fixture.Services));

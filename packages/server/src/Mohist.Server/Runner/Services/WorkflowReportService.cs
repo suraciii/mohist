@@ -54,8 +54,9 @@ public sealed class WorkflowReportService : IScopedService
 
         var stage = run.CurrentStage();
         var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        var workerId = runnerId;
 
-        var task = stage.FindRunningTaskByWork(workId, runnerId);
+        var task = stage.FindRunningTaskByWork(workId, workerId);
         if (task is not null)
         {
             var item = WorkItem.Task(
@@ -64,7 +65,7 @@ public sealed class WorkflowReportService : IScopedService
             var outcome = await _translator.TranslateResultAsync(item, result, workflowRunId, run);
             ReportAck ack = outcome switch
             {
-                WorkflowItemTranslator.InboundOutcome.Task t => await workflow.ReportTaskOutcomeAsync(runnerId, workId, t.Value),
+                WorkflowItemTranslator.InboundOutcome.Task t => await workflow.ReportTaskOutcomeAsync(workerId, workId, t.Value),
                 _ => ReportAck.Stale,
             };
             return (ack.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());
@@ -80,7 +81,7 @@ public sealed class WorkflowReportService : IScopedService
             var outcome = await _translator.TranslateResultAsync(item, result, workflowRunId, run);
             ReportAck ack = outcome switch
             {
-                WorkflowItemTranslator.InboundOutcome.Checks c => await workflow.ReportCheckOutcomeAsync(runnerId, workId, c.Value),
+                WorkflowItemTranslator.InboundOutcome.Checks c => await workflow.ReportCheckOutcomeAsync(workerId, workId, c.Value),
                 _ => ReportAck.Stale,
             };
             return (ack.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());

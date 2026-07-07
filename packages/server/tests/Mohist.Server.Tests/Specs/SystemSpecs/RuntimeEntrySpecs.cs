@@ -254,8 +254,8 @@ public class RuntimeEntrySpecs
                 }));
             await workflowAGrain.StartAsync(startInput);
             await workflowBGrain.StartAsync(startInput);
-            await workflowAGrain.AssignRunnerAsync(runnerId);
-            await workflowBGrain.AssignRunnerAsync(runnerId);
+            await workflowAGrain.AssignWorkerAsync(runnerId);
+            await workflowBGrain.AssignWorkerAsync(runnerId);
 
             var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
             var first = await runner.PollAsync(_fixture.Services);
