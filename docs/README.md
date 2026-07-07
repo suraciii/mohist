@@ -6,24 +6,24 @@
 
 ## 板块 1：入门
 
-> 先跑通一个 issue，再理解 Project / Issue / Workflow / Epic 这些名词。读完能回答"这是啥、怎么转起来"。
+> 先跑通一个 issue，再理解 Project / Issue / Workflow / Epic / Agent 这些名词。读完能回答"这是啥、怎么转起来"。
 
 - [快速上手](getting-started.md) —— 从零启动，看一个 issue 走完全流程
-- [核心概念](concepts.md) —— 五个名词，理解了就理解了 Mohist
+- [核心概念](concepts.md) —— 理解 Mohist 的生产线模型
 
 ## 板块 2：工作流
 
-> Mohist 的核心在这。你在快速上手里见过一个 issue 跑完，这里深入它怎么自治地流过每个阶段，以及怎么定制它。
+> Mohist 的核心在这。你在快速上手里见过一个 issue 跑完，这里深入它怎么流过每个阶段、在哪里等待审批，以及怎么定制它。
 
 - [工作流详解](the-workflow.md) —— Draft → Plan → Build → Check → Integrate 每个阶段做什么
 - [Workflow Profile](workflow-profiles.md) —— 自定义阶段、任务、检查、审批策略
 
 ## 板块 3：工作管理
 
-> 日常工作：创建和推进 issue，把多个 issue 组织成 Epic 做产品规划。
+> 日常工作：创建和推进 issue，把多个 issue 组织成 Epic，为生产线持续供料。
 
 - [Issue 管理](issues.md) —— 创建、启动、审批、恢复、关闭
-- [用 Epic 规划](epics.md) —— 把零散 issue 组织成可自动推进的产品里程碑
+- [用 Epic 规划](epics.md) —— 把零散 issue 组织成可自动推进的产品目标
 
 ## 板块 4：观察与操作
 
@@ -34,7 +34,7 @@
 
 ## 板块 5：执行与扩展
 
-> 执行后端怎么配，怎么用外部 agent 探索需求、产出 issue。
+> 执行后端怎么配，怎么用外部 agent 探索需求、产出 ready issue。
 
 - [Runner 指南](runner.md) —— 执行平面怎么跑、怎么调并发
 - [Skill 机制](skills.md) —— 用 OpenCode / Claude Code 探索需求，再交给 Mohist
@@ -50,7 +50,7 @@
 
 > 还没实装、但已对齐需求的产品方案。**这些功能当前不存在**，文档记录的是方向与用户需求，不是可用能力。落地后会搬到上面的板块并去掉 WIP 标记。
 
-- [Agent 事件订阅](agent-subscriptions.md) —— Agent 监听 issue/workflow 事件、按订阅响应提示词自动启动
+- [Agent 事件订阅](agent-subscriptions.md) —— Agent 监听系统事件、按订阅响应提示词自动启动
 
 ## 写作约束
 
@@ -59,6 +59,6 @@
 - **命令自包含**：文档会被 agent 读取并直接执行，所有 shell / CLI 示例必须能独立复制运行，不依赖"把上面那个替换一下"。
 - **改前先核对差距**：动手修改任何事实陈述前，先看文内「实装差距」小节是否已标注该处未对齐——避免把 spec 改回现状。
 - **WIP 产品方案**：尚未对齐需求、还在探索方向的产品方案收录在「板块 7」，用 frontmatter `status: wip-not-implemented` 标注，用「将支持 / 计划 / （开放）」等表述。需求对齐、spec 定稿后搬到对应板块，移除 WIP 标记。
-- **术语一致**：Project / Issue / Workflow / Epic / Skill 等术语在各篇保持一致。
+- **术语一致**：Project / Issue / Workflow / Epic / Agent / Skill 等术语在各篇保持一致。
 
 发现过时描述欢迎提 issue。

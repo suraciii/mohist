@@ -1,6 +1,6 @@
 # 用 Epic 规划
 
-Epic 是把零散 issue 组织成产品里程碑的工具，也是驱动 issue 按目标自动推进的规划单位。如果你只是被动响应 issue 流，你做的不是产品 owner，是消防员。
+Epic 是把零散 issue 组织成产品目标的工具，也是给生产线持续供料的单位。它决定哪些 issue 属于同一个目标，以及当前哪个 issue 可以交给 workflow 推进。
 
 ## 什么时候用 Epic
 
@@ -9,6 +9,7 @@ Epic 是把零散 issue 组织成产品里程碑的工具，也是驱动 issue �
 - 一个产品目标需要 3+ 个 issue 才能完成（如"加上完整登录系统"）
 - 你想做 roadmap 规划，知道下个月做哪几件事
 - 想看一个目标的整体进度，而不是只看单个 issue
+- 想让一个目标下的 ready issue 自动接续推进
 
 **不用**：
 
@@ -201,6 +202,8 @@ curl -X POST http://localhost:3456/api/projects/<project>/epics/<epic-id>/resume
 ### 自动推进与 running-but-idle
 
 `running` 的 Epic 会在当前 in-progress linked issue 到达终态（`done` / `cancelled`）后，**自动推进到下一个 startable issue**。`idle` 和 `paused` 状态的 Epic **不会自动推进**。
+
+这不是批量启动。Epic 每次把当前可推进的 issue 交给 workflow，避免一个目标下的工作全靠 owner 手动接力。
 
 当一个 `running` 的 Epic 仍有 open linked issue、但没有可推进的 next startable issue 时，它处于 **running-but-idle** 的可观察情况。此时 Epic 仍然是 `running` 状态（**不是第六个状态**），`progress.nextIssueReason` 字段会解释当前为什么没有推进（例如正在等待某个 in-progress issue 完成、下一个 issue 被 blocked 或依赖未就绪）。
 

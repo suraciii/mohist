@@ -9,7 +9,7 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 | **看板（Home）** | 默认页。所有 issue 按状态分列 |
 | **Issue 详情** | 单个 issue 的全部信息和操作 |
 | **Issue 改动文件** | 看一个 issue 改了哪些文件、diff |
-| **Coder Session** | AI 干活时的对话回放 |
+| **Coder Session** | Agent 执行时的对话回放 |
 | **Epics** | Epic 列表和详情 |
 | **Activity** | 实时活动流 |
 | **Logs** | 系统日志 |
@@ -38,7 +38,7 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 - Status pill（blocked / approval / running / waiting / drift）
 - Workflow stage pill（Plan / Build / Check / Integrate）
 - Health pill（active / paused / interrupted 等）
-- Running indicator（脉冲蓝点，表示 AI 正在工作）
+- Running indicator（脉冲蓝点，表示 Agent 正在工作）
 
 ### 筛选和排序
 
@@ -102,8 +102,8 @@ Web UI 是日常使用 Mohist 的主要入口。访问 `http://localhost:3456`�
 | 状态 | 可见按钮 | 含义 |
 |---|---|---|
 | Backlog | Start | 启动 workflow |
-| Running | Running indicator + Force Stop | AI 在干活，可强停 |
-| Awaiting approval | Approve / Reject | 你审批 |
+| Running | Running indicator + Force Stop | Agent 正在执行，可强停 |
+| Awaiting approval | Approve / Reject | 审批 |
 | Blocked | Retry / Resume / Rerun / Stop | 看错误原因选 |
 | Interrupted | Resume | 进程崩了，继续 |
 | Done | Close / Archive | 终态处理 |
@@ -118,11 +118,11 @@ URL: `/issues/<number>/files`
 
 URL: `/sessions/<session-id>`
 
-AI 在执行 task 时的对话回放。可以：
+Agent 在执行 task 时的对话回放。可以：
 
-- 看 AI 的思考过程
+- 看 Agent 的执行过程
 - 看每个工具调用（读文件、写文件、跑命令）
-- 调试为什么 AI 做了某个奇怪的决定
+- 调试为什么 Agent 做了某个奇怪的决定
 
 调试 plan/build 诡异行为时必看。
 

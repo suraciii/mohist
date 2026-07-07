@@ -1,6 +1,6 @@
 # Skill 机制
 
-Mohist 不内置对话式探索。需求挖掘、产品思考这类**需要实时互动**的工作，由外部 agent 通过 Skill 完成。
+Mohist 不内置对话式探索。需求挖掘、产品思考这类**需要实时互动**的工作，由外部 agent 通过 Skill 完成。探索的结果应当是可进入 workflow 的 ready issue。
 
 ## 为什么探索在外部
 
@@ -16,9 +16,9 @@ Mohist 不内置对话式探索。需求挖掘、产品思考这类**需要实�
 你 + 外部 agent（OpenCode/Claude Code/Hermes 等）
   ↓ 探索（用 mohist-explore skill）
   ↓ 整理出结构化需求
-结构化 issue
+ready issue
   ↓ 进入 Mohist workflow
-Mohist runtime（自治执行）
+Mohist runtime（workflow 执行）
 ```
 
 ## Mohist 分发的 Skill
@@ -42,9 +42,9 @@ Mohist runtime（自治执行）
 - 从用户视角思考（用户价值、用户旅程）
 - 区分"能跑"和"好用"
 - 发现功能缺陷、体验问题、设计机会
-- 把探索结论整理成结构化 issue body
+- 把探索结论整理成可进入 workflow 的 issue body
 
-适用场景：你有一个模糊的产品想法，想理清楚再交给 Mohist 执行。
+适用场景：你有一个模糊的产品想法，想理清楚边界和验收条件，再交给 Mohist 执行。
 
 ## 安装 Skill 到外部 Agent
 
@@ -124,11 +124,11 @@ mo skills get mohist-explore
    mo issue start <new-number>
    ```
 
-   workflow 接管，开始自治执行。
+   workflow 接管，开始执行。
 
 ## 不想用外部 agent 怎么办
 
-你也可以直接用 Web UI 或 CLI 创建 issue。Skill 只是让"探索 → 创建"更顺滑，不是强制路径。
+你也可以直接用 Web UI 或 CLI 创建 issue。Skill 只是让"探索 → ready issue"更顺滑，不是强制路径。
 
 但**强烈建议**写 issue body 时参考 explore skill 的结构（Background/Goal/Non-goals/Acceptance）。这个结构直接决定 plan 质量。
 

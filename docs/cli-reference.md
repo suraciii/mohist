@@ -44,7 +44,7 @@
 mo project      项目
 mo repo         仓库
 mo issue        工作项
-mo epic         产品里程碑
+mo epic         产品目标
 mo workflow     工作流执行（WorkflowRun）
 mo agent        智能体
 mo label        标签
@@ -69,8 +69,8 @@ mo info         CLI 本地诊断（受控例外：跨资源只读，不归任一
 
 | 命令 | 作用 |
 |---|---|
-| `mo workflow approve <runId>` | 通过审批门 |
-| `mo workflow reject <runId> --message <理由>` | 在审批门打回（理由必需） |
+| `mo workflow approve <runId>` | 审批通过 |
+| `mo workflow reject <runId> --message <理由>` | 审批打回（理由必需） |
 | `mo workflow retry <runId>` | 失败后原地重试当前阶段 |
 | `mo workflow rerun <runId>` | 从头重跑 |
 | `mo workflow rerun <runId> --from-stage <阶段>` | 从指定阶段重跑（变体用 flag，不另造 `rerun-from-stage` 命令） |
@@ -198,7 +198,7 @@ mo issue rerun <number> --from-stage <stage>
 
 Issue 的工作流快捷方式（approve/retry/rerun/...）是对应 `mo workflow` 命令的人类便利别名，行为一致。
 
-## Epic（产品里程碑）
+## Epic（产品目标）
 
 ```
 mo epic create <title> [options]

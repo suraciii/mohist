@@ -50,7 +50,7 @@ npm run dev:web
 
 > 生产或长跑场景请参考 [Self-host 部署](self-host.md)，不用三个终端。
 
-## 4. 配置 AI 模型
+## 4. 配置 coder agent 模型
 
 Mohist 通过 opencode 调用 LLM。你需要确保 opencode 能正常工作：
 
@@ -104,7 +104,7 @@ mo issue start 1
 
 这时 Mohist 会：
 1. 创建 worktree（`mo/issue-1` 分支）
-2. 进入 **Plan** 阶段，AI 开始分析需求、产出 proposal/design/specs/tasks
+2. 进入 **Plan** 阶段，Agent 开始分析需求、产出 proposal/design/specs/tasks
 
 ## 8. 等待 Plan 完成
 
@@ -114,19 +114,19 @@ Plan 阶段通常 5-20 分钟（取决于 issue 复杂度和模型速度）。�
 - `mo issue logs 1` 看详细日志
 - `mo issue show 1` 看当前状态
 
-Plan 完成后，issue 会停在 **awaiting approval** 状态——等你点头才继续。
+Plan 完成后，issue 会停在 **awaiting approval** 状态，表示 workflow 正在等待审批决策。
 
 ## 9. 审批 Plan
 
 进入 issue 详情页，看 `LatestArtifactsPanel` 里的产物：
 
-- `proposal.md` — AI 对这个需求的理解
+- `proposal.md` — Agent 对这个需求的理解
 - `design.md` — 设计决策
 - `specs/` — 规格变更
 - `tasks.json` — 接下来 Build 阶段会执行的步骤
-- `self-review.md` — AI 自己的 review
+- `self-review.md` — Agent 自己的 review
 
-读一遍，觉得合理就点 **Approve**。觉得有问题就 **Reject**（AI 会重新 plan）。
+读一遍，觉得合理就点 **Approve**。觉得有问题就 **Reject**（Agent 会重新 plan）。这一步处理的是 workflow 的审批点；动作可以来自 Web UI、CLI、Agent 或其它自动化。
 
 ```bash
 mo issue approve 1     # 批准
@@ -135,10 +135,10 @@ mo issue reject 1      # 打回
 
 ## 10. 观察 Build / Check / Integrate
 
-审批后 workflow 自动推进：
+审批通过后 workflow 自动推进：
 
-- **Build**：AI 按 tasks.json 写代码、跑测试
-- **Check**：AI review 自己的产出，可能再次 hold 等你审批
+- **Build**：Agent 按 tasks.json 写代码、跑测试
+- **Check**：Agent review 自己的产出，可能再次等待审批
 - **Integrate**：把 `mo/issue-1` 分支合并回 base branch
 
 任何阶段失败，issue 会进入 blocked 状态。看 [故障恢复](troubleshooting.md) 怎么处理。

@@ -1,18 +1,19 @@
 ---
-purpose: "Agent 事件订阅：Agent 从「手动启动」升级为「监听 CloudEvent、按订阅响应提示词自动启动」。订阅 = 过滤表达式 + 优先级 + 响应提示词；事件级按优先级选一个 Agent 响应；Agent 自拉上下文。本文是技术方案；产品需求见 docs/agent-subscriptions.md。"
+purpose: "Agent 事件订阅：Agent 从「手动启动」升级为「监听 CloudEvent、按订阅响应提示词自动启动」。Agent 是 owner 的代理人，走与人相同的动作通道。订阅 = 过滤表达式 + 响应提示词 + 响应方式；互斥场景按优先级仲裁，非互斥场景允许 fan-out；Agent 自拉上下文。本文是技术方案；产品需求见 docs/agent-subscriptions.md。"
 style:
   - "只记录已收敛的决策与理由；开放问题单列，标「(开放)」，不作决策。"
   - "中文为主，表格 + 少量代码/ASCII。"
 include:
   - "领域边界：订阅归属 Agent 上下文，消费 CloudEvent PL，不构成反向模型依赖。"
   - "上下文获取：handler 只读信封自带字段，Agent 用 mo workflow get 自拉关联 issue；零反查、零盖印。"
-  - "订阅模型：Filter 表达式（基于 CloudEvent 属性）+ 优先级 + 响应提示词。"
-  - "事件级仲裁：按优先级选一个 Agent 响应（兜底/接管）；可见性而非强制。"
+  - "订阅模型：Filter 表达式（基于 CloudEvent 属性）+ 响应提示词 + 响应方式。"
+  - "响应协调：互斥场景按优先级选一个 Agent 响应（兜底/接管）；非互斥场景允许 fan-out；可见性而非强制配置校验。"
+  - "动作边界：Agent 是代理人，能做的动作也必须能由人做；Agent 不获得专属审批通道。"
   - "组件清单与落地顺序。"
 exclude:
   - "grain 内部实现、EF mapping、SQL 细节。"
   - "响应提示词的内容设计（用户自配，见产品文档）。"
-status: "WIP——技术方案。核心边界已收敛：①订阅归属 Agent 上下文、消费 CloudEvent PL；②订阅 = 过滤表达式 + 优先级 + 响应提示词；③事件级按 Agent 优先级仲裁，可见性而非强制冲突检测；④handler 只读信封、Agent 用 mo workflow get 自拉上下文；⑤前置依赖 mo workflow 命令套件已交付（issue #381）。开放项见末尾。"
+status: "WIP——技术方案。核心边界已收敛：①订阅归属 Agent 上下文、消费 CloudEvent PL；②订阅 = 过滤表达式 + 响应提示词 + 响应方式；③互斥响应按 Agent 优先级仲裁，非互斥响应允许 fan-out，可见性而非强制配置校验；④handler 只读信封、Agent 用 mo workflow get 自拉上下文；⑤前置依赖 mo workflow 命令套件已交付（issue #381）。开放项见末尾。"
 ---
 
 # Agent 事件订阅（技术方案）
@@ -21,10 +22,11 @@ status: "WIP——技术方案。核心边界已收敛：①订阅归属 Agent �
 
 ## 动机与约束
 
-产品要 Agent 能监听事件、按订阅自动响应。技术上要同时满足两条硬约束：
+产品要 Agent 能监听系统事件、按订阅自动响应。代理审批只是其中一个场景。技术上要同时满足三条硬约束：
 
 - **Agent 是叶子域**（[`domain-analysis.md`](domain-analysis.md):98,105）：Agent 不反向依赖 Workflow / Issue 的领域模型。
 - **CloudEvent 是 Published Language**（[`eventbus-v2.md`](eventbus-v2.md):110,166）：`[Subscription]` + `ICloudEventHandler` 是基础设施投递落点，不是业务域间的模型依赖。
+- **Agent 是代理人**：Agent 能做的动作也必须能由人做。Agent 审批走 `mo workflow approve` / `mo issue approve`，不引入专属裁判通道。
 
 ## 领域边界（镜头 3）
 
@@ -61,13 +63,14 @@ Agent 启动，按提示词执行：
 
 ## 订阅模型（核心）
 
-一条 `AgentSubscription` 声明三件事 + 元数据：
+一条 `AgentSubscription` 声明几件事 + 元数据：
 
 ```
 AgentSubscription（Agent 域新聚合，1 Agent : N 订阅）
   Id, ProjectId, AgentId, Name,
   Filter,                     // 过滤表达式，见下
   ResponsePrompt (string),    // 带 {{workflow_run_id}} {{stage}} {{event_type}} 占位符
+  CoordinationMode,            // fanout | exclusive（命名待定）
   Priority (int?),            // 可选；仲裁用，null 取默认
   Status (active|archived),
   timestamps
@@ -91,26 +94,30 @@ AgentSubscription（Agent 域新聚合，1 Agent : N 订阅）
 
 > **(开放)** 表达式的精确语法：是照搬 CloudEvents Subscriptions API 的 filter dialect（attribute-based，更通用），还是用现有 `|`+`.*` 扩展成简易多属性形式。后者实现轻、够用；前者更标准、更可移植。倾向先用简易扩展，待需求驱动再升级。匹配只在 CloudEvent 信封属性上发生，**零业务域查询**——这是守边界的硬约束。
 
-### Priority + 事件级仲裁（兜底/接管）
+### CoordinationMode + Priority（fan-out / 兜底 / 接管）
 
-**产品约束**：一个事件只能被一个 Agent 响应。
+**产品约束**：不是所有事件都只能由一个 Agent 响应。
 
-**机制**：每个 CloudEvent 实例到来时，按 Agent 仲裁，不是按订阅仲裁：
+- 非互斥事件可以 fan-out：所有命中的 active 订阅都可触发。例：issue 完成后同时生成 release note、统计交付成本、通知 owner。
+- 互斥事件需要仲裁：同一个审批点只应产生一个最终 approve / reject 决策。
+
+**互斥机制**：每个 CloudEvent 实例到来时，按 Agent 仲裁，不是按订阅仲裁：
 
 ```
 事件 E 到来
   ↓ 找出所有 Filter 命中 E 的 active 订阅
+  ↓ 过滤出互斥响应订阅
   ↓ 按 Agent 归组：{AgentX: [sub1, sub2], AgentY: [sub3]}
   ↓ Agent 组之间按「组内最高订阅优先级」排序，最高优先级的 Agent 组赢
   ↓ 赢的 Agent 组内，按订阅优先级选一条订阅触发
   ↓ 触发：渲染该订阅的 ResponsePrompt → 调 IAgentLauncher → 给 session 打可见性标签
 ```
 
-**为什么按 Agent 仲裁而非按订阅仲裁**：用户给同一 Agent 配多条订阅（不同提示词应对不同子场景）是正常配置，不该因同 Agent 内部命中多条被当成"多个 Agent 响应"而违反约束。同 Agent 内多条命中，组内按订阅优先级选一条。
+**为什么互斥时按 Agent 仲裁而非按订阅仲裁**：用户给同一 Agent 配多条订阅（不同提示词应对不同子场景）是正常配置，不该因同 Agent 内部命中多条被当成"多个 Agent 响应"而违反约束。同 Agent 内多条命中，组内按订阅优先级选一条。
 
 **同优先级**：不报错、不拒绝、不阻塞。确定性选一个（实现细节，如订阅 id 字典序）。**核心防错机制是可见性，不是强制**（见下）。
 
-> 注：此模型支持产品定义的「兜底 + 接管」模式——全局兜底订阅低优先级，特定 issue 订阅高优先级，事件来了高优先级 Agent 接管、低优先级不响应。
+> 注：互斥模式支持产品定义的「兜底 + 接管」模式——全局兜底订阅低优先级，特定 issue 订阅高优先级，事件来了高优先级 Agent 接管、低优先级不响应。
 
 ### 可见性（取代严格冲突检测）
 
@@ -122,7 +129,7 @@ AgentSubscription（Agent 域新聚合，1 Agent : N 订阅）
 - `mohist.io/trigger/subscription-id` —— 命中的订阅 id
 
 这样：
-- **从事件查 Agent**：某次审批事件 → 被哪个 Agent、哪条订阅响应。
+- **从事件查 Agent**：某次事件 → 被哪个 Agent、哪条订阅响应。
 - **从 Agent job 查事件**：这个 Agent 这次执行 → 响应哪个事件、哪条订阅触发。
 
 兜底/接管配错了（你以为 B 接管结果 A 跑了），从可见性发现，去调优先级。**配置正确性用户负责，可观测性系统负责。**
@@ -145,7 +152,7 @@ AgentSubscription（Agent 域新聚合，1 Agent : N 订阅）
 收到 CloudEvent
   ↓ 查 AgentSubscriptionStore：列出本 project 的 active 订阅
   ↓ Filter 匹配：用 CloudEvent 信封属性（type/source/subject）逐条对照订阅 Filter
-  ↓ 按 Agent 归组 + 优先级仲裁（见上），选出一个 (Agent, Subscription)
+  ↓ 按 CoordinationMode 分流：fanout 订阅全部触发；exclusive 订阅按 Agent 归组 + 优先级仲裁
   ↓ 渲染该订阅 ResponsePrompt（填 {{workflow_run_id}} {{stage}} {{event_type}}）
   ↓ 调 IAgentLauncher.LaunchAsync(agentId, renderedPrompt, contextRef, triggerLabels)
   ↓ triggerLabels 含 event-id + subscription-id，写进 session metadata
@@ -170,8 +177,9 @@ handler 零业务域 `using`，纯 PL 消费。骨架照搬 `InboxProjectionHand
 | # | 问题 | 倾向 | 理由 |
 |---|---|---|---|
 | 1 | Filter 精确语法 | 简易多属性扩展优先 | 实现轻、够用；标准 dialect 待需求驱动 |
-| 2 | 审批可追溯 | MVP 不做，记为已知缺口 | 改 ApprovalStatus 牵动核心域；先靠 prompt 让 Agent 自述理由 + session 可见性 |
+| 2 | 动作可追溯 | MVP 不改 Workflow 裁判模型，记为审计缺口 | Workflow 不关心审批者是谁；审计视图需要从 session / API 调用侧追到发起者 |
 | 3 | 配置入口 | Web UI 挂 Agent 详情页 Subscriptions 分区；CLI `mo agent subscribe` | 与 Agent CRUD 同址 |
+| 4 | CoordinationMode 默认值 | 待定 | 审批类事件应 exclusive；通知、总结类事件可 fanout |
 
 ## 不做（守边界 / YAGNI）
 
@@ -179,7 +187,7 @@ handler 零业务域 `using`，纯 PL 消费。骨架照搬 `InboxProjectionHand
 - **不做** 严格冲突检测/拒绝——可见性取代强制（见上）。
 - **不做** per-订阅重试 / outbox——复用事件总线现有投递 + AgentSession 失败可见。
 - **不碰** workflow profile 的 `requiresApproval`——那是引擎自推进，与本功能正交。
-- **不做** per-Agent 并发闸门（`MaxConcurrentRuns` 强制）——事件级按优先级单 Agent 响应已避免扇出打爆；该字段后续按需评估。
+- **不做** per-Agent 并发闸门（`MaxConcurrentRuns` 强制）——先用订阅响应方式和可见性控制范围；该字段后续按需评估。
 
 ## 落地顺序
 
@@ -190,7 +198,7 @@ handler 零业务域 `using`，纯 PL 消费。骨架照搬 `InboxProjectionHand
    ↓ 依赖已满足
 1. IAgentLauncher 重构（纯提取，可独立验证）
 2. Subscription 聚合 + Store + CRUD API
-3. 分发 handler + Filter 匹配 + 优先级仲裁 + 模板渲染（纯信封消费，零业务域依赖）
+3. 分发 handler + Filter 匹配 + 响应方式 + 优先级仲裁 + 模板渲染（纯信封消费，零业务域依赖）
 4. 可见性标签（session metadata trigger keys）+ EventCatalog 补登记 issue.* 事件 + Web/CLI 配置面
 ```
 
