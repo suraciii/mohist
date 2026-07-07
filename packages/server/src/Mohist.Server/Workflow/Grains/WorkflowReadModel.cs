@@ -2,9 +2,6 @@ using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Workflow.Grains;
 
-/// <summary>
-/// Read-side projections over the grain-owned <see cref="WorkflowRun"/>.
-/// </summary>
 internal sealed class WorkflowReadModel
 {
     private readonly IWorkflowGrainContext _owner;

@@ -29,10 +29,6 @@ public static partial class WorkflowRunExtensions
 
             run.Assignment = new WorkflowAssignment(workerId, now);
             run.Status = WorkflowRunStatus.Ready;
-            // Seed the fairness ordering key on the first Ready entry
-            // (assignment). Re-entry via draining/stage-advance overwrites it
-            // through SetStatus in WorkflowRunExtensions. AssignAt doubles as
-            // ReadySince: assignment and first-Ready coincide.
             run.ReadySince ??= now;
         }
 

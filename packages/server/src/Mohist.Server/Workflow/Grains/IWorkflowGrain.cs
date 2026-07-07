@@ -22,25 +22,10 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId);
-    /// <summary>
-    /// The single write that starts work. Picks the run's next pending work,
-    /// acquires the sequential stage lock, marks the work Running with the
-    /// worker identity, and persists — one atomic transition on the
-    /// single-writer grain. Returns the claimed <see cref="WorkItem"/> (with its
-    /// resolved work id), or <c>null</c> when there is no dispatchable work, the
-    /// stage lock is contended, or the run is not Ready/Running/assigned to the
-    /// caller. There is no offer phase: a claim that never reaches the worker
-    /// needs no rollback — the work is Running and unreported, so the next poll
-    /// re-dispatches it.
-    /// </summary>
     Task<WorkItem?> ClaimNextAsync(string workerId);
     Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report);
     Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);
 
-    /// <summary>
-    /// Releases the sequential stage lock owned by this workflow run for a
-    /// stage. Used by bus subscribers and by retry/rerun/stop cleanup paths.
-    /// </summary>
     Task ReleaseStageLocksAsync(string stage, string reason);
     Task<string?> GetRunStatusAsync();
     Task<bool> IsStoppedOrTerminalAsync();
@@ -108,14 +93,9 @@ public enum WorkflowAssignmentStatus
 }
 
 /// <summary>
-/// The ack for an at-least-once report (<c>ReceiveTaskReportAsync</c> /
-/// <c>ReceiveCheckReportAsync</c>). <see cref="Accepted"/> means the owner
-/// consumed the report. <see cref="Stale"/> means the work was already
-/// terminal, not assigned to the caller, or otherwise no longer current — the
-/// result is discarded idempotently. Both are acks: the worker retires the work
-/// from <c>awaitingAck</c> on either (see <c>design/workflow/scheduling.md</c>
-/// §Report). A report for a work the owner does not recognize is Stale, never
-/// an error — late/duplicate reports are the normal case under at-least-once.
+/// Report delivery ack. <see cref="Stale"/> is still a successful ack for
+/// late, duplicate, or no-longer-current work; the worker retires awaitingAck
+/// on both values.
 /// </summary>
 [GenerateSerializer]
 public enum ReportAck
@@ -154,13 +134,6 @@ public sealed record WorkflowActiveWorkView(
     [property: Id(6)] string? IssueId = null,
     [property: Id(7)] int? IssueNumber = null);
 
-/// <summary>
-/// Read-only snapshot of an approval feedback record for API
-/// responses. Wraps the persisted <see cref="ApprovalFeedback"/>
-/// with the workflow run id and issue number so callers can correlate
-/// feedback with the workflow that owns it and the issue that
-/// requested changes.
-/// </summary>
 [GenerateSerializer]
 public sealed record WorkflowFeedbackRecord(
     [property: Id(0)] string Id,
@@ -172,12 +145,6 @@ public sealed record WorkflowFeedbackRecord(
     [property: Id(6)] WorkflowFeedbackResolution? Resolution,
     [property: Id(7)] int? IssueNumber = null);
 
-/// <summary>
-/// Resolution sub-object for the stable, agent-readable feedback
-/// JSON shape. <c>null</c> when the feedback is still open; populated
-/// with the resolution task id, timestamp, and summary when the
-/// apply-feedback task completes successfully.
-/// </summary>
 [GenerateSerializer]
 public sealed record WorkflowFeedbackResolution(
     [property: Id(0)] string? ResolutionTaskId,

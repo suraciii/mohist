@@ -3,9 +3,6 @@ using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Grains;
 
-/// <summary>
-/// Acquires and releases sequential stage locks for the grain-owned run.
-/// </summary>
 internal sealed class WorkflowStageLockCoordinator
 {
     private readonly IWorkflowGrainContext _owner;
@@ -15,10 +12,6 @@ internal sealed class WorkflowStageLockCoordinator
         _owner = owner;
     }
 
-    /// <summary>
-    /// Returns false only when another workflow currently holds the declared
-    /// sequential resource.
-    /// </summary>
     public async Task<bool> AcquireStageLocksIfNeededAsync(string stage)
     {
         var resource = await GetSequentialLockResourceAsync(stage);
@@ -41,10 +34,6 @@ internal sealed class WorkflowStageLockCoordinator
         await ReleaseStageLocksAsync(_owner.RunOrNull.CurrentStageId, reason);
     }
 
-    /// <summary>
-    /// Releases this workflow's lock for the given stage, if that stage uses
-    /// a sequential resource.
-    /// </summary>
     public async Task ReleaseStageLocksAsync(string stage, string reason)
     {
         var resource = await GetSequentialLockResourceAsync(stage);
@@ -55,16 +44,9 @@ internal sealed class WorkflowStageLockCoordinator
 
         var key = WorkflowStageLockKeys.ForProjectResource(projectId, resource);
         var lockGrain = _owner.Grains.GetGrain<IWorkflowStageLockGrain>(key);
-        var result = await lockGrain.ReleaseAsync(new StageLockOwner(_owner.GrainKey, stage));
-
-        // Pull scheduling rediscovers assignable runs from persisted state.
-        _ = result.NextWorkflowRunId;
+        await lockGrain.ReleaseAsync(new StageLockOwner(_owner.GrainKey, stage));
     }
 
-    /// <summary>
-    /// Returns the first sequential resource for a stage, or null when no lock
-    /// is required.
-    /// </summary>
     private async Task<string?> GetSequentialLockResourceAsync(string stage)
     {
         var stageDef = await _owner.ProfileManager.LoadStageSpecsAsync(_owner.GrainKey, stage);

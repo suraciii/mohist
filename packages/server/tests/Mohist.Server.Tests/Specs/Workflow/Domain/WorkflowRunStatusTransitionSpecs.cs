@@ -212,7 +212,6 @@ public class WorkflowRunStatusTransitionSpecs
     [Fact]
     public void Stop_FromAwaitingApproval_ClearsCurrentStageApprovalGate()
     {
-        // spec scenario 1: current stage awaiting approval is cleared on stop.
         var run = BuildAwaitingApprovalRun();
         var current = run.CurrentStage();
         Assert.True(current.IsAwaitingApproval);
@@ -233,7 +232,6 @@ public class WorkflowRunStatusTransitionSpecs
     [Fact]
     public void Stop_FromRunningStage_LeavesApprovalStatusUnchanged()
     {
-        // spec scenario 2: a stage not awaiting approval is unaffected by stop.
         var run = BuildReadyRun();
         run.StartTask("work-1", WorkerId);
         var current = run.CurrentStage();
@@ -269,21 +267,15 @@ public class WorkflowRunStatusTransitionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void ReconcileStoppedApprovalGate_CorrectsPersistedDirtyRun()
+    public void ClearStaleApprovalGate_CorrectsPersistedDirtyRun()
     {
-        // spec scenario 3: a run persisted as Stopped with a dangling
-        // unresolved ApprovalStatus on its current stage is corrected the
-        // next time the domain method runs over the rehydrated state.
-        // Mirrors ReconcileReadyStatusWithInFlightWork_CorrectsReadyToRunning.
         var run = BuildAwaitingApprovalRun();
-        // Simulate the #331-class poisoned persisted state: Stopped with a
-        // current stage still carrying a non-null, unresolved ApprovalStatus.
         run.Status = WorkflowRunStatus.Stopped;
         var current = run.CurrentStage();
         Assert.NotNull(current.ApprovalStatus);
         Assert.True(current.IsAwaitingApproval);
 
-        var changed = run.ReconcileStoppedApprovalGate();
+        var changed = run.ClearStaleApprovalGate();
 
         Assert.True(changed);
         Assert.Equal(WorkflowRunStatus.Stopped, run.Status);
@@ -296,17 +288,14 @@ public class WorkflowRunStatusTransitionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void ReconcileStoppedApprovalGate_IsIdempotentOnAlreadyCleanRun()
+    public void ClearStaleApprovalGate_IsIdempotentOnAlreadyCleanRun()
     {
-        // After the gate is cleared once, subsequent activations must be a
-        // no-op (return false) so the grain rehydration path doesn't write-
-        // amplify across repeated activations.
         var run = BuildAwaitingApprovalRun();
         run.Status = WorkflowRunStatus.Stopped;
         var current = run.CurrentStage();
-        Assert.True(run.ReconcileStoppedApprovalGate());
+        Assert.True(run.ClearStaleApprovalGate());
 
-        var changed = run.ReconcileStoppedApprovalGate();
+        var changed = run.ClearStaleApprovalGate();
 
         Assert.False(changed);
         Assert.Null(current.ApprovalStatus);
@@ -316,21 +305,14 @@ public class WorkflowRunStatusTransitionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void ReconcileStoppedApprovalGate_ClearsGateOnLiveAwaitingApprovalRun()
+    public void ClearStaleApprovalGate_ClearsGateOnLiveAwaitingApprovalRun()
     {
-        // The OnActivateAsync caller scopes invocation to Stopped runs, but
-        // the method itself guards on the residual-gate predicate alone
-        // (not the run status) so it can also serve the Stop() call site,
-        // where the run is not yet Stopped. Verify the guard: on a live run
-        // genuinely awaiting approval, calling the method clears the gate
-        // (matching Stop() behavior). The Stopped-scoping discipline lives
-        // at the OnActivateAsync caller, not the method.
         var run = BuildAwaitingApprovalRun();
         var current = run.CurrentStage();
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
         Assert.True(current.IsAwaitingApproval);
 
-        var changed = run.ReconcileStoppedApprovalGate();
+        var changed = run.ClearStaleApprovalGate();
 
         Assert.True(changed);
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
@@ -351,15 +333,15 @@ public class WorkflowRunStatusTransitionSpecs
     }
 
     // Regression for issue #387: HasInFlightWork must only look at the
-    // current stage. A completed prior stage may carry a residual
+    // current stage. A completed prior stage may carry a stale
     // ChecksWorkId (left behind by a stage that has since advanced); that
-    // residue does not mean work is in flight NOW, and treating it as such
+    // stale id does not mean work is in flight NOW, and treating it as such
     // leaves the run on Running when it should fall to Ready, making it
     // invisible to the worker's Ready/Pending-only dispatch query.
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void HasInFlightWork_IgnoresResidualChecksWorkIdOnCompletedStages()
+    public void HasInFlightWork_IgnoresStaleChecksWorkIdOnCompletedStages()
     {
         var run = WorkflowRun.Create("wr_387", new WorkflowDefinition("spec/wf", [
             new StageDefinition("build",
@@ -387,7 +369,7 @@ public class WorkflowRunStatusTransitionSpecs
         run.Stages[0].ChecksWorkId = "checks-build:leaked";
 
         Assert.False(run.HasInFlightWork(),
-            "residual ChecksWorkId on a completed stage must not count as in-flight work");
+            "stale ChecksWorkId on a completed stage must not count as in-flight work");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

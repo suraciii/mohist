@@ -15,7 +15,7 @@ internal interface IWorkflowGrainContext
     WorkflowSessionHealthService SessionHealthGate { get; }
     ILogger Log { get; }
 
-    void SetLastKnownWorkerId(string? workerId);
+    void CacheAssignedWorkerId(string? workerId);
     Task SaveAsync();
     Task SaveAsyncWithEvents(IReadOnlyList<WorkflowEvent> events);
     Task DispatchEvent(WorkflowEvent e);
