@@ -24,12 +24,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 {
     private WorkflowRun? _run;
     /// <summary>
-    /// Non-authoritative cache of the most recent runner identity, retained for
-    /// recovery/reconciliation when the authoritative <see cref="WorkflowRun.Assignment"/> is absent.
-    /// This is grain infrastructure state, NOT part of the assignment domain model, and does NOT
-    /// represent an active assignment. The authoritative runner identity is always
-    /// <c>_run.Assignment.RunnerId</c>. When no <see cref="WorkflowRun.Assignment"/> exists,
-    /// <see cref="WorkflowRun.IsAssigned"/> remains <c>false</c> regardless of this field's value.
+    /// Non-authoritative runner cache for recovery/reconciliation. Assignment
+    /// remains the only source of truth for active ownership.
     /// </summary>
     private string? _lastKnownRunnerId;
     private bool _runDirty;
@@ -42,96 +38,18 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private readonly WorkflowStageInitializer _stageInitializer;
     private readonly WorkflowOutcomeProcessor _outcomeProcessor;
 
-    /// <summary>
-    /// Internal accessor exposing the in-memory run to grain-composed helpers
-    /// (notably <see cref="WorkflowReadModel"/> and
-    /// <see cref="WorkflowStageLockCoordinator"/>). Exposed as a property
-    /// rather than a field so the helpers can stay grain-internal without
-    /// forcing the field to become <c>internal</c>.
-    /// </summary>
+    // Narrow surface for in-grain helpers. Saves and event dispatch stay on
+    // the grain so ETag reload and event reactions keep one boundary.
     internal WorkflowRun? RunOrNull => _run;
-
-    /// <summary>
-    /// Internal accessor exposing the grain's primary key string to
-    /// grain-composed helpers (notably
-    /// <see cref="WorkflowStageLockCoordinator"/>, which composes lock
-    /// acquire/release requests against the key).
-    /// </summary>
     internal string GrainKey => this.GetPrimaryKeyString();
-
-    /// <summary>
-    /// Internal accessor exposing the grain's <see cref="WorkflowProfileManager"/>
-    /// to grain-composed helpers (notably
-    /// <see cref="WorkflowStageLockCoordinator"/>, which resolves stage
-    /// specs through it).
-    /// </summary>
     internal WorkflowProfileManager ProfileManager => _profileManager;
-
-    /// <summary>
-    /// Internal accessor exposing the inherited <c>GrainFactory</c> to
-    /// grain-composed helpers (notably
-    /// <see cref="WorkflowStageLockCoordinator"/>, which resolves the
-    /// <see cref="IWorkflowStageLockGrain"/> per (project, resource)). The
-    /// Orleans base <c>Grain.GrainFactory</c> is <c>protected</c>, so the
-    /// coordinator cannot read it directly.
-    /// </summary>
     internal IGrainFactory GrainFactoryAccess => GrainFactory;
-
-    /// <summary>
-    /// Internal accessor exposing the grain's <see cref="WorkflowSessionHealthService"/>
-    /// to <see cref="WorkflowOutcomeProcessor"/>, which forwards the
-    /// session-health gate call from <c>MarkTaskRunningAsync</c>.
-    /// </summary>
     internal WorkflowSessionHealthService SessionHealthGate => _sessionHealth;
-
-    /// <summary>
-    /// Internal accessor exposing the grain's <see cref="ILogger"/> to
-    /// <see cref="WorkflowOutcomeProcessor"/>, which logs at the same
-    /// level / category the grain used before the outcome cluster was
-    /// extracted. The processor logs informational lines that were
-    /// previously inline in the grain's outcome methods.
-    /// </summary>
     internal ILogger<WorkflowGrain> Log => _log;
-
-    /// <summary>
-    /// Internal setter for <c>_lastKnownRunnerId</c>. The cache is
-    /// grain infrastructure state (not part of the run aggregate), so the
-    /// outcome processor writes it via this accessor instead of holding
-    /// a reference to the field.
-    /// </summary>
     internal void SetLastKnownRunnerId(string? runnerId) => _lastKnownRunnerId = runnerId;
-
-    /// <summary>
-    /// Internal save accessor used by <see cref="WorkflowOutcomeProcessor"/>.
-    /// Persists the current run without publishing events; preserves the
-    /// ETag conflict → <c>DeactivateOnIdle()</c> reload path.
-    /// </summary>
     internal Task SaveAsync() => SaveRunAsync();
-
-    /// <summary>
-    /// Internal save accessor used by <see cref="WorkflowOutcomeProcessor"/>.
-    /// Persists the current run with the given events (which the store
-    /// also publishes to the bus). Preserves the ETag conflict →
-    /// <c>DeactivateOnIdle()</c> reload path.
-    /// </summary>
     internal Task SaveAsyncWithEvents(IReadOnlyList<WorkflowEvent> events) => SaveRunAsync(events);
-
-    /// <summary>
-    /// Internal event-dispatch accessor used by
-    /// <see cref="WorkflowOutcomeProcessor"/> after
-    /// <see cref="WorkflowRunExtensions.StartTask"/>. Forwards to the
-    /// grain's <c>On()</c> dispatcher so any grain-side reactions
-    /// observe the new event with the same semantics as the pre-extraction
-    /// inline path.
-    /// </summary>
     internal Task DispatchEvent(WorkflowEvent e) => On(e);
-
-    /// <summary>
-    /// Internal accessor exposing the grain's release-current-stage-lock
-    /// path to <see cref="WorkflowOutcomeProcessor.ClearExecutableStateAsync"/>.
-    /// Delegates to the T-001 <see cref="WorkflowStageLockCoordinator"/>
-    /// so all lock-touching logic stays in one composed service.
-    /// </summary>
     internal Task ReleaseCurrentStageLocks(string reason) =>
         _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
 
@@ -155,13 +73,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         _run = await _runStore.LoadAsync(GrainKey);
 
-        // Self-heal persisted dirty state (#331-class): a run previously
-        // stopped under the pre-fix code may have a Stopped run status with a
-        // dangling awaiting-approval gate on its current stage. Stop() cannot
-        // repair this (it throws on a terminal run), so we correct it on grain
-        // reactivation. The reconcile is idempotent — repeated activations are
-        // no-ops once the gate is cleared — and the Stopped-only scope keeps a
-        // live run genuinely awaiting approval untouched.
+        // Old stopped runs may still carry an awaiting-approval gate; repair
+        // only that terminal shape so live approval gates are untouched.
         if (_run is not null && _run.Status == WorkflowRunStatus.Stopped && _run.ReconcileStoppedApprovalGate())
         {
             await _runStore.SaveAsync(_run, ct);
@@ -229,8 +142,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run.Status is not (WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
-        // Flip the run status to Stopped before clearing executable state so the
-        // TaskFailed event handler observes a terminal status and short-circuits.
+        // Fail any in-flight task after the run is terminal.
         _ = _run.Stop();
 
         await _outcomeProcessor.ClearExecutableStateAsync(_run!, reason ?? "stopped");
@@ -279,10 +191,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             failedTaskId, stageId, GrainKey, _run,
             events => CommitAsync(events), "retry", default);
 
-        // If a previous attempt was blocked by context exhaustion, the user
-        // may have recovered the session (via compact/reset) by now. The gate
-        // reports a healthy context, so demote the sticky failure reason
-        // back to TaskFailed and let the regular retry path re-run the task.
+        // A healthy gate means a previous context-exhaustion failure is no
+        // longer sticky; retry can use the normal task path again.
         if (failure?.Reason == FailureReason.ContextExhaustion
             && _run.ClearContextExhaustionFailure())
         {
@@ -388,35 +298,21 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (!_run.IsAssignedTo(runnerId))
             return null;
 
-        // Pick the next dispatchable work. No work means the run has nothing
-        // outstanding (idle / gated / between stages) — nothing to claim.
         var work = _run.NextWork();
         if (work is null)
             return null;
 
-        // Project to a WorkItem up front to resolve the work id (a task's
-        // definition id, or the deterministic checks-{stage} id) that the claim
-        // and the eventual report key on. BuildWorkItem is a pure projection —
-        // it does not mutate, so calling it before the claim is safe.
         var item = _outcomeProcessor.BuildWorkItem(_run!, work);
         if (item?.Id is null)
             return null;
         var workId = item.Id;
 
-        // Acquire the sequential stage lock as part of the claim. A failed
-        // claim (lock contended) must not leave the workflow holding a lock on
-        // a stage it never started, so the lock is taken here, in the same
-        // single write that starts the work — there is no separate offer phase
-        // whose failure would need a rollback.
+        // Lock and start in the same claim path; a contended lock leaves no
+        // workflow-owned lock to roll back.
         var stage = _run.CurrentStageId;
         if (stage is not null && !await AcquireStageLocksIfNeededAsync(stage))
             return null;
 
-        // Single atomic write: mark the work Running, persist, dispatch events.
-        // ClaimWorkItemAsync is idempotent for an already-Running work (re-claim
-        // after a lost dispatch response): it returns the in-flight work id
-        // without re-transitioning. Returns null when the workId no longer maps
-        // to offerable work (the run advanced between NextWork and the claim).
         var resolvedWorkId = await _outcomeProcessor.ClaimWorkItemAsync(
             _run!, workId, runnerId, events => CommitAsync(events));
 
@@ -462,12 +358,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     public async Task<ReportAck> ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome)
     {
-        // Stale (an ack, not an error) covers every "no longer current" case:
-        // the run is gone, not assigned to this runner, or the workId no longer
-        // maps to a Running task the runner owns (already terminal, superseded
-        // by a rerun, advanced past). At-least-once reports make late/duplicate
-        // reports normal; the runner retires the work from awaitingAck on either
-        // Accepted or Stale. See design/workflow/scheduling.md §Report.
+        // Stale is still an ack; late or duplicate reports are normal under
+        // at-least-once delivery. See design/workflow/scheduling.md Report.
         if (_run is null || !_run.IsAssignedTo(runnerId)) return ReportAck.Stale;
         var stage = _run.CurrentStage();
         var activeTask = stage.FindRunningTaskByWork(workId, runnerId);
@@ -531,9 +423,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     public Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId)
     {
-        // Snapshot projection — delegated to the in-grain composed
-        // WorkflowReadModel so the write path stays focused on the state
-        // machine and read snapshots don't interleave with state transitions.
         return Task.FromResult(_readModel.GetActiveWork(workId));
     }
 
@@ -556,24 +445,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
 
     /// <summary>
-    /// Releases the sequential stage lock owned by this workflow run for the
-    /// given stage. Used by both the grain's retry/rerun/stop paths (via
-    /// the composed <see cref="WorkflowStageLockCoordinator"/>) and by the
-    /// bus-side <c>WorkflowStageLockReleaseHandler</c> that subscribes to
-    /// <c>com.mohist.workflow.stage.{completed,failed}</c> events.
-    ///
-    /// The grain's <c>On()</c> dispatch used to call this synchronously after
-    /// emitting a <see cref="StageCompleted"/>/<see cref="StageFailed"/>
-    /// event; the lock release now flows through the event bus so the
-    /// handler runs as part of the same in-process dispatch that
-    /// <c>WorkflowRunStopped</c> already rides. Pull-scheduling (T-005
-    /// cleanup D8) means a successful release no longer requires the
-    /// previously-no-op <c>RequeueWorkflowIdAsync</c>: the next runner poll
-    /// rediscovers the assignable workflow run from persisted state.
-    ///
-    /// The grain keeps this method as the <see cref="IWorkflowGrain"/>
-    /// interface contract; the body delegates to the lock coordinator so
-    /// the acquire/release implementation lives in one composed service.
+    /// Interface entrypoint for bus-driven sequential stage lock release.
     /// </summary>
     public Task ReleaseStageLocksAsync(string stage, string reason) =>
         _stageLockCoordinator.ReleaseStageLocksAsync(stage, reason);
@@ -627,35 +499,16 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private Task OnWorkflowStoppedAsync()
     {
-        // Side effects now flow through the bus — IssueGrain subscribes
-        // to com.mohist.workflow.run.stopped and the workspace cleanup
-        // service subscribes to .completed. Sequential stage lock release
-        // has likewise been migrated to a bus subscription (see
-        // WorkflowStageLockReleaseHandler) so this grain no longer holds
-        // any workflow-event-aware side effect that crosses the lock-grain
-        // boundary.
+        // Stopped side effects are owned by event subscribers.
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Project id from the workflow run's metadata annotations. Used by the
-    /// grain's lock coordinator and exposed to the in-grain composed
-    /// <see cref="WorkflowReadModel"/>.
-    /// </summary>
     internal string GetProjectId() =>
         _run?.Metadata?.Annotations?.TryGetValue("projectId", out var v) == true ? v : "";
 
-    /// <summary>
-    /// Issue id from the workflow run's metadata annotations. Exposed to the
-    /// in-grain composed <see cref="WorkflowReadModel"/>.
-    /// </summary>
     internal string? GetIssueId() =>
         _run?.Metadata?.Annotations?.TryGetValue("issueId", out var v) == true ? v : null;
 
-    /// <summary>
-    /// Issue number from the workflow run's metadata annotations. Exposed to
-    /// the in-grain composed <see cref="WorkflowReadModel"/>.
-    /// </summary>
     internal string? GetIssueNumber() =>
         _run?.Metadata?.Annotations?.TryGetValue("issueNumber", out var v) == true ? v : null;
 

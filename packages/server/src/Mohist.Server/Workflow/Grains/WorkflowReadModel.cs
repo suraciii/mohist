@@ -3,11 +3,7 @@ using Mohist.Server.Workflow.Domain.Run;
 namespace Mohist.Server.Workflow.Grains;
 
 /// <summary>
-/// Read-side projections of <see cref="WorkflowRun"/> state, composed inside
-/// the grain process to preserve the strong-consistency requirement (grain is
-/// the consistency boundary for <see cref="WorkflowRun"/>). Extracted from
-/// <see cref="WorkflowGrain"/> so the grain body stays focused on the state
-/// machine — query snapshots no longer interleave with the write path.
+/// Read-side projections over the grain-owned <see cref="WorkflowRun"/>.
 /// </summary>
 public sealed class WorkflowReadModel
 {

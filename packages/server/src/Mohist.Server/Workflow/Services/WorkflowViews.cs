@@ -128,12 +128,8 @@ public sealed record ApprovalStatusView(
 
 /// <summary>
 /// Minimal associated-issue reference surfaced by the
-/// <c>GET /api/workflow-runs/{workflowRunId}</c> read model
-/// (issue-381 T-002): a human-numbered handle plus the title. Carrying
-/// only <c>Number</c>+<c>Title</c> (no id, no project info, no body)
-/// keeps the surface auditable for agents that only have a run id and
-/// want to correlate to the issue; anything else is left to a
-/// follow-up <c>mo issue show</c>.
+/// <c>GET /api/workflow-runs/{workflowRunId}</c> read model: a human-numbered
+/// handle plus the title, without full issue details.
 /// </summary>
 public sealed record WorkflowRunIssueRef(
     int Number,

@@ -38,13 +38,8 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<ReportAck> ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome);
 
     /// <summary>
-    /// Releases the sequential stage lock owned by this workflow run for the
-    /// given stage. Driven by the bus-side
-    /// <c>com.mohist.workflow.stage.{completed,failed}</c> subscription
-    /// handler; also used internally by the grain's retry/rerun/stop paths
-    /// (which call into it with the current stage). The handler pattern
-    /// replaces the previous grain-internal <c>On()</c> branch so lock
-    /// release fires asynchronously after the event is published.
+    /// Releases the sequential stage lock owned by this workflow run for a
+    /// stage. Used by bus subscribers and by retry/rerun/stop cleanup paths.
     /// </summary>
     Task ReleaseStageLocksAsync(string stage, string reason);
     Task<string?> GetRunStatusAsync();

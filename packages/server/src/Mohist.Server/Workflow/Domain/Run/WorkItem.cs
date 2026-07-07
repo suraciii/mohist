@@ -5,10 +5,7 @@ using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.Workflow.Domain.Run;
 
 /// <summary>
-/// Discriminator values for the work item variants the control plane
-/// surfaces. Only "task" and "checks" are public — stage-init was eagerly
-/// absorbed by the InitializeStage pre-commit step (D3) and is no longer
-/// visible to callers.
+/// Discriminator values for the work item variants the control plane surfaces.
 /// </summary>
 public static class WorkItemTypes
 {
@@ -17,12 +14,9 @@ public static class WorkItemTypes
 }
 
 /// <summary>
-/// Domain-semantic work item returned by <c>IWorkflowGrain.PollWorkAsync</c>.
-/// Carries the declaration and unrendered templates only — no dispatch id,
-/// no resolved variables, no rendered execution context, no loaded prompts.
-/// The caller's translator (RunnerGrain-side WorkflowItemTranslator) is
-/// responsible for turning a <see cref="WorkItem"/> into a runner
-/// <c>WorkDispatch</c>.
+/// Domain-semantic work item returned by <c>IWorkflowGrain.ClaimNextAsync</c>.
+/// Carries declarations and unrendered templates only; the runner-side
+/// translator turns it into an executable dispatch.
 ///
 /// The shape mirrors the runner TS <c>WorkItem</c> so the runner can
 /// hydrate its in-process type directly from the JSON returned by the
