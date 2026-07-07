@@ -10,6 +10,14 @@ export {
   useUnarchiveAgent,
   useAgentSessions,
 } from './api/queries'
+export {
+  agentSubscriptionsQueryKey,
+  useAgentSubscriptions,
+  useCreateAgentSubscription,
+  useArchiveAgentSubscription,
+  useRestoreAgentSubscription,
+  useDeleteAgentSubscription,
+} from './api/subscription-queries'
 export { costRollupQueryKey, fetchCostRollup, useCostRollup } from './api/cost-rollup'
 export type { AgentCostMetricDto, AgentCostRollupDto, AgentCostWindowedFigureDto } from './api/cost-rollup'
 export { agentUsageQueryKey, fetchAgentUsage, useAgentUsage } from './api/agent-usage'
@@ -36,6 +44,19 @@ export type {
   AgentInfo,
   AgentUpdateRequest,
 } from './api/client'
+export {
+  archiveAgentSubscription,
+  createAgentSubscription,
+  deleteAgentSubscription,
+  formatAgentSubscriptionFilter,
+  listAgentSubscriptions,
+  restoreAgentSubscription,
+} from './api/subscriptions'
+export type {
+  AgentSubscriptionCreateRequest,
+  AgentSubscriptionDto,
+  AgentSubscriptionFilterDto,
+} from './api/subscriptions'
 export {
   cancelGenericSession,
   getAgentSessions as getAgentScopedSessions,

@@ -1,0 +1,129 @@
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
+using Orleans;
+
+namespace Mohist.Server.Agent.Services;
+
+/// <summary>
+/// <see cref="IAgentLauncher"/> implementation that performs the canonical
+/// mint-session → open-generic-session → build-AgentJobInput → submit-to-grain
+/// pipeline. Extracted verbatim from the manual HTTP launch route
+/// (<c>Api/AgentSessionLaunchRoutes.cs</c>, issue-129 T-003) so the manual
+/// HTTP path and the subscription dispatch handler (issue-391 T-003) compose
+/// sessions through a single, observable, testable entry point.
+///
+/// <para>
+/// Lifetime is <see cref="IScopedService"/> because the launcher resolves
+/// scoped collaborators (<see cref="AgentSessionResolver"/>) from its
+/// captured scope; the dispatch handler resolves this service via
+/// <c>IServiceScopeFactory</c> from its own single-threaded bus handler
+/// scope (same pattern as <c>InboxProjectionHandler</c>).
+/// </para>
+///
+/// <para>
+/// The two <c>OpenAsync</c> + <c>SubmitAsync</c> calls are awaited
+/// sequentially because both the manual launch path and the subscription
+/// path require the session to be open (and addressable by label) before
+/// the AgentJobGrain dispatches. The dispatch submission itself is
+/// fire-and-forget at the grain side — <see cref="IAgentJobGrain.SubmitAsync"/>
+/// mints an AgentJob and enqueues dispatch without blocking on a runner —
+/// so this launcher adds no new blocking surface beyond what the manual
+/// HTTP path already had.
+/// </para>
+/// </summary>
+public sealed class AgentLauncher : IAgentLauncher, IScopedService
+{
+    private readonly AgentSessionResolver _sessions;
+    private readonly IGrainFactory _grains;
+
+    public AgentLauncher(
+        AgentSessionResolver sessions,
+        IGrainFactory grains)
+    {
+        _sessions = sessions;
+        _grains = grains;
+    }
+
+    public async Task<AgentLaunchResult> LaunchAsync(
+        AgentInfo agent,
+        string prompt,
+        AgentLaunchContext context,
+        IReadOnlyDictionary<string, string>? triggerLabels = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(context);
+
+        var trimmedPrompt = prompt.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedPrompt))
+        {
+            throw new ArgumentException(
+                "Prompt must not be empty or whitespace.",
+                nameof(prompt));
+        }
+
+        var sessionId = _sessions.NewSessionId();
+        var sessionContext = BuildContext(context, agent);
+        var metadata = GenericAgentSessionMetadata.Metadata(sessionContext);
+        if (triggerLabels is not null)
+        {
+            metadata = WithTriggerLabels(metadata, triggerLabels);
+        }
+
+        var sessionGrain = _sessions.GetGrain(sessionId);
+        await sessionGrain.OpenAsync(
+            new OpenAgentSessionCommand(
+                RunnerId: string.Empty,
+                AgentRuntime: "opencode",
+                WorkDir: context.WorkspacePath,
+                Metadata: metadata));
+
+        var jobKey = $"agent-job-launch-{Guid.NewGuid():N}";
+        var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
+        await jobGrain.SubmitAsync(
+            new AgentJobInput(
+                Prompt: trimmedPrompt,
+                Model: null,
+                WorkspacePath: context.WorkspacePath,
+                ProjectId: context.ProjectId,
+                Uses: "mohist/acp-agent",
+                AgentId: agent.Id,
+                AgentInstructions: string.IsNullOrWhiteSpace(agent.Instructions) ? null : agent.Instructions,
+                AgentConfig: agent.AgentConfig?.Clone(),
+                AgentSessionId: sessionId));
+
+        return new AgentLaunchResult(
+            SessionId: sessionId,
+            AgentId: agent.Id,
+            AgentName: agent.Name);
+    }
+
+    private static GenericAgentSessionContext BuildContext(AgentLaunchContext context, AgentInfo agent) =>
+        new(
+            ProjectId: context.ProjectId,
+            AgentId: agent.Id,
+            AgentName: agent.Name,
+            IssueNumber: context.IssueNumber,
+            EpicNumber: context.EpicNumber,
+            Repository: context.Repository,
+            WorkspacePath: context.WorkspacePath,
+            Title: context.Title);
+
+    /// <summary>
+    /// Returns a new <see cref="AgentSessionMetadata"/> carrying
+    /// <paramref name="triggerLabels"/> merged into the existing label set
+    /// via the record-level <see cref="AgentSessionMetadata.Merge"/> API.
+    /// Manual launches pass <c>null</c> and skip this path entirely — no
+    /// trigger labels are recorded.
+    /// </summary>
+    private static AgentSessionMetadata WithTriggerLabels(
+        AgentSessionMetadata metadata,
+        IReadOnlyDictionary<string, string> triggerLabels) =>
+        metadata.Merge(new AgentSessionMetadata(
+            Labels: triggerLabels,
+            Annotations: null));
+}

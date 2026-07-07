@@ -196,6 +196,77 @@ public class AgentSessionQuerySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task QueryByTriggerLabels_ResolvesSubscriptionTriggeredSessions()
+    {
+        using var fixture = new FakeAgentSessionQueryDbContextFactory();
+        SeedMixedSessions(fixture);
+
+        const string eventId = "evt_subscription_42";
+        const string subscriptionId = "subs_abc123";
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = ProjectA,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+            [GenericAgentSessionMetadata.AgentId] = AgentA1Id,
+            [GenericAgentSessionMetadata.AgentName] = AgentA1Name,
+            [GenericAgentSessionMetadata.TriggerEventId] = eventId,
+            [GenericAgentSessionMetadata.TriggerSubscriptionId] = subscriptionId,
+        };
+        await using (var db = fixture.CreateDbContext())
+        {
+            db.AgentSessions.Add(BuildRow("s_triggered", labels, createdAt: DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        var query = new AgentSessionQuery(fixture, TimeProvider);
+
+        var byEvent = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GenericAgentSessionMetadata.TriggerEventId] = eventId,
+        });
+        Assert.Equal(new[] { "s_triggered" }, byEvent.Select(m => m.Row.Id).ToArray());
+
+        var bySubscription = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GenericAgentSessionMetadata.TriggerSubscriptionId] = subscriptionId,
+        });
+        Assert.Equal(new[] { "s_triggered" }, bySubscription.Select(m => m.Row.Id).ToArray());
+
+        var byBoth = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GenericAgentSessionMetadata.TriggerEventId] = eventId,
+            [GenericAgentSessionMetadata.TriggerSubscriptionId] = subscriptionId,
+        });
+        Assert.Equal(new[] { "s_triggered" }, byBoth.Select(m => m.Row.Id).ToArray());
+
+        var byMissingEvent = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GenericAgentSessionMetadata.TriggerEventId] = "evt_does_not_exist",
+        });
+        Assert.Empty(byMissingEvent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task QueryByTriggerLabels_ManualSessionsDoNotMatch()
+    {
+        using var fixture = new FakeAgentSessionQueryDbContextFactory();
+        SeedMixedSessions(fixture);
+
+        var query = new AgentSessionQuery(fixture, TimeProvider);
+
+        var matches = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GenericAgentSessionMetadata.TriggerEventId] = "evt_any",
+        });
+
+        Assert.Empty(matches);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task ComputedColumns_PopulateFromStateJson_WithoutBackfill()
     {
         // Adds a session by id/createdAt only — the new computed columns must
@@ -212,6 +283,8 @@ public class AgentSessionQuerySpecs
             [AgentSessionQueryMetadataKeys.ProjectId] = ProjectB,
             [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
             [GenericAgentSessionMetadata.IssueNumber] = "999",
+            [GenericAgentSessionMetadata.TriggerEventId] = "evt_runtime",
+            [GenericAgentSessionMetadata.TriggerSubscriptionId] = "subs_runtime",
         };
         var state = JsonSerializer.Serialize(new
         {
@@ -251,6 +324,20 @@ public class AgentSessionQuerySpecs
         });
         Assert.Contains("s_runtime", byIssue.Select(m => m.Row.Id));
 
+        // issue-391 T-003: trigger correlation labels must also resolve via
+        // the new stored computed columns.
+        var byEvent = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GenericAgentSessionMetadata.TriggerEventId] = "evt_runtime",
+        });
+        Assert.Equal(new[] { "s_runtime" }, byEvent.Select(m => m.Row.Id).ToArray());
+
+        var bySubscription = await query.ListByLabelsAsync(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [GenericAgentSessionMetadata.TriggerSubscriptionId] = "subs_runtime",
+        });
+        Assert.Equal(new[] { "s_runtime" }, bySubscription.Select(m => m.Row.Id).ToArray());
+
         // Read back via EF so the populated computed-column values are
         // visible to the test — protects against the (silent) regression
         // where the column SQL evaluates to null.
@@ -262,6 +349,8 @@ public class AgentSessionQuerySpecs
             Assert.Equal("999", row.LabelAgentLaunchIssueNumber);
             Assert.Equal(ProjectB, row.LabelProjectId);
             Assert.Equal("agent-launch", row.LabelSourceKind);
+            Assert.Equal("evt_runtime", row.LabelTriggerEventId);
+            Assert.Equal("subs_runtime", row.LabelTriggerSubscriptionId);
         }
     }
 
