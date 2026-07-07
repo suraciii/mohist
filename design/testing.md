@@ -33,7 +33,32 @@ Mohist 的测试分两条轨道，写之前先回答："这条测试属于哪条
 - 不要用 fixture 重量级程度给测试分类。**用"验证对象是产品还是模块"给测试分类**。一个文件名是 `*Specs` 却只测一个纯 parser，是错位的。
 - 一个 spec 文件不要塞多个产品面。`SessionPage.test.tsx` 同时测 widget + page + model 是错位的。
 
-Speed trait（C# `Support/Traits.cs`）是 fixture 成本的标签，不是轨道标签。`Speed=Unit` 的文件可能仍是 spec（纯 parser 的产品契约），`Speed=Integration` 的文件一定是 spec。
+## 结构承担轨道，trait 承担分级
+
+先定轨道（Spec / Unit / Architecture，依据是"验证对象是产品、模块还是结构"），再用结构把轨道落实下来——**不能只靠运行时 trait**。三个手段，成本与强度递增，按需叠加：
+
+| 手段 | 表达 | 何时用 |
+|------|------|--------|
+| 命名 | 文件属哪条轨道 | 永远，必做 |
+| 目录 | 轨道 + 验证对象的集成层次 | unit/spec 一多就分目录 |
+| 项目（csproj） | 轨道之间的依赖方向 | 只在想把"unit 不得依赖重型 fixture"变编译不变量时 |
+
+- **命名二分，一个文件只属一条轨道**：
+
+  | 栈 | unit | spec |
+  |----|------|------|
+  | C# | `*Tests.cs` | `*Specs.cs` |
+  | TS | `*.test.ts` | `*.spec.ts` |
+
+- **放置表达验证对象**：unit 贴近被测模块（web colocate 到 `src/`，其余按模块归集）；spec 贴近产品面（按 bounded context，再按集成层次 `Api/` / `Domain/` / `Grain/` / `Services/`）。
+- **架构规则自成一类，单独放置**：它不验证行为，依赖面只有 production 程序集，与行为测试不相交。塞进 `Specs/` 是错位。
+- **trait 是 fixture 成本标签，不是轨道标签**：C# `Speed=Unit|Grain|Service|Integration` 用于运行时选择（`--filter Speed=Unit`）与并行控制。一个 `Speed=Unit` 的文件可能是便宜的 spec（纯 parser 的产品契约），也可能是 unit——**轨道由结构表达，不由 trait 决定**。
+
+反例：
+
+- 靠 `Speed` trait 区分 unit/spec，命名和目录却混在一起 → trait 扛了结构的活，要 grep 才看得见轨道。
+- 文件叫 `*Specs.cs`、标 `Speed=Unit`，验证的却是一个模块的内部行为（不是产品契约）→ 轨道错位，它是 unit，改名 `*Tests.cs` 并移出 spec 目录。
+- 把 arch 规则文件塞进 `Specs/`，和带 fixture 的行为测试同处 → 依赖面混淆。
 
 ## 硬性原则
 
@@ -120,15 +145,11 @@ flaky 的常见来源，逐一排除：
 - "一次性回归"（`*RegressionSpecs` / `issue-N-regression`）只有在没有等价常规测试时保留；一旦等价覆盖存在，删掉回归文件，把"issue #N"写进常规测试的注释。
 - "一次性迁移"（`*MigrationSpecs`）带"release X 后删除"注释，到期删。
 
-### 6. 命名与放置表达验证对象
+### 6. 一个文件只测一个被测对象
 
-文件名、目录、`describe` 标题三者要一致表达"验证的是什么产品/模块"。
+轨道与放置见上节；这里只约束粒度。文件名、目录、`describe` 标题三者要一致表达"验证的是什么"，且一个文件只测一个被测对象。
 
-- C#：`Specs/{Feature}/{Api|Domain|Grain|Services}/{X}Specs.cs`。目录表达集成层次（`Api/` = HTTP 契约 spec，`Domain/` = 领域规则 unit，`Grain/` = actor 行为 spec）。
-- 纯 unit 测试（parser、renderer、resolver）不要塞进 `Specs/.../Api/`。
-- runner：`tests/{module}.spec.ts`（spec）/ `tests/{module}.test.ts`（unit）/ `tests/acp/`（ACP 层按策略切片）。
-- web：优先 colocated（`src/.../*.test.tsx`）。`tests/` 顶层只放跨模块 page-level spec 和 e2e/a11y。
-- 一个测试只测一个被测对象。`SessionPage.test.tsx` 同时测 `SessionTranscriptView`（widget）+ `SessionPage`（page）+ `ToolRegistry`（model）是反例。
+`SessionPage.test.tsx` 同时测 `SessionTranscriptView`（widget）+ `SessionPage`（page）+ `ToolRegistry`（model）是反例——拆成三个文件，各归各的轨道。
 
 ## 各端 fake 入口速查
 
