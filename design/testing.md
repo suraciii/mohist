@@ -60,6 +60,8 @@ Mohist 的测试分两条轨道，写之前先回答："这条测试属于哪条
 - 文件叫 `*Specs.cs`、标 `Speed=Unit`，验证的却是一个模块的内部行为（不是产品契约）→ 轨道错位，它是 unit，改名 `*Tests.cs` 并移出 spec 目录。
 - 把 arch 规则文件塞进 `Specs/`，和带 fixture 的行为测试同处 → 依赖面混淆。
 
+**落地现状**：server 已定稿拆 `UnitTests` / `SpecTests` / `ArchTests` 三项目（UnitTests 禁依赖重型 fixture、ArchTests 禁依赖任何测试基建，均为编译不变量）；cli 进 sln、runner 补 unit 轨道、web 顶层改 `*.spec.tsx` 同步推进。由改造 issue 落地，落地后删本注记。
+
 ## 硬性原则
 
 下面六条是硬约束，违反即视为不合格测试，审查应打回。
