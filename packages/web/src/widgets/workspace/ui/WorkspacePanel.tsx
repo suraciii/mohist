@@ -4,6 +4,7 @@ import { ApiError } from '../../../shared/api/client'
 import { cleanupIssueWorkspace, onRebaseEvent, rebaseIssue, useLiveTask, useWorkspaceStatus } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
+import { Badge } from '@/shared/ui/components/badge'
 
 interface WorkspacePanelProps {
   issueNumber: number
@@ -197,14 +198,18 @@ export function WorkspacePanel({ issueNumber, isAgentRunning, isDone }: Workspac
       )}
 
       {rebaseResult && !isConflictFailed && (
-        <div className={`mb-3 rounded-md px-3 py-2 text-xs ${
-          rebaseResult.type === 'success' ? 'bg-green-50 text-green-700' :
-          rebaseResult.type === 'error' ? 'bg-red-50 text-red-700' :
-          'bg-blue-50 text-blue-700'
-        }`}>
-          <div>{rebaseResult.message}</div>
+        <div className="mb-3 flex flex-col gap-2 text-xs">
+          <Badge
+            variant={
+              rebaseResult.type === 'success' ? 'success' :
+              rebaseResult.type === 'error' ? 'danger' :
+              'info'
+            }
+          >
+            {rebaseResult.message}
+          </Badge>
           {rebaseResult.conflicts && rebaseResult.conflicts.length > 0 && (
-            <ul className="mt-1 list-disc list-inside text-red-600">
+            <ul className="list-disc list-inside text-danger">
               {rebaseResult.conflicts.map((f) => (
                 <li key={f}>{f}</li>
               ))}
@@ -214,31 +219,33 @@ export function WorkspacePanel({ issueNumber, isAgentRunning, isDone }: Workspac
       )}
 
       {isConflictFailed && (
-        <div className="mb-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-          Conflict resolution failed{rebaseConflict?.error ? `: ${rebaseConflict.error}` : ''}
+        <div className="mb-3 flex flex-col gap-2 text-xs">
+          <Badge variant="danger">
+            Conflict resolution failed{rebaseConflict?.error ? `: ${rebaseConflict.error}` : ''}
+          </Badge>
         </div>
       )}
 
       {cleanupResult && (
-        <div className={`mb-3 rounded-md px-3 py-2 text-xs ${
-          cleanupResult.type === 'success' ? 'bg-green-50 text-green-700' :
-          cleanupResult.type === 'error' ? 'bg-red-50 text-red-700' :
-          'bg-blue-50 text-blue-700'
-        }`}>
-          {cleanupResult.message}
+        <div className="mb-3 flex flex-col gap-2 text-xs">
+          <Badge
+            variant={
+              cleanupResult.type === 'success' ? 'success' :
+              cleanupResult.type === 'error' ? 'danger' :
+              'info'
+            }
+          >
+            {cleanupResult.message}
+          </Badge>
         </div>
       )}
 
       {(isRebasing || !isUpstreamUnknown) && (
         <Button
-          variant="outline"
+          variant={isBehind ? 'warning' : 'outline'}
           onClick={() => { setRebaseResult(null); rebaseMutation.mutate() }}
           disabled={isRebasing}
-          className={`h-auto w-full px-3 py-2 ${
-            isBehind
-              ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
-              : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-          }`}
+          className="h-auto w-full px-3 py-2"
         >
           {isRebasing ? (
             <>
@@ -259,7 +266,7 @@ export function WorkspacePanel({ issueNumber, isAgentRunning, isDone }: Workspac
           variant="outline"
           onClick={() => { setCleanupResult(null); cleanupMutation.mutate() }}
           disabled={!canCleanup || cleanupMutation.isPending}
-          className="mt-2 h-auto w-full border-gray-300 bg-white px-3 py-2 text-gray-700 hover:bg-gray-50"
+          className="mt-2 h-auto w-full px-3 py-2"
         >
           {cleanupMutation.isPending ? 'Cleaning up workspace...' : isAgentRunning ? 'Clean up after completion' : 'Clean up workspace'}
         </Button>

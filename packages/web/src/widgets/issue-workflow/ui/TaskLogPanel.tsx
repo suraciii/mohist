@@ -5,6 +5,8 @@ import { DiamondIcon } from 'lucide-react'
 import { useProject } from '../../../entities/project'
 import { useIssueWorkflowTaskLog, type TaskLogLine, type TaskLogPage } from '../../../entities/issue'
 import { useWorkflowRunSessions } from '../../../entities/coder-session'
+import { Button } from '@/shared/ui/components/button'
+import { Badge } from '@/shared/ui/components/badge'
 import {
   useEventsConnection,
   subscribeTaskLog,
@@ -411,23 +413,25 @@ export function TaskLogPanel({
               placeholder="Search log lines…"
               aria-label="Search log lines"
               data-testid="task-log-search-input"
-              className="w-full rounded-md border border-slate-300 bg-white pl-7 pr-3 py-1 text-[11px] text-slate-900 placeholder-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 focus:outline-none min-h-[28px] sm:w-48"
+              className="w-full rounded-md border border-input bg-background pl-7 pr-3 py-1 text-[11px] text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 focus:outline-none min-h-[28px] sm:w-48"
             />
           </div>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={handleDownload}
             disabled={visibleLines === 0}
             aria-label="Download execution log"
             data-testid="task-log-download-button"
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors min-h-[28px]"
+            className="min-h-[28px] px-2.5 text-[11px]"
           >
             <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
               <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
               <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
             </svg>
             <span>Download</span>
-          </button>
+          </Button>
         </div>
       </div>
       {sources.length > 0 && (
@@ -435,20 +439,21 @@ export function TaskLogPanel({
           {sources.map((source) => {
             const disabled = disabledSources.has(source)
             return (
-              <button
+              <Badge
                 key={source}
-                type="button"
-                onClick={() => toggleSource(source)}
-                aria-pressed={!disabled}
-                data-testid={`task-log-source-chip-${source}`}
-                className={
-                  disabled
-                    ? 'inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-semibold text-slate-400 line-through transition-colors'
-                    : 'inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-200 transition-colors'
+                variant={disabled ? 'outline' : 'secondary'}
+                render={
+                  <button
+                    type="button"
+                    onClick={() => toggleSource(source)}
+                    aria-pressed={!disabled}
+                  />
                 }
+                data-testid={`task-log-source-chip-${source}`}
+                className={disabled ? 'opacity-60 line-through' : undefined}
               >
                 {source}
-              </button>
+              </Badge>
             )
           })}
         </div>

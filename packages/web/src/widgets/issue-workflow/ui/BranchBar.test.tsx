@@ -234,4 +234,90 @@ describe('BranchBar', () => {
     expect(screen.queryByRole('button', { name: /rebase onto master/i })).toBeNull()
     expect(rebaseIssueMock).toHaveBeenCalledTimes(1)
   })
+
+  it('behind-state rebase action uses the warning Button variant and carries no amber overlay', () => {
+    vi.mocked(useWorkspaceStatus).mockReturnValue({
+      data: {
+        exists: true,
+        branch: 'mohist/run-wr-161',
+        baseBranch: 'master',
+        ahead: 11,
+        behind: 80,
+        rebaseInProgress: false,
+        conflictingFiles: [],
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useWorkspaceStatus>)
+
+    const queryClient = new QueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <BranchBar issueNumber={161} stage={null} isAgentRunning={true} baseBranch="master" allowRebase />
+      </QueryClientProvider>
+    )
+
+    const rebase = screen.getByRole('button', { name: /rebase onto master/i })
+    expect(rebase.dataset.slot).toBe('button')
+    expect(rebase.className).toContain('border-warning-border')
+    expect(rebase.className).toContain('bg-warning-subtle')
+    expect(rebase.className).not.toContain('border-amber-')
+    expect(rebase.className).not.toContain('bg-amber-')
+    expect(rebase.className).not.toContain('text-amber-')
+  })
+
+  it('upstream-unknown rebase action uses the outline Button variant and carries no gray overlay', () => {
+    vi.mocked(useWorkspaceStatus).mockReturnValue({
+      data: {
+        exists: true,
+        reason: 'fetch_failed',
+        branch: 'mohist/run-wr-161',
+        baseBranch: 'master',
+        ahead: 0,
+        behind: 0,
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useWorkspaceStatus>)
+
+    const queryClient = new QueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <BranchBar issueNumber={161} stage={WorkflowStage.Build} isAgentRunning={false} baseBranch="master" allowRebase />
+      </QueryClientProvider>
+    )
+
+    const rebase = screen.getByRole('button', { name: /rebase onto master/i })
+    expect(rebase.dataset.slot).toBe('button')
+    expect(rebase.className).toContain('border-border')
+    expect(rebase.className).toContain('bg-background')
+    expect(rebase.className).not.toContain('border-gray-')
+    expect(rebase.className).not.toContain('bg-white')
+    expect(rebase.className).not.toContain('text-gray-')
+  })
+
+  it('rebase action uses the primitive disabled treatment when disabled', () => {
+    vi.mocked(useWorkspaceStatus).mockReturnValue({
+      data: {
+        exists: true,
+        branch: 'mohist/run-wr-161',
+        baseBranch: 'master',
+        ahead: 11,
+        behind: 80,
+        rebaseInProgress: false,
+        conflictingFiles: [],
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useWorkspaceStatus>)
+
+    const queryClient = new QueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <BranchBar issueNumber={161} stage={null} isAgentRunning={true} baseBranch="master" />
+      </QueryClientProvider>
+    )
+
+    const rebase = screen.getByRole('button', { name: /rebase onto master/i })
+    expect((rebase as HTMLButtonElement).disabled).toBe(true)
+    expect(rebase.className).toContain('disabled:pointer-events-none')
+    expect(rebase.className).toContain('disabled:opacity-50')
+  })
 })

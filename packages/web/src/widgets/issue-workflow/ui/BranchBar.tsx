@@ -116,7 +116,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
                         ? 'Conflict resolution in progress'
                         : undefined
                   }
-                  className="h-auto w-full rounded-md border-gray-300 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-gray-50 disabled:opacity-50 sm:w-auto"
+                  className="h-auto w-full rounded-md px-3 py-1.5 text-xs font-medium sm:w-auto"
                 >
                   Rebase onto {baseBranch}
                 </Button>
@@ -148,7 +148,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
                 </span>
               )}
               <Button
-                variant="outline"
+                variant="warning"
                 onClick={() => rebaseMutation.mutate()}
                 disabled={!canRequestRebase}
                 title={
@@ -158,7 +158,7 @@ export function BranchBar({ issueNumber, stage, baseBranch: fallbackBaseBranch, 
                       ? 'Conflict resolution in progress'
                       : undefined
                 }
-                className="h-auto w-full rounded-md border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-800 transition-colors hover:bg-amber-50 disabled:opacity-50 sm:w-auto"
+                className="h-auto w-full rounded-md px-3 py-1.5 text-xs font-medium sm:w-auto"
               >
                 Rebase onto {baseBranch}
               </Button>

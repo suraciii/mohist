@@ -290,3 +290,60 @@
   CreateIssueDialog, EditIssueDialog) is replaced with class-based
   treatment. No raw hex literals remain in the converted registry
   files (`label-colors.ts`, `stage-colors.ts`, `CompactSessionCard.tsx`).
+
+## Action-button standardization notes (T-005)
+
+- **Variant mapping is the single source of color for action affordances.**
+  WorkspacePanel rebase-behind → `variant="warning"`, WorkspacePanel
+  rebase-default + cleanup → `variant="outline"`. BranchBar
+  behind → `variant="warning"`, BranchBar upstream-unknown →
+  `variant="outline"`. TaskLogPanel download → `variant="outline"`,
+  source chips enabled → `variant="secondary"`, source chips
+  disabled → `variant="outline"` (with `opacity-60 line-through`).
+  All four panels' bespoke `border-amber-*` / `bg-amber-*` /
+  `text-amber-*` / `border-gray-*` / `bg-white` /
+  `text-gray-*` / `border-slate-*` / `bg-slate-*` /
+  `text-slate-*` overlays are removed from action affordances.
+
+- **Result banners use Badge variants instead of inline color blocks.**
+  WorkspacePanel's rebase-result / conflict-failed / cleanup-result
+  banners previously used `bg-green-50 text-green-700` /
+  `bg-red-50 text-red-700` / `bg-blue-50 text-blue-700` based on
+  result type; they now wrap a `Badge variant="success"|"danger"|"info"`
+  with no bespoke color className on the banner. The
+  `text-danger` token (not raw `text-red-*`) is used on the
+  conflict list, which is token-backed via `--color-danger: var(--danger)`.
+
+- **BranchBar's upstream-unknown rebase action was `border-gray-300
+  bg-white text-foreground hover:bg-gray-50 disabled:opacity-50`.**
+  Replaced by `Button variant="outline"`; the `disabled:opacity-50`
+  per-call-site treatment is gone — the primitive's standard disabled
+  treatment (`disabled:pointer-events-none disabled:opacity-50`)
+  applies uniformly.
+
+- **TaskLogPanel's `slate`+`sky` action dialect retired for the
+  download button and source chips.** The download button now uses
+  `Button variant="outline" size="sm"`; the source chips use
+  `Badge` with `render={<button ... />}` to preserve the click-to-toggle
+  semantics while inheriting Badge variant classes. The search input's
+  `focus:border-sky-500 focus:ring-sky-500` is replaced with the
+  standard `--ring` focus ring (`focus-visible:border-ring
+  focus-visible:ring-ring/50`). The dark-terminal palette
+  (`bg-slate-900 text-slate-100`) on the scroll body is preserved
+  per design D7.
+
+- **The truncation indicator (`bg-amber-100 text-amber-800`) is a
+  status pill, not an action affordance.** It is not in scope for
+  T-005; it can be migrated to a Badge variant in a future task if
+  the spec demands it. (The design D7 description targets the
+  `slate`+`sky` action dialect specifically; the truncation
+  indicator is amber, not slate/sky.)
+
+- **Test anchor: `data-slot="button"` and `data-slot="badge"`.** All
+  new component tests assert the action elements carry the primitive's
+  data-slot hook and that the rendered className contains the
+  expected token classes (e.g. `border-warning-border`,
+  `bg-warning-subtle`, `bg-secondary`) and does NOT contain the
+  retired bespoke overlays (`border-amber-`, `bg-amber-`,
+  `text-amber-`, `border-gray-`, `bg-white`, `text-gray-`,
+  `border-slate-`, `bg-slate-`, `text-slate-`).
