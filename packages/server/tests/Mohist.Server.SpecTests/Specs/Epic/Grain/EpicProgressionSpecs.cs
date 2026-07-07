@@ -16,7 +16,7 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Grain;
 
 public class EpicProgressionSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task StartAsync_IdleEpicWithStartableIssue_StartsIssueAndIsRunning()
@@ -40,7 +40,7 @@ public class EpicProgressionSpecs
         Assert.Equal("running", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task StartAsync_IdleEpicWithoutStartableIssue_BecomesRunningButIdle()
@@ -59,7 +59,7 @@ public class EpicProgressionSpecs
         Assert.Empty(grains.IssueStartCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task StartAsync_AlreadyRunningEpic_IsIdempotentAndDoesNotReStart()
@@ -78,7 +78,7 @@ public class EpicProgressionSpecs
         Assert.Empty(grains.IssueStartCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileAfterTerminalAsync_RunningEpicOnDoneIssue_AdvancesNextStartable()
@@ -103,7 +103,7 @@ public class EpicProgressionSpecs
         Assert.Equal("issue_3", started);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileAfterTerminalAsync_RunningEpicOnCancelledInProgressIssue_AdvancesNext()
@@ -130,7 +130,7 @@ public class EpicProgressionSpecs
         Assert.Equal("issue_2", started);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileAfterTerminalAsync_RunningEpicOnDoneIssueWithAllComplete_AutoMarksDone()
@@ -154,7 +154,7 @@ public class EpicProgressionSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileAfterTerminalAsync_PausedEpic_IsNoOpAndDoesNotAdvance()
@@ -176,7 +176,7 @@ public class EpicProgressionSpecs
         Assert.Empty(grains.IssueStartCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileAfterTerminalAsync_IdleEpic_DoesNotAdvance()
@@ -197,7 +197,7 @@ public class EpicProgressionSpecs
         Assert.Empty(grains.IssueStartCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileAfterTerminalAsync_TerminalEpic_IsNoOp()
@@ -213,7 +213,7 @@ public class EpicProgressionSpecs
         Assert.Empty(grains.IssueStartCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileAfterTerminalAsync_FailedInProgressIssue_HoldsEpic()
@@ -237,7 +237,7 @@ public class EpicProgressionSpecs
         Assert.Empty(grains.IssueStartCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileAfterTerminalAsync_NoStartableIssue_RemainsRunningButIdle()
@@ -258,7 +258,7 @@ public class EpicProgressionSpecs
         Assert.Empty(grains.IssueStartCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileAfterTerminalAsync_CancelledIssueIsSkipped_NextStartableChosen()
@@ -280,7 +280,7 @@ public class EpicProgressionSpecs
         Assert.Equal("issue_2", started);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileAfterTerminalAsync_StartWorkAsyncThrows_LeavesEpicRunning()
@@ -301,7 +301,7 @@ public class EpicProgressionSpecs
         Assert.NotEmpty(grains.IssueStartCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ResumeAsync_PausedEpic_AdvancesAfterResume()
@@ -324,7 +324,7 @@ public class EpicProgressionSpecs
         Assert.Equal("issue_2", started);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ResumeAsync_AlreadyRunningEpic_IsIdempotentAndDoesNotReAdvance()
@@ -345,7 +345,7 @@ public class EpicProgressionSpecs
         Assert.Empty(grains.IssueStartCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task PauseAsync_AlreadyPausedEpic_IsIdempotentNoOp()
@@ -365,7 +365,7 @@ public class EpicProgressionSpecs
         Assert.Equal("on hold", stored.PauseReason);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task PauseAsync_IdleEpic_ThrowsEpicPauseRequiresRunning()
@@ -389,7 +389,7 @@ public class EpicProgressionSpecs
         Assert.Equal("idle", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task PauseAsync_DoneEpic_ThrowsEpicAlreadyTerminal()
@@ -405,7 +405,7 @@ public class EpicProgressionSpecs
         Assert.Equal("paused", ex.RequestedStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileAfterTerminalAsync_HighestPriorityStartableWins()

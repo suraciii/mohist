@@ -11,7 +11,7 @@ namespace Mohist.Server.SpecTests.Specs.Epic.Domain;
 
 public class EpicActiveIssueMigrationSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Migration_BackfillsActiveMembershipSlotsOnlyForNonTerminalOwners()

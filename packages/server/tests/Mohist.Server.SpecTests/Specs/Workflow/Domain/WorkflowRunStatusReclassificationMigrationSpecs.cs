@@ -15,7 +15,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
     private const string MigrationId = "20260702060000_WorkflowRunStatus";
     private const string PreviousMigrationId = "20260629120000_BackfillIssueCompletedAt";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Up_ReclassifiesOldPendingRow_ToCreated()
@@ -39,7 +39,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         Assert.Equal("created", await ReadStatusColumnAsync(verify, rowId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Up_ReclassifiesOldRunningRowWithoutAssignment_ToPending()
@@ -66,7 +66,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         Assert.Equal("pending", await ReadStatusColumnAsync(verify, rowId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Up_KeepsOldRunningRowWithInFlightTask_AsRunning()
@@ -92,7 +92,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         Assert.Equal("running", await ReadStatusColumnAsync(verify, rowId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Up_KeepsOldRunningRowWithInFlightChecksWorkId_AsRunning()
@@ -118,7 +118,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         Assert.Equal("running", await ReadStatusColumnAsync(verify, rowId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Up_ReclassifiesOldRunningRowWithAssignmentAndNoInFlight_ToReady()
@@ -142,7 +142,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         Assert.Equal("ready", await ReadStatusColumnAsync(verify, rowId));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Up_LeavesTerminalRows_Unchanged()
@@ -195,7 +195,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Up_IsIdempotent_WhenRunTwice()
@@ -230,7 +230,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         Assert.Equal(firstState, secondState);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task Up_StoredStatusColumn_MirrorsReclassifiedValue()
@@ -291,7 +291,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         Assert.Equal("running", await ReadStatusColumnAsync(verify, inFlightRow));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task DatabaseMigrate_IncludesWorkflowRunStatusMigration()

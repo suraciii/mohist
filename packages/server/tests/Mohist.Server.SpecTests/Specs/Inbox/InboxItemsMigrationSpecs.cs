@@ -11,7 +11,7 @@ namespace Mohist.Server.SpecTests.Specs.Inbox;
 
 public class InboxItemsMigrationSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Up_CreatesInboxItemsTableWithExpectedColumns()
@@ -36,7 +36,7 @@ public class InboxItemsMigrationSpecs
         Assert.Equal("TEXT", columnTypes["ArchivedAt"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Up_CreatesThreeNamedIndexes()
@@ -54,7 +54,7 @@ public class InboxItemsMigrationSpecs
         Assert.Contains("IX_InboxItems_ProjectId_Id", indexes.Keys);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Up_ProjectIdCreatedAtIndex_IsDescending()
@@ -71,7 +71,7 @@ public class InboxItemsMigrationSpecs
         Assert.True(desc.Descending[1]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Up_SourceEventIndex_IsUniqueOnSourceAndId()
@@ -89,7 +89,7 @@ public class InboxItemsMigrationSpecs
         Assert.True(unique);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Up_NotificationKindCheckConstraint_RejectsUnsupportedKind()
@@ -116,7 +116,7 @@ public class InboxItemsMigrationSpecs
         await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task DatabaseMigrate_AppliesInboxItemsMigration()
@@ -131,7 +131,7 @@ public class InboxItemsMigrationSpecs
         Assert.Contains(applied, m => m == "20260629003151_AddInboxItemsTable");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task Down_DropsInboxItemsTable()
@@ -153,7 +153,7 @@ public class InboxItemsMigrationSpecs
         Assert.False(await TableExistsAsync(verify, "InboxItems"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
     public async Task DbContext_ExposesInboxItemsDbSet()

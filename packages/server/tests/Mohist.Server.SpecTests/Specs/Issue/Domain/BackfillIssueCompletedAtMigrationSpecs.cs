@@ -11,7 +11,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
 {
     private const string MigrationId = "20260629120000_BackfillIssueCompletedAt";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_BackfillsDoneIssue_FromWorkCompletedEvent()
@@ -36,7 +36,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
         Assert.Contains("2026-06-28T12:00:00", state);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_BackfillsCancelledIssue_FromClosedEvent()
@@ -61,7 +61,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
         Assert.Contains("2026-06-27T14:00:00", state);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_SecondRun_IsIdempotent()
@@ -93,7 +93,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
         Assert.Equal(firstState, secondState);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_DoesNotClobber_AlreadySetCompletedAt()
@@ -119,7 +119,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
         Assert.DoesNotContain("2026-06-28T12:00:00", state);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_RoundTripsBackfilledValue_ThroughIssueStore()
@@ -150,7 +150,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
         Assert.Equal(new DateTime(2026, 6, 28, 12, 30, 0, DateTimeKind.Utc), deserialized.CompletedAt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_NonTerminalIssue_RemainsNull()
@@ -172,7 +172,7 @@ public class BackfillIssueCompletedAtMigrationSpecs
         Assert.DoesNotContain("\"completedAt\"", state);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DatabaseMigrate_IncludesBackfillIssueCompletedAtMigration()

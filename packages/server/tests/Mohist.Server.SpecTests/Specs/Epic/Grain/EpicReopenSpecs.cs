@@ -31,7 +31,7 @@ public class EpicReopenSpecs
 {
     private const string ProjectId = "project_1";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReopenAsync_OnClosedEpic_TransitionsToIdle()
@@ -49,7 +49,7 @@ public class EpicReopenSpecs
         Assert.Equal("idle", row.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReopenAsync_OnDoneEpic_TransitionsToIdle()
@@ -63,7 +63,7 @@ public class EpicReopenSpecs
         Assert.Equal("idle", dto.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReopenAsync_OnIdleEpic_ThrowsNotTerminalAndStateUnchanged()
@@ -82,7 +82,7 @@ public class EpicReopenSpecs
         Assert.Equal("idle", row.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReopenAsync_OnRunningEpic_ThrowsNotTerminalAndStateUnchanged()
@@ -100,7 +100,7 @@ public class EpicReopenSpecs
         Assert.Equal("running", row.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReopenAsync_OnPausedEpic_ThrowsNotTerminalAndStateUnchanged()
@@ -118,7 +118,7 @@ public class EpicReopenSpecs
         Assert.Equal("paused", row.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReopenAsync_ReestablishesActiveMembershipsForLinkedIssues()
@@ -152,7 +152,7 @@ public class EpicReopenSpecs
         Assert.Equal(2, links.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReopenAsync_WhenActiveMembershipInsertFails_RollsBackStatusAndCanRetry()
@@ -188,7 +188,7 @@ public class EpicReopenSpecs
         Assert.Equal("issue_1", active.IssueId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReopenAsync_SkipsIssueRehomedToAnotherNonTerminalEpic()
@@ -245,7 +245,7 @@ public class EpicReopenSpecs
         Assert.Equal(2, links.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReopenAsync_RecordsEpicReopenedAndEpicStatusChangedEvents()
@@ -272,7 +272,7 @@ public class EpicReopenSpecs
             "Expected EpicReopened to be persisted after the EpicStatusChanged(closed->idle) event");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReopenAsync_OnMissingEpic_ThrowsInvalidOperation()
@@ -283,7 +283,7 @@ public class EpicReopenSpecs
         await Assert.ThrowsAsync<InvalidOperationException>(() => grain.ReopenAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReopenAsync_EnsureNotTerminalStillBlocksOtherTransitionsAfter()

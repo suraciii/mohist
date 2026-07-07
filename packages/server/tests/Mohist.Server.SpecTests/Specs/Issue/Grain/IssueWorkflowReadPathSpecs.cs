@@ -49,7 +49,7 @@ public class IssueWorkflowReadPathSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetWorkflowStatusAsync_InProgressIssueWithCompletedRun_ReturnsCompletedStatusWithoutTransitioningIssue()
@@ -104,7 +104,7 @@ public class IssueWorkflowReadPathSpecs
         Assert.Empty(stateStore.SaveCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetWorkflowStatusAsync_RepeatedCalls_NeverMutateIssueField()
@@ -143,7 +143,7 @@ public class IssueWorkflowReadPathSpecs
         Assert.Empty(stateStore.SaveCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetWorkflowStatusAsync_NoWorkflowRun_ReturnsNullAndDoesNotMutate()

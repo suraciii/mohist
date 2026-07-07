@@ -45,7 +45,7 @@ public class WorkflowRunStoreSpecs
     private const string IssueId = "issue_ws_1";
     private const string WorkflowRunId = "wr_ws_1";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SaveAsync_WithProjectAnnotation_StampsProjectIdOnCloudEventExtensions()
@@ -78,7 +78,7 @@ public class WorkflowRunStoreSpecs
         Assert.Equal(ProjectId, projectId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SaveAsync_WithoutProjectAnnotation_DoesNotStampProjectIdExtension()

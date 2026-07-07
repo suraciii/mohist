@@ -17,7 +17,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
     private const string MigrationId = "20260705132535_BackfillIssueCompletedEvents";
     private const string CompletedType = "com.mohist.issue.completed";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_DoneIssueWithCompletedAt_InsertsCompletedEventUsingCompletedAt()
@@ -45,7 +45,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         Assert.Contains("\"issueno\":\"7\"", row.ExtensionsJson);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_DoneIssueWithoutCompletedAt_FallsBackToUpdatedAt()
@@ -71,7 +71,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         Assert.Contains("\"workflowRunId\":null", row.Data);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_LegacyDoneCapitalized_AlsoBackfilled()
@@ -95,7 +95,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         Assert.Equal(CompletedType, row!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_CancelledIssue_NotBackfilled()
@@ -118,7 +118,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         Assert.Null(row);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_NonTerminalIssue_NotBackfilled()
@@ -139,7 +139,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         Assert.Null(row);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_IssueWithExistingCompletedEvent_NotReinserted()
@@ -164,7 +164,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         Assert.Equal(1, count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Up_BackfilledEvent_CountsAsCompletedInMetricsScan()
@@ -192,7 +192,7 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         Assert.Equal("com.mohist.issue.completed", row!.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DatabaseMigrate_IncludesBackfillIssueCompletedEventsMigration()

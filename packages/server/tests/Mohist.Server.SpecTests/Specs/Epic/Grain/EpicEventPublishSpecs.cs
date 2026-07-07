@@ -32,7 +32,7 @@ public class EpicEventPublishSpecs
     private const string ProjectId = "project_1";
     private const string EpicId = "epic_1";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CreateAsync_PersistsEpicCreatedEvent()
@@ -58,7 +58,7 @@ public class EpicEventPublishSpecs
         Assert.Equal("Auth epic", created.Envelope.Data!.Value.GetProperty("title").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_PersistsEpicIssueLinkedEvent()
@@ -78,7 +78,7 @@ public class EpicEventPublishSpecs
         Assert.Equal(1, linked.Envelope.Data!.Value.GetProperty("issueNumber").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task UnlinkIssueAsync_PersistsEpicIssueUnlinkedEvent()
@@ -98,7 +98,7 @@ public class EpicEventPublishSpecs
         Assert.Equal("issue_1", unlinked.Envelope.Data!.Value.GetProperty("issueId").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task StartAndPauseAndResume_PersistEpicStatusChangedEventsInOrder()
@@ -137,7 +137,7 @@ public class EpicEventPublishSpecs
         Assert.True(pausedToRunning > runningToPaused, "missing paused→running transition");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task Close_PersistsEpicStatusChangedAndEpicClosedEvents()
@@ -156,7 +156,7 @@ public class EpicEventPublishSpecs
         Assert.Equal(EventCatalog.ReverseDns.EpicClosed, events[1].Envelope.Type);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task UpdateAsync_PersistsEpicUpdatedAndEpicPriorityChangedEvents()
@@ -177,7 +177,7 @@ public class EpicEventPublishSpecs
         Assert.Equal("New title", updated.Envelope.Data!.Value.GetProperty("title").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task MultipleMutations_PerEpicEventIdIsMonotonic()
@@ -205,7 +205,7 @@ public class EpicEventPublishSpecs
             Assert.True(ids[i] > ids[i - 1], $"Expected monotonic Ids; got {string.Join(", ", ids)}");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EnvelopeTime_EqualsInjectedTimeProvider()
@@ -224,7 +224,7 @@ public class EpicEventPublishSpecs
         Assert.All(events, e => Assert.Equal(fixedTime, e.Envelope.Time));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ListEpicEventsAsync_EmptyForUnknownEpic()
@@ -234,7 +234,7 @@ public class EpicEventPublishSpecs
         Assert.Empty(events);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EventStoreFailure_DoesNotPropagateAndStateStillCommits()
@@ -255,7 +255,7 @@ public class EpicEventPublishSpecs
         Assert.Equal(1, throwingStore.AppendCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ExistingSingleIssueLinkUnlinkBehaviorAndDefaultListOrderingUnchanged()
@@ -292,7 +292,7 @@ public class EpicEventPublishSpecs
         Assert.Equal("issue_a", active[0].IssueId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public void EpicEventSerializer_RoundTripsEveryExistingVariantToReverseDns()
@@ -332,7 +332,7 @@ public class EpicEventPublishSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public void EpicEventCatalog_AllReverseDnsValuesRegistered()
@@ -355,7 +355,7 @@ public class EpicEventPublishSpecs
             Assert.Contains(type, EventCatalog.All);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EventStore_PersistsEpicEventsViaDbRoundTrip()

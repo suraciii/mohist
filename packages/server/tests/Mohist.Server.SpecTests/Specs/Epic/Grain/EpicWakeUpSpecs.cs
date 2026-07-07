@@ -33,7 +33,7 @@ public class EpicWakeUpSpecs
     private const string ProjectId = "project_1";
     private const string EpicId = "epic_1";
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_DoneEpic_OpenIssue_WakesToRunning_InSameCommit()
@@ -57,7 +57,7 @@ public class EpicWakeUpSpecs
         Assert.Equal("issue_1", active.IssueId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_DoneEpic_TerminalIssue_StaysDone_AndNoActiveRow()
@@ -80,7 +80,7 @@ public class EpicWakeUpSpecs
             .ToListAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_DoneEpic_AlreadyLinked_IsIdempotent_NoStatusChange()
@@ -106,7 +106,7 @@ public class EpicWakeUpSpecs
         Assert.Equal(1, count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_DoneEpic_OpenIssue_NoManualStartOrResume_ReachesRunningDirectly()
@@ -135,7 +135,7 @@ public class EpicWakeUpSpecs
         Assert.Empty(grains.IssueStartCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_ClosedEpic_ThrowsEpicClosedCannotLinkException_NoRowsCreated()
@@ -164,7 +164,7 @@ public class EpicWakeUpSpecs
         Assert.Equal(EpicStatusName.Closed, row.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_DoneEpic_OpenIssueOwnedByAnotherNonTerminal_Rejects_NoWake()
@@ -213,7 +213,7 @@ public class EpicWakeUpSpecs
             .ToListAsync());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_DoneEpic_WakeUpActiveRowInsertFails_EpicStaysDoneAndRetrySucceeds()
@@ -260,7 +260,7 @@ public class EpicWakeUpSpecs
         Assert.Equal("issue_1", active.IssueId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_DoneEpic_WakesAndAutopilotStartsNewOpenIssue()
@@ -285,7 +285,7 @@ public class EpicWakeUpSpecs
         Assert.Equal("issue_1", started);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssueAsync_DoneEpic_WakeUpDoesNotInvokeTryStartNext_WhenNoStartableIssue()
@@ -309,7 +309,7 @@ public class EpicWakeUpSpecs
         Assert.Empty(grains.IssueStartCalls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task WakeFromDone_OnNonDoneEpic_ThrowsEpicAlreadyTerminal()
@@ -330,7 +330,7 @@ public class EpicWakeUpSpecs
         Assert.Equal(EpicStatusName.Running, ex.RequestedStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task WakeFromDone_OnDoneEpic_TransitionsToRunningAndEmitsStatusChanged()
@@ -352,7 +352,7 @@ public class EpicWakeUpSpecs
         Assert.Equal(EpicStatusName.Running, statusChanged.NewStatus);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task LinkIssue_OnClosedEpic_IsRejected_EvenForAlreadyLinkedIssue()

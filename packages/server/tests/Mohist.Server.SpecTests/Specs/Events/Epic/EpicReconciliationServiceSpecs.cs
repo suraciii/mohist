@@ -15,7 +15,7 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 
 public class EpicReconciliationServiceSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public void DefaultReconciliationPeriod_RecoversRunningEpicsPromptly()
@@ -23,7 +23,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Equal(TimeSpan.FromMinutes(10), EpicReconciliationOptions.DefaultReconciliationPeriod);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_ReadyIdleEpicMissedEvent_TransitionsToDone()
@@ -50,7 +50,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Equal("project_1:epic_1", grains.Calls[0].GrainKey);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_PausedEpic_IsSkippedByCandidateQuery()
@@ -77,7 +77,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_DoneAndClosedEpics_AreSkippedByCandidateQuery()
@@ -104,7 +104,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_IdleEpicWithOpenIssue_StaysIdleAndGrainNoOps()
@@ -132,7 +132,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Single(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_RepeatedRuns_AreIdempotent()
@@ -161,7 +161,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Single(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_NoActiveEpics_DoesNotInvokeGrain()
@@ -179,7 +179,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Empty(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_IdleEpicWithCancelledIssueOnly_TransitionsToDone()
@@ -206,7 +206,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Single(grains.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_MultipleIdleEpics_FansOutAcrossAllCandidates()
@@ -237,7 +237,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Equal("idle", statuses["epic_unready"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_ReadyEpicAfterFirstBatch_IsReached()
@@ -268,7 +268,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Contains(grains.Calls, call => call.GrainKey == "project_1:epic_z_ready");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_RunningEpic_IsCandidateAndInvokesReconcile()
@@ -302,7 +302,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Equal("running", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_RunningEpicMissedClosedEvent_AdvancesNext()
@@ -334,7 +334,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Equal("running", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_RunningEpicMissedDoneEventWithAllComplete_AutoMarksDone()
@@ -362,7 +362,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Equal("done", stored.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_MixedIdleAndRunningEpics_AllReachTheGrain()
@@ -399,7 +399,7 @@ public class EpicReconciliationServiceSpecs
         Assert.Equal("running", runningStuck.Status);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task ReconcileOnceAsync_RunningEpicRepeatedSweeps_AreIdempotent()

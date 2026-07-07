@@ -54,7 +54,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_FallsBackToSystemDefault_WhenRunContextMissing()
@@ -65,7 +65,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains("system-template:mohist/local", result.Id ?? "");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_UsesIssueCustomWithoutRunProfileBinding()
@@ -82,7 +82,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(2, result.Structure.Stages.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_Priority2_ReturnsIssueCustomTemplate()
@@ -99,7 +99,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(2, result.Structure.Stages.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_Priority3_ReturnsIssueReferencedTemplate()
@@ -117,7 +117,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(4, result.Structure.Stages.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_ProjectDefaultCustomTemplate_NoIssueSelection_UsesProjectDefault()
@@ -136,7 +136,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(5, result.Structure.Stages.Count);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_ProjectDefaultSystemTemplate_FallsBackToSystemTemplate()
@@ -154,7 +154,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains(result.Structure.Stages, s => s.Stage == "plan");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_DisabledProjectDefaultSystemTemplate_UsesFirstEnabledProfile()
@@ -175,7 +175,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_WhenAllProfilesDisabled_ThrowsActionableErrorInsteadOfFallingBackToLocal()
@@ -193,7 +193,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_WhenAllProfilesDisabled_ThrowsBeforeIssueCustomTemplate()
@@ -211,7 +211,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_ExistingRunIgnoresLaterDisabledProfiles()
@@ -233,7 +233,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_IssuePrProfile_NoOverrides_UsesPrSystemTemplate()
@@ -255,7 +255,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_IssueDefaultProfile_NoOverrides_UsesDefaultSystemTemplate()
@@ -276,7 +276,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:open-pr");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_IssuePrProfile_ProjectDefaultIsDifferent_UsesIssueProfile()
@@ -298,7 +298,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_IssuePrProfile_CustomYamlOverride_TakesPrecedence()
@@ -317,7 +317,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Single(result.Structure.Stages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ResolveLayeredVariables_ReturnsEmpty_WhenNoProfileVariablesExist()
@@ -335,7 +335,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Null(result.Stages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ResolveLayeredVariables_MergesProjectDefaultsWithIssueOverrides()
@@ -360,7 +360,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("issue-d", doc.RootElement.GetProperty("d").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ResolveLayeredVariables_ProjectEditsAffectExistingIssueWhenNotOverridden()
@@ -397,7 +397,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             doc.RootElement.GetProperty("agent").GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ResolveLayeredVariables_IssueModelOverrideWinsOverProjectModel()
@@ -421,7 +421,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("issue/override", agent.GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ResolveEffectiveVariables_ProjectStageModelAppliesWhenIssueOnlyHasContext()
@@ -457,7 +457,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(122, result.GetProperty("issue").GetProperty("number").GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ResolveEffectiveVariables_ReadsIssueStageAndFallsBackToTopLevel()
@@ -493,7 +493,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             topLevelResult.GetProperty("agent").GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ResolveLayeredVariables_MergesTemplateProjectIssueAndRuntimeLayers()
@@ -542,7 +542,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("https://example.test/pr/249", pr.GetProperty("url").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ResolveEffectiveVariables_ReturnsRunnerVarsForStage()
@@ -588,7 +588,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("build-model", agent.GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_NullTaskWith_ReturnsNull()
@@ -598,7 +598,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Null(result);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_ResolvesWholeTemplateStringToJsonValue()
@@ -623,7 +623,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("sonnet-4", result["agent"]!.Value.GetProperty("model").GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_DeepMergesObjectKey()
@@ -650,7 +650,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(300000, doc.RootElement.GetProperty("timeoutMs").GetInt32());       // vars overrides task
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_PreservesPlainValues()
@@ -670,7 +670,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(42, result!["count"]!.Value.GetInt32());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_ResolvesNestedWholeTemplatePath()
@@ -691,7 +691,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("found-it", result!["x"]!.Value.GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_ResolvesVarsPrefixedNestedWholeTemplatePath()
@@ -714,7 +714,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("https://github.com/example/repo/pull/42", result!["prUrl"]!.Value.GetString());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_PreservesUnresolvedWholeTemplateString()
@@ -739,7 +739,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     // WorkflowDefinition).
     // =================================================================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadStageSpecsAsync_ReturnsTasksAndChecksForStage_FromProjectTemplate()
@@ -773,7 +773,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(new[] { "ci-pool" }, build.Resources);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadStageSpecsAsync_HonorsIssueCustomTemplate_PerStage()
@@ -805,7 +805,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(new[] { "replacement-task" }, build.Tasks.Select(t => t.Id).ToArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadStageSpecsAsync_RerunsCascadeBetweenCalls_HotReloadsProfileEdits()
@@ -837,7 +837,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(new[] { "replacement-task", "follow-up-task" }, after.Tasks.Select(t => t.Id).ToArray());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadStageSpecsAsync_ThrowsWhenStageMissing()
@@ -857,7 +857,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains("no-such-stage", ex.Message);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadStageSpecsAsync_WhenAllProfilesDisabled_ThrowsActionableErrorInsteadOfFallingBackToLocal()
@@ -875,7 +875,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadStageSpecsAsync_ExistingRunKeepsOriginalProfileAfterItIsDisabled()
@@ -894,7 +894,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadStructureAsync_ReturnsStageSequenceAndApprovalFlags_WithoutTasks()
@@ -929,7 +929,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.False(structure.Stages.Single(s => s.Stage == "build").RequiresApproval);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadStructureAsync_HonorsExplicitContextAtCreateTime_BeforeRunPersisted()
@@ -976,7 +976,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.True(structure.Stages.Single().RequiresApproval);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadStructureAsync_FallsBackToSystemDefault_WhenContextMissing()
@@ -989,7 +989,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains(structure.Stages, s => s.Stage == "plan");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadStructureAsync_WhenAllProfilesDisabled_ThrowsActionableErrorInsteadOfFallingBackToLocal()
@@ -1007,7 +1007,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadStructureAsync_ExistingRunKeepsOriginalProfileAfterItIsDisabled()
@@ -1026,7 +1026,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains(structure.Stages, s => s.Stage == "integrate");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowQuerier_ExistingRunYamlAndStatusUseOriginalProfileAfterItIsDisabled()
@@ -1056,7 +1056,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "merge-pr");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowQuerier_StatusRead_MigratesLegacyClaimAssignment()
@@ -1097,7 +1097,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("runner-legacy-claim", status.AssignedTo);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadApprovalConfigAsync_ExistingRunIgnoresLaterDisabledProfiles()
@@ -1116,7 +1116,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("apply-feedback", approval!.Feedback!.Task!.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadApprovalConfigAsync_ReturnsConfiguredFeedbackTask_WhenDefined()
@@ -1154,7 +1154,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("spec/task", loaded.Feedback.Task.Uses);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadApprovalConfigAsync_ReturnsNull_WhenNoApprovalConfig()
