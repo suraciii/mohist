@@ -4,194 +4,36 @@ import { getAgentStatus } from '../../../entities/agent'
 import { onAgentEvent } from '../../../entities/agent'
 import type {
   ToolCallEntry,
-  TaskProgressMap,
-  LoopProgress,
   CoderSessionItem,
 } from '../../../entities/coder-session'
 import type { AgentDetailEventMap } from '../../../entities/agent'
 import {
-  viewSessionEvents,
-  type SessionEvent,
-  type SessionTimelineToolCall,
-  type SessionTimelineRecovery,
-  type SessionTimelineCompaction,
-} from '../../../entities/session/model/view'
+  BASE_PLAN_STEPS,
+  coderRecoveryStatusReducer,
+  compactionEventReducer,
+  contextCompactedReducer,
+  contextHealthUpdateReducer,
+  contextHealthUpdatedReducer,
+  deriveToolCallTitle,
+  planRoundCompleteReducer,
+  planRoundStartReducer,
+  sessionLivenessReducer,
+  usageUpdatedReducer,
+  type ContextHealthState,
+  type PlanProgress,
+  type RecoveryStatus,
+  type Round,
+  type SessionTimelineEnv,
+  type SessionTimelineState,
+} from './session-timeline-reducer'
+
+export * from './session-timeline-reducer'
 
 const FLUSH_INTERVAL = 100
-
-export interface RecoveryEvent {
-  status: 'detected' | 'recovering' | 'recovered' | 'failed'
-  attempt: number
-  reason?: string
-  timestamp: number
-}
-
-export type ContextHealthStatus = 'green' | 'yellow' | 'red'
-
-export interface ContextHealthState {
-  status: ContextHealthStatus | null
-  contextWindowUsed: number | null
-  contextWindowSize: number | null
-  contextUsagePercent: number | null
-  recordedAt: string | null
-}
-
-function toContextHealthStatus(value: string | null | undefined): ContextHealthStatus | null {
-  return value === 'green' || value === 'yellow' || value === 'red' ? value : null
-}
-
-export interface CompactionEntry {
-  id: string
-  strategy?: string
-  contextWindowUsedBefore?: number | null
-  contextWindowUsedAfter?: number | null
-  contextWindowSize?: number | null
-  summary?: string
-  timestamp: number
-  recordedAt: string
-}
-
-export interface Round {
-  roundIndex: number
-  label: string
-  startedAt: string
-  completedAt: string | null
-  userText: string
-  agentText: string
-  thoughtText: string
-  toolCalls: ToolCallEntry[]
-  recoveryEvents: RecoveryEvent[]
-  compactions: CompactionEntry[]
-}
-
-export interface RecoveryStatus {
-  status: 'detected' | 'recovering' | 'recovered' | 'failed'
-  attempt: number
-  reason?: string
-}
-
-function mapLivenessToRecoveryStatus(status: AgentDetailEventMap['session.liveness']['status']): RecoveryStatus['status'] {
-  if (status === 'probing') return 'recovering'
-  if (status === 'running') return 'recovered'
-  return 'failed'
-}
-
-const BASE_PLAN_STEPS: Array<{ roundType: string; roundLabel: string }> = [
-  { roundType: 'proposal', roundLabel: 'Proposal' },
-  { roundType: 'specs', roundLabel: 'Specs' },
-  { roundType: 'design', roundLabel: 'Design' },
-  { roundType: 'tasks', roundLabel: 'Tasks' },
-  { roundType: 'self-review', roundLabel: 'Self Review' },
-]
-
-export interface PlanStep {
-  roundType: string
-  roundLabel: string
-  roundIndex: number
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  duration?: number
-  verdict?: 'PASS' | 'FAIL'
-}
-
-export interface PlanProgress {
-  steps: PlanStep[]
-  completedCount: number
-  totalSteps: number
-}
-
-export function deriveToolCallTitle(toolName: string, title: string | undefined, rawInput: string | undefined): string {
-  if (title && title !== toolName) return title
-  if (!rawInput) return toolName
-  try {
-    const parsed = JSON.parse(rawInput)
-    if (typeof parsed !== 'object' || parsed === null) return toolName
-    const lower = toolName.toLowerCase()
-    if (['read', 'read_file', 'write', 'write_file', 'edit'].includes(lower)) {
-      const fp = parsed.file_path ?? parsed.filePath ?? parsed.path
-      if (typeof fp === 'string' && fp) return fp.split('/').pop() ?? fp
-    }
-    if (lower === 'bash') {
-      const cmd = parsed.command ?? parsed.script
-      if (typeof cmd === 'string' && cmd) return cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd
-    }
-    if (['glob', 'search_files', 'grep', 'search'].includes(lower)) {
-      const pat = parsed.pattern ?? parsed.query ?? parsed.search
-      if (typeof pat === 'string' && pat) return pat
-    }
-    return toolName
-  } catch {
-    return rawInput || toolName
-  }
-}
-
-const PLAN_ROUND_LABELS = ['proposal.md', 'specs/', 'design.md', 'tasks.json', 'self-review']
-
-function inferRoundLabel(roundIndex: number, totalRounds: number): string {
-  if (roundIndex < PLAN_ROUND_LABELS.length && totalRounds <= PLAN_ROUND_LABELS.length) {
-    return PLAN_ROUND_LABELS[roundIndex]
-  }
-  return `Round ${roundIndex + 1}`
-}
-
-function timelineToolCallToEntry(tool: SessionTimelineToolCall, fallbackAt: string): ToolCallEntry {
-  const state: ToolCallEntry['state'] =
-    tool.state === 'running' ? 'started' : tool.state
-  return {
-    executionId: '',
-    toolName: tool.toolName,
-    state,
-    timestamp: new Date(tool.startedAt ?? fallbackAt).getTime(),
-    toolCallId: tool.toolCallId,
-    title: deriveToolCallTitle(tool.toolName, tool.title, tool.rawInput),
-    rawInput: tool.rawInput,
-    rawOutput: tool.rawOutput,
-  }
-}
 
 function toToolCallEntryState(state: AgentDetailEventMap['tool_call.started']['state']): ToolCallEntry['state'] {
   if (state === 'timeout') return 'failed'
   return state
-}
-
-function timelineRecoveryToEvent(recovery: SessionTimelineRecovery): RecoveryEvent {
-  return {
-    status: recovery.status,
-    attempt: recovery.attempt ?? 1,
-    reason: recovery.reason,
-    timestamp: new Date(recovery.at).getTime(),
-  }
-}
-
-function timelineCompactionToEntry(compaction: SessionTimelineCompaction, fallbackIndex: number): CompactionEntry {
-  const id = compaction.id != null ? String(compaction.id) : `compaction-${compaction.at}-${fallbackIndex}`
-  return {
-    id,
-    strategy: compaction.strategy,
-    contextWindowUsedBefore: compaction.contextWindowUsedBefore ?? null,
-    contextWindowUsedAfter: compaction.contextWindowUsedAfter ?? null,
-    contextWindowSize: compaction.contextWindowSize ?? null,
-    summary: compaction.summary,
-    timestamp: new Date(compaction.at).getTime(),
-    recordedAt: compaction.at,
-  }
-}
-
-export function reconstructRoundsFromEvents(events: SessionEvent[]): Round[] {
-  if (events.length === 0) return []
-  const view = viewSessionEvents(events, 'timeline')
-  const totalRounds = view.rounds.length
-  return view.rounds.map((round) => ({
-    roundIndex: round.roundIndex,
-    label: inferRoundLabel(round.roundIndex, totalRounds),
-    startedAt: round.startedAt,
-    completedAt: round.completedAt,
-    userText: round.userText,
-    agentText: round.agentText,
-    thoughtText: round.thoughtText,
-    toolCalls: round.toolCalls.map((tool) => timelineToolCallToEntry(tool, round.startedAt)),
-    recoveryEvents: round.recovery.map(timelineRecoveryToEvent),
-    compactions: round.compactions.map((entry, idx) => timelineCompactionToEntry(entry, idx)),
-  }))
 }
 
 export function useSessionTimeline(issueNumber: number, session?: CoderSessionItem) {
@@ -206,8 +48,6 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
   const [rounds, setRounds] = useState<Round[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
-  const [taskProgress] = useState<TaskProgressMap>(new Map())
-  const [loopProgress] = useState<LoopProgress | null>(null)
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null)
   const [planProgress, setPlanProgress] = useState<PlanProgress | null>(null)
   const [contextHealth, setContextHealth] = useState<ContextHealthState | null>(null)
@@ -222,6 +62,15 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
   const historyLoadedRef = useRef(false)
   const setRoundsRef = useRef(setRounds)
   setRoundsRef.current = setRounds
+
+  const roundsRef = useRef<Round[]>(rounds)
+  const planProgressRef = useRef<PlanProgress | null>(planProgress)
+  const recoveryStatusRef = useRef<RecoveryStatus | null>(recoveryStatus)
+  const contextHealthRef = useRef<ContextHealthState | null>(contextHealth)
+  roundsRef.current = rounds
+  planProgressRef.current = planProgress
+  recoveryStatusRef.current = recoveryStatus
+  contextHealthRef.current = contextHealth
 
   const flushPlanBuffer = useCallback(() => {
     if (!mountedRef.current) return
@@ -376,6 +225,30 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
       return detail.coderSessionId === s.id || detail.sessionId === s.id
     }
 
+    const makeEnv = (): SessionTimelineEnv => ({
+      now: Date.now(),
+      isoNow: new Date().toISOString(),
+      randomId: () => Math.random().toString(36).slice(2, 8),
+    })
+
+    const dispatch = <D>(
+      reducer: (prev: SessionTimelineState, detail: D, env: SessionTimelineEnv) => SessionTimelineState,
+      detail: D,
+    ) => {
+      const env = makeEnv()
+      const snapshot: SessionTimelineState = {
+        rounds: roundsRef.current,
+        planProgress: planProgressRef.current,
+        recoveryStatus: recoveryStatusRef.current,
+        contextHealth: contextHealthRef.current,
+      }
+      const next = reducer(snapshot, detail, env)
+      if (next.rounds !== snapshot.rounds) setRounds(next.rounds)
+      if (next.planProgress !== snapshot.planProgress) setPlanProgress(next.planProgress)
+      if (next.recoveryStatus !== snapshot.recoveryStatus) setRecoveryStatus(next.recoveryStatus)
+      if (next.contextHealth !== snapshot.contextHealth) setContextHealth(next.contextHealth)
+    }
+
     unsubs.push(
       onAgentEvent('plan_round_start', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
@@ -385,45 +258,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
           if (!detail.coderSessionId && detail.acpSessionId && detail.acpSessionId !== s.acpSessionId) return
           if (!detail.coderSessionId && !detail.acpSessionId) return
         }
-        setRoundsRef.current((prev) => {
-          const newRound: Round = {
-            roundIndex: prev.length,
-            label: detail.roundLabel ?? `Round ${prev.length + 1}`,
-            startedAt: new Date().toISOString(),
-            completedAt: null,
-            userText: '',
-            agentText: '',
-            thoughtText: '',
-            toolCalls: [],
-            recoveryEvents: [],
-            compactions: [],
-          }
-          return [...prev, newRound]
-        })
-        setPlanProgress((prev) => {
-          const steps: PlanStep[] = prev?.steps ? [...prev.steps] : BASE_PLAN_STEPS.map((s, i) => ({
-            roundType: s.roundType,
-            roundLabel: s.roundLabel,
-            roundIndex: i,
-            status: 'pending' as const,
-          }))
-          const idx = steps.findIndex((s) => s.roundType === detail.roundType)
-          if (idx >= 0) {
-            steps[idx] = { ...steps[idx], status: 'running' }
-          } else {
-            steps.push({
-              roundType: detail.roundType,
-              roundLabel: detail.roundLabel ?? detail.roundType,
-              roundIndex: detail.roundIndex,
-              status: 'running',
-            })
-          }
-          return {
-            steps,
-            completedCount: prev?.completedCount ?? 0,
-            totalSteps: prev?.totalSteps ?? 5,
-          }
-        })
+        dispatch(planRoundStartReducer, detail)
       }),
     )
 
@@ -444,48 +279,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     unsubs.push(
       onAgentEvent('plan_round_complete', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
-        setPlanProgress((prev) => {
-          const steps: PlanStep[] = prev?.steps ? [...prev.steps] : BASE_PLAN_STEPS.map((s, i) => ({
-            roundType: s.roundType,
-            roundLabel: s.roundLabel,
-            roundIndex: i,
-            status: i < detail.roundIndex ? ('completed' as const) : ('pending' as const),
-          }))
-          const isFailed = detail.verdict === 'FAIL'
-          const idx = steps.findIndex((s) => s.roundType === detail.roundType)
-          if (idx >= 0) {
-            steps[idx] = {
-              ...steps[idx],
-              status: isFailed ? ('failed' as const) : ('completed' as const),
-              duration: detail.duration,
-              ...(detail.verdict ? { verdict: detail.verdict as 'PASS' | 'FAIL' } : {}),
-            }
-          }
-          if (detail.roundType === 'self-review' && isFailed) {
-            if (!steps.some((s) => s.roundType === 'auto-fix')) {
-              steps.push({
-                roundType: 'auto-fix',
-                roundLabel: 'Auto Fix',
-                roundIndex: steps.length,
-                status: 'pending',
-              })
-            }
-            if (!steps.some((s) => s.roundType === 're-self-review')) {
-              steps.push({
-                roundType: 're-self-review',
-                roundLabel: 'Re Self Review',
-                roundIndex: steps.length,
-                status: 'pending',
-              })
-            }
-          }
-          const completedCount = steps.filter((s) => s.status === 'completed' || s.status === 'failed').length
-          return {
-            steps,
-            completedCount,
-            totalSteps: prev?.totalSteps ?? 5,
-          }
-        })
+        dispatch(planRoundCompleteReducer, detail)
       }),
     )
 
@@ -579,229 +373,49 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     unsubs.push(
       onAgentEvent('coder_recovery_status', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
-        setRecoveryStatus({
-          status: detail.status,
-          attempt: detail.attempt,
-          reason: detail.reason,
-        })
-        if (detail.status === 'detected' || detail.status === 'recovering') {
-          setRoundsRef.current((prev) => {
-            if (prev.length === 0) return prev
-            const next = [...prev]
-            const lastRound = { ...next[next.length - 1] }
-            lastRound.recoveryEvents = [...lastRound.recoveryEvents, {
-              status: detail.status,
-              attempt: detail.attempt,
-              reason: detail.reason,
-              timestamp: Date.now(),
-            }]
-            next[next.length - 1] = lastRound
-            return next
-          })
-        }
-        if (detail.status === 'recovered' || detail.status === 'failed') {
-          setRecoveryStatus(null)
-          setRoundsRef.current((prev) => {
-            if (prev.length === 0) return prev
-            const next = [...prev]
-            const lastRound = { ...next[next.length - 1] }
-            lastRound.recoveryEvents = [...lastRound.recoveryEvents, {
-              status: detail.status,
-              attempt: detail.attempt,
-              reason: detail.reason,
-              timestamp: Date.now(),
-            }]
-            next[next.length - 1] = lastRound
-            return next
-          })
-        }
+        dispatch(coderRecoveryStatusReducer, detail)
       }),
     )
 
     unsubs.push(
       onAgentEvent('session.liveness', (detail) => {
         if (!isCurrentSessionEvent(detail)) return
-        const status = mapLivenessToRecoveryStatus(detail.status)
-        const attempt = detail.activeProbeVersion ?? detail.satisfiedProbeVersion ?? detail.probeVersion ?? 1
-        const reason = detail.failureReason
-          ?? (detail.status === 'probing'
-            ? `Probe sent; waiting for activity before ${detail.probeDeadlineAt ?? 'deadline unknown'}`
-            : detail.lastActivityType)
-
-        setRecoveryStatus({
-          status,
-          attempt,
-          reason,
-        })
-
-        setRoundsRef.current((prev) => {
-          if (prev.length === 0) return prev
-          const next = [...prev]
-          const lastRound = { ...next[next.length - 1] }
-          lastRound.recoveryEvents = [...lastRound.recoveryEvents, {
-            status,
-            attempt,
-            reason,
-            timestamp: Date.now(),
-          }]
-          next[next.length - 1] = lastRound
-          return next
-        })
-
-        if (detail.status === 'running' || detail.status === 'failed') {
-          setRecoveryStatus(null)
-        }
+        dispatch(sessionLivenessReducer, detail)
       }),
     )
-
-    const applyContextHealth = (next: ContextHealthState) => {
-      setContextHealth((prev) => {
-        if (!prev) return next
-        if (
-          prev.status === next.status
-          && prev.contextWindowUsed === next.contextWindowUsed
-          && prev.contextWindowSize === next.contextWindowSize
-          && prev.contextUsagePercent === next.contextUsagePercent
-        ) {
-          return prev
-        }
-        return next
-      })
-    }
 
     unsubs.push(
       onAgentEvent('usage.updated', (detail) => {
         if (!isCurrentSessionEvent(detail)) return
-        if (detail.contextWindowUsed == null && detail.contextWindowSize == null && detail.contextUsagePercent == null && detail.healthStatus == null) return
-        const used = detail.contextWindowUsed ?? null
-        const size = detail.contextWindowSize ?? null
-        applyContextHealth({
-          status: toContextHealthStatus(detail.healthStatus),
-          contextWindowUsed: used,
-          contextWindowSize: size,
-          contextUsagePercent: detail.contextUsagePercent ?? null,
-          recordedAt: new Date().toISOString(),
-        })
+        dispatch(usageUpdatedReducer, detail)
       }),
     )
 
     unsubs.push(
       onAgentEvent('context_health_update', (detail) => {
         if (!isCurrentSessionEvent(detail)) return
-        applyContextHealth({
-          status: toContextHealthStatus(detail.healthStatus),
-          contextWindowUsed: detail.contextWindowUsed ?? null,
-          contextWindowSize: detail.contextWindowSize ?? null,
-          contextUsagePercent: detail.contextUsagePercent ?? null,
-          recordedAt: detail.recordedAt ?? new Date().toISOString(),
-        })
+        dispatch(contextHealthUpdateReducer, detail)
       }),
     )
 
     unsubs.push(
       onAgentEvent('compaction_event', (detail) => {
         if (!isCurrentSessionEvent(detail)) return
-        const recordedAt = detail.recordedAt ?? new Date().toISOString()
-        const entry: CompactionEntry = {
-          id: `compaction-${recordedAt}-${Math.random().toString(36).slice(2, 8)}`,
-          strategy: detail.strategy,
-          contextWindowUsedBefore: detail.contextWindowUsedBefore ?? null,
-          contextWindowUsedAfter: detail.contextWindowUsedAfter ?? null,
-          contextWindowSize: detail.contextWindowSize ?? null,
-          summary: detail.summary,
-          timestamp: new Date(recordedAt).getTime(),
-          recordedAt,
-        }
-        setRoundsRef.current((prev) => {
-          if (prev.length === 0) {
-            const placeholder: Round = {
-              roundIndex: 0,
-              label: 'Compaction',
-              startedAt: recordedAt,
-              completedAt: recordedAt,
-              userText: '',
-              agentText: '',
-              thoughtText: '',
-              toolCalls: [],
-              recoveryEvents: [],
-              compactions: [entry],
-            }
-            return [placeholder]
-          }
-          const next = [...prev]
-          const lastRound = { ...next[next.length - 1] }
-          lastRound.compactions = [...lastRound.compactions, entry]
-          next[next.length - 1] = lastRound
-          return next
-        })
-        const size = detail.contextWindowSize ?? null
-        applyContextHealth({
-          status: null,
-          contextWindowUsed: detail.contextWindowUsedAfter ?? null,
-          contextWindowSize: size,
-          contextUsagePercent: null,
-          recordedAt,
-        })
+        dispatch(compactionEventReducer, detail)
       }),
     )
 
     unsubs.push(
       onAgentEvent('com.mohist.agent-session.context-compacted', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
-        const recordedAt = detail.recordedAt ?? new Date().toISOString()
-        const entry: CompactionEntry = {
-          id: `compaction-domain-${recordedAt}-${Math.random().toString(36).slice(2, 8)}`,
-          strategy: detail.strategy ?? undefined,
-          contextWindowUsedBefore: detail.contextWindowUsedBefore ?? null,
-          contextWindowUsedAfter: detail.contextWindowUsedAfter ?? null,
-          contextWindowSize: detail.contextWindowSize ?? null,
-          summary: detail.summary ?? undefined,
-          timestamp: new Date(recordedAt).getTime(),
-          recordedAt,
-        }
-        setRoundsRef.current((prev) => {
-          if (prev.length === 0) {
-            const placeholder: Round = {
-              roundIndex: 0,
-              label: 'Compaction',
-              startedAt: recordedAt,
-              completedAt: recordedAt,
-              userText: '',
-              agentText: '',
-              thoughtText: '',
-              toolCalls: [],
-              recoveryEvents: [],
-              compactions: [entry],
-            }
-            return [placeholder]
-          }
-          const next = [...prev]
-          const lastRound = { ...next[next.length - 1] }
-          lastRound.compactions = [...lastRound.compactions, entry]
-          next[next.length - 1] = lastRound
-          return next
-        })
-        const size = detail.contextWindowSize ?? null
-        applyContextHealth({
-          status: null,
-          contextWindowUsed: detail.contextWindowUsedAfter ?? null,
-          contextWindowSize: size,
-          contextUsagePercent: null,
-          recordedAt,
-        })
+        dispatch(contextCompactedReducer, detail)
       }),
     )
 
     unsubs.push(
       onAgentEvent('com.mohist.agent-session.context-health-updated', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
-        applyContextHealth({
-          status: toContextHealthStatus(detail.healthStatus),
-          contextWindowUsed: detail.contextWindowUsed ?? null,
-          contextWindowSize: detail.contextWindowSize ?? null,
-          contextUsagePercent: detail.contextUsagePercent ?? null,
-          recordedAt: detail.recordedAt ?? new Date().toISOString(),
-        })
+        dispatch(contextHealthUpdatedReducer, detail)
       }),
     )
 
@@ -823,8 +437,6 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     rounds,
     isLoading: false,
     isStreaming,
-    taskProgress,
-    loopProgress,
     recoveryStatus,
     planProgress,
     contextHealth,
