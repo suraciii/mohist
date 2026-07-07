@@ -1,0 +1,358 @@
+using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Issue.Grains;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Sessions.Services;
+using Xunit;
+
+namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+
+[Collection("MohistIntegration")]
+public class WorkflowSessionSpecs
+{
+    private readonly HttpClient _client;
+    private readonly MohistIntegrationFixture _fixture;
+    private readonly string _runnerId = $"workflow-session-spec-runner-{Guid.NewGuid():N}";
+
+    public WorkflowSessionSpecs(MohistIntegrationFixture fixture)
+    {
+        _fixture = fixture;
+        _client = fixture.Client;
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task GivenPersistedIssueWhenAllProfilesDisabled_ThenReadSurfacesAreUnresolvedAndStartFails()
+    {
+        var project = await _client.PostProjectWithRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            new { name = $"all-disabled-start-{Guid.NewGuid():N}" },
+            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main", isDefault = true });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
+        {
+            title = "Persisted issue in all-disabled project",
+            body = "Created before the project lost every enabled workflow.",
+            labels = new Dictionary<string, string>(StringComparer.Ordinal),
+            priority = "p2",
+            isDraft = false
+        });
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var projectProfile = await db.ProjectWorkflowProfiles
+                .FirstOrDefaultAsync(x => x.ProjectId == project.Id);
+            if (projectProfile is null)
+            {
+                projectProfile = new ProjectWorkflowProfile
+                {
+                    ProjectId = project.Id,
+                    Variables = "{}",
+                };
+                db.ProjectWorkflowProfiles.Add(projectProfile);
+            }
+
+            projectProfile.DisabledWorkflowProfileIds = ["mohist/local", "mohist/github-pr"];
+            await db.SaveChangesAsync();
+        }
+
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+        var workflowProfile = await _client.GetDataAsync<IssueWorkflowProfileDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+
+        Assert.Null(detail.WorkflowProfileId);
+        Assert.Null(workflowProfile.ProfileId);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
+        Assert.Contains("Enable a workflow first", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        var retryEx = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
+        Assert.Contains("Enable a workflow first", retryEx.Message, StringComparison.OrdinalIgnoreCase);
+
+        var afterFailure = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+        Assert.Equal("backlog", afterFailure.Status);
+        Assert.Null(afterFailure.WorkflowRunId);
+
+        await using var eventScope = _fixture.Services.CreateAsyncScope();
+        var events = await eventScope.ServiceProvider.GetRequiredService<IEventStore>()
+            .ListIssueEventsAsync(issue.Id);
+        Assert.DoesNotContain(events, e => string.Equals(
+            e.Envelope.Type,
+            EventCatalog.ReverseDns.IssueWorkStarted,
+            StringComparison.Ordinal));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task GivenRunnerReportsAcpSessionEvents_WhenSessionIsQueried_ThenEventsAreSavedInSessionOrder()
+    {
+        var (project, issue, workflowRunId) = await CreateIssueWorkflowAsync("Runner reports ACP session events");
+        var projectId = project.Id;
+        var sessionName = "builder";
+
+        var opened = await PostRawAsync<RunnerAgentSessionDto>($"/api/runner/runner-1/sessions/{projectId}/{workflowRunId}/{sessionName}/open", new
+        {
+            workId = "proposal",
+            workType = "task",
+            stage = "plan",
+            title = "Generate proposal",
+            issueNumber = issue.Number,
+        });
+        await PostRawAsync<RunnerAgentSessionDto>(RunnerAgentSessionAttachPath("runner-1", projectId, workflowRunId, sessionName), new
+        {
+            agentSessionId = "acp-1",
+            workDir = "/workspace",
+            model = "openai/gpt-4o",
+            processPid = 123,
+        });
+        var fetched = await GetRawAsync<RunnerAgentSessionDto>(RunnerSessionPath("runner-1", projectId, workflowRunId, sessionName));
+
+        await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
+        {
+            workId = "proposal",
+            workType = "task",
+            stage = "plan",
+            runtimeEvents = new object[]
+            {
+                new { type = "session.input", payload = new { text = "write proposal" } },
+                new { type = "message.delta", payload = new { content = new { text = "done" } } },
+                new { type = "usage.updated", payload = new { inputTokens = 10, outputTokens = 5, totalTokens = 15 } },
+            },
+        });
+        await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
+        {
+            runtimeEvents = new object[]
+            {
+                new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
+            },
+        });
+
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
+        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 3, _fixture.Grains);
+
+        var detail = await _client.GetDataAsync<WorkflowSessionDetailDto>($"/api/workflow-runs/{workflowRunId}/sessions/{sessionName}");
+        var sessions = await _client.GetDataAsync<WorkflowSessionDto[]>($"/api/workflow-runs/{workflowRunId}/sessions");
+
+        Assert.Equal(workflowRunId, opened.Key.WorkflowRunId);
+        Assert.Equal(workflowRunId, fetched.Key.WorkflowRunId);
+        Assert.Equal("acp-1", fetched.AcpSessionId);
+        Assert.Equal("/workspace", fetched.WorkDir);
+        Assert.Equal(sessionName, detail.Session.SessionName);
+        Assert.Equal("acp-1", detail.Session.AcpSessionId);
+        Assert.Equal("completed", detail.Session.Status);
+        Assert.Equal("plan", detail.Session.Stage);
+        Assert.NotNull(detail.Session.CompletedAt);
+        Assert.Equal("openai/gpt-4o", detail.Session.Model);
+        var listed = Assert.Single(sessions);
+        Assert.Equal(sessionName, listed.SessionName);
+        Assert.Equal("acp-1", listed.AcpSessionId);
+        Assert.Equal("completed", listed.Status);
+        Assert.Equal("plan", listed.Stage);
+        Assert.NotNull(listed.CompletedAt);
+        Assert.NotNull(listed.Usage);
+        Assert.Equal(15, listed.Usage!.TotalTokens);
+        Assert.Equal(3, detail.Transcript.PartCount);
+        var turn = Assert.Single(detail.Transcript.Turns);
+        Assert.Equal("write proposal", turn.User.Text);
+        Assert.Contains(turn.Assistant, p => p.Type == "text" && p.Text == "done");
+        Assert.Null(turn.CompletedAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task GivenMohistPromptAndTerminalFailure_WhenIssueWorkflowSessionEventsAreQueried_ThenRawEventsReturnInSequence()
+    {
+        const string promptBody =
+            "Real full mohist_prompt text body. " +
+            "It is longer than a short task title and is the exact text the agent sees. " +
+            "Repeating the body to make sure the assertion fails on any truncation.";
+        const string failureReason = "model refused to continue";
+        var (project, issue, sessionName, workflowRunId) = await CreateIssueWorkflowSessionAsync("workflow-mohist-prompt");
+        var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
+
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(_runnerId, project.Id, workflowRunId, sessionName), new
+        {
+            agentSessionId = sessionId,
+            workDir = project.Path,
+            processPid = 1234
+        });
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(_runnerId, project.Id, workflowRunId, sessionName), new
+        {
+            runtimeEvents = new object[]
+            {
+                new
+                {
+                    type = "session.input",
+                    payload = new { text = promptBody, kind = "task" }
+                },
+                new { type = "message.delta", payload = new { text = "starting work" } },
+                new
+                {
+                    type = "session.liveness",
+                    payload = new { status = "probing", probeDeadlineAt = "2026-06-03T12:00:00Z", lastActivityType = "session" }
+                },
+                new
+                {
+                    type = "session.liveness",
+                    payload = new { status = "failed", failureReason = "no progress", lastActivityType = "message" }
+                },
+                new
+                {
+                    type = "session.closed",
+                    payload = new { status = "failed", failureReason, exitCode = 1 }
+                }
+            }
+        });
+
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 3, _fixture.Grains);
+
+        var metadata = await _client.GetDataAsync<IssueSessionMetadataTestDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}");
+        Assert.Equal(sessionId, metadata.Id);
+        Assert.Equal(sessionName, metadata.SessionName);
+        Assert.Equal(3, metadata.Metadata.PartCount);
+        Assert.Equal(0, metadata.Metadata.ToolCount);
+
+        var transcript = await _client.GetDataAsync<IssueSessionTranscriptTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}/transcript");
+        Assert.Equal(3, transcript.PartCount);
+        var turn = Assert.Single(transcript.Turns);
+        Assert.Equal(promptBody, turn.User.Text);
+        Assert.Equal("task", turn.User.Kind);
+        Assert.Contains(turn.Assistant, p => p.Type == "text" && p.Text == "starting work");
+        Assert.Contains(turn.Assistant, p => p.Type == "error" && p.Kind == "failed" && p.Message == failureReason);
+
+        var workflowSessions = await _client.GetDataAsync<WorkflowSessionDto[]>($"/api/workflow-runs/{workflowRunId}/sessions");
+        var listed = Assert.Single(workflowSessions);
+        Assert.Equal("failed", listed.Status);
+        Assert.Equal("Build", listed.Stage);
+        Assert.NotNull(listed.CompletedAt);
+        Assert.Equal(failureReason, listed.FailureReason);
+        Assert.Equal(1, listed.ExitCode);
+    }
+
+    private async Task<(ProjectDto Project, IssueDto Issue, string SessionName, string WorkflowRunId)> CreateIssueWorkflowSessionAsync(string name, string? title = null)
+    {
+        var issueTitle = title ?? $"Workflow session {name}";
+        var (project, issue, workflowRunId) = await CreateIssueWorkflowAsync(issueTitle);
+        var sessionName = $"task-{Guid.NewGuid():N}";
+        var sessionId = Guid.NewGuid().ToString("N");
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
+            .OpenAsync(new OpenAgentSessionCommand(
+                _runnerId,
+                "opencode",
+                Metadata: WorkflowSessionMetadata(project.Id, issue.Number, workflowRunId, sessionName, sessionName, "task", "Build", issueTitle)));
+
+        return (project, issue, sessionName, workflowRunId);
+    }
+
+    private async Task<(ProjectDto Project, IssueDto Issue, string WorkflowRunId)> CreateIssueWorkflowAsync(string title)
+    {
+        var projectName = $"wfs-{Guid.NewGuid():N}";
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
+        {
+            name = projectName,
+        });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
+        {
+            name = "main",
+            gitUrl = "https://example.com/repo.git",
+            baseBranch = "main",
+            isDefault = true
+        });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
+        {
+            title,
+            body = "track workflow session",
+            labels = new Dictionary<string, string>(StringComparer.Ordinal),
+            priority = "p1",
+            isDraft = false
+        });
+
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        await issueGrain.StartWorkAsync();
+        var workflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
+        return (project, issue, workflowRunId);
+    }
+
+    private async Task<T> PostRawAsync<T>(string path, object body)
+    {
+        using var response = await _client.PostAsJsonAsync(path, body, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<T>(new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)))!;
+    }
+
+    private async Task<T> GetRawAsync<T>(string path)
+    {
+        using var response = await _client.GetAsync(path);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<T>(new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)))!;
+    }
+
+    private static string RunnerAgentSessionAttachPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
+        $"{RunnerSessionPath(runnerId, projectId, workflowRunId, sessionName)}/attach";
+
+    private static string RunnerAgentSessionRuntimeEventsPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
+        $"{RunnerSessionPath(runnerId, projectId, workflowRunId, sessionName)}/runtime-events";
+
+    private static string RunnerSessionPath(string runnerId, string projectId, string workflowRunId, string sessionName) =>
+        $"/api/runner/{runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}";
+
+    private async Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName)
+    {
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        return await db.AgentSessions
+            .Where(s => s.LabelSourceId == workflowRunId && s.LabelSessionName == sessionName)
+            .Select(s => s.Id)
+            .SingleAsync();
+    }
+
+    private static AgentSessionMetadata WorkflowSessionMetadata(
+        string projectId,
+        int issueNumber,
+        string workflowRunId,
+        string sessionName,
+        string? workId,
+        string? workType,
+        string? stage,
+        string? title) =>
+        new AgentSessionMetadata()
+            .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
+            .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
+            .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
+            .WithLabel(AgentSessionQueryMetadataKeys.SessionName, sessionName)
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkId, workId)
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkType, workType)
+            .WithLabel(AgentSessionQueryMetadataKeys.Stage, stage)
+            .WithAnnotation(AgentSessionQueryMetadataKeys.Title, title);
+
+    private sealed record RunnerAgentSessionDto(RunnerAgentSessionKeyDto Key, string? AcpSessionId, string Status, string? WorkDir, string? Model);
+    private sealed record RunnerAgentSessionKeyDto(string ProjectId, string WorkflowRunId, string SessionName);
+    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? AcpSessionId, string Status, string? Stage, string? Model, string? CompletedAt, string? FailureReason, int? ExitCode, WorkflowSessionUsageDto? Usage);
+    private sealed record WorkflowSessionUsageDto(long? TotalTokens);
+    private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IssueSessionTranscriptTestResponse Transcript);
+    private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);
+    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record IssueDto(
+        string Id,
+        int Number,
+        string Title,
+        string Status,
+        string? WorkflowRunId,
+        string? WorkflowProfileId = null);
+    private sealed record IssueWorkflowProfileDto(string? ProfileId);
+    private sealed record IssueSessionMetadataTestDto(string Id, string SessionName, IssueSessionMetadataCountsTestDto Metadata);
+    private sealed record IssueSessionMetadataCountsTestDto(int PartCount, int ToolCount);
+    private sealed record IssueSessionTranscriptTestResponse(IssueSessionTranscriptTurnTestDto[] Turns, int PartCount, string? LastActivityAt);
+    private sealed record IssueSessionTranscriptTurnTestDto(string Id, string StartedAt, string? CompletedAt, bool Incomplete, IssueSessionTranscriptUserTestDto User, IssueSessionTranscriptPartTestDto[] Assistant);
+    private sealed record IssueSessionTranscriptUserTestDto(string Text, string Kind, string SentAt);
+    private sealed record IssueSessionTranscriptPartTestDto(string Id, string Type, string? Text, string? ToolCallId, string? Status, string? StartedAt, string? CompletedAt, string? Message, string? Kind, string? At);
+}
