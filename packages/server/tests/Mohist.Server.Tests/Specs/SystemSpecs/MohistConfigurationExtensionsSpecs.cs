@@ -1,6 +1,9 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -24,6 +27,38 @@ public class MohistConfigurationExtensionsSpecs : IDisposable
         File.WriteAllText(path, content);
         _tempFiles.Add(path);
         return path;
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void AddMohistUserConfigFile_WhenEnvironmentIsTesting_DoesNotRegisterJsonSource()
+    {
+        var path = CreateTempJsonc("""{ "Mohist": { "Host": "from-user-file" } }""");
+        var environment = new TestHostEnvironment(MohistHostEnvironment.Testing);
+
+        var builder = new ConfigurationBuilder();
+        builder.AddMohistUserConfigFile(environment, path: path, optional: true, reloadOnChange: true);
+        var cfg = builder.Build();
+
+        Assert.Empty(builder.Sources.OfType<JsonConfigurationSource>());
+        Assert.Null(cfg["Mohist:Host"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void AddMohistUserConfigFile_WhenEnvironmentIsNotTesting_RegistersJsonSource()
+    {
+        var path = CreateTempJsonc("""{ "Mohist": { "Host": "from-user-file" } }""");
+        var environment = new TestHostEnvironment(Environments.Production);
+
+        var builder = new ConfigurationBuilder();
+        builder.AddMohistUserConfigFile(environment, path: path, optional: true, reloadOnChange: false);
+        var cfg = builder.Build();
+
+        Assert.Single(builder.Sources.OfType<JsonConfigurationSource>());
+        Assert.Equal("from-user-file", cfg["Mohist:Host"]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -130,5 +165,13 @@ public class MohistConfigurationExtensionsSpecs : IDisposable
 
         var jsonSource = builder.Sources.OfType<JsonConfigurationSource>().Single();
         Assert.False(jsonSource.ReloadOnChange);
+    }
+
+    private sealed class TestHostEnvironment(string environmentName) : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = environmentName;
+        public string ApplicationName { get; set; } = "Mohist.Server.Tests";
+        public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }

@@ -12,6 +12,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services.SignalR;
@@ -122,6 +123,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.UseEnvironment(MohistHostEnvironment.Testing);
         _webRoot ??= CreateWebRoot();
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
         builder.UseSetting("Mohist:WebRoot", _webRoot);
@@ -144,11 +146,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
                 ["Mohist:AgentJob:JobTimeout"] = "00:00:08",
-                // 集成测试 host 会经 Program.cs 的 AddMohistConfigFile() 读到真实的
-                // ~/.mohist/config.jsonc。若用户配了 Hermes webhook + 本地 Hermes
-                // 在跑，测试产生的 WorkflowRunFailed 会被真实投递到用户聊天平台。
-                // 这里把 WebhookUrl 置空，让 HermesIssueNotificationHandler 在
-                // IsWebhookConfigured 检查处直接短路，杜绝真实外部副作用。
                 ["Mohist:Notifications:Hermes:WebhookUrl"] = null,
             });
         });

@@ -1,10 +1,25 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
+using Microsoft.Extensions.Hosting;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Infrastructure.Config;
 
 public static class MohistConfigurationExtensions
 {
+    public static IConfigurationBuilder AddMohistUserConfigFile(
+        this IConfigurationBuilder builder,
+        IHostEnvironment environment,
+        string? path = null,
+        bool optional = true,
+        bool reloadOnChange = true)
+    {
+        if (environment.IsEnvironment(MohistHostEnvironment.Testing))
+            return builder;
+
+        return builder.AddMohistConfigFile(path, optional, reloadOnChange);
+    }
+
     public static IConfigurationBuilder AddMohistConfigFile(
         this IConfigurationBuilder builder,
         string? path = null,
