@@ -1,0 +1,491 @@
+using System.Text.Json;
+using Microsoft.Extensions.Configuration;
+using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Workflow.Domain;
+using Xunit;
+using EnvironmentAbstractions.TestHelpers;
+
+namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
+
+public class ConfigServiceSpecs : IAsyncLifetime
+{
+    private ConfigService _svc = null!;
+    private string _configPath = null!;
+
+    public Task InitializeAsync()
+    {
+        var config = new ConfigurationBuilder().Build();
+        _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
+        _svc = new ConfigService(config, new MockEnvironmentVariableProvider(), Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigService>.Instance, _configPath);
+        return Task.CompletedTask;
+    }
+
+    public Task DisposeAsync()
+    {
+        if (File.Exists(_configPath)) File.Delete(_configPath);
+        return Task.CompletedTask;
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetConfig_Defaults_ReturnsDefaults()
+    {
+        var cfg = await _svc.GetConfigAsync();
+        Assert.Equal(3456, cfg["serverPort"]);
+        Assert.Equal("localhost", cfg["serverHost"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task SetAndGet_ReturnsUpdatedValue()
+    {
+        await _svc.SetAsync("serverPort", 8080);
+        var cfg = await _svc.GetConfigAsync();
+        Assert.Equal(8080, cfg["serverPort"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task Validate_Number_Invalid()
+    {
+        var (valid, error) = _svc.Validate("serverPort", "abc");
+        Assert.False(valid);
+        Assert.NotNull(error);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task Validate_Number_Valid()
+    {
+        var (valid, error) = _svc.Validate("serverPort", "8080");
+        Assert.True(valid);
+        Assert.Null(error);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetAll_MasksSecrets()
+    {
+        await _svc.SetAsync("logLevel", "DEBUG");
+        var all = await _svc.GetAllAsync();
+        Assert.Equal("DEBUG", all["logLevel"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetVariables_AgentConfigured_ExposesAgentAtVarsAgent()
+    {
+        await _svc.SetAsync("agent", new Dictionary<string, object?>
+        {
+            ["model"] = "gpt-4o",
+            ["type"] = "opencode",
+        });
+
+        var bundle = await _svc.GetVariables();
+
+        Assert.NotNull(bundle.Vars);
+        using var doc = JsonDocument.Parse(bundle.Vars.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+
+        Assert.Equal("gpt-4o", agent.GetProperty("model").GetString());
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetVariables_OnlyModelSet_ReturnsEmptyBundle()
+    {
+        await File.WriteAllTextAsync(_configPath, """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""");
+
+        var bundle = await _svc.GetVariables();
+
+        Assert.Null(bundle.Vars);
+        Assert.Null(bundle.Stages);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetAgentConfig_OnlyModelSet_ReturnsNull()
+    {
+        await File.WriteAllTextAsync(_configPath, """{ "Mohist": { "Config": { "model": "anthropic/claude" } } }""");
+
+        var agent = await _svc.GetAgentConfigAsync();
+
+        Assert.Null(agent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetAgentConfig_AgentConfigured_ReturnsConfiguredObjectVerbatim()
+    {
+        await _svc.SetAsync("agent", new Dictionary<string, object?>
+        {
+            ["model"] = "gpt-4o",
+            ["type"] = "opencode",
+        });
+
+        var agent = await _svc.GetAgentConfigAsync();
+
+        Assert.NotNull(agent);
+        Assert.Equal("gpt-4o", agent!["model"]!.ToString());
+        Assert.Equal("opencode", agent["type"]!.ToString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetAgentConfig_NeitherAgentNorModel_ReturnsNull()
+    {
+        var agent = await _svc.GetAgentConfigAsync();
+
+        Assert.Null(agent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task SetAgentModel_WritesModelUnderAgentObject()
+    {
+        await _svc.SetAgentModelAsync("anthropic/claude");
+
+        var agent = await _svc.GetAgentConfigAsync();
+        Assert.NotNull(agent);
+        Assert.Equal("anthropic/claude", agent!["model"]!.ToString());
+
+        var cfg = await _svc.GetConfigAsync();
+        Assert.False(cfg.ContainsKey("model"));
+        Assert.True(cfg.ContainsKey("agent"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task SetAgentModel_NullModel_ClearsAgentKeyWhenNoRemainingKeys()
+    {
+        await _svc.SetAgentModelAsync("anthropic/claude");
+        await _svc.SetAgentModelAsync(null);
+
+        var cfg = await _svc.GetConfigAsync();
+        Assert.False(cfg.ContainsKey("agent"));
+        Assert.False(cfg.ContainsKey("model"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task SetAgentModel_PreservesSiblingAgentKeysWhenOnlyClearingModel()
+    {
+        await _svc.SetAsync("agent", new Dictionary<string, object?>
+        {
+            ["model"] = "anthropic/claude",
+            ["type"] = "opencode",
+        });
+        await _svc.SetAgentModelAsync(null);
+
+        var agent = await _svc.GetAgentConfigAsync();
+        Assert.NotNull(agent);
+        Assert.False(agent!.ContainsKey("model"));
+        Assert.Equal("opencode", agent["type"]!.ToString());
+
+        var cfg = await _svc.GetConfigAsync();
+        Assert.True(cfg.ContainsKey("agent"));
+        Assert.False(cfg.ContainsKey("model"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetVariables_NoAgentOrModel_ReturnsEmptyBundle()
+    {
+        var bundle = await _svc.GetVariables();
+
+        Assert.Null(bundle.Vars);
+        Assert.Null(bundle.Stages);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetVariables_AlwaysReturnsEmptyStages()
+    {
+        await _svc.SetAsync("agent", new Dictionary<string, object?>
+        {
+            ["model"] = "gpt-4o",
+        });
+        await _svc.SetAsync("stageAgents", new Dictionary<string, Dictionary<string, object?>>
+        {
+            ["plan"] = new() { ["model"] = "sonnet-4" },
+        });
+
+        var bundle = await _svc.GetVariables();
+
+        // Stage names are project-specific and never come from global config.jsonc.
+        Assert.Null(bundle.Stages);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetVariables_AgentConfigured_DoesNotLeakTopLevelModelKey()
+    {
+        await _svc.SetAsync("agent", new Dictionary<string, object?>
+        {
+            ["model"] = "gpt-4o",
+        });
+
+        var bundle = await _svc.GetVariables();
+
+        Assert.NotNull(bundle.Vars);
+        using var doc = JsonDocument.Parse(bundle.Vars.Value.GetRawText());
+        // The model must be nested under agent, not a sibling at vars root.
+        Assert.False(doc.RootElement.TryGetProperty("model", out _));
+        Assert.True(doc.RootElement.TryGetProperty("agent", out _));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetConfig_ExposesLogLevelAndRuntimeSchedulingKeys()
+    {
+        var cfg = await _svc.GetConfigAsync();
+
+        Assert.True(cfg.ContainsKey("logLevel"), "logLevel should be exposed by config");
+        Assert.Equal("INFO", cfg["logLevel"]);
+
+        Assert.True(cfg.ContainsKey("maxConcurrentAgents"), "maxConcurrentAgents should be exposed by config");
+        Assert.True(cfg.ContainsKey("agentTimeout"), "agentTimeout should be exposed by config");
+        Assert.True(cfg.ContainsKey("taskTimeout"), "taskTimeout should be exposed by config");
+        Assert.True(cfg.ContainsKey("stageTimeout"), "stageTimeout should be exposed by config");
+        Assert.True(cfg.ContainsKey("pollInterval"), "pollInterval should be exposed by config");
+        Assert.True(cfg.ContainsKey("maxGracePeriods"), "maxGracePeriods should be exposed by config");
+
+        Assert.Equal(3, cfg["maxConcurrentAgents"]);
+        Assert.Equal(600, cfg["agentTimeout"]);
+        Assert.Equal(600, cfg["taskTimeout"]);
+        Assert.Equal(3600, cfg["stageTimeout"]);
+        Assert.Equal(5000, cfg["pollInterval"]);
+        Assert.Equal(3, cfg["maxGracePeriods"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData("DEBUG")]
+    [InlineData("INFO")]
+    [InlineData("WARN")]
+    [InlineData("ERROR")]
+    public async Task Validate_LogLevel_AcceptsSupportedLevels(string level)
+    {
+        var (valid, error) = _svc.Validate("logLevel", level);
+        Assert.True(valid);
+        Assert.Null(error);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData("debug")]
+    [InlineData("VERBOSE")]
+    [InlineData("TRACE")]
+    [InlineData("FATAL")]
+    [InlineData("")]
+    [InlineData("INFO ")]
+    public async Task Validate_LogLevel_RejectsUnsupportedValues(string level)
+    {
+        var (valid, error) = _svc.Validate("logLevel", level);
+        Assert.False(valid);
+        Assert.NotNull(error);
+        Assert.Contains("logLevel", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData("DEBUG")]
+    [InlineData("INFO")]
+    [InlineData("WARN")]
+    [InlineData("ERROR")]
+    public async Task SetAsync_LogLevel_PersistsSupportedLevelAndIsReadable(string level)
+    {
+        await _svc.SetAsync("logLevel", level);
+        var cfg = await _svc.GetConfigAsync();
+        Assert.Equal(level, cfg["logLevel"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task SetAsync_LogLevel_RejectsUnsupportedValue_AndLeavesPreviousUnchanged()
+    {
+        await _svc.SetAsync("logLevel", "WARN");
+        var before = await _svc.GetConfigAsync();
+        Assert.Equal("WARN", before["logLevel"]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _svc.SetAsync("logLevel", "TRACE"));
+
+        var after = await _svc.GetConfigAsync();
+        Assert.Equal("WARN", after["logLevel"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task Validate_UnknownKey_ReturnsUnknownKeyError()
+    {
+        var (valid, error) = _svc.Validate("doesNotExist", "x");
+        Assert.False(valid);
+        Assert.NotNull(error);
+        Assert.Contains("Unknown", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task SetAsync_UnknownKey_Throws()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _svc.SetAsync("doesNotExist", "x"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData("maxConcurrentAgents", 5)]
+    [InlineData("agentTimeout", 900)]
+    [InlineData("taskTimeout", 1200)]
+    [InlineData("stageTimeout", 7200)]
+    [InlineData("pollInterval", 1500)]
+    [InlineData("maxGracePeriods", 5)]
+    public async Task SetAsync_RuntimeSchedulingKey_PersistsAndIsReadable(string key, int value)
+    {
+        await _svc.SetAsync(key, value);
+        var cfg = await _svc.GetConfigAsync();
+        Assert.Equal(value, cfg[key]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData("maxConcurrentAgents")]
+    [InlineData("agentTimeout")]
+    [InlineData("taskTimeout")]
+    [InlineData("stageTimeout")]
+    [InlineData("pollInterval")]
+    [InlineData("maxGracePeriods")]
+    public async Task Validate_RuntimeSchedulingKey_RejectsNonNumberValue(string key)
+    {
+        var (valid, error) = _svc.Validate(key, "not-a-number");
+        Assert.False(valid);
+        Assert.NotNull(error);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void GetSupportedLogLevels_ContainsAllFourRequiredLevels()
+    {
+        var levels = ConfigService.GetSupportedLogLevels();
+        Assert.Contains("DEBUG", levels);
+        Assert.Contains("INFO", levels);
+        Assert.Contains("WARN", levels);
+        Assert.Contains("ERROR", levels);
+        Assert.Equal(4, levels.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task ReadConfigFile_WithLineComments_ParsesAllKeys()
+    {
+        var jsonc = "// leading line comment\n{\n  \"Mohist\": {\n    // nested line comment\n    \"Config\": {\n      \"serverPort\": 8080,\n      \"serverHost\": \"example\"\n    }\n  }\n}\n";
+        await File.WriteAllTextAsync(_configPath, jsonc);
+
+        var cfg = await _svc.GetConfigAsync();
+
+        Assert.Equal(8080, cfg["serverPort"]);
+        Assert.Equal("example", cfg["serverHost"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task ReadConfigFile_WithBlockCommentsAndTrailingCommas_ParsesAllKeys()
+    {
+        await File.WriteAllTextAsync(_configPath, """
+            /* file header block comment */
+            {
+              "Mohist": {
+                "Config": {
+                  "serverPort": 8081, /* inline block */
+                  "serverHost": "host",
+                },
+              },
+            }
+            """);
+
+        var cfg = await _svc.GetConfigAsync();
+
+        Assert.Equal(8081, cfg["serverPort"]);
+        Assert.Equal("host", cfg["serverHost"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task ReadConfigFile_GenuinelyMalformed_ReturnsEmptyDictionarySoDefaultsApply()
+    {
+        await File.WriteAllTextAsync(_configPath, "{ this is not jsonc ");
+
+        var cfg = await _svc.GetConfigAsync();
+
+        // The schema-backed defaults still come back; nothing throws.
+        Assert.Equal(3456, cfg["serverPort"]);
+        Assert.Equal("localhost", cfg["serverHost"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task WriteConfigFileAsync_RoundTripsCommentedConfig_AndAppliesNewValue()
+    {
+        await File.WriteAllTextAsync(_configPath, """
+            // user comment we should be able to load
+            {
+              "Mohist": {
+                "Config": {
+                  "serverHost": "before"
+                }
+              }
+            }
+            """);
+
+        await _svc.SetAsync("serverHost", "after");
+
+        var cfg = await _svc.GetConfigAsync();
+        Assert.Equal("after", cfg["serverHost"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task WriteConfigFileAsync_OnMalformedExistingFile_FallsBackToFreshJsonObjectAndAppliesChange()
+    {
+        await File.WriteAllTextAsync(_configPath, "{ broken jsonc ");
+
+        await _svc.SetAsync("serverPort", 9090);
+
+        var cfg = await _svc.GetConfigAsync();
+        Assert.Equal(9090, cfg["serverPort"]);
+    }
+}
