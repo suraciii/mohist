@@ -15,7 +15,7 @@ namespace Mohist.Cli.Tests;
 //   - openspec/changes/issue-388/specs/update-single-entry/spec.md
 //   - openspec/changes/issue-388/design.md D1 (no-alias policy) and
 //     D3 (explicit `mo runner update` invariant).
-public class CliInstallUpdateSingleEntrySpecs
+public class CliInstallUpdateSingleEntryTests
 {
     [Fact]
     public async Task LegacyServerInstall_FailsToResolveAndTriggersNoInstallerCall()

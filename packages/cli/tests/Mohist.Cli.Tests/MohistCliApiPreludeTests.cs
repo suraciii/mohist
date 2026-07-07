@@ -4,7 +4,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class MohistCliApiPreludeSpecs
+public class MohistCliApiPreludeTests
 {
     private static (MohistCliApi Api, StringWriter Output, StringWriter Error) CreateApi(
         string? activeProjectId = "proj_abc")

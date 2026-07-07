@@ -22,7 +22,7 @@ namespace Mohist.Cli.Tests;
 // (workflow-run-reads/spec.md#show-is-a-transitional-alias-of-get). Alias
 // parity is asserted by re-running the same scenario under both names and
 // diffing the recorded HTTP requests + stdout + exit code.
-public class CliWorkflowReads
+public class CliWorkflowReadsSpecs
 {
     private const string WrId = "wr_read01";
 

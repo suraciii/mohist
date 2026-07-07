@@ -2,7 +2,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class CliReferenceDocsSpecs
+public class CliReferenceDocsTests
 {
     [Fact]
     public void CliReference_IssueCommandExamplesUseCurrentCommentAndPrereqSurface()

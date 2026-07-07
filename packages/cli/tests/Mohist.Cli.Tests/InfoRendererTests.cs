@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public class InfoRendererSpecs
+public class InfoRendererTests
 {
     private static InfoResult BuildSampleResult(bool includeVerbose = false)
     {
