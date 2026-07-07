@@ -36,7 +36,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
     private readonly WorkflowReadModel _readModel;
     private readonly WorkflowStageLockCoordinator _stageLockCoordinator;
     private readonly WorkflowStageInitializer _stageInitializer;
-    private readonly WorkflowOutcomeProcessor _outcomeProcessor;
+    private readonly WorkflowReportProcessor _reportProcessor;
 
     private string GrainKey => this.GetPrimaryKeyString();
 
@@ -53,7 +53,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         _readModel = new WorkflowReadModel(this);
         _stageLockCoordinator = new WorkflowStageLockCoordinator(this);
         _stageInitializer = new WorkflowStageInitializer(this);
-        _outcomeProcessor = new WorkflowOutcomeProcessor(this);
+        _reportProcessor = new WorkflowReportProcessor(this);
     }
 
     WorkflowRun? IWorkflowGrainContext.RunOrNull => _run;
@@ -148,7 +148,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         // Fail any in-flight task after the run is terminal.
         _ = _run.Stop();
 
-        await _outcomeProcessor.ClearExecutableStateAsync(_run!, reason ?? "stopped");
+        await _reportProcessor.ClearExecutableStateAsync(_run!, reason ?? "stopped");
 
         await SaveRunAsync();
 
@@ -305,7 +305,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         if (work is null)
             return null;
 
-        var item = _outcomeProcessor.BuildWorkItem(_run!, work);
+        var item = _reportProcessor.BuildWorkItem(_run!, work);
         if (item?.Id is null)
             return null;
         var workId = item.Id;
@@ -316,7 +316,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         if (stage is not null && !await AcquireStageLocksIfNeededAsync(stage))
             return null;
 
-        var resolvedWorkId = await _outcomeProcessor.ClaimWorkItemAsync(
+        var resolvedWorkId = await _reportProcessor.ClaimWorkItemAsync(
             _run!, workId, workerId, events => CommitAsync(events));
 
         if (resolvedWorkId is null)
@@ -359,7 +359,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         return new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count);
     }
 
-    public async Task<ReportAck> ReportTaskOutcomeAsync(string workerId, string workId, TaskOutcome outcome)
+    public async Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report)
     {
         // Stale is still an ack; late or duplicate reports are normal under
         // at-least-once delivery. See design/workflow/scheduling.md Report.
@@ -368,27 +368,27 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
             return ReportAck.Stale;
 
-        _log.LogInformation("Workflow {Id} received task outcome for {WorkId}: {Status} detail={Detail}",
-            GrainKey, workId, outcome.Status, outcome.Detail ?? "(none)");
+        _log.LogInformation("Workflow {Id} received task report for {WorkId}: {Status} detail={Detail}",
+            GrainKey, workId, report.Status, report.Detail ?? "(none)");
 
-        var events = await _outcomeProcessor.ProcessTaskOutcomeAsync(_run!, outcome, activeWork.TaskRunId, workId);
+        var events = await _reportProcessor.ProcessTaskReportAsync(_run!, report, activeWork.TaskRunId, workId);
 
         await CommitAsync(events);
         return ReportAck.Accepted;
     }
 
-    public async Task<ReportAck> ReportCheckOutcomeAsync(string workerId, string workId, CheckOutcome outcome)
+    public async Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)
     {
         if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
         var activeWork = _run.FindActiveWork(workId, workerId);
         if (activeWork is null || !activeWork.IsChecks)
             return ReportAck.Stale;
 
-        _log.LogInformation("Workflow {Id} received check outcome for stage {Stage}: {Count} results",
-            GrainKey, outcome.Stage, outcome.Results.Count);
+        _log.LogInformation("Workflow {Id} received check report for stage {Stage}: {Count} results",
+            GrainKey, report.Stage, report.Results.Count);
 
-        var events = await _outcomeProcessor.ProcessCheckOutcomeAsync(_run!, outcome);
-        _outcomeProcessor.ResetChecksRunningState(_run!);
+        var events = await _reportProcessor.ProcessCheckReportAsync(_run!, report);
+        _reportProcessor.ResetChecksRunningState(_run!);
 
         await CommitAsync(events);
         return ReportAck.Accepted;

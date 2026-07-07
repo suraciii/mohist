@@ -7,45 +7,45 @@ using Mohist.Server.Workflow.Services;
 namespace Mohist.Server.Workflow.Grains;
 
 /// <summary>
-/// Handles workflow outcome transitions inside the grain. The grain remains
+/// Handles workflow report transitions inside the grain. The grain remains
 /// the commit and event-dispatch boundary; this helper mutates the supplied
 /// run and returns or commits events through grain-owned callbacks.
 /// </summary>
-internal sealed class WorkflowOutcomeProcessor
+internal sealed class WorkflowReportProcessor
 {
     private readonly IWorkflowGrainContext _owner;
 
-    public WorkflowOutcomeProcessor(IWorkflowGrainContext owner)
+    public WorkflowReportProcessor(IWorkflowGrainContext owner)
     {
         _owner = owner;
     }
 
     /// <summary>
-    /// Applies a worker task outcome. Artifact events precede task completion
+    /// Applies a worker task report. Artifact events precede task completion
     /// so history records the produced artifact before the producing task closes.
     /// </summary>
-    public async Task<IReadOnlyList<WorkflowEvent>> ProcessTaskOutcomeAsync(
-        WorkflowRun run, TaskOutcome outcome, string taskRunId, string workId)
+    public async Task<IReadOnlyList<WorkflowEvent>> ProcessTaskReportAsync(
+        WorkflowRun run, TaskReport report, string taskRunId, string workId)
     {
         var currentStage = run.CurrentStage();
         var currentTask = currentStage?.Tasks.FirstOrDefault(t => t.Id == taskRunId);
         var events = new List<WorkflowEvent>();
 
-        if (outcome.Artifacts is { Count: > 0 })
+        if (report.Artifacts is { Count: > 0 })
         {
-            foreach (var a in outcome.Artifacts)
+            foreach (var a in report.Artifacts)
             {
                 events.Add(new WorkflowArtifactRecorded(_owner.GrainKey, taskRunId, a.Path, DateTimeOffset.UtcNow));
             }
         }
 
-        if (outcome.Status == OutcomeStatus.Passed)
+        if (report.Status == TaskReportStatus.Succeeded)
         {
             if (currentTask is not null)
-                currentTask.Output = ParseOutputToJsonElement(outcome.Output);
+                currentTask.Output = ParseOutputToJsonElement(report.Output);
             if (currentTask?.CausedByFeedbackId is { } feedbackId)
             {
-                var resolved = run.ResolveFeedback(feedbackId, currentTask.Id, outcome.Output);
+                var resolved = run.ResolveFeedback(feedbackId, currentTask.Id, report.Output);
                 if (resolved is not null)
                 {
                     _owner.Log.LogInformation(
@@ -53,10 +53,10 @@ internal sealed class WorkflowOutcomeProcessor
                         _owner.GrainKey, feedbackId, currentTask.Id);
                 }
             }
-            var hasFollowUpTasks = outcome.AddTasks is { Count: > 0 };
+            var hasFollowUpTasks = report.AddTasks is { Count: > 0 };
             events.AddRange(run.CompleteTask(advance: !hasFollowUpTasks));
 
-            if (hasFollowUpTasks && outcome.AddTasks is { Count: > 0 } addTasks)
+            if (hasFollowUpTasks && report.AddTasks is { Count: > 0 } addTasks)
             {
                 var taskDefs = addTasks.Select(t =>
                 {
@@ -72,19 +72,19 @@ internal sealed class WorkflowOutcomeProcessor
         }
         else
         {
-            if (currentTask is not null) currentTask.Output = ParseOutputToJsonElement(outcome.Output);
-            var taskResult = new TaskResult("failed", outcome.Detail ?? outcome.Output);
+            if (currentTask is not null) currentTask.Output = ParseOutputToJsonElement(report.Output);
+            var taskResult = new TaskResult("failed", report.Detail ?? report.Output);
             events.AddRange(run.FailTask(taskResult));
         }
 
         return events;
     }
 
-    public Task<IReadOnlyList<WorkflowEvent>> ProcessCheckOutcomeAsync(WorkflowRun run, CheckOutcome outcome)
+    public Task<IReadOnlyList<WorkflowEvent>> ProcessCheckReportAsync(WorkflowRun run, CheckReport report)
     {
-        var actions = new List<CheckResultAction>(outcome.Results.Count);
+        var actions = new List<CheckResultAction>(report.Results.Count);
 
-        foreach (var cr in outcome.Results)
+        foreach (var cr in report.Results)
         {
             if (cr.Status == "pass")
             {
@@ -104,9 +104,6 @@ internal sealed class WorkflowOutcomeProcessor
         return Task.FromResult<IReadOnlyList<WorkflowEvent>>(run.ProcessCheckResults(actions));
     }
 
-    /// <summary>
-    /// Clears running task/check state when execution is abandoned.
-    /// </summary>
     public async Task ClearExecutableStateAsync(WorkflowRun run, string reason)
     {
         await _owner.ReleaseCurrentStageLocks(reason);
@@ -270,9 +267,6 @@ internal sealed class WorkflowOutcomeProcessor
         }
     }
 
-    /// <summary>
-    /// Clears the current checks batch and returns any Running checks to Pending.
-    /// </summary>
     public void ResetChecksRunningState(WorkflowRun run)
     {
         var currentStage = run.CurrentStage();

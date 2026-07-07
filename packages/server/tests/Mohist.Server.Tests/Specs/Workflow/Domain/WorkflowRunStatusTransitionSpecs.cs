@@ -396,7 +396,7 @@ public class WorkflowRunStatusTransitionSpecs
     [InlineData("pass")]
     [InlineData("fail")]
     [InlineData("pending")]
-    public void CheckOutcome_ClearsCurrentStageChecksWorkId(string outcome)
+    public void CheckReport_ClearsCurrentStageChecksWorkId(string checkStatus)
     {
         var run = BuildReadyRun(
             [new("compile", "Compile", "spec/task")],
@@ -405,8 +405,8 @@ public class WorkflowRunStatusTransitionSpecs
         run.CurrentStage().ChecksWorkId = "checks-build:abc";
         run.CurrentStage().Checks[0].Status = StageCheckStatus.Running;
 
-        var result = new CheckResult("build-ok", outcome);
-        switch (outcome)
+        var result = new CheckResult("build-ok", checkStatus);
+        switch (checkStatus)
         {
             case "pass":
                 run.PassCheck(result);

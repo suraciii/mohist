@@ -44,13 +44,13 @@ public sealed class WorkflowReportService : IScopedService
         if (activeWork is null)
             return (ReportAck.Stale.ToString().ToLowerInvariant(), null);
 
-        var outcome = await _translator.TranslateResultAsync(activeWork.Item, result, workflowRunId, run);
-        ReportAck ack = outcome switch
+        var report = await _translator.TranslateResultAsync(activeWork.Item, result, workflowRunId, run);
+        ReportAck ack = report switch
         {
-            WorkflowItemTranslator.InboundOutcome.Task t when activeWork.IsTask =>
-                await workflow.ReportTaskOutcomeAsync(workerId, workId, t.Value),
-            WorkflowItemTranslator.InboundOutcome.Checks c when activeWork.IsChecks =>
-                await workflow.ReportCheckOutcomeAsync(workerId, workId, c.Value),
+            WorkflowItemTranslator.InboundReport.Task t when activeWork.IsTask =>
+                await workflow.ReceiveTaskReportAsync(workerId, workId, t.Value),
+            WorkflowItemTranslator.InboundReport.Checks c when activeWork.IsChecks =>
+                await workflow.ReceiveCheckReportAsync(workerId, workId, c.Value),
             _ => ReportAck.Stale,
         };
         return (ack.ToString().ToLowerInvariant(), await workflow.GetRunStatusAsync());

@@ -14,11 +14,11 @@ namespace Mohist.Server.Runner.Services;
 /// <summary>
 /// Translator that owns the boundary between the control plane's
 /// domain-semantic work items and the runner-process execution envelopes.
-/// The control plane (WorkflowGrain) now only exposes
-/// <see cref="WorkItem"/> / <see cref="TaskOutcome"/> / <see cref="CheckOutcome"/>;
+/// The control plane (WorkflowGrain) exposes
+/// <see cref="WorkItem"/> / <see cref="TaskReport"/> / <see cref="CheckReport"/>;
 /// this service renders work items into <see cref="WorkDispatch"/> for the
 /// runner process and converts the runner's raw <see cref="WorkResult"/> into
-/// domain outcomes the grain consumes.
+/// domain reports the grain consumes.
 ///
 /// Moving the translation out of <c>WorkflowGrain</c> removes the rendering
 /// and parsing responsibilities from the control-plane grain (variables,
@@ -300,31 +300,13 @@ public sealed class WorkflowItemTranslator : IScopedService
         return null;
     }
 
-    // =========================================================================
-    // Inbound translation — runner raw WorkResult → domain outcome
-    // =========================================================================
-
-    /// <summary>
-    /// Result of inbound translation. Either a <see cref="TaskOutcome"/>
-    /// (single task result) or a <see cref="CheckOutcome"/> (checks batch).
-    /// </summary>
-    public abstract record InboundOutcome
+    public abstract record InboundReport
     {
-        public sealed record Task(TaskOutcome Value) : InboundOutcome;
-        public sealed record Checks(CheckOutcome Value) : InboundOutcome;
+        public sealed record Task(TaskReport Value) : InboundReport;
+        public sealed record Checks(CheckReport Value) : InboundReport;
     }
 
-    /// <summary>
-    /// Translates a raw <see cref="WorkResult"/> from the runner process
-    /// into the corresponding domain outcome for the grain. The original
-    /// <see cref="WorkItem"/> carries the context (work id, stage, type,
-    /// declared artifacts) needed to assemble the outcome. Timeouts and
-    /// runner-loss do not appear here — the runner process reports them
-    /// as <see cref="WorkResult"/> with <c>status="failed"</c>; the
-    /// translator collapses them into <see cref="OutcomeStatus.Failed"/>
-    /// + <see cref="TaskOutcome.Detail"/>.
-    /// </summary>
-    public async Task<InboundOutcome> TranslateResultAsync(
+    public async Task<InboundReport> TranslateResultAsync(
         WorkItem item,
         WorkResult result,
         string workflowRunId,
@@ -338,7 +320,7 @@ public sealed class WorkflowItemTranslator : IScopedService
             $"Unsupported work item variant '{item.WorkType}' for workflow '{workflowRunId}'");
     }
 
-    private async Task<InboundOutcome> TranslateTaskResultAsync(
+    private async Task<InboundReport> TranslateTaskResultAsync(
         WorkItem item,
         WorkResult result,
         string workflowRunId,
@@ -346,7 +328,7 @@ public sealed class WorkflowItemTranslator : IScopedService
     {
         var workId = item.Id ?? throw new InvalidOperationException(
             $"Task work item for workflow '{workflowRunId}' is missing work id");
-        var status = ResolveOutcomeStatus(result);
+        var status = ResolveTaskReportStatus(result);
         var detail = NormalizeDetail(result, status);
         IReadOnlyList<ArtifactRef>? artifacts = null;
 
@@ -367,9 +349,9 @@ public sealed class WorkflowItemTranslator : IScopedService
                 _log.LogWarning(
                     "Workflow {Id} task {TaskId} artifact binding failed: {Error}",
                     workflowRunId, workId, bindResult.Error);
-                return new InboundOutcome.Task(new TaskOutcome(
+                return new InboundReport.Task(new TaskReport(
                     WorkId: workId,
-                    Status: OutcomeStatus.Failed,
+                    Status: TaskReportStatus.Failed,
                     Output: result.Output,
                     Artifacts: null,
                     Detail: bindResult.Error ?? "artifact binding failed"));
@@ -380,7 +362,7 @@ public sealed class WorkflowItemTranslator : IScopedService
                 .ToList();
         }
 
-        return new InboundOutcome.Task(new TaskOutcome(
+        return new InboundReport.Task(new TaskReport(
             WorkId: workId,
             Status: status,
             Output: result.Output,
@@ -389,21 +371,21 @@ public sealed class WorkflowItemTranslator : IScopedService
             AddTasks: result.AddTasks is { Count: > 0 } ? result.AddTasks.ToList() : null));
     }
 
-    private static InboundOutcome TranslateChecksResult(WorkItem item, WorkResult result)
+    private static InboundReport TranslateChecksResult(WorkItem item, WorkResult result)
     {
         var results = WorkflowDispatchHelpers.ParseCheckResults(result.Output);
-        return new InboundOutcome.Checks(new CheckOutcome(item.Stage, results));
+        return new InboundReport.Checks(new CheckReport(item.Stage, results));
     }
 
-    private static OutcomeStatus ResolveOutcomeStatus(WorkResult result) =>
+    private static TaskReportStatus ResolveTaskReportStatus(WorkResult result) =>
         string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
             || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
-                ? OutcomeStatus.Passed
-                : OutcomeStatus.Failed;
+                ? TaskReportStatus.Succeeded
+                : TaskReportStatus.Failed;
 
-    private static string? NormalizeDetail(WorkResult result, OutcomeStatus status)
+    private static string? NormalizeDetail(WorkResult result, TaskReportStatus status)
     {
-        if (status == OutcomeStatus.Passed) return null;
+        if (status == TaskReportStatus.Succeeded) return null;
         if (!string.IsNullOrWhiteSpace(result.Message)) return result.Message;
         return result.Status;
     }

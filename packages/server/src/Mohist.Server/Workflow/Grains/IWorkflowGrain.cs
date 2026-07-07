@@ -34,8 +34,8 @@ public interface IWorkflowGrain : IGrainWithStringKey
     /// re-dispatches it.
     /// </summary>
     Task<WorkItem?> ClaimNextAsync(string workerId);
-    Task<ReportAck> ReportTaskOutcomeAsync(string workerId, string workId, TaskOutcome outcome);
-    Task<ReportAck> ReportCheckOutcomeAsync(string workerId, string workId, CheckOutcome outcome);
+    Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report);
+    Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report);
 
     /// <summary>
     /// Releases the sequential stage lock owned by this workflow run for a
@@ -108,9 +108,9 @@ public enum WorkflowAssignmentStatus
 }
 
 /// <summary>
-/// The ack for an at-least-once report (<c>ReportTaskOutcomeAsync</c> /
-/// <c>ReportCheckOutcomeAsync</c>). <see cref="Accepted"/> means the owner
-/// consumed the outcome. <see cref="Stale"/> means the work was already
+/// The ack for an at-least-once report (<c>ReceiveTaskReportAsync</c> /
+/// <c>ReceiveCheckReportAsync</c>). <see cref="Accepted"/> means the owner
+/// consumed the report. <see cref="Stale"/> means the work was already
 /// terminal, not assigned to the caller, or otherwise no longer current — the
 /// result is discarded idempotently. Both are acks: the worker retires the work
 /// from <c>awaitingAck</c> on either (see <c>design/workflow/scheduling.md</c>

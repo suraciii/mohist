@@ -54,38 +54,23 @@ public sealed record WorkItem(
     public bool IsChecks => string.Equals(WorkType, WorkItemTypes.Checks, StringComparison.Ordinal);
 }
 
-/// <summary>
-/// Domain outcome of a task the worker finished. Status is one of
-/// <see cref="OutcomeStatus.Passed"/> / <see cref="OutcomeStatus.Failed"/>.
-/// Timeouts and runner-loss collapses into <see cref="OutcomeStatus.Failed"/>
-/// + <see cref="Detail"/> (e.g. <c>"work-timeout"</c>, <c>"runner-lost"</c>).
-/// <see cref="Artifacts"/> are the bound artifact references the worker
-/// reported for this task; the grain consumes them to record
-/// <c>WorkflowArtifactRecorded</c> events.
-/// </summary>
 [GenerateSerializer]
-public sealed record TaskOutcome(
+public sealed record TaskReport(
     [property: Id(0)] string WorkId,
-    [property: Id(1)] OutcomeStatus Status,
+    [property: Id(1)] TaskReportStatus Status,
     [property: Id(2)] string? Output,
     [property: Id(3)] IReadOnlyList<ArtifactRef>? Artifacts,
     [property: Id(4)] string? Detail = null,
     [property: Id(5)] IReadOnlyList<RuntimeTaskInput>? AddTasks = null);
 
-/// <summary>
-/// Domain outcome of a checks batch. Each <see cref="CheckResult"/> carries
-/// the canonical name, status, message, and optional output — the worker
-/// translator converts the raw <c>WorkResult.Output</c> JSON into this
-/// shape before the grain sees it.
-/// </summary>
 [GenerateSerializer]
-public sealed record CheckOutcome(
+public sealed record CheckReport(
     [property: Id(0)] string Stage,
     [property: Id(1)] IReadOnlyList<CheckResult> Results);
 
-public enum OutcomeStatus
+public enum TaskReportStatus
 {
-    Passed,
+    Succeeded,
     Failed,
 }
 
