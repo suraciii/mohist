@@ -313,25 +313,25 @@ skipped for them and presence-loss closeout remains the only safety net.
 
 ## 实装差距
 
-正文描述目标设计（对账模型）。当前实现是前一代边沿触发协议，差距由 epic #44「调度链路设计收敛」跟踪推进，分两批落地。
+正文描述目标设计（对账模型）。对账模型已由 epic #44「调度链路设计收敛」分两批落地，正文即现状。
 
 **已落地（Batch 1 — runner 进程状态层）**：
 
 - runner 进程的 reported set（`inFlight ∪ awaitingAck`）已提升为进程生命期状态（`RunnerHost` 实例字段），跨 poll 异常与连接重置存活——这是 rollback-storm 根因的修复（见上「Implementation constraint — the reported set is process-lifetime state」）。
-- poll 已携带 body `{ inFlight: [workKey...], awaitingAck: [workKey...] }`；服务端 `/poll` 当前接受但忽略该 body（兼容入口），`desired − reported` 对账在 Batch 2 落地。
+- poll 已携带 body `{ inFlight: [workKey...], awaitingAck: [workKey...] }`。
 - awaitingAck at-least-once：执行完成的结果进入 awaitingAck，report 传输失败时按重试循环周期重试，`Accepted` 与 `Stale` 都终止重试。不再把传输失败降级为 `failed` 业务结果。
 - 公平性查询列已就位：`WorkflowRun.ReadySince` + `WorkflowRunRow.ReadySince` 计算列 + `IX_WorkflowRuns_Status_ReadySince` 索引 + `FindAssignedToAsync` 已改为 `ORDER BY ReadySince ASC`。
 
-**仍待落地（Batch 2 — 服务端对账主体）**：
+**已落地（Batch 2 — 服务端对账主体）**：
 
-- offer/claim 两阶段（`PollWorkAsync` + `ClaimAsync`）+ runner 侧 claim 前预登记与回滚 → 目标合并为 `ClaimNextAsync` 单次写。
-- RunnerGrain 双台账（grain persisted `_worksState` + `RunnerWorkStore` ledger）与 `WorkItemSnapshot`/dispatch 快照，以及 Hydrate / Reconfirm / orphan-drop 恢复分支 → 目标删除，run 即台账、dispatch 从 run 重渲染（现有降级路径 `RecoverWorkItemFromRun` 转正）。
-- 服务端 `/poll` 消费 reported set 做 `desired − reported` diff → 新建 stateless `DispatchService` 统一补派 + 新 claim，runner 侧不再走 offer/claim。
-- report 经 RunnerGrain 中继并记账 → 目标直达属主（runner 已实现 awaitingAck；服务端 report 路由直达属主为 Batch 2，issue #393）。
-- 服务端 `WorkCompletionTimeout`（30 分钟墙钟 reminder）合成失败 → 目标删除，work 级 liveness 即 poll 汇报，兜底只剩 presence 关账。
-- presence 由 HTTP heartbeat + 每次 poll `TouchPresenceAsync`（每 poll 空写全局 registry）双通道维持 → 目标 poll 即心跳、registry 仅写变更。
-- 每 poll 至多一个 dispatch → 目标一次 poll 可携带补派 + 新 claim 多个 dispatch（runner 侧 `poll` 返回类型从单 `WorkDispatch` 改为 `{ dispatches: [...] }` 在 Batch 2）。
+- `PollWorkAsync` + `ClaimAsync` 两阶段合并为 `IWorkflowGrain.ClaimNextAsync` 单次写（Pending→Running + stage lock + persist 原子化）；runner 侧 offer/claim 预登记与回滚一并删除。
+- RunnerGrain workflow 双台账（grain persisted `_worksState` + `RunnerWorkStore` ledger）与 `WorkItemSnapshot`/dispatch 快照、Hydrate/Reconfirm/orphan-drop 恢复分支全部删除——run 即台账，dispatch 从 run 重渲染（`RenderRunningWorkAsync` 转正为 repair 路径）。
+- 服务端 `/poll` 消费 reported set 做 `desired − reported` diff：新建 stateless `DispatchService` 统一补派 + 新 claim，按四步（touch presence → desired → repair → spare claim），runner 侧不再走 offer/claim。
+- report 直达属主：新建 `WorkflowReportService`，`/report` 对 workflow 直走属主 grain，不经 RunnerGrain 中继；RunnerGrain 仅保留 agent-job push 台账。
+- 服务端 `WorkCompletionTimeout`（30 分钟墙钟 reminder）删除；work 级 liveness 即 poll 汇报，兜底只剩 presence 关账。
+- presence 由 HTTP heartbeat + 每次 poll 空写 registry 的双通道，收敛为 poll 即心跳（`TouchPresenceAsync` 仅刷 `lastSeen`，registry 仅在 register/unregister/heartbeat-repair 时写）。
+- 一次 poll 可携带补派 + 新 claim 多个 dispatch：runner 侧 `poll` 返回 `RenderedWorkItem[]`，服务端响应为 `{ dispatches: [...] }`。
 
 **保持不变、无差距**：pull-only 交付、Assignment 唯一真相与 sticky 语义、claimable 的数据性质、stage lock 在 claim 时获取、WorkflowGrain 无 timer 不感知 runner、监督分层（进程管进度、控制平面只管存亡）。
 
-**相邻文档**：`design/runner.md` 的聚合描述（`assignedWorkflows` 事件增量集合与 `Claim/Release` 行为）基于旧模型，随本 spec 落地一并修订；显式 reassign 出口由 issue #395 单独跟踪。
+**相邻文档**：`design/runner.md` 的聚合描述已随本 spec 落地修订（RunnerGrain 不再持有 workflow 台账）；显式 reassign 出口由 issue #395 单独跟踪。
