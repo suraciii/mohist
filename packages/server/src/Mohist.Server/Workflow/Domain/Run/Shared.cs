@@ -15,7 +15,7 @@ public sealed record TaskResult(
     string? Reason = null);
 
 /// <summary>
-/// The per-run head ref the runner prepares inside the workflow
+/// The per-run head ref the execution plane prepares inside the workflow
 /// workspace. MUST stay in sync with the runner's <c>runBranchName()</c>
 /// helper in <c>packages/runner/src/runtime/workspace.ts</c>.
 /// </summary>
@@ -39,7 +39,7 @@ public static partial class WorkflowRunExtensions
 
         /// <summary>
         /// True when the <see cref="CurrentStage"/> has work currently being
-        /// executed by a runner (a Running task, an open checks batch, or a
+        /// executed by a worker (a Running task, an open checks batch, or a
         /// Running check). The workflow invariant is that at most one stage
         /// executes at a time, so only the current stage can carry in-flight
         /// work; scanning completed stages would make this predicate depend

@@ -323,8 +323,9 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         // projected into the unified RunnerActiveWorkItem shape the read model
         // (RunnerStatusService) consumes.
         var activeWorks = new List<RunnerActiveWorkItem>();
+        var workerId = RunnerId;
 
-        foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(RunnerId))
+        foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(workerId))
         {
             var run = await _workflowRuns.LoadAsync(workflowRunId);
             if (run is null) continue;
@@ -455,10 +456,11 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private async Task CloseoutLostAsync()
     {
         var synthesizedFailure = new WorkResult("failed", "runner-lost");
+        var workerId = RunnerId;
 
         // Workflow works: query the store for Running works assigned to this
-        // runner and report each FAILED direct to the owning workflow grain.
-        foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(RunnerId))
+        // runner-as-worker and report each FAILED direct to the owning workflow grain.
+        foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(workerId))
         {
             try
             {
@@ -472,13 +474,13 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 {
                     var workId = task.WorkId ?? task.Id;
                     var outcome = new TaskOutcome(workId, OutcomeStatus.Failed, Output: null, Artifacts: null, Detail: "runner-lost", AddTasks: null);
-                    await workflow.ReportTaskOutcomeAsync(RunnerId, workId, outcome);
+                    await workflow.ReportTaskOutcomeAsync(workerId, workId, outcome);
                     continue;
                 }
                 if (!string.IsNullOrWhiteSpace(stage.ChecksWorkId))
                 {
                     var checksOutcome = new CheckOutcome(stage.Id, [new CheckResult(stage.Id, "failed", "runner-lost")]);
-                    await workflow.ReportCheckOutcomeAsync(RunnerId, stage.ChecksWorkId, checksOutcome);
+                    await workflow.ReportCheckOutcomeAsync(workerId, stage.ChecksWorkId, checksOutcome);
                 }
             }
             catch (Exception ex)

@@ -126,7 +126,7 @@ public class WorkflowRunStore : IWorkflowRunStore
     {
         try
         {
-            return JSON.Deserialize<WorkflowRun>(MigrateAssignmentJson(json));
+            return JSON.Deserialize<WorkflowRun>(MigrateLegacyWorkflowRunJson(json));
         }
         catch (Exception ex)
         {
@@ -135,35 +135,109 @@ public class WorkflowRunStore : IWorkflowRunStore
         }
     }
 
-    public static string MigrateAssignmentJson(string json)
+    public static string MigrateLegacyWorkflowRunJson(string json)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object
-            || root.TryGetProperty("assignment", out _)
-            || !root.TryGetProperty("claim", out var oldAssignment)
-            || oldAssignment.ValueKind != JsonValueKind.Object)
+        if (root.ValueKind != JsonValueKind.Object)
+            return json;
+
+        var changed = root.TryGetProperty("claim", out _)
+            || (root.TryGetProperty("assignment", out var assignment) && assignment.ValueKind == JsonValueKind.Object && assignment.TryGetProperty("runnerId", out _))
+            || ContainsLegacyTaskRunnerId(root);
+        if (!changed)
             return json;
 
         using var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer))
         {
-            writer.WriteStartObject();
-            foreach (var property in root.EnumerateObject())
+            WriteRunObject(root, writer);
+        }
+
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+    }
+
+    private static void WriteRunObject(JsonElement root, Utf8JsonWriter writer)
+    {
+        writer.WriteStartObject();
+        foreach (var property in root.EnumerateObject())
+        {
+            if (string.Equals(property.Name, "claim", StringComparison.Ordinal))
             {
-                if (string.Equals(property.Name, "claim", StringComparison.Ordinal))
+                if (!root.TryGetProperty("assignment", out _))
                 {
                     writer.WritePropertyName("assignment");
-                    writer.WriteStartObject();
-                    foreach (var oldProperty in oldAssignment.EnumerateObject())
-                    {
-                        if (string.Equals(oldProperty.Name, "claimedAt", StringComparison.Ordinal))
-                            writer.WritePropertyName("assignedAt");
-                        else
-                            writer.WritePropertyName(oldProperty.Name);
-                        oldProperty.Value.WriteTo(writer);
-                    }
-                    writer.WriteEndObject();
+                    WriteAssignmentObject(property.Value, writer);
+                }
+                continue;
+            }
+
+            if (string.Equals(property.Name, "assignment", StringComparison.Ordinal)
+                && property.Value.ValueKind == JsonValueKind.Object)
+            {
+                writer.WritePropertyName(property.Name);
+                WriteAssignmentObject(property.Value, writer);
+                continue;
+            }
+
+            if (string.Equals(property.Name, "stages", StringComparison.Ordinal)
+                && property.Value.ValueKind == JsonValueKind.Array)
+            {
+                writer.WritePropertyName(property.Name);
+                WriteStagesArray(property.Value, writer);
+                continue;
+            }
+
+            property.WriteTo(writer);
+        }
+        writer.WriteEndObject();
+    }
+
+    private static void WriteAssignmentObject(JsonElement assignment, Utf8JsonWriter writer)
+    {
+        var hasWorkerId = assignment.TryGetProperty("workerId", out _);
+        var hasAssignedAt = assignment.TryGetProperty("assignedAt", out _);
+        writer.WriteStartObject();
+        foreach (var property in assignment.EnumerateObject())
+        {
+            if (string.Equals(property.Name, "runnerId", StringComparison.Ordinal))
+            {
+                if (hasWorkerId) continue;
+                writer.WritePropertyName("workerId");
+            }
+            else if (string.Equals(property.Name, "claimedAt", StringComparison.Ordinal))
+            {
+                if (hasAssignedAt) continue;
+                writer.WritePropertyName("assignedAt");
+            }
+            else
+            {
+                writer.WritePropertyName(property.Name);
+            }
+            property.Value.WriteTo(writer);
+        }
+        writer.WriteEndObject();
+    }
+
+    private static void WriteStagesArray(JsonElement stages, Utf8JsonWriter writer)
+    {
+        writer.WriteStartArray();
+        foreach (var stage in stages.EnumerateArray())
+        {
+            if (stage.ValueKind != JsonValueKind.Object)
+            {
+                stage.WriteTo(writer);
+                continue;
+            }
+
+            writer.WriteStartObject();
+            foreach (var property in stage.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "tasks", StringComparison.Ordinal)
+                    && property.Value.ValueKind == JsonValueKind.Array)
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteTasksArray(property.Value, writer);
                     continue;
                 }
 
@@ -171,8 +245,60 @@ public class WorkflowRunStore : IWorkflowRunStore
             }
             writer.WriteEndObject();
         }
+        writer.WriteEndArray();
+    }
 
-        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+    private static void WriteTasksArray(JsonElement tasks, Utf8JsonWriter writer)
+    {
+        writer.WriteStartArray();
+        foreach (var task in tasks.EnumerateArray())
+        {
+            if (task.ValueKind != JsonValueKind.Object)
+            {
+                task.WriteTo(writer);
+                continue;
+            }
+
+            writer.WriteStartObject();
+            var hasWorkerId = task.TryGetProperty("workerId", out _);
+            foreach (var property in task.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "runnerId", StringComparison.Ordinal))
+                {
+                    if (hasWorkerId) continue;
+                    writer.WritePropertyName("workerId");
+                }
+                else
+                {
+                    writer.WritePropertyName(property.Name);
+                }
+                property.Value.WriteTo(writer);
+            }
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+    }
+
+    private static bool ContainsLegacyTaskRunnerId(JsonElement root)
+    {
+        if (!root.TryGetProperty("stages", out var stages) || stages.ValueKind != JsonValueKind.Array)
+            return false;
+
+        foreach (var stage in stages.EnumerateArray())
+        {
+            if (stage.ValueKind != JsonValueKind.Object
+                || !stage.TryGetProperty("tasks", out var tasks)
+                || tasks.ValueKind != JsonValueKind.Array)
+                continue;
+
+            foreach (var task in tasks.EnumerateArray())
+            {
+                if (task.ValueKind == JsonValueKind.Object && task.TryGetProperty("runnerId", out _))
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private static string WorkflowEventSource(string workflowRunId) =>

@@ -28,31 +28,31 @@ public sealed class WorkflowRunQuerier
         var row = await db.WorkflowRuns.AsNoTracking()
             .FirstOrDefaultAsync(x => x.WorkflowRunId == workflowRunId, ct);
         if (row is null) return null;
-        return JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateAssignmentJson(row.State));
+        return JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateLegacyWorkflowRunJson(row.State));
     }
 
     /// <summary>
-    /// Epic #44: returns workflow runs bound to <paramref name="runnerId"/>
+    /// Epic #44: returns workflow runs bound to <paramref name="workerId"/>
     /// and sitting in <c>Ready</c> (assigned, dispatchable work, no in-flight
     /// work), ordered by <c>ReadySince ASC</c> for round-robin fairness. A run
     /// records when it (re-)entered Ready; serving the oldest-Ready run first
     /// means a just-served run re-queues at the tail — fairness as a property
     /// of persisted data with zero scheduler state (see
     /// <c>design/workflow/scheduling.md</c> §Fairness). Filters at the DB layer
-    /// on the STORED <c>Status</c> column + <c>AssignedRunnerId</c>, backed by
+    /// on the STORED <c>Status</c> column + <c>AssignedWorkerId</c>, backed by
     /// <c>IX_WorkflowRuns_Status_ReadySince</c>; never deserializes
     /// <c>State</c>. The <c>Ready</c> filter already excludes in-flight work,
     /// so every row returned is directly pickup-able.
     /// </summary>
-    public async Task<IReadOnlyList<string>> FindAssignedToAsync(string runnerId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> FindAssignedToAsync(string workerId, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(runnerId))
+        if (string.IsNullOrWhiteSpace(workerId))
             return [];
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.WorkflowRuns
             .AsNoTracking()
-            .Where(row => row.Status == StatusString(WorkflowRunStatus.Ready) && row.AssignedRunnerId == runnerId)
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Ready) && row.AssignedWorkerId == workerId)
             .OrderBy(row => row.ReadySince)
             .ThenBy(row => row.WorkflowRunId)
             .Select(row => row.WorkflowRunId)
@@ -64,7 +64,7 @@ public sealed class WorkflowRunQuerier
     /// for *any* runner to claim (<c>Pending</c>). Filters at the database
     /// layer on the STORED <c>Status</c> computed column; never
     /// deserializes the <c>State</c> JSON of non-matching rows. The
-    /// unassigned (<c>AssignedRunnerId IS NULL</c>) is implied by the
+    /// unassigned (<c>AssignedWorkerId IS NULL</c>) is implied by the
     /// <c>Pending</c> status under the new state machine (D1) and is
     /// asserted redundantly here as defensive belt-and-suspenders against
     /// any orphan row that survives the migration without an assignment.
@@ -75,7 +75,7 @@ public sealed class WorkflowRunQuerier
 
         var query = db.WorkflowRuns
             .AsNoTracking()
-            .Where(row => row.Status == StatusString(WorkflowRunStatus.Pending) && row.AssignedRunnerId == null);
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Pending) && row.AssignedWorkerId == null);
 
         if (!string.IsNullOrWhiteSpace(projectId))
             query = query.Where(row => row.MetadataProjectId == projectId);
@@ -90,46 +90,46 @@ public sealed class WorkflowRunQuerier
 
     /// <summary>
     /// Issue-318 D4: counts workflow runs that are currently in flight
-    /// (<c>Running</c>) and bound to <paramref name="runnerId"/>. Used by
+    /// (<c>Running</c>) and bound to <paramref name="workerId"/>. Used by
     /// the runner grain's dispatch-capacity gate so the per-runner slot
     /// budget accounts for work already picked up. Filters at the database
     /// layer on the STORED <c>Status</c> computed column plus
-    /// <c>AssignedRunnerId</c>; never deserializes <c>State</c>. Replaces
+    /// <c>AssignedWorkerId</c>; never deserializes <c>State</c>. Replaces
     /// the previous <c>FindAssignedToAsync</c> +
     /// <c>GetCurrentWorkIdAsync</c> fan-out, which under the new state
     /// machine would have collapsed to zero (Ready excludes in-flight
     /// work).
     /// </summary>
-    public async Task<int> CountRunningAssignedToAsync(string runnerId, CancellationToken ct = default)
+    public async Task<int> CountRunningAssignedToAsync(string workerId, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(runnerId))
+        if (string.IsNullOrWhiteSpace(workerId))
             return 0;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.WorkflowRuns
             .AsNoTracking()
-            .Where(row => row.Status == StatusString(WorkflowRunStatus.Running) && row.AssignedRunnerId == runnerId)
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Running) && row.AssignedWorkerId == workerId)
             .Select(row => row.WorkflowRunId)
             .CountAsync(ct);
     }
 
     /// <summary>
     /// Epic #44: returns the ids of workflow runs currently in flight
-    /// (<c>Running</c>) and bound to <paramref name="runnerId"/> — the
+    /// (<c>Running</c>) and bound to <paramref name="workerId"/> — the
     /// <c>desired</c> set for poll reconciliation. The DispatchService loads
     /// each to resolve its current workId and render a repair dispatch when
     /// the runner's reported set does not include it. Filters at the DB layer;
     /// never deserializes <c>State</c>.
     /// </summary>
-    public async Task<IReadOnlyList<string>> FindRunningAssignedToAsync(string runnerId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> FindRunningAssignedToAsync(string workerId, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(runnerId))
+        if (string.IsNullOrWhiteSpace(workerId))
             return [];
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.WorkflowRuns
             .AsNoTracking()
-            .Where(row => row.Status == StatusString(WorkflowRunStatus.Running) && row.AssignedRunnerId == runnerId)
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Running) && row.AssignedWorkerId == workerId)
             .Select(row => row.WorkflowRunId)
             .ToListAsync(ct);
     }

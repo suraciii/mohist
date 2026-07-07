@@ -1452,10 +1452,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("AssignedRunnerId")
+                    b.Property<string>("AssignedWorkerId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", false);
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.workerId'), json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", false);
 
                     b.Property<DateTime?>("CreatedAt")
                         .ValueGeneratedOnAddOrUpdate()
@@ -1487,17 +1487,17 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("WorkflowRunId");
 
-                    b.HasIndex("AssignedRunnerId");
+                    b.HasIndex("AssignedWorkerId");
 
                     b.HasIndex("MetadataProjectId");
 
-                    b.HasIndex("Status", "AssignedRunnerId")
+                    b.HasIndex("Status", "AssignedWorkerId")
                         .HasDatabaseName("IX_WorkflowRuns_Status");
 
-                    b.HasIndex("Status", "AssignedRunnerId", "ReadySince")
+                    b.HasIndex("Status", "AssignedWorkerId", "ReadySince")
                         .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");
 
-                    b.HasIndex("MetadataProjectId", "AssignedRunnerId", "CreatedAt");
+                    b.HasIndex("MetadataProjectId", "AssignedWorkerId", "CreatedAt");
 
                     b.ToTable("WorkflowRuns");
                 });

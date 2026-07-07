@@ -261,7 +261,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         var (work, _) = await PollWorkAnyAsync();
         Assert.NotNull(work);
 
-        var assigned = await workflow.GetAssignedRunnerIdAsync();
+        var assigned = await workflow.GetAssignedWorkerIdAsync();
         var status = await workflow.GetRunStatusAsync();
         var currentWorkId = await workflow.GetCurrentWorkIdAsync();
         Assert.Equal(runnerId, assigned);

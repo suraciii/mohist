@@ -8,7 +8,7 @@ namespace Mohist.Server.Tests.Specs.Workflow.Domain;
 
 public class WorkflowRunStatusTransitionSpecs
 {
-    private const string RunnerId = "runner-1";
+    private const string WorkerId = "worker-1";
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
@@ -49,14 +49,14 @@ public class WorkflowRunStatusTransitionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void AssignRunner_MovesPendingToReady_AndStoresRunnerOnAssignment()
+    public void AssignWorker_MovesPendingToReady_AndStoresWorkerOnAssignment()
     {
         var run = BuildPendingRun();
 
-        run.AssignTo(RunnerId, DateTimeOffset.UtcNow);
+        run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
 
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
-        Assert.Equal(RunnerId, run.Assignment!.RunnerId);
+        Assert.Equal(WorkerId, run.Assignment!.WorkerId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -66,7 +66,7 @@ public class WorkflowRunStatusTransitionSpecs
     {
         var run = BuildReadyRun();
 
-        run.StartTask("work-1", RunnerId);
+        run.StartTask("work-1", WorkerId);
 
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
         Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks.Single().Status);
@@ -82,7 +82,7 @@ public class WorkflowRunStatusTransitionSpecs
             new("compile", "Compile", "spec/task"),
             new("test", "Test", "spec/task")
         ], checks: []);
-        run.StartTask("work-1", RunnerId);
+        run.StartTask("work-1", WorkerId);
 
         run.CompleteTask();
 
@@ -100,7 +100,7 @@ public class WorkflowRunStatusTransitionSpecs
             new("compile", "Compile", "spec/task"),
             new("test", "Test", "spec/task")
         ], checks: []);
-        run.StartTask("work-1", RunnerId);
+        run.StartTask("work-1", WorkerId);
         run.Assignment = null;
 
         run.CompleteTask();
@@ -115,7 +115,7 @@ public class WorkflowRunStatusTransitionSpecs
     public void CompleteTask_WithNoRemainingWork_CompletesRun()
     {
         var run = BuildReadyRun(checks: []);
-        run.StartTask("work-1", RunnerId);
+        run.StartTask("work-1", WorkerId);
 
         run.CompleteTask();
 
@@ -130,7 +130,7 @@ public class WorkflowRunStatusTransitionSpecs
         var pending = BuildPendingRun();
         var ready = BuildReadyRun();
         var running = BuildReadyRun();
-        running.StartTask("work-1", RunnerId);
+        running.StartTask("work-1", WorkerId);
 
         pending.Pause();
         ready.Pause();
@@ -147,7 +147,7 @@ public class WorkflowRunStatusTransitionSpecs
     public void Resume_WithInFlightWork_ReturnsToRunning()
     {
         var run = BuildReadyRun();
-        run.StartTask("work-1", RunnerId);
+        run.StartTask("work-1", WorkerId);
         run.Pause();
 
         run.Resume();
@@ -188,7 +188,7 @@ public class WorkflowRunStatusTransitionSpecs
     public void FailTask_LandsOnFailed()
     {
         var run = BuildReadyRun();
-        run.StartTask("work-1", RunnerId);
+        run.StartTask("work-1", WorkerId);
 
         run.FailTask(new TaskResult("failed", "boom"));
 
@@ -235,7 +235,7 @@ public class WorkflowRunStatusTransitionSpecs
     {
         // spec scenario 2: a stage not awaiting approval is unaffected by stop.
         var run = BuildReadyRun();
-        run.StartTask("work-1", RunnerId);
+        run.StartTask("work-1", WorkerId);
         var current = run.CurrentStage();
         Assert.False(current.IsAwaitingApproval);
         Assert.Null(current.ApprovalStatus);
@@ -355,7 +355,7 @@ public class WorkflowRunStatusTransitionSpecs
     // ChecksWorkId (left behind by a stage that has since advanced); that
     // residue does not mean work is in flight NOW, and treating it as such
     // leaves the run on Running when it should fall to Ready, making it
-    // invisible to the runner's Ready/Pending-only dispatch query.
+    // invisible to the worker's Ready/Pending-only dispatch query.
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
@@ -373,8 +373,8 @@ public class WorkflowRunStatusTransitionSpecs
         run.InitializeStage(
             [new("compile", "Compile", "spec/t")],
             [new("verify", "Verify", "spec/check")]);
-        run.AssignTo(RunnerId, DateTimeOffset.UtcNow);
-        run.StartTask("w-compile", RunnerId);
+        run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
+        run.StartTask("w-compile", WorkerId);
         run.CompleteTask();
         run.PassCheck(new CheckResult("verify", "pass"));
         // Build has advanced; integrate is now current.
@@ -426,7 +426,7 @@ public class WorkflowRunStatusTransitionSpecs
     // NextWork() is the offer — it must NOT mutate run state. The task stays
     // Pending and the run stays Ready until a claim (StartTask) explicitly
     // transitions it. This is what makes "Running ⟹ claimed" a flow
-    // invariant: there is no window where a task is Running without a runner
+    // invariant: there is no window where a task is Running without a worker
     // having durably registered it.
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
@@ -446,7 +446,7 @@ public class WorkflowRunStatusTransitionSpecs
 
         Assert.NotNull(offered);
         Assert.Equal(TaskRunStatus.Pending, taskBefore.Status);
-        Assert.Null(taskBefore.RunnerId);
+        Assert.Null(taskBefore.WorkerId);
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
     }
 
@@ -463,14 +463,14 @@ public class WorkflowRunStatusTransitionSpecs
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
 
         // Claim: StartTask is what transitions the task to Running.
-        run.StartTask("work-1", RunnerId);
+        run.StartTask("work-1", WorkerId);
 
         Assert.Equal(TaskRunStatus.Running, run.CurrentStage().Tasks[0].Status);
-        Assert.Equal(RunnerId, run.CurrentStage().Tasks[0].RunnerId);
+        Assert.Equal(WorkerId, run.CurrentStage().Tasks[0].WorkerId);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
     }
 
-    // Offer-then-crash recovery: if the runner takes the offer but crashes
+    // Offer-then-crash recovery: if the worker takes the offer but crashes
     // before claiming, the task is still Pending and the run is still Ready.
     // A subsequent offer (new poll) re-offers the same work. No reconcile
     // is needed because offer never persisted any "in-flight" state.
@@ -501,8 +501,8 @@ public class WorkflowRunStatusTransitionSpecs
         ]));
         run.Start();
         run.InitializeStage([new("draft", "Draft", "spec/task")], [new("plan-ok", "Plan OK", "spec/check")]);
-        run.AssignTo(RunnerId, DateTimeOffset.UtcNow);
-        run.StartTask("work-1", RunnerId);
+        run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
+        run.StartTask("work-1", WorkerId);
         run.CompleteTask();
         run.PassCheck(new CheckResult("plan-ok", "pass"));
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
@@ -514,7 +514,7 @@ public class WorkflowRunStatusTransitionSpecs
         List<CheckDefinition>? checks = null)
     {
         var run = BuildPendingRun(tasks, checks);
-        run.AssignTo(RunnerId, DateTimeOffset.UtcNow);
+        run.AssignTo(WorkerId, DateTimeOffset.UtcNow);
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         return run;
     }

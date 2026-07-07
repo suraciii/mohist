@@ -84,7 +84,7 @@ public static partial class WorkflowRunExtensions
                 new CheckPending(current.Id, check.Name, result.Message)
             };
             // Re-evaluate the run state: the check has been re-queued,
-            // so the run is no longer in-flight. With the runner still
+            // so the run is no longer in-flight. With the worker still
             // assigned, it lands on Ready so the next poll re-dispatches
             // the check work.
             events.AddRange(run.Advance());

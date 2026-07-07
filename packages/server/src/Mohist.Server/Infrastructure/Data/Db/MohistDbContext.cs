@@ -443,8 +443,8 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", stored: true);
             entity.Property(e => e.CreatedAt)
                 .HasComputedColumnSql("json_extract(State, '$.metadata.createdAt')", stored: false);
-            entity.Property(e => e.AssignedRunnerId)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", stored: false);
+            entity.Property(e => e.AssignedWorkerId)
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.workerId'), json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", stored: false);
             // Fairness ordering key: when the run last (re-)entered Ready.
             // VIRTUAL (non-stored) — read only to ORDER Ready runs
             // round-robin (ReadySince ASC), never filtered on. JSON path is
@@ -462,20 +462,20 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Status)
                 .HasComputedColumnSql("LOWER(COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status')))", stored: true);
             entity.HasIndex(e => e.MetadataProjectId);
-            entity.HasIndex(e => e.AssignedRunnerId);
-            entity.HasIndex(e => new { e.MetadataProjectId, e.AssignedRunnerId, e.CreatedAt });
+            entity.HasIndex(e => e.AssignedWorkerId);
+            entity.HasIndex(e => new { e.MetadataProjectId, e.AssignedWorkerId, e.CreatedAt });
             // Issue-318 D3: covering index for the two scheduler queries
             // (FindAssignableAsync -> status == pending, FindAssignedToAsync
-            // -> status == ready AND assigned == runner). The composite
-            // matches the runner-bound filter exactly; the standalone
+            // -> status == ready AND assigned == worker). The composite
+            // matches the worker-bound filter exactly; the standalone
             // status index is implied by EF through the column projection.
-            entity.HasIndex(e => new { e.Status, e.AssignedRunnerId })
+            entity.HasIndex(e => new { e.Status, e.AssignedWorkerId })
                 .HasDatabaseName("IX_WorkflowRuns_Status");
-            // Fairness: the scheduler serves Ready runs assigned to a runner in
+            // Fairness: the scheduler serves Ready runs assigned to a worker in
             // ReadySince ASC order. Composite covering index matches the filter
-            // (Status, AssignedRunnerId) plus the ordering key (ReadySince) so
+            // (Status, AssignedWorkerId) plus the ordering key (ReadySince) so
             // the round-robin scan is index-only.
-            entity.HasIndex(e => new { e.Status, e.AssignedRunnerId, e.ReadySince })
+            entity.HasIndex(e => new { e.Status, e.AssignedWorkerId, e.ReadySince })
                 .HasDatabaseName("IX_WorkflowRuns_Status_ReadySince");
         });
 

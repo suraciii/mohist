@@ -26,11 +26,11 @@ public class WorkflowLeaseActivationSpecs : WorkflowGrainSpecs
 
         workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
-        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
+        Assert.Equal(runnerId, await workflow.GetAssignedWorkerIdAsync());
         var snapshot = await GetQuerier().GetStatusAsync(workflowId);
         var runningTask = snapshot!.Stages.Single().Tasks.Single();
         Assert.Equal("running", runningTask.Status);
-        var differentRunner = await workflow.AssignRunnerAsync("different-runner");
+        var differentRunner = await workflow.AssignWorkerAsync("different-runner");
         Assert.Equal(WorkflowAssignmentStatus.Rejected, differentRunner.Status);
         Assert.Equal("already-assigned", differentRunner.Reason);
     }

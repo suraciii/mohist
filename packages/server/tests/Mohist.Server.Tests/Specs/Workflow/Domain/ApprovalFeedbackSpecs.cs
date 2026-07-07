@@ -32,11 +32,11 @@ public class ApprovalFeedbackSpecs
         run.InitializeStage(
             [new("draft", "Draft", "spec/task")],
             [new("plan-ok", "Plan OK", "spec/check")]);
-        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
         // The new task lifecycle (PR #140) requires a task to transition through
         // Pending → Running → Completed. Mirror that here before completing the
         // draft task so the stage reaches AwaitingApproval.
-        run.StartTask("draft.1", "runner-1");
+        run.StartTask("draft.1", "worker-1");
         run.CompleteTask();
         run.PassCheck(new CheckResult("plan-ok", "pass"));
         return run;
@@ -127,7 +127,7 @@ public class ApprovalFeedbackSpecs
         run.InitializeStage(
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")]);
-        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
         var current = run.CurrentStage();
         Assert.Equal(StageRunStatus.Running, current.Status);
 
@@ -227,7 +227,7 @@ public class ApprovalFeedbackSpecs
         // the checks before asserting AwaitingApproval.
         var current = run.CurrentStage();
         var feedbackTask = current.Tasks.Last(t => t.CausedByFeedbackId is not null);
-        run.StartTask(feedbackTask.Id, "runner-1");
+        run.StartTask(feedbackTask.Id, "worker-1");
         run.CompleteTask();
         run.PassCheck(new CheckResult("plan-ok", "pass"));
 
@@ -276,8 +276,8 @@ public class ApprovalFeedbackSpecs
         run.InitializeStage(
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")]);
-        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
-        run.StartTask("compile.1", "runner-1");
+        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
+        run.StartTask("compile.1", "worker-1");
         run.FailTask(new TaskResult("failed", "boom"));
 
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);

@@ -161,7 +161,7 @@ public static class WorkflowGrainTestHelpers
     public static async Task AssignWorkflowToRunnerAsync(IGrainFactory grains, string workflowId, string runnerId)
     {
         var workflow = grains.GetGrain<IWorkflowGrain>(workflowId);
-        await workflow.AssignRunnerAsync(runnerId);
+        await workflow.AssignWorkerAsync(runnerId);
     }
 
     public static async Task AssignActiveWorkForTestAsync(
@@ -180,7 +180,7 @@ public static class WorkflowGrainTestHelpers
             tasks: [new("task-1", title ?? "Task 1", "spec/task")],
             checks: []), projectId);
         await workflow.StartAsync(TestInput(grains, workflowId, projectId));
-        await workflow.AssignRunnerAsync(runnerId);
+        await workflow.AssignWorkerAsync(runnerId);
 
         // The runner grain no longer owns PollAsync (the stateless
         // DispatchService computes dispatches, which needs a service provider

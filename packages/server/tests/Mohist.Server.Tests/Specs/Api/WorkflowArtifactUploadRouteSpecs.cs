@@ -361,7 +361,7 @@ public class WorkflowArtifactUploadRouteSpecs
         Assert.False(string.IsNullOrEmpty(workflowRunId));
 
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
-        await workflow.AssignRunnerAsync(runnerId);
+        await workflow.AssignWorkerAsync(runnerId);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
 
         var work = await TestWait.ForAsync(

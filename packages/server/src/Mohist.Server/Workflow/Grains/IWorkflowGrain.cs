@@ -21,21 +21,21 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request);
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
     Task<bool> HasIncompleteTaskByIdAsync(string id);
-    Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId);
+    Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId);
     /// <summary>
     /// The single write that starts work. Picks the run's next pending work,
     /// acquires the sequential stage lock, marks the work Running with the
-    /// runner identity, and persists — one atomic transition on the
+    /// worker identity, and persists — one atomic transition on the
     /// single-writer grain. Returns the claimed <see cref="WorkItem"/> (with its
     /// resolved work id), or <c>null</c> when there is no dispatchable work, the
     /// stage lock is contended, or the run is not Ready/Running/assigned to the
-    /// caller. There is no offer phase: a claim that never reaches the runner
+    /// caller. There is no offer phase: a claim that never reaches the worker
     /// needs no rollback — the work is Running and unreported, so the next poll
     /// re-dispatches it.
     /// </summary>
-    Task<WorkItem?> ClaimNextAsync(string runnerId);
-    Task<ReportAck> ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome);
-    Task<ReportAck> ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome);
+    Task<WorkItem?> ClaimNextAsync(string workerId);
+    Task<ReportAck> ReportTaskOutcomeAsync(string workerId, string workId, TaskOutcome outcome);
+    Task<ReportAck> ReportCheckOutcomeAsync(string workerId, string workId, CheckOutcome outcome);
 
     /// <summary>
     /// Releases the sequential stage lock owned by this workflow run for a
@@ -44,7 +44,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task ReleaseStageLocksAsync(string stage, string reason);
     Task<string?> GetRunStatusAsync();
     Task<bool> IsStoppedOrTerminalAsync();
-    Task<string?> GetAssignedRunnerIdAsync();
+    Task<string?> GetAssignedWorkerIdAsync();
     Task<string?> GetCurrentWorkIdAsync();
     Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId);
     Task<WorkflowFeedbackRecord?> GetFeedbackAsync(string feedbackId);
@@ -98,7 +98,7 @@ public sealed record AddTasksBatchResult(
 [GenerateSerializer]
 public sealed record WorkflowAssignmentResult(
     [property: Id(0)] WorkflowAssignmentStatus Status,
-    [property: Id(1)] string? OwnerRunnerId = null,
+    [property: Id(1)] string? OwnerWorkerId = null,
     [property: Id(2)] string? Reason = null);
 
 public enum WorkflowAssignmentStatus
@@ -112,7 +112,7 @@ public enum WorkflowAssignmentStatus
 /// <c>ReportCheckOutcomeAsync</c>). <see cref="Accepted"/> means the owner
 /// consumed the outcome. <see cref="Stale"/> means the work was already
 /// terminal, not assigned to the caller, or otherwise no longer current — the
-/// result is discarded idempotently. Both are acks: the runner retires the work
+/// result is discarded idempotently. Both are acks: the worker retires the work
 /// from <c>awaitingAck</c> on either (see <c>design/workflow/scheduling.md</c>
 /// §Report). A report for a work the owner does not recognize is Stale, never
 /// an error — late/duplicate reports are the normal case under at-least-once.
@@ -141,7 +141,7 @@ public sealed record WorkflowControlResult(
 /// Read-only snapshot of the active workflow work item. The upload
 /// endpoint uses this to derive the server-side task run binding
 /// context (<see cref="TaskRunId"/>) for a pending artifact upload
-/// without trusting runner-supplied identifiers.
+/// without trusting worker-supplied identifiers.
 /// </summary>
 [GenerateSerializer]
 public sealed record WorkflowActiveWorkView(

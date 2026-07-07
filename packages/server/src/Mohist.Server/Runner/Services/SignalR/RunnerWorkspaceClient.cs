@@ -93,10 +93,10 @@ public sealed class RunnerWorkspaceClient : IRunnerWorkspaceClient
     private async Task<string?> ResolveConnectionIdAsync(string projectId, string workflowRunId)
     {
         var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
-        var assignedRunnerId = await workflow.GetAssignedRunnerIdAsync();
-        if (!string.IsNullOrWhiteSpace(assignedRunnerId))
+        var assignedWorkerId = await workflow.GetAssignedWorkerIdAsync();
+        if (!string.IsNullOrWhiteSpace(assignedWorkerId))
         {
-            var connectionId = _connections.GetConnectionId(assignedRunnerId);
+            var connectionId = _connections.GetConnectionId(assignedWorkerId);
             if (!string.IsNullOrWhiteSpace(connectionId)) return connectionId;
         }
 

@@ -28,7 +28,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
             rowId = "wf_legacy_pending";
             await SeedWorkflowRunAsync(setup, rowId, BuildState(
                 status: "Pending",
-                assignmentRunnerId: null,
+                assignmentWorkerId: null,
                 stagesInFlight: false));
         }
 
@@ -50,13 +50,12 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
         {
             await MigrateToPreviousAsync(setup);
             rowId = "wf_legacy_running_unassigned";
-            // Old "Running" with no assignment and no in-flight work —
-            // covers the backstop case where a runner pool entry never
-            // got claimed. Under the new state machine this is exactly
-            // Pending (waiting for any runner).
+            // Old "Running" with no assignment and no in-flight work.
+            // Under the new state machine this is exactly Pending
+            // (waiting for any worker).
             await SeedWorkflowRunAsync(setup, rowId, BuildState(
                 status: "Running",
-                assignmentRunnerId: null,
+                assignmentWorkerId: null,
                 stagesInFlight: false));
         }
 
@@ -80,7 +79,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
             rowId = "wf_legacy_running_inflight_task";
             await SeedWorkflowRunAsync(setup, rowId, BuildState(
                 status: "Running",
-                assignmentRunnerId: "runner_legacy_a",
+                assignmentWorkerId: "worker_legacy_a",
                 stagesInFlight: true,
                 inFlightTask: true,
                 inFlightChecksWorkId: false));
@@ -106,7 +105,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
             rowId = "wf_legacy_running_inflight_checks";
             await SeedWorkflowRunAsync(setup, rowId, BuildState(
                 status: "Running",
-                assignmentRunnerId: "runner_legacy_b",
+                assignmentWorkerId: "worker_legacy_b",
                 stagesInFlight: true,
                 inFlightTask: false,
                 inFlightChecksWorkId: true));
@@ -132,7 +131,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
             rowId = "wf_legacy_running_assigned_idle";
             await SeedWorkflowRunAsync(setup, rowId, BuildState(
                 status: "Running",
-                assignmentRunnerId: "runner_legacy_c",
+                assignmentWorkerId: "worker_legacy_c",
                 stagesInFlight: false));
         }
 
@@ -175,7 +174,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
                 var id = $"wf_legacy_{suffix}";
                 await SeedWorkflowRunAsync(setup, id, BuildState(
                     status: status,
-                    assignmentRunnerId: null,
+                    assignmentWorkerId: null,
                     stagesInFlight: false));
                 seeded[id] = status;
             }
@@ -213,7 +212,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
             await MigrateToPreviousAsync(setup);
             await SeedWorkflowRunAsync(setup, rowId, BuildState(
                 status: "Running",
-                assignmentRunnerId: "runner_x",
+                assignmentWorkerId: "worker_x",
                 stagesInFlight: false));
         }
 
@@ -255,15 +254,15 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
             await MigrateToPreviousAsync(setup);
             await SeedWorkflowRunAsync(setup, assignedRow, BuildState(
                 status: "Running",
-                assignmentRunnerId: "runner_e2e",
+                assignmentWorkerId: "worker_e2e",
                 stagesInFlight: false));
             await SeedWorkflowRunAsync(setup, unassignedRow, BuildState(
                 status: "Running",
-                assignmentRunnerId: null,
+                assignmentWorkerId: null,
                 stagesInFlight: false));
             await SeedWorkflowRunAsync(setup, inFlightRow, BuildState(
                 status: "Running",
-                assignmentRunnerId: "runner_e2e",
+                assignmentWorkerId: "worker_e2e",
                 stagesInFlight: true,
                 inFlightTask: true,
                 inFlightChecksWorkId: false));
@@ -307,7 +306,7 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
 
     private static string BuildState(
         string status,
-        string? assignmentRunnerId,
+        string? assignmentWorkerId,
         bool stagesInFlight,
         bool inFlightTask = false,
         bool inFlightChecksWorkId = false)
@@ -337,12 +336,12 @@ public class WorkflowRunStatusReclassificationMigrationSpecs
               ]
               """
             : "";
-        var assignment = assignmentRunnerId is null
+        var assignment = assignmentWorkerId is null
             ? ""
             : $$"""
               ,
               "assignment": {
-                "runnerId": "{{assignmentRunnerId}}",
+                "runnerId": "{{assignmentWorkerId}}",
                 "assignedAt": "2026-06-15T10:00:00Z"
               }
               """;

@@ -19,7 +19,7 @@ public class WorkflowRunRow
     public DateTime? CreatedAt { get; set; }
 
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
-    public string? AssignedRunnerId { get; set; }
+    public string? AssignedWorkerId { get; set; }
 
     /// <summary>
     /// VIRTUAL computed column projecting the persisted

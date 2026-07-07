@@ -32,7 +32,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         await runner.UnregisterAsync();
 
         Assert.Equal("Failed", await workflow.GetRunStatusAsync());
-        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
+        Assert.Equal(runnerId, await workflow.GetAssignedWorkerIdAsync());
         Assert.Null(await workflow.GetCurrentWorkIdAsync());
 
         var run = await LoadRunAsync(work.WorkflowRunId);
@@ -134,7 +134,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         task.Status = TaskRunStatus.Running;
         task.StartedAt = _fixture.TimeProvider.GetUtcNow();
         task.WorkId = dispatched.WorkId;
-        task.RunnerId = runnerId;
+        task.WorkerId = runnerId;
         run.Status = WorkflowRunStatus.Running;
         run.Stages.Single().Status = StageRunStatus.Running;
         run.Failure = null;
@@ -192,7 +192,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         await workflow.StopAsync("test-stop");
 
         Assert.Equal("Stopped", await workflow.GetRunStatusAsync());
-        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
+        Assert.Equal(runnerId, await workflow.GetAssignedWorkerIdAsync());
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.Null(await runner.PollAsync(Services));

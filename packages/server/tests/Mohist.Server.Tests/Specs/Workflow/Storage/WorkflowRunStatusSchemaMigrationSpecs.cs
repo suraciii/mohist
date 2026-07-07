@@ -45,7 +45,7 @@ public class WorkflowRunStatusSchemaMigrationSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task DbContext_ExposesIndexOnStatusAndAssignedRunnerId()
+    public async Task DbContext_ExposesIndexOnStatusAndAssignedWorkerId()
     {
         await using var database = CreateDatabase();
         await using var context = database.CreateDbContext();
@@ -58,7 +58,7 @@ public class WorkflowRunStatusSchemaMigrationSpecs
             .SingleOrDefault(i => i.GetDatabaseName() == "IX_WorkflowRuns_Status");
         Assert.NotNull(index);
         Assert.Equal(
-            new[] { "Status", "AssignedRunnerId" },
+            new[] { "Status", "AssignedWorkerId" },
             index!.Properties.Select(p => p.Name).ToArray());
     }
 

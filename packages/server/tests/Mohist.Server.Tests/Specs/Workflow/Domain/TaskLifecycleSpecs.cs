@@ -16,7 +16,7 @@ public class TaskLifecycleSpecs
         ]));
         run.Start();
         run.InitializeStage([new("compile", "Compile", "spec/task")], [new("build-ok", "Build OK", "spec/check")]);
-        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
+        run.AssignTo("worker-1", DateTimeOffset.UtcNow);
         return run;
     }
 
@@ -28,17 +28,17 @@ public class TaskLifecycleSpecs
         var run = BuildRun();
         var task = run.CurrentStage().Tasks[0];
 
-        var events = run.StartTask("work-1", "runner-1");
+        var events = run.StartTask("work-1", "worker-1");
 
         Assert.Equal(TaskRunStatus.Running, task.Status);
         Assert.NotNull(task.StartedAt);
         Assert.Null(task.FinishedAt);
         Assert.Equal("work-1", task.WorkId);
-        Assert.Equal("runner-1", task.RunnerId);
+        Assert.Equal("worker-1", task.WorkerId);
         var evt = Assert.IsType<TaskStarted>(WorkflowEventSerializer.Unwrap(Assert.Single(events)));
         Assert.Equal("build", evt.Stage);
         Assert.Equal(task.Id, evt.TaskId);
-        Assert.Equal("runner-1", evt.RunnerId);
+        Assert.Equal("worker-1", evt.WorkerId);
         Assert.Equal(EventCatalog.ReverseDns.TaskStarted, WorkflowEventSerializer.BusType(events[0]));
         Assert.IsType<TaskStarted>(WorkflowEventSerializer.Unwrap(
             WorkflowEventSerializer.FromData(nameof(TaskStarted), WorkflowEventSerializer.ToData(events[0]))));
@@ -50,7 +50,7 @@ public class TaskLifecycleSpecs
     public void CompleteTask_SetsFinishedAtBeforeCompletingRunningTask()
     {
         var run = BuildRun();
-        run.StartTask("work-1", "runner-1");
+        run.StartTask("work-1", "worker-1");
         var task = run.CurrentStage().Tasks[0];
 
         var events = run.CompleteTask();
@@ -98,7 +98,7 @@ public class TaskLifecycleSpecs
     public void FailTaskForStopped_FailsRunningTaskWithStoppedReason()
     {
         var run = BuildRun();
-        run.StartTask("work-1", "runner-1");
+        run.StartTask("work-1", "worker-1");
         var task = run.CurrentStage().Tasks[0];
 
         var events = run.FailTaskForStopped("stopped");

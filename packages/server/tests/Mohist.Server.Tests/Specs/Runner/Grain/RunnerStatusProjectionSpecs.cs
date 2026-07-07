@@ -49,7 +49,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
                 ["issueId"] = issueId,
                 ["issueNumber"] = issueNumber.ToString(),
             })));
-        await workflow.AssignRunnerAsync(runnerId);
+        await workflow.AssignWorkerAsync(runnerId);
 
         var work = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(Services);
         Assert.NotNull(work);

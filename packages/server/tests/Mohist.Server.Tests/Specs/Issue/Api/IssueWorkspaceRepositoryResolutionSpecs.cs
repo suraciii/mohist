@@ -246,7 +246,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         var wrId = issueStatus!.WorkflowRunId!;
 
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(wrId);
-        await workflow.AssignRunnerAsync(runnerId);
+        await workflow.AssignWorkerAsync(runnerId);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.PollAsync(_fixture.Services);
 

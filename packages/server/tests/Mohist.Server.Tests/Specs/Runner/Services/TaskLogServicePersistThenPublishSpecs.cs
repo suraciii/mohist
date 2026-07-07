@@ -328,7 +328,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
                             Attempt = 1,
                             Title = "do thing",
                             Status = TaskRunStatus.Running,
-                            RunnerId = "runner-A",
+                            WorkerId = "runner-A",
                             WorkId = workId,
                         },
                     },
