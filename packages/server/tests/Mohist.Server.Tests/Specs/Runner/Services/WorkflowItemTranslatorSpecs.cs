@@ -357,9 +357,9 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal("build", checks.Value.Stage);
         Assert.Equal(2, checks.Value.Results.Count);
         Assert.Equal("check-1", checks.Value.Results[0].Name);
-        Assert.Equal("pass", checks.Value.Results[0].Status);
+        Assert.Equal(CheckResultStatus.Passed, checks.Value.Results[0].Status);
         Assert.Equal("check-2", checks.Value.Results[1].Name);
-        Assert.Equal("fail", checks.Value.Results[1].Status);
+        Assert.Equal(CheckResultStatus.Failed, checks.Value.Results[1].Status);
         Assert.Equal("nope", checks.Value.Results[1].Message);
     }
 

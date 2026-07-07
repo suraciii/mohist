@@ -38,7 +38,7 @@ public class ApprovalFeedbackSpecs
         run.AssignTo("worker-1", DateTimeOffset.UtcNow);
         run.StartTask("draft.1", "worker-1", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
-        run.PassCheck(new CheckResult("plan-ok", "pass"), DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
         return run;
     }
 
@@ -230,7 +230,7 @@ public class ApprovalFeedbackSpecs
         var feedbackTask = current.Tasks.Last(t => t.CausedByFeedbackId is not null);
         run.StartTask(feedbackTask.Id, "worker-1", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
-        run.PassCheck(new CheckResult("plan-ok", "pass"), DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
 
         Assert.Equal(StageRunStatus.AwaitingApproval, current.Status);
 

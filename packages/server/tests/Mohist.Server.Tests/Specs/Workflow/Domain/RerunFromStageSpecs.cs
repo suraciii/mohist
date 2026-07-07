@@ -39,7 +39,7 @@ public class RerunFromStageSpecs
 
             run.StartTask(stage.Tasks.Single().Id, "worker-1", DateTimeOffset.UnixEpoch);
             run.CompleteTask(DateTimeOffset.UnixEpoch);
-            run.PassCheck(new CheckResult(stage.Checks.Single().Name, "pass"), DateTimeOffset.UnixEpoch);
+            run.PassCheck(new CheckResult(stage.Checks.Single().Name, CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
         }
         return run;
     }
@@ -57,7 +57,7 @@ public class RerunFromStageSpecs
         run.AssignTo("worker-1", DateTimeOffset.UtcNow);
         run.StartTask("draft.1", "worker-1", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
-        run.PassCheck(new CheckResult("plan-ok", "pass"), DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
 
         var buildStage = run.Stages[1];
         run.CurrentStageId = buildStage.Id;
@@ -68,7 +68,7 @@ public class RerunFromStageSpecs
             DateTimeOffset.UnixEpoch);
         run.StartTask("compile.1", "worker-1", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
-        run.PassCheck(new CheckResult("build-ok", "pass"), DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("build-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
 
         var integrateStage = run.Stages[2];
         run.CurrentStageId = integrateStage.Id;
@@ -79,7 +79,7 @@ public class RerunFromStageSpecs
             DateTimeOffset.UnixEpoch);
         run.StartTask("merge.1", "worker-1", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
-        run.PassCheck(new CheckResult("merge-ok", "pass"), DateTimeOffset.UnixEpoch);
+        run.PassCheck(new CheckResult("merge-ok", CheckResultStatus.Passed), DateTimeOffset.UnixEpoch);
 
         return run;
     }

@@ -1,49 +1,21 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Grains;
 using Xunit;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Tests.Specs.Workflow;
 
 namespace Mohist.Server.Tests.Specs.Runner.Grain;
 
-/// <summary>
-/// Coverage for T-004 (design D5): <see cref="RunnerGrain"/> must own the
-/// outstanding-work set for workflow work items, and on runner loss must
-/// drain that set by synthesizing a failed report through the normal
-/// workflow report channel.
-/// </summary>
 [Collection("WorkflowGrain")]
 public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
 {
     public RunnerOutstandingWorkSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    private async Task DeactivateRunnerAsync(string runnerId)
-    {
-        await Grains.GetGrain<IRunnerGrain>(runnerId).DeactivateForTestAsync();
-        var management = Grains.GetGrain<IManagementGrain>(0);
-        await management.ForceActivationCollection(TimeSpan.Zero);
-
-        await TestWait.ForAsync(
-            async () => await management.GetDetailedGrainStatistics(),
-            activations => !activations.Any(stat => stat.GrainType.Contains(nameof(RunnerGrain), StringComparison.Ordinal)
-                && stat.GrainId.ToString()!.Contains(runnerId, StringComparison.Ordinal)),
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromMilliseconds(50),
-            $"Runner grain '{runnerId}' to deactivate");
-    }
-
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task RunnerLoss_SynthesizesFailedTaskReport_ViaReportChannel()
+    public async Task RunnerLoss_FailsActiveWorkflowTask()
     {
-        // Regression for T-004 (design D5): runner-loss closeout must go
-        // through the normal workflow report channel. The grain
-        // sees the same TaskReport(Failed, Detail="runner-lost") that a
-        // runner process would have sent if it had finished and reported
-        // `failed` itself — there is no separate "runner lost" path on
-        // the grain.
         var workflow = await StartWorkflowAsync(SingleStage());
         var runnerId = _runnerId!;
         var (work, _) = await PollWorkAnyAsync();
@@ -63,11 +35,6 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RunnerLoss_WithoutOutstandingWorkflowWork_IsNoOp()
     {
-        // The runner may have no polled workflow work (only registered).
-        // UnregisterAsync must not throw, must not synthesize a report,
-        // and must not touch any unrelated workflow's state. We test this
-        // by registering a runner that has no assigned workflow, then
-        // unregistering — the closeout path must no-op cleanly.
         var runnerId = $"lonely-runner-{Guid.NewGuid():N}";
         await Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
             runnerId,
@@ -76,7 +43,6 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
             "test-project-no-workflow"));
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        // No poll — outstanding-work set is empty.
         var runtimeBefore = await runner.GetRuntimeStateAsync();
         Assert.Equal(RunnerStatus.Online, runtimeBefore.Status);
         Assert.Empty(runtimeBefore.ActiveWorks);
@@ -90,14 +56,8 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task RunnerLoss_FailedReportHasDetailRunnerLost_OnWorkflowGrainSide()
+    public async Task RunnerLoss_FailedTaskKeepsRunnerLostMessage()
     {
-        // After T-004, the runner-side synthesized failed report flows
-        // through the same translator that any runner-process "failed"
-        // report would. This pins the observable product contract:
-        // the workflow grain ends up with task status Failed and the
-        // failure message "runner-lost" — identical to the old
-        // NotifyRunnerLostAsync path but produced via the report channel.
         var workflow = await StartWorkflowAsync(SingleStage());
         var runnerId = _runnerId!;
         var (work, _) = await PollWorkAnyAsync();
@@ -105,8 +65,6 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.UnregisterAsync();
 
-        // The synthesized report's `Detail: "runner-lost"` is preserved
-        // through the translator -> grain -> failure-message path.
         var run = await LoadRunAsync(work.WorkflowRunId);
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
         Assert.Equal(TaskRunStatus.Failed, run.Stages.Single().Tasks.Single().Status);

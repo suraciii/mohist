@@ -125,12 +125,21 @@ internal static class WorkflowDispatchHelpers
         var name = element.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
         if (string.IsNullOrWhiteSpace(name)) return null;
 
-        var status = element.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "fail" : "fail";
+        var status = element.TryGetProperty("status", out var statusProp) ? statusProp.GetString() : null;
         var message = element.TryGetProperty("message", out var msgProp) ? msgProp.GetString() : null;
         JsonElement? output = element.TryGetProperty("output", out var outProp) ? outProp.Clone() : null;
 
-        return new CheckResult(name!, status, message, output);
+        return new CheckResult(name!, ParseCheckResultStatus(status), message, output);
     }
+
+    private static CheckResultStatus ParseCheckResultStatus(string? status) =>
+        status?.Trim().ToLowerInvariant() switch
+        {
+            "pass" or "passed" => CheckResultStatus.Passed,
+            "pending" => CheckResultStatus.Pending,
+            "fail" or "failed" => CheckResultStatus.Failed,
+            _ => CheckResultStatus.Failed
+        };
 
     internal static Dictionary<string, JsonElement?>? ParseWith(JsonElement? with) =>
         with is { } el ? el.Deserialize<Dictionary<string, JsonElement?>>(JSON.Options) : null;

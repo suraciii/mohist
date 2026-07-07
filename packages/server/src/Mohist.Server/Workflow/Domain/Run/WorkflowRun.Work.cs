@@ -27,6 +27,12 @@ public sealed record WorkflowActiveWork(WorkItem Item, string? TaskRunId)
     public bool IsChecks => Item.IsChecks;
 }
 
+public sealed record WorkflowPendingWork(
+    string Id,
+    string WorkType,
+    string Stage,
+    string Title);
+
 public static partial class WorkflowRunExtensions
 {
     public static string ChecksWorkIdFor(string stage) => $"checks-{stage}";
@@ -35,7 +41,8 @@ public static partial class WorkflowRunExtensions
     {
         public WorkflowWork? NextWork()
         {
-            var current = run.CurrentStage();
+            var current = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
+            if (current is null) return null;
 
             var pendingTask = NextUnclaimedTask(current);
             if (pendingTask is not null)
@@ -56,7 +63,8 @@ public static partial class WorkflowRunExtensions
         {
             if (!run.IsAssignedTo(workerId)) return null;
 
-            var current = run.CurrentStage();
+            var current = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
+            if (current is null) return null;
             var task = current.RunningTask;
             if (task is not null)
             {
@@ -77,6 +85,23 @@ public static partial class WorkflowRunExtensions
             return active is not null && string.Equals(active.WorkId, workId, StringComparison.Ordinal)
                 ? active
                 : null;
+        }
+
+        public WorkflowPendingWork? CurrentPendingWork()
+        {
+            if (run.CurrentStageId is null) return null;
+            if (run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running)) return null;
+
+            var current = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
+            if (current is null) return null;
+            var task = current.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed));
+            if (task is not null)
+                return new WorkflowPendingWork(task.Id, WorkItemTypes.Task, current.Id, task.Title);
+
+            if (current.Checks.Count > 0 && current.Checks.Any(c => c.Status != StageCheckStatus.Passed))
+                return new WorkflowPendingWork("checks", WorkItemTypes.Checks, current.Id, "Checks");
+
+            return null;
         }
 
         public IReadOnlyList<WorkflowEvent> AddRuntimeTask(
