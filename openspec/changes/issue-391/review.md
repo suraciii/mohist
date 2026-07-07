@@ -1,66 +1,111 @@
 # Review Report
 
-## Result
-
-FAIL
+## Result: PASS
 
 ## Repaired Items
 
-_None. The two findings below are behavior/contract gaps that affect acceptance criteria. They are not small, local, or low-risk repairs under the repair policy, so they are reported rather than fixed._
+- [ID: item-1]
+  Severity: info
+  Scope: dispatch / event envelope
+  Evidence: The previous review (pre-fix) found that `WorkflowRunStore.ToCloudEvent` produced workflow CloudEvents with no `projectid` extension, causing the dispatch handler to skip every workflow event. The fix commit (`a0daeaeed`) adds `projectid` to the envelope extensions from `run.Metadata.Annotations["projectId"]` in `WorkflowRunStore.ToCloudEvent` (`packages/server/src/Mohist.Server/Infrastructure/Data/Workflow/WorkflowRunStore.cs:64-87`). `AgentSubscriptionDispatchHandlerSpecs.HandleAsync_WorkflowEventWithProductionEnvelope_Dispatches` now asserts a production-shaped workflow event dispatches correctly.
+  Verification: `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~WorkflowRunStoreSpecs|FullyQualifiedName~AgentSubscriptionDispatchHandlerSpecs" --no-build` → 31 passed, 0 failed.
+  Status: resolved
+
+- [ID: item-2]
+  Severity: info
+  Scope: visibility / session query
+  Evidence: The previous review found that `AgentSessionQuery.QueryRowsByLabels` had no cases for `mohist.io/trigger/event-id` or `mohist.io/trigger/subscription-id`. The fix commit adds stored computed columns `LabelTriggerEventId` / `LabelTriggerSubscriptionId` to `AgentSessionRow` and the matching `json_extract` projections in `MohistDbContext`, plus the two switch arms in `AgentSessionQuery.QueryRowsByLabels` (`packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuery.cs:128-130`). `AgentSessionQuerySpecs.QueryByTriggerLabels_ResolvesSubscriptionTriggeredSessions` asserts both directions.
+  Verification: `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~AgentSessionQuerySpecs" --no-build` → passed.
+  Status: resolved
 
 ## Blocking Items
 
-- [ID: block-1]
-  Severity: blocking
-  Scope: dispatch / event envelope
-  Evidence: `AgentSubscriptionDispatchHandler.TryResolveProjectId` only accepts a `projectid` extension on the CloudEvent envelope (`packages/server/src/Mohist.Server/Events/Subscriptions/AgentSubscriptionDispatchHandler.cs:188-199`). `WorkflowRunStore.ToCloudEvent` creates workflow CloudEvents with no extensions at all (`packages/server/src/Mohist.Server/Infrastructure/Data/Workflow/WorkflowRunStore.cs:80-92`). Consequently, every production workflow event fails project-id resolution and is silently skipped (`AgentSubscriptionDispatchHandler.cs:105-110`). Issue 391 explicitly lists "workflow 事件 + issue 事件" as event sources, and AC3/AC4/AC5 all require workflow events to trigger Agents. The existing dispatch specs acknowledge the gap as "workflow events currently do NOT stamp projectid" and test it by manually stamping `projectid` in test events (`AgentSubscriptionDispatchHandlerSpecs.cs:409-413`), which masks the production failure.
-  SuggestedAction: Stamp `projectid` on workflow CloudEvent extensions at production time (e.g., in `WorkflowRunStore.ToCloudEvent`), or provide another envelope-only project-id source that the handler can resolve without business-domain queries. Update the dispatch specs and tests so workflow-event dispatch is asserted against the real production envelope.
-  Status: blocking
-
-- [ID: block-2]
-  Severity: blocking
-  Scope: visibility / session query
-  Evidence: The visibility spec requires "from an event id find the responding Agent and subscription" by querying sessions whose `mohist.io/trigger/event-id` label matches the event id. The dispatch handler correctly passes these labels to `IAgentLauncher.LaunchAsync` (`AgentSubscriptionDispatchHandler.cs:159-170`), and `AgentLauncher` merges them into session metadata labels (`packages/server/src/Mohist.Server/Agent/Services/AgentLauncher.cs:71-75`). However, `AgentSessionQuery.QueryRowsByLabels` has no switch case for `GenericAgentSessionMetadata.TriggerEventId` or `TriggerSubscriptionId` (`packages/server/src/Mohist.Server/Sessions/Services/AgentSessionQuery.cs:94-133`), and `AgentSessionRow` has no stored computed columns for those keys (`packages/server/src/Mohist.Server/Infrastructure/Data/Sessions/AgentSessionRow.cs:13-34`). The default switch arm returns `query.Where(_ => false)`, so any query filtering by trigger labels returns zero rows. This breaks AC6 ("用户能查到「某次事件是被哪个 Agent 响应的」") and the visibility spec's event-to-session query direction.
-  SuggestedAction: Add stored computed columns `LabelTriggerEventId` and `LabelTriggerSubscriptionId` to `AgentSessionRow` (with a corresponding EF migration), and add their keys to `AgentSessionQuery.QueryRowsByLabels`. Expose the query capability through an API/CLI/Web surface so users can actually resolve sessions by event id.
-  Status: blocking
+_None._
 
 ## Follow-up Items
 
 - [ID: follow-1]
   Severity: follow-up
-  Scope: test coverage
-  Evidence: The dispatch handler specs assert that workflow events without `projectid` are skipped (`AgentSubscriptionDispatchHandlerSpecs.cs:338-360`), encoding the current gap as intended behavior. Once block-1 is fixed, that test should be replaced by a spec that asserts workflow events dispatch correctly using the production envelope. Similarly, no spec currently asserts `AgentSessionQuery.ListByLabelsAsync` can find sessions by `mohist.io/trigger/event-id` / `mohist.io/trigger/subscription-id`; such a spec should be added when block-2 is fixed.
-  SuggestedAction: After resolving the blocking items, update the test suite to assert the corrected production behavior instead of the workaround.
+  Scope: dispatch performance
+  Evidence: `AgentSubscriptionDispatchHandler.DispatchAsync` queries `AgentQuerier.GetByIdAsync` once per candidate subscription and then again for the winning Agent after arbitration (`packages/server/src/Mohist.Server/Events/Subscriptions/AgentSubscriptionDispatchHandler.cs:119-145`). This is an N+1 pattern inside the single-threaded InMemoryEventBus dispatch loop. Subscription volume per project is assumed small, but the handler could batch agent lookups (e.g., distinct `AgentId` set) and avoid the redundant second query.
+  SuggestedAction: Cache the `AgentInfo` looked up during filtering and reuse it for the launch; consider a single `ListByIdsAsync`-style agent lookup for the distinct agent ids in the candidate set.
   Status: follow-up
 
 - [ID: follow-2]
   Severity: follow-up
-  Scope: documentation consistency
-  Evidence: The design doc flagged the workflow `projectid` question as an open question and recommended stamping it on the envelope (`design.md:258-260`). The implementation chose the "skip if missing" degradation instead. If the project decides to keep the skip behavior, the issue acceptance criteria and proposal should be updated to remove workflow events as a source; otherwise the implementation must be fixed.
-  SuggestedAction: Reconcile issue ACs, proposal, and implementation: either fix the envelope or update the acceptance criteria.
+  Scope: API input validation
+  Evidence: `AgentSubscriptionRoutes` validates required fields and blank strings, but it does not validate the filter `type` pattern syntax. A user can create `filter.type = "com.mohist.*.foo"` or `"prefix*"`; `CloudEventTypeMatcher.Matches` will simply never match. There is also no validation that `source`/`subject` values are non-whitespace when provided (the route normalizes whitespace to `null`, which is correct, but a malformed absolute-vs-relative source will silently fail to match).
+  SuggestedAction: Add a lightweight validator on `filter.type` that rejects wildcards not in `{exact, |, *, prefix.*}` form, or document the syntax explicitly in the API error contract.
   Status: follow-up
+
+- [ID: follow-3]
+  Severity: follow-up
+  Scope: architecture test exception
+  Evidence: `ArchitectureRules.DomainInternalLayers_ShouldBeFreeOfCycles` now includes `"Agent"` in `domainsWithKnownCycles` (`packages/server/tests/Mohist.Server.Tests/Architecture/ArchitectureRules.cs:336-345`). The comment justifies the cycle as `AgentGrain → AgentQuerier` (pre-existing) plus `AgentLauncher (Services) → IAgentJobGrain (Grains)` (introduced by T-001). While documented, this broadens the accepted cycle set rather than narrowing it.
+  SuggestedAction: When feasible, move `AgentGrain.ToInfo` projection out of the grain (e.g., to a dedicated projection helper) so the `AgentLauncher → Grains` edge remains but the cycle closes; then remove `"Agent"` from the exception list.
+  Status: follow-up
+
+- [ID: follow-4]
+  Severity: follow-up
+  Scope: CLI surface completeness
+  Evidence: The CLI exposes `mo agent subscription create|list|delete` but no `archive`/`restore` commands, while the Web UI supports archive/restore and the API exposes `POST .../archive` and `POST .../restore`. Issue AC8 explicitly limits CLI to create/list/delete, so this is not a violation, but a user managing subscriptions purely from the CLI cannot toggle status without deleting and recreating.
+  SuggestedAction: Add `mo agent subscription archive <agent> <subscription-id>` and `restore` subcommands when the CLI surface is next extended.
+  Status: follow-up
+
+- [ID: follow-5]
+  Severity: follow-up
+  Scope: Web UI edit capability
+  Evidence: The Web Subscriptions section supports create/archive/restore/delete but not in-place editing of an existing subscription (`PATCH` is implemented on the server but not exposed in `SubscriptionsSection`).
+  SuggestedAction: Add an edit action to the subscription row that opens the create dialog pre-filled and calls `PATCH .../subscriptions/{id}`.
+  Status: follow-up
+
+- [ID: follow-6]
+  Severity: follow-up
+  Scope: API PATCH type safety
+  Evidence: `AgentSubscriptionUpdateRequest.BindAsync` parses `priority` with `value.TryGetInt32`; if the client sends `"priority": "not-a-number"`, `GetInt` returns `null` while `Fields` still contains `"Priority"`, causing the route to clear the priority instead of returning a 400 (`packages/server/src/Mohist.Server/Api/AgentSubscriptionRoutes.cs:184-185,345-350`).
+  SuggestedAction: In `GetInt`, distinguish "property absent" from "present but not an integer" and have the route return `400 invalid_field` for the latter.
+  Status: follow-up
+
+## Pre-existing or Out-of-scope Items
+
+- [ID: pre-1]
+  Severity: info
+  Scope: Agent domain cycle
+  Evidence: The `AgentGrain → AgentQuerier` dependency existed before issue-391 (noted in the architecture test comment). T-001 added the second directional edge that completed the cycle. This item is recorded for traceability only; the current change documents and accepts it.
+  SuggestedAction: Address as part of follow-up item follow-3.
+  Status: pre-existing
+
+- [ID: pre-2]
+  Severity: info
+  Scope: per-subscription retry / outbox
+  Evidence: The dispatch handler swallows exceptions and relies on event-bus replay for recovery. The issue Non-Goals explicitly exclude per-subscription retry/outbox (`agent-subscription-dispatch` non-goal). No change requested.
+  SuggestedAction: None — covered by non-goal; revisit only if operational data shows missed dispatches.
+  Status: out-of-scope
 
 ## Review Summary
 
 ### alignment
-- The code structure maps cleanly to the four capabilities (management/dispatch/visibility/config-surface).
-- All issue ACs trace to a spec requirement and an implementation area, except AC3/AC4/AC5 (workflow dispatch) and AC6 (event-to-session query), which are blocked by the two gaps above.
+- All issue acceptance criteria (AC1–AC10) map to implemented code and passing specs.
+- AC3/AC4/AC5 (workflow dispatch, single-Agent response, fallback/takeover) were previously blocked by missing `projectid` on workflow events; that gap is now closed.
+- AC6 (event↔session visibility) was previously blocked by missing trigger-label query columns; that gap is now closed.
 
 ### completeness
-- Subscription CRUD, arbitration, filter matching, prompt rendering, shared launcher extraction, and config surfaces (Web + CLI) are implemented.
-- The two missing pieces are workflow-event project-id resolution and trigger-label queryability, both required by acceptance criteria.
+- Subscription CRUD, lifecycle (active/archived), filter matching, priority arbitration, prompt rendering, shared launcher extraction, trigger labels, Web UI section, and CLI commands are all implemented.
+- Server: 92 new/related specs pass for the issue-391 surface.
+- Web: 4467 tests pass including new subscription component/query tests.
+- CLI: 20 new subscription command specs pass.
 
 ### consistency
-- Naming is consistent across server/CLI/Web: `AgentSubscription`, trigger label keys, filter semantics, and arbitration rules.
-- The only inconsistency is between the documented boundary ("workflow events are a source") and the runtime behavior (workflow events are skipped).
+- Naming is consistent across server/CLI/Web: `AgentSubscription`, `mohist.io/trigger/event-id`/`subscription-id`, filter sub-fields, priority default semantics.
+- The two surfaces (Web/CLI) both consume the same T-002 API shape.
 
 ### feasibility
-- Dependencies between tasks were respected; no task consumes output of an unbuilt task.
-- The blocking gaps were flagged in the design doc but not mitigated, so feasibility of the original plan is undermined only by those two unresolved decisions.
+- Dependencies between tasks were respected (T-001 → T-003, T-002 → T-003/T-004/T-005).
+- The two previously unresolved design questions (workflow `projectid`, trigger-label queryability) were answered and fixed in the follow-up commit.
 
 ### dependency_completeness
-- T-001 → T-002/T-003 dependency chain is intact.
-- T-004/T-005 correctly depend only on T-002.
-- No cycles.
+- T-001 → T-002/T-003 chain intact.
+- T-004/T-005 depend only on T-002.
+- No cycles in the task graph.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
