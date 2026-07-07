@@ -159,25 +159,43 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         Assert.Equal("wf-runtime-read", work.WorkflowRunId);
     }
 
-    // The "Heartbeat / Poll re-registers a runner whose registry entry is
-    // missing" specs were removed: under the reconciliation model the registry
-    // is written only on register / unregister / heartbeat-repair (hash
-    // change), never on a plain heartbeat or poll. Poll IS heartbeat and only
-    // refreshes presence — the per-poll registry self-heal was intentionally
-    // dropped to keep poll cheap (see RunnerGrain.TouchPresenceAsync). The
-    // Poll_WhenRegistryEntryMissing_RemainsPresenceOnlyAndDoesNotReRegister
-    // spec below locks in that property.
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task HeartbeatRepair_WhenRegistryEntryMissing_ReRegistersRunner()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+        var projectId = $"heartbeat-repair-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(projectId, $"heartbeat-repair-runner-{Guid.NewGuid():N}");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        var registeredAt = (await runner.GetInfoAsync())!.RegisteredAt;
+
+        await registry.UnregisterAsync(runnerId);
+        Assert.DoesNotContain(runnerId, await registry.ListRunnerIdsAsync());
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(30));
+        await runner.HeartbeatRepairAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            projectId,
+            CoderModels: ["openai/gpt-4"],
+            BuildGitHash: "heartbeat-hash"));
+
+        var info = Assert.Single(await registry.ListRunnersAsync(), r => r.RunnerId == runnerId);
+        Assert.Equal(projectId, info.ProjectId);
+        Assert.Equal("heartbeat-hash", info.BuildGitHash);
+        Assert.NotNull(info.CoderModels);
+        Assert.Equal(["openai/gpt-4"], info.CoderModels!);
+        Assert.Equal(registeredAt, info.RegisteredAt);
+    }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task Poll_WhenRegistryEntryMissing_RemainsPresenceOnlyAndDoesNotReRegister()
     {
-        // Poll IS heartbeat (design §Supervision): it refreshes presence but
-        // does NOT write the registry. A runner whose registry entry was lost
-        // is not re-registered by polling — the registry write happens only on
-        // register / unregister / heartbeat-repair. This locks in that poll
-        // stays cheap (no per-poll registry fan-out).
         await ClearGlobalRunnerRegistryAsync();
         await ClearBacklogAsync();
         var projectId = $"poll-redelivery-project-{Guid.NewGuid():N}";

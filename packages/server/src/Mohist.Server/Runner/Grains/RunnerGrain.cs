@@ -130,17 +130,12 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     public async Task RegisterAsync(RunnerInfo info)
     {
-        var effectiveHash = info.BuildGitHash ?? _pendingBuildGitHash;
-        _info = info with
-        {
-            BuildGitHash = effectiveHash,
-        };
+        _info = InfoForRegister(info);
         _status = RunnerStatus.Online;
         _lastHeartbeat = _timeProvider.GetUtcNow().UtcDateTime;
         _pendingBuildGitHash = null;
         _slots = await _definitions.GetOrInitAsync(RunnerId);
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        await registry.RegisterAsync(_info);
+        await UpsertRegistryAsync();
         _heartbeatTimer ??= this.RegisterGrainTimer(
             _ => CheckHeartbeatAsync(),
             HeartbeatCheckInterval,
@@ -176,14 +171,9 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             return;
         }
 
-        var effectiveHash = info.BuildGitHash ?? _pendingBuildGitHash;
-        if (effectiveHash is not null && _info is not null && _info.BuildGitHash != effectiveHash)
-        {
-            _info = _info with { BuildGitHash = effectiveHash };
-            var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-            await registry.RegisterAsync(_info);
-        }
+        _info = InfoForHeartbeat(info);
         _pendingBuildGitHash = null;
+        await UpsertRegistryAsync();
         await TouchPresenceAsync();
     }
 
@@ -388,6 +378,32 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
         _info = _info with { BuildGitHash = normalized };
         _log.LogInformation("Runner {Id} reported buildGitHash {Hash}", RunnerId, normalized ?? "<null>");
+        await UpsertRegistryAsync();
+    }
+
+    private RunnerInfo InfoForRegister(RunnerInfo info)
+    {
+        return info with
+        {
+            BuildGitHash = info.BuildGitHash ?? _pendingBuildGitHash,
+            RegisteredAt = info.RegisteredAt ?? _timeProvider.GetUtcNow(),
+        };
+    }
+
+    private RunnerInfo InfoForHeartbeat(RunnerInfo info)
+    {
+        return info with
+        {
+            BuildGitHash = info.BuildGitHash ?? _pendingBuildGitHash ?? _info?.BuildGitHash,
+            RegisteredAt = _info?.RegisteredAt ?? info.RegisteredAt ?? _timeProvider.GetUtcNow(),
+        };
+    }
+
+    private async Task UpsertRegistryAsync()
+    {
+        if (_info is null)
+            return;
+
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         await registry.RegisterAsync(_info);
     }
