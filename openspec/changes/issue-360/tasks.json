@@ -1,0 +1,98 @@
+{
+  "project": "mohist-local",
+  "description": "Add delivery progress (DispatchedAt + partial undelivered index) on the three event truth tables, a DeadLetters isolation table with its own store port, the mark-delivered / list-undelivered operations on IEventStore, and the additive (Type, Time) dashboard index from #298 — all landed via a single additive EF Core migration. Pure server storage layer; lays the ground for the epic #36 durable dispatcher without changing any user-visible behavior.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Event delivery progress on IEventStore (DispatchedAt + partial index + mark/list operations)",
+      "spec": "specs/event-delivery-progress/spec.md#a-nullable-delivery-timestamp-on-every-event-row-is-the-sole-marker-of-delivery-progress",
+      "description": "Add a nullable `DispatchedAt` column to `WorkflowRunEventRow`, `IssueEventRow`, and `EpicEventRow`, and configure a partial index scoped to `\"DispatchedAt\" IS NULL` keyed on `(Source, Id)` on each via `MohistDbContext` (D3, codebase's first HasFilter usage — filter string verbatim into CREATE INDEX). Extend `IEventStore` with `MarkDispatchedAsync(source, id, dispatchedAt, ct)` (per-row by composite key, caller-supplied timestamp — no TimeProvider dependency) and `ListUndeliveredAsync(limit, ct)` returning `IReadOnlyList<UndeliveredEvent>` (full envelope + `EventOrigin` discriminator). Implement `ListUndeliveredAsync` as a single raw-SQL UNION ALL across the three tables ordered by `Source, Id` via `db.Database.SqlQueryRaw<UndeliveredEvent>` (D4, mirrors `EpicQuerier.cs:71`). Implement `MarkDispatchedAsync` in `EventStore` dispatching by source prefix. `AppendAsync` MUST leave `DispatchedAt` NULL; existing `List*Async` behavior MUST be unchanged. Fix the three `IEventStore` test fakes (`Support/NoopEventStore.cs`, `Support/RecordingEventStore.cs`, nested `InboxProjectionTestSupport.NoopEventStore`) with no-op implementations so the solution compiles.",
+      "acceptanceCriteria": [
+        "`WorkflowRunEventRow`, `IssueEventRow`, `EpicEventRow` each expose a nullable `DateTimeOffset DispatchedAt`.",
+        "`MohistDbContext` configures a partial index named `IX_<Table>_Undelivered` on each of the three tables with `.HasFilter(\"\\\"DispatchedAt\\\" IS NULL\")` keyed on `(Source, Id)`.",
+        "`IEventStore` exposes `MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken)` and `ListUndeliveredAsync(int limit, CancellationToken)` returning `IReadOnlyList<UndeliveredEvent>`; no other members added.",
+        "`MarkDispatchedAsync` sets `DispatchedAt` only on the row matched by `(Source, Id)`; rows in the same table and in the other two tables are untouched.",
+        "Re-marking an already-delivered row succeeds and leaves it delivered (idempotent).",
+        "`ListUndeliveredAsync` returns undelivered rows from all three tables in one query, excludes rows with non-null `DispatchedAt`, and orders by `Source` then `Id` (per-stream FIFO) — asserted with two undelivered rows in the same `Source` at ascending `Id`.",
+        "`AppendAsync` leaves `DispatchedAt` NULL; existing `List*Async` return the same rows in the same order regardless of `DispatchedAt` value (delivered and undelivered returned identically).",
+        "`NoopEventStore`, `RecordingEventStore`, and `InboxProjectionTestSupport.NoopEventStore` implement the two new members (no-op / empty list) so `npm run build` and `npm test` compile.",
+        "New unit tests (in-memory shared-cache SQLite, `EnsureCreated`) cover: append leaves NULL, mark sets only the matched row, re-mark idempotent, list-undelivered spans three tables, delivered rows excluded, per-stream FIFO ordering. All timestamps are fixed constants (no wall clock, no FakeTimeProvider needed since the timestamp is a parameter).",
+        "`npm test` (server) is green; `TreatWarningsAsErrors` lint gate passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Edited: WorkflowRunEventRow.cs, IssueEventRow.cs, EpicEventRow.cs, MohistDbContext.cs, IEventStore.cs, EventStore.cs, Support/NoopEventStore.cs, Support/RecordingEventStore.cs, Support/InboxProjectionTestSupport.cs. New: UndeliveredEvent record (+ EventOrigin enum) co-located with IEventStore. New tests under tests/.../Specs/Events/ (or extend EventStoreSpecs.cs).",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Per D2, do NOT introduce any global cursor / offset / high-water-mark table — delivery progress is per-row only. Per D4, the UNION ALL is raw SQL because EF LINQ cannot cross-table UNION three DbSets. Source is globally unique across the three tables (/mohist/workflow-runs/{id} vs /mohist/issues/{id} vs /mohist/epics/{id}) so ORDER BY Source, Id preserves per-stream FIFO without an origin tiebreaker. Do NOT scaffold the EF migration here — D7 mandates a single unified migration produced by T-004 after all model changes land. Tests use EnsureCreated (model-based) so they pass without the migration."
+    },
+    {
+      "id": "T-002",
+      "title": "DeadLetters isolation table + IDeadLetterStore port (separate from IEventStore per D1)",
+      "spec": "specs/dead-letter-store/spec.md#a-deadletters-table-isolates-poison-messages-from-the-live-event-tables",
+      "description": "Add a new `DeadLetterRow` entity under `Infrastructure/Data/Events/` mirroring the CloudEvent envelope snapshot columns (Source, Id, EventId, Type, Time, Subject, DataContentType, SpecVersion, Data JSON, ExtensionsJson JSON) plus an `Origin` discriminator (`WorkflowRun` / `Issue` / `Epic`), a surrogate `DeadLetterId` PK (`ValueGeneratedOnAdd`), `FailingHandler`, `ErrorMessage`, nullable `ErrorStack`, `AttemptCount`, and `DeadLetteredAt`. Configure it in `MohistDbContext` with indexes `(DeadLetteredAt)` and `(FailingHandler, DeadLetteredAt)` and no unique constraint (per D5, the same logical failure may legitimately produce multiple rows). Add a sibling port `IDeadLetterStore` (NOT methods on `IEventStore` — D1) under `Infrastructure/Events/` exposing ONLY `WriteAsync(DeadLetterRecord, ct)` and `ListAsync(limit, ct)` — no replay, requeue, or delete. Implement `DeadLetterStore` under `Infrastructure/Data/Events/`. Register `IDeadLetterStore` → `DeadLetterStore` in `CloudEventBusServiceCollectionExtensions`. Add a `NoopDeadLetterStore` to `Support/` for tests. `DeadLetterRecord` is an immutable record carrying the snapshot fields.",
+      "acceptanceCriteria": [
+        "`DeadLetterRow` exists with surrogate `DeadLetterId` PK, `Origin` discriminator, the full envelope snapshot columns, `FailingHandler`, `ErrorMessage`, nullable `ErrorStack`, `AttemptCount`, and `DeadLetteredAt` — sufficient to reconstruct the CloudEvent without consulting live tables.",
+        "`MohistDbContext` exposes a `DeadLetters` DbSet and configures indexes `(DeadLetteredAt)` and `(FailingHandler, DeadLetteredAt)` with no unique constraint.",
+        "`IDeadLetterStore` exists under `Infrastructure/Events/` and exposes ONLY `WriteAsync(DeadLetterRecord, CancellationToken)` and `ListAsync(int, CancellationToken)` — compile-time guarantee of no replay/requeue/delete surface.",
+        "`WriteAsync` appends a new row (never overwrites); writing twice for the same logical failure yields two rows (count = 2).",
+        "`ListAsync` returns previously written records with all envelope snapshot fields round-tripping intact.",
+        "`IDeadLetterStore` → `DeadLetterStore` is registered in `CloudEventBusServiceCollectionExtensions` (Scoped or Transient to match sibling stores).",
+        "`NoopDeadLetterStore` exists under `tests/.../Support/` and is usable as a test fake.",
+        "New unit tests (in-memory shared-cache SQLite, `EnsureCreated`) cover: write-then-list round-trip, second write appends (does not overwrite), envelope snapshot fields preserved. Timestamps are fixed constants.",
+        "`npm test` (server) is green; `TreatWarningsAsErrors` lint gate passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New: Infrastructure/Data/Events/DeadLetterRow.cs, Infrastructure/Data/Events/DeadLetterStore.cs, Infrastructure/Events/IDeadLetterStore.cs, DeadLetterRecord (co-located with IDeadLetterStore), tests/.../Support/NoopDeadLetterStore.cs, tests/.../Specs/Events/DeadLetterStoreTests.cs. Edited: MohistDbContext.cs (DeadLetters DbSet + config), CloudEventBusServiceCollectionExtensions.cs (DI registration).",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Per D1, `IDeadLetterStore` is a sibling of `IEventStore`, NOT methods on it — different lifecycle (write-once, query-for-ops), different consumer, different invariants. Per D5, the snapshot is immutable (no FK to live row) because the live row's DispatchedAt will eventually be set when the dispatcher gives up; a FK would force operators to keep the live row forever. Tests use EnsureCreated so they pass before T-004 scaffolds the migration. Do NOT add DLQ surface to IEventStore or its fakes."
+    },
+    {
+      "id": "T-003",
+      "title": "(Type, Time) composite index on WorkflowRunEvents + IssueEvents (from #298, excludes EpicEvents)",
+      "spec": "specs/event-delivery-progress/spec.md#a-type-time-composite-index-on-the-workflow-and-issue-event-tables-for-time-window-scans",
+      "description": "Add a schema-only additive `(Type, Time)` composite index on `WorkflowRunEvents` and `IssueEvents` in `MohistDbContext`. The existing `(Type, Source, Id)` index does not serve the dashboard's time-window scans (IssueMetricsQuerier currently materializes and filters in memory). `EpicEvents` is explicitly EXCLUDED — it has no (Type, Time) dashboard consumer. This index is schema-only: no read path is altered to consume it, and no consumer behavior changes. Predicate pushdown of `IssueMetricsQuerier` into SQL is a #361 follow-on (blocked on producer payload convergence) and is NOT in this change.",
+      "acceptanceCriteria": [
+        "`MohistDbContext` configures a composite index on `(Type, Time)` for `WorkflowRunEventRow` and `IssueEventRow`.",
+        "`EpicEventRow` does NOT receive a `(Type, Time)` index — asserted by a unit test inspecting the model/indexes.",
+        "No existing read operation (`List*Async`, `AppendAsync`, querier paths) changes its result set, ordering, or return shape.",
+        "A unit test (in-memory SQLite, `EnsureCreated`) asserts the `(Type, Time)` index exists on the two tables and is absent on `EpicEvents`.",
+        "`npm test` (server) is green; `TreatWarningsAsErrors` lint gate passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Edited: MohistDbContext.cs (two new index configs). New: a small unit test asserting presence on the two tables and absence on EpicEvents.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Bundled into the same migration as the delivery-column work per D6 (running two schema passes on the same populated tables is wasteful). Exact covering shape (e.g. (Type, Time) vs (Type, Time, Source)) is intentionally minimal here — the #361 follow-on will revisit once predicate pushdown lands and profiling drives the decision. Schema-only — do NOT touch IssueMetricsQuerier in this change."
+    },
+    {
+      "id": "T-004",
+      "title": "Single unified EF Core migration + migration unit test (partial-index SQL verification)",
+      "spec": "specs/event-delivery-progress/spec.md#a-partial-index-on-each-table-makes-the-undelivered-query-cheap",
+      "description": "Scaffold ONE additive EF Core migration `YYYYMMDDHHMMSS_AddEventDeliveryProgressAndDeadLetters` under `Infrastructure/Data/Migrations/` via `dotnet ef migrations add AddEventDeliveryProgressAndDeadLetters` capturing all model changes from T-001, T-002, and T-003: 3× AddColumn (`DispatchedAt` nullable, no default), 3× CreateIndex (partial undelivered on the three event tables), 2× CreateIndex (`(Type, Time)` on WorkflowRunEvents + IssueEvents), 1× CreateTable (`DeadLetters` + its 2 indexes). No data backfill — NULL is the correct initial value for every existing row. Inspect the generated `Up` SQL: verify the three partial-index `WHERE` clauses use double-quoted `\"DispatchedAt\"` (D3 risk mitigation — first HasFilter in the codebase). Add a migration unit test that, after `Migrate()`, queries `sqlite_master` for each event table's indexes and asserts one entry's SQL contains `WHERE \"DispatchedAt\" IS NULL`. Extend `EventStoreSpecs.cs` (MohistDbFixture, Migrate-based) with the delivery-progress scenarios if not already covered by T-001's EnsureCreated tests.",
+      "acceptanceCriteria": [
+        "Exactly one new migration exists under `Infrastructure/Data/Migrations/` named `YYYYMMDDHHMMSS_AddEventDeliveryProgressAndDeadLetters` (timestamp generated by `dotnet ef`), with paired `.cs` + `.Designer.cs` files; `MohistDbContextModelSnapshot.cs` is regenerated.",
+        "The migration's `Up` contains: 3 `AddColumn` for nullable `DispatchedAt` (no default), 3 partial `CreateIndex` with `WHERE \"DispatchedAt\" IS NULL` on the three event tables, 2 `CreateIndex` for `(Type, Time)` on WorkflowRunEvents + IssueEvents, 1 `CreateTable` for `DeadLetters` with its 2 indexes. No `UPDATE`/backfill statements.",
+        "The migration's `Down` drops indexes → drops `DispatchedAt` columns → drops the `DeadLetters` table (SQLite `ALTER TABLE DROP COLUMN` is supported and already used in the codebase, e.g. `20260615065058_DropAgentSessionDeadColumns`).",
+        "Migration unit test (Migrate-based, in-memory SQLite) asserts `sqlite_master` contains a partial index entry with `WHERE \"DispatchedAt\" IS NULL` on each of the three event tables — guards the D3 quoting risk.",
+        "Migration unit test asserts the `(Type, Time)` index exists on `WorkflowRunEvents` + `IssueEvents` and is absent on `EpicEvents` post-Migrate.",
+        "Migration applies cleanly on a database seeded with the previous migration (idempotent additive schema change).",
+        "Full `npm test` (server) is green, including any EventStoreSpecs scenarios that require the Migrate() path.",
+        "`TreatWarningsAsErrors` lint gate passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "New: Infrastructure/Data/Migrations/<timestamp>_AddEventDeliveryProgressAndDeadLetters.cs + .Designer.cs, regenerated MohistDbContextModelSnapshot.cs. New: a migration unit test under tests/.../Specs/Events/ (or extend WorkflowRunStatusSchemaMigrationSpecs-style file) querying sqlite_master after Migrate().",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": false,
+      "notes": "D7 mandates a SINGLE migration — do NOT scaffold per-feature migrations in T-001/T-002/T-003. The migration is generated LAST so it captures every model change in one pass. Pay specific attention to the partial-index identifier quoting in the generated SQL (D3 risk: wrong quoting silently produces a non-partial index). If T-001 already covered the EventStore delivery-progress scenarios via EnsureCreated, the migration unit test is still required — its purpose is to validate the migration-produced schema, not just the model."
+    }
+  ]
+}
