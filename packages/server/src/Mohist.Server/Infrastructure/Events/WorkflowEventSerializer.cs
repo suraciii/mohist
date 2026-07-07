@@ -37,7 +37,6 @@ internal static class WorkflowEventSerializer
         CheckPassed => EventCatalog.ReverseDns.CheckPassed,
         CheckFailed => EventCatalog.ReverseDns.CheckFailed,
         CheckPending => EventCatalog.ReverseDns.CheckPending,
-        RepairScheduled => EventCatalog.ReverseDns.RepairScheduled,
         WorkflowArtifactRecorded => EventCatalog.ReverseDns.WorkflowArtifactRecorded,
         _ => throw new InvalidOperationException($"No CloudEvents type for {Unwrap(payload).GetType().Name}"),
     };
@@ -77,7 +76,6 @@ internal static class WorkflowEventSerializer
         nameof(CheckPassed) => data.Deserialize<CheckPassed>(JsonOptions)!,
         nameof(CheckFailed) => data.Deserialize<CheckFailed>(JsonOptions)!,
         nameof(CheckPending) => data.Deserialize<CheckPending>(JsonOptions)!,
-        nameof(RepairScheduled) => data.Deserialize<RepairScheduled>(JsonOptions)!,
         nameof(WorkflowArtifactRecorded) => data.Deserialize<WorkflowArtifactRecorded>(JsonOptions)!,
         _ => throw new InvalidOperationException($"Unknown workflow event '{type}'"),
     };
@@ -102,7 +100,6 @@ internal static class WorkflowEventSerializer
         CheckPassed x => x,
         CheckFailed x => x,
         CheckPending x => x,
-        RepairScheduled x => x,
         WorkflowArtifactRecorded x => x,
         null => throw new InvalidOperationException("Null workflow event"),
     };

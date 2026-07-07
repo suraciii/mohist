@@ -820,7 +820,7 @@ public class IssueMetricsQuerierSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task GetQualityAsync_CheckRepairBeforeStageRerun_UsesDurableRepairHistory()
+    public async Task GetQualityAsync_HistoricalRepairEventBeforeStageRerun_UsesDurableReworkHistory()
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -2709,7 +2709,7 @@ public class IssueMetricsQuerierSpecs
 
     private static object QualityRunState(
         string workflowRunId,
-        (string Stage, (string Name, string Title, int RepairCount)[]? Checks)[] stages)
+        (string Stage, (string Name, string Title, int ReworkCount)[]? Checks)[] stages)
     {
         var now = DateTimeOffset.UtcNow;
         var stageObjects = stages.Select(s =>
@@ -2722,8 +2722,14 @@ public class IssueMetricsQuerierSpecs
                     Name = c.Name,
                     Title = c.Title,
                     Status = "Passed",
-                    RepairCount = c.RepairCount,
                 }).ToArray();
+            var tasks = new List<object>();
+            if (initialized)
+            {
+                tasks.Add(new { Id = $"{s.Stage}-task", DefinitionId = $"{s.Stage}-task", Attempt = 1, Title = $"{s.Stage} task", Status = "Completed", Uses = "mohist/acp-agent" });
+                foreach (var check in s.Checks!.Where(c => c.ReworkCount > 0))
+                    tasks.Add(new { Id = $"recover:{check.Name}.1", DefinitionId = $"recover:{check.Name}", Attempt = 1, Title = $"{check.Title} recovery", Status = "Completed", Uses = "mohist/acp-agent" });
+            }
 
             return (object)new
             {
@@ -2732,9 +2738,7 @@ public class IssueMetricsQuerierSpecs
                 RequiresApproval = false,
                 Initialized = initialized,
                 Status = initialized ? "Completed" : "Pending",
-                Tasks = initialized
-                    ? new[] { new { Id = $"{s.Stage}-task", DefinitionId = $"{s.Stage}-task", Attempt = 1, Title = $"{s.Stage} task", Status = "Completed", Uses = "mohist/acp-agent" } }
-                    : Array.Empty<object>(),
+                Tasks = tasks.ToArray(),
                 Checks = checks,
             };
         }).ToArray();
@@ -2752,4 +2756,3 @@ public class IssueMetricsQuerierSpecs
         };
     }
 }
-

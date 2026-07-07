@@ -70,7 +70,11 @@ public sealed class WorkflowArtifactQuerier : IWorkflowArtifactQuerier
 
         return rows
             .GroupBy(a => a.Path)
-            .Select(g => g.OrderByDescending(a => a.RecordedAt).First())
+            .Select(g => g
+                .OrderByDescending(a => a.RecordedAt)
+                .ThenByDescending(a => a.TaskRunId, StringComparer.Ordinal)
+                .ThenByDescending(a => a.ArtifactId, StringComparer.Ordinal)
+                .First())
             .OrderBy(a => a.Path)
             .Select(MapInfo)
             .ToList();
@@ -89,7 +93,13 @@ public sealed class WorkflowArtifactQuerier : IWorkflowArtifactQuerier
             .Where(a => a.WorkflowRunId == workflowRunId && a.Path == path)
             .ToListAsync(ct);
 
-        var latest = rows.Count == 0 ? null : rows.OrderByDescending(a => a.RecordedAt).First();
+        var latest = rows.Count == 0
+            ? null
+            : rows
+                .OrderByDescending(a => a.RecordedAt)
+                .ThenByDescending(a => a.TaskRunId, StringComparer.Ordinal)
+                .ThenByDescending(a => a.ArtifactId, StringComparer.Ordinal)
+                .First();
         return latest is null
             ? Array.Empty<WorkflowArtifactInfo>()
             : new[] { MapInfo(latest) };
@@ -104,7 +114,12 @@ public sealed class WorkflowArtifactQuerier : IWorkflowArtifactQuerier
             .Where(a => a.WorkflowRunId == workflowRunId && a.Path == path)
             .ToListAsync(ct);
 
-        return rows.OrderBy(a => a.RecordedAt).Select(MapInfo).ToList();
+        return rows
+            .OrderBy(a => a.RecordedAt)
+            .ThenBy(a => a.TaskRunId, StringComparer.Ordinal)
+            .ThenBy(a => a.ArtifactId, StringComparer.Ordinal)
+            .Select(MapInfo)
+            .ToList();
     }
 
     public async Task<IReadOnlyList<WorkflowArtifactInfo>> ListByTaskRunAsync(
@@ -116,7 +131,13 @@ public sealed class WorkflowArtifactQuerier : IWorkflowArtifactQuerier
             .Where(a => a.WorkflowRunId == workflowRunId && a.TaskRunId == taskRunId)
             .ToListAsync(ct);
 
-        return rows.OrderBy(a => a.Path).ThenBy(a => a.RecordedAt).Select(MapInfo).ToList();
+        return rows
+            .OrderBy(a => a.Path)
+            .ThenBy(a => a.RecordedAt)
+            .ThenBy(a => a.TaskRunId, StringComparer.Ordinal)
+            .ThenBy(a => a.ArtifactId, StringComparer.Ordinal)
+            .Select(MapInfo)
+            .ToList();
     }
 
     public async Task<IReadOnlyList<WorkflowArtifactInfo>> ListAsync(

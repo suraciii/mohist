@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public enum FailureReason { TaskFailed, CheckUnrepaired, ApprovalRejected, ContextExhaustion }
+public enum FailureReason { TaskFailed, CheckFailed, ApprovalRejected, ContextExhaustion }
 
 public sealed record FailureDetails(
     FailureReason Reason,

@@ -39,6 +39,8 @@ export function tryRecovery(
       title: work.title ?? work.workId,
       uses: work.uses ?? null,
       with: work.with,
+      artifacts: work.artifacts,
+      setVars: work.setVars ?? null,
       recovery: nextRecovery,
     })
   }
@@ -92,6 +94,8 @@ export function readAddTasks(raw: unknown): AddTaskInput[] {
       title: stringField(entry, "title") ?? id,
       uses: stringField(entry, "uses"),
       with: objectField(entry, "with"),
+      artifacts: objectField(entry, "artifacts"),
+      setVars: recordField(entry, "setVars"),
       recovery: objectField(entry, "recovery"),
     })
   }
@@ -114,4 +118,14 @@ function stringField(obj: JsonObject, key: string): string | null {
 function objectField(obj: JsonObject, key: string): JsonObject | null {
   const value = obj[key]
   return isObject(value) ? value : null
+}
+
+function recordField(obj: JsonObject, key: string): Record<string, string> | null {
+  const value = obj[key]
+  if (!isObject(value)) return null
+  const result: Record<string, string> = {}
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    if (typeof entryValue === "string") result[entryKey] = entryValue
+  }
+  return Object.keys(result).length > 0 ? result : null
 }

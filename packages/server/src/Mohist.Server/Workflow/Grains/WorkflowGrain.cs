@@ -205,7 +205,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
         }
 
         await ReleaseCurrentStageLocksAsync("retried");
-        var events = await _outcomeProcessor.TryScheduleRequestedCheckRepairAsync(_run!) ?? _run.Retry();
+        var events = _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
     }
@@ -496,7 +496,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
             CheckPassed => Task.CompletedTask,
             CheckFailed => Task.CompletedTask,
             CheckPending => Task.CompletedTask,
-            RepairScheduled => Task.CompletedTask,
             WorkflowArtifactRecorded => Task.CompletedTask,
         };
 

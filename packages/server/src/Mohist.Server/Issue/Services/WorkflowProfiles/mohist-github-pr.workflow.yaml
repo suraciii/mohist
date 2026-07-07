@@ -93,6 +93,7 @@ stages:
                 oneOf:
                   - <promise>PASS</promise>
                   - <promise>FAIL</promise>
+                failIf: <promise>FAIL</promise>
         recovery:
           budget: 2
           handlers:
@@ -151,22 +152,26 @@ stages:
                   file: ${{ openspecChangeDir }}/tasks.json
                   items: tasks
                   base: ${{ prompts.build }}
-    checks:
-      - name: verify
+      - id: verify
         title: Build & full test suite
         uses: core/script
         with:
           run: ${{ vars.ci.verify }}
           timeout: 1500000
-        repairLimit: 2
-        repairTask:
-          id: fix-tests
-          title: Fix failing tests/build
-          uses: mohist/acp-agent
-          with:
-            session: build
-            prompt: ${{ prompts.fix-tests }}
-            agent: ${{ vars.agent }}
+        recovery:
+          budget: 2
+          handlers:
+            - when: errorCode=script-failed
+              tasks:
+                - id: recover:fix-tests
+                  title: Fix failing tests/build
+                  uses: mohist/acp-agent
+                  with:
+                    session: build
+                    prompt: ${{ prompts.fix-tests }}
+                    agent: ${{ vars.agent }}
+              retrySelf: true
+    checks: []
 
   - stage: check
     requiresApproval: true
@@ -187,6 +192,7 @@ stages:
                 oneOf:
                   - <promise>PASS</promise>
                   - <promise>FAIL</promise>
+                failIf: <promise>FAIL</promise>
         recovery:
           budget: 2
           handlers:

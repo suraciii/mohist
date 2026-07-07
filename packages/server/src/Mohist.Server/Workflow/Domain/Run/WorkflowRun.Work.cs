@@ -105,15 +105,6 @@ public static partial class WorkflowRunExtensions
             return tasks.Count > 0 ? [new WorkflowRunResumed()] : [];
         }
 
-        private void AddRepairTask(string checkName, TaskDefinition task)
-        {
-            var current = run.CurrentStage();
-            var newTask = TaskRun.MakeTask(current.Tasks, task);
-            current.Tasks.Add(newTask);
-            var check = current.FindCheck(checkName);
-            check.RepairCount++;
-        }
-
         public bool HasIncompleteTaskWithUses(string uses)
         {
             var current = run.CurrentStage();
@@ -124,13 +115,6 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             return current.Tasks.Any(t => t.Id == id && t.Status != TaskRunStatus.Completed);
-        }
-
-        public int GetRepairCount(string checkName)
-        {
-            var current = run.CurrentStage();
-            var check = current.FindCheck(checkName);
-            return check.RepairCount;
         }
     }
 }

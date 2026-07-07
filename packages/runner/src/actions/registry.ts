@@ -91,7 +91,16 @@ async function scriptAction(context: ActionContext): Promise<ActionResult> {
     return {
       status: result.exitCode === 0 ? "success" : "failure",
       message: result.exitCode === 0 ? "Script completed" : `Script failed: ${firstLine(run)}`,
-      output: JSON.stringify({ kind: "script", run, shell, exitCode: result.exitCode, stdout: trim(result.stdout), stderr: trim(result.stderr) }),
+      output: JSON.stringify({
+        kind: "script",
+        status: result.exitCode === 0 ? "success" : "failure",
+        errorCode: result.exitCode === 0 ? null : "script-failed",
+        run,
+        shell,
+        exitCode: result.exitCode,
+        stdout: trim(result.stdout),
+        stderr: trim(result.stderr),
+      }),
       exitCode: result.exitCode,
     }
   } finally {

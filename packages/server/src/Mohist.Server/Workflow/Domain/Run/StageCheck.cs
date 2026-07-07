@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -21,8 +20,7 @@ public sealed record CheckResult(
 
 public sealed record CheckResultAction(
     CheckResult Result,
-    string Action,
-    IReadOnlyList<TaskDefinition>? RepairTasks = null);
+    string Action);
 
 public sealed class StageCheck
 {
@@ -33,7 +31,6 @@ public sealed class StageCheck
     public StageCheckStatus Status { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
-    public int RepairCount { get; set; }
     public string? Message { get; set; }
     public JsonElement? Output { get; set; }
 }

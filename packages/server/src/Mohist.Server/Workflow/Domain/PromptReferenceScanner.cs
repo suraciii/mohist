@@ -23,10 +23,6 @@ public static class PromptReferenceScanner
             foreach (var check in stage.Checks)
             {
                 ScanWith(check.With, keys);
-                if (check.OnFailure?.Repair is { } repair)
-                {
-                    ScanTask(repair.Task, keys);
-                }
             }
         }
         return keys;
@@ -35,6 +31,13 @@ public static class PromptReferenceScanner
     private static void ScanTask(TaskDefinition task, HashSet<string> keys)
     {
         ScanWith(task.With, keys);
+        if (task.Recovery is null) return;
+
+        foreach (var handler in task.Recovery.Handlers)
+        {
+            foreach (var recoveryTask in handler.Tasks)
+                ScanTask(recoveryTask, keys);
+        }
     }
 
     private static void ScanWith(Dictionary<string, JsonElement?>? with, HashSet<string> keys)

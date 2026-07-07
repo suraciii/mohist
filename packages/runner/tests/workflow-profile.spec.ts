@@ -126,6 +126,6 @@ describe("mohist local workflow profile", () => {
     expect(integrate).not.toContain("mohist/prepare")
     expect(integrate).not.toContain("mohist/publish")
     expect(integrate.indexOf("id: integrate:rebase")).toBeLessThan(integrate.indexOf("id: integrate:push"))
-    expect(integrate.indexOf("id: integrate:push")).toBeLessThan(integrate.indexOf("name: health"))
+    expect(integrate.indexOf("id: integrate:push")).toBeLessThan(integrate.indexOf("id: integrate:health"))
   })
 })

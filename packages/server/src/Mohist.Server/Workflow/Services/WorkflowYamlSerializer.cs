@@ -288,17 +288,15 @@ public static class WorkflowYamlSerializer
         if (string.IsNullOrWhiteSpace(title))
             throw new InvalidOperationException($"Workflow check {name} requires title");
 
-        var repairLimit = Int(map, "repairLimit");
-        var repairTask = map.TryGetValue("repairTask", out var repairTaskValue) && repairTaskValue is not null
-            ? ToTask(repairTaskValue)
-            : null;
+        if (map.ContainsKey("repairLimit") || map.ContainsKey("repairTask"))
+            throw new InvalidOperationException(
+                $"Workflow check '{name}' uses obsolete check-level repair. Move this verification into a task and use task-level recovery.");
 
         return new CheckDefinition(
             name,
             title,
             NullIfEmpty(String(map, "uses")),
-            JsonElementMap(OptionalMap(map, "with")),
-            repairLimit > 0 && repairTask is not null ? new CheckFailureAction(new CheckFailureRepair(repairLimit, repairTask)) : null);
+            JsonElementMap(OptionalMap(map, "with")));
     }
 
     private static Dictionary<string, object?> ToStageMap(StageDefinition stage)
@@ -368,11 +366,6 @@ public static class WorkflowYamlSerializer
         };
         if (check.Uses is not null) map["uses"] = check.Uses;
         AddWith(map, check.With);
-        if (check.OnFailure?.Repair is { } repair)
-        {
-            map["repairLimit"] = repair.Limit;
-            map["repairTask"] = ToTaskMap(repair.Task);
-        }
         return map;
     }
 

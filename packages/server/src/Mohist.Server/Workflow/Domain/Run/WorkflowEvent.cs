@@ -21,7 +21,6 @@ public union WorkflowEvent(
     CheckPassed,
     CheckFailed,
     CheckPending,
-    RepairScheduled,
     WorkflowArtifactRecorded);
 
 public sealed record WorkflowRunStarted;
@@ -49,4 +48,3 @@ public sealed record TaskFailed(string Stage, string TaskId, string? Message);
 public sealed record CheckPassed(string Stage, string CheckName, string? Message);
 public sealed record CheckFailed(string Stage, string CheckName, string? Message);
 public sealed record CheckPending(string Stage, string CheckName, string? Message);
-public sealed record RepairScheduled(string Stage, string CheckName, IReadOnlyList<string> TaskIds);

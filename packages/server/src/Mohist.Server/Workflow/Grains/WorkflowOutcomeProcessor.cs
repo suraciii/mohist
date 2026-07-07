@@ -53,15 +53,15 @@ internal sealed class WorkflowOutcomeProcessor
                         _owner.GrainKey, feedbackId, currentTask.Id);
                 }
             }
-            events.AddRange(run.CompleteTask());
+            var hasRecoveryTasks = outcome.AddTasks is { Count: > 0 };
+            events.AddRange(run.CompleteTask(advance: !hasRecoveryTasks));
 
-            if (outcome.AddTasks is { Count: > 0 } addTasks)
+            if (hasRecoveryTasks && outcome.AddTasks is { Count: > 0 } addTasks)
             {
-                var current = run.CurrentStage();
                 var taskDefs = addTasks.Select(t =>
                 {
                     var with = WorkflowDispatchHelpers.ParseWith(t.With);
-                    return new TaskDefinition(t.Id, t.Title, t.Uses, with, Recovery: t.Recovery);
+                    return new TaskDefinition(t.Id, t.Title, t.Uses, with, t.Artifacts, t.SetVars, t.Recovery);
                 }).ToList();
                 var recoveryEvents = run.AddRuntimeTasks(taskDefs);
                 events.AddRange(recoveryEvents);
@@ -80,14 +80,8 @@ internal sealed class WorkflowOutcomeProcessor
         return events;
     }
 
-    /// <summary>
-    /// Applies check results. The first repairable failure schedules repair
-    /// tasks and stops adjudicating later checks in the batch.
-    /// </summary>
-    public async Task<IReadOnlyList<WorkflowEvent>> ProcessCheckOutcomeAsync(WorkflowRun run, CheckOutcome outcome)
+    public Task<IReadOnlyList<WorkflowEvent>> ProcessCheckOutcomeAsync(WorkflowRun run, CheckOutcome outcome)
     {
-        var stage = run.CurrentStageId!;
-        var stageDef = await _owner.ProfileManager.LoadStageSpecsAsync(_owner.GrainKey, stage);
         var actions = new List<CheckResultAction>(outcome.Results.Count);
 
         foreach (var cr in outcome.Results)
@@ -102,61 +96,12 @@ internal sealed class WorkflowOutcomeProcessor
             }
             else
             {
-                var repairTasks = ResolveRepairTasks(run, stageDef, cr.Name, cr);
-                actions.Add(repairTasks is not null
-                    ? new(cr, "repair", repairTasks)
-                    : new(cr, "fail"));
-                if (repairTasks is not null)
-                    break;
+                actions.Add(new(cr, "fail"));
+                break;
             }
         }
 
-        return run.ProcessCheckResults(actions);
-    }
-
-    /// <summary>
-    /// Resolves repair tasks for a failed check, honoring the repair budget
-    /// unless the caller is explicitly bypassing it.
-    /// </summary>
-    public IReadOnlyList<TaskDefinition>? ResolveRepairTasks(
-        WorkflowRun run,
-        StageDefinition? stageDef,
-        string checkName,
-        CheckResult? result = null,
-        bool enforceLimit = true)
-    {
-        var checkDef = stageDef?.Checks.Find(c => c.Name == checkName);
-        if (checkDef?.OnFailure?.Repair is not { } repair) return null;
-
-        if (enforceLimit)
-        {
-            var repairCount = run.GetRepairCount(checkName);
-            if (repairCount >= repair.Limit) return null;
-        }
-
-        return run.BuildRepairTasks(checkName, repair, result);
-    }
-
-    /// <summary>
-    /// Retry is the escape hatch from <see cref="FailureReason.CheckUnrepaired"/>,
-    /// so it schedules the requested repair without consuming the normal budget.
-    /// </summary>
-    public async Task<IReadOnlyList<WorkflowEvent>?> TryScheduleRequestedCheckRepairAsync(WorkflowRun run)
-    {
-        if (run.Status != WorkflowRunStatus.Failed)
-            return null;
-
-        var failure = run.Failure;
-        if (failure?.Reason != FailureReason.CheckUnrepaired || string.IsNullOrWhiteSpace(failure.CheckName))
-            return null;
-
-        var stageDef = await _owner.ProfileManager.LoadStageSpecsAsync(_owner.GrainKey, failure.Stage);
-        var repairTasks = ResolveRepairTasks(run, stageDef, failure.CheckName, enforceLimit: false);
-        if (repairTasks is null)
-            return null;
-
-        ResetChecksRunningState(run);
-        return run.ScheduleCheckRepair(failure.CheckName, repairTasks, failure.Message);
+        return Task.FromResult<IReadOnlyList<WorkflowEvent>>(run.ProcessCheckResults(actions));
     }
 
     /// <summary>

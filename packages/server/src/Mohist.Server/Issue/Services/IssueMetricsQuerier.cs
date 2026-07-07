@@ -1183,17 +1183,11 @@ public class IssueMetricsQuerier : IScopedService
             {
                 if (!stage.Initialized) continue;
 
-                var stageHasRepair = false;
-                foreach (var check in stage.Checks)
-                {
-                    if (check.RepairCount > 0)
-                    {
-                        stageHasRepair = true;
-                        isFirstTimeRight = false;
-                    }
-                }
+                var stageHasRework = stage.Tasks.Any(IsRecoveryTask);
+                if (stageHasRework)
+                    isFirstTimeRight = false;
 
-                stageRework[stage.Id] = stageRework.GetValueOrDefault(stage.Id) || stageHasRepair;
+                stageRework[stage.Id] = stageRework.GetValueOrDefault(stage.Id) || stageHasRework;
             }
         }
 
@@ -1224,6 +1218,10 @@ public class IssueMetricsQuerier : IScopedService
 
         return (isFirstTimeRight, stageRework);
     }
+
+    private static bool IsRecoveryTask(TaskRun task) =>
+        task.DefinitionId.StartsWith("recover:", StringComparison.Ordinal)
+        || task.Id.StartsWith("recover:", StringComparison.Ordinal);
 
     private static bool IsCheckRunEvent(string type) =>
         string.Equals(type, EventCatalog.ReverseDns.CheckPassed, StringComparison.Ordinal)
