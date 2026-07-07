@@ -441,20 +441,11 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await registry.UnregisterAsync(RunnerId);
     }
 
-    /// <summary>
-    /// Closeout on presence loss: synthesize FAILED("runner-lost") for every
-    /// outstanding work this runner held — workflow Running works (queried from
-    /// the store) and agent-job works (from this grain's ledger). All reports
-    /// go through the normal report channel direct to the owning grain.
-    /// (design/workflow/scheduling.md §Supervision.)
-    /// </summary>
     private async Task CloseoutLostAsync()
     {
         var synthesizedFailure = new WorkResult("failed", "runner-lost");
         var workerId = RunnerId;
 
-        // Workflow works: query the store for Running works assigned to this
-        // runner-as-worker and report each FAILED direct to the owning workflow grain.
         foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(workerId))
         {
             try
@@ -474,8 +465,15 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 }
                 if (!string.IsNullOrWhiteSpace(stage.ChecksWorkId))
                 {
-                    var checksReport = new CheckReport(stage.Id, [new CheckResult(stage.Id, "failed", "runner-lost")]);
-                    await workflow.ReceiveCheckReportAsync(workerId, stage.ChecksWorkId, checksReport);
+                    var failedChecks = stage.Checks
+                        .Where(c => c.Status == StageCheckStatus.Running)
+                        .Select(c => new CheckResult(c.Name, "failed", "runner-lost"))
+                        .ToList();
+                    if (failedChecks.Count > 0)
+                    {
+                        var checksReport = new CheckReport(stage.Id, failedChecks);
+                        await workflow.ReceiveCheckReportAsync(workerId, stage.ChecksWorkId, checksReport);
+                    }
                 }
             }
             catch (Exception ex)
@@ -486,7 +484,6 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             }
         }
 
-        // Agent-job works: synthesize FAILED direct to the owning AgentJob grain.
         var agentJobs = GetWorks()
             .Where(w => w.Status is RunnerWorkStatus.Pending or RunnerWorkStatus.Running
                 && w.OwnerKind == WorkDispatchOwnerKinds.AgentJob)

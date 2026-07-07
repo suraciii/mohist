@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 using Mohist.Server.Tests.Support;
@@ -158,6 +159,37 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         Assert.Equal("failed", status.Status);
         Assert.NotNull(status.Failure);
         Assert.Equal("typecheck", status.Failure.CheckName);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task MultipleChecks_MixedResults_RecordsEachReportedCheck()
+    {
+        await StartWorkflowAsync(MultiCheckStage());
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "completed");
+
+        var (checks, r2) = await PollWorkAnyAsync();
+        await ReportChecksAsync(r2, checks,
+            ("typecheck", "pass", null),
+            ("lint", "fail", "lint errors"),
+            ("test", "fail", "test failures"));
+
+        var run = await LoadRunAsync(_workflowId!);
+        var stage = run.Stages.Single();
+        var typecheck = stage.Checks.Single(c => c.Name == "typecheck");
+        var lint = stage.Checks.Single(c => c.Name == "lint");
+        var test = stage.Checks.Single(c => c.Name == "test");
+
+        Assert.Equal(WorkflowRunStatus.Failed, run.Status);
+        Assert.Equal(StageCheckStatus.Passed, typecheck.Status);
+        Assert.Equal(StageCheckStatus.Failed, lint.Status);
+        Assert.Equal("lint errors", lint.Message);
+        Assert.Equal(StageCheckStatus.Failed, test.Status);
+        Assert.Equal("test failures", test.Message);
+        Assert.Equal("lint", run.Failure?.CheckName);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

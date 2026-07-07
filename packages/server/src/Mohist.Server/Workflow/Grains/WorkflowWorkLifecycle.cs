@@ -94,7 +94,6 @@ internal sealed class WorkflowWorkLifecycle
             else
             {
                 actions.Add(new(cr, "fail"));
-                break;
             }
         }
 
