@@ -186,3 +186,107 @@
   `packages/web/src/shared/status-presentation/cross-surface.equivalence.spec.tsx`.
   It imports directly from the layer; widgets do not need to expose
   test hooks beyond the `data-family` attribute they already set.
+## Registry notes (T-004)
+
+- **`label-colors.ts` API surface migrated from `{ bg, text }` hex pairs to
+  `{ className }` class strings.** Consumers that previously wrote
+  `style={{ backgroundColor: style.bg, color: style.text }}` now drop the
+  inline `style` and apply `className` directly. The size distinction
+  (`sm` vs `md`) is preserved as a separate `size` field so chip
+  dimensions can still vary independently of the visual treatment.
+
+- **`RISK_COLORS` / `TYPE_LABEL_COLORS` route through semantic families.**
+  `low→bg-success-subtle text-success`, `medium→bg-warning-subtle
+  text-warning`, `high→bg-danger-subtle text-danger`; the five type
+  chips likewise pick their family's soft treatment
+  (`bg-<family>-subtle text-<family> border-<family>-border`). All five
+  are dark-mode-aware via the token layer — no raw palette classes,
+  no inline hex.
+
+- **`TYPE_STRIP_COLORS` collapses to family foregrounds.** Returns
+  `bg-danger`, `bg-success`, `bg-info`, `bg-warning`, `bg-muted-foreground`
+  (same family as the chip text). The previous hex-priority list
+  (`#ef4444`, `#22c55e`, …) is gone.
+
+- **Priority stays ordinal, NOT semantic-family.** Per D6, collapsing
+  p0..p4 onto success/warning/info/danger/muted would overload the
+  meaning reservation (p3 is not 'healthy'). `PRIORITY_COLORS` and
+  `PRIORITY_STRIP_COLORS` are documented dark-aware class palettes —
+  each entry pairs a light `bg-X-100 text-X-800` with a `dark:bg-X-900/40
+  dark:text-X-200` counterpart so the ordinal red/orange/yellow/green/
+  gray hue survives in both themes. Five distinct class strings, no
+  inline hex.
+
+- **Area / urgency stay on documented dark-aware palettes** (categorical
+  labels, not state — same rationale as priority). `AREA_LABEL_COLORS`
+  uses the muted family (categorical); `URGENCY_LABEL_COLORS` keeps
+  the existing red-on-white dark-mode counterpart so `critical` is
+  visibly loud in both themes.
+
+- **Stage colors (IssueStatus → STAGE_COLORS) routes through families
+  per D6.** Backlog→muted, InProgress→warning, Done→success, Cancelled→
+  danger. The `accent` value is a `bg-<family>` class (not a hex); the
+  inner `labelClass` is `text-<family>`; `activeBg` is the family's
+  subtle treatment (e.g. `bg-warning-subtle/60`); `activeBorder` is the
+  family's border token (e.g. `border-warning-border`); a new
+  `bottomBorder` field exposes direction-specific
+  `border-b-<family>-border` for the mobile stage tab. `STAGE_COLORS`
+  resolves through `TREATMENT_BY_FAMILY` from the shared status-
+  presentation layer, keeping the family's class strings as the single
+  source of truth.
+
+- **CompactSessionCard stage-identity palette is dark-aware and hex-free.**
+  Categorical identity (purple/blue/teal/orange/slate) preserved across
+  themes via `dark:` variants — the same documented palette already
+  landed in T-003. This task tightened the comment to call out the
+  per-hue `border-<hue>-<step>` counterpart and added the fallback's
+  `border-border` token class.
+
+## Gotchas (T-004)
+
+- **`IssueCard`'s left priority strip migrates from `style.borderLeftColor`
+  to a Tailwind class** (`border-l-orange-600 dark:border-l-orange-400`
+  etc.). The `border-l-4` width utility stays on the card; the strip
+  color is layered via `getPriorityStripColor(priority)` as a class. The
+  previous `IssueCard.test.tsx` asserted `card.style.borderLeftColor`
+  against hex-converted RGB strings; the test now asserts the
+  `border-l-…` / `dark:border-l-…` classes are present in `card.className`
+  and that no inline `style` attribute remains.
+
+- **Mobile stage tab bottom border uses a direction-specific utility**
+  (`border-b-warning-border`, etc.) — not the full-side
+  `border-warning-border` — because the tab already has `border-b-2`
+  (width) and applying a full-side color would bleed into the left/right
+  borders the tab doesn't actually draw. The `STAGE_COLORS` scheme now
+  exposes both `activeBorder` (full-side, for the StageColumn outer
+  card) and `bottomBorder` (direction-specific, for the mobile tab).
+
+- **`statusTreatment(...)` is a status-bearing entry point only.**
+  `label-colors.ts` and `stage-colors.ts` resolve their chip palettes
+  through `TREATMENT_BY_FAMILY` directly (not through `statusTreatment`
+  with a synthetic kind/state) because priority/type/area/urgency are
+  not domain state values. The kanban `STAGE_COLORS` keeps its
+  hardcoded mapping (Backlog→muted, InProgress→warning, Done→success,
+  Cancelled→danger) because the task spec mandates that mapping — it
+  diverges from the generic `workflow-stage.running`→`info` reservation
+  intentionally.
+
+## Handoff Notes for Downstream Tasks (post-T-004)
+
+- T-005 (action-button variants) is unaffected by T-004. The new
+  `className`-based label/risk/priority chip styles render correctly
+  inside `Button variant="ghost"` because the chip styles set
+  `bg-/text-/border-` independently of the Button variant's
+  structural classes.
+
+- The `<StatusPill>` (T-002) remains the right primitive for status
+  surfaces; T-004's `LabelStyle` (`{ className, size }`) is for chip
+  surfaces that need their own visual treatment (priority, risk, type,
+  area, urgency, stage column accents). The two layers stay disjoint.
+
+- All inline `style={{ backgroundColor: '#...' }}` / `style={{ color: '#...' }}`
+  consumption in the covered surfaces (IssueCard, StageColumn,
+  KanbanBoard, pills.tsx, IssueDetailPage, ArchivedPage,
+  CreateIssueDialog, EditIssueDialog) is replaced with class-based
+  treatment. No raw hex literals remain in the converted registry
+  files (`label-colors.ts`, `stage-colors.ts`, `CompactSessionCard.tsx`).

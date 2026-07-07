@@ -152,12 +152,10 @@ function WorkflowStagePill({ issue }: { issue: Issue }) {
   return (
     <span
       data-testid="workflow-stage-badge"
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-      style={{ backgroundColor: `${colors.accent}1a`, color: colors.accent }}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${colors.activeBg} ${colors.labelClass}`}
     >
       <span
-        className="inline-block h-1.5 w-1.5 rounded-full"
-        style={{ backgroundColor: colors.accent }}
+        className={`inline-block h-1.5 w-1.5 rounded-full ${colors.accent}`}
       />
       {WORKFLOW_STAGE_LABELS[stage]}
     </span>
@@ -170,8 +168,7 @@ function PriorityChip({ priority }: { priority: string | null | undefined }) {
   return (
     <span
       data-testid="priority-chip"
-      className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
-      style={{ backgroundColor: style.bg, color: style.text }}
+      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${style.className}`}
     >
       {formatPriority(priority)}
     </span>
@@ -265,8 +262,8 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
       to={toProjectPath(`/issues/${issue.number}`)}
       data-testid="issue-card"
       data-draft={isDraft ? 'true' : undefined}
-      className={`block rounded-lg border border-l-4 bg-background shadow-sm hover:border-muted hover:shadow-md transition-colors relative overflow-hidden ${cardDeEmphasis}`}
-      style={{ borderLeftColor: getPriorityStripColor(issue.priority) }}
+      data-priority-strip={issue.priority ?? 'none'}
+      className={`block rounded-lg border border-l-4 bg-background shadow-sm hover:border-muted hover:shadow-md transition-colors relative overflow-hidden ${cardDeEmphasis} ${getPriorityStripColor(issue.priority)}`}
     >
       {isCancelled && (
         <div className="absolute inset-0 bg-muted-foreground/40 z-10 flex items-center justify-center pointer-events-none">
@@ -358,10 +355,9 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               return (
                 <span
                   key={label}
-                  className={`inline-block rounded-full px-1.5 font-medium whitespace-nowrap ${
+                  className={`inline-block rounded-full border px-1.5 font-medium whitespace-nowrap ${
                     s.size === 'sm' ? 'text-[10px] py-px' : 'text-xs py-0.5'
-                  }`}
-                  style={{ backgroundColor: s.bg, color: s.text }}
+                  } ${s.className}`}
                 >
                   {label}
                 </span>

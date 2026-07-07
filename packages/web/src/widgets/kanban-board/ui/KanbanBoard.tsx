@@ -69,14 +69,9 @@ function PriorityChips({
             onClick={() => onToggle(p)}
             data-testid={`priority-chip-${p}`}
             data-active={isActive}
-            className={`h-6 rounded-full px-2 text-[11px] font-semibold ${
-              isActive ? 'ring-2 ring-offset-1' : 'hover:opacity-80'
+            className={`h-6 rounded-full border px-2 text-[11px] font-semibold ${style.className} ${
+              isActive ? 'ring-2 ring-offset-1 ring-foreground/40' : 'hover:opacity-80'
             }`}
-            style={{
-              backgroundColor: style.bg,
-              color: style.text,
-              ...(isActive ? { boxShadow: `0 0 0 1px ${style.text}` } : {}),
-            }}
           >
             {p.toUpperCase()}
           </Button>
@@ -569,18 +564,12 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
                 data-active={active}
                 className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap snap-start transition-colors min-h-[44px] border-b-2 rounded-none ${
                   active
-                    ? `${colors.labelClass}`
+                    ? `${colors.labelClass} ${colors.bottomBorder}`
                     : 'text-muted-foreground border-transparent hover:text-foreground/80'
                 }`}
-                style={
-                  active
-                    ? { borderBottomColor: colors.accent, color: colors.accent }
-                    : undefined
-                }
               >
                 <span
-                  className="inline-block h-2 w-2 rounded-full"
-                  style={{ backgroundColor: active ? colors.accent : '#d1d5db' }}
+                  className={`inline-block h-2 w-2 rounded-full ${active ? colors.accent : 'bg-muted-foreground/40'}`}
                 />
                 {col.label}
                 <span

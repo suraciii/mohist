@@ -10,17 +10,19 @@ import type { SessionCard } from '@/widgets/coder-session/model/activity-cards'
  * rather than forcing onto the semantic families (which would overload
  * the status meaning reservation per design D6). Each entry pairs a
  * light bg/text with a `dark:` counterpart so the chip survives dark
- * theme; no inline hex literals.
+ * theme; no inline hex literals. Each hue is preserved across themes
+ * (purple/blue/teal/orange/slate) — these names identify the stage,
+ * not its state.
  */
 const STAGE_COLORS: Record<string, string> = {
-  build: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-200',
-  plan: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200',
-  review: 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-200',
-  check: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200',
-  integrate: 'bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-200',
+  build: 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/40 dark:text-purple-200 dark:border-purple-800',
+  plan: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-800',
+  review: 'bg-teal-100 text-teal-700 border-teal-200 dark:bg-teal-900/40 dark:text-teal-200 dark:border-teal-800',
+  check: 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/40 dark:text-orange-200 dark:border-orange-800',
+  integrate: 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/60 dark:text-slate-200 dark:border-slate-700',
 }
 
-const STAGE_COLOR_FALLBACK = 'bg-muted text-muted-foreground dark:bg-muted/40'
+const STAGE_COLOR_FALLBACK = 'bg-muted text-muted-foreground border-border dark:bg-muted/40'
 
 const LINE_CLAMP_STYLE = {
   display: '-webkit-box',

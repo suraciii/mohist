@@ -113,10 +113,9 @@ export function ArchivedPage() {
                             return (
                               <span
                                 key={label}
-                                className={`inline-block rounded-full px-1.5 font-medium whitespace-nowrap ${
+                                className={`inline-block rounded-full border px-1.5 font-medium whitespace-nowrap ${
                                   s.size === 'sm' ? 'text-[10px] py-px' : 'text-xs py-0.5'
-                                }`}
-                                style={{ backgroundColor: s.bg, color: s.text }}
+                                } ${s.className}`}
                               >
                                 {label}
                               </span>
