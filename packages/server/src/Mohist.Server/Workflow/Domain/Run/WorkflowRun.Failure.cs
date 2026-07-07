@@ -48,7 +48,7 @@ public static partial class WorkflowRunExtensions
                     ApplyWaitingForDispatchStatus(run);
                     return [new WorkflowRunResumed()];
                 }
-                case FailureReason.CheckUnrepaired:
+                case FailureReason.CheckFailed:
                     current.RetryFailedCheck(current.Failure.CheckName);
                     run.Failure = null;
                     ApplyWaitingForDispatchStatus(run);

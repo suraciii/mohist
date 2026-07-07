@@ -85,7 +85,7 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
               oneOf:
                 - <promise>PASS</promise>
                 - <promise>FAIL</promise>
-              failIf: FAIL
+              failIf: <promise>FAIL</promise>
       artifacts:
         files:
           - path: ${{ openspecChangeDir }}/self-review.md
@@ -130,21 +130,25 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
     - id: load-tasks
       title: Load tasks from plan
       uses: mohist/openspec-tasks
-  checks:
-    - name: verify
+    - id: verify
       title: Build & full test suite
       uses: core/script
       with:
         run: ${{ vars.ci.verify }}
-      repairLimit: 2
-      repairTask:
-        id: fix-tests
-        title: Fix failing tests/build
-        uses: mohist/acp-agent
-        with:
-          session: build
-          prompt: ${{ prompts.fix-tests }}
-          agent: ${{ vars.agent }}
+      recovery:
+        budget: 2
+        handlers:
+          - when: errorCode=script-failed
+            tasks:
+              - id: recover:fix-tests
+                title: Fix failing tests/build
+                uses: mohist/acp-agent
+                with:
+                  session: build
+                  prompt: ${{ prompts.fix-tests }}
+                  agent: ${{ vars.agent }}
+            retrySelf: true
+  checks: []
 
 - stage: check
   tasks:

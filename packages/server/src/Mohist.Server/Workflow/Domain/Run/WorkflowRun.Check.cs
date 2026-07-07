@@ -1,6 +1,3 @@
-using System.Text.Json;
-using Mohist.Server.Infrastructure;
-using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -22,39 +19,12 @@ public static partial class WorkflowRunExtensions
                     case "pending":
                         events.AddRange(run.ResetCheck(a.Result));
                         break;
-                    case "repair":
-                        events.AddRange(run.ScheduleCheckRepair(a.Result.Name, a.RepairTasks!, a.Result.Message, a.Result.Output));
-                        break;
                     case "fail":
                         events.AddRange(run.FailCheck(a.Result));
                         return events;
                 }
             }
             return events;
-        }
-
-        public IReadOnlyList<WorkflowEvent> RepairFailedCheck(CheckResult result, TaskDefinition repairTask)
-            => run.ScheduleCheckRepair(result.Name, [repairTask], result.Message, result.Output);
-
-        public IReadOnlyList<WorkflowEvent> ScheduleCheckRepair(
-            string checkName,
-            IReadOnlyList<TaskDefinition> repairTasks,
-            string? message = null,
-            JsonElement? output = null)
-        {
-            var current = run.CurrentStage();
-            current.ScheduleCheckRepair(checkName, repairTasks, message, output);
-            current.ChecksWorkId = null;
-            run.Failure = null;
-            ApplyWaitingForDispatchStatus(run);
-            var taskIds = current.Tasks
-                .TakeLast(repairTasks.Count)
-                .Select(t => t.Id)
-                .ToArray();
-            return [
-                new RepairScheduled(current.Id, checkName, taskIds),
-                new WorkflowRunResumed()
-            ];
         }
 
         public IReadOnlyList<WorkflowEvent> PassCheck(CheckResult result)
@@ -86,7 +56,7 @@ public static partial class WorkflowRunExtensions
             if (current.Failure is null)
             {
                 current.Failure = new FailureDetails(
-                    FailureReason.CheckUnrepaired, current.Id,
+                    FailureReason.CheckFailed, current.Id,
                     CheckName: check.Name, Message: result.Message);
                 run.Failure = current.Failure;
             }
@@ -120,32 +90,5 @@ public static partial class WorkflowRunExtensions
             events.AddRange(run.Advance());
             return events;
         }
-
-        public IReadOnlyList<TaskDefinition> BuildRepairTasks(
-            string checkName,
-            CheckFailureRepair repair,
-            CheckResult? result = null)
-        {
-            return [BuildRepairTask(run, checkName, repair.Task, result)];
-        }
-    }
-
-    private static TaskDefinition BuildRepairTask(
-        WorkflowRun run, string checkName, TaskDefinition repairTask, CheckResult? result)
-    {
-        JsonElement? resultJson = result is null
-            ? null
-            : JSON.DeserializeElement(JSON.Serialize(result));
-        var repairWith = repairTask.With is not null
-            ? new Dictionary<string, JsonElement?>(repairTask.With)
-            : new Dictionary<string, JsonElement?>();
-        if (resultJson is not null && !string.Equals(checkName, "review-passed", StringComparison.Ordinal))
-            repairWith["failedCheckResult"] = resultJson;
-
-        return new TaskDefinition(
-            $"{repairTask.Id}:{run.GetRepairCount(checkName) + 1}",
-            repairTask.Title,
-            repairTask.Uses,
-            repairWith);
     }
 }

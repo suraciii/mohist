@@ -276,7 +276,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var plan = MohistWorkflow.Definition.Stages.Single(s => s.Stage == "plan");
 
         var checkNames = plan.Checks.Select(c => c.Name).ToArray();
-        Assert.Equal(new[] { "plan-artifacts", "self-review-passed", "health" }, checkNames);
+        Assert.Equal(new[] { "plan-artifacts", "health" }, checkNames);
 
         var planArtifacts = plan.Checks.Single(c => c.Name == "plan-artifacts");
         Assert.Equal("mohist/openspec-artifacts", planArtifacts.Uses);
@@ -286,9 +286,11 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.DoesNotContain(plan.Checks, c => c.Name == "specs-complete");
         Assert.DoesNotContain(plan.Checks, c => c.Name == "design-complete");
         Assert.DoesNotContain(plan.Checks, c => c.Name == "tasks-valid");
+        Assert.DoesNotContain(plan.Checks, c => c.Name == "self-review-passed");
 
-        var selfReview = plan.Checks.Single(c => c.Name == "self-review-passed");
-        Assert.Equal("core/marker", selfReview.Uses);
+        var selfReviewTask = plan.Tasks.Single(t => t.Id == "self-review");
+        Assert.NotNull(selfReviewTask.Recovery);
+        Assert.Equal("promise=FAIL", Assert.Single(selfReviewTask.Recovery!.Handlers).When);
 
         var health = plan.Checks.Single(c => c.Name == "health");
         Assert.Equal("core/script", health.Uses);
@@ -306,18 +308,21 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var prBuild = pr.Stages.Single(s => s.Stage == "build");
         var defBuild = def.Stages.Single(s => s.Stage == "build");
 
-        Assert.Equal(new[] { "workspace-prepare", "load-tasks" }, prBuild.Tasks.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { "workspace-prepare", "load-tasks", "verify" }, prBuild.Tasks.Select(t => t.Id).ToArray());
         var prLoad = prBuild.Tasks.Single(t => t.Id == "load-tasks");
         var defLoad = defBuild.Tasks.Single(t => t.Id == "load-tasks");
         AssertTaskWithMapsMatchExcept(prLoad, defLoad);
 
-        Assert.Single(prBuild.Checks);
-        var verify = prBuild.Checks.Single(c => c.Name == "verify");
+        Assert.Empty(prBuild.Checks);
+        var verify = prBuild.Tasks.Single(t => t.Id == "verify");
         Assert.Equal("core/script", verify.Uses);
         Assert.Equal("${{ vars.ci.verify }}", ReadStringWith(verify, "run"));
-        Assert.NotNull(verify.OnFailure?.Repair);
-        Assert.Equal("fix-tests", verify.OnFailure!.Repair!.Task.Id);
-        Assert.True(verify.OnFailure.Repair.Limit >= 2);
+        Assert.NotNull(verify.Recovery);
+        Assert.True(verify.Recovery!.Budget >= 2);
+        var handler = Assert.Single(verify.Recovery.Handlers);
+        Assert.Equal("errorCode=script-failed", handler.When);
+        Assert.True(handler.RetrySelf);
+        Assert.Equal("recover:fix-tests", Assert.Single(handler.Tasks).Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -500,6 +505,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var recoveryIds = allTaskIds.Where(id => id.StartsWith("recover:", StringComparison.Ordinal)).ToList();
         Assert.Contains("recover:fix-plan-review", recoveryIds);
+        Assert.Contains("recover:fix-tests", recoveryIds);
         Assert.Contains("recover:fix-review-findings", recoveryIds);
         Assert.Contains("recover:rebase", recoveryIds);
         Assert.Contains("recover:push", recoveryIds);
@@ -647,6 +653,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("merge-verified", emitted);
         Assert.Contains("github-pr-status", emitted);
         Assert.Contains("when: errorCode=conflict", emitted);
+        Assert.Contains("when: errorCode=script-failed", emitted);
         Assert.Contains("retrySelf: true", emitted);
 
         var reparsed = WorkflowYamlSerializer.FromYaml(emitted, "mohist/github-pr");

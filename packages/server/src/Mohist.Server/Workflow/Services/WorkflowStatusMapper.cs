@@ -164,9 +164,9 @@ public static class WorkflowStatusMapper
                     actions.Add(new AvailableActionView("retry", "Retry failed task", taskId));
                 }
             }
-            else if (failure.Reason is FailureReason.CheckUnrepaired && failure.CheckName is not null)
+            else if (failure.Reason is FailureReason.CheckFailed && failure.CheckName is not null)
             {
-                actions.Add(new AvailableActionView("retry", "Repair failed check", failure.CheckName));
+                actions.Add(new AvailableActionView("retry", "Retry failed check", failure.CheckName));
             }
             else if (failure.Reason is FailureReason.ContextExhaustion)
             {

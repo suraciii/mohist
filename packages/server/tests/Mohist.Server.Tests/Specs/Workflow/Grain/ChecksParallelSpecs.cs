@@ -101,7 +101,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         Assert.NotNull(status);
         Assert.Equal("failed", status.Status);
         Assert.NotNull(status.Failure);
-        Assert.Equal("CheckUnrepaired", status.Failure.Reason);
+        Assert.Equal("CheckFailed", status.Failure.Reason);
         Assert.Equal("lint", status.Failure.CheckName);
     }
 
@@ -158,81 +158,6 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         Assert.Equal("failed", status.Status);
         Assert.NotNull(status.Failure);
         Assert.Equal("typecheck", status.Failure.CheckName);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
-    public async Task MultipleChecks_FailedCheckHasRepair_RepairTaskInjectedThenAllChecksReRun()
-    {
-        var workflow = await StartWorkflowAsync(MultiCheckStage(
-            checks: [
-                new("typecheck", "TypeCheck", "spec/typecheck"),
-                new("lint", "Lint", "spec/lint",
-                    OnFailure: new CheckFailureAction(new CheckFailureRepair(2, new TaskDefinition("fix-lint", "Fix lint", "spec/fix-lint"))))
-            ]));
-
-        var (task, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, task.WorkId, "completed");
-
-        var (checks, r2) = await PollWorkAnyAsync();
-        await ReportChecksFailAsync(r2, checks, "lint", "unused imports", "typecheck");
-
-        var (repair, r3) = await PollWorkAnyAsync();
-        Assert.Equal("task", repair.WorkType);
-
-        await ReportAsync(r3, repair.WorkId, "completed");
-
-        var (recheck, r4) = await PollWorkAnyAsync();
-        Assert.Equal("checks", recheck.WorkType);
-
-        var parsed = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(recheck.With!);
-        Assert.True(parsed.TryGetProperty("checks", out var checksArr));
-        Assert.Equal(2, checksArr.GetArrayLength());
-
-        await ReportChecksPassAsync(r4, recheck, "typecheck", "lint");
-
-        var runner = Grains.GetGrain<IRunnerGrain>(r4);
-        Assert.Null(await runner.PollAsync(Services));
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
-    public async Task MultipleChecks_FailedCheckWithRepair_DoesNotFailLaterChecksBeforeRepairRuns()
-    {
-        await StartWorkflowAsync(MultiCheckStage(
-            checks: [
-                new("review", "Review", "spec/review",
-                    OnFailure: new CheckFailureAction(new CheckFailureRepair(2, new TaskDefinition("fix-review", "Fix review findings", "spec/review-repair-agent")))),
-                new("merge-ready", "Merge Ready", "spec/merge-ready")
-            ]));
-
-        var (task, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, task.WorkId, "completed");
-
-        var (checks, r2) = await PollWorkAnyAsync();
-        await ReportChecksAsync(r2, checks,
-            ("review", "fail", "review still has blocking findings"),
-            ("merge-ready", "fail", "merge conflict"));
-
-        var (repair, r3) = await PollWorkAnyAsync();
-        Assert.Equal("task", repair.WorkType);
-        Assert.StartsWith("fix-review:", repair.WorkId);
-
-        var status = await GetQuerier().GetStatusAsync(_workflowId!);
-        Assert.NotNull(status);
-        Assert.Equal("running", status.Status);
-        Assert.Null(status.Failure);
-
-        await ReportAsync(r3, repair.WorkId, "completed");
-
-        var (recheck, _) = await PollWorkAnyAsync();
-        Assert.Equal("checks", recheck.WorkType);
-
-        var parsed = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(recheck.With!);
-        Assert.True(parsed.TryGetProperty("checks", out var checksArr));
-        Assert.Equal(2, checksArr.GetArrayLength());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

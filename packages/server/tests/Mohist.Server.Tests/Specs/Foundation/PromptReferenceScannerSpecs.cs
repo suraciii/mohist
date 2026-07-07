@@ -58,28 +58,29 @@ public class PromptReferenceScannerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
-    public void Scan_RepairTask_ReturnsItsPromptKey()
+    public void Scan_RecoveryTask_ReturnsItsPromptKey()
     {
-        // VerifyTask is removed from the check-repair model. The
-        // scanner only walks the repair task; there is no verify step
-        // branch to traverse.
         var definition = Parse("""
         stages:
           - stage: build
-            tasks: []
-            checks:
-              - name: review
+            tasks:
+              - id: review
                 title: Review
-                uses: mohist/ai-review
+                uses: mohist/acp-agent
                 with:
                   prompt: ${{ prompts.review }}
-                repairLimit: 1
-                repairTask:
-                  id: fix
-                  title: Fix
-                  uses: mohist/acp-agent
-                  with:
-                    prompt: ${{ prompts.auto-fix }}
+                recovery:
+                  budget: 1
+                  handlers:
+                    - when: promise=FAIL
+                      tasks:
+                        - id: recover:fix
+                          title: Fix
+                          uses: mohist/acp-agent
+                          with:
+                            prompt: ${{ prompts.auto-fix }}
+                      retrySelf: true
+            checks: []
         """);
 
         var keys = PromptReferenceScanner.Scan(definition);

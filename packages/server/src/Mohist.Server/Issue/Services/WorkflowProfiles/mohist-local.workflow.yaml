@@ -82,8 +82,25 @@ stages:
           prompt: ${{ prompts.self-review }}
           agent: ${{ vars.agent }}
           expect:
-            files:
+            markers:
               - path: ${{ openspecChangeDir }}/self-review.md
+                oneOf:
+                  - <promise>PASS</promise>
+                  - <promise>FAIL</promise>
+                failIf: <promise>FAIL</promise>
+        recovery:
+          budget: 1
+          handlers:
+            - when: promise=FAIL
+              tasks:
+                - id: recover:fix-plan-review
+                  title: Fix plan review findings
+                  uses: mohist/acp-agent
+                  with:
+                    session: plan
+                    prompt: ${{ prompts.fix-plan-review }}
+                    agent: ${{ vars.agent }}
+              retrySelf: true
         artifacts:
           files:
             - path: ${{ openspecChangeDir }}/self-review.md
@@ -93,23 +110,6 @@ stages:
         uses: mohist/openspec-artifacts
         with:
           changeDir: ${{ openspecChangeDir }}
-      - name: self-review-passed
-        title: Self review passed
-        uses: core/marker
-        with:
-          path: ${{ openspecChangeDir }}/self-review.md
-          expect: <promise>PASS</promise>
-        repairLimit: 1
-        repairTask:
-          id: fix-plan-review
-          title: Fix plan review findings
-          uses: mohist/acp-agent
-          with:
-            session: plan
-            prompt: |
-              Fix the plan review findings in ${{ openspecChangeDir }}.
-              Update proposal.md, specs, design.md, tasks.json, or self-review.md as needed.
-            agent: ${{ vars.agent }}
       - name: health
         title: Health
         uses: core/script
@@ -137,44 +137,53 @@ stages:
                   file: ${{ openspecChangeDir }}/tasks.json
                   items: tasks
                   base: ${{ prompts.build }}
-    checks:
-      - name: health
+      - id: build-health
         title: Health
         uses: core/script
         with:
           run: git diff --check
           timeout: 300000
-        repairLimit: 1
-        repairTask:
-          id: fix-build-health
-          title: Fix build health
-          uses: mohist/acp-agent
-          with:
-            session: build
-            prompt: |
-              Fix the build-stage health failure reported by `git diff --check`.
-              Keep changes focused on whitespace and patch formatting issues.
-            agent: ${{ vars.agent }}
-      - name: verify
+        recovery:
+          budget: 1
+          handlers:
+            - when: errorCode=script-failed
+              tasks:
+                - id: recover:fix-build-health
+                  title: Fix build health
+                  uses: mohist/acp-agent
+                  with:
+                    session: build
+                    prompt: |
+                      Fix the build-stage health failure reported by `git diff --check`.
+                      Keep changes focused on whitespace and patch formatting issues.
+                    agent: ${{ vars.agent }}
+              retrySelf: true
+      - id: verify
         title: Build & full test suite
         uses: core/script
         with:
           run: ${{ vars.ci.verify }}
           timeout: 600000
-        repairLimit: 2
-        repairTask:
-          id: fix-tests
-          title: Fix failing tests/build
-          uses: mohist/acp-agent
-          with:
-            prompt: ${{ prompts.fix-tests }}
-            agent: ${{ vars.agent }}
-            expect:
-              markers:
-                - path: _output
-                  oneOf:
-                    - <promise>done</promise>
-                    - <promise>unfinished</promise>
+        recovery:
+          budget: 2
+          handlers:
+            - when: errorCode=script-failed
+              tasks:
+                - id: recover:fix-tests
+                  title: Fix failing tests/build
+                  uses: mohist/acp-agent
+                  with:
+                    session: build
+                    prompt: ${{ prompts.fix-tests }}
+                    agent: ${{ vars.agent }}
+                    expect:
+                      markers:
+                        - path: _output
+                          oneOf:
+                            - <promise>done</promise>
+                            - <promise>unfinished</promise>
+              retrySelf: true
+    checks: []
 
   - stage: check
     requiresApproval: true
@@ -195,6 +204,7 @@ stages:
                 oneOf:
                   - <promise>PASS</promise>
                   - <promise>FAIL</promise>
+                failIf: <promise>FAIL</promise>
         recovery:
           budget: 2
           handlers:
@@ -211,47 +221,55 @@ stages:
         artifacts:
           files:
             - path: ${{ openspecChangeDir }}/review.md
-    checks:
-      - name: health
+      - id: check-health
         title: Health
         uses: core/script
         with:
           run: git diff --check
           timeout: 300000
-        repairLimit: 1
-        repairTask:
-          id: fix-check-health
-          title: Fix check health
-          uses: mohist/acp-agent
-          with:
-            session: check
-            prompt: |
-              Fix the check-stage health failure reported by `git diff --check`.
-              Keep changes focused on whitespace and patch formatting issues.
-            agent: ${{ vars.agent }}
-      - name: merge-ready
+        recovery:
+          budget: 1
+          handlers:
+            - when: errorCode=script-failed
+              tasks:
+                - id: recover:fix-check-health
+                  title: Fix check health
+                  uses: mohist/acp-agent
+                  with:
+                    session: check
+                    prompt: |
+                      Fix the check-stage health failure reported by `git diff --check`.
+                      Keep changes focused on whitespace and patch formatting issues.
+                    agent: ${{ vars.agent }}
+              retrySelf: true
+      - id: merge-ready
         title: Merge ready
         uses: mohist/merge-ready
-        repairLimit: 1
-        repairTask:
-          id: rebase-onto-base
-          title: Rebase onto base branch
-          uses: mohist/rebase
-          with:
-            baseBranch: ${{ repository.baseBranch }}
-            remote: origin
-          recovery:
-            budget: 2
-            handlers:
-              - when: errorCode=conflict
-                tasks:
-                  - id: recover:resolve-rebase-conflicts
-                    title: Resolve rebase conflicts
-                    uses: mohist/acp-agent
-                    with:
-                      session: check
-                      prompt: ${{ prompts.resolve-rebase-conflicts }}
-                      agent: ${{ vars.agent }}
+        recovery:
+          budget: 1
+          handlers:
+            - when: canMerge=false
+              tasks:
+                - id: recover:rebase-onto-base
+                  title: Rebase onto base branch
+                  uses: mohist/rebase
+                  with:
+                    baseBranch: ${{ repository.baseBranch }}
+                    remote: origin
+                  recovery:
+                    budget: 2
+                    handlers:
+                      - when: errorCode=conflict
+                        tasks:
+                          - id: recover:resolve-rebase-conflicts
+                            title: Resolve rebase conflicts
+                            uses: mohist/acp-agent
+                            with:
+                              session: check
+                              prompt: ${{ prompts.resolve-rebase-conflicts }}
+                              agent: ${{ vars.agent }}
+              retrySelf: true
+    checks: []
 
   - stage: integrate
     lockBehavior: sequential
@@ -298,21 +316,25 @@ stages:
           source: ${{ workspace.branch }}
           target: ${{ repository.baseBranch }}
           remote: origin
-    checks:
-      - name: health
+      - id: integrate:health
         title: Health
         uses: core/script
         with:
           run: git diff --check
           timeout: 300000
-        repairLimit: 1
-        repairTask:
-          id: fix-integrate-health
-          title: Fix integrate health
-          uses: mohist/acp-agent
-          with:
-            session: integrate
-            prompt: |
-              Fix the integrate-stage health failure reported by `git diff --check`.
-              Keep changes focused on whitespace and patch formatting issues.
-            agent: ${{ vars.agent }}
+        recovery:
+          budget: 1
+          handlers:
+            - when: errorCode=script-failed
+              tasks:
+                - id: recover:fix-integrate-health
+                  title: Fix integrate health
+                  uses: mohist/acp-agent
+                  with:
+                    session: integrate
+                    prompt: |
+                      Fix the integrate-stage health failure reported by `git diff --check`.
+                      Keep changes focused on whitespace and patch formatting issues.
+                    agent: ${{ vars.agent }}
+              retrySelf: true
+    checks: []

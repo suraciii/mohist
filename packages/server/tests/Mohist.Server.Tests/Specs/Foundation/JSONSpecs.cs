@@ -140,9 +140,9 @@ public class JSONSpecs
     [Fact]
     public void Serialize_EnumValue_UsesStringRepresentation()
     {
-        var json = JSON.Serialize(new { status = "active", reason = FailureReason.CheckUnrepaired });
+        var json = JSON.Serialize(new { status = "active", reason = FailureReason.CheckFailed });
 
-        Assert.Contains("\"reason\":\"CheckUnrepaired\"", json);
+        Assert.Contains("\"reason\":\"CheckFailed\"", json);
         Assert.DoesNotContain("\"reason\":1", json);
     }
 

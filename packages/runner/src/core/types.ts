@@ -164,6 +164,8 @@ export interface AddTaskInput {
   title: string
   uses?: string | null
   with?: JsonObject | null
+  artifacts?: JsonObject | null
+  setVars?: Record<string, string> | null
   recovery?: JsonObject | null
 }
 

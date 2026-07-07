@@ -290,11 +290,11 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     const run = host.run(controller.signal)
 
     await vi.waitFor(() => expect(connect).toHaveBeenCalled(), { timeout: 5_000 })
-    // Drain until both concurrent works have logged and their threshold-1
-    // incremental flushes have been uploaded. drainUntil advances fake
-    // timers and microtasks deterministically, avoiding the order-
-    // dependence that made the previous flushCycles/vi.waitFor mix flaky.
-    await drainUntil(() => uploadTaskLog.mock.calls.length >= 2, "two incremental uploads")
+    await drainUntil(
+      () => new Set(uploadTaskLog.mock.calls.map((call) => call[1])).size === 2,
+      "incremental uploads for both work items",
+    )
+    expect(new Set(uploadTaskLog.mock.calls.map((call) => call[1]))).toEqual(new Set(["work-A", "work-B"]))
 
     for (const call of uploadTaskLog.mock.calls) {
       const [, workId, batch] = call as [string, string, { entries: Array<{ text: string }> }]
@@ -305,8 +305,8 @@ describe("RunnerHost task-log best-effort flush (T-003)", () => {
     }
 
     gate.resolve()
-    releases.get("work-A")?.resolve()
-    releases.get("work-B")?.resolve()
+    releases.get("work-A")!.resolve()
+    releases.get("work-B")!.resolve()
     await vi.waitFor(() => expect(report).toHaveBeenCalledTimes(2), { timeout: 5_000 })
     controller.abort()
     await vi.waitFor(() => expect(run).resolves.toBeUndefined(), { timeout: 5_000 })

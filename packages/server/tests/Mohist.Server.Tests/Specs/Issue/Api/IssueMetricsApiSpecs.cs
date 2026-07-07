@@ -1839,7 +1839,7 @@ public class IssueMetricsApiSpecs
         string issueId,
         string workflowRunId,
         DateTimeOffset shipTime,
-        (string Stage, (string Name, string Title, int RepairCount)[] Checks)[] stages)
+        (string Stage, (string Name, string Title, int ReworkCount)[] Checks)[] stages)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -1890,8 +1890,13 @@ public class IssueMetricsApiSpecs
                 Name = c.Name,
                 Title = c.Title,
                 Status = "Passed",
-                RepairCount = c.RepairCount,
             }).ToArray();
+            var tasks = new List<object>
+            {
+                new { Id = $"{s.Stage}-task", DefinitionId = $"{s.Stage}-task", Attempt = 1, Title = $"{s.Stage} task", Status = "Completed", Uses = "mohist/acp-agent" },
+            };
+            foreach (var check in s.Checks.Where(c => c.ReworkCount > 0))
+                tasks.Add(new { Id = $"recover:{check.Name}.1", DefinitionId = $"recover:{check.Name}", Attempt = 1, Title = $"{check.Title} recovery", Status = "Completed", Uses = "mohist/acp-agent" });
 
             return (object)new
             {
@@ -1900,10 +1905,7 @@ public class IssueMetricsApiSpecs
                 RequiresApproval = false,
                 Initialized = true,
                 Status = "Completed",
-                Tasks = new[]
-                {
-                    new { Id = $"{s.Stage}-task", DefinitionId = $"{s.Stage}-task", Attempt = 1, Title = $"{s.Stage} task", Status = "Completed", Uses = "mohist/acp-agent" },
-                },
+                Tasks = tasks.ToArray(),
                 Checks = checks,
             };
         }).ToArray();

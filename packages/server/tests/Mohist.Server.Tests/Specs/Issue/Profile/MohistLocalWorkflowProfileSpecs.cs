@@ -129,7 +129,7 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("sequential", definition.Stages[3].LockBehavior);
         Assert.Equal(["project-integration"], definition.Stages[3].Resources);
         var integrateIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "workspace-prepare", "integrate:archive-change", "integrate:rebase", "integrate:push" }, integrateIds);
+        Assert.Equal(new[] { "workspace-prepare", "integrate:archive-change", "integrate:rebase", "integrate:push", "integrate:health" }, integrateIds);
         Assert.DoesNotContain("integrate:merge", integrateIds);
         Assert.Equal("mohist/rebase", rebase.Uses);
         var rebaseWithJson = JsonSerializer.Serialize(rebase.With);
@@ -143,20 +143,23 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("workspace.branch", pushWithJson);
         Assert.Contains("repository.baseBranch", pushWithJson);
         var integrateTaskIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(["workspace-prepare", "integrate:archive-change", "integrate:rebase", "integrate:push"], integrateTaskIds);
+        Assert.Equal(["workspace-prepare", "integrate:archive-change", "integrate:rebase", "integrate:push", "integrate:health"], integrateTaskIds);
         foreach (var task in definition.Stages[3].Tasks)
         {
             Assert.NotEqual("mohist/merge", task.Uses);
         }
 
-        var mergeReady = definition.Stages[2].Checks.Single(c => c.Name == "merge-ready");
-        var rebaseRepair = mergeReady.OnFailure?.Repair?.Task;
-        Assert.NotNull(rebaseRepair);
-        Assert.Equal("rebase-onto-base", rebaseRepair!.Id);
-        Assert.Equal("mohist/rebase", rebaseRepair.Uses);
-        var repairWithJson = JsonSerializer.Serialize(rebaseRepair.With);
-        Assert.DoesNotContain("\"conflictResolver\"", repairWithJson);
-        AssertRebaseConflictRecovery(rebaseRepair, "check");
+        var mergeReady = definition.Stages[2].Tasks.Single(t => t.Id == "merge-ready");
+        Assert.NotNull(mergeReady.Recovery);
+        var mergeReadyHandler = Assert.Single(mergeReady.Recovery!.Handlers);
+        Assert.Equal("canMerge=false", mergeReadyHandler.When);
+        Assert.True(mergeReadyHandler.RetrySelf);
+        var rebaseRecovery = Assert.Single(mergeReadyHandler.Tasks);
+        Assert.Equal("recover:rebase-onto-base", rebaseRecovery.Id);
+        Assert.Equal("mohist/rebase", rebaseRecovery.Uses);
+        var recoveryWithJson = JsonSerializer.Serialize(rebaseRecovery.With);
+        Assert.DoesNotContain("\"conflictResolver\"", recoveryWithJson);
+        AssertRebaseConflictRecovery(rebaseRecovery, "check");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -476,9 +479,9 @@ public class MohistLocalWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void WorkflowYamlParser_ParsesRepairTasksAndWithObjects()
+    public void WorkflowYamlParser_CheckLevelRepairFieldsThrowSchemaDiagnostic()
     {
-        var definition = MohistWorkflow.ParseYaml("""
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
         stages:
           - stage: build
             tasks: []
@@ -496,26 +499,17 @@ public class MohistLocalWorkflowProfileSpecs
                   uses: mohist/acp-agent
                   with:
                     prompt: Fix it
-        """);
+        """));
 
-        var check = definition.Stages.Single().Checks.Single();
-        Assert.Equal("core/script", check.Uses);
-        Assert.Equal(1, check.OnFailure?.Repair?.Limit);
-        Assert.Equal("fix-health", check.OnFailure?.Repair?.Task.Id);
-        Assert.Contains("\"timeout\":300000", JsonSerializer.Serialize(check.With));
-        Assert.Contains("\"prompt\":\"Fix it\"", JsonSerializer.Serialize(check.OnFailure?.Repair?.Task.With));
+        Assert.Contains("obsolete check-level repair", ex.Message);
+        Assert.Contains("task-level recovery", ex.Message);
     }
 
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void WorkflowYamlParser_TreatsVerifyTaskAsUnknownKey()
+    public void WorkflowYamlParser_CheckRepairWithVerifyTaskStillThrows()
     {
-        // VerifyTask was removed in the onFailure-only recovery model.
-        // A YAML profile that still carries a `verifyTask:` block on a
-        // check is parsed as if the key were unknown — the deserializer's
-        // IgnoreUnmatchedProperties behavior is preserved and the
-        // resulting CheckFailureRepair carries only the repair task.
-        var definition = MohistWorkflow.ParseYaml("""
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
         stages:
           - stage: build
             tasks: []
@@ -538,16 +532,9 @@ public class MohistLocalWorkflowProfileSpecs
                   uses: core/script
                   with:
                     run: git diff --check
-        """);
+        """));
 
-        var check = definition.Stages.Single().Checks.Single();
-        Assert.NotNull(check.OnFailure?.Repair);
-        var repair = check.OnFailure!.Repair!;
-        Assert.Equal(2, repair.Limit);
-        Assert.Equal("fix-health", repair.Task.Id);
-        // The CheckFailureRepair record has exactly two fields; assert
-        // that no extra task is exposed via reflection.
-        Assert.Equal(2, typeof(CheckFailureRepair).GetProperties().Length);
+        Assert.Contains("obsolete check-level repair", ex.Message);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -561,13 +548,11 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal(MohistWorkflow.Definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
         Assert.Contains("agent: ${{ vars.agent }}", yaml);
         Assert.Contains("prompt: ${{ prompts.proposal }}", yaml);
-        Assert.Contains("repairTask:", yaml);
+        Assert.DoesNotContain("repairTask:", yaml);
+        Assert.DoesNotContain("repairLimit:", yaml);
         Assert.Contains("id: recover:fix-review-findings", yaml);
         Assert.Contains("prompt: ${{ prompts.auto-fix }}", yaml);
         Assert.Contains("retrySelf: true", yaml);
-        // The serializer must not emit a verifyTask key. VerifyTask is
-        // removed from the check-repair model; the serialized check
-        // carries only the repair task.
         Assert.DoesNotContain("verifyTask:", yaml);
         Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[1].Uses);
         // Review failure is modeled on the ai-review task itself
@@ -648,19 +633,50 @@ public class MohistLocalWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void DefaultWorkflowDefinition_HasNoTaskVerdictMarkers()
+    public void DefaultWorkflowDefinition_TaskVerdictMarkersDeclareFailIf()
     {
         var definition = MohistWorkflow.Definition;
 
-        foreach (var stage in definition.Stages)
+        var verdictTasks = definition.Stages
+            .SelectMany(s => s.Tasks)
+            .Where(HasFailVerdictMarker)
+            .ToList();
+
+        Assert.Equal(["self-review", "ai-review"], verdictTasks.Select(t => t.Id).ToArray());
+        foreach (var task in verdictTasks)
+            Assert.Equal("<promise>FAIL</promise>", FailIfMarker(task));
+    }
+
+    private static bool HasFailVerdictMarker(TaskDefinition task)
+    {
+        var failIf = FailIfMarker(task);
+        if (failIf != "<promise>FAIL</promise>") return false;
+
+        var expect = JsonSerializer.SerializeToElement(task.With!["expect"]);
+        if (!expect.TryGetProperty("markers", out var markers)) return false;
+        foreach (var marker in markers.EnumerateArray())
         {
-            foreach (var task in stage.Tasks)
-            {
-                var withJson = JsonSerializer.Serialize(task.With);
-                Assert.DoesNotContain("\"PASS\"", withJson);
-                Assert.DoesNotContain("\"FAIL\"", withJson);
-            }
+            if (!marker.TryGetProperty("oneOf", out var oneOf)) continue;
+            if (oneOf.EnumerateArray().Any(v => v.GetString() == "<promise>FAIL</promise>"))
+                return true;
         }
+
+        return false;
+    }
+
+    private static string? FailIfMarker(TaskDefinition task)
+    {
+        if (task.With is null || !task.With.TryGetValue("expect", out var expect) || !expect.HasValue)
+            return null;
+
+        var expectElement = JsonSerializer.SerializeToElement(expect);
+        if (!expectElement.TryGetProperty("markers", out var markers)) return null;
+        foreach (var marker in markers.EnumerateArray())
+        {
+            if (marker.TryGetProperty("failIf", out var failIf))
+                return failIf.GetString();
+        }
+        return null;
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -829,12 +845,8 @@ public class MohistLocalWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void WorkflowYamlParser_RepairTaskArtifactsAreIsolated()
+    public void WorkflowYamlParser_RecoveryTaskArtifactsAreIsolated()
     {
-        // VerifyTask is gone. The check-repair path exposes only the
-        // repair task. The repair task's own `artifacts` declaration
-        // (none in this fixture) must remain isolated from the parent
-        // check task's `artifacts` declaration.
         var definition = MohistWorkflow.ParseYaml("""
         stages:
           - stage: check
@@ -847,28 +859,26 @@ public class MohistLocalWorkflowProfileSpecs
                 artifacts:
                   files:
                     - path: review.md
-            checks:
-              - name: review-passed
-                title: Review passed
-                uses: core/marker
-                with:
-                  path: review.md
-                  expect: <promise>PASS</promise>
-                repairLimit: 1
-                repairTask:
-                  id: fix-review
-                  title: Fix review
-                  uses: mohist/acp-agent
-                  with:
-                    prompt: fix
+                recovery:
+                  budget: 1
+                  handlers:
+                    - when: promise=FAIL
+                      tasks:
+                        - id: recover:fix-review
+                          title: Fix review
+                          uses: mohist/acp-agent
+                          with:
+                            prompt: fix
+                      retrySelf: true
+            checks: []
         """);
 
         var stage = definition.Stages.Single();
         var review = stage.Tasks.Single();
         Assert.NotNull(review.Artifacts);
 
-        var repairCheck = stage.Checks.Single();
-        Assert.Null(repairCheck.OnFailure?.Repair?.Task.Artifacts);
+        var recoveryTask = Assert.Single(Assert.Single(review.Recovery!.Handlers).Tasks);
+        Assert.Null(recoveryTask.Artifacts);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

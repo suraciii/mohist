@@ -116,14 +116,13 @@ public struct CheckDefinitionSurrogate
     [Id(1)] public string Title;
     [Id(2)] public string? Uses;
     [Id(3)] public Dictionary<string, JsonElement?>? With;
-    [Id(4)] public CheckFailureAction? OnFailure;
 }
 
 [RegisterConverter]
 public sealed class CheckDefinitionSurrogateConverter : IConverter<CheckDefinition, CheckDefinitionSurrogate>
 {
     public CheckDefinition ConvertFromSurrogate(in CheckDefinitionSurrogate surrogate) =>
-        new(surrogate.Name, surrogate.Title, surrogate.Uses, surrogate.With, surrogate.OnFailure);
+        new(surrogate.Name, surrogate.Title, surrogate.Uses, surrogate.With);
 
     public CheckDefinitionSurrogate ConvertToSurrogate(in CheckDefinition value) => new()
     {
@@ -131,44 +130,5 @@ public sealed class CheckDefinitionSurrogateConverter : IConverter<CheckDefiniti
         Title = value.Title,
         Uses = value.Uses,
         With = value.With,
-        OnFailure = value.OnFailure,
-    };
-}
-
-[GenerateSerializer]
-public struct CheckFailureActionSurrogate
-{
-    [Id(0)] public CheckFailureRepair? Repair;
-}
-
-[RegisterConverter]
-public sealed class CheckFailureActionSurrogateConverter : IConverter<CheckFailureAction, CheckFailureActionSurrogate>
-{
-    public CheckFailureAction ConvertFromSurrogate(in CheckFailureActionSurrogate surrogate) =>
-        new(surrogate.Repair);
-
-    public CheckFailureActionSurrogate ConvertToSurrogate(in CheckFailureAction value) => new()
-    {
-        Repair = value.Repair,
-    };
-}
-
-[GenerateSerializer]
-public struct CheckFailureRepairSurrogate
-{
-    [Id(0)] public int Limit;
-    [Id(1)] public TaskDefinition Task;
-}
-
-[RegisterConverter]
-public sealed class CheckFailureRepairSurrogateConverter : IConverter<CheckFailureRepair, CheckFailureRepairSurrogate>
-{
-    public CheckFailureRepair ConvertFromSurrogate(in CheckFailureRepairSurrogate surrogate) =>
-        new(surrogate.Limit, surrogate.Task);
-
-    public CheckFailureRepairSurrogate ConvertToSurrogate(in CheckFailureRepair value) => new()
-    {
-        Limit = value.Limit,
-        Task = value.Task,
     };
 }

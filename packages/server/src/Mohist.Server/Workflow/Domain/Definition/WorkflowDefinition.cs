@@ -29,16 +29,11 @@ public sealed record RecoveryHandlerDefinition(
     IReadOnlyList<TaskDefinition> Tasks,
     bool RetrySelf);
 
-public sealed record CheckFailureRepair(int Limit, TaskDefinition Task);
-
-public sealed record CheckFailureAction(CheckFailureRepair? Repair = null);
-
 public sealed record CheckDefinition(
     string Name,
     string Title,
     string? Uses = null,
-    Dictionary<string, JsonElement?>? With = null,
-    CheckFailureAction? OnFailure = null);
+    Dictionary<string, JsonElement?>? With = null);
 
 public sealed record StageDefinition(
     string Stage,

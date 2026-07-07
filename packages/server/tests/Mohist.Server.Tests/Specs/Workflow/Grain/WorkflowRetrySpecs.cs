@@ -437,7 +437,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.NotNull(status);
         Assert.Equal("failed", status.Status);
         Assert.NotNull(status.Failure);
-        Assert.Equal("CheckUnrepaired", status.Failure.Reason);
+        Assert.Equal("CheckFailed", status.Failure.Reason);
         Assert.Equal("check-1", status.Failure.CheckName);
 
         var retryAction = status.AvailableActions.Find(a => a.Name == "retry");
