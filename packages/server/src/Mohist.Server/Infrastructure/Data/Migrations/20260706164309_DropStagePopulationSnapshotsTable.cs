@@ -24,11 +24,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     ProjectId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
                     Day = table.Column<string>(type: "TEXT", maxLength: 10, nullable: false),
                     Backlog = table.Column<int>(type: "INTEGER", nullable: false),
+                    Plan = table.Column<int>(type: "INTEGER", nullable: false),
                     Build = table.Column<int>(type: "INTEGER", nullable: false),
                     Check = table.Column<int>(type: "INTEGER", nullable: false),
-                    Done = table.Column<int>(type: "INTEGER", nullable: false),
                     Integrate = table.Column<int>(type: "INTEGER", nullable: false),
-                    Plan = table.Column<int>(type: "INTEGER", nullable: false)
+                    Done = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {

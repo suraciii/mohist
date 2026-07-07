@@ -32,6 +32,21 @@ public class IssueMetricsApiSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Theory]
+    [InlineData("cumulative-flow")]
+    [InlineData("cumulative-flow?range=30d")]
+    public async Task CumulativeFlowEndpoint_Removed_ReturnsNotFound(string queryString)
+    {
+        var project = await CreateProjectAsync($"cumulative-flow-removed-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/{queryString}");
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletionMetrics_DayBucket_ReturnsThirtyTrailingDays()
     {
