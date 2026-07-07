@@ -6,33 +6,13 @@ using Mohist.Server.Infrastructure;
 namespace Mohist.Server.Workflow.Storage;
 
 /// <summary>
-/// Default <see cref="IWorkflowArtifactStorage"/> implementation. The
-/// service writes recorded content under the configured storage root
-/// using a generated layout that never embeds the source artifact
-/// path. File artifacts persist <c>metadata.json</c> + <c>content</c>;
-/// directory artifacts persist <c>metadata.json</c> + a <c>files/</c>
-/// tree.
+/// Default <see cref="IWorkflowArtifactStorage"/> implementation. It writes
+/// recorded content under generated paths that never embed source artifact
+/// paths.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The service is intentionally agnostic of HTTP, EF Core, and
-/// Orleans. The upload endpoint (T-005) is expected to call
-/// <see cref="WriteFileAsync"/> / <see cref="WriteDirectoryAsync"/>
-/// from the multipart handler; the binding flow (T-007) is expected
-/// to call <see cref="GenerateStoragePath"/> first and persist the
-/// returned relative path on <c>WorkflowArtifactRow.ArtifactStoragePath</c>
-/// before the content is written; the content/browsing endpoints
-/// (T-008) are expected to resolve that path back through
-/// <see cref="ResolveAbsolutePath"/> and call the read primitives.
-/// </para>
-/// <para>
-/// All public APIs that touch the filesystem use
-/// <see cref="System.IO.FileStream"/> with asynchronous reads and
-/// writes. Atomic moves are performed by writing to a temporary
-/// path and renaming it into place once the stream is fully
-/// flushed and closed, so partial writes never leak as recorded
-/// artifact content.
-/// </para>
+/// Writes are committed by flushing a temporary file and then renaming it into
+/// place, so partial files are not exposed as recorded artifact content.
 /// </remarks>
 public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 {
@@ -63,11 +43,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
     {
     }
 
-    /// <summary>
-    /// Test-only constructor that accepts explicit directory limits.
-    /// Used by specs that need to assert on limit behavior without
-    /// going through the options pipeline.
-    /// </summary>
+    /// <summary>Test-only constructor that accepts explicit directory limits.</summary>
     public FileSystemWorkflowArtifactStorage(
         string root,
         ILogger<FileSystemWorkflowArtifactStorage> log,

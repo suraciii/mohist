@@ -7,50 +7,9 @@ using Mohist.Server.Workflow.Services;
 namespace Mohist.Server.Workflow.Grains;
 
 /// <summary>
-/// Command-side processor for task / check outcomes. Applies a runner
-/// outcome to the in-memory <see cref="WorkflowRun"/>, resolves check repair
-/// tasks, schedules a check repair when the failure reason is
-/// <see cref="FailureReason.CheckUnrepaired"/>, clears the executable state
-/// on stop / retry, marks task / checks running on dispatch, and constructs
-/// the <see cref="WorkItem"/> payloads returned to the runner.
-///
-/// Composed inside the grain process (mirrors <see cref="WorkflowReadModel"/>
-/// and the T-001 <see cref="WorkflowStageLockCoordinator"/>): the grain is
-/// the consistency boundary for <see cref="WorkflowRun"/> and the outcome
-/// path must observe grain state with the same strong-consistency guarantee
-/// as the rest of the command surface. Per design D2 the public methods
-/// take the mutable <see cref="WorkflowRun"/> by reference — the processor
-/// mutates the passed-in run, and the grain's <c>_run</c> field reflects
-/// the writes immediately because both point to the same instance.
-///
-/// Saving and event publishing stay on the grain (design D3):
-/// <list type="bullet">
-///   <item>Mid-path commit is delivered through a <c>commitAsync</c>
-///   callback of signature <c>Func&lt;IReadOnlyList&lt;WorkflowEvent&gt;,
-///   Task&gt;</c> — the same shape <see cref="Services.WorkflowSessionHealthService"/>
-///   uses for its session-health gate.</item>
-///   <item>The two save sites (<c>MarkTaskRunningAsync</c>'s
-///   <c>SaveRunAsync(events)</c> after <c>StartTask</c> and
-///   <c>ClearExecutableStateAsync</c>'s save with or without
-///   <c>FailTaskForStopped</c> events) flow back to the grain's own
-///   <c>SaveRunAsync</c> overloads via internal accessors so the ETag
-///   conflict → <c>DeactivateOnIdle()</c> reload path stays on the grain.</item>
-///   <item>The non-persisted <c>_lastKnownRunnerId</c> cache is written
-///   via an internal setter on the grain — the processor never holds a
-///   reference to grain infrastructure state.</item>
-/// </list>
-///
-/// The <see cref="ClearExecutableStateAsync"/> path delegates the
-/// "release current stage lock" step to the T-001
-/// <see cref="WorkflowStageLockCoordinator"/> so all lock-touching logic
-/// stays in one composed service.
-///
-/// No new async yield points are introduced beyond what the extracted
-/// methods already used: the awaits in this file are the pre-existing
-/// ones (session-health gate round trip, profile-manager stage spec load,
-/// grain-owned save path). The run mutations and the save call stay in a
-/// straight-line sequence inside each method — there is no new
-/// <c>await</c> between mutating <c>run</c> and saving it.
+/// Handles workflow outcome transitions inside the grain. The grain remains
+/// the commit and event-dispatch boundary; this helper mutates the supplied
+/// run and returns or commits events through grain-owned callbacks.
 /// </summary>
 public sealed class WorkflowOutcomeProcessor
 {
@@ -62,20 +21,9 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Applies a runner-reported <see cref="TaskOutcome"/> to the run.
-    /// Mutates the passed run: writes <c>currentTask.Output</c>, resolves
-    /// the feedback that caused the task when present, completes the task,
-    /// appends recovery tasks from <c>outcome.AddTasks</c>, or — for a
-    /// non-Passed outcome — fails the task with the runner's detail.
-    ///
-    /// Artifact references are surfaced as <see cref="WorkflowArtifactRecorded"/>
-    /// events before the task completion event so the run history sees
-    /// the artifact before the producing task transitions to Completed.
+    /// Applies a runner task outcome. Artifact events precede task completion
+    /// so history records the produced artifact before the producing task closes.
     /// </summary>
-    /// <param name="run">The grain's current run, mutated in place.</param>
-    /// <param name="outcome">The runner-reported task outcome.</param>
-    /// <param name="taskRunId">The task run id within the current stage.</param>
-    /// <param name="workId">The work id the runner reported under.</param>
     public async Task<IReadOnlyList<WorkflowEvent>> ProcessTaskOutcomeAsync(
         WorkflowRun run, TaskOutcome outcome, string taskRunId, string workId)
     {
@@ -85,8 +33,6 @@ public sealed class WorkflowOutcomeProcessor
 
         if (outcome.Artifacts is { Count: > 0 })
         {
-            // The translator already bound artifact uploads; surface each
-            // reference as a recorded event so the run history sees it.
             foreach (var a in outcome.Artifacts)
             {
                 events.Add(new WorkflowArtifactRecorded(_owner.GrainKey, taskRunId, a.Path, DateTimeOffset.UtcNow));
@@ -135,19 +81,9 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Adjudicates each <see cref="CheckResult"/> in the runner's
-    /// <see cref="CheckOutcome"/> and applies the resulting actions via
-    /// <see cref="WorkflowRunExtensions.ProcessCheckResults"/>. Mutates the
-    /// passed run by way of <see cref="WorkflowRunExtensions.ProcessCheckResults"/>.
-    ///
-    /// Per-check semantics: <c>pass</c> → pass action, <c>pending</c> →
-    /// pending action, otherwise → try a repair action via
-    /// <see cref="ResolveRepairTasks"/>; if a repair is generated the
-    /// outcome loop breaks and the repair action is the final entry of
-    /// <c>actions</c>. A failure without a repair produces a fail action.
+    /// Applies check results. The first repairable failure schedules repair
+    /// tasks and stops adjudicating later checks in the batch.
     /// </summary>
-    /// <param name="run">The grain's current run, mutated in place.</param>
-    /// <param name="outcome">The runner-reported check outcome.</param>
     public async Task<IReadOnlyList<WorkflowEvent>> ProcessCheckOutcomeAsync(WorkflowRun run, CheckOutcome outcome)
     {
         var stage = run.CurrentStageId!;
@@ -179,17 +115,9 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Resolves the <see cref="CheckFailureRepair"/> declared on a failed
-    /// check, returning the corresponding <see cref="TaskDefinition"/> list
-    /// (or <c>null</c> when the check declares no repair, the repair limit
-    /// is reached, or the run cannot build a repair task for the current
-    /// failure counter).
+    /// Resolves repair tasks for a failed check, honoring the repair budget
+    /// unless the caller is explicitly bypassing it.
     /// </summary>
-    /// <param name="run">The grain's current run; read for repair counter when <paramref name="enforceLimit"/> is true.</param>
-    /// <param name="stageDef">The current stage spec.</param>
-    /// <param name="checkName">The name of the failing check.</param>
-    /// <param name="result">The runner-reported result, if available.</param>
-    /// <param name="enforceLimit">When true, return null once <c>run.GetRepairCount(checkName) >= repair.Limit</c>.</param>
     public IReadOnlyList<TaskDefinition>? ResolveRepairTasks(
         WorkflowRun run,
         StageDefinition? stageDef,
@@ -210,15 +138,9 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Retry-path helper: when the run is Failed with
-    /// <see cref="FailureReason.CheckUnrepaired"/> on a known check, builds
-    /// the repair tasks (limit not enforced — the retry path is the only
-    /// way back from <c>CheckUnrepaired</c>), clears the current stage's
-    /// checks running state, and calls <see cref="WorkflowRunExtensions.ScheduleCheckRepair"/>.
-    /// Returns <c>null</c> when the run is not in the
-    /// <c>CheckUnrepaired</c> shape or no repair can be resolved.
+    /// Retry is the escape hatch from <see cref="FailureReason.CheckUnrepaired"/>,
+    /// so it schedules the requested repair without consuming the normal budget.
     /// </summary>
-    /// <param name="run">The grain's current run, mutated in place.</param>
     public async Task<IReadOnlyList<WorkflowEvent>?> TryScheduleRequestedCheckRepairAsync(WorkflowRun run)
     {
         if (run.Status != WorkflowRunStatus.Failed)
@@ -238,19 +160,8 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Releases the current stage lock, clears the current stage's checks
-    /// running state, and — when a task is currently in flight — fails
-    /// that task with <see cref="WorkflowRunExtensions.FailTaskForStopped"/>.
-    /// The save path goes back to the grain so ETag conflict still triggers
-    /// the grain's <c>DeactivateOnIdle()</c> reload.
-    ///
-    /// Two save shapes are preserved verbatim: with the
-    /// <c>FailTaskForStopped</c> events when a task was running (these
-    /// events are also published via the bus by the store), or without
-    /// events when no task was running.
+    /// Clears running task/check state when execution is abandoned.
     /// </summary>
-    /// <param name="run">The grain's current run, mutated in place.</param>
-    /// <param name="reason">The reason surfaced to the task failure event.</param>
     public async Task ClearExecutableStateAsync(WorkflowRun run, string reason)
     {
         await _owner.ReleaseCurrentStageLocks(reason);
@@ -272,19 +183,6 @@ public sealed class WorkflowOutcomeProcessor
         await _owner.SaveAsync();
     }
 
-    /// <summary>
-    /// Dispatches a logical task: runs the session-health gate, returns
-    /// the existing work id if the task is already running, otherwise
-    /// calls <see cref="WorkflowRunExtensions.StartTask"/> and persists
-    /// the resulting events. The non-persisted runner id cache on the
-    /// grain is updated via the grain's internal setter, and the events
-    /// are dispatched to the grain's <c>On()</c> hook so any grain-side
-    /// reactions observe the new <c>TaskStarted</c>.
-    /// </summary>
-    /// <param name="run">The grain's current run, mutated in place when starting.</param>
-    /// <param name="logicalTaskId">The logical task id within the current stage.</param>
-    /// <param name="runnerId">The runner claiming the task.</param>
-    /// <param name="commitAsync">The grain's <c>CommitAsync</c> callback used by the session-health gate.</param>
     public async Task<string?> MarkTaskRunningAsync(
         WorkflowRun run,
         string logicalTaskId,
@@ -313,17 +211,6 @@ public sealed class WorkflowOutcomeProcessor
         return workId;
     }
 
-    /// <summary>
-    /// Writes the deterministic checks work id
-    /// (<see cref="ChecksWorkIdFor"/>) to the current stage's
-    /// <c>ChecksWorkId</c>, marks each matching check Running with
-    /// <c>StartedAt</c> = now, and flips the run status to Running. Called
-    /// by the claim path (<see cref="ClaimWorkItemAsync"/>) once a runner
-    /// has durably registered the work.
-    /// </summary>
-    /// <param name="run">The grain's current run, mutated in place.</param>
-    /// <param name="stage">The current stage id.</param>
-    /// <param name="items">The pending check items to dispatch.</param>
     public string MarkChecksRunning(WorkflowRun run, string stage, IReadOnlyList<CheckItem> items)
     {
         var checksWorkId = ChecksWorkIdFor(stage);
@@ -344,17 +231,8 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Builds a <see cref="WorkItem"/> for an offered work WITHOUT mutating
-    /// the run state. This is the offer-phase projection: it produces the
-    /// work item the runner takes away so it can durably claim it, but
-    /// leaves the task/check Pending and the run untouched. The state
-    /// transition to Running happens only when the runner calls back via
-    /// <c>ClaimAsync</c> (<see cref="ClaimWorkItemAsync"/>).
-    ///
-    /// The work id is deterministic so the same offer yields the same id
-    /// across calls: a task's id is its <see cref="TaskRun.Id"/>; a checks
-    /// batch's id is <c>checks-{stage}</c> (a stage has at most one
-    /// outstanding checks batch at a time — see <c>NextWork</c>).
+    /// Pure projection used before claiming. Work ids are stable: task id or
+    /// <c>checks-{stage}</c>.
     /// </summary>
     public WorkItem? BuildWorkItem(WorkflowRun run, WorkflowWork work)
     {
@@ -384,17 +262,8 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Claims an offered work item on behalf of a runner that has durably
-    /// registered it. This is the claim-phase counterpart of
-    /// <see cref="BuildWorkItem"/>: it performs the state transition to
-    /// Running (task via <see cref="WorkflowRunExtensions.StartTask"/>,
-    /// checks batch via <see cref="MarkChecksRunning"/>), persists it, and
-    /// returns the resolved work id the runner should use for reporting.
-    ///
-    /// Idempotent: a claim for an already-Running work item succeeds and
-    /// returns the in-flight work id. Returns <c>null</c> when the work id
-    /// no longer maps to offerable work in the current stage (the offer was
-    /// overtaken — e.g. another runner claimed it, or the stage advanced).
+    /// Transitions the resolved work item to Running. Re-claiming already
+    /// running work returns the in-flight id.
     /// </summary>
     public async Task<string?> ClaimWorkItemAsync(
         WorkflowRun run,
@@ -404,7 +273,6 @@ public sealed class WorkflowOutcomeProcessor
     {
         var currentStage = run.CurrentStage();
 
-        // Task claim: the offered work id equals the pending task's id.
         var task = currentStage.Tasks.FirstOrDefault(t => t.Id == workId);
         if (task is not null)
         {
@@ -419,10 +287,8 @@ public sealed class WorkflowOutcomeProcessor
             return claimedWorkId;
         }
 
-        // Checks claim: the offered work id is the deterministic checks id.
         if (workId == ChecksWorkIdFor(currentStage.Id))
         {
-            // If a batch is already running for this stage, claim is a no-op.
             if (!string.IsNullOrWhiteSpace(currentStage.ChecksWorkId))
             {
                 _owner.SetLastKnownRunnerId(runnerId);
@@ -436,11 +302,7 @@ public sealed class WorkflowOutcomeProcessor
             if (items.Count == 0) return null;
 
             var checksWorkId = MarkChecksRunning(run, currentStage.Id, items);
-            // MarkChecksRunning only mutates in-memory state; persist the
-            // claimed checks batch (task claim persists itself via
-            // MarkTaskRunningAsync). Empty events: checks claim emits no
-            // workflow events, but the run state must be saved so the
-            // Running status and ChecksWorkId survive grain deactivation.
+            // Checks claims emit no events, but the Running state must persist.
             await commitAsync([]);
             return checksWorkId;
         }
@@ -449,11 +311,7 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Deterministic work id for a checks batch on the given stage. A stage
-    /// has at most one outstanding checks batch at a time (tasks always
-    /// precede checks in <c>NextWork</c>), so the stage id alone identifies
-    /// the batch. This keeps the id stable across re-offers without mutable
-    /// staging state on the grain (which is [Reentrant]).
+    /// Stable work id for the single checks batch a stage can have in flight.
     /// </summary>
     public static string ChecksWorkIdFor(string stage) => $"checks-{stage}";
 
@@ -473,13 +331,7 @@ public sealed class WorkflowOutcomeProcessor
     }
 
     /// <summary>
-    /// Resets the current stage's checks running state: nulls
-    /// <c>ChecksWorkId</c> and demotes every still-Running check back to
-    /// <see cref="StageCheckStatus.Pending"/> with <c>StartedAt</c> cleared.
-    /// Used by the report-check-outcome path (after
-    /// <see cref="ProcessCheckOutcomeAsync"/>), by
-    /// <see cref="ClearExecutableStateAsync"/>, and by
-    /// <see cref="TryScheduleRequestedCheckRepairAsync"/>.
+    /// Clears the current checks batch and returns any Running checks to Pending.
     /// </summary>
     public void ResetChecksRunningState(WorkflowRun run)
     {

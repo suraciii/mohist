@@ -4,18 +4,8 @@ using Orleans.Serialization;
 
 namespace Mohist.Server.Workflow.Grains.Surrogates;
 
-// NOTE: WorkflowDefinition (and ApprovalConfig / ApprovalFeedbackConfig /
-// FeedbackTaskConfig) are intentionally NOT registered here. The control-plane
-// grain no longer holds or returns WorkflowDefinition — it only goes through
-// the narrow profileManager APIs (LoadStageSpecsAsync / LoadStructureAsync /
-// LoadApprovalConfigAsync), which deserialize into the runtime types and hand
-// the grain stage / structure / approval slices. WorkflowDefinition itself is
-// an internal persistence/management concern (IssueWorkflowProfileManager,
-// ProjectWorkflowProfileManager, WorkflowYamlSerializer, ResolvedTemplate)
-// serialized via System.Text.Json, not Orleans. The per-stage surrogates
-// below remain because StageDefinition / TaskDefinition / CheckDefinition are
-// still passed into grain methods (InitializeStage, AddTasksAsync,
-// BindArtifactUploadsAsync).
+// Only runtime slices that cross grain calls need Orleans surrogates here.
+// Full workflow definitions stay in the profile/persistence path and use JSON.
 
 [GenerateSerializer]
 public struct StageDefinitionSurrogate

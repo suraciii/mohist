@@ -12,20 +12,12 @@ using Orleans;
 namespace Mohist.Server.Workflow.Services.Artifacts;
 
 /// <summary>
-/// Domain service that turns runner-supplied artifact uploads into
-/// hidden pending <c>WorkflowArtifactPendingUploadRow</c> records.
-/// The service is invoked by the runner upload endpoint (T-005); it
-/// will be reused by the binding flow (T-007) when pending uploads
-/// are validated against the reporting workflow run and work item.
+/// Turns runner-supplied artifact uploads into hidden pending artifact rows.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Pending uploads are <em>not</em> user-visible <c>WorkflowArtifact</c>
-/// records. They live only as rows under
-/// <c>WorkflowArtifactPendingUploads</c> together with the underlying
-/// storage content, and become visible only after
-/// <c>WorkflowGrain.ReportResultAsync</c> binds them during task
-/// result reporting.
+/// records; they become visible only after task result reporting binds them.
 /// </para>
 /// <para>
 /// Idempotency key:
@@ -39,17 +31,12 @@ namespace Mohist.Server.Workflow.Services.Artifacts;
 public sealed class WorkflowArtifactUploadService : IScopedService
 {
     /// <summary>
-    /// Default TTL for a pending upload. Rows past expiry are eligible
-    /// for cleanup by a hosted TTL job; this value is intentionally
-    /// generous so retries across runner crashes are accepted.
+    /// Default TTL for pending uploads; generous enough for runner crash retry.
     /// </summary>
     public static readonly TimeSpan DefaultPendingTtl = TimeSpan.FromHours(24);
 
     /// <summary>
-    /// Content type used by the runner to signal a directory upload
-    /// carried as a JSON envelope of base64-encoded contained files.
-    /// The server decodes the envelope and persists the contained
-    /// files through <c>WriteDirectoryAsync</c>.
+    /// Directory upload envelope content type.
     /// </summary>
     public const string DirectoryContentType = "application/x-mohist-artifact-directory";
 

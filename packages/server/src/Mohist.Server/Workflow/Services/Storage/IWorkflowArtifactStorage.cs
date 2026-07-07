@@ -1,38 +1,18 @@
 namespace Mohist.Server.Workflow.Storage;
 
 /// <summary>
-/// Filesystem-backed storage for recorded <c>WorkflowArtifact</c>
-/// content. The service owns the on-disk layout rooted under
-/// <c>~/.mohist/artifacts/</c> and exposes path generation, write,
-/// and read primitives for the upload endpoint (T-005), the binding
-/// flow (T-007), and the content/browsing endpoints (T-008).
+/// Storage for recorded workflow artifact content. Storage paths are generated
+/// by the server; original source paths are preserved as metadata only.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Storage paths are generated or sanitized by the server. The
-/// original source artifact path is never used as a filesystem path
-/// segment; it is preserved as metadata only.
-/// </para>
-/// <para>
-/// The default storage root is
+/// Default file layout:
 /// <c>~/.mohist/artifacts/workflows/{workflowRunId}/tasks/{taskRunId}/artifacts/{artifactId}</c>.
-/// File artifacts persist <c>metadata.json</c> + <c>content</c>;
-/// directory artifacts persist <c>metadata.json</c> + a <c>files/</c>
-/// tree.
-/// </para>
 /// </remarks>
 public interface IWorkflowArtifactStorage
 {
     /// <summary>
-    /// Generates the storage path for a recorded artifact under the
-    /// configured storage root. The returned path is relative to the
-    /// storage root and is safe to persist on
-    /// <c>WorkflowArtifactRow.ArtifactStoragePath</c>.
+    /// Generates a storage-root-relative path safe to persist on the artifact row.
     /// </summary>
-    /// <param name="workflowRunId">Workflow run id from the upload/binding context.</param>
-    /// <param name="taskRunId">Server-derived producing task run id.</param>
-    /// <param name="artifactId">Mohist-generated artifact id.</param>
-    /// <param name="kind">Storage shape (file or directory).</param>
     string GenerateStoragePath(
         string workflowRunId,
         string taskRunId,
@@ -40,14 +20,8 @@ public interface IWorkflowArtifactStorage
         WorkflowArtifactStorageKind kind);
 
     /// <summary>
-    /// Persists a single file artifact. The supplied stream is read
-    /// exactly once and written atomically to the storage location's
-    /// <c>content</c> file. <c>metadata.json</c> is written alongside.
+    /// Persists a single file artifact, reading the stream exactly once.
     /// </summary>
-    /// <exception cref="WorkflowArtifactStorageException">
-    /// Thrown when the storage root cannot be created, the destination
-    /// already exists, or the supplied size is negative.
-    /// </exception>
     Task<WorkflowArtifactStorageWriteResult> WriteFileAsync(
         string storagePath,
         Stream content,
@@ -56,16 +30,9 @@ public interface IWorkflowArtifactStorage
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Persists a directory artifact. Entries are written under
-    /// <c>{storagePath}/files/</c> and validated against
-    /// <paramref name="limits"/>. Symlinks and entries that escape the
-    /// collection root are rejected.
+    /// Persists a directory artifact, rejecting symlinks, traversal, and
+    /// limit breaches.
     /// </summary>
-    /// <exception cref="WorkflowArtifactStorageException">
-    /// Thrown when an entry escapes the collection root, follows a
-    /// symlink, exceeds <see cref="WorkflowArtifactDirectoryLimits.MaxFileCount"/>,
-    /// or exceeds <see cref="WorkflowArtifactDirectoryLimits.MaxTotalBytes"/>.
-    /// </exception>
     Task<WorkflowArtifactStorageWriteResult> WriteDirectoryAsync(
         string storagePath,
         IReadOnlyList<WorkflowArtifactDirectoryEntryInput> entries,
@@ -75,73 +42,43 @@ public interface IWorkflowArtifactStorage
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns a read-only stream over the recorded file artifact
-    /// content. The caller is responsible for disposing the stream.
+    /// Opens recorded file content; the caller owns the returned stream.
     /// </summary>
-    /// <exception cref="WorkflowArtifactNotFoundException">
-    /// Thrown when the storage directory or <c>content</c> file does
-    /// not exist.
-    /// </exception>
-    /// <exception cref="WorkflowArtifactStorageException">
-    /// Thrown when the storage path does not point at a file artifact.
-    /// </exception>
     Stream OpenFileContent(string storagePath);
 
     /// <summary>
-    /// Lists the recorded contained files for a directory artifact in
-    /// stable, sorted order.
+    /// Lists contained files for a directory artifact in stable order.
     /// </summary>
-    /// <exception cref="WorkflowArtifactNotFoundException">
-    /// Thrown when the storage directory does not exist.
-    /// </exception>
-    /// <exception cref="WorkflowArtifactStorageException">
-    /// Thrown when the storage path does not point at a directory
-    /// artifact.
-    /// </exception>
     Task<WorkflowArtifactDirectoryListing> ListDirectoryEntriesAsync(
         string storagePath,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Opens a contained file inside a directory artifact for reading.
-    /// The <paramref name="relativePath"/> is normalized and validated
-    /// against traversal; it must match an entry previously written.
+    /// The relative path is normalized and validated against traversal.
     /// </summary>
-    /// <exception cref="WorkflowArtifactNotFoundException">
-    /// Thrown when the contained file is missing.
-    /// </exception>
-    /// <exception cref="WorkflowArtifactStorageException">
-    /// Thrown when the relative path escapes the collection.
-    /// </exception>
     Stream OpenDirectoryEntry(string storagePath, string relativePath);
 
     /// <summary>
-    /// Reads the <c>metadata.json</c> for a stored artifact. Returns
-    /// <c>null</c> if no metadata file is present.
+    /// Reads the stored artifact metadata, if present.
     /// </summary>
     Task<WorkflowArtifactStorageMetadata?> ReadMetadataAsync(
         string storagePath,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Resolves a storage path (relative to the storage root) into an
-    /// absolute filesystem path.
+    /// Resolves a storage-root-relative path into an absolute filesystem path.
     /// </summary>
     string ResolveAbsolutePath(string storagePath);
 
     /// <summary>
-    /// Storage root resolved from configuration. Exposed for callers
-    /// that need it for diagnostics; the public API operates on
-    /// relative paths.
+    /// Storage root resolved from configuration.
     /// </summary>
     string StorageRoot { get; }
 }
 
 /// <summary>
-/// A single contained file to be persisted inside a directory
-/// artifact. The entry carries the relative path within the
-/// collection and a content supplier; the supplier is read once,
-/// during the directory write.
+/// A single contained file to persist inside a directory artifact.
 /// </summary>
 public sealed class WorkflowArtifactDirectoryEntryInput
 {
@@ -152,16 +89,13 @@ public sealed class WorkflowArtifactDirectoryEntryInput
     public string? ContentType { get; set; }
 
     /// <summary>
-    /// Supplier that yields the file content. Invoked exactly once
-    /// during the write. Implementations should return a stream
-    /// positioned at the start of the content.
+    /// Supplier invoked once during the write; returns a stream at position 0.
     /// </summary>
     public Func<Stream> OpenContent { get; set; } = static () => Stream.Null;
 }
 
 /// <summary>
-/// Base exception for storage-level errors. The HTTP layer is expected
-/// to translate this into the appropriate status code.
+/// Base exception for storage-level errors.
 /// </summary>
 public class WorkflowArtifactStorageException : Exception
 {
@@ -170,10 +104,7 @@ public class WorkflowArtifactStorageException : Exception
 }
 
 /// <summary>
-/// Raised when the recorded storage content cannot be located. This
-/// is distinct from a binding-time or validation error: the artifact
-/// row exists but the on-disk content is gone (drift, manual cleanup,
-/// partial write recovery).
+/// Raised when an artifact row exists but its recorded content is missing.
 /// </summary>
 public sealed class WorkflowArtifactNotFoundException : WorkflowArtifactStorageException
 {
