@@ -402,4 +402,90 @@ public class ConfigServiceSpecs : IAsyncLifetime
         Assert.Contains("ERROR", levels);
         Assert.Equal(4, levels.Count);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task ReadConfigFile_WithLineComments_ParsesAllKeys()
+    {
+        var jsonc = "// leading line comment\n{\n  \"Mohist\": {\n    // nested line comment\n    \"Config\": {\n      \"serverPort\": 8080,\n      \"serverHost\": \"example\"\n    }\n  }\n}\n";
+        await File.WriteAllTextAsync(_configPath, jsonc);
+
+        var cfg = await _svc.GetConfigAsync();
+
+        Assert.Equal(8080, cfg["serverPort"]);
+        Assert.Equal("example", cfg["serverHost"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task ReadConfigFile_WithBlockCommentsAndTrailingCommas_ParsesAllKeys()
+    {
+        await File.WriteAllTextAsync(_configPath, """
+            /* file header block comment */
+            {
+              "Mohist": {
+                "Config": {
+                  "serverPort": 8081, /* inline block */
+                  "serverHost": "host",
+                },
+              },
+            }
+            """);
+
+        var cfg = await _svc.GetConfigAsync();
+
+        Assert.Equal(8081, cfg["serverPort"]);
+        Assert.Equal("host", cfg["serverHost"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task ReadConfigFile_GenuinelyMalformed_ReturnsEmptyDictionarySoDefaultsApply()
+    {
+        await File.WriteAllTextAsync(_configPath, "{ this is not jsonc ");
+
+        var cfg = await _svc.GetConfigAsync();
+
+        // The schema-backed defaults still come back; nothing throws.
+        Assert.Equal(3456, cfg["serverPort"]);
+        Assert.Equal("localhost", cfg["serverHost"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task WriteConfigFileAsync_RoundTripsCommentedConfig_AndAppliesNewValue()
+    {
+        await File.WriteAllTextAsync(_configPath, """
+            // user comment we should be able to load
+            {
+              "Mohist": {
+                "Config": {
+                  "serverHost": "before"
+                }
+              }
+            }
+            """);
+
+        await _svc.SetAsync("serverHost", "after");
+
+        var cfg = await _svc.GetConfigAsync();
+        Assert.Equal("after", cfg["serverHost"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task WriteConfigFileAsync_OnMalformedExistingFile_FallsBackToFreshJsonObjectAndAppliesChange()
+    {
+        await File.WriteAllTextAsync(_configPath, "{ broken jsonc ");
+
+        await _svc.SetAsync("serverPort", 9090);
+
+        var cfg = await _svc.GetConfigAsync();
+        Assert.Equal(9090, cfg["serverPort"]);
+    }
 }

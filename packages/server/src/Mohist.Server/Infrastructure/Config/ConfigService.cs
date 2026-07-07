@@ -240,8 +240,7 @@ public class ConfigService : ISingletonService
         try
         {
             var json = File.ReadAllText(_configPath);
-            var cleaned = MohistConfigurationExtensions.StripJsoncComments(json);
-            var doc = JsonDocument.Parse(cleaned);
+            var doc = JsonDocument.Parse(json, JsoncDocumentOptions);
             var result = new Dictionary<string, JsonNode?>();
             FlattenJson(doc.RootElement, "", result);
             return result;
@@ -263,10 +262,9 @@ public class ConfigService : ISingletonService
         if (File.Exists(_configPath))
         {
             var json = await File.ReadAllTextAsync(_configPath);
-            var cleaned = MohistConfigurationExtensions.StripJsoncComments(json);
             try
             {
-                root = JsonNode.Parse(cleaned)?.AsObject();
+                root = JsonNode.Parse(json, documentOptions: JsoncDocumentOptions)?.AsObject();
             }
             catch
             {
@@ -331,6 +329,12 @@ public class ConfigService : ISingletonService
         }
     }
 
+    private static readonly JsonDocumentOptions JsoncDocumentOptions = new()
+    {
+        CommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
+    };
+
     private static void FlattenJson(JsonElement element, string prefix, Dictionary<string, JsonNode?> result)
     {
         switch (element.ValueKind)
@@ -341,18 +345,18 @@ public class ConfigService : ISingletonService
                     var newKey = string.IsNullOrEmpty(prefix) ? property.Name : $"{prefix}:{property.Name}";
                     if (property.Value.ValueKind == JsonValueKind.Object || property.Value.ValueKind == JsonValueKind.Array)
                     {
-                        result[newKey] = JsonNode.Parse(property.Value.GetRawText());
+                        result[newKey] = JsonNode.Parse(property.Value.GetRawText(), documentOptions: JsoncDocumentOptions);
                         FlattenJson(property.Value, newKey, result);
                     }
                     else
-                        result[newKey] = JsonNode.Parse(property.Value.GetRawText());
+                        result[newKey] = JsonNode.Parse(property.Value.GetRawText(), documentOptions: JsoncDocumentOptions);
                 }
                 break;
             case JsonValueKind.Array:
-                result[prefix] = JsonNode.Parse(element.GetRawText());
+                result[prefix] = JsonNode.Parse(element.GetRawText(), documentOptions: JsoncDocumentOptions);
                 break;
             default:
-                result[prefix] = JsonNode.Parse(element.GetRawText());
+                result[prefix] = JsonNode.Parse(element.GetRawText(), documentOptions: JsoncDocumentOptions);
                 break;
         }
     }
