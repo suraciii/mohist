@@ -506,7 +506,8 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
 
     const validationError = screen.getByText('Must be at least 1 minute')
     expect(validationError).toBeInTheDocument()
-    expect(validationError.className).toContain('text-red-700')
+    expect(validationError.className).toContain('text-danger-foreground')
+    expect(validationError.className).not.toContain('text-red-700')
     expect(validationError).toHaveAttribute('role', 'alert')
 
     expect(timeoutInput).toHaveAttribute('aria-invalid', 'true')

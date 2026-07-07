@@ -1,0 +1,27 @@
+## Codebase Patterns
+
+- `packages/web/src/shared/ui/components/{badge,button}.tsx` use cva variants. Existing tests on these primitives were absent — created `*.test.tsx` colocated.
+- The bare `--destructive` token (without `-subtle`/`-foreground`/`-border` siblings) is still referenced by `aria-invalid` utilities in primitives and elsewhere; T-001 only retires the `bg-destructive/10 text-destructive` class set on Badge/Button variants.
+- `aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40` in the Badge/Button base classes deliberately still uses the bare `--destructive` token — these are NOT the `destructive` variant and are out of scope for T-001.
+- `text-destructive` (without `bg-` or `border-`) is used by non-variant code in `ChartContainer.tsx`, `AgentSessionComposerPage.tsx` — also not the Badge/Button variant path; later tasks can decide whether to retire those.
+- `AlertDialog` already had a `tone === 'destructive'` branch; only the inline `bg-red-600 text-white hover:bg-red-700` overlay is removed. The dialog itself still carries the same destructive button visual treatment (now via the variant).
+- Tailwind v4 dark theme is driven by `.dark` parent selector with `@custom-variant dark` configured in `app/styles/index.css`. Tokens are dark-mode-aware via `:root` vs `.dark` rule blocks. The variant classes produced by cva (`bg-danger-subtle`, `text-danger-foreground`, `border-danger-border`) resolve automatically.
+- Tests previously asserted `text-destructive` / `text-red-700` in three downstream files (`LinkedIssueRow.removeConfirm.test.tsx`, `AgentSettingsSection.test.tsx`, `LabelCatalogSection.test.tsx`) for the now-replaced behavior — updated them to assert against the new token classes.
+
+## Gotchas
+
+- cva's `ConfigVariants` type only enumerates `variant` and `size` keys; passing `disabled: true` to `buttonVariants({...})` triggers TS2353. Test by rendering the component with `disabled` prop instead, or assert the variant class string and check the base classes separately for `disabled:` utilities.
+- `useRender.ComponentProps<"span">` (Badge) and `ButtonPrimitive.Props` (Button) are the right prop types; spreading `...props` lets the variants compose with size-specific layout classes via `cn(buttonVariants({ variant, size, className }))`.
+- The `--warning` family in light theme had three hues (70/80/75) before this task. Dark theme was already consistent at hue 75. Aligning light-theme `--warning` and `--warning-subtle` to hue 75 matches the existing dark-theme values and the existing `--warning-border`.
+
+## Decisions
+
+- `destructive` variant on both Badge and Button is duplicated as a literal class string matching `danger` (rather than using cva's `variants: { destructive: dangerVariant }` shorthand) to keep the cva variant record readable and to make a future divergence auditable.
+- Field-error text uses `text-danger-foreground` rather than `text-danger` because the base foreground token (`--danger-foreground`) is the high-contrast text color (oklch 0.985 light / 0.145 dark) and pairs correctly with `bg-danger-subtle` if anyone ever wraps the error in a banner; `text-danger` is the raw hue token and is not appropriate for body text.
+
+## Handoff Notes for Downstream Tasks
+
+- T-002 will build the `shared/status-presentation/` layer; it can consume the new `success`/`warning`/`info`/`danger` Badge variants directly.
+- T-003 will rewrite `entities/issue/lib/status-badge.ts` and `widgets/issue-workflow/ui/WorkflowRunStatusPill.tsx`. The `text-destructive` / `text-red-700` assertions in their old tests will need a similar update to token-backed classes when those tests are rewritten.
+- T-005 will rely on these Button variants (`success`/`warning`/`outline`) to replace bespoke action colors in `WorkspacePanel`/`BranchBar`/`TaskLogPanel`.
+- The `<Badge>` and `<Button>` components retain their old API; `variant="destructive"` call sites now get the soft `danger` token treatment (visually nearly identical to before — both used `bg-destructive/10`).

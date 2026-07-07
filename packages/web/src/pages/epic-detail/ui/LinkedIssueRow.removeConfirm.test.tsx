@@ -268,7 +268,11 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () =>
     fireEvent.click(screen.getByTestId('linked-issue-remove'))
 
     const confirm = screen.getByTestId('linked-issue-remove-confirm')
-    expect(confirm.className).toContain('text-destructive')
+    expect(confirm.className).toContain('text-danger-foreground')
+    expect(confirm.className).toContain('bg-danger-subtle')
+    expect(confirm.className).toContain('border-danger-border')
+    expect(confirm.className).not.toContain('text-destructive')
+    expect(confirm.className).not.toContain('bg-red-')
   })
 
   it('the Cancel button uses the outline variant', () => {

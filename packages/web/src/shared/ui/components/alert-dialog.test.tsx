@@ -215,7 +215,12 @@ describe('shared/ui AlertDialog', () => {
     expect(dialog).toHaveAttribute('data-tone', 'destructive')
 
     const confirm = withinDialog(dialog).getByTestId('alert-dialog-confirm')
-    expect(confirm.className).toContain('bg-red-600')
+    expect(confirm.className).toContain('bg-danger-subtle')
+    expect(confirm.className).toContain('text-danger-foreground')
+    expect(confirm.className).toContain('border-danger-border')
+    expect(confirm.className).not.toContain('bg-red-600')
+    expect(confirm.className).not.toContain('bg-red-700')
+    expect(confirm.className).not.toContain('text-white')
 
     expect(dialog.querySelector('button[aria-label="Close"]')).toBeNull()
   })
@@ -228,6 +233,7 @@ describe('shared/ui AlertDialog', () => {
 
     expect(dialog).toHaveAttribute('data-tone', 'default')
     const confirm = withinDialog(dialog).getByTestId('alert-dialog-confirm')
+    expect(confirm.className).not.toContain('bg-danger-subtle')
     expect(confirm.className).not.toContain('bg-red-600')
   })
 

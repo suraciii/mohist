@@ -85,9 +85,9 @@
     --success-foreground: oklch(0.985 0 0);
     --success-subtle: oklch(0.96 0.05 145);
     --success-border: oklch(0.84 0.10 145);
-    --warning: oklch(0.55 0.15 70);
+    --warning: oklch(0.55 0.15 75);
     --warning-foreground: oklch(0.985 0 0);
-    --warning-subtle: oklch(0.96 0.06 80);
+    --warning-subtle: oklch(0.96 0.06 75);
     --warning-border: oklch(0.84 0.11 75);
     --info: oklch(0.50 0.16 245);
     --info-foreground: oklch(0.985 0 0);
