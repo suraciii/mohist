@@ -191,5 +191,65 @@ issue-391 progress notes (working memory — appended as work proceeds)
 - T-005 (CLI `mo agent subscription create|list|delete`) consumes the same T-002 endpoints and so only needs to mirror these wire shapes — no schema work required.
 - `formatAgentSubscriptionFilter` in `packages/web/src/entities/agent/api/subscriptions.ts` is the small "filter → single-line string" UI helper the Web renders as the row subtitle; the CLI should consider reimplementing the same formatter (or simply echo `filter.type` + `?source=...` + `?subject=...`) for consistency.
 
+## T-005 — CLI 订阅命令面（create / list / delete）
+
+**Outcome**: Done. All 811 / 814 CLI tests pass (the 3 pre-existing failures in `CliReferenceDocsSpecs` are unrelated — they look for `"mo server start"` in `docs/cli-reference.md` and pre-date T-005). All 20 new `CliAgentSubscriptionCommandSpecs` are green; `dotnet build packages/cli/Mohist.Cli.csproj` clean (no warnings, `TreatWarningsAsErrors`).
+
+**Command naming** (per task notes "命令命名实施时对齐现有 mo agent 子命令风格并记录于 notes"):
+- `mo agent subscription create <agent>` (matches the noun-verb style of `mo agent session launch` / `mo workflow approve` etc.)
+- `mo agent subscription list <agent>` (with `ls` alias, matches `mo agent list`)
+- `mo agent subscription delete <agent> <subscription-id>` (with `rm` alias, matches `mo agent archive/delete`)
+
+**Key files**:
+- Modified `packages/cli/Mohist.Cli/MohistCliApi.cs` — added `AgentSubscriptionList` + `AgentSubscriptionShow` to the `TableShape` enum (so the table renderer can dispatch).
+- Modified `packages/cli/Mohist.Cli/TableRenderer.cs` — added the two new dispatch cases in `Render(...)`.
+- Modified `packages/cli/Mohist.Cli/TableRenderer.Entities.cs` — added `RenderAgentSubscriptionList` (table: id / name / filter type / priority / status), `RenderAgentSubscriptionShow` (key-value show view), and the `FormatSubscriptionPriority` helper that handles the JSON `priority` field which may arrive as either `int?` null, `int`, or `string` (depends on the serializer).
+- Modified `packages/cli/Mohist.Cli/MohistCliCommands.Agent.cs` — added `BuildSubscription` group + three subcommands (`BuildSubscriptionCreate` / `BuildSubscriptionList` / `BuildSubscriptionDelete`), wired into `Build(api)` next to `BuildSession(api)`.
+- New `packages/cli/tests/Mohist.Cli.Tests/CliAgentSubscriptionCommandSpecs.cs` — 20 specs.
+
+**create command** (`mo agent subscription create <agent>`):
+- Required: `--name <name>`, `--filter-type <type>`, `--response-prompt|--response-prompt-file|--response-prompt-stdin <body>` (the same `BodyInputResolver` pattern as `mo agent session launch` / `mo issue create`).
+- Optional: `--filter-source <source>`, `--filter-subject <subject>`, `--priority <int>`, `--project|--project-id`, `-o/--output` (default `table`, supports `json`).
+- POSTs `/api/projects/{projectRef}/agents/{agentId}/subscriptions` with body `{ name, filter: { type, source?, subject? }, responsePrompt, priority? }`.
+- On success: prints the created subscription as a `table` show view (default) or raw JSON envelope (`--output json`).
+- On conflict: surfaces server `409 agent_archived` (creating on archived Agent), `409 subscription_name_conflict` (rename clash), and other server errors verbatim via `ReadDataOrPrintErrorAsync`.
+
+**list command** (`mo agent subscription list <agent>`):
+- Resolves the agent by `agent_*` id (single GET) or by name (list-then-match, same as `mo agent show`).
+- GETs `/api/projects/{projectRef}/agents/{agentId}/subscriptions`.
+- Renders a table with columns `id / name / filter / priority / status`. The `filter` column shows the type matcher only (single-line); full source/subject constraints are surfaced in `show` and via `--output json`.
+- Empty list prints `No subscriptions` (matches `mo agent list` empty-state shape).
+- `-o/--output json` emits the raw server envelope.
+
+**delete command** (`mo agent subscription delete <agent> <subscription-id>`):
+- Resolves the agent (id or name) then DELETEs `/api/projects/{projectRef}/agents/{agentId}/subscriptions/{subscriptionId}`.
+- Alias: `rm` (mirrors `mo agent archive/delete` aliases).
+- On success prints `Subscription <id> deleted` (the only place we write a non-JSON success line in delete — matches `mo agent archive` which writes `Agent <name> (<id>) archived`).
+- 404 surfaces verbatim via the server envelope (`code = null` because T-002's `NotFound` does not set a code).
+
+**Agent resolution reuse** — all three commands call the existing private `ResolveAgentAsync(api, projectId, agentRef)` defined at `MohistCliCommands.Agent.cs:977`. id-prefix `agent_` → by id; otherwise name-then-id from `?all=true`; `null` → `api.Error.WriteLine("Agent '<name>' not found")` + exit `1`. This is the same rule `mo agent show/update/archive` use, so spec scenario `Subscription commands resolve the Agent the same way as Agent CRUD` is satisfied by sharing the function rather than duplicating it.
+
+**Archived-Agent gating** — handled server-side (T-002 returns `409 agent_archived`). The CLI surfaces the error verbatim via `MohistCliApi.GetDataOrPrintErrorAsync`'s path (T-002 conflict payload `{ success: false, error: "Archived agents cannot receive new subscriptions", code: "agent_archived" }` → `api.Error.WriteLine($"{error} ({code})")` → exit code `FailureExitCode(HttpStatusCode.Conflict)` = `1`).
+
+**Body-input resolution before agent resolve** — on the create path the prompt is resolved via `BodyInputResolver.ResolveAsync(...)` *before* `ResolveAgentAsync` is called. This mirrors the order in `mo agent session launch` (which resolves the prompt before the network call) and gives the right UX: if the prompt is missing or the file path is wrong, the user gets the error without the server ever being contacted. Pinned by `SubscriptionCreate_MissingResponsePromptFailsClearly` (asserts `handler.Requests` is empty on missing prompt).
+
+**Spec scenarios verified**:
+- **Create a subscription via CLI** (`SubscriptionCreate_ResolvesAgentById_AndSendsRequiredFields`, `_ResolvesAgentByName_AndSendsFilterConstraintsAndPriority`, `_ReadsResponsePromptFromFile`, `_ReadsResponsePromptFromStdin`, `_JsonOutputPrintsRawServerPayload`, `_RespectsProjectIdFlag`).
+- **List subscriptions for an Agent via CLI** (`SubscriptionList_ResolvesAgentAndEnumeratesSubscriptionsTable`, `_EmptyListPrintsNoSubscriptions`).
+- **Delete a subscription via CLI** (`SubscriptionDelete_ResolvesAgentAndSendsDeleteRequest`, `_RmAliasProducesIdenticalRequest`, `_NotFoundFailsClearly`).
+- **Subscription commands resolve the Agent the same way as Agent CRUD** (`SubscriptionCreate_ResolvesAgentById_...`, `_ResolvesAgentByName_...`, `_UnknownAgentFailsClearly`, `SubscriptionList_UnknownAgentFailsClearly`, `SubscriptionDelete_UnknownAgentFailsClearly` — all share `ResolveAgentAsync`).
+- **Creating a subscription on an archived Agent is rejected from the configuration surfaces** (`SubscriptionCreate_ArchivedAgentConflictFailsClearly`).
+- **CLI build + tests green** — `dotnet build packages/cli/Mohist.Cli.csproj` clean, `dotnet test packages/cli/tests/Mohist.Cli.Tests` 811/814 (3 pre-existing `CliReferenceDocsSpecs` failures unrelated to T-005).
+
+**Design notes**:
+- **Filter column in `list` is intentionally narrow** — it shows the type matcher only. The full constraint set (`source` / `subject`) is in the `show` view and via `--output json`. This keeps the row legible at terminal width (the test for the `source=...` string is an explicit `DoesNotContain` to pin this contract).
+- **`FormatSubscriptionPriority` helper** — the JSON `priority` field can be `null`, a number, or (in some serializer configurations) a string. The helper normalises all three into a printable string with `"default"` for null. Pinned indirectly by the list test (`Assert.Contains("default", stdout)` for a row whose `priority` is `null`).
+- **Subscription `delete` is silent on non-failure paths** — T-002's DELETE returns `200 OK` with an empty envelope body. We print `Subscription <id> deleted` to mirror the `mo agent archive` UX (`Agent <name> (<id>) archived`).
+
+**Gotchas**:
+- **`response-prompt-stdin` vs `response-prompt`** — `BodyInputResolver` requires exactly one source. Passing `--response-prompt ""` *plus* `--response-prompt-stdin` is treated as two sources and rejected (good — same pattern as `mo agent session launch`).
+- **Agent id prefix** — `ResolveAgentAsync` does an exact `agent_` prefix check, so a friendly name starting with `agent_` would still be treated as an id. This is the existing behavior (matches `mo agent show`); not new to T-005.
+- **`mo agent subscription delete` requires both `<agent>` and `<subscription-id>`** — the subscription id is not project-global (T-002 scopes it to the owning Agent), so deleting without an agent would risk misrouting. Pinning both is consistent with the existing `mo workflow approve <runId>` style of always scoping under the parent.
+
 (End of file - total X lines — see file)
 
