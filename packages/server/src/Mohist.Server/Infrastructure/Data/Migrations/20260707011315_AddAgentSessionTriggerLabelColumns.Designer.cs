@@ -998,12 +998,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("LabelTriggerEventId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/trigger/event-id\"')", true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/trigger/event-id\"')", false);
 
                     b.Property<string>("LabelTriggerSubscriptionId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/trigger/subscription-id\"')", true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/trigger/subscription-id\"')", false);
 
                     b.Property<string>("LabelWorkId")
                         .ValueGeneratedOnAddOrUpdate()
