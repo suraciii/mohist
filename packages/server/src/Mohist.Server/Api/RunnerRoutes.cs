@@ -165,7 +165,16 @@ public static class RunnerRoutes
         // handler; /poll no longer carries CleanupPolicy (T-002 removed the
         // field from WorkDispatchResponse atomically with the runner
         // switch to /config).
-        group.MapGet("/config", (Microsoft.Extensions.Options.IOptions<CleanupPolicyOptions> cleanupPolicyOptions) =>
+        // Per-request re-bind from the currently-loaded IConfiguration.
+        // IOptions<T> would snapshot once at startup; IOptionsSnapshot<T>
+        // is request-scoped (matches the minimal-API handler lifetime),
+        // rebuilds every request through OptionsFactory<T>, and honors
+        // every registered IConfigureOptions<T> in registration order.
+        // Combined with the T-001 native-AddJsonFile wiring, a reload
+        // of config.jsonc reaches the next /config call without a
+        // server restart. No singleton consumes CleanupPolicyOptions
+        // today, so IOptionsMonitor is unnecessary machinery.
+        group.MapGet("/config", (Microsoft.Extensions.Options.IOptionsSnapshot<CleanupPolicyOptions> cleanupPolicyOptions) =>
         {
             return Results.Json(
                 new RunnerConfigResponse(ToCleanupPolicyDto(cleanupPolicyOptions.Value)),

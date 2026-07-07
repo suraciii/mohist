@@ -47,3 +47,24 @@
 - T-002 will switch `GET /api/runner/{runnerId}/config` in `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs` from `IOptions<CleanupPolicyOptions>` to `IOptionsSnapshot<CleanupPolicyOptions>`. The `services.Configure<CleanupPolicyOptions>(...)` binding in `MohistServiceRegistration.cs:116` already emits change tokens; combined with T-001's source-reload wiring, `IOptionsSnapshot` will pick up the new values on the next request automatically.
 - The hot-reload spec (per design D5) should trigger reload via `((IConfigurationRoot)cfg).Reload()` after rewriting a temp JSONC — **never** by waiting on the OS watcher. Use a per-test harness similar to the existing `ConfigHarness` pattern in `RunnerConfigApiSpecs.cs:374`.
 - Existing `RunnerConfigApiSpecs` test-injected `services.Configure<CleanupPolicyOptions>(opts => {...})` overrides (`RunnerConfigApiSpecs.cs:493-501`) keep working under `IOptionsSnapshot` because `OptionsFactory<T>` runs every registered `IConfigureOptions<T>` on each snapshot build. The existing test suite should pass unchanged.
+
+## T-002: Switch runner config endpoint to live options consumption
+
+### What landed
+
+- `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs`
+  - Changed `GET /api/runner/{runnerId}/config` from `IOptions<CleanupPolicyOptions>` to `IOptionsSnapshot<CleanupPolicyOptions>`.
+  - Added a local comment documenting why request-scoped snapshots are the right fit: the route rebinds through `OptionsFactory<T>` per request and no singleton consumes `CleanupPolicyOptions`.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Config/ConfigHotReloadSpecs.cs`
+  - Added focused coverage for the T-002 live-read contract: JSONC file source -> deterministic `IConfigurationRoot.Reload()` -> fresh `IOptionsSnapshot<CleanupPolicyOptions>` in a new scope.
+  - Covers budget update, retention update, and unconfigured all-null options.
+
+### Gotchas
+
+- A full `MohistWebApplicationFactory` / `WebApplication` route-host harness repeatedly hung while building the test configuration source. The smallest stable test boundary is the options chain itself; existing `RunnerConfigApiSpecs` already locks the HTTP `/config` wire shape and continued to pass after the handler switched to `IOptionsSnapshot`.
+- The T-002 spec intentionally uses `AddJsonFile(..., reloadOnChange: false)` and calls `IConfigurationRoot.Reload()` explicitly. T-001 already has structural tests proving production `AddMohistConfigFile` wires `reloadOnChange: true`; T-002 only needs a deterministic reload trigger and must not depend on OS watcher latency.
+
+### Verification
+
+- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj -p:SkipWebBuild=true --filter "FullyQualifiedName~ConfigHotReloadSpecs"` -> **3 passed, 0 failed**.
+- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj -p:SkipWebBuild=true --filter "FullyQualifiedName~RunnerConfigApiSpecs"` -> **9 passed, 0 failed**.
