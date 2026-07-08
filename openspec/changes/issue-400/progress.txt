@@ -4,6 +4,9 @@
 - `StageColumn`'s column classes are `flex flex-col min-w-[280px] max-w-[420px] flex-1 rounded-xl border bg-card/50 ...` — the raised `max-w-[420px]` cap keeps the core groups from stretching into unreadable wide blocks at large viewports.
 - `filterCancelledFromColumns` is intentionally an identity function (documented seam); visibility is a render-time concern owned by `KanbanBoard.tsx` + `StageColumn`. Cancelled column carries full issue set through the pipeline so tab counts / counts / "n hidden" affordances stay stable.
 - State `showCancelled` is local React state. `cancelledCount` (derived from `allColumns`, pre-filter, pre-toggle) is what mobile tab counts and the in-list Show/Hide link read. This is the contract tested by the "Mobile cancelled tab count is independent of showCancelled" describe.
+- For IssueCard density assertions, the title is a bare `<h3>` (no `data-testid`) so the test helper `getTitleElement(card: HTMLElement)` queries `card.querySelector('h3')` and returns the typed node. Keep this helper local to the density describe — extending it elsewhere risks coupling unrelated tests to the title-element selector.
+- The six-dimension test deliberately uses an **active idle** card (no agent running, health=Active) so all six signals are independently observable: `issue-number`, `<h3>`, `priority-chip`, `workflow-stage-badge`, `workflow-stage-progress`, and `rerun-button`. A *running* card would fold stage+progress into the status pill and hide the rerun button, collapsing the independent signal set.
+- Existing `data-testid` anchors cover the full signal set: `issue-number`, `priority-chip`, `status-pill`, `workflow-stage-badge`, `workflow-stage-progress`, `rerun-button`. The title `<h3>` is queried by tag. No new testids are needed for card-density assertions.
 
 ## T-001 — Desktop Cancelled column default-collapse to compact stub reclaiming space for core groups
 
@@ -17,8 +20,21 @@
 - The mobile tab badge (and `cancelledCount`) reads from `allColumns` (pre-filter, pre-toggle), so the existing mobile tab count independence test (`Mobile cancelled tab count is independent of showCancelled`) remains untouched and still passes — mobile layout is unaffected.
 - `npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes (4481 tests, 1 skipped pre-existing).
 
+## T-002 — Codify six-dimension card-density invariant in regression tests
+
+- The IssueCard source already renders all six decision dimensions; this task added purely additive regression coverage to `IssueCard.test.tsx`. No production code change to `IssueCard.tsx`.
+- Added two tests inside the existing `IssueCard - stage folds into StatusPill instead of stacking` describe: one for the **blocked** fold (asserts `status-pill` present with `'Blocked · Build 2/5'`, no `workflow-stage-badge`, no `workflow-stage-progress`, and `issue-number` / `priority-chip` / `<h3>` title remain visible); one for the **approval-awaiting** fold (same shape with `'Approval · Plan 2/5'`).
+- Added a new `IssueCard - six-dimension card-density invariant` describe with five tests:
+  1. **All six dimensions exposed** for an active idle card (priority + workflow stage + progress, no agent running). Status indicator is null → no `status-pill`, but `workflow-stage-badge` carries the stage, `workflow-stage-progress` shows the fraction, and `rerun-button` is the health signal (idle/queued/rerunnable).
+  2. **Active card with no status pill**: same shape but no progress; `workflow-stage-badge` stands alone as the stage dimension.
+  3. **Title has bounded line clamp**: assert `style.webkitLineClamp === '2'`, `webkitBoxOrient === 'vertical'`, `overflow === 'hidden'`, `display === '-webkit-box'` on the `<h3>` title element — locked against future Tailwind/utility churn.
+  4. **Sibling compactness**: render four cards inside a column mock and assert each card's `<h3>` keeps the same four clamp properties and full title text, locking the "cards do not push each other out of compact density" invariant.
+  5. **Non-active card preserves number/title/priority**: a blocked card with `number: 211` and `priority: 'p1'` still exposes the issue number `#211` and `P1` chip alongside the folded status pill.
+- `npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes (4488 tests, 1 skipped pre-existing; +7 new tests vs. the prior T-001 baseline of 4481).
+
 ## Gotchas
 
 - The StageColumn class string is on a single line in the source — editing it means re-matching the full string, since conditional whitespace inside the templated class is easy to mistype.
 - The DOM-trees-always-render split (desktop `hidden md:flex` + mobile `md:hidden`) means there's always both a desktop row and a mobile column in the document, even if jsdom-class-hidden. Tests that target the desktop board by testid (`kanban-board-row`, `stage-column-*`) still locate the right elements because each testid is rendered exactly once.
 - `filterCancelledFromColumns` is an identity seam by design; do not move visibility decisions back into the model — that would break tab counts (already covered by the "cancelled tab count is independent of showCancelled" test).
+- jsdom does NOT expose `WebkitLineClamp` via `getComputedStyle()` (it is a CSS-only runtime property, not on `CSSStyleDeclaration.prototype`). Card-density tests read `style.webkitLineClamp` directly from the inline `style` prop on the `<h3>` (set by `IssueCard.tsx:381-386`), not from computed style.
