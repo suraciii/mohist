@@ -397,7 +397,7 @@ public class IssueWorkflowCompletionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task DeliveredThroughInMemoryBus_TypedHandlerDispatches()
+    public async Task HandleAsync_CompletesIssue_ForWorkflowRunIdInEventSource()
     {
         await using var database = CreateDatabase();
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1,
@@ -408,17 +408,7 @@ public class IssueWorkflowCompletionHandlerSpecs
         var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
-        var subscriptions = new List<Subscription>
-        {
-            new(EventCatalog.ReverseDns.WorkflowRunCompleted, handler,
-                (h, e, ct) => ((ICloudEventHandler)h).HandleAsync(e, ct)),
-        };
-        var bus = new InMemoryEventBus(subscriptions, NullLogger<InMemoryEventBus>.Instance);
-
-        await bus.PublishAsync(
-            data: new { },
-            type: EventCatalog.ReverseDns.WorkflowRunCompleted,
-            source: "/mohist/workflow-runs/wr_completed");
+        await handler.HandleAsync(BuildCompletedEvent(workflowRunId: "wr_completed"), CancellationToken.None);
 
         var call = Assert.Single(grains.Calls);
         Assert.Equal("issue_1", call.IssueId);

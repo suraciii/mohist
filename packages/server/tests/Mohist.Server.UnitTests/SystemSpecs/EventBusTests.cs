@@ -9,7 +9,7 @@ public class EventBusTests
     [Fact]
     public async Task PublishAsync_NoSubscriber_DoesNotThrow()
     {
-        var bus = new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(new NoopEventStore(), NullLogger<InMemoryEventBus>.Instance);
 
         await bus.PublishAsync(
             data: new TestPayload("orphan"),
@@ -18,8 +18,9 @@ public class EventBusTests
     }
 
     [Fact]
-    public async Task PublishAsync_WithSubscriber_HandlerReceivesEnvelope()
+    public async Task PublishAsync_WithSubscriber_DoesNotInvokeHandler()
     {
+        var store = new RecordingEventStore();
         var received = new Queue<CloudEvent>();
         var subs = new List<Subscription>
         {
@@ -28,20 +29,23 @@ public class EventBusTests
                 onEvent: e => received.Enqueue(e)),
                 DispatchDynamic),
         };
-        var bus = new InMemoryEventBus(subs, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(subs, store, NullLogger<InMemoryEventBus>.Instance);
 
         await bus.PublishAsync(
             data: new TestPayload("hello"),
             type: "test.greeting",
             source: "test://greeting");
 
-        var match = received.Single(e => e.Type == "test.greeting");
-        Assert.NotNull(match.Data);
+        Assert.Empty(received);
+        var recorded = Assert.Single(store.Appended);
+        Assert.Equal("test.greeting", recorded.Envelope.Type);
+        Assert.Equal("test://greeting/", recorded.Envelope.Source.ToString());
     }
 
     [Fact]
     public async Task PublishAsync_FilteredOut_HandlerNotInvoked()
     {
+        var store = new RecordingEventStore();
         var received = new Queue<CloudEvent>();
         var subs = new List<Subscription>
         {
@@ -50,7 +54,7 @@ public class EventBusTests
                 onEvent: e => received.Enqueue(e)),
                 DispatchDynamic),
         };
-        var bus = new InMemoryEventBus(subs, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(subs, store, NullLogger<InMemoryEventBus>.Instance);
 
         await bus.PublishAsync(
             data: new TestPayload("hello"),
@@ -58,6 +62,7 @@ public class EventBusTests
             source: "test://greeting");
 
         Assert.Empty(received);
+        Assert.Single(store.Appended);
     }
 
     private sealed record TestPayload(string Message);

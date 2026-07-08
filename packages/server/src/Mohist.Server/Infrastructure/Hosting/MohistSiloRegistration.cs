@@ -50,7 +50,7 @@ public static class MohistSiloRegistration
         // Orleans silo has its own DI container (separate from the web/api one).
         // Handlers are registered there too, since grains need them.
         silo.Services.AddCloudEventBus();
-        silo.Services.AddScoped<IEventStore, EventStore>();
+        silo.Services.AddSingleton<IEventStore, EventStore>();
         silo.Services.AddScoped<InboxStore>();
         silo.Services.AddScoped<IStateStore<DomainIssue>, IssueStore>();
         silo.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();

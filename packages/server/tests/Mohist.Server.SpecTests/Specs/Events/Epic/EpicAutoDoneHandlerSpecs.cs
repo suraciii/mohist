@@ -164,8 +164,12 @@ public class EpicAutoDoneHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task HandleAsync_DeliveredThroughInMemoryBus_TypedHandlerDispatches()
+    public async Task HandleAsync_DispatchedByBus_AppendsRowButDoesNotInvokeHandler()
     {
+        // After issue-361 T-002 the bus is write-only: PublishAsync
+        // delegates to IEventStore.AppendAsync and never invokes the
+        // registered handlers. Driving the handler directly (as the
+        // future dispatcher will) is what produces the state change.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
@@ -175,6 +179,7 @@ public class EpicAutoDoneHandlerSpecs
         var grains = new TestEpicGrainFactory(database.Factory);
         var handler = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
 
+        var store = new RecordingEventStore();
         var subscriptions = new List<Subscription>
         {
             new(EventCatalog.ReverseDns.IssueCompleted, handler, (h, e, ct) =>
@@ -185,7 +190,7 @@ public class EpicAutoDoneHandlerSpecs
                         e.DataContentType, e.Subject, e.SpecVersion, e.Extensions),
                     ct)),
         };
-        var bus = new InMemoryEventBus(subscriptions, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(subscriptions, store, NullLogger<InMemoryEventBus>.Instance);
 
         var extensions = new Dictionary<string, string>
         {
@@ -200,10 +205,15 @@ public class EpicAutoDoneHandlerSpecs
             subject: "1",
             extensions: extensions);
 
+        // Bus no longer fans out — no grain call, epic stays idle.
+        Assert.Empty(grains.Calls);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
-        Assert.Equal("done", stored.Status);
-        Assert.Single(grains.Calls);
+        Assert.Equal("idle", stored.Status);
+
+        // The row was persisted for the future dispatcher to pick up.
+        var row = Assert.Single(store.Appended);
+        Assert.Equal(EventCatalog.ReverseDns.IssueCompleted, row.Envelope.Type);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

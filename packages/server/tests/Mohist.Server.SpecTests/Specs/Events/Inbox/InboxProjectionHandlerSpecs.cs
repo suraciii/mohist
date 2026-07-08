@@ -219,12 +219,15 @@ public class InboxProjectionHandlerSpecs
             title: "Issue 1");
 
         var handler = InboxProjectionTestSupport.CreateHandler(database);
-        var bus = new InMemoryEventBus([
-            new Subscription(
-                "com.mohist.workflow.run.failed",
-                handler,
-                InboxProjectionTestSupport.DispatchDynamic)
-        ], NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(
+            [
+                new Subscription(
+                    "com.mohist.workflow.run.failed",
+                    handler,
+                    InboxProjectionTestSupport.DispatchDynamic)
+            ],
+            new NoopEventStore(),
+            NullLogger<InMemoryEventBus>.Instance);
         var eventStore = new EventStore(database.Factory, NullLogger<EventStore>.Instance);
         var runStore = new WorkflowRunStore(database.Factory, eventStore, bus);
         var run = InboxProjectionTestSupport.BuildWorkflowRun(

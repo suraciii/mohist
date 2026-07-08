@@ -117,6 +117,121 @@
     from `ListUndeliveredAsync` after `MarkDispatchedAsync`,
     non-scoped overload routes agent-session source to the right
     table.
-  - `AgentSessionEventsMigrationSpecs` (3 specs): table + index
-    created via `Migrate()`, applies cleanly on DB seeded with
-    previous migration, no `IX_AgentSessionEvents_Type_Time` index.
+- `AgentSessionEventsMigrationSpecs` (3 specs): table + index
+  created via `Migrate()`, applies cleanly on DB seeded with
+  previous migration, no `IX_AgentSessionEvents_Type_Time` index.
+
+## T-002 progress notes
+
+### Codebase Patterns
+
+- `InMemoryEventBus` is registered as a singleton (see
+  `CloudEventBusServiceCollectionExtensions.AddCloudEventBus`),
+  so its `IEventStore` constructor dependency must also be a
+  singleton — T-002 promotes `IEventStore` registration in both
+  `MohistServiceRegistration` and `MohistSiloRegistration` from
+  `AddScoped` to `AddSingleton`. `EventStore` only depends on
+  `IDbContextFactory<MohistDbContext>` + `ILogger<>`, so singleton
+  lifetime is safe; each call still gets its own short-lived
+  `MohistDbContext` from the factory.
+
+- `IEventPublisher` interface signature is unchanged by T-002
+  (the same two `PublishAsync` overloads). The change is
+  semantic inside `InMemoryEventBus`: synchronous handler
+  fan-out is removed; both overloads now delegate to
+  `IEventStore.AppendAsync(CloudEvent)` (the non-scoped
+  overload). All existing fakes (e.g.
+  `RecordingIEventPublisher`) keep compiling.
+
+- Subscriptions (`_subscriptions` + `AddSubscription`) remain
+  on the bus instance for the future dispatcher. `AddSubscription`
+  is now only used by spec files that build the bus empty and
+  wire handlers post-construction; production DI still feeds
+  subscriptions through the second constructor (the
+  `IEnumerable<Subscription>` overload registered by
+  `AddCloudEventHandlersFromAssembly`).
+
+- Specs that previously asserted on captured publishes (bus
+  fan-out) had to be rewritten to assert on persisted event
+  rows via the new `RecordingEventStore.Appended` accessor.
+  The accessor is a public read-only view over the in-memory
+  recorded envelopes, exposing the `RecordedEnvelope` record
+  type so callers can inspect `Envelope.Type` / `Source` /
+  `Subject` / `Data` / `Extensions` directly.
+
+- `EventBridge` specs no longer exercise the bus at all — the
+  bus would now just persist a row, not drive the bridge. The
+  specs build a `CloudEvent` and call `bridge.HandleAsync(...)`
+  directly, matching the path the future dispatcher will take.
+  `ProjectIsolationIntegrationSpecs` follows the same pattern.
+
+- Specs whose end-to-end behavior depended on synchronous
+  bus dispatch (e.g. `IssueWorkflowProductLoopSpecs` completing
+  an issue after a `WorkflowRunCompleted` publish,
+  `StageLockSpecs` releasing sequential locks after
+  `StageFailed` / `StageCompleted`,
+  `RunnerWorkflowTerminalStatusHandlerSpecs` pushing
+  `ReceiveWorkflowRunStatus`) were rewritten to replay the
+  persisted row through the handler/router that the future
+  dispatcher will use. Each spec uses
+  `TestWait.ForAsync` to wait for the row to land in
+  `IEventStore.ListAsync(...)` before driving the handler.
+
+### Gotchas
+
+- After T-002 the bus is write-only, but the three producers
+  still call *both* `_eventStore.AppendAsync(...)` and
+  `_eventPublisher.PublishAsync(...)` (the post-commit loops
+  in `WorkflowRunStore`, `IssueGrain.PublishIssueEventsAsync`,
+  `AgentSessionGrain.PublishAgentSessionLifecycleAsync`).
+  Since `IEventPublisher.PublishAsync` now also appends to
+  `IEventStore`, each event ends up persisted **twice** in
+  the interim (T-003 / T-004 / T-005 will collapse this to
+  one row per event by moving writes into the state
+  transaction and dropping the publish call). Specs that
+  count rows use `Assert.NotEmpty` + `Assert.Contains`
+  instead of `Assert.Single`; see the
+  `WorkflowRunStoreEvent_PersistsRowButDoesNotSyncProjectToInbox`
+  and `CreateIssue_PersistsCreatedEventToIssueEvents`
+  tests for the exact phrasing.
+
+- `IEventStore` singleton promotion interacts with
+  `MohistDbFixture` and the various grain fixtures that build
+  their own `InMemoryEventBus` instance: each one had to
+  pass an `IEventStore` (typically `new NoopEventStore()` or
+  a shared `new RecordingEventStore()`) to the bus
+  constructor. NoopEventStore is fine because the bus only
+  needs a working `AppendAsync(CloudEvent)` — the scoped
+  overload is unused here.
+
+- The original `InMemoryEventBus(ILogger)` constructor was
+  removed; callers (test fixtures, DI extensions) must now
+  pass an `IEventStore`. The single-arg overload is no
+  longer needed because the bus is never constructed without
+  its event-store dependency after the write-only
+  convergence.
+
+- The DI cycle worry called out in the `InboxProjectionHandler`
+  comment ("`IEventPublisher` resolves to the `InMemoryEventBus`
+  singleton whose constructor enumerates all handler
+  subscriptions") no longer applies once T-002 lands: the
+  bus no longer takes `IEnumerable<Subscription>` as a
+  hard constructor dependency for the singleton path (the
+  subscription enumeration moves to a separate `AddSingleton`
+  registration in `AddCloudEventHandlersFromAssembly`).
+  However, the cycle is still latent because the bus
+  constructor can still resolve subscriptions transitively
+  through `IEventStore` (which has no such dependency) — so
+  the existing scope-resolved `IEventPublisher` pattern in
+  the handler is left in place to be safe.
+
+### Verification
+
+- `dotnet build Mohist.sln` succeeds with 0 warnings
+  (TreatWarningsAsErrors active).
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests`
+  passes (4128 specs, 10 skipped, 0 failures).
+- `dotnet test packages/server/tests/Mohist.Server.ArchTests`
+  passes (24 specs, 3 skipped, 0 failures).
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests` passes
+  (865 specs, 0 failures).

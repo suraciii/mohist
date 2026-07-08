@@ -44,7 +44,7 @@ public class BacklogFixture : IAsyncLifetime
     {
         builder.ConfigureSilo((_, siloBuilder) =>
             GrainTestConfig.ConfigureSilo(siloBuilder, connectionString,
-                new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance),
+                new InMemoryEventBus(new NoopEventStore(), NullLogger<InMemoryEventBus>.Instance),
                 new NoopEventStore()));
     }
 }

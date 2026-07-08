@@ -308,8 +308,15 @@ public class InboxApiSpecs
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
-    public async Task WorkflowRunStoreEvent_ProjectsThroughProductionEventBusAndIsVisibleFromInboxApi()
+    public async Task WorkflowRunStoreEvent_PersistsRowButDoesNotSyncProjectToInbox()
     {
+        // issue-361 T-002: IEventPublisher converges to write-only.
+        // The synchronous dispatch path that previously invoked
+        // InboxProjectionHandler during publish is removed; the
+        // inbox row will be projected by the future dispatcher.
+        // This spec verifies that the workflow event is durable
+        // (visible via the event store) but the projection is
+        // suspended until the dispatcher lands.
         var projectId = await CreateProjectAsync("inbox-spec");
         await _client.PostOkAsync(
             $"/api/projects/{projectId}/repositories",
@@ -328,12 +335,13 @@ public class InboxApiSpecs
         var issueNumber = issue.GetProperty("number").GetInt32();
         var issueId = issue.GetProperty("id").GetString()!;
 
+        var runId = $"wr_inbox_spec_{Guid.NewGuid():N}";
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
             var runStore = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
             await runStore.SaveAsync(new WorkflowRun
             {
-                Id = $"wr_inbox_spec_{Guid.NewGuid():N}",
+                Id = runId,
                 Metadata = new WorkflowRunMetadata(
                     Name: null,
                     CreatedAt: DateTimeOffset.UtcNow,
@@ -347,14 +355,23 @@ public class InboxApiSpecs
             }, [new WorkflowRunFailed("failed")]);
         }
 
-        var items = await WaitForInboxItemsAsync(projectId, expectedCount: 1);
-        var item = Assert.Single(items);
-        Assert.Equal(NotificationKinds.WorkflowFailed, item.GetProperty("notificationKind").GetString());
-        Assert.Equal(issueId, item.GetProperty("issueId").GetString());
-        Assert.Equal(issueNumber, item.GetProperty("issueNumber").GetInt32());
-        Assert.Equal("Started from API", item.GetProperty("issueTitle").GetString());
-        Assert.False(item.GetProperty("isRead").GetBoolean());
-        Assert.False(item.TryGetProperty("readAt", out _));
+        await using (var verify = _fixture.Services.CreateAsyncScope())
+        {
+            var events = verify.ServiceProvider.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
+            var stored = await events.ListAsync(runId);
+            // WorkflowRunStore currently persists via _eventStore.AppendAsync
+            // AND publishes via _eventPublisher.PublishAsync (which is now
+            // itself write-only and delegates to the same store), so the
+            // durable row count is > 1. T-003 will move the event write
+            // inside the state transaction and drop the publish, collapsing
+            // this back to one row per event. Until then assert at least
+            // one durable row exists with the right type.
+            Assert.NotEmpty(stored);
+            Assert.Contains(stored, s => s.Envelope.Type == "com.mohist.workflow.run.failed");
+        }
+
+        Assert.Empty(await _client.GetDataAsync<JsonElement[]>(
+            $"/api/projects/{projectId}/inbox"));
 
         var otherProjectId = await CreateProjectAsync("inbox-spec-other");
         Assert.Empty(await _client.GetDataAsync<JsonElement[]>(

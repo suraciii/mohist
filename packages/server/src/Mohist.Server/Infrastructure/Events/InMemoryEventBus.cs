@@ -4,10 +4,22 @@ namespace Mohist.Server.Infrastructure.Events;
 
 public sealed class InMemoryEventBus : IEventPublisher
 {
-    private readonly ILogger<InMemoryEventBus> _log = null!;
+    private readonly IEventStore _eventStore;
+    private readonly ILogger<InMemoryEventBus> _log;
 
-    public InMemoryEventBus(IEnumerable<Subscription> subscriptions, ILogger<InMemoryEventBus> log)
+    public InMemoryEventBus(IEventStore eventStore, ILogger<InMemoryEventBus> log)
     {
+        _eventStore = eventStore ?? throw new ArgumentNullException(nameof(eventStore));
+        _log = log;
+        _subscriptions = [];
+    }
+
+    public InMemoryEventBus(
+        IEnumerable<Subscription> subscriptions,
+        IEventStore eventStore,
+        ILogger<InMemoryEventBus> log)
+    {
+        _eventStore = eventStore ?? throw new ArgumentNullException(nameof(eventStore));
         _subscriptions = subscriptions.ToList();
         _log = log;
 
@@ -18,20 +30,21 @@ public sealed class InMemoryEventBus : IEventPublisher
             "Event bus ready: {Count} subscriptions", _subscriptions.Count);
     }
 
-    public InMemoryEventBus(ILogger<InMemoryEventBus> log) : this([], log) { }
-
     private readonly List<Subscription> _subscriptions;
 
     public Task PublishAsync(CloudEvent envelope, CancellationToken ct = default)
     {
         if (envelope is null) throw new ArgumentNullException(nameof(envelope));
-        return DispatchAsync(envelope, ct);
+        return _eventStore.AppendAsync(envelope, ct);
     }
 
     /// <summary>
     /// Adds a subscription after construction. Used by test fixtures that
     /// build the bus empty and then wire the same handlers the production
     /// pipeline registers via <c>AddCloudEventHandlersFromAssembly</c>.
+    /// Subscriptions are retained for the future dispatcher but are not
+    /// invoked by <see cref="PublishAsync"/>; the publish path is write-only
+    /// and delegates to <see cref="IEventStore.AppendAsync(CloudEvent, CancellationToken)"/>.
     /// </summary>
     public void AddSubscription(Subscription subscription)
     {
@@ -41,8 +54,6 @@ public sealed class InMemoryEventBus : IEventPublisher
             _subscriptions.Add(subscription);
         }
     }
-
-    private IReadOnlyList<Subscription> Snapshot() => _subscriptions.ToList();
 
     public async Task PublishAsync<TData>(
         TData data,
@@ -65,31 +76,7 @@ public sealed class InMemoryEventBus : IEventPublisher
             subject: subject,
             extensions: extDict);
 
-        await DispatchAsync(evt, ct).ConfigureAwait(false);
-    }
-
-    private async Task DispatchAsync(CloudEvent evt, CancellationToken ct)
-    {
-        // Snapshot the subscription list so concurrent AddSubscription calls
-        // (used by test fixtures that wire handlers post-construction) do not
-        // mutate it mid-dispatch.
-        var subs = Snapshot();
-        foreach (var sub in subs)
-        {
-            if (!CloudEventTypeMatcher.Matches(sub.Type, evt.Type))
-                continue;
-
-            try
-            {
-                await sub.Dispatch(sub.Handler, evt, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "Handler {Handler} failed for event {EventType}",
-                    sub.Handler.GetType().Name, evt.Type);
-            }
-        }
+        await _eventStore.AppendAsync(evt, ct).ConfigureAwait(false);
     }
 
     private static void ValidateType(string type)
