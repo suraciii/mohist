@@ -1,16 +1,18 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangleIcon, CheckCircle2Icon, PlayIcon, ShieldOffIcon } from 'lucide-react'
+import { AlertTriangleIcon, CheckCircle2Icon, GaugeIcon, PlayIcon, ShieldOffIcon } from 'lucide-react'
 import {
   approveIssue,
   deriveAttentionItems,
   invalidateApprovalWait,
+  isIssueAttentionItem,
   resumeIssue,
   useApprovalWait,
   useIssues,
   type ApprovalWaitMetricsResponse,
   type AttentionItem,
+  type IssueAttentionItem,
   type Issue,
 } from '../../../entities/issue'
 import { formatDuration } from '@/shared/lib/format-duration'
@@ -18,14 +20,48 @@ import { useAgentStatus, type AgentStatus } from '../../../entities/agent'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { cn } from '@/shared/lib/utils'
 
-const APPROVAL_LABEL = 'Approval needed'
-
-function isApprovalItem(item: AttentionItem): boolean {
-  return item.label === APPROVAL_LABEL
+interface AttentionTreatment {
+  family: 'danger' | 'warning'
+  container: string
+  border: string
+  dot: string
+  text: string
 }
 
-function isResumableItem(item: AttentionItem): boolean {
-  return item.label !== APPROVAL_LABEL
+const dangerTreatment: AttentionTreatment = {
+  family: 'danger',
+  container: 'border-danger-border bg-danger-subtle',
+  border: 'border-danger-border',
+  dot: 'bg-danger',
+  text: 'text-danger',
+}
+
+const warningTreatment: AttentionTreatment = {
+  family: 'warning',
+  container: 'border-warning-border bg-warning-subtle',
+  border: 'border-warning-border',
+  dot: 'bg-warning',
+  text: 'text-warning',
+}
+
+function isApprovalItem(item: AttentionItem): boolean {
+  return item.kind === 'approval-needed'
+}
+
+function isResumableItem(item: AttentionItem): item is IssueAttentionItem {
+  return isIssueAttentionItem(item) && !isApprovalItem(item)
+}
+
+function attentionTreatment(item: AttentionItem): AttentionTreatment {
+  return item.kind === 'approval-needed' || item.kind === 'runner-capacity-limited'
+    ? warningTreatment
+    : dangerTreatment
+}
+
+function attentionSummaryTreatment(items: AttentionItem[]): AttentionTreatment {
+  return items.some((item) => attentionTreatment(item).family === 'danger')
+    ? dangerTreatment
+    : warningTreatment
 }
 
 export interface AttentionHeroProps {
@@ -53,8 +89,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
     [issues, agentStatus],
   )
 
-  const runnerDown = agentStatus?.runnerAvailable === false
-  const hasAttention = items.length > 0 || runnerDown
+  const hasAttention = items.length > 0
 
   const approveMutation = useMutation({
     mutationFn: (issueNumber: number) => approveIssue(issueNumber, projectId),
@@ -73,7 +108,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
     },
   })
 
-  if (!issuesResolved && !runnerDown) {
+  if (!issuesResolved && items.length === 0) {
     return <LoadingState />
   }
 
@@ -82,29 +117,36 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
   }
 
   const isPending = approveMutation.isPending || resumeMutation.isPending
-  const totalCount = items.length + (runnerDown ? 1 : 0)
+  const heroTreatment = attentionSummaryTreatment(items)
 
   return (
     <section
       data-testid="dashboard-zone-attention"
       data-zone="attention"
+      data-family={heroTreatment.family}
       aria-label="Attention"
-      className="rounded-lg border border-amber-200 bg-amber-50/60 p-4"
+      className={cn('rounded-lg border p-4', heroTreatment.container)}
     >
       <div className="flex items-center gap-2 mb-3">
-        <span className="inline-flex items-center justify-center size-6 rounded-full bg-amber-500 text-white">
+        <span className={cn(
+          'inline-flex items-center justify-center size-6 rounded-full text-warning-foreground',
+          heroTreatment.dot,
+        )}>
           <AlertTriangleIcon className="size-3.5" />
         </span>
-        <span className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+        <span className={cn(
+          'text-xs font-semibold uppercase tracking-wide',
+          heroTreatment.text,
+        )}>
           Needs attention
         </span>
-        <span className="text-xs text-amber-700/80 font-medium">({totalCount})</span>
+        <span className={cn('text-xs font-medium', heroTreatment.text)}>({items.length})</span>
       </div>
       <ApprovalWaitSummary approvalWait={approvalWait} />
       <ul className="flex flex-col gap-2" data-testid="attention-items">
         {items.map((item) => (
           <AttentionItemRow
-            key={item.issueId}
+            key={attentionKey(item)}
             item={item}
             isPending={isPending}
             onApprove={(n) => approveMutation.mutate(n)}
@@ -112,12 +154,14 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
             toProjectPath={toProjectPath}
           />
         ))}
-        {runnerDown && agentStatus && (
-          <RunnerDownEntry agentStatus={agentStatus} toProjectPath={toProjectPath} />
-        )}
       </ul>
     </section>
   )
+}
+
+function attentionKey(item: AttentionItem): string {
+  if (isIssueAttentionItem(item)) return item.issueId
+  return item.kind
 }
 
 const defaultAgentStatus: AgentStatus = {
@@ -143,16 +187,24 @@ function AttentionItemRow({
   onResume,
   toProjectPath,
 }: AttentionItemRowProps) {
+  if (!isIssueAttentionItem(item)) {
+    return <RunnerAttentionRow item={item} toProjectPath={toProjectPath} />
+  }
+
   const showApprove = isApprovalItem(item)
   const showResume = isResumableItem(item)
+  const treatment = attentionTreatment(item)
+
   return (
     <li
       data-testid="attention-item"
       data-issue-number={item.issueNumber}
       data-label={item.label}
-      className="flex items-center gap-3 rounded-md bg-background px-3 py-2 border border-amber-200/80"
+      data-kind={item.kind}
+      data-family={treatment.family}
+      className={cn('flex items-center gap-3 rounded-md bg-background px-3 py-2 border', treatment.border)}
     >
-      <span className="font-mono font-semibold text-amber-700 text-sm">
+      <span className={cn('font-mono font-semibold text-sm', treatment.text)}>
         #{item.issueNumber}
       </span>
       <span className="font-medium text-foreground text-sm">{item.label}</span>
@@ -168,7 +220,7 @@ function AttentionItemRow({
         <Link
           to={toProjectPath(`/issues/${item.issueNumber}`)}
           data-testid="attention-item-link"
-          className="text-xs text-amber-700 hover:underline"
+          className={cn('text-xs hover:underline hover:opacity-80', treatment.text)}
         >
           Open
         </Link>
@@ -180,8 +232,8 @@ function AttentionItemRow({
             disabled={isPending}
             onClick={() => onApprove(item.issueNumber)}
             className={cn(
-              'inline-flex items-center gap-1 rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white',
-              'hover:bg-amber-700 disabled:opacity-50 disabled:pointer-events-none',
+              'inline-flex items-center gap-1 rounded-md bg-warning px-2 py-1 text-xs font-medium text-warning-foreground',
+              'hover:bg-warning/90 disabled:opacity-50 disabled:pointer-events-none',
             )}
           >
             <CheckCircle2Icon className="size-3" />
@@ -209,31 +261,66 @@ function AttentionItemRow({
   )
 }
 
-interface RunnerDownEntryProps {
-  agentStatus: AgentStatus
+function RunnerAttentionRow({
+  item,
+  toProjectPath,
+}: {
+  item: AttentionItem
   toProjectPath: (path: string) => string
-}
+}) {
+  const treatment = attentionTreatment(item)
 
-function RunnerDownEntry({ agentStatus, toProjectPath }: RunnerDownEntryProps) {
+  if (item.kind === 'runner-unavailable') {
+    return (
+      <li
+        data-testid="runner-down-entry"
+        data-family={treatment.family}
+        className={cn('flex items-center gap-3 rounded-md px-3 py-2 border', treatment.container)}
+      >
+        <span className="inline-flex items-center justify-center size-5 rounded-full text-danger-foreground shrink-0 bg-danger">
+          <ShieldOffIcon className="size-3" />
+        </span>
+        <span className={cn('font-medium text-sm', treatment.text)}>{item.label}</span>
+        <span
+          data-testid="runner-down-message"
+          className={cn('text-sm truncate min-w-0 flex-1', treatment.text)}
+        >
+          {item.detail ?? 'No runner is connected.'}
+        </span>
+        <Link
+          to={toProjectPath('/activity')}
+          data-testid="runner-down-link"
+          className="shrink-0 text-xs text-danger hover:underline hover:opacity-80"
+        >
+          View runner status
+        </Link>
+      </li>
+    )
+  }
+
   return (
     <li
-      data-testid="runner-down-entry"
-      className="flex items-center gap-3 rounded-md bg-red-50 px-3 py-2 border border-red-200"
+      data-testid="runner-capacity-entry"
+      data-family={treatment.family}
+      data-kind={item.kind}
+      className={cn('flex items-center gap-3 rounded-md px-3 py-2 border', treatment.container)}
     >
-      <span className="inline-flex items-center justify-center size-5 rounded-full bg-red-500 text-white shrink-0">
-        <ShieldOffIcon className="size-3" />
+      <span className={cn('inline-flex items-center justify-center size-5 rounded-full shrink-0 text-warning-foreground', treatment.dot)}>
+        <GaugeIcon className="size-3" />
       </span>
-      <span className="font-medium text-red-800 text-sm">Runner unavailable</span>
-      <span
-        data-testid="runner-down-message"
-        className="text-red-700/80 text-sm truncate min-w-0 flex-1"
-      >
-        {agentStatus.runnerMessage ?? 'No runner is connected.'}
-      </span>
+      <span className="font-medium text-sm text-foreground">{item.label}</span>
+      {item.detail && (
+        <span
+          data-testid="runner-capacity-detail"
+          className="text-muted-foreground text-sm truncate min-w-0 flex-1"
+        >
+          {item.detail}
+        </span>
+      )}
       <Link
         to={toProjectPath('/activity')}
-        data-testid="runner-down-link"
-        className="shrink-0 text-xs text-red-700 hover:underline"
+        data-testid="runner-capacity-link"
+        className="shrink-0 text-xs hover:underline hover:opacity-80 text-muted-foreground"
       >
         View runner status
       </Link>
@@ -274,18 +361,19 @@ function AllClearState({ approvalWait }: AllClearStateProps) {
     <section
       data-testid="dashboard-zone-attention"
       data-zone="attention"
+      data-family="success"
       aria-label="Attention"
-      className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4"
+      className="rounded-lg border border-success-border bg-success-subtle p-4"
     >
       <div className="flex items-center gap-2 mb-2">
-        <span className="inline-flex items-center justify-center size-6 rounded-full bg-emerald-500 text-white">
+        <span className="inline-flex items-center justify-center size-6 rounded-full bg-success text-success-foreground">
           <CheckCircle2Icon className="size-3.5" />
         </span>
-        <span className="text-sm font-semibold text-emerald-800 uppercase tracking-wide">
+        <span className="text-sm font-semibold text-success uppercase tracking-wide">
           All clear
         </span>
       </div>
-      <p className="text-sm text-emerald-700/80 mb-3">
+      <p className="text-sm text-success mb-3">
         Nothing needs your attention right now.
       </p>
       <ApprovalWaitSummary approvalWait={approvalWait} />

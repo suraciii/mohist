@@ -1,4 +1,4 @@
-import type { Issue } from '../../../entities/issue'
+import { isRunningIssue, type Issue } from '../../../entities/issue'
 import type { AgentCostMetricDto, AgentStatus } from '../../../entities/agent'
 
 export interface FactoryStatusFields {
@@ -31,7 +31,7 @@ export function deriveFactoryStatus(
   let shippedToday = 0
 
   for (const issue of issues ?? []) {
-    if (issue.status === 'in_progress' && issue.health !== 'done' && issue.health !== 'cancelled') {
+    if (isRunningIssue(issue)) {
       inFlight += 1
     }
 
