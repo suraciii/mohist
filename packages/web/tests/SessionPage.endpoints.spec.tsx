@@ -3,7 +3,7 @@ import { TEST_PROJECT, baseRender, screen, waitFor, fireEvent } from './test-uti
 import { SessionPage } from '../src/pages/session/ui/SessionPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import React from 'react'
 import type {
   AgentSessionMetadata,
@@ -19,14 +19,6 @@ const endpointMocks = vi.hoisted(() => ({
   transcript: { turns: [], partCount: 0, lastActivityAt: null } as AgentSessionTranscriptResponse,
   params: { number: '51', sessionName: 'T-003.1' } as Record<string, string>,
 }))
-
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
-  return {
-    ...actual,
-    useParams: () => endpointMocks.params,
-  }
-})
 
 vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
   useCoderSessions: () => ({ sessions: endpointMocks.sessions, isLoading: endpointMocks.sessionsLoading }),
@@ -75,10 +67,16 @@ function createMockQueryClient() {
 function renderWithQueryClient(ui: React.ReactElement) {
   const queryClient = createMockQueryClient()
   queryClients.push(queryClient)
+  const { number, sessionName } = endpointMocks.params
+  const initialEntry = `/issues/${number}/workflow/sessions/${sessionName}`
   return baseRender(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
-        <MemoryRouter>{ui}</MemoryRouter>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route path="/issues/:number/workflow/sessions/:sessionName" element={ui} />
+          </Routes>
+        </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
   )
