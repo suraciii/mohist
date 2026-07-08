@@ -52,6 +52,11 @@ export default defineConfig({
     globals: true,
     testTimeout: 10_000,
     hookTimeout: 10_000,
+    // mock/stub 的恢复交给机器而不是各文件的自觉——isolate:false 终局下
+    // 跨文件卫生必须是机械保证（openspec/changes/web-test-boundary-mocks）。
+    restoreMocks: true,
+    unstubGlobals: true,
+    unstubEnvs: true,
     exclude: [
       '**/*.a11y.spec.ts',
       '**/node_modules/**',
