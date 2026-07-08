@@ -15,16 +15,8 @@ const mocks = vi.hoisted(() => ({
   transcriptIsRunning: false,
   followupMutation: { mutate: vi.fn(), isPending: false },
   cancelMutation: { mutate: vi.fn(), isPending: false },
-  routeParams: { sessionId: 'sess-abc' },
 }))
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useParams: () => mocks.routeParams,
-  }
-})
 
 vi.mock('../../../entities/agent', () => ({
   useGenericSessionSummary: () => ({
@@ -136,7 +128,6 @@ describe('GenericSessionPage', () => {
     mocks.transcriptTurns = []
     mocks.followupMutation = { mutate: vi.fn(), isPending: false }
     mocks.cancelMutation = { mutate: vi.fn(), isPending: false }
-    mocks.routeParams = { sessionId: 'sess-abc' }
   })
 
   afterEach(() => {

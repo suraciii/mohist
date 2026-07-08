@@ -15,7 +15,7 @@
 import type { ReactElement } from 'react'
 import { render, screen, type RenderResult } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { LinkedIssue } from '../../../entities/epic'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
@@ -78,12 +78,18 @@ export const issues = [
   issue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
 ]
 
+export function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="current-path">{location.pathname}{location.search}</div>
+}
+
 export function renderPage(): RenderResult & { rerenderPage: () => void } {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const ui = (): ReactElement => (
     <QueryClientProvider client={queryClient}>
       <ProjectProvider>
         <MemoryRouter initialEntries={['/epic/epic-12345678']}>
+          <LocationProbe />
           <Routes>
             <Route path="/epic/:id" element={<EpicDetailPage />} />
             <Route path="/epics" element={<div>Epics</div>} />

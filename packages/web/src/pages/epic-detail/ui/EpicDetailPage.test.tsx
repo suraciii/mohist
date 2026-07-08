@@ -8,6 +8,7 @@ import { EpicStatus } from '../../../entities/epic'
 import type { LinkedIssue } from '../../../entities/epic'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
 import { EpicDetailPage } from './EpicDetailPage'
+import { LocationProbe } from './_epicDetailPageTestHarness'
 import { ApiError } from '../../../shared/api/client'
 
 function linkedIssue(overrides: Pick<LinkedIssue, 'id' | 'number'> & Partial<Omit<LinkedIssue, 'id' | 'number'>>): LinkedIssue {
@@ -35,8 +36,6 @@ function issue(overrides: Record<string, unknown>) {
     ...overrides,
   }
 }
-
-const mockUseNavigate = vi.hoisted(() => vi.fn())
 
 const mocks = vi.hoisted(() => ({
   useProject: vi.fn(),
@@ -83,14 +82,6 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
     useUpdateEpic: mocks.useUpdateEpic,
     usePauseEpic: mocks.usePauseEpic,
     useResumeEpic: mocks.useResumeEpic,
-  }
-})
-
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useNavigate: () => mockUseNavigate,
   }
 })
 
@@ -180,6 +171,7 @@ function renderPage() {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider>
         <MemoryRouter initialEntries={['/epic/epic-12345678']}>
+          <LocationProbe />
           <Routes>
             <Route path="/epic/:id" element={<EpicDetailPage />} />
             <Route path="/epics" element={<div>Epics</div>} />
@@ -695,9 +687,7 @@ describe('EpicDetailPage Ask Agent entry (T-005)', () => {
     const button = screen.getByTestId('ask-agent-epic')
     fireEvent.click(button)
 
-    expect(mockUseNavigate).toHaveBeenCalledWith(
-      expect.stringContaining('/agent-sessions/new?epic='),
-    )
+    expect(screen.getByTestId('current-path').textContent).toContain('/agent-sessions/new?epic=')
   })
 
   it('includes the epic id in the navigation URL', () => {
@@ -708,7 +698,6 @@ describe('EpicDetailPage Ask Agent entry (T-005)', () => {
     const button = screen.getByTestId('ask-agent-epic')
     fireEvent.click(button)
 
-    const callArg = mockUseNavigate.mock.calls[0][0] as string
-    expect(callArg).toContain('epic=epic-abc-def')
+    expect(screen.getByTestId('current-path').textContent).toContain('epic=epic-abc-def')
   })
 })
