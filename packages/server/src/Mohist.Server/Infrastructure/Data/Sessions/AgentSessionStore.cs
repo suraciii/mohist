@@ -1,6 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -13,11 +16,15 @@ public interface IAgentSessionStore : IStateStore<AgentSession>
 
 public class AgentSessionStore : IAgentSessionStore
 {
-    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private const string SpecVersion = "1.0";
 
-    public AgentSessionStore(IDbContextFactory<MohistDbContext> dbFactory)
+    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly IEventStore _eventStore;
+
+    public AgentSessionStore(IDbContextFactory<MohistDbContext> dbFactory, IEventStore eventStore)
     {
         _dbFactory = dbFactory;
+        _eventStore = eventStore;
     }
 
     public async Task<AgentSession?> LoadAsync(string key)
@@ -43,17 +50,25 @@ public class AgentSessionStore : IAgentSessionStore
 
     public async Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
     {
+        var source = AgentSessionEventPersistence.AgentSessionSource(state.Id);
+        var subject = state.Id;
+
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
             await StageSessionAsync(db, key, state, ct);
+            foreach (var evt in events)
+            {
+                if (evt is null) continue;
+                var envelope = ToCloudEvent(evt, source, subject);
+                await _eventStore.AppendAsync(db, envelope, ct);
+            }
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
         catch (DbUpdateConcurrencyException)
         {
-            await transaction.RollbackAsync(ct);
             throw;
         }
     }
@@ -84,6 +99,20 @@ public class AgentSessionStore : IAgentSessionStore
         }
     }
 
+    private static CloudEvent ToCloudEvent(AgentSessionEvent evt, string source, string subject)
+    {
+        var type = AgentSessionEventSerializer.BusType(evt);
+        var data = AgentSessionEventSerializer.ToData(evt);
+        return new CloudEvent(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri(source, UriKind.Relative),
+            type: type,
+            time: DateTimeOffset.UtcNow,
+            data: data,
+            subject: subject,
+            specVersion: SpecVersion,
+            extensions: null);
+    }
 }
 
 public static class AgentSessionJson

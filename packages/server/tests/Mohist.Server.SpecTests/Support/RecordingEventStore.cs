@@ -65,7 +65,20 @@ public class RecordingEventStore : IEventStore
         }
     }
 
-public Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
+public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var source = $"/mohist/agent-session/{sessionId}";
+            return Task.FromResult<IReadOnlyList<StoredCloudEvent>>(_events
+                .Where(e => e.Envelope.Source.ToString() == source)
+                .TakeLast(limit)
+                .Select((e, idx) => new StoredCloudEvent(idx + 1, e.Envelope))
+                .ToList());
+        }
+    }
+
+    public Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
 
     public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<UndeliveredEvent>>([]);

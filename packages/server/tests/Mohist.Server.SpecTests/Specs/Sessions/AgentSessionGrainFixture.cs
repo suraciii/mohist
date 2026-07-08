@@ -54,7 +54,6 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 
             siloBuilder.Services.AddSingleton<IAgentSessionStore>(StateStore);
             siloBuilder.Services.AddSingleton<IAgentSessionTranscriptStore>(TranscriptStore);
-            siloBuilder.Services.AddSingleton<IEventPublisher>(new NoopEventPublisher());
             siloBuilder.Services.AddSingleton<ITranscriptEventPublisher>(new NoopTranscriptEventPublisher());
             siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
             siloBuilder.Services.AddSingleton<ILogger<AgentSessionGrain>>(Logger);
@@ -68,19 +67,6 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         Cluster?.Dispose();
         _keeper?.Dispose();
         return Task.CompletedTask;
-    }
-
-    private sealed class NoopEventPublisher : IEventPublisher
-    {
-        public Task PublishAsync(CloudEvent envelope, CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task PublishAsync<TData>(
-            TData data,
-            string type,
-            string source,
-            string? subject = null,
-            IReadOnlyDictionary<string, string>? extensions = null,
-            CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher

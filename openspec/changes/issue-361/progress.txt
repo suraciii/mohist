@@ -552,3 +552,213 @@
   assertion tightened to `Assert.Single` — exactly one durable
   `IssueCreated` row per emitted event (T-002's publisher
   duplicate append is gone).
+## T-005 progress notes
+
+### Codebase Patterns
+
+- `AgentSessionStore.SaveAsync(key, state, events, ct)` is the third
+  producer's events-aware entry point, mirroring T-003's
+  `WorkflowRunStore.SaveAsync(run, events, ct)` and T-004's
+  `IssueStore.SaveAsync(key, state, events, ct)`. Same shape: open
+  the producer's `MohistDbContext`, `BeginTransactionAsync`, stage
+  the state row, append every event row via the T-001 scoped
+  overload (`_eventStore.AppendAsync(db, envelope, ct)`), then
+  `SaveChangesAsync` + `CommitAsync`. No post-commit publish loop,
+  no own `SaveChanges` from the event store.
+
+- Envelope construction and identity stamping consolidate into the
+  store, completing the D5 pattern that T-003 started for WorkflowRun
+  and T-004 finished for Issue. `AgentSessionStore.ToCloudEvent` calls
+  the existing `AgentSessionEventSerializer.BusType` / `ToData` helpers
+  (the same ones the old `AgentSessionGrain.PublishAgentSessionLifecycleAsync`
+  used) and stamps `subject = state.Id` per design.md#OQ3 (no
+  `projectid` extension — no consumer reads it from agent-session
+  lifecycle events). The store does not accept identity from the
+  caller — it reads it from the persisted aggregate, which is the
+  single point of truth. `source` is set to
+  `AgentSessionEventPersistence.AgentSessionSource(state.Id)` so the
+  T-001 routing branch lands the row in `AgentSessionEvents`.
+
+- `AgentSessionStore.SaveAsync(key, state)` (no events, the existing
+  `IStateStore<AgentSession>` overload) is preserved for any caller
+  with no pending events — same JSON snapshot path as before, no
+  new `BeginTransactionAsync` needed (single-write implicit
+  transaction). The grain takes the events-aware overload whenever
+  the `AppendRuntimeEventsAsync` path has buffered events, or via
+  `CommitAsync` for `AttachPhysicalSessionAsync` / recovery paths.
+
+- The `AgentSessionStore` constructor gained an `IEventStore`
+  dependency. DI registration in `MohistServiceRegistration.cs`
+  already wires `IEventStore` as a singleton (T-002 promotion) and
+  `IAgentSessionStore` as scoped, so the Orleans silo resolves it
+  transparently.
+
+- `AgentSessionGrain` stops depending on `IEventPublisher` after
+  this task — the `_eventPublisher` field, the
+  `PublishAgentSessionLifecycleAsync` method, the `AgentSessionSource`
+  helper, the swallow-`InvalidOperationException` + log-and-swallow
+  catches, and the post-commit publish loop are all gone. The grain's
+  constructor signature is now
+  `(IAgentSessionStore, IAgentSessionTranscriptStore,
+  IDbContextFactory<MohistDbContext>, ITranscriptEventPublisher,
+  TimeProvider, ILogger<>)`. The transcript publisher stays (it's a
+  separate concern: SignalR streaming of transcript events, not
+  domain event publishing).
+
+- The grain's runtime-event path accumulates pending domain events
+  into a new `_pendingDomainEvents` field. `AppendRuntimeEventsAsync`
+  appends to the queue; `FlushAsync` snapshots the queue into a local
+  array, passes it to `SaveAsync`, and only clears the queue after
+  a successful save (matching the existing transcript-flush
+  semantics). If `SaveAsync` throws, the events stay queued for the
+  next retry — no loss.
+
+- `_eventPublisher`-style append-during-publish is gone. Per
+  `EventPublishingIntegrationFixture`'s design, the production
+  `AgentSessionStore` writes event rows in the same transaction as
+  the state save. The `_fixture.Services.GetRequiredService<IEventStore>()`
+  accessor exposes the singleton `EventStore` to integration specs
+  for persisted-row assertions. The `RecordingPublisher` is no
+  longer called by the agent-session producer, so its
+  `_fixture.RecordingPublisher.Clear()` calls in
+  `AgentSessionLifecycleDedupSpecs` / `AgentSessionContextEventPublishingSpecs`
+  were removed along with the post-commit `Published` assertions.
+
+- `IEventStore` gained a `ListAgentSessionEventsAsync(sessionId, limit, ct)`
+  accessor that reads from `AgentSessionEvents` filtered by the
+  canonical source prefix. `EventStore` routes
+  `/mohist/agent-session/` to `AgentSessionEvents` in both the
+  scoped and non-scoped overloads (T-001 work). `RecordingEventStore`
+  mirrors the new accessor for spec support.
+
+### Gotchas
+
+- `AgentSessionGrainFixture` (the unit-test fixture that uses
+  `FakeAgentSessionStore`) had to drop the `IEventPublisher`
+  registration from the silo — the grain constructor no longer
+  takes the dependency. The `NoopEventPublisher` inner class was
+  removed from the fixture in lockstep.
+
+- `AgentSessionStoreSpecs` (the unit-test fixture that constructs
+  `AgentSessionStore` directly) had to add a `new NoopEventStore()`
+  to its constructor call. The no-events `SaveAsync(key, state)`
+  overload does not exercise the event-store path, but the events-
+  aware overload now requires it; the fake satisfies the constructor.
+
+- `EventPublishingIntegrationFixture` exposes `IServiceProvider Services`
+  so integration specs can resolve the singleton `IEventStore` for
+  persisted-row reads. Without this accessor, the dedup specs would
+  have no path to assert against `AgentSessionEvents` rows. The
+  `RecordingIEventPublisher` / `NoopEventPublisher` inner classes
+  stay (other tests still use them for the inbox hint path).
+
+- The integration specs use `grain.FlushForTestAsync()` to force a
+  state save before reading the persisted rows. The fixture's
+  production `AgentSessionStore` writes to the in-memory SQLite
+  database, and the singleton `EventStore` reads from the same
+  connection, so the dedup specs can read back exactly what was
+  written. Without the explicit `FlushForTestAsync()`, the
+  persist-timer (200 ms debounce) would race against the read.
+
+- `AgentSessionTransactionalEventAppendSpecs` uses
+  `db.Database.EnsureCreated()` to set up the schema. The
+  `MohistDbContext` registration for `AgentSessionEvents` (added in
+  T-001) is honoured by `EnsureCreated` on a fresh database, so
+  the unit specs run against the same table shape as production
+  (without the migration history overhead).
+
+- The new `ThrowingEventStore` private fake throws on the second
+  `AppendAsync(db, envelope)` call, simulating a mid-transaction
+  event-row write failure. The first event lands in
+  `db.AgentSessionEvents.Local` as `Added`, so the test's
+  verification on a fresh `DbContext` proves the rollback wiped
+  both staged state and event rows. Mirrors the `WorkflowRunStore`
+  and `IssueStore` equivalents from T-003/T-004.
+
+- `SaveAsync_NoEventsOverload_RemainsForCallerWithNoPendingEvents`
+  documents that the no-events `SaveAsync(key, state)` overload
+  keeps its original behavior verbatim — the grain takes the
+  events-aware overload whenever `_pendingDomainEvents` was
+  non-empty, but callers with no pending events continue to use
+  the no-events overload with its single-write implicit transaction.
+
+### Open follow-ups for downstream tasks
+
+- The dispatcher (step 3, future issue) must wire the handlers back
+  to react to durable event rows. The handler registration on the
+  bus is intact — they are dormant, not deleted. After T-005
+  completes, all three core producers (`WorkflowRunStore`,
+  `IssueStore`, `AgentSessionStore`) emit durable event rows in
+  one transaction with their state save, and `IEventPublisher` is
+  used only by `InboxProjectionHandler` for the inbox hint path.
+
+### Verification
+
+- `dotnet build Mohist.sln` succeeds with 0 warnings
+  (TreatWarningsAsErrors active).
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests`:
+  4147 specs pass, 10 skipped, 0 failures (up from 4141 in T-004 —
+  6 new specs in `AgentSessionTransactionalEventAppendSpecs`).
+- `dotnet test packages/server/tests/Mohist.Server.ArchTests`:
+  24 pass, 3 skipped, 0 failures.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests`: 865 pass,
+  0 failures.
+- New tests in
+  `packages/server/tests/Mohist.Server.SpecTests/Specs/Events/AgentSessionTransactionalEventAppendSpecs.cs`
+  (6 specs):
+  - `SaveAsync_CommitsStateAndLifecycleEventRowsTogether` — atomic
+    save of state and event rows; both rows readable via
+    `ListAgentSessionEventsAsync` after commit.
+  - `SaveAsync_EventRowWriteFailure_RollsBackStateAndEvents_AndDoesNotSwallow`
+    — `ThrowingEventStore` triggers `InvalidOperationException`;
+    the exception propagates out of `SaveAsync` and the
+    fresh-DbContext verification proves both `AgentSessions` and
+    `AgentSessionEvents` are empty (rollback wiped both).
+  - `SaveAsync_CrashAfterCommit_LifecycleEventRowsRemainDurableOnFreshDbContext`
+    — after commit, a fresh `DbContext` reads the persisted event
+    row with `DispatchedAt IS NULL` and the correct
+    `subject = session id`.
+  - `SaveAsync_StampsSourceAndSubjectOnEveryLifecycleEnvelope` — all
+    six lifecycle types (`RuntimeBound`, `UsageRecorded`,
+    `ModelChanged`, `ContextCompacted`, `ContextExhausted`,
+    `ContextHealthUpdated`) are persisted (no filtering per
+    design.md#OQ1), each carries
+    `source = /mohist/agent-session/{id}` and
+    `subject = state.Id`, and none stamps a `projectid`
+    extension (per design.md#OQ3).
+  - `SaveAsync_NoEvents_StillCommitsStateRow` — events-aware path
+    with an empty events list still commits the state row cleanly
+    and produces zero event rows.
+  - `SaveAsync_NoEventsOverload_RemainsForCallerWithNoPendingEvents`
+    — the no-events `SaveAsync(key, state)` overload still exists
+    and commits the state row cleanly without opening a
+    transaction.
+- `AgentSessionLifecycleDedupSpecs` (8 specs): all rewritten to
+  assert on persisted event rows via
+  `eventStore.ListAgentSessionEventsAsync(...)` after
+  `grain.FlushForTestAsync()` instead of on captured bus publishes.
+  `_fixture.RecordingPublisher.Clear()` calls were removed from
+  every spec — the agent-session producer no longer fans out to
+  the in-memory bus.
+- `AgentSessionContextEventPublishingSpecs` (2 specs):
+  `SessionClosed_FailedWithContextExhaustion_*` and
+  `UsageUpdated_Emits*` rewritten to assert on persisted rows via
+  `eventStore.ListAgentSessionEventsAsync(...)`. Same fixture-side
+  accessor pattern.
+- `AgentSessionContextExhaustionSpecs`: doc-comment updated to
+  drop the `IEventPublisher` reference (the recording is now
+  purely `ITranscriptEventPublisher`-scoped).
+- `AgentSessionGrainFixture`: `IEventPublisher` registration and
+  the `NoopEventPublisher` inner class removed from the silo; the
+  grain constructor no longer takes the dependency.
+- `AgentSessionStoreSpecs`: `new AgentSessionStore(new Factory(_options), new NoopEventStore())`
+  to satisfy the new constructor signature.
+- `EventPublishingIntegrationFixture`: exposes `Services` so
+  integration specs can resolve the singleton `IEventStore`.
+- `IEventStore` fakes updated to implement
+  `ListAgentSessionEventsAsync` (no-op in `NoopEventStore`,
+  source-prefix-filtered view in `RecordingEventStore`, dummy in
+  `InboxProjectionTestSupport.NoopEventStore`,
+  `EpicEventPublishSpecs.ThrowingEventStore`,
+  `IssueTransactionalEventAppendSpecs`'s and
+  `TransactionalEventAppendSpecs`'s private fakes).

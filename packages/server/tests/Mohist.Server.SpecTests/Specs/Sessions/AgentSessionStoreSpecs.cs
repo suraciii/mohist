@@ -26,7 +26,7 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         _options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connectionString)
             .Options;
-        _store = new AgentSessionStore(new Factory(_options));
+        _store = new AgentSessionStore(new Factory(_options), new NoopEventStore());
         _transcriptStore = new AgentSessionTranscriptStore(new Factory(_options));
 
         using var db = new MohistDbContext(_options);

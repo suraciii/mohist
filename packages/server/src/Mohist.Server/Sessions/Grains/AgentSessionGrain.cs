@@ -16,7 +16,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly IAgentSessionStore _stateStore;
     private readonly IAgentSessionTranscriptStore _transcriptStore;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IEventPublisher _eventPublisher;
     private readonly ITranscriptEventPublisher _transcriptPublisher;
     private readonly ILogger<AgentSessionGrain> _log;
     private readonly TimeProvider _timeProvider;
@@ -26,6 +25,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private long _realtimeSequence;
     private IDisposable? _persistTimer;
     private bool _stateDirty;
+    private readonly List<AgentSessionEvent> _pendingDomainEvents = new();
     private string? _lastHealthStatus;
     private double? _lastHealthPercent;
 
@@ -33,7 +33,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IAgentSessionStore stateStore,
         IAgentSessionTranscriptStore transcriptStore,
         IDbContextFactory<MohistDbContext> dbFactory,
-        IEventPublisher eventPublisher,
         ITranscriptEventPublisher transcriptPublisher,
         TimeProvider timeProvider,
         ILogger<AgentSessionGrain> log)
@@ -41,7 +40,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _stateStore = stateStore;
         _transcriptStore = transcriptStore;
         _dbFactory = dbFactory;
-        _eventPublisher = eventPublisher;
         _transcriptPublisher = transcriptPublisher;
         _timeProvider = timeProvider;
         _log = log;
@@ -362,6 +360,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         _transcript.Accept(session, allEntries, now);
 
+        _pendingDomainEvents.AddRange(events);
         _session = session;
         _cachedSummary = null;
 
@@ -507,22 +506,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IReadOnlyList<RuntimeEventEnvelope> entries,
         IReadOnlyList<AgentSessionEvent> domainEvents)
     {
-        var source = AgentSessionSource(session);
-
-        foreach (var domainEvent in domainEvents)
-        {
-            try
-            {
-                await PublishAgentSessionLifecycleAsync(domainEvent, source, session.Id);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "AgentSessionGrain failed to publish domain event for {SessionId}",
-                    session.Id);
-            }
-        }
-
         if (entries.Count == 0) return;
 
         foreach (var row in entries)
@@ -596,9 +579,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         if (_stateDirty)
         {
+            var pendingEvents = _pendingDomainEvents.Count == 0
+                ? Array.Empty<AgentSessionEvent>()
+                : _pendingDomainEvents.ToArray();
             try
             {
-                await _stateStore.SaveAsync(SessionId, _session, Array.Empty<AgentSessionEvent>(), ct);
+                await _stateStore.SaveAsync(SessionId, _session, pendingEvents, ct);
                 stateSaved = true;
             }
             catch (Exception ex)
@@ -629,6 +615,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             if (transcript is not null)
                 _transcript.CommitFlush();
+            if (_stateDirty)
+                _pendingDomainEvents.Clear();
             _stateDirty = false;
             return true;
         }
@@ -670,41 +658,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         await _stateStore.SaveAsync(SessionId, session, events);
         _session = session;
-
-        var source = AgentSessionSource(session);
-        foreach (var domainEvent in events)
-        {
-            try
-            {
-                await PublishAgentSessionLifecycleAsync(domainEvent, source, session.Id);
-            }
-            catch (InvalidOperationException)
-            {
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "AgentSessionGrain failed to publish lifecycle event for {SessionId}",
-                    session.Id);
-            }
-        }
-    }
-
-    private static string AgentSessionSource(AgentSession session) =>
-        $"/mohist/agent-session/{session.Id}";
-
-    private async Task PublishAgentSessionLifecycleAsync(AgentSessionEvent? domainEvent, string source, string subject)
-    {
-        if (domainEvent is null) return;
-        var concrete = domainEvent.Value;
-        var type = AgentSessionEventSerializer.BusType(concrete);
-        var data = AgentSessionEventSerializer.ToData(concrete);
-        await _eventPublisher.PublishAsync(
-            data,
-            type,
-            source,
-            subject: subject,
-            ct: CancellationToken.None);
     }
 
     private async Task<AgentSessionInfo> ToInfoAsync(AgentSession s)

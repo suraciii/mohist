@@ -163,7 +163,21 @@ public class EventStore : IEventStore
         return rows.Select(ToEpicStored).ToList();
     }
 
-public async Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default)
+public async Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default)
+    {
+        var source = AgentSessionEventPersistence.AgentSessionSource(sessionId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.AgentSessionEvents.AsNoTracking()
+            .Where(e => e.Source == source)
+            .OrderByDescending(e => e.Id)
+            .Take(limit)
+            .OrderBy(e => e.Id)
+            .ToListAsync(ct);
+
+        return rows.Select(ToAgentSessionStored).ToList();
+    }
+
+    public async Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         if (source.StartsWith(AgentSessionEventPersistence.SourcePrefix, StringComparison.Ordinal))
@@ -258,6 +272,18 @@ public async Task MarkDispatchedAsync(string source, long id, DateTimeOffset dis
             extensions: DeserializeExtensions(row.ExtensionsJson)));
 
     private static StoredCloudEvent ToEpicStored(EpicEventRow row) =>
+        new(row.Id, new CloudEvent(
+            id: row.EventId,
+            source: new Uri(row.Source, UriKind.RelativeOrAbsolute),
+            type: row.Type,
+            time: row.Time,
+            data: row.Data,
+            dataContentType: row.DataContentType,
+            subject: row.Subject,
+            specVersion: row.SpecVersion,
+            extensions: DeserializeExtensions(row.ExtensionsJson)));
+
+    private static StoredCloudEvent ToAgentSessionStored(AgentSessionEventRow row) =>
         new(row.Id, new CloudEvent(
             id: row.EventId,
             source: new Uri(row.Source, UriKind.RelativeOrAbsolute),

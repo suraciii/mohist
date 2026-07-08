@@ -38,6 +38,7 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
 
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client => _factory.CreateClient();
+    public IServiceProvider Services => _factory.Services;
     public RecordingIEventPublisher RecordingPublisher => _factory.RecordingPublisher;
     public RecordingTranscriptEventPublisher RecordingTranscriptPublisher => _factory.RecordingTranscriptPublisher;
 
