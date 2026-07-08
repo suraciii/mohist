@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest'
-import { sessionToCard } from './activity-cards'
+import { describe, it, expect, vi } from 'vitest'
+import { renderHook } from '@testing-library/react'
+import { sessionToCard, useActivityCards } from './activity-cards'
 import type { AgentActivitySession } from '../../../entities/agent'
+
+const useAgentActivityMock = vi.fn()
+
+vi.mock('../../../entities/agent', () => ({
+  useAgentActivity: (...args: unknown[]) => useAgentActivityMock(...args),
+}))
 
 function makeSession(overrides: Partial<AgentActivitySession> = {}): AgentActivitySession {
   return {
@@ -104,5 +111,80 @@ describe('sessionToCard', () => {
     expect(card.contextWindowSize).toBeNull()
     expect(card.contextUsagePercent).toBeNull()
     expect(card.contextUsageHistory).toBeNull()
+  })
+})
+
+describe('useActivityCards — activeCardByIssueNumber', () => {
+  beforeEach(() => {
+    useAgentActivityMock.mockReset()
+  })
+
+  it('indexes active sessions by numeric issue number for O(1) join from Pulse zone', () => {
+    useAgentActivityMock.mockReturnValue({
+      data: {
+        summary: { active: 2, waiting: 0, completed: 0, failed: 0, slots: { active: 2, max: 8 } },
+        sessions: [
+          makeSession({ sessionId: 'a-12', issueNumber: 12, status: 'active' }),
+          makeSession({ sessionId: 'a-99', issueNumber: 99, status: 'active' }),
+        ],
+        waiting: [],
+      },
+    })
+
+    const { result } = renderHook(() => useActivityCards())
+
+    expect(result.current.activeCardByIssueNumber.size).toBe(2)
+    expect(result.current.activeCardByIssueNumber.get(12)?.sessionId).toBe('a-12')
+    expect(result.current.activeCardByIssueNumber.get(99)?.sessionId).toBe('a-99')
+    expect(result.current.activeCardByIssueNumber.get(1)).toBeUndefined()
+  })
+
+  it('does NOT index non-active sessions (completed, failed, etc.)', () => {
+    useAgentActivityMock.mockReturnValue({
+      data: {
+        summary: { active: 1, waiting: 0, completed: 1, failed: 1, slots: { active: 1, max: 8 } },
+        sessions: [
+          makeSession({ sessionId: 'a-active', issueNumber: 12, status: 'active' }),
+          makeSession({ sessionId: 'a-completed', issueNumber: 13, status: 'completed' }),
+          makeSession({ sessionId: 'a-failed', issueNumber: 14, status: 'failed' }),
+        ],
+        waiting: [],
+      },
+    })
+
+    const { result } = renderHook(() => useActivityCards())
+
+    expect(result.current.activeCardByIssueNumber.size).toBe(1)
+    expect(result.current.activeCardByIssueNumber.get(12)?.sessionId).toBe('a-active')
+    expect(result.current.activeCardByIssueNumber.get(13)).toBeUndefined()
+    expect(result.current.activeCardByIssueNumber.get(14)).toBeUndefined()
+  })
+
+  it('returns an empty map when the activity feed has no sessions', () => {
+    useAgentActivityMock.mockReturnValue({ data: undefined })
+
+    const { result } = renderHook(() => useActivityCards())
+
+    expect(result.current.activeCardByIssueNumber).toBeInstanceOf(Map)
+    expect(result.current.activeCardByIssueNumber.size).toBe(0)
+  })
+
+  it('keeps only one active session per issue number when duplicates exist', () => {
+    useAgentActivityMock.mockReturnValue({
+      data: {
+        summary: { active: 2, waiting: 0, completed: 0, failed: 0, slots: { active: 2, max: 8 } },
+        sessions: [
+          makeSession({ sessionId: 'first-12', issueNumber: 12, status: 'active' }),
+          makeSession({ sessionId: 'second-12', issueNumber: 12, status: 'active' }),
+        ],
+        waiting: [],
+      },
+    })
+
+    const { result } = renderHook(() => useActivityCards())
+
+    expect(result.current.activeCardByIssueNumber.size).toBe(1)
+    expect(result.current.activeCardByIssueNumber.get(12)).toBeDefined()
+    expect(['first-12', 'second-12']).toContain(result.current.activeCardByIssueNumber.get(12)!.sessionId)
   })
 })

@@ -143,8 +143,15 @@ export function useActivityCards() {
     const recentCards = cards.filter((c) => !ACTIVE_STATUSES.has(c.status))
     const waitingCards = (data?.waiting ?? []).map(waitingToCard)
 
+    const activeCardByIssueNumber = new Map<number, SessionCard>()
+    for (const card of activeCards) {
+      const n = Number(card.issueNumber)
+      if (Number.isFinite(n)) activeCardByIssueNumber.set(n, card)
+    }
+
     return {
       activeCards,
+      activeCardByIssueNumber,
       recentCards,
       waitingCards,
       statusCounts: data?.summary ?? {

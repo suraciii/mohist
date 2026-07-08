@@ -25,6 +25,21 @@ function isIntegrateFailure(issue: Issue): boolean {
   )
 }
 
+/**
+ * Shared predicate: does this issue require owner action?
+ * Matches the issue-side classification inside `deriveAttentionItems`
+ * (awaiting approval / integrate-failure / interrupted / blocked) so the
+ * inline cue on the Pulse zone and the prioritized attention entry can
+ * never disagree.
+ */
+function issueNeedsOwnerAction(issue: Issue): boolean {
+  if (issue.approvalState?.status === 'awaiting') return true
+  if (isIntegrateFailure(issue)) return true
+  if (issue.health === IssueHealth.Interrupted) return true
+  if (issue.health === IssueHealth.Blocked) return true
+  return false
+}
+
 function deriveAttentionItems(issues: Issue[], agentStatus: AgentStatus): AttentionItem[] {
   const items: AttentionItem[] = []
   const seen = new Set<string>()
@@ -91,4 +106,4 @@ function deriveAttentionItems(issues: Issue[], agentStatus: AgentStatus): Attent
   return items
 }
 
-export { deriveAttentionItems, isIntegrateFailure }
+export { deriveAttentionItems, isIntegrateFailure, issueNeedsOwnerAction }
