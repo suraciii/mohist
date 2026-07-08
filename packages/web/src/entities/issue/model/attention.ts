@@ -1,5 +1,5 @@
 import type { AgentStatus } from '../../agent'
-import { IssueHealth, WorkflowStage, type Issue } from '..'
+import { IssueHealth, WorkflowStage, type Issue } from './issue'
 
 export type AttentionItem =
   | {
@@ -15,6 +15,8 @@ export type AttentionItem =
       detail?: string
     }
 
+type IssueAttentionItem = Extract<AttentionItem, { issueId: string }>
+
 function isIntegrateFailure(issue: Issue): boolean {
   return (
     issue.workflowStage === WorkflowStage.Integrate
@@ -25,19 +27,52 @@ function isIntegrateFailure(issue: Issue): boolean {
   )
 }
 
-/**
- * Shared predicate: does this issue require owner action?
- * Matches the issue-side classification inside `deriveAttentionItems`
- * (awaiting approval / integrate-failure / interrupted / blocked) so the
- * inline cue on the Pulse zone and the prioritized attention entry can
- * never disagree.
- */
+function classifyIssueAttention(issue: Issue): IssueAttentionItem | null {
+  if (issue.approvalState?.status === 'awaiting') {
+    return {
+      kind: 'approval-needed',
+      issueNumber: issue.number,
+      issueId: issue.id,
+      label: 'Approval needed',
+      detail: issue.title,
+    }
+  }
+
+  if (isIntegrateFailure(issue)) {
+    return {
+      kind: 'integration-failed',
+      issueNumber: issue.number,
+      issueId: issue.id,
+      label: 'Integration failed',
+      detail: issue.title,
+    }
+  }
+
+  if (issue.health === IssueHealth.Interrupted) {
+    return {
+      kind: 'interrupted',
+      issueNumber: issue.number,
+      issueId: issue.id,
+      label: 'Interrupted',
+      detail: issue.title,
+    }
+  }
+
+  if (issue.health === IssueHealth.Blocked) {
+    return {
+      kind: 'blocked',
+      issueNumber: issue.number,
+      issueId: issue.id,
+      label: 'Needs action',
+      detail: issue.blockedReason ?? issue.title,
+    }
+  }
+
+  return null
+}
+
 function issueNeedsOwnerAction(issue: Issue): boolean {
-  if (issue.approvalState?.status === 'awaiting') return true
-  if (isIntegrateFailure(issue)) return true
-  if (issue.health === IssueHealth.Interrupted) return true
-  if (issue.health === IssueHealth.Blocked) return true
-  return false
+  return classifyIssueAttention(issue) !== null
 }
 
 function deriveAttentionItems(issues: Issue[], agentStatus: AgentStatus): AttentionItem[] {
@@ -47,42 +82,10 @@ function deriveAttentionItems(issues: Issue[], agentStatus: AgentStatus): Attent
   for (const issue of issues) {
     if (seen.has(issue.id)) continue
 
-    if (issue.approvalState?.status === 'awaiting') {
+    const item = classifyIssueAttention(issue)
+    if (item) {
       seen.add(issue.id)
-      items.push({
-        kind: 'approval-needed',
-        issueNumber: issue.number,
-        issueId: issue.id,
-        label: 'Approval needed',
-        detail: issue.title,
-      })
-    } else if (isIntegrateFailure(issue)) {
-      seen.add(issue.id)
-      items.push({
-        kind: 'integration-failed',
-        issueNumber: issue.number,
-        issueId: issue.id,
-        label: 'Integration failed',
-        detail: issue.title,
-      })
-    } else if (issue.health === IssueHealth.Interrupted) {
-      seen.add(issue.id)
-      items.push({
-        kind: 'interrupted',
-        issueNumber: issue.number,
-        issueId: issue.id,
-        label: 'Interrupted',
-        detail: issue.title,
-      })
-    } else if (issue.health === IssueHealth.Blocked) {
-      seen.add(issue.id)
-      items.push({
-        kind: 'blocked',
-        issueNumber: issue.number,
-        issueId: issue.id,
-        label: 'Needs action',
-        detail: issue.blockedReason ?? issue.title,
-      })
+      items.push(item)
     }
   }
 
@@ -106,4 +109,4 @@ function deriveAttentionItems(issues: Issue[], agentStatus: AgentStatus): Attent
   return items
 }
 
-export { deriveAttentionItems, isIntegrateFailure, issueNeedsOwnerAction }
+export { classifyIssueAttention, deriveAttentionItems, isIntegrateFailure, issueNeedsOwnerAction }

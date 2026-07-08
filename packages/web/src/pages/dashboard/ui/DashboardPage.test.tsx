@@ -112,6 +112,39 @@ const NO_AGENT_ACTIVITY = {
   slotUsage: { active: 0, max: 0 },
 }
 
+function makeActiveCard(overrides: Record<string, unknown> = {}) {
+  return {
+    issueId: 'session-only-issue',
+    issueNumber: '999',
+    issueTitle: 'Session-only issue',
+    issueStage: 'Build',
+    sessionId: 'session-only',
+    status: 'active',
+    model: null,
+    resolvedModel: null,
+    taskDescription: 'Session-only work',
+    title: 'Session-only work',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    completedAt: null,
+    lastActivityAt: '2026-01-01T00:00:00.000Z',
+    activityPreviews: [],
+    taskProgress: null,
+    currentWorkTitle: null,
+    failureReason: null,
+    failureCategory: null,
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+    costAmount: null,
+    costCurrency: null,
+    contextWindowUsed: null,
+    contextWindowSize: null,
+    toolCallCount: null,
+    toolErrorCount: null,
+    ...overrides,
+  }
+}
+
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     id: overrides.id ?? `issue-${Math.random().toString(36).slice(2, 8)}`,
@@ -645,20 +678,30 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       expect(screen.getByTestId('dashboard-zone-pulse')).toBeInTheDocument()
     })
 
-    it('does not render an empty active-production zone for an active card without a running issue', () => {
+    it('renders active-production for an active session without a running issue and does not show the ready state', () => {
       mocks.projects = [
         { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
       ]
       mocks.useIssuesMock.mockReturnValue({ data: [], isLoading: false })
+      const activeCard = makeActiveCard({
+        issueNumber: '999',
+        issueTitle: 'Active session without issue row',
+        title: 'Active session without issue row',
+        sessionId: 'session-999',
+      })
       mocks.useAgentActivityMock.mockReturnValue({
         ...NO_AGENT_ACTIVITY,
-        activeCardByIssueNumber: new Map([[999, { issueNumber: '999' }]]),
+        activeCards: [activeCard],
+        activeCardByIssueNumber: new Map([[999, activeCard]]),
       })
 
       renderPage()
 
-      expect(screen.queryByTestId('dashboard-zone-pulse')).not.toBeInTheDocument()
+      expect(screen.getByTestId('dashboard-zone-pulse')).toBeInTheDocument()
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
       expect(screen.queryByTestId('pulse-empty-state')).not.toBeInTheDocument()
+      expect(screen.getByTestId('pulse-compact-card')).toHaveAttribute('data-issue-number', '999')
+      expect(screen.getByTestId('pulse-compact-title')).toHaveTextContent('Active session without issue row')
     })
   })
 

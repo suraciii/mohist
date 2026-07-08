@@ -8,17 +8,16 @@ import { CreateProjectDialog } from '../../../widgets/create-project-dialog'
 import { DashboardDigestWidget } from '../../../widgets/dashboard-digest'
 import { DashboardCapacityZone } from '../../../widgets/dashboard-capacity'
 import { PulseZone } from '../../../widgets/dashboard-pulse'
+import { useActivityCards } from '../../../widgets/coder-session/model/activity-cards'
 import { FactoryStatusHeadline } from '../../../widgets/factory-status'
 import { AttentionHero } from '../../../widgets/attention-hero'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import {
   deriveAttentionItems,
+  isRunningIssue,
   useIssues,
   useRecentDigest,
-  IssueHealth,
-  IssueStatus,
-  type Issue,
 } from '../../../entities/issue'
 import { CheckCircle2Icon } from 'lucide-react'
 import { DashboardZone } from './DashboardZone'
@@ -31,19 +30,12 @@ const defaultAgentStatus: AgentStatus = {
   capacity: { active: 0, max: 0 },
 }
 
-function isRunningIssue(issue: Issue): boolean {
-  return (
-    issue.status === IssueStatus.InProgress
-    && issue.health !== IssueHealth.Done
-    && issue.health !== IssueHealth.Cancelled
-  )
-}
-
 export function DashboardPage() {
   const { data: projects, isLoading: projectsLoading } = useProjects()
   const { currentProject, projectId } = useProject()
   const { data: agentStatus } = useAgentStatus()
   const { data: fetchedIssues, isLoading: issuesLoading } = useIssues(projectId ? { projectId } : undefined)
+  const { activeCards } = useActivityCards()
   const { completed, failed, archived } = useRecentDigest()
   const [showCreateProject, setShowCreateProject] = useState(false)
 
@@ -60,7 +52,7 @@ export function DashboardPage() {
   )
 
   const hasAttention = attentionItems.length > 0
-  const hasActiveWork = runningIssues.length > 0
+  const hasActiveWork = runningIssues.length > 0 || activeCards.length > 0
   const hasDigestItems =
     completed.length > 0 || failed.length > 0 || archived.length > 0
   const hasCapacityData =

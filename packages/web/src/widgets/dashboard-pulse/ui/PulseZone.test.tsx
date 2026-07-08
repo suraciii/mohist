@@ -284,6 +284,28 @@ describe('PulseZone — issue-led active production', () => {
     expect(screen.getByTestId('pulse-compact-progress')).toHaveTextContent('3/8 tasks')
   })
 
+  it('shows an active session even when no in-progress issue row exists', () => {
+    mocks.issues = []
+    mocks.activity = makeActivity([
+      makeSession({
+        sessionId: 'session-only-999',
+        issueId: 'session-only-issue',
+        issueNumber: 999,
+        issueTitle: 'Session-only active work',
+        issueStage: 'Check',
+        taskDescription: 'Continue active session',
+      }),
+    ])
+
+    renderZone()
+
+    expect(screen.queryByTestId('pulse-empty-state')).not.toBeInTheDocument()
+    const card = screen.getByTestId('pulse-compact-card')
+    expect(card).toHaveAttribute('data-issue-number', '999')
+    expect(within(card).getByTestId('pulse-compact-title')).toHaveTextContent('Continue active session')
+    expect(within(card).getByTestId('pulse-compact-stage')).toHaveTextContent('Check')
+  })
+
   it('uses the current issue title and workflow stage when session telemetry is stale', () => {
     mocks.issues = [
       makeRunningIssue({
@@ -339,9 +361,11 @@ describe('PulseZone — issue-led active production', () => {
 
     renderZone()
 
-    const card = screen.getByTestId('pulse-compact-card')
-    expect(card).toHaveAttribute('data-issue-number', '130')
-    expect(within(card).getByTestId('pulse-compact-title')).toHaveTextContent('Work paused between stages')
+    const cards = screen.getAllByTestId('pulse-compact-card')
+    expect(cards.map((card) => card.getAttribute('data-issue-number'))).toContain('130')
+    const issueCard = cards.find((card) => card.getAttribute('data-issue-number') === '130')
+    if (!issueCard) throw new Error('Expected issue 130 to render')
+    expect(within(issueCard).getByTestId('pulse-compact-title')).toHaveTextContent('Work paused between stages')
   })
 
   it('renders the cue on a session-enriched row when the issue also needs owner action', () => {
@@ -403,7 +427,7 @@ describe('PulseZone — issue-led active production', () => {
 
     expect(screen.getAllByTestId('pulse-compact-card')).toHaveLength(4)
     const link = screen.getByTestId('pulse-overflow-link')
-    expect(link).toHaveTextContent('+2 more running issues')
+    expect(link).toHaveTextContent('+2 more active items')
     expect(link.getAttribute('href')).toMatch(/\/issues$/)
   })
 
@@ -422,10 +446,10 @@ describe('PulseZone — issue-led active production', () => {
     renderZone()
 
     expect(screen.getAllByTestId('pulse-compact-card')).toHaveLength(4)
-    expect(screen.getByTestId('pulse-overflow-link')).toHaveTextContent('+1 more running issues')
+    expect(screen.getByTestId('pulse-overflow-link')).toHaveTextContent('+1 more active items')
   })
 
-  it('renders an empty-state affordance when there are no running issues', () => {
+  it('renders an empty-state affordance when there are no running issues or active sessions', () => {
     mocks.issues = [
       makeRunningIssue({
         id: 'done-issue',
@@ -451,7 +475,7 @@ describe('PulseZone — issue-led active production', () => {
     renderZone()
 
     const empty = screen.getByTestId('pulse-empty-state')
-    expect(empty).toHaveTextContent('No running issues')
+    expect(empty).toHaveTextContent('No active production')
     expect(screen.queryByTestId('pulse-compact-card')).not.toBeInTheDocument()
   })
 
@@ -487,7 +511,7 @@ describe('PulseZone — issue-led active production', () => {
     expect(cards.map((card) => card.getAttribute('data-issue-number'))).toEqual(['5', '12', '30'])
   })
 
-  it('does not list non-in-progress issues (Done/Cancelled/Backlog), even with an active session', () => {
+  it('lists active sessions that do not have a matching running issue row', () => {
     mocks.issues = [
       makeRunningIssue({
         id: 'done-with-session',
@@ -514,8 +538,8 @@ describe('PulseZone — issue-led active production', () => {
     renderZone()
 
     const cards = screen.getAllByTestId('pulse-compact-card')
-    expect(cards).toHaveLength(1)
-    expect(cards[0]).toHaveAttribute('data-issue-number', '601')
+    expect(cards).toHaveLength(2)
+    expect(cards.map((card) => card.getAttribute('data-issue-number'))).toEqual(['601', '600'])
   })
 
   it('renders both a session-enriched row and a session-less row side by side (mixed state)', () => {

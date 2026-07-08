@@ -1,19 +1,11 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { useActivityCards } from '@/widgets/coder-session/model/activity-cards'
+import { useActivityCards, type SessionCard } from '@/widgets/coder-session/model/activity-cards'
 import { useProject, useProjectPath } from '@/entities/project'
-import { IssueHealth, IssueStatus, issueNeedsOwnerAction, useIssues, type Issue } from '@/entities/issue'
+import { isRunningIssue, issueNeedsOwnerAction, useIssues, type Issue } from '@/entities/issue'
 import { CompactSessionCard, IssueRow } from './CompactSessionCard'
 
 const MAX_VISIBLE_ROWS = 4
-
-function isRunningIssue(issue: Issue): boolean {
-  return (
-    issue.status === IssueStatus.InProgress
-    && issue.health !== IssueHealth.Done
-    && issue.health !== IssueHealth.Cancelled
-  )
-}
 
 function stageLabel(stage: string | null | undefined): string | null {
   if (!stage) return null
@@ -33,33 +25,57 @@ export interface PulseZoneProps {
 export function PulseZone({ issuesOverride }: PulseZoneProps = {}) {
   const { projectId } = useProject()
   const { data: fetchedIssues } = useIssues(projectId ? { projectId } : undefined)
-  const { activeCardByIssueNumber } = useActivityCards()
+  const { activeCards, activeCardByIssueNumber } = useActivityCards()
   const toProjectPath = useProjectPath()
 
-  const runningIssues = useMemo(() => {
+  const activeRows = useMemo(() => {
     const issues = issuesOverride ?? fetchedIssues ?? []
-    return issues
+    const runningIssues = issues
       .filter(isRunningIssue)
       .slice()
       .sort((a, b) => a.number - b.number)
-  }, [issuesOverride, fetchedIssues])
+    const runningIssueNumbers = new Set(runningIssues.map((issue) => issue.number))
+    const sessionOnlyRows = activeCards
+      .filter((card) => {
+        const issueNumber = Number(card.issueNumber)
+        return !Number.isFinite(issueNumber) || !runningIssueNumbers.has(issueNumber)
+      })
+      .slice()
+      .sort(compareSessionCards)
+      .map((card) => ({ kind: 'session' as const, card }))
 
-  const visible = runningIssues.slice(0, MAX_VISIBLE_ROWS)
-  const overflow = runningIssues.length - visible.length
+    return [
+      ...runningIssues.map((issue) => ({ kind: 'issue' as const, issue })),
+      ...sessionOnlyRows,
+    ]
+  }, [issuesOverride, fetchedIssues, activeCards])
+
+  const visible = activeRows.slice(0, MAX_VISIBLE_ROWS)
+  const overflow = activeRows.length - visible.length
 
   return (
     <div data-testid="pulse-zone" className="flex flex-col gap-3">
-      {runningIssues.length === 0 ? (
+      {activeRows.length === 0 ? (
         <div
           data-testid="pulse-empty-state"
           className="rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 py-6 text-center"
         >
-          <p className="text-xs text-gray-400">No running issues</p>
+          <p className="text-xs text-gray-400">No active production</p>
         </div>
       ) : (
         <>
           <div className="flex flex-col gap-2" data-testid="pulse-card-list">
-            {visible.map((issue) => {
+            {visible.map((row) => {
+              if (row.kind === 'session') {
+                return (
+                  <CompactSessionCard
+                    key={`session-${row.card.sessionId}`}
+                    card={row.card}
+                  />
+                )
+              }
+
+              const issue = row.issue
               const needsAction = issueNeedsOwnerAction(issue)
               const card = activeCardByIssueNumber.get(issue.number)
               if (card) {
@@ -91,11 +107,20 @@ export function PulseZone({ issuesOverride }: PulseZoneProps = {}) {
               data-testid="pulse-overflow-link"
               className="text-xs text-blue-600 hover:text-blue-800 hover:underline self-start"
             >
-              +{overflow} more running issues
+              +{overflow} more active items
             </Link>
           )}
         </>
       )}
     </div>
   )
+}
+
+function compareSessionCards(a: SessionCard, b: SessionCard): number {
+  const aIssueNumber = Number(a.issueNumber)
+  const bIssueNumber = Number(b.issueNumber)
+  if (Number.isFinite(aIssueNumber) && Number.isFinite(bIssueNumber)) {
+    return aIssueNumber - bIssueNumber
+  }
+  return a.issueNumber.localeCompare(b.issueNumber)
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentStatus } from '../../agent'
 import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from '..'
-import { deriveAttentionItems, isIntegrateFailure, issueNeedsOwnerAction, type AttentionItem } from './attention'
+import { classifyIssueAttention, deriveAttentionItems, isIntegrateFailure, issueNeedsOwnerAction, type AttentionItem } from './attention'
 
 function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   return {
@@ -721,6 +721,28 @@ describe('issueNeedsOwnerAction', () => {
         requestedAt: '2026-06-18T00:00:00.000Z',
       },
     }))).toBe(true)
+  })
+
+  it('uses the same issue classifier that feeds deriveAttentionItems', () => {
+    const issue = makeIssue({
+      id: 'a-10b',
+      number: 104,
+      title: 'Classifier source',
+      workflowStage: WorkflowStage.Build,
+      health: IssueHealth.Blocked,
+      blockedReason: 'blocked by owner decision',
+    })
+
+    const classified = classifyIssueAttention(issue)
+    expect(classified).toEqual({
+      kind: 'blocked',
+      issueNumber: 104,
+      issueId: 'a-10b',
+      label: 'Needs action',
+      detail: 'blocked by owner decision',
+    })
+    expect(issueNeedsOwnerAction(issue)).toBe(true)
+    expect(deriveAttentionItems([issue], NO_AGENT)).toEqual([classified])
   })
 
   it('stays in lock-step with deriveAttentionItems — every issue producing an issue kind returns true here', () => {
