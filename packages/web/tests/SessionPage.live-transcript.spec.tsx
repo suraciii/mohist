@@ -13,16 +13,7 @@ const sessionPageMocks = vi.hoisted(() => ({
   detail: null as CoderSessionDetail | null,
   detailError: null as Error | null,
   detailPending: false,
-  params: { number: '123', sessionId: 'session-123' },
 }))
-
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
-  return {
-    ...actual,
-    useParams: () => sessionPageMocks.params,
-  }
-})
 
 vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
   useCoderSessions: () => ({ sessions: sessionPageMocks.sessions, isLoading: sessionPageMocks.sessionsLoading }),
@@ -52,7 +43,6 @@ beforeEach(() => {
   sessionPageMocks.detail = null
   sessionPageMocks.detailError = null
   sessionPageMocks.detailPending = false
-  sessionPageMocks.params = { number: '123', sessionId: 'session-123' }
   Element.prototype.scrollTo = vi.fn()
 })
 

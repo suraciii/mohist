@@ -1,7 +1,7 @@
 import { TEST_PROJECT, baseRender, screen, fireEvent, renderHook } from './test-utils'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import React from 'react'
 import type { SessionTurn, CoderSessionDetail, AgentSessionMetadata } from '../src/entities/coder-session'
 
@@ -17,13 +17,21 @@ export function createMockQueryClient() {
   })
 }
 
-export function renderWithQueryClient(ui: React.ReactElement) {
+export function renderWithQueryClient(
+  ui: React.ReactElement,
+  initialEntry = '/issues/123/workflow/sessions/session-123',
+) {
   const queryClient = createMockQueryClient()
   queryClients.push(queryClient)
   return baseRender(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
-        <MemoryRouter>{ui}</MemoryRouter>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route path="/issues/:number/workflow/sessions/:sessionName" element={ui} />
+            <Route path="/issues/:number/workflow/sessions/:sessionId" element={ui} />
+          </Routes>
+        </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
   )
