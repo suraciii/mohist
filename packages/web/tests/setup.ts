@@ -4,9 +4,19 @@ import { afterEach, vi } from 'vitest'
 
 let _reducedMotionOverride: boolean | undefined
 
+// isolate:false 终局下，同 worker 的文件共享 jsdom 与模块图；每测试的
+// 环境复位必须集中在这里机械执行，不依赖各文件自觉
+// （openspec/changes/web-test-boundary-mocks）。
 afterEach(() => {
   cleanup()
   _reducedMotionOverride = undefined
+  vi.useRealTimers()
+  if (typeof window !== 'undefined') {
+    window.localStorage.clear()
+    window.sessionStorage.clear()
+    document.title = ''
+    document.documentElement.className = ''
+  }
 })
 
 if (typeof window !== 'undefined' && !window.matchMedia) {
