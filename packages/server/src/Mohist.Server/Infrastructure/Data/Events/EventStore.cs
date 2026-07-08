@@ -296,8 +296,8 @@ public async Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(s
             specVersion: row.SpecVersion,
             extensions: DeserializeExtensions(row.ExtensionsJson)));
 
-    private static string SerializeExtensions(IReadOnlyDictionary<string, string> extensions) =>
-        JsonSerializer.Serialize(extensions, CloudEvent.JsonOptions);
+    private static string SerializeExtensions(IReadOnlyDictionary<string, string>? extensions) =>
+        extensions is null ? "{}" : JsonSerializer.Serialize(extensions, CloudEvent.JsonOptions);
 
     private static IReadOnlyDictionary<string, string> DeserializeExtensions(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, string>>(json, CloudEvent.JsonOptions)

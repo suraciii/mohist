@@ -29,13 +29,12 @@ namespace Mohist.Server.Events.Subscriptions;
 /// unchanged).
 /// </para>
 /// <para>
-/// Dispatch is synchronous (no background detach): the handler is
-/// called from inside a workflow-grain publish path and resolves to a
-/// <em>different</em> grain (<see cref="IIssueGrain"/>), so no
-/// reentrancy/self-deadlock. This matches the posture of
-/// <see cref="EpicAutoDoneHandler"/>, which similarly calls a different
-/// grain (<c>EpicGrain</c>) from the issue grain's publish path
-/// without detaching.
+/// The handler is dormant until the dispatcher (step 3 of the event-bus
+/// v2 roadmap) lands. <see cref="InMemoryEventBus.PublishAsync"/> no longer
+/// invokes handlers synchronously, so this handler is currently triggered
+/// only by tests and by the future replay/dispatcher infrastructure. The
+/// registration is kept intact so the dispatcher can wire it without code
+/// changes.
 /// </para>
 /// <para>
 /// Handler exceptions are swallowed and logged so a dispatch/handling

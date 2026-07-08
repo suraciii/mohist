@@ -592,6 +592,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 _log.LogError(ex,
                     "AgentSessionGrain failed to save state for {SessionId}",
                     SessionId);
+                throw;
             }
         }
 

@@ -468,6 +468,7 @@ public class MohistDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(AgentSessionEventRow.Type), nameof(AgentSessionEventRow.Source), nameof(AgentSessionEventRow.Id));
+            entity.HasIndex(e => new { e.Type, e.Time });
             entity.HasIndex(e => new { e.Source, e.Id })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_AgentSessionEvents_Undelivered");

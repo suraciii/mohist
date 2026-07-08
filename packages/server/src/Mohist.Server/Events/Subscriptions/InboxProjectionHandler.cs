@@ -45,9 +45,12 @@ namespace Mohist.Server.Events.Subscriptions;
 /// the source plus event id index dedupes replays at the store level,
 /// so this handler does not need its own dedup bookkeeping.
 ///
-/// Exceptions are logged and swallowed: the bus already tolerates
-/// handler failures (see <see cref="InMemoryEventBus"/>), and the spec
-/// states the projection must never block workflow / issue execution.
+/// Exceptions are logged and swallowed. The handler is currently dormant
+/// because <see cref="InMemoryEventBus"/> no longer dispatches handlers
+/// synchronously; the inbox-hint publish path is also inactive until the
+/// dispatcher (step 3 of the event-bus v2 roadmap) lands. The spec
+/// requirement that projection must never block workflow / issue execution
+/// remains unchanged.
 ///
 /// <para>
 /// <b>Realtime hint</b>. On a successful, non-duplicate

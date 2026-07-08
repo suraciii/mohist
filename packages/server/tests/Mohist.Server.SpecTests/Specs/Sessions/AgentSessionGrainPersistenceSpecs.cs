@@ -84,12 +84,10 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
     public AgentSessionGrainPersistStateFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task PersistCallback_StateSaveFailure_LogsErrorAndRetries()
+    public async Task FlushForTestAsync_StateSaveFailure_LogsErrorAndRetries()
     {
         var grain = NewGrain();
         await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
-
-        Fixture.StateStore.NextException = new InvalidOperationException("state store down");
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
@@ -98,20 +96,42 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
             }));
 
-        await WaitUntilAsync(
-            () => Fixture.StateStore.SaveCount >= 2
-                && Fixture.TranscriptStore.Flushes.Count >= 2
-                && Fixture.Logger.Entries.Any(e => e.Level == LogLevel.Error),
-            "agent session state persistence retry");
+        Fixture.StateStore.NextException = new InvalidOperationException("state store down");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => grain.FlushForTestAsync());
+        Assert.Contains("state store down", ex.Message);
+        Assert.Equal(1, Fixture.StateStore.SaveCount);
+        Assert.Empty(Fixture.TranscriptStore.Flushes);
+
+        await grain.FlushForTestAsync();
 
         Assert.Equal(2, Fixture.StateStore.SaveCount);
-        Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count);
+        Assert.Single(Fixture.TranscriptStore.Flushes);
         var stateError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
-        Assert.Contains(grain.GetPrimaryKeyString(), stateError.Message);
+        Assert.Contains("failed to save state", stateError.Message);
         Assert.Contains("state store down", stateError.Exception?.Message ?? string.Empty);
-        var retryFlush = Fixture.TranscriptStore.Flushes[1];
+        var retryFlush = Fixture.TranscriptStore.Flushes[0];
         var part = Assert.Single(retryFlush.Parts);
         Assert.Equal("world", part.TextDelta);
+    }
+
+    [Fact]
+    public async Task FlushForTestAsync_StateSaveFailure_PropagatesException()
+    {
+        var grain = NewGrain();
+        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new List<AgentSessionRuntimeEventInput>
+            {
+                new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"hello\",\"kind\":\"task\"}")
+            }));
+
+        Fixture.StateStore.NextException = new InvalidOperationException("state store down");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => grain.FlushForTestAsync());
+        Assert.Contains("state store down", ex.Message);
+        Assert.Equal(1, Fixture.StateStore.SaveCount);
     }
 }
 
@@ -122,7 +142,7 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
     public AgentSessionGrainPersistTranscriptFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task PersistCallback_TranscriptSaveFailure_LogsErrorAndRetriesWithoutCommit()
+    public async Task FlushForTestAsync_TranscriptSaveFailure_LogsErrorAndRetriesWithoutCommit()
     {
         var grain = NewGrain();
         await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
@@ -136,15 +156,16 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
             }));
 
-        await WaitUntilAsync(
-            () => Fixture.StateStore.SaveCount >= 3
-                && Fixture.TranscriptStore.Flushes.Count >= 1
-                && Fixture.Logger.Entries.Any(e => e.Level == LogLevel.Error),
-            "agent session transcript persistence retry");
+        await grain.FlushForTestAsync();
+
+        Assert.Equal(2, Fixture.StateStore.SaveCount);
+        Assert.Empty(Fixture.TranscriptStore.Flushes);
+
+        await grain.FlushForTestAsync();
 
         Assert.Equal(3, Fixture.StateStore.SaveCount);
         var transcriptError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
-        Assert.Contains(grain.GetPrimaryKeyString(), transcriptError.Message);
+        Assert.Contains("failed to save transcript", transcriptError.Message);
         Assert.Contains("1", transcriptError.Message);
         Assert.Contains("transcript store down", transcriptError.Exception?.Message ?? string.Empty);
         var retryFlush = Assert.Single(Fixture.TranscriptStore.Flushes);
@@ -191,29 +212,6 @@ public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSp
         Assert.Equal(1, Fixture.StateStore.SaveCount);
         Assert.Empty(Fixture.TranscriptStore.Flushes);
         Assert.DoesNotContain(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
-    }
-
-    [Fact]
-    public async Task Deactivation_StateSaveFailure_LogsErrorAndStillFlushesTranscript()
-    {
-        var grain = NewGrain();
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
-
-        Fixture.StateStore.NextException = new InvalidOperationException("state store down");
-
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
-            new List<AgentSessionRuntimeEventInput>
-            {
-                new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"hello\",\"kind\":\"task\"}"),
-                new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
-            }));
-
-        await DeactivateAsync(grain);
-
-        Assert.Single(Fixture.TranscriptStore.Flushes);
-        var stateError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
-        Assert.Contains(grain.GetPrimaryKeyString(), stateError.Message);
-        Assert.Contains("state store down", stateError.Exception?.Message ?? string.Empty);
     }
 
     [Fact]

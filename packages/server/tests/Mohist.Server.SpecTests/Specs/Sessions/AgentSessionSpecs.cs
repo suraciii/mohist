@@ -4,20 +4,21 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.SpecTests.Support;
-using Mohist.Server.Issue.Grains;
-using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
-using Mohist.Server.Sessions.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
@@ -470,10 +471,29 @@ public class AgentSessionSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact(Skip = "AgentSessionEvent persistence is a no-op stub; event read-back not yet available.")]
+    [Fact]
     public async Task RunnerAppendsSessionEvents_StoresAggregateDomainEvents()
     {
-        await Task.CompletedTask;
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("runner-events-store");
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var before = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        var lastExistingId = before.Count == 0 ? 0 : before.Max(e => e.Id);
+
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        {
+            runtimeEvents = new[]
+            {
+                new { type = "usage.updated", payload = new { contextWindowUsed = 500, contextWindowSize = 1000 } }
+            }
+        });
+
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).FlushForTestAsync();
+
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        var appended = stored.Where(e => e.Id > lastExistingId).ToArray();
+
+        Assert.Contains(appended, e => e.Envelope.Type == EventCatalog.ReverseDns.AgentSessionUsageRecorded);
+        Assert.All(appended, e => Assert.Equal(session.Id, e.Envelope.Subject));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
