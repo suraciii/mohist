@@ -33,7 +33,7 @@ const defaultAgentStatus: AgentStatus = {
 export function DashboardPage() {
   const { data: projects, isLoading: projectsLoading } = useProjects()
   const { currentProject, projectId } = useProject()
-  const { data: agentStatus } = useAgentStatus()
+  const { data: agentStatus, isLoading: agentStatusLoading } = useAgentStatus()
   const { data: fetchedIssues, isLoading: issuesLoading } = useIssues(projectId ? { projectId } : undefined)
   const {
     activeCards,
@@ -66,9 +66,10 @@ export function DashboardPage() {
     agentStatus?.capacity != null && agentStatus.capacity.max > 0
   const issuesResolved = fetchedIssues !== undefined || !issuesLoading
   const activityResolved = !activityLoading && !activityError
+  const agentStatusResolved = agentStatus !== undefined || !agentStatusLoading
 
   const showAttentionHero = hasAttention
-  const showReadyState = issuesResolved && activityResolved && !hasAttention && !hasActiveWork
+  const showReadyState = issuesResolved && activityResolved && agentStatusResolved && !hasAttention && !hasActiveWork
 
   if (projectsLoading) {
     return null
@@ -120,16 +121,16 @@ export function DashboardPage() {
         </div>
         {showAttentionHero && (
           <div data-testid="dashboard-hero">
-            <AttentionHero />
+            <AttentionHero issues={fetchedIssues ?? []} agentStatus={agentStatus ?? defaultAgentStatus} />
           </div>
         )}
         {showReadyState && <ReadyState />}
         {hasActiveWork && (
           <DashboardZone id="pulse" name="Active production">
-            <PulseZone />
+            <PulseZone issuesOverride={fetchedIssues ?? []} agentStatusOverride={agentStatus ?? defaultAgentStatus} />
           </DashboardZone>
         )}
-        {hasCapacityData && <DashboardCapacityZone />}
+        {hasCapacityData && agentStatus && <DashboardCapacityZone agentStatusOverride={agentStatus} />}
         {hasDigestItems && (
           <DashboardZone id="digest" name="Recent history">
             <DashboardDigestWidget />

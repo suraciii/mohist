@@ -15,7 +15,11 @@ export type AttentionItem =
       detail?: string
     }
 
-type IssueAttentionItem = Extract<AttentionItem, { issueId: string }>
+export type IssueAttentionItem = Extract<AttentionItem, { issueId: string }>
+
+function isIssueAttentionItem(item: AttentionItem): item is IssueAttentionItem {
+  return 'issueId' in item
+}
 
 function isIntegrateFailure(issue: Issue): boolean {
   return (
@@ -109,4 +113,4 @@ function deriveAttentionItems(issues: Issue[], agentStatus: AgentStatus): Attent
   return items
 }
 
-export { classifyIssueAttention, deriveAttentionItems, isIntegrateFailure, issueNeedsOwnerAction }
+export { classifyIssueAttention, deriveAttentionItems, isIntegrateFailure, isIssueAttentionItem, issueNeedsOwnerAction }

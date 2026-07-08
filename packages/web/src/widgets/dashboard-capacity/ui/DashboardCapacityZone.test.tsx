@@ -111,12 +111,12 @@ describe('DashboardCapacityZone', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it('links to the runner settings page using the project-scoped path', () => {
+  it('links to runner management using the project-scoped path', () => {
     mocks.agentStatus = makeAgentStatus({ capacity: { active: 2, max: 4 } })
 
     renderZone()
 
     const link = screen.getByTestId('dashboard-zone-capacity-link')
-    expect(link.getAttribute('href')).toMatch(/\/runners$/)
+    expect(link).toHaveAttribute('href', '/demo/runners')
   })
 })

@@ -192,6 +192,8 @@ history. `PulseZone` becomes purely the active-work list and loses its
 `agentStatus.capacity` (the same source as D2) and renders a compact usage strip
 (`dashboard-zone-capacity`). It collapses (renders nothing) when capacity data is
 absent (`max === 0` / undefined), so it never becomes an empty reserved box.
+The strip links to `/runners` because it is the runner management surface; runner
+attention rows keep linking to `/activity` because they are live status signals.
 
 **Rationale.** The spec mandates "runner capacity usage MUST appear as its own
 level, ordered before recent history and separate from it." Today it is a header

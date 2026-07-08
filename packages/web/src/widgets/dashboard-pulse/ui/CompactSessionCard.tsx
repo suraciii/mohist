@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useProjectPath } from '@/entities/project'
+import type { IssueAttentionItem } from '@/entities/issue'
 import { ContextHealthIndicator, ContextUsageTrendMiniChart, type ContextUsageTrendSample } from '@/widgets/session-health'
 import { formatCompact, formatCost } from '@/shared/lib/format-compact'
 import type { SessionCard } from '@/widgets/coder-session/model/activity-cards'
@@ -21,8 +22,6 @@ const LINE_CLAMP_STYLE = {
   overflow: 'hidden',
 }
 
-const OWNER_ACTION_CLASS = 'border border-danger-border bg-danger-subtle text-danger'
-
 export function stageColorFor(stage: string | null | undefined): string {
   if (!stage) return STAGE_COLOR_FALLBACK
   return STAGE_COLORS[stage.toLowerCase()] ?? STAGE_COLOR_FALLBACK
@@ -33,7 +32,7 @@ export interface CompactSessionCardProps {
   issueNumber?: number
   issueTitle?: string
   workflowStage?: string | null
-  needsOwnerAction?: boolean
+  ownerActionItem?: IssueAttentionItem | null
 }
 
 export function CompactSessionCard({
@@ -41,7 +40,7 @@ export function CompactSessionCard({
   issueNumber,
   issueTitle,
   workflowStage,
-  needsOwnerAction = false,
+  ownerActionItem = null,
 }: CompactSessionCardProps) {
   const toProjectPath = useProjectPath()
   const displayedIssueNumber = issueNumber ?? card.issueNumber
@@ -65,7 +64,7 @@ export function CompactSessionCard({
           stage={stage}
           stageColor={stageColor}
           showLiveDot
-          needsOwnerAction={needsOwnerAction}
+          ownerActionItem={ownerActionItem}
         />
 
         <h3
@@ -131,7 +130,7 @@ export interface RunningIssueHeaderProps {
   stage: string | null | undefined
   stageColor: string
   showLiveDot: boolean
-  needsOwnerAction: boolean
+  ownerActionItem?: IssueAttentionItem | null
 }
 
 export function RunningIssueHeader({
@@ -139,8 +138,10 @@ export function RunningIssueHeader({
   stage,
   stageColor,
   showLiveDot,
-  needsOwnerAction,
+  ownerActionItem = null,
 }: RunningIssueHeaderProps) {
+  const ownerActionTreatment = ownerActionItem ? issueAttentionTreatment(ownerActionItem) : null
+
   return (
     <div className="flex items-center gap-2 mb-1.5">
       {showLiveDot && (
@@ -160,10 +161,11 @@ export function RunningIssueHeader({
       >
         {stage ?? 'No stage'}
       </span>
-      {needsOwnerAction && (
+      {ownerActionTreatment && (
         <span
-          className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${OWNER_ACTION_CLASS}`}
+          className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${ownerActionTreatment.container}`}
           data-testid="pulse-compact-owner-action-cue"
+          data-family={ownerActionTreatment.family}
           title="This issue needs your attention"
         >
           Owner action
@@ -173,14 +175,31 @@ export function RunningIssueHeader({
   )
 }
 
+function issueAttentionTreatment(item: IssueAttentionItem): {
+  family: 'danger' | 'warning'
+  container: string
+} {
+  if (item.kind === 'approval-needed') {
+    return {
+      family: 'warning',
+      container: 'border border-warning-border bg-warning-subtle text-warning',
+    }
+  }
+
+  return {
+    family: 'danger',
+    container: 'border border-danger-border bg-danger-subtle text-danger',
+  }
+}
+
 export interface IssueRowProps {
   issueNumber: number
   issueTitle: string
   workflowStage: string | null | undefined
-  needsOwnerAction: boolean
+  ownerActionItem?: IssueAttentionItem | null
 }
 
-export function IssueRow({ issueNumber, issueTitle, workflowStage, needsOwnerAction }: IssueRowProps) {
+export function IssueRow({ issueNumber, issueTitle, workflowStage, ownerActionItem = null }: IssueRowProps) {
   const toProjectPath = useProjectPath()
   const stageColor = stageColorFor(workflowStage)
 
@@ -197,7 +216,7 @@ export function IssueRow({ issueNumber, issueTitle, workflowStage, needsOwnerAct
           stage={workflowStage}
           stageColor={stageColor}
           showLiveDot={false}
-          needsOwnerAction={needsOwnerAction}
+          ownerActionItem={ownerActionItem}
         />
 
         <h3

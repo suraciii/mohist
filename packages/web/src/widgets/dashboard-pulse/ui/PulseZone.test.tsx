@@ -7,6 +7,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { ProjectProvider } from '@/entities/project/model/ProjectContext'
 import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from '@/entities/issue'
 import type {
+  AgentStatus,
   AgentActivity,
   AgentActivitySession,
 } from '@/entities/agent/model/types'
@@ -15,13 +16,14 @@ import { PulseZone } from './PulseZone'
 const mocks = vi.hoisted(() => ({
   activity: null as AgentActivity | null | undefined,
   issues: null as Issue[] | null | undefined,
+  agentStatus: undefined as AgentStatus | undefined,
   useAgentActivity: vi.fn(() => ({ data: mocks.activity })),
   useIssues: vi.fn((_params?: unknown) => ({ data: mocks.issues })),
 }))
 
 vi.mock('@/entities/agent/api/queries', () => ({
   useAgentActivity: mocks.useAgentActivity,
-  useAgentStatus: () => ({ data: undefined }),
+  useAgentStatus: () => ({ data: mocks.agentStatus }),
   useGlobalAgentSessions: () => ({ data: [] }),
 }))
 
@@ -66,6 +68,18 @@ function makeRunningIssue(overrides: Partial<Issue> = {}): Issue {
     isDraft: false,
     canStart: true,
     blocker: null,
+    ...overrides,
+  }
+}
+
+function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
+  return {
+    running: false,
+    issueId: null,
+    issueNumber: null,
+    activeAgents: [],
+    capacity: { active: 0, max: 8 },
+    runnerAvailable: true,
     ...overrides,
   }
 }
@@ -115,6 +129,7 @@ describe('PulseZone — issue-led active production', () => {
   beforeEach(() => {
     mocks.activity = null
     mocks.issues = null
+    mocks.agentStatus = undefined
     mocks.useAgentActivity.mockClear()
     mocks.useIssues.mockClear()
   })
@@ -175,6 +190,7 @@ describe('PulseZone — issue-led active production', () => {
 
     const cue = screen.getByTestId('pulse-compact-owner-action-cue')
     expect(cue).toHaveTextContent('Owner action')
+    expect(cue).toHaveAttribute('data-family', 'danger')
     expect(cue.className).toContain('bg-danger-subtle')
     expect(cue.className).toContain('text-danger')
   })
@@ -215,7 +231,11 @@ describe('PulseZone — issue-led active production', () => {
 
     renderZone()
 
-    expect(screen.getByTestId('pulse-compact-owner-action-cue')).toBeInTheDocument()
+    const cue = screen.getByTestId('pulse-compact-owner-action-cue')
+    expect(cue).toBeInTheDocument()
+    expect(cue).toHaveAttribute('data-family', 'warning')
+    expect(cue.className).toContain('bg-warning-subtle')
+    expect(cue.className).toContain('text-warning')
   })
 
   it('shows the cue for an Integrate-stage Blocked issue (integration-failed)', () => {
@@ -304,6 +324,44 @@ describe('PulseZone — issue-led active production', () => {
     expect(card).toHaveAttribute('data-issue-number', '999')
     expect(within(card).getByTestId('pulse-compact-title')).toHaveTextContent('Continue active session')
     expect(within(card).getByTestId('pulse-compact-stage')).toHaveTextContent('Check')
+  })
+
+  it('renders an active-agent placeholder when runner status has active work but activity cards are empty', () => {
+    mocks.issues = []
+    mocks.activity = makeActivity([])
+    mocks.agentStatus = makeAgentStatus({
+      activeAgents: [
+        {
+          issueId: 'agent-only-issue',
+          issueNumber: 432,
+          projectId: TEST_PROJECT.id,
+          progress: {
+            stage: 'check',
+            lastActivityAt: '2026-01-01T00:00:00.000Z',
+          },
+        },
+      ],
+    })
+
+    renderZone()
+
+    expect(screen.queryByTestId('pulse-empty-state')).not.toBeInTheDocument()
+    const card = screen.getByTestId('pulse-agent-status-card')
+    expect(card).toHaveAttribute('data-issue-number', '432')
+    expect(within(card).getByTestId('pulse-agent-status-title')).toHaveTextContent('Agent active')
+    expect(within(card).getByTestId('pulse-agent-status-stage')).toHaveTextContent('Check')
+  })
+
+  it('renders a generic active-agent placeholder when runner status has no issue number', () => {
+    mocks.issues = []
+    mocks.activity = makeActivity([])
+    mocks.agentStatus = makeAgentStatus({ running: true, issueNumber: null })
+
+    renderZone()
+
+    const card = screen.getByTestId('pulse-agent-status-card')
+    expect(card).toHaveAttribute('data-issue-number', 'unknown')
+    expect(card.getAttribute('href')).toMatch(/\/activity$/)
   })
 
   it('uses the current issue title and workflow stage when session telemetry is stale', () => {

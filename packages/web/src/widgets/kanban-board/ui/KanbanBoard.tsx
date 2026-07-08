@@ -5,7 +5,7 @@ import { Input } from '@/shared/ui/components/input'
 import { Link } from 'react-router-dom'
 import { AlertTriangleIcon, SearchIcon, XIcon } from 'lucide-react'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStatus, deriveAttentionItems, type AttentionItem, type Issue } from '../../../entities/issue'
+import { IssueStatus, deriveAttentionItems, isIssueAttentionItem, type AttentionItem, type Issue } from '../../../entities/issue'
 import { useRunnerSummary } from '../../../entities/runner/api/queries'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
@@ -461,16 +461,9 @@ function NeedsAttentionSummary({
   )
 }
 
-function isIssueAttentionItem(
-  item: AttentionItem,
-): item is Extract<AttentionItem, { issueNumber: number }> {
-  return item.kind !== 'runner-unavailable' && item.kind !== 'runner-capacity-limited'
-}
-
 function attentionFamily(item: Extract<AttentionItem, { issueNumber: number }>): 'danger' | 'warning' {
   return item.kind === 'approval-needed' ? 'warning' : 'danger'
 }
-
 function RunnerUnavailableBanner({
   agentStatus,
 }: {

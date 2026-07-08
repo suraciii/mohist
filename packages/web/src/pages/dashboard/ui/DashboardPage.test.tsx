@@ -22,7 +22,8 @@ const mocks = vi.hoisted(() => ({
     issueNumber: null,
     activeAgents: [],
     capacity: { active: 0, max: 8 },
-  } as AgentStatus,
+  } as AgentStatus | undefined,
+  agentStatusLoading: false,
   createProjectMutate: vi.fn(),
   useIssuesMock: vi.fn(),
   useArchivedIssuesMock: vi.fn(),
@@ -53,7 +54,7 @@ vi.mock('../../../entities/agent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/agent')>()
   return {
     ...actual,
-    useAgentStatus: () => ({ data: mocks.agentStatus }),
+    useAgentStatus: () => ({ data: mocks.agentStatus, isLoading: mocks.agentStatusLoading }),
     useAgentActivity: () => mocks.useAgentActivityMock(),
     useCostRollup: () => ({ data: undefined }),
     useAgentUsage: () => ({ data: undefined, isLoading: false, isError: false }),
@@ -196,6 +197,7 @@ function resetMocks() {
   mocks.projects = []
   mocks.isLoading = false
   mocks.agentStatus = makeAgentStatus({ capacity: { active: 0, max: 8 } })
+  mocks.agentStatusLoading = false
   mocks.useIssuesMock.mockReset()
   mocks.useIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
   mocks.useArchivedIssuesMock.mockReset()
@@ -471,6 +473,24 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       expect(screen.queryByText(/Nothing needs your attention right now/i)).not.toBeInTheDocument()
     })
 
+    it('does not render the ready state while runner status is still loading', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = undefined
+      mocks.agentStatusLoading = true
+      mocks.useIssuesMock.mockReturnValue({ data: [], isLoading: false })
+      mocks.useAgentActivityMock.mockReturnValue({
+        ...NO_AGENT_ACTIVITY,
+        activeCardByIssueNumber: new Map(),
+      })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
+      expect(screen.queryByText(/Nothing needs your attention right now/i)).not.toBeInTheDocument()
+    })
+
     it('does not render the ready state while activity data is unresolved and runner status reports live work', () => {
       mocks.projects = [
         { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
@@ -571,6 +591,8 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
 
       expect(screen.getByTestId('dashboard-page')).toHaveAttribute('data-state', 'active-only')
       expect(screen.getByTestId('dashboard-zone-pulse')).toBeInTheDocument()
+      expect(screen.getByTestId('pulse-agent-status-card')).toHaveAttribute('data-issue-number', '42')
+      expect(screen.queryByTestId('pulse-empty-state')).not.toBeInTheDocument()
       expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
     })
 

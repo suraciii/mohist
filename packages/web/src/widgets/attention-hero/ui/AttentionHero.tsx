@@ -6,11 +6,13 @@ import {
   approveIssue,
   deriveAttentionItems,
   invalidateApprovalWait,
+  isIssueAttentionItem,
   resumeIssue,
   useApprovalWait,
   useIssues,
   type ApprovalWaitMetricsResponse,
   type AttentionItem,
+  type IssueAttentionItem,
   type Issue,
 } from '../../../entities/issue'
 import { formatDuration } from '@/shared/lib/format-duration'
@@ -42,18 +44,12 @@ const warningTreatment: AttentionTreatment = {
   text: 'text-warning',
 }
 
-function isIssueItem(
-  item: AttentionItem,
-): item is Extract<AttentionItem, { issueNumber: number }> {
-  return item.kind !== 'runner-unavailable' && item.kind !== 'runner-capacity-limited'
-}
-
 function isApprovalItem(item: AttentionItem): boolean {
   return item.kind === 'approval-needed'
 }
 
-function isResumableItem(item: AttentionItem): boolean {
-  return isIssueItem(item) && !isApprovalItem(item)
+function isResumableItem(item: AttentionItem): item is IssueAttentionItem {
+  return isIssueAttentionItem(item) && !isApprovalItem(item)
 }
 
 function attentionTreatment(item: AttentionItem): AttentionTreatment {
@@ -164,7 +160,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
 }
 
 function attentionKey(item: AttentionItem): string {
-  if (isIssueItem(item)) return item.issueId
+  if (isIssueAttentionItem(item)) return item.issueId
   return item.kind
 }
 
@@ -191,7 +187,7 @@ function AttentionItemRow({
   onResume,
   toProjectPath,
 }: AttentionItemRowProps) {
-  if (!isIssueItem(item)) {
+  if (!isIssueAttentionItem(item)) {
     return <RunnerAttentionRow item={item} toProjectPath={toProjectPath} />
   }
 

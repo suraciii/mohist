@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentStatus } from '../../agent'
 import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from '..'
-import { classifyIssueAttention, deriveAttentionItems, isIntegrateFailure, issueNeedsOwnerAction, type AttentionItem } from './attention'
+import { classifyIssueAttention, deriveAttentionItems, isIntegrateFailure, isIssueAttentionItem, issueNeedsOwnerAction, type AttentionItem } from './attention'
 
 function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   return {
@@ -625,6 +625,24 @@ describe('deriveAttentionItems — union is exhaustive', () => {
       'runner-capacity-limited',
       'runner-unavailable',
     ])
+  })
+})
+
+describe('isIssueAttentionItem', () => {
+  it('narrows issue attention items and excludes runner attention items', () => {
+    const issueItem: AttentionItem = {
+      kind: 'approval-needed',
+      issueId: 'issue-1',
+      issueNumber: 1,
+      label: 'Approval needed',
+    }
+    const runnerItem: AttentionItem = {
+      kind: 'runner-capacity-limited',
+      label: 'Runner at capacity',
+    }
+
+    expect(isIssueAttentionItem(issueItem)).toBe(true)
+    expect(isIssueAttentionItem(runnerItem)).toBe(false)
   })
 })
 
