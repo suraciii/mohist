@@ -1,322 +1,265 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useAgent, useAgentSessions, useAgents, useArchiveAgent, useCreateAgent, useUnarchiveAgent, useUpdateAgent } from './queries'
+import { describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
+import { toast } from 'sonner'
+import {
+  agentQueryOptions,
+  agentSessionsQueryOptions,
+  agentsQueryOptions,
+  archiveAgentMutationOptions,
+  createAgentMutationOptions,
+  unarchiveAgentMutationOptions,
+  updateAgentMutationOptions,
+} from './queries'
 
-const useQueryMock = vi.fn()
-const useMutationMock = vi.fn()
-const useQueryClientMock = vi.fn()
-const useProjectMock = vi.fn()
-const listAgentsMock = vi.fn()
-const getAgentMock = vi.fn()
-const createAgentMock = vi.fn()
-const updateAgentMock = vi.fn()
-const archiveAgentMock = vi.fn()
-const unarchiveAgentMock = vi.fn()
-const getAgentScopedSessionsMock = vi.fn()
-const invalidateQueriesMock = vi.fn()
-const toastSuccessMock = vi.fn()
-const toastErrorMock = vi.fn()
+useMswServer()
 
-vi.mock('@tanstack/react-query', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQuery: (...args: unknown[]) => useQueryMock(...args),
-  useMutation: (...args: unknown[]) => useMutationMock(...args),
-  useQueryClient: () => useQueryClientMock(),
-}))
-
-vi.mock('../../project/@x/project-context', () => ({
-  useProject: () => useProjectMock(),
-}))
-
-vi.mock('./client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./client')>()
-  return {
-    ...actual,
-    listAgents: (...args: unknown[]) => listAgentsMock(...args),
-    getAgent: (...args: unknown[]) => getAgentMock(...args),
-    createAgent: (...args: unknown[]) => createAgentMock(...args),
-    updateAgent: (...args: unknown[]) => updateAgentMock(...args),
-    archiveAgent: (...args: unknown[]) => archiveAgentMock(...args),
-    unarchiveAgent: (...args: unknown[]) => unarchiveAgentMock(...args),
-  }
-})
-
-vi.mock('./agent-sessions', () => ({
-  getAgentSessions: (...args: unknown[]) => getAgentScopedSessionsMock(...args),
-}))
-
-vi.mock('sonner', () => ({
-  toast: {
-    success: (...args: unknown[]) => toastSuccessMock(...args),
-    error: (...args: unknown[]) => toastErrorMock(...args),
-  },
-}))
-
-beforeEach(() => {
-  useQueryMock.mockReset()
-  useMutationMock.mockReset()
-  useQueryClientMock.mockReset()
-  useProjectMock.mockReset()
-  listAgentsMock.mockReset()
-  getAgentMock.mockReset()
-  createAgentMock.mockReset()
-  updateAgentMock.mockReset()
-  archiveAgentMock.mockReset()
-  unarchiveAgentMock.mockReset()
-  getAgentScopedSessionsMock.mockReset()
-  invalidateQueriesMock.mockReset()
-  toastSuccessMock.mockReset()
-  toastErrorMock.mockReset()
-  useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-  useQueryClientMock.mockReturnValue({ invalidateQueries: invalidateQueriesMock })
-  useQueryMock.mockReturnValue({ data: [], isLoading: false })
-})
-
-function getLastQueryOptions() {
-  const calls = useQueryMock.mock.calls
-  return calls[calls.length - 1][0] as { queryKey: unknown[]; queryFn: () => unknown; enabled: boolean }
+function createInvalidationClient() {
+  return { invalidateQueries: vi.fn() }
 }
 
-function getLastMutationOptions(): {
-  mutationFn: (...a: unknown[]) => unknown
-  onSuccess: (...a: unknown[]) => void
-  onError: (...a: unknown[]) => void
-} {
-  const calls = useMutationMock.mock.calls
-  const last = calls[calls.length - 1][0] as {
-    mutationFn: (...a: unknown[]) => unknown
-    onSuccess: (...a: unknown[]) => void
-    onError: (...a: unknown[]) => void
-  }
-  return last
-}
-
-/* ── useAgents ──────────────────────────────────────────── */
-describe('useAgents', () => {
+/* ── agentsQueryOptions ─────────────────────────────────── */
+describe('agentsQueryOptions', () => {
   it('uses query key ["agents", projectId]', () => {
-    useAgents()
-    const opts = getLastQueryOptions()
-    expect(opts.queryKey).toEqual(['agents', 'proj-1'])
+    expect(agentsQueryOptions('proj-1').queryKey).toEqual(['agents', 'proj-1'])
   })
 
   it('is enabled only when projectId is present', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-    useAgents()
-    expect(getLastQueryOptions().enabled).toBe(true)
-
-    useProjectMock.mockReturnValue({ projectId: null })
-    useAgents()
-    expect(getLastQueryOptions().enabled).toBe(false)
+    expect(agentsQueryOptions('proj-1').enabled).toBe(true)
+    expect(agentsQueryOptions(null).enabled).toBe(false)
   })
 
   it('calls listAgents(projectId, { all: true }) so archived agents are included', async () => {
-    listAgentsMock.mockResolvedValue([{ id: 'a1' }, { id: 'a2', status: 'archived' }])
-    useAgents()
-    const opts = getLastQueryOptions()
-    await opts.queryFn()
-    expect(listAgentsMock).toHaveBeenCalledWith('proj-1', { all: true })
-  })
+    const urls: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agents', ({ request }) => {
+        urls.push(new URL(request.url).pathname + new URL(request.url).search)
+        return HttpResponse.json({ success: true, data: [{ id: 'a1' }, { id: 'a2', status: 'archived' }] })
+      }),
+    )
 
-  it('returns typed AgentInfo[]', () => {
-    const data = [{ id: 'a1', name: 'A1' }]
-    useQueryMock.mockReturnValue({ data, isLoading: false })
-    // Test is about the hook's return — ensure typing works
-    const result = useAgents()
-    expect(result.data).toEqual(data)
+    await agentsQueryOptions('proj-1').queryFn()
+
+    expect(urls).toEqual(['/api/projects/proj-1/agents?all=true'])
   })
 })
 
-/* ── useAgent ───────────────────────────────────────────── */
-describe('useAgent', () => {
+/* ── agentQueryOptions ──────────────────────────────────── */
+describe('agentQueryOptions', () => {
   it('uses query key ["agents", projectId, agentRef]', () => {
-    useAgent('agent-alpha')
-    const opts = getLastQueryOptions()
-    expect(opts.queryKey).toEqual(['agents', 'proj-1', 'agent-alpha'])
+    expect(agentQueryOptions('proj-1', 'agent-alpha').queryKey).toEqual(['agents', 'proj-1', 'agent-alpha'])
   })
 
   it('is enabled only when projectId and agentRef are present', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-    useAgent('alpha')
-    expect(getLastQueryOptions().enabled).toBe(true)
-
-    useProjectMock.mockReturnValue({ projectId: null })
-    useAgent('alpha')
-    expect(getLastQueryOptions().enabled).toBe(false)
-
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-    useAgent('')
-    expect(getLastQueryOptions().enabled).toBe(false)
+    expect(agentQueryOptions('proj-1', 'alpha').enabled).toBe(true)
+    expect(agentQueryOptions(null, 'alpha').enabled).toBe(false)
+    expect(agentQueryOptions('proj-1', '').enabled).toBe(false)
   })
 
   it('calls getAgent(projectId, agentRef) as the query function', async () => {
-    getAgentMock.mockResolvedValue({ id: 'a1' })
-    useAgent('agent-beta')
-    const opts = getLastQueryOptions()
-    await opts.queryFn()
-    expect(getAgentMock).toHaveBeenCalledWith('proj-1', 'agent-beta')
+    const urls: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agents/:agentRef', ({ request }) => {
+        urls.push(new URL(request.url).pathname)
+        return HttpResponse.json({ success: true, data: { id: 'a1' } })
+      }),
+    )
+
+    await agentQueryOptions('proj-1', 'agent-beta').queryFn()
+
+    expect(urls).toEqual(['/api/projects/proj-1/agents/agent-beta'])
   })
 })
 
-/* ── useAgentSessions ───────────────────────────────────── */
-describe('useAgentSessions', () => {
+/* ── agentSessionsQueryOptions ──────────────────────────── */
+describe('agentSessionsQueryOptions', () => {
   it('uses query key ["agents", projectId, agentRef, "sessions"]', () => {
-    useAgentSessions({ agentRef: 'agent-gamma' })
-    const opts = getLastQueryOptions()
-    expect(opts.queryKey).toEqual(['agents', 'proj-1', 'agent-gamma', 'sessions'])
+    expect(agentSessionsQueryOptions('proj-1', 'agent-gamma').queryKey).toEqual([
+      'agents',
+      'proj-1',
+      'agent-gamma',
+      'sessions',
+    ])
   })
 
   it('is enabled only when projectId and agentRef are present', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-    useAgentSessions({ agentRef: 'gamma' })
-    expect(getLastQueryOptions().enabled).toBe(true)
-
-    useProjectMock.mockReturnValue({ projectId: null })
-    useAgentSessions({ agentRef: 'gamma' })
-    expect(getLastQueryOptions().enabled).toBe(false)
-
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-    useAgentSessions({ agentRef: '' })
-    expect(getLastQueryOptions().enabled).toBe(false)
+    expect(agentSessionsQueryOptions('proj-1', 'gamma').enabled).toBe(true)
+    expect(agentSessionsQueryOptions(null, 'gamma').enabled).toBe(false)
+    expect(agentSessionsQueryOptions('proj-1', '').enabled).toBe(false)
   })
 
   it('calls getAgentScopedSessions(projectId, agentRef)', async () => {
-    getAgentScopedSessionsMock.mockResolvedValue([{ sessionId: 's1' }])
-    useAgentSessions({ agentRef: 'gamma' })
-    const opts = getLastQueryOptions()
-    await opts.queryFn()
-    expect(getAgentScopedSessionsMock).toHaveBeenCalledWith('proj-1', 'gamma')
+    const urls: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agents/:agentRef/sessions', ({ request }) => {
+        urls.push(new URL(request.url).pathname)
+        return HttpResponse.json({ success: true, data: [{ sessionId: 's1' }] })
+      }),
+    )
+
+    await agentSessionsQueryOptions('proj-1', 'gamma').queryFn()
+
+    expect(urls).toEqual(['/api/projects/proj-1/agents/gamma/sessions'])
   })
 })
 
-/* ── useCreateAgent ─────────────────────────────────────── */
-describe('useCreateAgent', () => {
-  beforeEach(() => {
-    useMutationMock.mockImplementation((options: unknown) => ({ mutate: vi.fn(), options }))
-  })
+/* ── createAgentMutationOptions ─────────────────────────── */
+describe('createAgentMutationOptions', () => {
+  it('calls createAgent(projectId, data) in mutationFn', async () => {
+    const captured: { url: string; method: string; body: unknown }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agents', async ({ request }) => {
+        captured.push({ url: new URL(request.url).pathname, method: request.method, body: await request.json() })
+        return HttpResponse.json({ success: true, data: { id: 'new-1' } })
+      }),
+    )
 
-  it('calls createAgent(projectId, data) in mutationFn', () => {
-    useCreateAgent()
-    const opts = getLastMutationOptions()
-    createAgentMock.mockResolvedValue({ id: 'new-1' })
-    void opts.mutationFn({ name: 'New Agent', instructions: 'Do things' } as Parameters<typeof opts.mutationFn>[0])
-    expect(createAgentMock).toHaveBeenCalledWith('proj-1', { name: 'New Agent', instructions: 'Do things' })
+    await createAgentMutationOptions('proj-1', createInvalidationClient()).mutationFn({
+      name: 'New Agent',
+      instructions: 'Do things',
+    } as never)
+
+    expect(captured).toEqual([
+      {
+        url: '/api/projects/proj-1/agents',
+        method: 'POST',
+        body: { name: 'New Agent', instructions: 'Do things' },
+      },
+    ])
   })
 
   it('invalidates ["agents"] on success', () => {
-    useCreateAgent()
-    getLastMutationOptions().onSuccess()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents'] })
+    const qc = createInvalidationClient()
+    createAgentMutationOptions('proj-1', qc).onSuccess()
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agents'] })
   })
 
   it('shows success toast on success', () => {
-    useCreateAgent()
-    getLastMutationOptions().onSuccess()
-    expect(toastSuccessMock).toHaveBeenCalledWith('Agent created')
+    createAgentMutationOptions('proj-1', createInvalidationClient()).onSuccess()
+    expect(toast.success).toHaveBeenCalledWith('Agent created')
   })
 
   it('shows error toast on failure', () => {
-    useCreateAgent()
-    getLastMutationOptions().onError(new Error('NAME_REQUIRED'))
-    expect(toastErrorMock).toHaveBeenCalledWith('NAME_REQUIRED')
+    createAgentMutationOptions('proj-1', createInvalidationClient()).onError(new Error('NAME_REQUIRED'))
+    expect(toast.error).toHaveBeenCalledWith('NAME_REQUIRED')
+  })
+
+  it('falls back to "Request failed" on empty error message', () => {
+    createAgentMutationOptions('proj-1', createInvalidationClient()).onError(new Error(''))
+    expect(toast.error).toHaveBeenCalledWith('Request failed')
   })
 })
 
-/* ── useUpdateAgent ─────────────────────────────────────── */
-describe('useUpdateAgent', () => {
-  beforeEach(() => {
-    useMutationMock.mockImplementation((options: unknown) => ({ mutate: vi.fn(), options }))
-  })
+/* ── updateAgentMutationOptions ─────────────────────────── */
+describe('updateAgentMutationOptions', () => {
+  it('calls updateAgent(projectId, agentRef, data) in mutationFn', async () => {
+    const captured: { url: string; method: string; body: unknown }[] = []
+    server.use(
+      http.patch('*/api/projects/:projectId/agents/:agentRef', async ({ request }) => {
+        captured.push({ url: new URL(request.url).pathname, method: request.method, body: await request.json() })
+        return HttpResponse.json({ success: true, data: { id: 'a1' } })
+      }),
+    )
 
-  it('calls updateAgent(projectId, agentRef, data) in mutationFn', () => {
-    useUpdateAgent()
-    const opts = getLastMutationOptions()
-    updateAgentMock.mockResolvedValue({ id: 'a1' })
-    void opts.mutationFn({ agentRef: 'agent-delta', data: { instructions: 'New instructions' } })
-    expect(updateAgentMock).toHaveBeenCalledWith('proj-1', 'agent-delta', { instructions: 'New instructions' })
+    await updateAgentMutationOptions('proj-1', createInvalidationClient()).mutationFn({
+      agentRef: 'agent-delta',
+      data: { instructions: 'New instructions' },
+    })
+
+    expect(captured).toEqual([
+      {
+        url: '/api/projects/proj-1/agents/agent-delta',
+        method: 'PATCH',
+        body: { instructions: 'New instructions' },
+      },
+    ])
   })
 
   it('invalidates ["agents"] on success', () => {
-    useUpdateAgent()
-    getLastMutationOptions().onSuccess()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents'] })
+    const qc = createInvalidationClient()
+    updateAgentMutationOptions('proj-1', qc).onSuccess()
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agents'] })
   })
 
   it('shows success toast on success', () => {
-    useUpdateAgent()
-    getLastMutationOptions().onSuccess()
-    expect(toastSuccessMock).toHaveBeenCalledWith('Agent updated')
+    updateAgentMutationOptions('proj-1', createInvalidationClient()).onSuccess()
+    expect(toast.success).toHaveBeenCalledWith('Agent updated')
   })
 
   it('shows error toast on failure', () => {
-    useUpdateAgent()
-    getLastMutationOptions().onError(new Error('NOT_FOUND'))
-    expect(toastErrorMock).toHaveBeenCalledWith('NOT_FOUND')
+    updateAgentMutationOptions('proj-1', createInvalidationClient()).onError(new Error('NOT_FOUND'))
+    expect(toast.error).toHaveBeenCalledWith('NOT_FOUND')
   })
 })
 
-/* ── useArchiveAgent ────────────────────────────────────── */
-describe('useArchiveAgent', () => {
-  beforeEach(() => {
-    useMutationMock.mockImplementation((options: unknown) => ({ mutate: vi.fn(), options }))
-  })
+/* ── archiveAgentMutationOptions ────────────────────────── */
+describe('archiveAgentMutationOptions', () => {
+  it('calls archiveAgent(projectId, agentRef) in mutationFn', async () => {
+    const captured: { url: string; method: string }[] = []
+    server.use(
+      http.delete('*/api/projects/:projectId/agents/:agentRef', ({ request }) => {
+        captured.push({ url: new URL(request.url).pathname, method: request.method })
+        return HttpResponse.json({ success: true, data: { id: 'a1', status: 'archived' } })
+      }),
+    )
 
-  it('calls archiveAgent(projectId, agentRef) in mutationFn', () => {
-    useArchiveAgent()
-    const opts = getLastMutationOptions()
-    archiveAgentMock.mockResolvedValue({ id: 'a1', status: 'archived' })
-    void opts.mutationFn('agent-epsilon')
-    expect(archiveAgentMock).toHaveBeenCalledWith('proj-1', 'agent-epsilon')
+    await archiveAgentMutationOptions('proj-1', createInvalidationClient()).mutationFn('agent-epsilon')
+
+    expect(captured).toEqual([
+      { url: '/api/projects/proj-1/agents/agent-epsilon', method: 'DELETE' },
+    ])
   })
 
   it('invalidates ["agents"] and ["agent-status"] on success', () => {
-    useArchiveAgent()
-    getLastMutationOptions().onSuccess()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
+    const qc = createInvalidationClient()
+    archiveAgentMutationOptions('proj-1', qc).onSuccess()
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agents'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
   })
 
   it('shows success toast on success', () => {
-    useArchiveAgent()
-    getLastMutationOptions().onSuccess()
-    expect(toastSuccessMock).toHaveBeenCalledWith('Agent archived')
+    archiveAgentMutationOptions('proj-1', createInvalidationClient()).onSuccess()
+    expect(toast.success).toHaveBeenCalledWith('Agent archived')
   })
 
   it('shows error toast on failure', () => {
-    useArchiveAgent()
-    getLastMutationOptions().onError(new Error('ALREADY_ARCHIVED'))
-    expect(toastErrorMock).toHaveBeenCalledWith('ALREADY_ARCHIVED')
+    archiveAgentMutationOptions('proj-1', createInvalidationClient()).onError(new Error('ALREADY_ARCHIVED'))
+    expect(toast.error).toHaveBeenCalledWith('ALREADY_ARCHIVED')
   })
 })
 
-/* ── useUnarchiveAgent ──────────────────────────────────── */
-describe('useUnarchiveAgent', () => {
-  beforeEach(() => {
-    useMutationMock.mockImplementation((options: unknown) => ({ mutate: vi.fn(), options }))
-  })
+/* ── unarchiveAgentMutationOptions ──────────────────────── */
+describe('unarchiveAgentMutationOptions', () => {
+  it('calls unarchiveAgent(projectId, agentRef) in mutationFn', async () => {
+    const captured: { url: string; method: string }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agents/:agentRef/unarchive', ({ request }) => {
+        captured.push({ url: new URL(request.url).pathname, method: request.method })
+        return HttpResponse.json({ success: true, data: { id: 'a1', status: 'active' } })
+      }),
+    )
 
-  it('calls unarchiveAgent(projectId, agentRef) in mutationFn', () => {
-    useUnarchiveAgent()
-    const opts = getLastMutationOptions()
-    unarchiveAgentMock.mockResolvedValue({ id: 'a1', status: 'active' })
-    void opts.mutationFn('agent-zeta')
-    expect(unarchiveAgentMock).toHaveBeenCalledWith('proj-1', 'agent-zeta')
+    await unarchiveAgentMutationOptions('proj-1', createInvalidationClient()).mutationFn('agent-zeta')
+
+    expect(captured).toEqual([
+      { url: '/api/projects/proj-1/agents/agent-zeta/unarchive', method: 'POST' },
+    ])
   })
 
   it('invalidates ["agents"] and ["agent-status"] on success (mirroring useArchiveAgent)', () => {
-    useUnarchiveAgent()
-    getLastMutationOptions().onSuccess()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
+    const qc = createInvalidationClient()
+    unarchiveAgentMutationOptions('proj-1', qc).onSuccess()
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agents'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
   })
 
   it('shows success toast on success', () => {
-    useUnarchiveAgent()
-    getLastMutationOptions().onSuccess()
-    expect(toastSuccessMock).toHaveBeenCalledWith('Agent restored')
+    unarchiveAgentMutationOptions('proj-1', createInvalidationClient()).onSuccess()
+    expect(toast.success).toHaveBeenCalledWith('Agent restored')
   })
 
   it('shows error toast on failure', () => {
-    useUnarchiveAgent()
-    getLastMutationOptions().onError(new Error('NOT_FOUND'))
-    expect(toastErrorMock).toHaveBeenCalledWith('NOT_FOUND')
+    unarchiveAgentMutationOptions('proj-1', createInvalidationClient()).onError(new Error('NOT_FOUND'))
+    expect(toast.error).toHaveBeenCalledWith('NOT_FOUND')
   })
 })

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { AgentActivity, AgentSessionInfo } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
@@ -20,6 +21,8 @@ import type {
 } from './client'
 import { getAgentSessions as getAgentScopedSessions } from './agent-sessions'
 import type { AgentSessionListItemDto } from './agent-sessions'
+
+type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
 
 export function useAgentStatus() {
   const { projectId } = useProject()
@@ -52,29 +55,35 @@ export function useAgentActivity(params?: { limit?: number }) {
 
 /* ── Agent profile CRUD queries ─────────────────────────── */
 
-export function useAgents() {
-  const { projectId } = useProject()
-  return useQuery<AgentInfo[]>({
+export function agentsQueryOptions(projectId: string | null | undefined) {
+  return {
     queryKey: ['agents', projectId],
     queryFn: () => listAgents(projectId!, { all: true }),
     enabled: !!projectId,
-  })
+  }
+}
+
+export function useAgents() {
+  const { projectId } = useProject()
+  return useQuery<AgentInfo[]>(agentsQueryOptions(projectId))
+}
+
+export function agentQueryOptions(projectId: string | null | undefined, agentRef: string) {
+  return {
+    queryKey: ['agents', projectId, agentRef],
+    queryFn: () => getAgent(projectId!, agentRef),
+    enabled: !!projectId && !!agentRef,
+  }
 }
 
 export function useAgent(agentRef: string) {
   const { projectId } = useProject()
-  return useQuery<AgentInfo>({
-    queryKey: ['agents', projectId, agentRef],
-    queryFn: () => getAgent(projectId!, agentRef),
-    enabled: !!projectId && !!agentRef,
-  })
+  return useQuery<AgentInfo>(agentQueryOptions(projectId, agentRef))
 }
 
-export function useCreateAgent() {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation<AgentInfo, Error, AgentCreateRequest>({
-    mutationFn: (data) => createAgent(projectId!, data),
+export function createAgentMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: (data: AgentCreateRequest) => createAgent(projectId!, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents'] })
       toast.success('Agent created')
@@ -82,14 +91,19 @@ export function useCreateAgent() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
 }
 
-export function useUpdateAgent() {
+export function useCreateAgent() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation<AgentInfo, Error, { agentRef: string; data: AgentUpdateRequest }>({
-    mutationFn: ({ agentRef, data }) => updateAgent(projectId!, agentRef, data),
+  return useMutation(createAgentMutationOptions(projectId, queryClient))
+}
+
+export function updateAgentMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: ({ agentRef, data }: { agentRef: string; data: AgentUpdateRequest }) =>
+      updateAgent(projectId!, agentRef, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents'] })
       toast.success('Agent updated')
@@ -97,14 +111,18 @@ export function useUpdateAgent() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
 }
 
-export function useArchiveAgent() {
+export function useUpdateAgent() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation<AgentInfo, Error, string>({
-    mutationFn: (agentRef) => archiveAgent(projectId!, agentRef),
+  return useMutation(updateAgentMutationOptions(projectId, queryClient))
+}
+
+export function archiveAgentMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: (agentRef: string) => archiveAgent(projectId!, agentRef),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -113,14 +131,18 @@ export function useArchiveAgent() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
 }
 
-export function useUnarchiveAgent() {
+export function useArchiveAgent() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation<AgentInfo, Error, string>({
-    mutationFn: (agentRef) => unarchiveAgent(projectId!, agentRef),
+  return useMutation(archiveAgentMutationOptions(projectId, queryClient))
+}
+
+export function unarchiveAgentMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: (agentRef: string) => unarchiveAgent(projectId!, agentRef),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -129,16 +151,26 @@ export function useUnarchiveAgent() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
+}
+
+export function useUnarchiveAgent() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation(unarchiveAgentMutationOptions(projectId, queryClient))
 }
 
 /* ── Agent-scoped session list (consumes #130) ──────────── */
 
-export function useAgentSessions({ agentRef }: { agentRef: string }) {
-  const { projectId } = useProject()
-  return useQuery<AgentSessionListItemDto[]>({
+export function agentSessionsQueryOptions(projectId: string | null | undefined, agentRef: string) {
+  return {
     queryKey: ['agents', projectId, agentRef, 'sessions'],
     queryFn: () => getAgentScopedSessions(projectId!, agentRef),
     enabled: !!projectId && !!agentRef,
-  })
+  }
+}
+
+export function useAgentSessions({ agentRef }: { agentRef: string }) {
+  const { projectId } = useProject()
+  return useQuery<AgentSessionListItemDto[]>(agentSessionsQueryOptions(projectId, agentRef))
 }
