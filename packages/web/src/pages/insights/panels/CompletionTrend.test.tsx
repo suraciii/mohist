@@ -1,18 +1,18 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
+import { TEST_PROJECT } from '../../../../tests/test-utils'
 import type { CompletionBucketPoint, CompletionTrendResponse } from '../../../entities/issue'
 
-const useCompletionTrendMock = vi.fn()
-vi.mock('../../../entities/issue/api/completion-trend', () => ({
-  useCompletionTrend: (...args: unknown[]) => useCompletionTrendMock(...args),
-}))
-
 import { CompletionTrend } from './CompletionTrend'
+
+useMswServer()
 
 function makeBuckets(completedByWeek: number[]): CompletionBucketPoint[] {
   return completedByWeek.map((completed, index) => {
@@ -34,11 +34,31 @@ function makeTrendResponse(buckets: CompletionBucketPoint[]): CompletionTrendRes
   }
 }
 
+const TREND_PATH = '*/api/projects/:projectId/issues/metrics/completion'
+
+function mockTrendResponse(data: CompletionTrendResponse) {
+  server.use(
+    http.get(TREND_PATH, () => HttpResponse.json({ success: true, data })),
+  )
+}
+
+function mockTrendPending() {
+  server.use(
+    http.get(TREND_PATH, () => new Promise(() => {})),
+  )
+}
+
+function mockTrendError() {
+  server.use(
+    http.get(TREND_PATH, () => HttpResponse.json({ success: false, error: { message: 'boom' } }, { status: 500 })),
+  )
+}
+
 function renderTrend() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider>
+      <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={['/']}>
           <CompletionTrend range="30d" />
         </MemoryRouter>
@@ -48,106 +68,108 @@ function renderTrend() {
 }
 
 describe('CompletionTrend', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   afterEach(() => {
     cleanup()
   })
 
-  it('renders through the shared chart baseline with one marker per returned weekly bucket in order', () => {
+  it('renders through the shared chart baseline with one marker per returned weekly bucket in order', async () => {
     const counts = [1, 2, 3, 5, 4, 6, 7, 9, 8, 11, 10, 12]
-    useCompletionTrendMock.mockReturnValue({ data: makeTrendResponse(makeBuckets(counts)) })
+    mockTrendResponse(makeTrendResponse(makeBuckets(counts)))
 
     const { container } = renderTrend()
 
-    const section = screen.getByTestId('productivity-trend')
-    expect(section).toBeInTheDocument()
-    expect(section).not.toHaveAttribute('data-state', 'empty')
+    await waitFor(() => {
+      const section = screen.getByTestId('productivity-trend')
+      expect(section).toBeInTheDocument()
+      expect(section).not.toHaveAttribute('data-state', 'empty')
 
-    expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
+      expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
 
-    const markers = screen.getByTestId('line-series').querySelectorAll('circle')
-    expect(markers).toHaveLength(counts.length)
+      const markers = screen.getByTestId('line-series').querySelectorAll('circle')
+      expect(markers).toHaveLength(counts.length)
 
-    expect(screen.getByTestId('productivity-trend-baseline')).toBeInTheDocument()
+      expect(screen.getByTestId('productivity-trend-baseline')).toBeInTheDocument()
 
-    const meta = screen.getByTestId('productivity-trend-meta')
-    expect(meta).toHaveTextContent(`${counts.length} weeks`)
+      const meta = screen.getByTestId('productivity-trend-meta')
+      expect(meta).toHaveTextContent(`${counts.length} weeks`)
 
-    expect(screen.queryByTestId('productivity-trend-empty')).not.toBeInTheDocument()
-    expect(container.querySelector('[data-state="empty"]')).toBeNull()
+      expect(screen.queryByTestId('productivity-trend-empty')).not.toBeInTheDocument()
+      expect(container.querySelector('[data-state="empty"]')).toBeNull()
+    })
   })
 
-  it('plots completed-only — failed counts do not influence the polyline points', () => {
+  it('plots completed-only — failed counts do not influence the polyline points', async () => {
     const buckets: CompletionBucketPoint[] = [
       { boundary: '2026-04-06', completed: 2, failed: 9 },
       { boundary: '2026-04-13', completed: 4, failed: 1 },
       { boundary: '2026-04-20', completed: 1, failed: 7 },
     ]
-    useCompletionTrendMock.mockReturnValue({ data: makeTrendResponse(buckets) })
+    mockTrendResponse(makeTrendResponse(buckets))
 
     renderTrend()
 
-    const markers = screen.getByTestId('line-series').querySelectorAll('circle')
-    const ys = [...markers].map((marker) => Number(marker.getAttribute('cy')))
+    await waitFor(() => {
+      const markers = screen.getByTestId('line-series').querySelectorAll('circle')
+      const ys = [...markers].map((marker) => Number(marker.getAttribute('cy')))
 
-    expect(ys).toHaveLength(3)
+      expect(ys).toHaveLength(3)
 
-    expect(ys[1]).toBeLessThan(ys[0])
-    expect(ys[1]).toBeLessThan(ys[2])
+      expect(ys[1]).toBeLessThan(ys[0])
+      expect(ys[1]).toBeLessThan(ys[2])
 
-    expect(ys[0]).toBeLessThan(ys[2])
+      expect(ys[0]).toBeLessThan(ys[2])
+    })
   })
 
-  it('renders the empty state when the endpoint returns no buckets', () => {
-    useCompletionTrendMock.mockReturnValue({ data: makeTrendResponse([]) })
+  it('renders the empty state when the endpoint returns no buckets', async () => {
+    mockTrendResponse(makeTrendResponse([]))
 
     const { container } = renderTrend()
 
-    const section = screen.getByTestId('productivity-trend')
-    expect(section).toBeInTheDocument()
-    expect(section).toHaveAttribute('data-state', 'empty')
+    await waitFor(() => {
+      const section = screen.getByTestId('productivity-trend')
+      expect(section).toBeInTheDocument()
+      expect(section).toHaveAttribute('data-state', 'empty')
 
-    const empty = screen.getByTestId('chart-container-empty')
-    expect(empty).toBeInTheDocument()
-    expect(empty.textContent ?? '').toMatch(/no completion data/i)
+      const empty = screen.getByTestId('chart-container-empty')
+      expect(empty).toBeInTheDocument()
+      expect(empty.textContent ?? '').toMatch(/no completion data/i)
 
-    expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
-    expect(container.querySelector('svg')).toBeNull()
+      expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
+      expect(container.querySelector('svg')).toBeNull()
+    })
   })
 
-  it('renders a flat sparkline when every returned bucket has completed=0', () => {
+  it('renders a flat sparkline when every returned bucket has completed=0', async () => {
     const counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    useCompletionTrendMock.mockReturnValue({
-      data: makeTrendResponse(makeBuckets(counts)),
-    })
+    mockTrendResponse(makeTrendResponse(makeBuckets(counts)))
 
     const { container } = renderTrend()
 
-    const section = screen.getByTestId('productivity-trend')
-    expect(section).not.toHaveAttribute('data-state', 'empty')
+    await waitFor(() => {
+      const section = screen.getByTestId('productivity-trend')
+      expect(section).not.toHaveAttribute('data-state', 'empty')
 
-    expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
+      expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
 
-    const markers = screen.getByTestId('line-series').querySelectorAll('circle')
-    expect(markers).toHaveLength(counts.length)
+      const markers = screen.getByTestId('line-series').querySelectorAll('circle')
+      expect(markers).toHaveLength(counts.length)
 
-    const ys = [...markers].map((marker) => Number(marker.getAttribute('cy')))
-    expect(new Set(ys).size).toBe(1)
+      const ys = [...markers].map((marker) => Number(marker.getAttribute('cy')))
+      expect(new Set(ys).size).toBe(1)
 
-    expect(screen.getByTestId('productivity-trend-meta')).toHaveTextContent(`${counts.length} weeks`)
-    expect(screen.queryByTestId('productivity-trend-empty')).not.toBeInTheDocument()
-    expect(container.querySelector('[data-state="empty"]')).toBeNull()
+      expect(screen.getByTestId('productivity-trend-meta')).toHaveTextContent(`${counts.length} weeks`)
+      expect(screen.queryByTestId('productivity-trend-empty')).not.toBeInTheDocument()
+      expect(container.querySelector('[data-state="empty"]')).toBeNull()
+    })
   })
 
-  it('does not expose any user-facing bucket-size or time-range control', () => {
-    useCompletionTrendMock.mockReturnValue({
-      data: makeTrendResponse(makeBuckets([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])),
-    })
+  it('does not expose any user-facing bucket-size or time-range control', async () => {
+    mockTrendResponse(makeTrendResponse(makeBuckets([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])))
 
     const { container } = renderTrend()
+
+    await waitFor(() => expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument())
 
     expect(container.querySelector('select')).toBeNull()
     expect(container.querySelector('input')).toBeNull()
@@ -157,20 +179,22 @@ describe('CompletionTrend', () => {
     expect(section.querySelector('[role="combobox"]')).toBeNull()
   })
 
-  it('renders the empty state when the hook returns no data (undefined)', () => {
-    useCompletionTrendMock.mockReturnValue({ data: undefined })
+  it('renders the empty state when the endpoint returns no data (empty buckets)', async () => {
+    mockTrendResponse(makeTrendResponse([]))
 
     const { container } = renderTrend()
 
-    const section = screen.getByTestId('productivity-trend')
-    expect(section).toHaveAttribute('data-state', 'empty')
+    await waitFor(() => {
+      const section = screen.getByTestId('productivity-trend')
+      expect(section).toHaveAttribute('data-state', 'empty')
 
-    expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
-    expect(container.querySelector('svg')).toBeNull()
+      expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
+      expect(container.querySelector('svg')).toBeNull()
+    })
   })
 
   it('routes loading through the shared chart container without rendering chart content', () => {
-    useCompletionTrendMock.mockReturnValue({ data: undefined, isLoading: true, isError: false })
+    mockTrendPending()
 
     const { container } = renderTrend()
 
@@ -180,25 +204,29 @@ describe('CompletionTrend', () => {
     expect(container.querySelector('svg')).toBeNull()
   })
 
-  it('routes fetch errors through the shared chart container without rendering chart content', () => {
-    useCompletionTrendMock.mockReturnValue({ data: undefined, isLoading: false, isError: true })
+  it('routes fetch errors through the shared chart container without rendering chart content', async () => {
+    mockTrendError()
 
     const { container } = renderTrend()
 
-    expect(screen.getByTestId('chart-container-error')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-container-error')).toBeInTheDocument()
+    })
     expect(screen.queryByTestId('chart-container-loading')).not.toBeInTheDocument()
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
     expect(container.querySelector('svg')).toBeNull()
   })
 
-  it('uses chart accessibility summary and theme-token line colors', () => {
-    useCompletionTrendMock.mockReturnValue({ data: makeTrendResponse(makeBuckets([1, 2, 3])) })
+  it('uses chart accessibility summary and theme-token line colors', async () => {
+    mockTrendResponse(makeTrendResponse(makeBuckets([1, 2, 3])))
 
     renderTrend()
 
-    expect(screen.getByTestId('chart-sr-summary').textContent).toContain('Weekly completion trend')
-    const path = screen.getByTestId('line-series').querySelector('path')
-    expect(path?.getAttribute('class')).toContain('stroke-chart-1')
-    expect(path?.getAttribute('stroke')).toBeNull()
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-sr-summary').textContent).toContain('Weekly completion trend')
+      const path = screen.getByTestId('line-series').querySelector('path')
+      expect(path?.getAttribute('class')).toContain('stroke-chart-1')
+      expect(path?.getAttribute('stroke')).toBeNull()
+    })
   })
 })
