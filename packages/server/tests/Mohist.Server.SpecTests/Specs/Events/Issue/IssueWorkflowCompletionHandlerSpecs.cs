@@ -1,6 +1,5 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Events.Subscriptions;
@@ -138,11 +137,10 @@ public class IssueWorkflowCompletionHandlerSpecs
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var scopeFactory = NewIssueQuerierScopeFactory(database.Factory);
-        var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
+        var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
-        var evt = BuildCompletedEvent(workflowRunId: "wr_completed");
+        var evt = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
         await handler.HandleAsync(evt, CancellationToken.None);
 
         var call = Assert.Single(grains.Calls);
@@ -165,8 +163,7 @@ public class IssueWorkflowCompletionHandlerSpecs
     {
         await using var database = CreateDatabase();
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var scopeFactory = NewIssueQuerierScopeFactory(database.Factory);
-        var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
+        var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
         var evt = new CloudEvent(
@@ -184,41 +181,24 @@ public class IssueWorkflowCompletionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task HandleAsync_NoInProgressIssueBound_NoOpsAndDoesNotInvokeGrain()
+    public async Task HandleAsync_NoIssueIdExtension_NoOpsAndDoesNotInvokeGrain()
     {
+        // The owning issue is now recovered from extensions["issueid"]
+        // stamped at write time; an event that lacks the stamp is
+        // equivalent to the legacy "no in-progress issue bound" case
+        // and must no-op without a grain call.
         await using var database = CreateDatabase();
-        // No issue at all bound to the run id.
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var scopeFactory = NewIssueQuerierScopeFactory(database.Factory);
-        var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
+        var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
-        var evt = BuildCompletedEvent(workflowRunId: "wr_orphan");
-        await handler.HandleAsync(evt, CancellationToken.None);
+        var evt = new CloudEvent(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri("/mohist/workflow-runs/wr_orphan", UriKind.Relative),
+            type: EventCatalog.ReverseDns.WorkflowRunCompleted,
+            time: FixedNow,
+            data: null);
 
-        Assert.Empty(grains.Calls);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
-    [Fact]
-    public async Task HandleAsync_DoneIssueWithPreservedReference_NoOpsWithoutGrainCall()
-    {
-        // After the first transition, the same workflowRunId is preserved
-        // on the Done issue as execution history. The lookup must filter
-        // to in_progress so a duplicate delivery does not re-activate the
-        // grain (status-guard alone would also catch it, but the status
-        // filter is the documented contract).
-        await using var database = CreateDatabase();
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_done", issueNumber: 1,
-            status: IssueStatus.Done, workflowRunId: "wr_completed");
-
-        var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var scopeFactory = NewIssueQuerierScopeFactory(database.Factory);
-        var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
-            NullLogger<IssueWorkflowCompletionHandler>.Instance);
-
-        var evt = BuildCompletedEvent(workflowRunId: "wr_completed");
         await handler.HandleAsync(evt, CancellationToken.None);
 
         Assert.Empty(grains.Calls);
@@ -230,27 +210,29 @@ public class IssueWorkflowCompletionHandlerSpecs
     public async Task HandleAsync_DuplicateCompletedDelivery_OnlyFirstInvocationRunsGrainLogic()
     {
         // First delivery transitions the issue to Done; the second
-        // delivery sees a Done issue in the DB (status='done', not
-        // 'in_progress') so the reverse lookup yields null and the
-        // handler is a true no-op. No second grain call, no throw, no
-        // field mutation. This is the documented idempotent path.
+        // delivery invokes CompleteWorkAsync again, but the aggregate
+        // guard rejects it (issue is no longer in_progress), so only
+        // one effective transition occurs. No throw, no field mutation.
+        // This is the documented idempotent path.
         await using var database = CreateDatabase();
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var scopeFactory = NewIssueQuerierScopeFactory(database.Factory);
-        var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
+        var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
-        var evt1 = BuildCompletedEvent(workflowRunId: "wr_completed");
-        var evt2 = BuildCompletedEvent(workflowRunId: "wr_completed");
+        var evt1 = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
+        var evt2 = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
         await handler.HandleAsync(evt1, CancellationToken.None);
         await handler.HandleAsync(evt2, CancellationToken.None);
 
-        var call = Assert.Single(grains.Calls);
-        Assert.Equal("issue_1", call.IssueId);
-        Assert.Equal("wr_completed", call.WorkflowRunId);
+        Assert.Equal(2, grains.Calls.Count);
+        Assert.All(grains.Calls, c =>
+        {
+            Assert.Equal("issue_1", c.IssueId);
+            Assert.Equal("wr_completed", c.WorkflowRunId);
+        });
 
         await using var verify = database.CreateDbContext();
         var stored = await verify.Issues.AsNoTracking().FirstAsync();
@@ -263,38 +245,41 @@ public class IssueWorkflowCompletionHandlerSpecs
     public async Task HandleAsync_MismatchedWorkflowRunIdOnIssue_DoesNotMutateIssue()
     {
         // After the issue is Done with wr_completed preserved, a
-        // second event for the same run id resolves to null at the
-        // lookup and never reaches the grain. Verify that no mutation
-        // happens even if a *different* delivery path attempted to
-        // invoke CompleteWorkAsync with a stale workflowRunId — the
-        // Issue.Complete guard would reject it (no change).
+        // second event for the same run id calls CompleteWorkAsync
+        // again, but the aggregate guard rejects it (issue is no
+        // longer in_progress). Verify no mutation happens even when a
+        // *different* delivery path attempts to invoke CompleteWorkAsync
+        // with a stale workflowRunId — the Issue.Complete guard rejects
+        // it (no change).
         await using var database = CreateDatabase();
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var scopeFactory = NewIssueQuerierScopeFactory(database.Factory);
-        var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
+        var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
         // Pre-flip the issue to Done with the matching id, then verify
         // a mismatched-id CompleteWorkAsync is guarded by the aggregate.
         // Use the handler's own grain to perform the initial transition so
         // the in-memory cache and DB stay consistent.
-        var firstEvent = BuildCompletedEvent(workflowRunId: "wr_completed");
+        var firstEvent = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
         await handler.HandleAsync(firstEvent, CancellationToken.None);
-        var firstCall = Assert.Single(grains.Calls);
+        var firstCall = grains.Calls.Single();
         Assert.Equal("issue_1", firstCall.IssueId);
         Assert.Equal("wr_completed", firstCall.WorkflowRunId);
         grains.Calls.Clear();
 
-        // Now drive the handler with the SAME run id; the lookup
-        // filters to in_progress and returns null, so the grain is
-        // never invoked — this is the "no-op after Done" invariant.
-        var evt = BuildCompletedEvent(workflowRunId: "wr_completed");
+        // Now drive the handler with the SAME run id; CompleteWorkAsync
+        // is invoked again but the aggregate is already Done so the
+        // transition is a no-op.
+        var evt = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
         await handler.HandleAsync(evt, CancellationToken.None);
 
-        Assert.Empty(grains.Calls);
+        var secondCall = Assert.Single(grains.Calls);
+        Assert.Equal("issue_1", secondCall.IssueId);
+        Assert.Equal("wr_completed", secondCall.WorkflowRunId);
+        grains.Calls.Clear();
 
         // Independently verify that CompleteWorkAsync with a
         // mismatched workflowRunId would be a no-op (Issue.Complete
@@ -320,15 +305,12 @@ public class IssueWorkflowCompletionHandlerSpecs
     public async Task HandleAsync_GrainThrows_HandlerSwallowsAndLogsWarning()
     {
         await using var database = CreateDatabase();
-        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1,
-            status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
         var grains = new ThrowingIssueGrainFactory();
-        var scopeFactory = NewIssueQuerierScopeFactory(database.Factory);
-        var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
+        var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
-        var evt = BuildCompletedEvent(workflowRunId: "wr_completed");
+        var evt = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
 
         // Must not throw — the publish path relies on this.
         await handler.HandleAsync(evt, CancellationToken.None);
@@ -343,8 +325,7 @@ public class IssueWorkflowCompletionHandlerSpecs
     {
         await using var database = CreateDatabase();
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var scopeFactory = NewIssueQuerierScopeFactory(database.Factory);
-        var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
+        var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
         var evt = new CloudEvent(
@@ -364,8 +345,7 @@ public class IssueWorkflowCompletionHandlerSpecs
     {
         await using var database = CreateDatabase();
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var scopeFactory = NewIssueQuerierScopeFactory(database.Factory);
-        var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
+        var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
         var evt = new CloudEvent(
@@ -385,11 +365,10 @@ public class IssueWorkflowCompletionHandlerSpecs
     {
         await using var database = CreateDatabase();
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var scopeFactory = NewIssueQuerierScopeFactory(database.Factory);
-        var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
+        var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
-        var evt = BuildCompletedEvent(workflowRunId: "wr_completed");
+        var evt = BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1");
 
         Assert.True(handler.Filter(evt));
     }
@@ -397,18 +376,22 @@ public class IssueWorkflowCompletionHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task HandleAsync_CompletesIssue_ForWorkflowRunIdInEventSource()
+    public async Task HandleAsync_CompletesIssue_FromIssueIdExtension()
     {
+        // The owning issue is recovered from extensions["issueid"]
+        // stamped at write time — no scoped service resolution or DB
+        // lookup. The handler dispatches CompleteWorkAsync directly.
         await using var database = CreateDatabase();
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1,
             status: IssueStatus.InProgress, workflowRunId: "wr_completed");
 
         var grains = new RecordingIssueGrainFactory(database.Factory, new FakeTimeProvider(FixedNow));
-        var scopeFactory = NewIssueQuerierScopeFactory(database.Factory);
-        var handler = new IssueWorkflowCompletionHandler(scopeFactory, grains,
+        var handler = new IssueWorkflowCompletionHandler(grains,
             NullLogger<IssueWorkflowCompletionHandler>.Instance);
 
-        await handler.HandleAsync(BuildCompletedEvent(workflowRunId: "wr_completed"), CancellationToken.None);
+        await handler.HandleAsync(
+            BuildCompletedEvent(workflowRunId: "wr_completed", issueId: "issue_1"),
+            CancellationToken.None);
 
         var call = Assert.Single(grains.Calls);
         Assert.Equal("issue_1", call.IssueId);
@@ -419,13 +402,17 @@ public class IssueWorkflowCompletionHandlerSpecs
         Assert.Equal(IssueStatus.Done, IssueStore.Deserialize(stored.State)!.Status);
     }
 
-    private static CloudEvent BuildCompletedEvent(string workflowRunId) =>
+    private static CloudEvent BuildCompletedEvent(string workflowRunId, string issueId) =>
         new(
             id: Guid.NewGuid().ToString(),
             source: new Uri($"/mohist/workflow-runs/{workflowRunId}", UriKind.Relative),
             type: EventCatalog.ReverseDns.WorkflowRunCompleted,
             time: FixedNow,
-            data: null);
+            data: null,
+            extensions: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["issueid"] = issueId,
+            });
 
     private static async Task SeedIssueAsync(
         TestDatabase database,
@@ -475,18 +462,6 @@ public class IssueWorkflowCompletionHandlerSpecs
             projectProfileManager: null!,
             loader: null!);
 
-    /// <summary>
-    /// Minimal <see cref="IServiceScopeFactory"/> for the handler
-    /// tests: the only scoped dependency the handler resolves is
-    /// <see cref="IssueQuerier"/>, and that querier only needs the
-    /// <see cref="IDbContextFactory{MohistDbContext}"/>. We expose
-    /// <see cref="IssueQuerier"/> from the per-scope service
-    /// collection so the production DI shape is preserved end-to-end
-    /// (handler → scope → IssueQuerier → db factory).
-    /// </summary>
-    private static IServiceScopeFactory NewIssueQuerierScopeFactory(IDbContextFactory<MohistDbContext> dbFactory) =>
-        new QuerierScopeFactory(dbFactory);
-
     private static TestDatabase CreateDatabase()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -526,42 +501,6 @@ public class IssueWorkflowCompletionHandlerSpecs
         public DbContextOptions<MohistDbContext> Options { get; }
 
         public MohistDbContext CreateDbContext() => new(Options);
-    }
-
-    private sealed class QuerierScopeFactory : IServiceScopeFactory
-    {
-        private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-
-        public QuerierScopeFactory(IDbContextFactory<MohistDbContext> dbFactory)
-        {
-            _dbFactory = dbFactory;
-        }
-
-        public IServiceScope CreateScope() => new QuerierScope(_dbFactory);
-
-        private sealed class QuerierScope : IServiceScope
-        {
-            private readonly ServiceProvider _provider;
-
-            public QuerierScope(IDbContextFactory<MohistDbContext> dbFactory)
-            {
-                var services = new ServiceCollection();
-                services.AddSingleton(dbFactory);
-                services.AddScoped<IssueQuerier>(sp => new IssueQuerier(
-                    sp.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
-                    projects: null!,
-                    configService: null!,
-                    effectiveProfileResolver: null!,
-                    projectProfileManager: null!,
-                    loader: null!));
-                _provider = services.BuildServiceProvider();
-                ServiceProvider = _provider;
-            }
-
-            public IServiceProvider ServiceProvider { get; }
-
-            public void Dispose() => _provider.Dispose();
-        }
     }
 
     private sealed class RecordingIssueGrainFactory : IGrainFactory

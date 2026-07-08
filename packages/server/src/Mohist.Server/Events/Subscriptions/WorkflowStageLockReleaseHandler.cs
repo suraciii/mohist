@@ -7,7 +7,8 @@ namespace Mohist.Server.Events.Subscriptions;
 
 /// <summary>
 /// Bus subscription that releases the workflow run's sequential stage lock
-/// when a <c>StageCompleted</c> or <c>StageFailed</c> event is committed.
+/// when a <c>StageCompleted</c> or <c>StageFailed</c> event row is
+/// persisted.
 ///
 /// Replaces the previous grain-internal <c>WorkflowGrain.On()</c> branch
 /// (<c>StageCompleted/Failed =&gt; ReleaseStageLocksAsync</c>) so the lock
@@ -17,8 +18,11 @@ namespace Mohist.Server.Events.Subscriptions;
 /// resolves the workflow run id from the CloudEvent source URI
 /// (<c>/mohist/workflow-runs/{id}</c>).
 ///
-/// The grain uses <c>[Reentrant]</c> so the bus dispatch can re-enter it
-/// from inside <c>WorkflowRunStore.SaveAsync</c> without deadlocking.
+/// The grain uses <c>[Reentrant]</c> so when the future dispatcher
+/// (issue-361 step 3) picks up the event row and re-enters the grain
+/// from the workflow-grain call stack, it does not deadlock. While the
+/// dispatcher is unimplemented the handler stays dormant — the rows
+/// are durable but the in-process notification is suspended.
 /// </summary>
 [Subscription(Type = "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed")]
 public sealed class WorkflowStageLockReleaseHandler : ICloudEventHandler

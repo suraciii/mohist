@@ -310,13 +310,14 @@ public class InboxApiSpecs
     [Fact]
     public async Task WorkflowRunStoreEvent_PersistsRowButDoesNotSyncProjectToInbox()
     {
-        // issue-361 T-002: IEventPublisher converges to write-only.
-        // The synchronous dispatch path that previously invoked
-        // InboxProjectionHandler during publish is removed; the
-        // inbox row will be projected by the future dispatcher.
-        // This spec verifies that the workflow event is durable
-        // (visible via the event store) but the projection is
-        // suspended until the dispatcher lands.
+        // issue-361 T-002/T-003: IEventPublisher converges to write-only
+        // and WorkflowRunStore now writes its event row inside the state
+        // transaction. The synchronous dispatch path that previously
+        // invoked InboxProjectionHandler during publish is removed; the
+        // inbox row will be projected by the future dispatcher. This spec
+        // verifies that the workflow event is durable (visible via the
+        // event store) but the projection is suspended until the
+        // dispatcher lands.
         var projectId = await CreateProjectAsync("inbox-spec");
         await _client.PostOkAsync(
             $"/api/projects/{projectId}/repositories",
@@ -359,15 +360,11 @@ public class InboxApiSpecs
         {
             var events = verify.ServiceProvider.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
             var stored = await events.ListAsync(runId);
-            // WorkflowRunStore currently persists via _eventStore.AppendAsync
-            // AND publishes via _eventPublisher.PublishAsync (which is now
-            // itself write-only and delegates to the same store), so the
-            // durable row count is > 1. T-003 will move the event write
-            // inside the state transaction and drop the publish, collapsing
-            // this back to one row per event. Until then assert at least
-            // one durable row exists with the right type.
-            Assert.NotEmpty(stored);
-            Assert.Contains(stored, s => s.Envelope.Type == "com.mohist.workflow.run.failed");
+            // issue-361 T-003: WorkflowRunStore now appends event rows inside
+            // the state transaction and no longer publishes; exactly one row
+            // per emitted event lands in the event store.
+            var storedFailed = Assert.Single(stored);
+            Assert.Equal("com.mohist.workflow.run.failed", storedFailed.Envelope.Type);
         }
 
         Assert.Empty(await _client.GetDataAsync<JsonElement[]>(

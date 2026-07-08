@@ -235,3 +235,146 @@
   passes (24 specs, 3 skipped, 0 failures).
 - `dotnet test packages/cli/tests/Mohist.Cli.Tests` passes
   (865 specs, 0 failures).
+
+## T-003 progress notes
+
+### Codebase Patterns
+
+- `WorkflowRunStore.SaveAsync(run, events)` is the canonical reference
+  switch. It is the only producer that actually stamped identity before
+  T-003, and it is the only one whose `issueid` reading is a pure
+  metadata lookup (the issue binding lives on the run's
+  `Annotations["issueId"]` because `IssueGrain` populates it at workflow
+  start time — `IssueGrain.cs:230`). The pattern is: read
+  `projectId`/`issueId` from the same `Metadata.Annotations` dictionary,
+  pass both into `ToCloudEvent`, stamp conditionally
+  (`string.IsNullOrWhiteSpace` guard) so a phantom `issueid` is never
+  emitted on an unbound run.
+
+- `WorkflowRunStore` no longer takes an `IEventPublisher` dependency at
+  all — the constructor signature is `(IDbContextFactory, IEventStore)`
+  and DI no longer wires one in. Test fakes
+  (`CapturingEventPublisher`) and call sites
+  (`InboxProjectionTestSupport`, `InboxProjectionHandlerSpecs`,
+  `WorkflowRunStoreSpecs`) had to be updated in lockstep.
+
+- `WorkflowRunStoreSpecs` re-asserts on persisted rows via
+  `IEventStore.ListAsync(runId)` instead of on captured publishes. This
+  is the only correct assertion after T-003 because there is no
+  publisher fan-out to capture — the assertion target is the event
+  store, which is what consumers will read.
+
+- The new `TransactionalEventAppendSpecs` file uses a hand-rolled
+  `IDbContextFactory<MohistDbContext>` (private `Factory` class) over a
+  shared in-memory SQLite connection (the `_keeper` connection pattern
+  from T-001's `AgentSessionEventsMigrationSpecs`). The
+  `ThrowingEventStore` private fake throws on the second
+  `AppendAsync(db, envelope)` call to simulate a mid-transaction event
+  write failure — this is the canonical way to express the
+  "rollback on event write failure" assertion in this test file
+  because it lives in the producer's transaction, not in
+  `MarkDispatchedAsync`.
+
+### Gotchas
+
+- `IssueWorkflowCompletionHandler` now reads `issueid` from
+  `evt.Extensions` and stops resolving `IssueQuerier` through a scoped
+  `IServiceScopeFactory`. Two follow-on consequences:
+
+  - `IssueQuerier` is no longer in the handler's constructor
+    dependencies. The handler's only remaining collaborators are
+    `IGrainFactory` and `ILogger<>`. The handler stays registered as
+    a singleton (subscription wiring unchanged) — no scope resolution
+    is needed.
+  - Specs that previously constructed a `QuerierScopeFactory` to feed
+    `IssueQuerier` for the handler no longer need it. The
+    `HandleAsync_NoInProgressIssueBound_NoOpsAndDoesNotInvokeGrain`
+    spec was rewritten to
+    `HandleAsync_NoIssueIdExtension_NoOpsAndDoesNotInvokeGrain` — the
+    "no in-progress issue bound" case is now expressed as "the event
+    has no `issueid` extension" because that is what the new code
+    path actually checks.
+
+- The handler's idempotency story is unchanged in spirit but shifted
+  in mechanism: it now relies on the `Issue.Complete` aggregate guard
+  (which rejects duplicate transitions on a non-`InProgress` issue)
+  instead of relying on the scoped reverse lookup filtering to
+  `in_progress`. Specs that previously asserted on a single grain
+  call after a duplicate delivery now assert on two calls + a no-op
+  transition. This is a meaningful semantic shift for
+  `IssueWorkflowCompletionHandler` — read both the new spec and the
+  modified one before reasoning about the change.
+
+- The `RunnerWorkflowTerminalStatusHandler` and
+  `WorkflowStageLockReleaseHandler` doc-comments were updated to
+  reflect the dormant state until the dispatcher lands (step 3). The
+  handler bodies are unchanged — the comment update is to flag for
+  future maintainers that synchronous dispatch is no longer the
+  trigger path. No tests changed for these handlers.
+
+- `InboxProjectionHandler` still resolves `IEventPublisher` through a
+  scope to publish the `com.mohist.inbox.item-persisted` hint. After
+  T-003 (and T-002) the resolved publisher no longer fans out — it
+  only appends a row. The hint is now durable; whether that is the
+  right long-term home is design OQ4. The handler's own
+  implementation was not modified by T-003.
+
+- `InboxProjectionTestSupport.NewServiceProvider` no longer passes
+  `IEventPublisher` into the `WorkflowRunStore` constructor — only
+  the `IEventStore` (`NoopEventStore`). The handler hint path uses
+  its own scoped `IEventPublisher` (the `InMemoryEventBus` singleton)
+  so removing the publisher from the store is safe.
+
+- The `InboxApiSpecs.WorkflowRunStoreEvent_PersistsRowButDoesNotSyncProjectToInbox`
+  spec was rewritten to assert `Assert.Single(stored)` instead of
+  `Assert.NotEmpty` + `Assert.Contains`. After T-003, exactly one row
+  per emitted event lands in the event store (the publisher is no
+  longer called by the store).
+
+### Open follow-ups for downstream tasks
+
+- T-004 (Issue producer) and T-005 (AgentSession producer) follow the
+  exact same pattern as T-003. The store takes over envelope
+  construction + identity stamping, the event append moves into the
+  state transaction, the producer's catch is removed, the publisher
+  field is dropped. The test fakes already exist for those stores;
+  T-004/T-005 will need analogous fake updates (drop the
+  `CapturingEventPublisher`, assert on `IEventStore.ListAsync` /
+  `ListIssueEventsAsync` / `AgentSessionEvents` queries).
+
+- The dispatcher (step 3, future issue) must wire the handlers back
+  to react to durable event rows. The handler registration on the
+  bus is intact — they are dormant, not deleted.
+
+### Verification
+
+- `dotnet build Mohist.sln` succeeds with 0 warnings
+  (TreatWarningsAsErrors active).
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests`
+  passes (4135 specs, 10 skipped, 0 failures).
+- `dotnet test packages/server/tests/Mohist.Server.ArchTests`
+  passes (24 specs, 3 skipped, 0 failures).
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests` passes
+  (865 specs, 0 failures).
+- New tests:
+  - `TransactionalEventAppendSpecs` (6 specs): state and event rows
+    commit atomically; event-row write failure rolls back the state
+    transaction and propagates (no bare catch); crash-after-commit
+    leaves event rows durable on a fresh `DbContext`; runs bound to
+    an issue stamp both `projectid` and `issueid`; unbound runs do
+    NOT stamp a phantom `issueid`; the no-events path still commits
+    the state row cleanly.
+  - `WorkflowRunStoreSpecs`: `CapturingEventPublisher` removed;
+    assertions move to `IEventStore.ListAsync(runId)`; one new spec
+    added (`SaveAsync_WithIssueAnnotation_StampsIssueIdOnPersistedEventExtensions`);
+    existing specs renamed to reflect the new assertion target.
+  - `IssueWorkflowCompletionHandlerSpecs`: `QuerierScopeFactory` and
+    `NewIssueQuerierScopeFactory` helper removed; the
+    `NoInProgressIssueBound` spec rewritten as
+    `NoIssueIdExtension`; the `DuplicateCompletedDelivery` and
+    `MismatchedWorkflowRunIdOnIssue` specs re-assert on two grain
+    calls + a no-op transition (the new idempotency story).
+  - `InboxApiSpecs`:
+    `WorkflowRunStoreEvent_PersistsRowButDoesNotSyncProjectToInbox`
+    updated to `Assert.Single` (post-T-003 there is exactly one row
+    per event, not `>1` from the post-commit publish loop).

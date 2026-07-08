@@ -306,8 +306,7 @@ internal static class InboxProjectionTestSupport
                 services.AddScoped<InboxSubscriptionStore>();
                 services.AddScoped<IWorkflowRunStore>(sp => new WorkflowRunStore(
                     _database.Factory,
-                    new NoopEventStore(),
-                    new NoopEventPublisher()));
+                    new NoopEventStore()));
                 services.AddScoped<IStateStore<DomainIssue>>(sp => new IssueStore(_database.Factory));
                 configureServices?.Invoke(services);
                 return services.BuildServiceProvider();
