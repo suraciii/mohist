@@ -3,7 +3,7 @@ import '@testing-library/jest-dom'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ProjectProvider } from '../../../entities/project'
 import { EpicCreateDialog } from './EpicCreateDialog'
@@ -13,21 +13,16 @@ const mocks = vi.hoisted(() => ({
   useCreateEpic: vi.fn(),
 }))
 
-const mockNavigate = vi.fn()
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="current-path">{location.pathname}{location.search}</div>
+}
 
 vi.mock('../../../entities/epic', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/epic')>()
   return {
     ...actual,
     useCreateEpic: mocks.useCreateEpic,
-  }
-})
-
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
   }
 })
 
@@ -43,7 +38,6 @@ const project = {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
-  mockNavigate.mockReset()
 })
 
 function renderDialog(props: { open?: boolean; onClose?: () => void } = {}) {
@@ -56,6 +50,7 @@ function renderDialog(props: { open?: boolean; onClose?: () => void } = {}) {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjects={[project]} initialProjectId={project.id}>
         <MemoryRouter initialEntries={['/epics']}>
+          <LocationProbe />
           <EpicCreateDialog open={open} onClose={onClose} />
         </MemoryRouter>
       </ProjectProvider>
@@ -282,7 +277,7 @@ describe('EpicCreateDialog success state', () => {
 
     fireEvent.click(openButton)
 
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/Project/epics/epic-open-target'))
+    await waitFor(() => expect(screen.getByTestId('current-path').textContent).toBe('/Project/epics/epic-open-target'))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
@@ -316,7 +311,7 @@ describe('EpicCreateDialog success state', () => {
     fireEvent.click(await screen.findByTestId('epic-create-stay'))
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
-    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(screen.getByTestId('current-path').textContent).toBe('/epics')
   })
 
   it('treats Cancel as Stay (closes without navigation) and the success state never fires a toast', async () => {
@@ -330,7 +325,7 @@ describe('EpicCreateDialog success state', () => {
     fireEvent.click(screen.getByTestId('epic-create-cancel'))
 
     expect(onClose).toHaveBeenCalledTimes(1)
-    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(screen.getByTestId('current-path').textContent).toBe('/epics')
   })
 
   it('does not fire any create-success toast (useCreateEpic slimmed) and the dialog owns all success UX', async () => {
@@ -361,7 +356,7 @@ describe('EpicCreateDialog success state', () => {
     fireEvent.click(stay)
 
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
-    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(screen.getByTestId('current-path').textContent).toBe('/epics')
   })
 })
 
