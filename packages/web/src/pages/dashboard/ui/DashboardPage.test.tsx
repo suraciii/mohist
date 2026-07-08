@@ -407,6 +407,18 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
   })
 
   describe('ready state when idle', () => {
+    it('does not render the ready state while issue data is still loading', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({ data: undefined, isLoading: true })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
+      expect(screen.queryByText(/Nothing needs your attention right now/i)).not.toBeInTheDocument()
+    })
+
     it('renders the concise ready state when there are no attention items and no active work', () => {
       mocks.projects = [
         { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
@@ -631,6 +643,22 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       renderPage()
 
       expect(screen.getByTestId('dashboard-zone-pulse')).toBeInTheDocument()
+    })
+
+    it('does not render an empty active-production zone for an active card without a running issue', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({ data: [], isLoading: false })
+      mocks.useAgentActivityMock.mockReturnValue({
+        ...NO_AGENT_ACTIVITY,
+        activeCardByIssueNumber: new Map([[999, { issueNumber: '999' }]]),
+      })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-zone-pulse')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('pulse-empty-state')).not.toBeInTheDocument()
     })
   })
 

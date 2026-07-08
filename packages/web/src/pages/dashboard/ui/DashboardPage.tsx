@@ -12,7 +12,6 @@ import { FactoryStatusHeadline } from '../../../widgets/factory-status'
 import { AttentionHero } from '../../../widgets/attention-hero'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { useActivityCards } from '../../../widgets/coder-session/model/activity-cards'
 import {
   deriveAttentionItems,
   useIssues,
@@ -44,9 +43,8 @@ export function DashboardPage() {
   const { data: projects, isLoading: projectsLoading } = useProjects()
   const { currentProject, projectId } = useProject()
   const { data: agentStatus } = useAgentStatus()
-  const { data: fetchedIssues } = useIssues(projectId ? { projectId } : undefined)
+  const { data: fetchedIssues, isLoading: issuesLoading } = useIssues(projectId ? { projectId } : undefined)
   const { completed, failed, archived } = useRecentDigest()
-  const { activeCardByIssueNumber } = useActivityCards()
   const [showCreateProject, setShowCreateProject] = useState(false)
 
   useDocumentTitle('Dashboard — Mohist', agentStatus?.running ?? false)
@@ -62,14 +60,15 @@ export function DashboardPage() {
   )
 
   const hasAttention = attentionItems.length > 0
-  const hasActiveWork = runningIssues.length > 0 || activeCardByIssueNumber.size > 0
+  const hasActiveWork = runningIssues.length > 0
   const hasDigestItems =
     completed.length > 0 || failed.length > 0 || archived.length > 0
   const hasCapacityData =
     agentStatus?.capacity != null && agentStatus.capacity.max > 0
+  const issuesResolved = fetchedIssues !== undefined || !issuesLoading
 
   const showAttentionHero = hasAttention
-  const showReadyState = !hasAttention && !hasActiveWork
+  const showReadyState = issuesResolved && !hasAttention && !hasActiveWork
 
   if (projectsLoading) {
     return null

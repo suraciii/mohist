@@ -238,6 +238,35 @@ describe('Needs attention summary - user-action wording', () => {
     expect(within(summary as HTMLElement).getByText(/#180/i)).toBeInTheDocument()
   })
 
+  it('bases the issue-board summary treatment on rendered issue attention items only', () => {
+    const approvalAwaitingIssue = makeIssue({
+      number: 181,
+      title: 'Plan awaits review while runner is down',
+      status: IssueStatus.Backlog,
+      health: IssueHealth.Active,
+      approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' } as ApprovalState,
+    })
+    const agentStatus: AgentStatus = {
+      ...mockAgentStatus,
+      runnerAvailable: false,
+      runnerMessage: 'No runner is connected.',
+    }
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <KanbanBoard issues={[approvalAwaitingIssue]} agentStatus={agentStatus} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    const summary = screen.getByTestId('needs-attention-summary')
+    expect(summary).toHaveAttribute('data-family', 'warning')
+    expect(summary).toHaveTextContent('(1)')
+    expect(screen.getByTestId('attention-link-181')).toHaveAttribute('data-family', 'warning')
+  })
+
   it('renders attention summary item with user-action label for interrupted issue', () => {
     const interruptedIssue = makeIssue({
       number: 17,

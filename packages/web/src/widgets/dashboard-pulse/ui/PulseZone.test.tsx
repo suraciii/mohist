@@ -284,6 +284,45 @@ describe('PulseZone — issue-led active production', () => {
     expect(screen.getByTestId('pulse-compact-progress')).toHaveTextContent('3/8 tasks')
   })
 
+  it('uses the current issue title and workflow stage when session telemetry is stale', () => {
+    mocks.issues = [
+      makeRunningIssue({
+        id: 'authoritative-issue',
+        number: 125,
+        title: 'Current issue title',
+        workflowStage: WorkflowStage.Check,
+        health: IssueHealth.Active,
+      }),
+    ]
+    mocks.activity = makeActivity([
+      makeSession({
+        sessionId: 'session-125',
+        issueId: 'authoritative-issue',
+        issueNumber: 125,
+        issueTitle: 'Stale session issue title',
+        issueStage: 'Plan',
+        taskDescription: 'Stale session task description',
+        currentWorkItem: {
+          type: 'task',
+          id: 'task-1',
+          title: 'Stale current work title',
+          stage: 'Plan',
+          sessionWorkType: null,
+        },
+        taskProgress: { completed: 1, total: 3 },
+      }),
+    ])
+
+    renderZone()
+
+    const card = screen.getByTestId('pulse-compact-card')
+    expect(within(card).getByTestId('pulse-compact-title')).toHaveTextContent('Current issue title')
+    expect(within(card).getByTestId('pulse-compact-stage')).toHaveTextContent('Check')
+    expect(within(card).queryByText('Stale current work title')).not.toBeInTheDocument()
+    expect(within(card).queryByText('Plan')).not.toBeInTheDocument()
+    expect(within(card).getByTestId('pulse-compact-progress')).toHaveTextContent('1/3 tasks')
+  })
+
   it('does NOT hide an in-progress issue that lacks an active session', () => {
     mocks.issues = [
       makeRunningIssue({

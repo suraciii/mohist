@@ -30,28 +30,39 @@ export function stageColorFor(stage: string | null | undefined): string {
 
 export interface CompactSessionCardProps {
   card: SessionCard
+  issueNumber?: number
+  issueTitle?: string
+  workflowStage?: string | null
   needsOwnerAction?: boolean
 }
 
-export function CompactSessionCard({ card, needsOwnerAction = false }: CompactSessionCardProps) {
+export function CompactSessionCard({
+  card,
+  issueNumber,
+  issueTitle,
+  workflowStage,
+  needsOwnerAction = false,
+}: CompactSessionCardProps) {
   const toProjectPath = useProjectPath()
-  const stageColor = stageColorFor(card.issueStage)
-  const title = card.title ?? card.taskDescription ?? card.issueTitle
+  const displayedIssueNumber = issueNumber ?? card.issueNumber
+  const stage = workflowStage ?? card.issueStage
+  const stageColor = stageColorFor(stage)
+  const title = issueTitle ?? card.title ?? card.taskDescription ?? card.issueTitle
   const taskProgressPercent = card.taskProgress
     ? getTaskProgressPercent(card.taskProgress.completed, card.taskProgress.total)
     : null
 
   return (
     <Link
-      to={toProjectPath(`/issues/${card.issueNumber}`)}
+      to={toProjectPath(`/issues/${displayedIssueNumber}`)}
       data-testid="pulse-compact-card"
-      data-issue-number={card.issueNumber}
+      data-issue-number={displayedIssueNumber}
       className="block rounded-lg border border-border bg-card shadow-sm hover:border-muted-foreground/40 hover:shadow-md transition-colors"
     >
       <div className="p-3">
         <RunningIssueHeader
-          issueNumber={card.issueNumber}
-          stage={card.issueStage}
+          issueNumber={displayedIssueNumber}
+          stage={stage}
           stageColor={stageColor}
           showLiveDot
           needsOwnerAction={needsOwnerAction}

@@ -67,6 +67,9 @@ export function PulseZone({ issuesOverride }: PulseZoneProps = {}) {
                   <CompactSessionCard
                     key={`issue-${issue.number}-session`}
                     card={card}
+                    issueNumber={issue.number}
+                    issueTitle={issue.title}
+                    workflowStage={stageLabel(issue.workflowStage ?? null)}
                     needsOwnerAction={needsAction}
                   />
                 )
