@@ -1,0 +1,20 @@
+## Codebase Patterns
+
+- The web package's test runner is `vitest`. `npm run test:run -w packages/web` runs the full suite (unit + spec). Spec tests use `@vitest-environment jsdom` directive.
+- Test factories (`makeIssue`, `makeAgentStatus`) live next to the test files that use them; cross-file helpers are not the convention.
+- Time-dependent logic uses `vi.setSystemTime` (per design/testing.md).
+- The `AgentStatus` type lives in `packages/web/src/entities/agent/model/types.ts`. `runnerAvailable` and `runnerMessage` are optional fields.
+- The shared status-presentation layer (`packages/web/src/shared/status-presentation/`) is the canonical routing layer for color/family. The `RUNNER` reservation table is `{idle, busy, stale, offline}` — adding a new state requires updating that table AND its `index.test.ts` exhaustive tests, so we reused `stale` (warning) for capacity-limited to avoid widening the shared contract.
+- Type-predicate guards (`item is X`) on union narrowing matter: a plain boolean-returning guard doesn't narrow inside `.map(item => ...)` and the TS compiler complains about `issueNumber`/`issueId` not existing on the runner branch. Used `Extract<AttentionItem, { issueNumber: number }>` as the narrowed type.
+
+## T-001 Discoveries
+
+- Evolved `AttentionItem` to a discriminated union of issue kinds (carrying `issueNumber`/`issueId`) and runner kinds (no issue reference). The issue-vs-runner shape split makes the runner item a fundamentally different row at the type level — no optional `.issueNumber` smell.
+- `deriveAttentionItems(issues, agentStatus)` now consumes `agentStatus` instead of ignoring it. Emits runner items AFTER issue items, preserving today's visual order. Runner-unavailable (`runnerAvailable === false`) suppresses runner-capacity-limited (`max > 0 && active >= max`) via an `if/else` precedence, never emitting both.
+- The hero's loading-state guard changed from `!issuesResolved && !runnerDown` to `!issuesResolved && items.length === 0` — equivalent because runner-down now flows through `items`, but worth noting for future readers.
+- The runner-down row's `runner-down-entry`/`-message`/`-link` test-ids are preserved for the unavailable kind. Runner-capacity-limited uses new test-ids: `runner-capacity-entry`/`-detail`/`-link` (no prior test-id contract to preserve for capacity-limited).
+- Treatment mapping: runner-unavailable → `statusTreatment('workflow-run', 'failed')` (danger, matches today's `RunnerDownEntry`). Runner-capacity-limited → `statusTreatment('runner', 'stale')` (warning). The summary treatment's danger-any rule still produces danger for runner-unavailable, preserving today's hero family.
+- `KanbanBoard.NeedsAttentionSummary` consumes `AttentionItem[]` and uses `.issueNumber`/`.issueId` directly. To not break TS with the new union, filtered to issue items via a `isIssueAttentionItem` type predicate. The KanbanBoard summary now shows the issue-only count; the runner-unavailable signal on the board is already rendered by `RunnerUnavailableBanner`. This is a defensive type-only change — no behavior change in KanbanBoard tests because `mockAgentStatus` has `runnerAvailable: undefined` and `capacity: { active: 0, max: 2 }`, so no runner items emit.
+- `attention.test.ts`: 22 new unit tests added (runner-unavailable scenarios, runner-capacity-limited scenarios, suppression, ordering, exhaustiveness, inverted "agentStatus is ignored" assertion). Inverting the original "agentStatus ignored" test required adding runner-unavailable to that scenario to keep it meaningful (a single issue + busy agent now produces 2 items).
+- `AttentionHero.test.tsx`: 5 new spec tests for runner-capacity-limited (under saturation with no issues, alongside issue items, below max → no fire, max === 0 → no fire, suppresses with runner-unavailable). All 34 existing tests still pass without modification — the change is fully backward-compatible for inputs the test suite already covered.
+- Test count: 4650 → 4669 (+19). All passing. Typecheck clean.

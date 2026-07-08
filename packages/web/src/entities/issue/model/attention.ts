@@ -1,12 +1,19 @@
 import type { AgentStatus } from '../../agent'
 import { IssueHealth, WorkflowStage, type Issue } from '..'
 
-export interface AttentionItem {
-  issueNumber: number
-  issueId: string
-  label: string
-  detail?: string
-}
+export type AttentionItem =
+  | {
+      kind: 'approval-needed' | 'integration-failed' | 'interrupted' | 'blocked'
+      issueNumber: number
+      issueId: string
+      label: string
+      detail?: string
+    }
+  | {
+      kind: 'runner-unavailable' | 'runner-capacity-limited'
+      label: string
+      detail?: string
+    }
 
 function isIntegrateFailure(issue: Issue): boolean {
   return (
@@ -18,7 +25,7 @@ function isIntegrateFailure(issue: Issue): boolean {
   )
 }
 
-function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): AttentionItem[] {
+function deriveAttentionItems(issues: Issue[], agentStatus: AgentStatus): AttentionItem[] {
   const items: AttentionItem[] = []
   const seen = new Set<string>()
 
@@ -28,6 +35,7 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
     if (issue.approvalState?.status === 'awaiting') {
       seen.add(issue.id)
       items.push({
+        kind: 'approval-needed',
         issueNumber: issue.number,
         issueId: issue.id,
         label: 'Approval needed',
@@ -36,6 +44,7 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
     } else if (isIntegrateFailure(issue)) {
       seen.add(issue.id)
       items.push({
+        kind: 'integration-failed',
         issueNumber: issue.number,
         issueId: issue.id,
         label: 'Integration failed',
@@ -44,6 +53,7 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
     } else if (issue.health === IssueHealth.Interrupted) {
       seen.add(issue.id)
       items.push({
+        kind: 'interrupted',
         issueNumber: issue.number,
         issueId: issue.id,
         label: 'Interrupted',
@@ -52,10 +62,28 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
     } else if (issue.health === IssueHealth.Blocked) {
       seen.add(issue.id)
       items.push({
+        kind: 'blocked',
         issueNumber: issue.number,
         issueId: issue.id,
         label: 'Needs action',
         detail: issue.blockedReason ?? issue.title,
+      })
+    }
+  }
+
+  if (agentStatus.runnerAvailable === false) {
+    items.push({
+      kind: 'runner-unavailable',
+      label: 'Runner unavailable',
+      detail: agentStatus.runnerMessage ?? 'No runner is connected.',
+    })
+  } else {
+    const capacity = agentStatus.capacity
+    if (capacity.max > 0 && capacity.active >= capacity.max) {
+      items.push({
+        kind: 'runner-capacity-limited',
+        label: 'Runner at capacity',
+        detail: `${capacity.active} of ${capacity.max} slots in use`,
       })
     }
   }

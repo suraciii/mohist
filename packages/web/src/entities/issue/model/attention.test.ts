@@ -309,7 +309,7 @@ describe('deriveAttentionItems — dedup by issue id', () => {
     ], NO_AGENT)
 
     expect(items).toHaveLength(1)
-    expect(items[0]?.issueId).toBe('dup-1')
+    expect(items[0]).toMatchObject({ kind: 'blocked', issueId: 'dup-1' })
   })
 
   it('emits a single AttentionItem when the same id appears more than once across different rule matches', () => {
@@ -334,7 +334,7 @@ describe('deriveAttentionItems — dedup by issue id', () => {
     ], NO_AGENT)
 
     expect(items).toHaveLength(1)
-    expect(items[0]?.issueId).toBe('dup-2')
+    expect(items[0]).toMatchObject({ kind: 'blocked', issueId: 'dup-2' })
   })
 })
 
@@ -374,7 +374,7 @@ describe('deriveAttentionItems — all-healthy input', () => {
     expect(items).toEqual([])
   })
 
-  it('returns an empty array for an empty input list', () => {
+  it('returns an empty array for an empty input list with no runner signal', () => {
     expect(deriveAttentionItems([], NO_AGENT)).toEqual([])
   })
 })
@@ -395,24 +395,227 @@ describe('deriveAttentionItems — output typing and signature', () => {
     expect(items[0]?.label).toBe('Needs action')
   })
 
-  it('preserves the AgentStatus parameter (the rule currently ignores it)', () => {
+  it('consumes the AgentStatus parameter (now produces runner items)', () => {
     const busyAgent = makeAgentStatus({
-      running: true,
-      issueId: 'typed-1',
-      issueNumber: 81,
+      runnerAvailable: false,
+      capacity: { active: 0, max: 1 },
     })
 
     const items = deriveAttentionItems([
       makeIssue({
         id: 'typed-2',
         number: 82,
-        title: 'Should still surface regardless of agent status',
+        title: 'No longer ignored',
         health: IssueHealth.Blocked,
         blockedReason: 'reason',
       }),
     ], busyAgent)
 
+    expect(items).toHaveLength(2)
+    expect(items[0]).toMatchObject({ kind: 'blocked', issueId: 'typed-2' })
+    expect(items[1]).toMatchObject({ kind: 'runner-unavailable' })
+  })
+})
+
+describe('deriveAttentionItems — runner-unavailable rule', () => {
+  it('emits runner-unavailable when runnerAvailable is false, even with an empty issue list', () => {
+    const items = deriveAttentionItems([], makeAgentStatus({
+      runnerAvailable: false,
+      runnerMessage: 'Embedded runner is offline',
+    }))
+
+    expect(items).toEqual([{
+      kind: 'runner-unavailable',
+      label: 'Runner unavailable',
+      detail: 'Embedded runner is offline',
+    }])
+  })
+
+  it('falls back to "No runner is connected." when runnerMessage is null', () => {
+    const items = deriveAttentionItems([], makeAgentStatus({
+      runnerAvailable: false,
+      runnerMessage: null,
+    }))
+
+    expect(items).toEqual([{
+      kind: 'runner-unavailable',
+      label: 'Runner unavailable',
+      detail: 'No runner is connected.',
+    }])
+  })
+
+  it('falls back to "No runner is connected." when runnerMessage is undefined', () => {
+    const items = deriveAttentionItems([], makeAgentStatus({
+      runnerAvailable: false,
+    }))
+
+    expect(items[0]).toMatchObject({
+      kind: 'runner-unavailable',
+      detail: 'No runner is connected.',
+    })
+  })
+
+  it('does NOT emit runner-unavailable when runnerAvailable is true', () => {
+    const items = deriveAttentionItems([], makeAgentStatus({ runnerAvailable: true }))
+    expect(items).toEqual([])
+  })
+
+  it('does NOT emit runner-unavailable when runnerAvailable is undefined (treated as runner-up)', () => {
+    const items = deriveAttentionItems([], makeAgentStatus({}))
+    expect(items).toEqual([])
+  })
+
+  it('emits runner-unavailable after issue items, both present', () => {
+    const items = deriveAttentionItems([
+      makeIssue({
+        id: 'await-1',
+        number: 11,
+        approvalState: {
+          status: 'awaiting',
+          requestedAt: '2026-06-18T00:00:00.000Z',
+        },
+      }),
+    ], makeAgentStatus({ runnerAvailable: false, runnerMessage: 'down' }))
+
+    expect(items).toHaveLength(2)
+    expect(items[0]).toMatchObject({ kind: 'approval-needed' })
+    expect(items[1]).toMatchObject({ kind: 'runner-unavailable' })
+  })
+})
+
+describe('deriveAttentionItems — runner-capacity-limited rule', () => {
+  it('emits runner-capacity-limited when max > 0 and active >= max', () => {
+    const items = deriveAttentionItems([], makeAgentStatus({
+      runnerAvailable: true,
+      capacity: { active: 4, max: 4 },
+    }))
+
+    expect(items).toEqual([{
+      kind: 'runner-capacity-limited',
+      label: 'Runner at capacity',
+      detail: '4 of 4 slots in use',
+    }])
+  })
+
+  it('emits runner-capacity-limited when active > max (overflow)', () => {
+    const items = deriveAttentionItems([], makeAgentStatus({
+      runnerAvailable: true,
+      capacity: { active: 5, max: 4 },
+    }))
+
+    expect(items[0]).toMatchObject({ kind: 'runner-capacity-limited' })
+  })
+
+  it('does NOT emit runner-capacity-limited when active < max', () => {
+    const items = deriveAttentionItems([], makeAgentStatus({
+      runnerAvailable: true,
+      capacity: { active: 2, max: 4 },
+    }))
+
+    expect(items).toEqual([])
+  })
+
+  it('does NOT emit runner-capacity-limited when max === 0', () => {
+    const items = deriveAttentionItems([], makeAgentStatus({
+      runnerAvailable: true,
+      capacity: { active: 0, max: 0 },
+    }))
+
+    expect(items).toEqual([])
+  })
+
+  it('does NOT emit runner-capacity-limited when max > 0 but active === 0', () => {
+    const items = deriveAttentionItems([], makeAgentStatus({
+      runnerAvailable: true,
+      capacity: { active: 0, max: 2 },
+    }))
+
+    expect(items).toEqual([])
+  })
+
+  it('emits runner-capacity-limited after issue items, both present', () => {
+    const items = deriveAttentionItems([
+      makeIssue({
+        id: 'blocked-1',
+        number: 20,
+        workflowStage: WorkflowStage.Build,
+        health: IssueHealth.Blocked,
+        blockedReason: 'r',
+      }),
+    ], makeAgentStatus({
+      runnerAvailable: true,
+      capacity: { active: 8, max: 8 },
+    }))
+
+    expect(items).toHaveLength(2)
+    expect(items[0]).toMatchObject({ kind: 'blocked' })
+    expect(items[1]).toMatchObject({ kind: 'runner-capacity-limited' })
+  })
+})
+
+describe('deriveAttentionItems — runner-unavailable suppresses capacity-limited', () => {
+  it('emits only runner-unavailable when runnerAvailable is false even if at capacity', () => {
+    const items = deriveAttentionItems([], makeAgentStatus({
+      runnerAvailable: false,
+      capacity: { active: 4, max: 4 },
+    }))
+
     expect(items).toHaveLength(1)
-    expect(items[0]?.label).toBe('Needs action')
+    expect(items[0]?.kind).toBe('runner-unavailable')
+  })
+})
+
+describe('deriveAttentionItems — union is exhaustive', () => {
+  it('the kind set is exactly the union of issue and runner kinds (no others)', () => {
+    const issueKinds = new Set([
+      'approval-needed',
+      'integration-failed',
+      'interrupted',
+      'blocked',
+    ])
+    const runnerKinds = new Set([
+      'runner-unavailable',
+      'runner-capacity-limited',
+    ])
+
+    const samples: Array<{ input: AttentionItem[]; expected: Set<string> }> = [
+      { input: [], expected: new Set() },
+      {
+        input: [{
+          kind: 'approval-needed',
+          issueId: 'a',
+          issueNumber: 1,
+          label: 'A',
+          detail: 'd',
+        }],
+        expected: new Set(['approval-needed']),
+      },
+      {
+        input: [{ kind: 'runner-unavailable', label: 'X' }],
+        expected: new Set(['runner-unavailable']),
+      },
+      {
+        input: [{ kind: 'runner-capacity-limited', label: 'X' }],
+        expected: new Set(['runner-capacity-limited']),
+      },
+    ]
+
+    for (const sample of samples) {
+      const seen = new Set(sample.input.map((i) => i.kind))
+      for (const k of seen) {
+        const inAny = issueKinds.has(k) || runnerKinds.has(k)
+        expect(inAny).toBe(true)
+      }
+      expect([...seen].sort()).toEqual([...sample.expected].sort())
+    }
+
+    expect([...issueKinds, ...runnerKinds].sort()).toEqual([
+      'approval-needed',
+      'blocked',
+      'integration-failed',
+      'interrupted',
+      'runner-capacity-limited',
+      'runner-unavailable',
+    ])
   })
 })
