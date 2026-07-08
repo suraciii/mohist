@@ -1,6 +1,6 @@
 import React, { type ReactElement, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter } from 'react-router-dom'
+import { MemoryRouter } from 'react-router-dom'
 import { render, type RenderOptions } from '@testing-library/react'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 
@@ -36,7 +36,7 @@ function QueryClientWrapper({ children }: WrapperProps) {
   return (
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
-        <BrowserRouter>{children}</BrowserRouter>
+        <MemoryRouter>{children}</MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>
   )
@@ -44,13 +44,42 @@ function QueryClientWrapper({ children }: WrapperProps) {
 
 interface CustomRenderOptions extends Omit<RenderOptions, 'wrapper'> {
   wrapper?: React.ComponentType<WrapperProps>
+  /** MemoryRouter 初始路由（默认 "/"）。 */
+  route?: string
+  /** 覆盖 TEST_PROJECT 字段。 */
+  project?: Partial<typeof TEST_PROJECT>
+  /** 传入以便测试直接断言/操作 query cache；缺省每次渲染新建。 */
+  queryClient?: QueryClient
 }
 
 function customRender(
   ui: ReactElement,
-  { wrapper: WrapperComponent = QueryClientWrapper, ...options }: CustomRenderOptions = {}
+  {
+    wrapper: WrapperComponent,
+    route = '/',
+    project,
+    queryClient,
+    ...options
+  }: CustomRenderOptions = {}
 ) {
-  return render(ui, { wrapper: WrapperComponent, ...options })
+  if (WrapperComponent) {
+    return render(ui, { wrapper: WrapperComponent, ...options })
+  }
+
+  const testProject = { ...TEST_PROJECT, ...project }
+  const client = queryClient ?? createQueryClient()
+
+  function DefaultWrapper({ children }: WrapperProps) {
+    return (
+      <QueryClientProvider client={client}>
+        <ProjectProvider initialProjectId={testProject.id} initialProjects={[testProject]}>
+          <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>
+    )
+  }
+
+  return { ...render(ui, { wrapper: DefaultWrapper, ...options }), queryClient: client }
 }
 
 export * from '@testing-library/react'
