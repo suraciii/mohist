@@ -11,9 +11,6 @@ import { TEST_PROJECT } from './_liveTaskProviderTestUtils'
 const mocks = vi.hoisted(() => ({
   useEventsConnection: vi.fn(),
   useAgentStatus: vi.fn(),
-  toastInfo: vi.fn(),
-  toastError: vi.fn(),
-  toastSuccess: vi.fn(),
 }))
 
 vi.mock('../../shared/api/events-hub', () => ({
@@ -23,14 +20,6 @@ vi.mock('../../shared/api/events-hub', () => ({
 vi.mock('../../entities/agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../entities/agent')>()),
   useAgentStatus: () => mocks.useAgentStatus(),
-}))
-
-vi.mock('sonner', () => ({
-  toast: {
-    info: (...args: unknown[]) => mocks.toastInfo(...args),
-    error: (...args: unknown[]) => mocks.toastError(...args),
-    success: (...args: unknown[]) => mocks.toastSuccess(...args),
-  },
 }))
 
 beforeEach(() => {

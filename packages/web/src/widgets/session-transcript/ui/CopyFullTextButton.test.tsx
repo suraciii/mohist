@@ -2,23 +2,13 @@
 import '@testing-library/jest-dom'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
 import { CopyFullTextButton } from './CopyFullTextButton'
 import type {
   DisplayTurn,
   DisplayPrompt,
   DisplayAssistantPart,
 } from '../model/session-transcript-display'
-
-const toastMock = vi.hoisted(() => ({
-  success: vi.fn(),
-  error: vi.fn(),
-  warning: vi.fn(),
-  info: vi.fn(),
-}))
-
-vi.mock('sonner', () => ({
-  toast: toastMock,
-}))
 
 function makePrompt(overrides: Partial<DisplayPrompt> = {}): DisplayPrompt {
   return {
@@ -155,7 +145,7 @@ describe('CopyFullTextButton', () => {
 
     await waitFor(() => expect(button.getAttribute('data-state')).toBe('copied'))
     expect(button.textContent).toBe('Copied!')
-    expect(toastMock.error).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('on writeText reject: surfaces toast.error, sets data-state="failed", does NOT show success', async () => {
@@ -168,8 +158,8 @@ describe('CopyFullTextButton', () => {
     fireEvent.click(button)
 
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(toastMock.error).toHaveBeenCalledTimes(1))
-    expect(toastMock.error).toHaveBeenCalledWith('Failed to copy transcript to clipboard.')
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    expect(toast.error).toHaveBeenCalledWith('Failed to copy transcript to clipboard.')
     await waitFor(() => expect(button.getAttribute('data-state')).toBe('failed'))
     expect(button.textContent).toBe('Copy full text')
     expect(button.textContent).not.toBe('Copied!')
@@ -183,8 +173,8 @@ describe('CopyFullTextButton', () => {
     const button = document.querySelector('[data-copy-full-text]') as HTMLButtonElement
     fireEvent.click(button)
 
-    await waitFor(() => expect(toastMock.error).toHaveBeenCalledTimes(1))
-    expect(toastMock.error).toHaveBeenCalledWith('Clipboard is unavailable in this browser.')
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    expect(toast.error).toHaveBeenCalledWith('Clipboard is unavailable in this browser.')
     await waitFor(() => expect(button.getAttribute('data-state')).toBe('failed'))
     expect(button.textContent).toBe('Copy full text')
   })
@@ -256,8 +246,8 @@ describe('CopyFullTextButton', () => {
     fireEvent.click(button)
 
     await waitFor(() => expect(button.getAttribute('data-state')).toBe('copied'))
-    expect(toastMock.error).not.toHaveBeenCalled()
-    expect(toastMock.success).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
   })
 
   it('resets data-state back to idle after the ~2s timer elapses (success path)', async () => {

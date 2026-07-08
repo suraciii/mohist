@@ -13,13 +13,6 @@ const mocks = vi.hoisted(() => ({
   useUpdateEpic: vi.fn(),
 }))
 
-const toastMocks = vi.hoisted(() => ({
-  success: vi.fn(),
-  error: vi.fn(),
-  warning: vi.fn(),
-  info: vi.fn(),
-}))
-
 vi.mock('../../../entities/epic', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/epic')>()
   return {
@@ -27,10 +20,6 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
     useUpdateEpic: mocks.useUpdateEpic,
   }
 })
-
-vi.mock('sonner', () => ({
-  toast: toastMocks,
-}))
 
 const project = {
   id: 'proj-edit',

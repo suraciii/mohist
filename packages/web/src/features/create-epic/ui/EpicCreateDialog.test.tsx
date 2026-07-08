@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { toast } from 'sonner'
 import { ProjectProvider } from '../../../entities/project'
 import { EpicCreateDialog } from './EpicCreateDialog'
 import { EPIC_DESCRIPTION_TEMPLATE, hasEpicDescriptionStructure } from '@/shared/lib/epic-description-template'
@@ -13,12 +14,6 @@ const mocks = vi.hoisted(() => ({
 }))
 
 const mockNavigate = vi.fn()
-const toastMocks = vi.hoisted(() => ({
-  success: vi.fn(),
-  error: vi.fn(),
-  warning: vi.fn(),
-  info: vi.fn(),
-}))
 
 vi.mock('../../../entities/epic', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/epic')>()
@@ -27,10 +22,6 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
     useCreateEpic: mocks.useCreateEpic,
   }
 })
-
-vi.mock('sonner', () => ({
-  toast: toastMocks,
-}))
 
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>()
@@ -352,7 +343,7 @@ describe('EpicCreateDialog success state', () => {
     fireEvent.click(screen.getByTestId('epic-create-submit'))
 
     await waitFor(() => expect(screen.queryByTestId('epic-create-success')).toBeInTheDocument())
-    expect(toastMocks.success).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
   })
 
   it('still closes cleanly when an X-style cancel happens from the success state (treat as Stay)', async () => {
