@@ -224,7 +224,6 @@ internal static class InboxProjectionTestSupport
         {
             db.Database.Migrate();
             GrainTestConfig.ApplyWorkflowRunsStatusSchemaFix(db);
-            GrainTestConfig.ApplyEventDeliverySchemaFix(db);
         }
         return new TestDatabase(connection, factory);
     }

@@ -58,58 +58,6 @@ public static class GrainTestConfig
         // exercises the full Migrate() path.
         db.Database.Migrate();
         ApplyWorkflowRunsStatusSchemaFix(db);
-        ApplyEventDeliverySchemaFix(db);
-    }
-
-    /// <summary>
-    /// issue-360 T-001 (pre-T-004): materializes the
-    /// <c>DispatchedAt</c> column and the three partial undelivered
-    /// indexes on the event truth tables for test databases whose
-    /// schema was built before the migration landed. The migration
-    /// that produces the durable form is owned by T-004
-    /// (<c>AddEventDeliveryProgressAndDeadLetters</c>); this helper
-    /// keeps fixtures (MohistIntegrationFixture, MohistDbFixture, …)
-    /// that go through <c>Migrate()</c> with the model-only changes
-    /// working. Idempotent — re-runnable across test classes sharing
-    /// an in-memory database.
-    /// </summary>
-    public static void ApplyEventDeliverySchemaFix(MohistDbContext db)
-    {
-        AddDispatchedAt(db, "WorkflowRunEvents");
-        AddDispatchedAt(db, "IssueEvents");
-        AddDispatchedAt(db, "EpicEvents");
-
-        // Partial indexes keyed on (Source, Id) scoped to undelivered
-        // rows. CREATE INDEX IF NOT EXISTS is idempotent.
-        db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS "IX_WorkflowRunEvents_Undelivered"
-            ON "WorkflowRunEvents" ("Source", "Id") WHERE "DispatchedAt" IS NULL;
-            """);
-        db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS "IX_IssueEvents_Undelivered"
-            ON "IssueEvents" ("Source", "Id") WHERE "DispatchedAt" IS NULL;
-            """);
-        db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS "IX_EpicEvents_Undelivered"
-            ON "EpicEvents" ("Source", "Id") WHERE "DispatchedAt" IS NULL;
-            """);
-    }
-
-    private static void AddDispatchedAt(MohistDbContext db, string tableName)
-    {
-        try
-        {
-            // tableName is hardcoded by callers (three fixed event table
-            // names); EF's EF1002 SQL-injection lint can't see that.
-#pragma warning disable EF1002
-            db.Database.ExecuteSqlRaw(
-                $"ALTER TABLE \"{tableName}\" ADD COLUMN \"DispatchedAt\" TEXT NULL;");
-#pragma warning restore EF1002
-        }
-        catch (Microsoft.Data.Sqlite.SqliteException ex) when (
-            ex.Message.Contains("duplicate column name", StringComparison.Ordinal))
-        {
-        }
     }
 
     /// <summary>
