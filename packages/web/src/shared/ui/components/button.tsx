@@ -16,15 +16,15 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         success:
-          "border-success-border bg-success-subtle text-success hover:bg-success-subtle/80 focus-visible:border-success-border/40 focus-visible:ring-success-border/20 dark:bg-success-subtle/40 dark:hover:bg-success-subtle/60",
+          "border-success-border bg-success-subtle text-success-foreground hover:bg-success-subtle/80 focus-visible:border-success-border/40 focus-visible:ring-success-border/20 dark:bg-success-subtle/40 dark:hover:bg-success-subtle/60",
         info:
-          "border-info-border bg-info-subtle text-info hover:bg-info-subtle/80 focus-visible:border-info-border/40 focus-visible:ring-info-border/20 dark:bg-info-subtle/40 dark:hover:bg-info-subtle/60",
+          "border-info-border bg-info-subtle text-info-foreground hover:bg-info-subtle/80 focus-visible:border-info-border/40 focus-visible:ring-info-border/20 dark:bg-info-subtle/40 dark:hover:bg-info-subtle/60",
         warning:
-          "border-warning-border bg-warning-subtle text-warning hover:bg-warning-subtle/80 focus-visible:border-warning-border/40 focus-visible:ring-warning-border/20 dark:bg-warning-subtle/40 dark:hover:bg-warning-subtle/60",
+          "border-warning-border bg-warning-subtle text-warning-foreground hover:bg-warning-subtle/80 focus-visible:border-warning-border/40 focus-visible:ring-warning-border/20 dark:bg-warning-subtle/40 dark:hover:bg-warning-subtle/60",
         danger:
-          "border-danger-border bg-danger-subtle text-danger hover:bg-danger-subtle/80 focus-visible:border-danger-border/40 focus-visible:ring-danger-border/20 dark:bg-danger-subtle/40 dark:hover:bg-danger-subtle/60",
+          "border-danger-border bg-danger-subtle text-danger-foreground hover:bg-danger-subtle/80 focus-visible:border-danger-border/40 focus-visible:ring-danger-border/20 dark:bg-danger-subtle/40 dark:hover:bg-danger-subtle/60",
         destructive:
-          "border-danger-border bg-danger-subtle text-danger hover:bg-danger-subtle/80 focus-visible:border-danger-border/40 focus-visible:ring-danger-border/20 dark:bg-danger-subtle/40 dark:hover:bg-danger-subtle/60",
+          "border-danger-border bg-danger-subtle text-danger-foreground hover:bg-danger-subtle/80 focus-visible:border-danger-border/40 focus-visible:ring-danger-border/20 dark:bg-danger-subtle/40 dark:hover:bg-danger-subtle/60",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

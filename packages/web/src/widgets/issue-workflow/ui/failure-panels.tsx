@@ -278,7 +278,7 @@ export function SpecialStatePanel({
         <Button
           onClick={() => resumeMutation.mutate()}
           disabled={resumeMutation.isPending}
-          className="bg-warning hover:bg-warning/90 text-warning-foreground"
+          className="bg-warning hover:bg-warning/90 text-foreground"
         >
           {resumeMutation.isPending ? 'Resuming...' : 'Resume'}
         </Button>

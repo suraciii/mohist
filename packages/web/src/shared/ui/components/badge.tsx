@@ -13,14 +13,15 @@ const badgeVariants = cva(
         secondary:
           "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
         success:
-          "border-success-border bg-success-subtle text-success [a]:hover:bg-success-subtle/80",
-        info: "border-info-border bg-info-subtle text-info [a]:hover:bg-info-subtle/80",
+          "border-success-border bg-success-subtle text-success-foreground [a]:hover:bg-success-subtle/80",
+        info: "border-info-border bg-info-subtle text-info-foreground [a]:hover:bg-info-subtle/80",
         warning:
-          "border-warning-border bg-warning-subtle text-warning [a]:hover:bg-warning-subtle/80",
+          "border-warning-border bg-warning-subtle text-warning-foreground [a]:hover:bg-warning-subtle/80",
         danger:
-          "border-danger-border bg-danger-subtle text-danger [a]:hover:bg-danger-subtle/80",
+          "border-danger-border bg-danger-subtle text-danger-foreground [a]:hover:bg-danger-subtle/80",
         destructive:
-          "border-danger-border bg-danger-subtle text-danger [a]:hover:bg-danger-subtle/80",
+          "border-danger-border bg-danger-subtle text-danger-foreground [a]:hover:bg-danger-subtle/80",
+        muted: "bg-muted text-muted-foreground border-border [a]:hover:bg-muted/80",
         outline:
           "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
         ghost:

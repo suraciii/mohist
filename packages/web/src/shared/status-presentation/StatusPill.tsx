@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { cn } from '@/shared/lib/utils'
+import { Badge } from '@/shared/ui/components/badge'
 import { statusTreatment, type StatusKind, type StatusTreatment } from './index'
 
 export interface StatusPillProps {
@@ -26,16 +27,13 @@ export interface StatusPillProps {
 }
 
 /**
- * Thin pill that renders `statusTreatment(...)` directly.
+ * Thin pill that composes the `Badge` primitive with the semantic family
+ * resolved by `statusTreatment(...)`.
  *
- * The treatment supplies the entire color set (background, text, border, dot)
- * — no Badge primitive sits between, because every Badge variant in the app
- * still uses `text-<family>-foreground` (page foreground) which has poor
- * contrast against the soft-tinted backgrounds. Calling sites that want
- * layout primitives (size, padding, radius) can wrap or compose the pill.
- *
- * The optional dot inherits the same family as the pill text/background so
- * dot, text, and container cannot disagree.
+ * The Badge variant supplies the full color set (background, text, border)
+ * so the pill stays in sync with the shared primitive contract. The optional
+ * dot inherits the same family as the pill text/background so dot, text, and
+ * container cannot disagree.
  */
 export function StatusPill({
   kind,
@@ -48,15 +46,14 @@ export function StatusPill({
 }: StatusPillProps) {
   const treatment: StatusTreatment = statusTreatment(kind, state)
   return (
-    <span
+    <Badge
       data-testid={testId}
       data-status={state ?? 'unknown'}
       data-family={treatment.family}
       data-slot="status-pill"
+      variant={treatment.family}
       className={cn(
-        'inline-flex h-5 w-fit shrink-0 items-center gap-1 overflow-hidden rounded-4xl border px-2 py-0.5 text-xs font-medium whitespace-nowrap',
-        treatment.container,
-        treatment.border,
+        'inline-flex h-5 w-fit shrink-0 items-center gap-1 overflow-hidden rounded-4xl px-2 py-0.5 text-xs font-medium whitespace-nowrap',
         className,
       )}
     >
@@ -68,6 +65,6 @@ export function StatusPill({
         />
       )}
       {children}
-    </span>
+    </Badge>
   )
 }

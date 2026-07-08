@@ -124,13 +124,9 @@ export function familyFor(kind: StatusKind, state: string | null | undefined): S
  * Tailwind palette classes (`bg-blue-100`, `text-red-700`, …) are forbidden
  * here so the family meaning stays the source of truth.
  *
- * The text and dot use the family's *base* color (e.g. `text-success`),
- * not the `-foreground` slot. The `-foreground` token is calibrated as the
- * page foreground (near-white in light, near-black in dark) for solid
- * backgrounds like `bg-success`; on a soft-tinted `bg-success-subtle` pill,
- * using `text-success-foreground` would yield roughly 1.05:1 contrast.
- * `text-success` (the deep hue) clears WCAG AA in both themes (asserted by
- * `contrast.spec.ts`).
+ * The text and dot use the family's *base* color (e.g. `text-success`), drawn
+ * from the same token family as the background and border so a pill never
+ * pairs a success background with a warning dot.
  */
 const TREATMENT_BY_FAMILY: Record<SemanticFamily, Omit<StatusTreatment, 'family'>> = Object.freeze({
   success: Object.freeze({

@@ -15,7 +15,7 @@ describe('shared/status-presentation StatusPill', () => {
     const pill = screen.getByText('Blocked')
     expect(pill).toBeInTheDocument()
     expect(pill.className).toContain('bg-danger-subtle')
-    expect(pill.className).toContain('text-danger')
+    expect(pill.className).toContain('text-danger-foreground')
     expect(pill.className).toContain('border-danger-border')
     expect(pill.getAttribute('data-family')).toBe('danger')
     expect(pill.getAttribute('data-status')).toBe('blocked')

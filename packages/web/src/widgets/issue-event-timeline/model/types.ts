@@ -1,4 +1,4 @@
-import { statusTreatment } from '@/shared/status-presentation'
+import { statusTreatment, type StatusTreatment } from '@/shared/status-presentation'
 
 export type TimelineCategory = 'workflow' | 'approval' | 'integration' | 'success' | 'failure' | 'metadata'
 
@@ -27,67 +27,32 @@ export interface CategoryStyle {
   label: string
 }
 
-const NEUTRAL_DOT = 'bg-gray-300'
-const NEUTRAL_BG = 'bg-muted'
-const NEUTRAL_TEXT = 'text-muted-foreground'
-const NEUTRAL_BORDER = 'border-border'
+function buildCategoryStyle(treatment: StatusTreatment, label: string): CategoryStyle {
+  return {
+    container: treatment.container,
+    bg: treatment.container.split(' ')[0]!,
+    dot: treatment.dot,
+    accentDot: treatment.dot,
+    text: treatment.text,
+    border: treatment.border,
+    label,
+  }
+}
 
-const FAILURE_TREATMENT = statusTreatment('severity', 'ERROR')
-const ATTENTION_TREATMENT = statusTreatment('severity', 'WARN')
+const CATEGORY_TREATMENTS: Record<TimelineCategory, StatusTreatment> = {
+  workflow: statusTreatment('workflow-run', 'running'),
+  approval: statusTreatment('approval', 'awaiting'),
+  integration: statusTreatment('workflow-run', 'running'),
+  success: statusTreatment('workflow-run', 'completed'),
+  failure: statusTreatment('severity', 'ERROR'),
+  metadata: statusTreatment('severity', 'DEBUG'),
+}
 
 export const CATEGORY_STYLES: Record<TimelineCategory, CategoryStyle> = {
-  workflow: {
-    container: `${NEUTRAL_BG} ${NEUTRAL_TEXT} ${NEUTRAL_BORDER}`,
-    dot: NEUTRAL_DOT,
-    accentDot: NEUTRAL_DOT,
-    bg: NEUTRAL_BG,
-    text: NEUTRAL_TEXT,
-    border: NEUTRAL_BORDER,
-    label: 'Workflow',
-  },
-  approval: {
-    container: ATTENTION_TREATMENT.container,
-    dot: ATTENTION_TREATMENT.dot,
-    accentDot: ATTENTION_TREATMENT.dot,
-    bg: ATTENTION_TREATMENT.container,
-    text: ATTENTION_TREATMENT.text,
-    border: ATTENTION_TREATMENT.border,
-    label: 'Approval',
-  },
-  integration: {
-    container: `${NEUTRAL_BG} ${NEUTRAL_TEXT} ${NEUTRAL_BORDER}`,
-    dot: NEUTRAL_DOT,
-    accentDot: NEUTRAL_DOT,
-    bg: NEUTRAL_BG,
-    text: NEUTRAL_TEXT,
-    border: NEUTRAL_BORDER,
-    label: 'Integration',
-  },
-  success: {
-    container: `${NEUTRAL_BG} ${NEUTRAL_TEXT} ${NEUTRAL_BORDER}`,
-    dot: NEUTRAL_DOT,
-    accentDot: NEUTRAL_DOT,
-    bg: NEUTRAL_BG,
-    text: NEUTRAL_TEXT,
-    border: NEUTRAL_BORDER,
-    label: 'Success',
-  },
-  failure: {
-    container: FAILURE_TREATMENT.container,
-    dot: FAILURE_TREATMENT.dot,
-    accentDot: FAILURE_TREATMENT.dot,
-    bg: FAILURE_TREATMENT.container,
-    text: FAILURE_TREATMENT.text,
-    border: FAILURE_TREATMENT.border,
-    label: 'Failure',
-  },
-  metadata: {
-    container: `${NEUTRAL_BG} ${NEUTRAL_TEXT} ${NEUTRAL_BORDER}`,
-    dot: NEUTRAL_DOT,
-    accentDot: NEUTRAL_DOT,
-    bg: NEUTRAL_BG,
-    text: NEUTRAL_TEXT,
-    border: NEUTRAL_BORDER,
-    label: 'Metadata',
-  },
+  workflow: buildCategoryStyle(CATEGORY_TREATMENTS.workflow, 'Workflow'),
+  approval: buildCategoryStyle(CATEGORY_TREATMENTS.approval, 'Approval'),
+  integration: buildCategoryStyle(CATEGORY_TREATMENTS.integration, 'Integration'),
+  success: buildCategoryStyle(CATEGORY_TREATMENTS.success, 'Success'),
+  failure: buildCategoryStyle(CATEGORY_TREATMENTS.failure, 'Failure'),
+  metadata: buildCategoryStyle(CATEGORY_TREATMENTS.metadata, 'Metadata'),
 }

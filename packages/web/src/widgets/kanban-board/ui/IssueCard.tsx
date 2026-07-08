@@ -9,7 +9,6 @@ import { archiveIssue, rerunIssue, resumeIssue } from '../../../entities/issue'
 import { getPriorityStripColor, getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { getStageColors } from '../model/stage-colors'
 import { statusTreatment, type StatusKind, type StatusTreatment } from '@/shared/status-presentation'
 
 export const APPROVAL_STAGES = new Set<string>([WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check])
@@ -139,23 +138,33 @@ function StatusPill({
   )
 }
 
+function deriveWorkflowStageState(
+  progress?: WorkflowStageProgress | null,
+): string {
+  if (!progress || progress.total === 0) return 'not-started'
+  if (progress.running > 0) return 'running'
+  if (progress.failed > 0) return 'failed'
+  if (progress.completed > 0 && progress.completed === progress.total) return 'passed'
+  return 'pending'
+}
+
 function WorkflowStagePill({ issue }: { issue: Issue }) {
   const stage = issue.workflowStage
   if (!stage || !WORKFLOW_STAGE_LABELS[stage]) return null
 
-  const colors = getStageColors(
-    issue.status === IssueStatus.Done
-      ? IssueStatus.Done
-      : IssueStatus.InProgress,
+  const treatment = statusTreatment(
+    'workflow-stage',
+    deriveWorkflowStageState(issue.workflowStageProgress),
   )
 
   return (
     <span
       data-testid="workflow-stage-badge"
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${colors.activeBg} ${colors.labelClass}`}
+      data-family={treatment.family}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${treatment.container}`}
     >
       <span
-        className={`inline-block h-1.5 w-1.5 rounded-full ${colors.accent}`}
+        className={`inline-block h-1.5 w-1.5 rounded-full ${treatment.dot}`}
       />
       {WORKFLOW_STAGE_LABELS[stage]}
     </span>

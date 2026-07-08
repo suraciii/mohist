@@ -102,22 +102,18 @@ function ActiveWorkSummary({
 function CapacityIndicator({ used, total }: { used: number; total: number }) {
   const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0
   // Map capacity saturation onto runner status meaning: empty capacity is
-  // healthy/available (`success`), partial load is `info`, fully saturated is
-  // `warning`. The dot class for the same family lives in
-  // `statusTreatment('runner', state).dot`, so the bar fill tracks the same
-  // family the runner's status pill renders.
-  const family = used >= total
-    ? 'warning'
+  // healthy/available (`idle` -> success), partial load is `busy` -> info,
+  // fully saturated is `stale` -> warning. The bar fill uses the same dot
+  // class the runner status pill renders, so capacity shares the shared
+  // status layer rather than picking local palette classes.
+  const state = used >= total
+    ? 'stale'
     : used > 0
-      ? 'info'
-      : 'success'
-  const dotClass = family === 'success'
-    ? 'bg-success'
-    : family === 'info'
-      ? 'bg-info'
-      : 'bg-warning'
+      ? 'busy'
+      : 'idle'
+  const treatment = statusTreatment('runner', state)
   return (
-    <div className="flex items-center gap-2" data-testid="runner-capacity" data-family={family}>
+    <div className="flex items-center gap-2" data-testid="runner-capacity" data-family={treatment.family}>
       <div className="flex items-center gap-1.5">
         <span className="text-xs tabular-nums text-muted-foreground">
           {used}/{total}
@@ -125,7 +121,7 @@ function CapacityIndicator({ used, total }: { used: number; total: number }) {
         <span className="text-xs text-muted-foreground">slots</span>
       </div>
       <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
-        <div className={`h-full rounded-full ${dotClass} transition-all`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full ${treatment.dot} transition-all`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   )
