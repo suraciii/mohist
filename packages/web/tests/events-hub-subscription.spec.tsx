@@ -1,95 +1,32 @@
 import { renderHook, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { useEventsConnection } from '../src/shared/api/events-hub'
 import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES, TRANSCRIPT_EVENT_TYPES } from '../src/shared/lib/canonical-event-types'
+import { fakeConnections, rejectNextInvoke, type FakeConnection } from '../tests/support/signalr-fake'
 
-type OnArgs = [string, (...payload: unknown[]) => void]
-type InvokeArgs = [string, ...unknown[]]
-type ReconnectedArgs = [() => void]
 
-const signalr = vi.hoisted(() => {
-  const on = vi.fn() as unknown as Mock<(...args: OnArgs) => void>
-  const onreconnected = vi.fn() as unknown as Mock<(...args: ReconnectedArgs) => void>
-  const invoke = vi.fn(
-    () => new Promise<unknown>((resolve) => resolve(undefined)),
-  ) as unknown as Mock<(...args: InvokeArgs) => Promise<unknown>>
-  const start = vi.fn(
-    () => new Promise<unknown>((resolve) => resolve(undefined)),
-  ) as unknown as Mock<(...args: unknown[]) => Promise<unknown>>
-  const stop = vi.fn(
-    () => new Promise<unknown>((resolve) => resolve(undefined)),
-  ) as unknown as Mock<(...args: unknown[]) => Promise<unknown>>
-
-  const connection = {
-    on,
-    onreconnected,
-    onreconnecting: vi.fn(),
-    onclose: vi.fn(),
-    invoke,
-    start,
-    stop,
-  }
-
-  const builder = {
-    withUrl: vi.fn(() => builder),
-    withAutomaticReconnect: vi.fn(() => builder),
-    configureLogging: vi.fn(() => builder),
-    build: vi.fn(() => connection),
-  }
-
-  return {
-    builder,
-    connection,
-    on,
-    onreconnected,
-    invoke,
-    start,
-    stop,
-    HubConnectionBuilder: vi.fn(function HubConnectionBuilder() {
-      return builder
-    }),
-    HubConnectionState: {
-      Connected: 'Connected',
-      Reconnecting: 'Reconnecting',
-      Connecting: 'Connecting',
-      Disconnected: 'Disconnected',
-      Disconnecting: 'Disconnecting',
-    },
-    LogLevel: { Warning: 'Warning' },
-  }
-})
-
-vi.mock('@microsoft/signalr', () => ({
-  HubConnectionBuilder: signalr.HubConnectionBuilder,
-  HubConnectionState: signalr.HubConnectionState,
-  LogLevel: signalr.LogLevel,
-}))
-
-afterEach(() => {
-  vi.clearAllMocks()
-})
+function lastConnection(): FakeConnection {
+  const conn = fakeConnections[fakeConnections.length - 1]
+  if (!conn) throw new Error('no fake connection was built')
+  return conn
+}
 
 function getOnReconnectedCallback(): () => void {
-  const calls = signalr.onreconnected.mock.calls as ReconnectedArgs[]
-  expect(calls.length).toBeGreaterThan(0)
-  const cb = calls[calls.length - 1]?.[0]
+  const conn = lastConnection()
+  const cb = conn.onreconnected() as (() => void) | null
   expect(typeof cb).toBe('function')
-  return cb
+  return cb as () => void
 }
 
 function getTranscriptHandler(): (envelope: unknown) => void {
-  const calls = signalr.on.mock.calls as OnArgs[]
-  const entry = calls.find(([eventName]) => eventName === 'OnTranscriptEvent')
-  expect(entry).toBeDefined()
-  const handler = entry![1]
+  const conn = lastConnection()
+  const handler = conn.handlers.get('OnTranscriptEvent')
+  expect(handler).toBeDefined()
   return handler as (envelope: unknown) => void
 }
 
 function getSubscribeCalls(): Array<{ method: string; args: unknown[] }> {
-  return (signalr.invoke.mock.calls as InvokeArgs[]).map(([method, ...args]) => ({
-    method,
-    args,
-  }))
+  return lastConnection().invokes
 }
 
 describe('useEventsConnection subscription behavior', () => {
@@ -97,7 +34,7 @@ describe('useEventsConnection subscription behavior', () => {
     renderHook(() => useEventsConnection('project-1', vi.fn()))
 
     await waitFor(() => {
-      expect(signalr.invoke).toHaveBeenCalledWith(
+      expect(vi.mocked(lastConnection().invoke)).toHaveBeenCalledWith(
         'SetSubscriptionsAsync',
         expect.arrayContaining([...EVENT_TYPES]),
       )
@@ -118,7 +55,7 @@ describe('useEventsConnection subscription behavior', () => {
     renderHook(() => useEventsConnection('project-1', vi.fn()))
 
     await waitFor(() => {
-      expect(signalr.invoke).toHaveBeenCalledWith(
+      expect(vi.mocked(lastConnection().invoke)).toHaveBeenCalledWith(
         'SetSubscriptionsAsync',
         expect.any(Array),
       )
@@ -168,15 +105,7 @@ describe('useEventsConnection subscription behavior', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    let invokeCount = 0
-    signalr.invoke.mockImplementation(() => {
-      invokeCount += 1
-      if (invokeCount === 1) {
-        return Promise.reject(new Error('transient hub error'))
-      }
-      return Promise.resolve(undefined)
-    })
-
+    rejectNextInvoke(new Error('transient hub error'))
     const { unmount } = renderHook(() => useEventsConnection('project-1', vi.fn()))
 
     await waitFor(() => {
@@ -205,7 +134,6 @@ describe('useEventsConnection subscription behavior', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    expect(signalr.start).not.toHaveBeenCalled()
-    expect(signalr.invoke).not.toHaveBeenCalled()
+    expect(fakeConnections.length).toBe(0)
   })
 })

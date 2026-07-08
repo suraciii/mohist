@@ -20,10 +20,17 @@ import type { ReactNode } from 'react'
 import { act, render, waitFor } from '@testing-library/react'
 import { expect, vi, type Mock } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { HubConnectionBuilder } from '@microsoft/signalr'
 import { ProjectProvider } from '../../../entities/project'
 import type { TaskLogLine, TaskLogPage } from '../../../entities/issue'
 import type { WorkflowRunSession } from '../../../entities/coder-session/model/types'
+import {
+  fakeConnections,
+  recordedInvokes,
+  makeFakeConnection,
+  type FakeConnection,
+} from '../../../../tests/support/signalr-fake'
+
+export type { FakeConnection }
 
 export function makeLine(overrides: Partial<TaskLogLine>): TaskLogLine {
   return {
@@ -79,77 +86,12 @@ export function sessionFixture(overrides: Partial<WorkflowRunSession>): Workflow
   }
 }
 
-type Listener = (...args: unknown[]) => void
 
-export interface FakeConnection {
-  state: number
-  onreconnecting: (handler?: Listener) => Listener | null | void
-  onreconnected: (handler?: Listener) => Listener | null | void
-  onclose: (handler?: Listener) => Listener | null | void
-  on: (event: string, handler: Listener) => void
-  start: () => Promise<void>
-  stop: () => Promise<void>
-  invoke: (...args: unknown[]) => Promise<unknown>
-  handlers: Map<string, Listener>
-  invokes: Array<{ method: string; args: unknown[] }>
-  reconnectHandler: Listener | null
-}
-
-export const fakeConnections: FakeConnection[] = []
-export const recordedInvokes: Array<{ method: string; args: unknown[] }> = []
-
-export function makeFakeConnection(): FakeConnection {
-  const handlers = new Map<string, Listener>()
-  const invokes: Array<{ method: string; args: unknown[] }> = []
-  const conn: FakeConnection = {
-    state: 0,
-    reconnectHandler: null,
-    onreconnecting(handler) {
-      if (handler === undefined) return undefined
-    },
-    onreconnected(handler) {
-      conn.reconnectHandler = handler ?? null
-      if (handler === undefined) return undefined
-    },
-    onclose(handler) {
-      if (handler === undefined) return undefined
-    },
-    on: vi.fn((event: string, handler: Listener) => {
-      handlers.set(event, handler)
-    }),
-    start: vi.fn(async () => {
-      conn.state = 1
-    }),
-    stop: vi.fn(async () => {
-      conn.state = 0
-    }),
-    invoke: vi.fn(async (...callArgs: unknown[]) => {
-      const [method, ...args] = callArgs
-      const m = String(method)
-      invokes.push({ method: m, args })
-      recordedInvokes.push({ method: m, args })
-      return undefined
-    }),
-    handlers,
-    invokes,
-  }
-  fakeConnections.push(conn)
-  return conn
-}
+export { fakeConnections, recordedInvokes, makeFakeConnection }
 
 export function mockConnectionBuilder() {
-  function FakeBuilder(this: unknown) {
-    return {
-      withUrl: () => ({
-        withAutomaticReconnect: () => ({
-          configureLogging: () => ({
-            build: () => makeFakeConnection(),
-          }),
-        }),
-      }),
-    }
-  }
-  vi.mocked(HubConnectionBuilder).mockImplementation(FakeBuilder as unknown as typeof HubConnectionBuilder)
+  // 全局 signalr alias 已让 HubConnectionBuilder 返回构建 FakeConnection 的链；
+  // 保留此函数为空操作以维持调用方签名不变。
 }
 
 export const projects = [

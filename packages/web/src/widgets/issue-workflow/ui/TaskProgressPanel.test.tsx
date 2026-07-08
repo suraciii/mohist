@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { HubConnectionBuilder } from '@microsoft/signalr'
+import { recordedInvokes } from '../../../../tests/support/signalr-fake'
 import { ProjectProvider } from '../../../entities/project'
 import { TaskProgressPanel } from './TaskProgressPanel'
 import {
@@ -19,14 +19,6 @@ vi.mock('../../../entities/issue', async (importOriginal) => ({
   useIssueWorkflowTaskLog: vi.fn(),
 }))
 
-vi.mock('@microsoft/signalr', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@microsoft/signalr')>()
-  return {
-    ...actual,
-    HubConnectionBuilder: vi.fn(),
-  }
-})
-
 const mockedUseWorkflowTimeline = vi.mocked(useWorkflowTimeline)
 const mockedUseIssueWorkflowTaskLog = vi.mocked(useIssueWorkflowTaskLog)
 
@@ -40,36 +32,6 @@ const projects = [
     repositories: [],
   },
 ]
-
-const recordedInvokes: Array<{ method: string; args: unknown[] }> = []
-
-function mockConnectionBuilder() {
-  function FakeBuilder(this: unknown) {
-    return {
-      withUrl: () => ({
-        withAutomaticReconnect: () => ({
-          configureLogging: () => ({
-            build: () => ({
-              state: 0,
-              on: vi.fn(),
-              onreconnecting: vi.fn(),
-              onreconnected: vi.fn(),
-              onclose: vi.fn(),
-              start: vi.fn(async () => undefined),
-              stop: vi.fn(async () => undefined),
-              invoke: vi.fn(async (...callArgs: unknown[]) => {
-                const [method, ...args] = callArgs
-                recordedInvokes.push({ method: String(method), args })
-                return undefined
-              }),
-            }),
-          }),
-        }),
-      }),
-    }
-  }
-  vi.mocked(HubConnectionBuilder).mockImplementation(FakeBuilder as unknown as typeof HubConnectionBuilder)
-}
 
 function makeTimeline(): WorkflowTimeline {
   return {
@@ -202,12 +164,10 @@ function renderWithQueryClientAndProject(ui: React.ReactNode) {
 describe('TaskProgressPanel — task execution log panel', () => {
   afterEach(() => {
     cleanup()
-    recordedInvokes.length = 0
     vi.clearAllMocks()
   })
 
   it('allows expanding a running task and subscribes its log panel for live updates', async () => {
-    mockConnectionBuilder()
     mockedUseWorkflowTimeline.mockReturnValue({ data: makeRunningTimeline() } as never)
     setLogPage({ lines: [], nextCursor: null, truncated: false })
 

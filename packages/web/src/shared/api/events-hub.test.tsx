@@ -5,15 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../entities/project'
 import { useEventsConnection } from './events-hub'
 import { RuntimeToastHost, useRuntimeToast } from '../ui/toast'
-import { HubConnectionBuilder } from '@microsoft/signalr'
-
-vi.mock('@microsoft/signalr', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@microsoft/signalr')>()
-  return {
-    ...actual,
-    HubConnectionBuilder: vi.fn(),
-  }
-})
+import { fakeConnections } from '../../../tests/support/signalr-fake'
 
 const projects = [
   {
@@ -26,75 +18,6 @@ const projects = [
   },
 ]
 
-type Listener = (...args: unknown[]) => void
-
-interface FakeConnection {
-  state: number
-  onreconnecting: (handler?: Listener) => Listener | null | void
-  onreconnected: (handler?: Listener) => Listener | null | void
-  onclose: (handler?: Listener) => Listener | null | void
-  on: (event: string, handler: Listener) => void
-  start: () => Promise<void>
-  stop: () => Promise<void>
-  invoke: (...args: unknown[]) => Promise<unknown>
-  emit: (kind: 'reconnecting' | 'reconnected' | 'close') => void
-  handlers: Map<string, Listener>
-  invokes: Array<{ method: string; args: unknown[] }>
-}
-
-const fakeConnections: FakeConnection[] = []
-
-function makeFakeConnection(): FakeConnection {
-  let onReconnectingHandler: Listener | null = null
-  let onReconnectedHandler: Listener | null = null
-  let onCloseHandler: Listener | null = null
-  const handlers = new Map<string, Listener>()
-  const invokes: Array<{ method: string; args: unknown[] }> = []
-  const conn: FakeConnection = {
-    state: 0,
-    onreconnecting(handler) {
-      if (handler === undefined) return onReconnectingHandler
-      onReconnectingHandler = handler
-    },
-    onreconnected(handler) {
-      if (handler === undefined) return onReconnectedHandler
-      onReconnectedHandler = handler
-    },
-    onclose(handler) {
-      if (handler === undefined) return onCloseHandler
-      onCloseHandler = handler
-    },
-    on: vi.fn((event: string, handler: Listener) => {
-      handlers.set(event, handler)
-    }),
-    start: vi.fn(async () => {
-      conn.state = 1
-    }),
-    stop: vi.fn(async () => {
-      conn.state = 0
-    }),
-    invoke: vi.fn(async (...callArgs: unknown[]) => {
-      const [method, ...args] = callArgs
-      invokes.push({ method: String(method), args })
-      return undefined
-    }),
-    emit(kind) {
-      if (kind === 'reconnecting') {
-        onReconnectingHandler?.()
-      }
-      if (kind === 'reconnected') {
-        onReconnectedHandler?.()
-      }
-      if (kind === 'close') {
-        onCloseHandler?.()
-      }
-    },
-    handlers,
-    invokes,
-  }
-  fakeConnections.push(conn)
-  return conn
-}
 
 function StateProbe({ projectId, onState }: { projectId: string | null; onState: (s: string) => void }) {
   const { status: state } = useEventsConnection(projectId, () => {}, undefined)
@@ -144,19 +67,6 @@ function renderWithHost(ui: React.ReactNode) {
 describe('useEventsConnection state tracking', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    fakeConnections.length = 0
-    function FakeBuilder(this: unknown) {
-      return {
-        withUrl: () => ({
-          withAutomaticReconnect: () => ({
-            configureLogging: () => ({
-              build: () => makeFakeConnection(),
-            }),
-          }),
-        }),
-      }
-    }
-    vi.mocked(HubConnectionBuilder).mockImplementation(FakeBuilder as unknown as typeof HubConnectionBuilder)
   })
 
   afterEach(() => {

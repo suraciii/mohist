@@ -6,7 +6,10 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: { '@': path.resolve(__dirname, './src') },
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+      '@microsoft/signalr': path.resolve(__dirname, './tests/support/signalr-fake.ts'),
+    },
   },
   test: {
     environment: 'jsdom',
