@@ -35,7 +35,11 @@ export function DashboardPage() {
   const { currentProject, projectId } = useProject()
   const { data: agentStatus } = useAgentStatus()
   const { data: fetchedIssues, isLoading: issuesLoading } = useIssues(projectId ? { projectId } : undefined)
-  const { activeCards } = useActivityCards()
+  const {
+    activeCards,
+    isLoading: activityLoading,
+    isError: activityError,
+  } = useActivityCards()
   const { completed, failed, archived } = useRecentDigest()
   const [showCreateProject, setShowCreateProject] = useState(false)
 
@@ -52,15 +56,19 @@ export function DashboardPage() {
   )
 
   const hasAttention = attentionItems.length > 0
-  const hasActiveWork = runningIssues.length > 0 || activeCards.length > 0
+  const hasAgentStatusActiveWork =
+    agentStatus?.running === true || (agentStatus?.activeAgents?.length ?? 0) > 0
+  const hasActiveWork =
+    runningIssues.length > 0 || activeCards.length > 0 || hasAgentStatusActiveWork
   const hasDigestItems =
     completed.length > 0 || failed.length > 0 || archived.length > 0
   const hasCapacityData =
     agentStatus?.capacity != null && agentStatus.capacity.max > 0
   const issuesResolved = fetchedIssues !== undefined || !issuesLoading
+  const activityResolved = !activityLoading && !activityError
 
   const showAttentionHero = hasAttention
-  const showReadyState = issuesResolved && !hasAttention && !hasActiveWork
+  const showReadyState = issuesResolved && activityResolved && !hasAttention && !hasActiveWork
 
   if (projectsLoading) {
     return null

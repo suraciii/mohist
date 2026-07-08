@@ -10,39 +10,35 @@
 
 - [ID: item-1]
   Severity: blocking
-  Scope: `packages/web/src/pages/dashboard/ui/DashboardPage.tsx`, `packages/web/src/widgets/dashboard-pulse/ui/PulseZone.tsx`
-  Evidence: Active sessions without an `InProgress` issue are hidden from the first screen. `DashboardPage` computes active work only as `runningIssues.length > 0` (`DashboardPage.tsx:62-63`), and `PulseZone` filters its rows only from `issues.filter(isRunningIssue)` (`PulseZone.tsx:39-48`). The candidate also locks in the opposite of the task requirement with `DashboardPage.test.tsx:648-662`, which asserts an active card without a running issue must not render the active-production zone. This contradicts `tasks.json` T-003 acceptance criteria that `hasActiveWork` is true for "running issues or active sessions" and the issue's product shape that active production includes current sessions. [disallowed:product-behavior-change]
-  SuggestedAction: Make the active-production decision and rendered rows account for active sessions as well as in-progress issues, or explicitly revise the spec/task if active-session-only work is intentionally no longer dashboard content. Replace the inverted test with coverage that an active session remains visible and does not trigger the ready state.
-  Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed with 307 files, 4713 tests passed, 1 skipped. The passing suite includes the inverted assertion, so tests do not validate the required behavior.
-  Status: open
-
-- [ID: item-2]
-  Severity: warning
-  Scope: `packages/web/src/entities/issue/model/attention.ts`
-  Evidence: `issueNeedsOwnerAction(issue)` is not the shared predicate used by `deriveAttentionItems`; it is a separate duplicate of the same conditions. The predicate is defined at `attention.ts:35-41`, while `deriveAttentionItems` repeats the classification chain at `attention.ts:50-77` instead of delegating to the shared predicate or a shared classifier. This does not satisfy T-002 acceptance criterion "issueNeedsOwnerAction(issue) is a single shared predicate used by both the inline cue and deriveAttentionItems," so the cue and attention entry can drift despite the current lock-step tests. [disallowed:architectural-judgment]
-  SuggestedAction: Extract one issue-attention classifier/predicate path and use it from both `deriveAttentionItems` and the Pulse owner-action cue. Keep the existing classification order and add a regression test around the shared classifier rather than two duplicated condition chains.
-  Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed, but the tests only compare duplicated behavior and do not prove single-source implementation.
-  Status: open
-
-- [ID: item-3]
-  Severity: cleanup
-  Scope: `packages/web/src/pages/dashboard/ui/DashboardPage.tsx`, `packages/web/src/widgets/dashboard-pulse/ui/PulseZone.tsx`, `packages/web/src/widgets/factory-status/model/factory-status.ts`
-  Evidence: The running-issue predicate is duplicated across dashboard surfaces instead of being shared. `DashboardPage.tsx:34-40` and `PulseZone.tsx:10-16` each define a private `isRunningIssue`, while `factory-status.ts:33-36` carries the same in-flight rule inline. T-003 acceptance says `hasAttention` and `hasActiveWork` are computed from the same predicates/hooks used by the hero and pulse; the current snapshot relies on copy/paste equivalence, so future changes can desynchronize the zone gate, Pulse rows, and headline count. [disallowed:architectural-judgment]
-  SuggestedAction: Move the running-issue predicate to a shared dashboard/entity model location and use it from the headline, page gate, and Pulse zone.
-  Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed, but there is no guard against predicate drift between these three copies.
+  Scope: `packages/web/src/pages/dashboard/ui/DashboardPage.tsx`, `packages/web/src/widgets/coder-session/model/activity-cards.ts`
+  Evidence: The dashboard can render the ready state while live work is still known or unresolved. `DashboardPage` computes active work only from `runningIssues.length > 0 || activeCards.length > 0` (`DashboardPage.tsx:49-64`), but it ignores `agentStatus.running` and `agentStatus.activeAgents` even though the same component already has `agentStatus` (`DashboardPage.tsx:36`) and uses it for the document title (`DashboardPage.tsx:42`). `useActivityCards()` collapses an unresolved `useAgentActivity()` query to empty `activeCards` and does not expose loading/error state (`activity-cards.ts:137-165`). Therefore, when issues have resolved to no running issue but the activity feed is still unresolved, `showReadyState` becomes true and the dashboard can say "Nothing needs your attention right now" even if `agentStatus.running === true` or `activeAgents` is non-empty. This violates the issue acceptance criteria that active production/current sessions are visible and that the concise ready state appears only when nothing is active. [disallowed:product-behavior-change]
+  SuggestedAction: Include a reliable active-work signal while the activity feed is unresolved, either by exposing `isLoading`/`isError` from `useActivityCards()` and suppressing the ready state until the session source is resolved, or by folding `agentStatus.running`/`agentStatus.activeAgents.length` into the page-level active-work gate. Add a `DashboardPage.test.tsx` regression where issues are empty, the activity feed has not resolved, and `agentStatus.running` or `activeAgents` indicates live work; the ready state must not render.
+  Verification: `npm run typecheck -w packages/web` passed. The targeted changed-file suite passed with 9 files and 181 tests: `npm run test:run -w packages/web -- src/entities/issue/model/attention.test.ts src/entities/issue/model/running.test.ts src/pages/dashboard/ui/DashboardPage.test.tsx src/widgets/attention-hero/ui/AttentionHero.test.tsx src/widgets/coder-session/model/activity-cards.test.ts src/widgets/dashboard-capacity/ui/DashboardCapacityZone.test.tsx src/widgets/dashboard-pulse/ui/PulseZone.test.tsx src/widgets/factory-status/model/factory-status.test.ts src/widgets/kanban-board/ui/kanban-board-query.counts.test.tsx`. The existing tests do not cover the unresolved-activity/agent-status-running case.
   Status: open
 
 ## Follow-up Items
 
-(none)
+- [ID: item-2]
+  Severity: follow-up
+  Scope: dashboard visual verification
+  Evidence: The candidate has strong DOM/unit coverage for zone order, collapse, ready state, capacity, and active rows, but the design verification step called for a manual sweep of has-attention, active-only, idle/ready, and capacity-limited states in light and dark themes. No browser/screenshot evidence is present in the artifacts. This is not a blocker by itself because the relevant component tests pass, but it leaves the visual-prominence part of the spec verified structurally rather than visually.
+  SuggestedAction: Before integration, run a browser sweep or screenshot check for the four dashboard states in both themes and confirm text wrapping, zone prominence, and first-screen density.
+  Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
+
+- [ID: item-3]
+  Severity: warning
+  Scope: `packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.test.tsx`
+  Evidence: The full web suite currently fails outside the issue-399 dashboard change. `npm run test:run -w packages/web` fails one test: `TaskProgressPanel — task execution log panel > renders each line with source label, timestamp, and text`, where Testing Library cannot find `08:00:00.000` at `TaskProgressPanel.test.tsx:272`. `git diff --name-only master...HEAD -- packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.test.tsx packages/web/src/widgets/issue-workflow/ui/TaskProgressPanel.tsx` returns no files, so this is outside the candidate deliverable.
+  SuggestedAction: Fix or isolate the timestamp expectation separately; rerun the full web suite after that fix.
+  Status: pre-existing
 
 - [ID: item-4]
   Severity: info
   Scope: branch integration state
-  Evidence: `git status -sb` reports this branch is ahead of `origin/master` by 9 commits and behind by 1 commit. `git log HEAD..origin/master` shows the missing upstream commit is `ba50c2089 test(server): 测试组织重构——纯 unit 迁入 UnitTests，Speed=Unit trait 正本清源`, which is outside the issue-399 Web dashboard deliverable.
-  SuggestedAction: Rebase or merge the upstream branch before integration if the workflow does not do that automatically.
+  Evidence: `git status -sb` reports `mohist/run-wr_6cbbd261f0e24e3bb0813223862734dd...origin/master [ahead 10, behind 3]`. This branch divergence is outside the reviewed dashboard implementation but matters before integration.
+  SuggestedAction: Rebase or merge the upstream branch before integration if the workflow does not do that automatically, then rerun the affected checks.
   Status: out-of-scope
 
 <promise>FAIL</promise>

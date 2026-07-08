@@ -169,6 +169,19 @@ describe('useActivityCards — activeCardByIssueNumber', () => {
     expect(result.current.activeCardByIssueNumber.size).toBe(0)
   })
 
+  it('preserves the activity feed loading and error state for page-level gates', () => {
+    useAgentActivityMock.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: true,
+    })
+
+    const { result } = renderHook(() => useActivityCards())
+
+    expect(result.current.isLoading).toBe(true)
+    expect(result.current.isError).toBe(true)
+  })
+
   it('keeps only one active session per issue number when duplicates exist', () => {
     useAgentActivityMock.mockReturnValue({
       data: {

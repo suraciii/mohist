@@ -110,6 +110,8 @@ const NO_AGENT_ACTIVITY = {
   waitingCards: [],
   statusCounts: { active: 0, waiting: 0, completed: 0, failed: 0 },
   slotUsage: { active: 0, max: 0 },
+  isLoading: false,
+  isError: false,
 }
 
 function makeActiveCard(overrides: Record<string, unknown> = {}) {
@@ -452,6 +454,42 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       expect(screen.queryByText(/Nothing needs your attention right now/i)).not.toBeInTheDocument()
     })
 
+    it('does not render the ready state while activity data is still loading', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({ data: [], isLoading: false })
+      mocks.useAgentActivityMock.mockReturnValue({
+        ...NO_AGENT_ACTIVITY,
+        activeCardByIssueNumber: new Map(),
+        isLoading: true,
+      })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
+      expect(screen.queryByText(/Nothing needs your attention right now/i)).not.toBeInTheDocument()
+    })
+
+    it('does not render the ready state while activity data is unresolved and runner status reports live work', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = makeAgentStatus({ running: true })
+      mocks.useIssuesMock.mockReturnValue({ data: [], isLoading: false })
+      mocks.useAgentActivityMock.mockReturnValue({
+        ...NO_AGENT_ACTIVITY,
+        activeCardByIssueNumber: new Map(),
+        isLoading: true,
+      })
+
+      renderPage()
+
+      expect(screen.getByTestId('dashboard-page')).toHaveAttribute('data-state', 'active-only')
+      expect(screen.getByTestId('dashboard-zone-pulse')).toBeInTheDocument()
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
+    })
+
     it('renders the concise ready state when there are no attention items and no active work', () => {
       mocks.projects = [
         { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
@@ -512,6 +550,28 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
 
       expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
       expect(screen.getByTestId('dashboard-zone-pulse')).toBeInTheDocument()
+    })
+
+    it('does not render the ready state when runner status lists active agents', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = makeAgentStatus({
+        activeAgents: [
+          {
+            issueId: 'issue-agent-live',
+            issueNumber: 42,
+            projectId: 'p1',
+          },
+        ],
+      })
+      mocks.useIssuesMock.mockReturnValue({ data: [], isLoading: false })
+
+      renderPage()
+
+      expect(screen.getByTestId('dashboard-page')).toHaveAttribute('data-state', 'active-only')
+      expect(screen.getByTestId('dashboard-zone-pulse')).toBeInTheDocument()
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
     })
 
     it('shows the ready state with the digest as a subordinate strip when digest has items', () => {
