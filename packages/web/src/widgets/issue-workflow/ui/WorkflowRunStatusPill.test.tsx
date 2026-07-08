@@ -161,6 +161,16 @@ describe('WorkflowRunStatusPill', () => {
     expect(pill).toHaveTextContent(/stopped/i)
   })
 
+  it('drift renders with the warning family', () => {
+    renderPill('drift')
+    const pill = screen.getByTestId('workflow-run-status-drift')
+    expect(pill.dataset.family).toBe('warning')
+    expect(pill).toHaveTextContent(/drift/i)
+    const cls = pill.className
+    expect(cls).not.toMatch(/bg-amber-/)
+    expect(cls).toMatch(/bg-warning-subtle/)
+  })
+
   it('falls back to an unknown presentation for an unrecognized status', () => {
     renderPill('mystery')
 

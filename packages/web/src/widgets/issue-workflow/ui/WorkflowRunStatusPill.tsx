@@ -1,7 +1,6 @@
-import { ActivityIcon, CheckCircle2Icon, CircleDashedIcon, ClockIcon, PauseCircleIcon, PlayCircleIcon, XCircleIcon } from 'lucide-react'
+import { ActivityIcon, AlertTriangleIcon, CheckCircle2Icon, CircleDashedIcon, ClockIcon, PauseCircleIcon, PlayCircleIcon, XCircleIcon } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import { statusTreatment } from '@/shared/status-presentation'
-import type { WorkflowRunStatus } from '../../../entities/issue'
 
 export interface WorkflowRunStatusPillProps {
   status: string | null | undefined
@@ -14,7 +13,7 @@ interface StatusLabel {
   testId: string
 }
 
-const LABELS_BY_STATUS: Record<WorkflowRunStatus, StatusLabel> = {
+const LABELS_BY_STATUS: Record<string, StatusLabel> = {
   created: { label: 'Created', icon: ClockIcon, testId: 'workflow-run-status-created' },
   pending: { label: 'Pending runner', icon: CircleDashedIcon, testId: 'workflow-run-status-pending' },
   ready: { label: 'Ready to run', icon: PlayCircleIcon, testId: 'workflow-run-status-ready' },
@@ -24,6 +23,7 @@ const LABELS_BY_STATUS: Record<WorkflowRunStatus, StatusLabel> = {
   stopped: { label: 'Stopped', icon: XCircleIcon, testId: 'workflow-run-status-stopped' },
   completed: { label: 'Completed', icon: CheckCircle2Icon, testId: 'workflow-run-status-completed' },
   failed: { label: 'Failed', icon: XCircleIcon, testId: 'workflow-run-status-failed' },
+  drift: { label: 'Drift', icon: AlertTriangleIcon, testId: 'workflow-run-status-drift' },
 }
 
 const UNKNOWN_LABEL: StatusLabel = {
@@ -32,7 +32,7 @@ const UNKNOWN_LABEL: StatusLabel = {
   testId: 'workflow-run-status-unknown',
 }
 
-function isKnownRunStatus(value: string): value is WorkflowRunStatus {
+function isKnownRunStatus(value: string): boolean {
   return value in LABELS_BY_STATUS
 }
 

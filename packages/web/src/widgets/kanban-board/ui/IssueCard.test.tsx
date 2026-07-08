@@ -161,6 +161,29 @@ describe('IssueCard - blocker rendering for waiting-for issues', () => {
     renderCard(waitingButCancelled)
     expect(screen.queryByTestId('blocker-reason')).not.toBeInTheDocument()
   })
+
+  it('routes blocked reason text through the danger token and no raw red palette', () => {
+    const blocked = makeIssue({
+      health: IssueHealth.Blocked,
+      blockedReason: 'Waiting on external dependency',
+    })
+    renderCard(blocked)
+    const reason = screen.getByTestId('blocked-reason')
+    expect(reason.className).toContain('text-danger')
+    expect(reason.className).not.toContain('text-red-')
+  })
+
+  it('routes waiting-for blocker text through the warning token and no raw amber palette', () => {
+    const waiting = makeIssue({
+      isDraft: false,
+      canStart: false,
+      blocker: { kind: 'waiting-for', issue: { number: 200, title: 'Foundational work' } },
+    })
+    renderCard(waiting)
+    const reason = screen.getByTestId('blocker-reason')
+    expect(reason.className).toContain('text-warning')
+    expect(reason.className).not.toContain('text-amber-')
+  })
 })
 
 describe('IssueCard - no legacy startEligibility fields rendered', () => {

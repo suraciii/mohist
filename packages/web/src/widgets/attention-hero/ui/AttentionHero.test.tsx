@@ -448,6 +448,66 @@ describe('AttentionHero - per-item actions', () => {
     expect(links[0]).toHaveAttribute('href', '/demo/issues/11')
     expect(links[1]).toHaveAttribute('href', '/demo/issues/22')
   })
+
+  it('Approve and Resume buttons use the Button primitive, not hand-rolled color classes', () => {
+    mocks.issues = [
+      makeIssue({
+        id: 'awaiting-1',
+        number: 11,
+        title: 'a',
+        approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
+      }),
+      makeIssue({
+        id: 'b-1',
+        number: 22,
+        title: 'b',
+        workflowStage: WorkflowStage.Build,
+        health: IssueHealth.Interrupted,
+      }),
+    ]
+
+    renderHero()
+
+    const approve = screen.getByTestId('attention-item-approve')
+    expect(approve.dataset.slot).toBe('button')
+    expect(approve.className).not.toContain('text-white')
+    expect(approve.className).not.toContain('bg-warning hover:bg-warning/80')
+
+    const resume = screen.getByTestId('attention-item-resume')
+    expect(resume.dataset.slot).toBe('button')
+    expect(resume.className).not.toContain('text-background')
+    expect(resume.className).not.toContain('bg-foreground/90')
+  })
+
+  it('Approve and Resume actions use Button variants directly', () => {
+    mocks.issues = [
+      makeIssue({
+        id: 'awaiting-1',
+        number: 11,
+        title: 'a',
+        approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
+      }),
+      makeIssue({
+        id: 'b-1',
+        number: 22,
+        title: 'b',
+        workflowStage: WorkflowStage.Build,
+        health: IssueHealth.Interrupted,
+      }),
+    ]
+
+    renderHero()
+
+    const approve = screen.getByTestId('attention-item-approve')
+    expect(approve.className).toContain('border-warning-border')
+    expect(approve.className).toContain('bg-warning-subtle')
+    expect(approve.className).not.toContain('text-white')
+
+    const resume = screen.getByTestId('attention-item-resume')
+    expect(resume.className).toContain('bg-primary')
+    expect(resume.className).toContain('text-primary-foreground')
+    expect(resume.className).not.toContain('text-background')
+  })
 })
 
 describe('AttentionHero - runner-down entry', () => {

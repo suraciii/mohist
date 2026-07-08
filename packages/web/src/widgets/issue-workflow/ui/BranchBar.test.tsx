@@ -320,4 +320,101 @@ describe('BranchBar', () => {
     expect(rebase.className).toContain('disabled:pointer-events-none')
     expect(rebase.className).toContain('disabled:opacity-50')
   })
+
+  it('panel chrome uses semantic tokens, not raw light-only palette classes', () => {
+    vi.mocked(useWorkspaceStatus).mockReturnValue({
+      data: {
+        exists: true,
+        branch: 'mohist/run-wr-161',
+        baseBranch: 'master',
+        ahead: 11,
+        behind: 80,
+        rebaseInProgress: false,
+        conflictingFiles: [],
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useWorkspaceStatus>)
+
+    const queryClient = new QueryClient()
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <BranchBar issueNumber={161} stage={null} isAgentRunning={true} baseBranch="master" allowRebase />
+      </QueryClientProvider>
+    )
+
+    const panel = container.querySelector('[data-testid="branch-bar"]') as HTMLElement
+    const cls = panel.className
+    expect(cls).toContain('border-warning-border')
+    expect(cls).toContain('bg-warning-subtle')
+    expect(cls).not.toContain('border-amber-')
+    expect(cls).not.toContain('bg-amber-')
+    expect(cls).not.toContain('border-blue-')
+    expect(cls).not.toContain('bg-blue-')
+    expect(cls).not.toContain('border-gray-')
+    expect(cls).not.toContain('bg-gray-')
+    expect(cls).not.toContain('bg-white')
+    expect(cls).not.toContain('text-red-')
+    expect(cls).not.toContain('bg-red-')
+  })
+
+  it('all branch-bar states use semantic token text and chrome classes only', () => {
+    const states = [
+      {
+        exists: true,
+        branch: 'mohist/run-wr-161',
+        baseBranch: 'master',
+        ahead: 11,
+        behind: 80,
+        rebaseInProgress: false,
+        conflictingFiles: [],
+      },
+      {
+        exists: true,
+        reason: 'fetch_failed',
+        branch: 'mohist/run-wr-162',
+        baseBranch: 'master',
+        ahead: 0,
+        behind: 0,
+      },
+      {
+        exists: true,
+        branch: 'mohist/run-wr-163',
+        baseBranch: 'master',
+        ahead: 0,
+        behind: 0,
+        rebaseInProgress: false,
+        conflictingFiles: [],
+      },
+    ]
+
+    for (const data of states) {
+      cleanup()
+      vi.mocked(useWorkspaceStatus).mockReturnValue({
+        data,
+        isLoading: false,
+      } as unknown as ReturnType<typeof useWorkspaceStatus>)
+
+      const queryClient = new QueryClient()
+      const { container, unmount } = render(
+        <QueryClientProvider client={queryClient}>
+          <BranchBar issueNumber={161} stage={WorkflowStage.Done} isAgentRunning={false} baseBranch="master" allowRebase />
+        </QueryClientProvider>
+      )
+
+      const html = container.innerHTML
+      expect(html).not.toContain('border-blue-')
+      expect(html).not.toContain('bg-blue-')
+      expect(html).not.toContain('text-blue-')
+      expect(html).not.toContain('border-red-')
+      expect(html).not.toContain('bg-red-')
+      expect(html).not.toContain('text-red-')
+      expect(html).not.toContain('border-amber-')
+      expect(html).not.toContain('bg-amber-')
+      expect(html).not.toContain('text-amber-')
+      expect(html).not.toContain('border-gray-')
+      expect(html).not.toContain('bg-gray-')
+      expect(html).not.toContain('bg-white')
+      unmount()
+    }
+  })
 })

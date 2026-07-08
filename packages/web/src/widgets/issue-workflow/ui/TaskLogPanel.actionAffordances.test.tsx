@@ -144,4 +144,63 @@ describe('TaskLogPanel — action affordances use Button/Badge variants (D7)', (
     expect(input.className).not.toContain('focus:border-sky-')
     expect(input.className).not.toContain('focus:ring-sky-')
   })
+
+  it('panel chrome uses semantic tokens, not raw light-only palette classes', async () => {
+    const harness = buildHarness(makePage([
+      makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' }),
+    ]), mockedGetIssueWorkflowTaskLog)
+
+    renderWithHarness(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
+      harness,
+    )
+
+    const panel = await screen.findByTestId('task-log-panel')
+    const cls = panel.className
+    expect(cls).toContain('border-border')
+    expect(cls).toContain('bg-background')
+    expect(cls).not.toContain('border-slate-')
+    expect(cls).not.toContain('bg-white')
+    expect(cls).not.toContain('text-slate-')
+  })
+
+  it('panel surface and truncation state avoid raw slate and amber palette classes', async () => {
+    const harness = buildHarness(
+      { lines: [makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' })], truncated: true, nextCursor: null },
+      mockedGetIssueWorkflowTaskLog,
+    )
+
+    const { container } = renderWithHarness(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
+      harness,
+    )
+
+    await screen.findByTestId('task-log-truncation-indicator')
+    const html = container.innerHTML
+    expect(html).toContain('text-muted-foreground')
+    expect(html).toContain('bg-warning-subtle')
+    expect(html).not.toContain('border-slate-')
+    expect(html).not.toContain('text-slate-500')
+    expect(html).not.toContain('bg-amber-')
+    expect(html).not.toContain('text-amber-')
+  })
+
+  it('truncation indicator renders as a warning Badge, not a raw amber badge', async () => {
+    const harness = buildHarness(
+      { lines: [makeLine({ seq: 1, source: 'workspace-prep', text: 'line-1' })], truncated: true, nextCursor: null },
+      mockedGetIssueWorkflowTaskLog,
+    )
+
+    renderWithHarness(
+      <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
+      harness,
+    )
+
+    const indicator = await screen.findByTestId('task-log-truncation-indicator')
+    expect(indicator.dataset.slot).toBe('badge')
+    expect(indicator.className).toContain('border-warning-border')
+    expect(indicator.className).toContain('bg-warning-subtle')
+    expect(indicator.className).not.toContain('bg-amber-')
+    expect(indicator.className).not.toContain('text-amber-')
+  })
 })

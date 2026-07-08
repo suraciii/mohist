@@ -18,6 +18,7 @@ import { useAgentStatus, type AgentStatus } from '../../../entities/agent'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { cn } from '@/shared/lib/utils'
 import { statusTreatment, type StatusTreatment } from '@/shared/status-presentation'
+import { Button } from '@/shared/ui/components/button'
 
 const APPROVAL_LABEL = 'Approval needed'
 
@@ -113,7 +114,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
         )}>
           Needs attention
         </span>
-        <span className="text-xs text-warning/80 font-medium">({totalCount})</span>
+        <span className="text-xs text-warning font-medium">({totalCount})</span>
       </div>
       <ApprovalWaitSummary approvalWait={approvalWait} />
       <ul className="flex flex-col gap-2" data-testid="attention-items">
@@ -193,41 +194,37 @@ function AttentionItemRow({
         <Link
           to={toProjectPath(`/issues/${item.issueNumber}`)}
           data-testid="attention-item-link"
-          className={cn('text-xs hover:underline', itemTreatment.text)}
+          className={cn('text-xs hover:underline hover:opacity-80', itemTreatment.text)}
         >
           Open
         </Link>
         {showApprove && (
-          <button
+          <Button
             type="button"
+            variant="warning"
+            size="xs"
             data-testid="attention-item-approve"
             data-action="approve"
             disabled={isPending}
             onClick={() => onApprove(item.issueNumber)}
-            className={cn(
-              'inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-white',
-              'bg-warning hover:bg-warning/80 disabled:opacity-50 disabled:pointer-events-none',
-            )}
           >
             <CheckCircle2Icon className="size-3" />
             Approve
-          </button>
+          </Button>
         )}
         {showResume && (
-          <button
+          <Button
             type="button"
+            variant="default"
+            size="xs"
             data-testid="attention-item-resume"
             data-action="resume"
             disabled={isPending}
             onClick={() => onResume(item.issueNumber)}
-            className={cn(
-              'inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-background',
-              'bg-foreground/90 hover:bg-foreground disabled:opacity-50 disabled:pointer-events-none',
-            )}
           >
             <PlayIcon className="size-3" />
             Resume
-          </button>
+          </Button>
         )}
       </div>
     </li>
@@ -262,14 +259,14 @@ function RunnerDownEntry({ agentStatus, toProjectPath }: RunnerDownEntryProps) {
       <span className={cn('font-medium text-sm', dangerTreatment.text)}>Runner unavailable</span>
       <span
         data-testid="runner-down-message"
-        className={cn('text-sm truncate min-w-0 flex-1', 'text-danger/80')}
+        className={cn('text-sm truncate min-w-0 flex-1', 'text-danger')}
       >
         {agentStatus.runnerMessage ?? 'No runner is connected.'}
       </span>
       <Link
         to={toProjectPath('/activity')}
         data-testid="runner-down-link"
-        className="shrink-0 text-xs text-danger hover:underline"
+        className="shrink-0 text-xs text-danger hover:underline hover:opacity-80"
       >
         View runner status
       </Link>
@@ -332,7 +329,7 @@ function AllClearState({ approvalWait }: AllClearStateProps) {
           All clear
         </span>
       </div>
-      <p className={cn('text-sm mb-3', 'text-success/80')}>
+      <p className={cn('text-sm mb-3', 'text-success')}>
         Nothing needs your attention right now.
       </p>
       <ApprovalWaitSummary approvalWait={approvalWait} />

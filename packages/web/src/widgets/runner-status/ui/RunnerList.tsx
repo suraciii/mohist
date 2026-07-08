@@ -76,11 +76,11 @@ function ActiveWorkSummary({
     return (
       <div className="flex items-center gap-1.5 text-xs" data-testid="active-work-row">
         <span className="text-foreground truncate">{label}</span>
-        <span className="text-gray-300 shrink-0">·</span>
+        <span className="text-muted-foreground shrink-0">·</span>
         <Link
           to={toProjectPath(`/issues/${work.issue.issueNumber}`)}
           onClick={(event) => event.stopPropagation()}
-          className="text-blue-600 hover:text-blue-700 hover:underline shrink-0"
+          className="text-primary hover:text-primary/80 hover:underline shrink-0"
           data-testid="active-work-issue-link"
           data-work-id={work.workId}
         >

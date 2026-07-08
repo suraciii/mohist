@@ -412,7 +412,8 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
         {issue.blockedReason && indicator === 'blocked' && (
           <div className="mt-1.5">
             <p
-              className="text-[11px] text-red-800"
+              data-testid="blocked-reason"
+              className="text-[11px] text-danger"
               style={{
                 display: '-webkit-box',
                 WebkitLineClamp: 1,
@@ -432,7 +433,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
           <div className="mt-1.5">
             <p
               data-testid="blocker-reason"
-              className="text-[11px] text-amber-800"
+              className="text-[11px] text-warning"
               style={{
                 display: '-webkit-box',
                 WebkitLineClamp: 1,

@@ -185,4 +185,32 @@ describe('WorkspacePanel', () => {
     expect(rebase.className).toContain('disabled:pointer-events-none')
     expect(rebase.className).toContain('disabled:opacity-50')
   })
+
+  it('panel chrome uses semantic tokens, not raw light-only palette classes', () => {
+    mockWorkspaceStatus({ exists: true, branch: 'mo/issue-1', ahead: 0, behind: 0, canFastForward: true, isRebaseInProgress: false }, false)
+    const { container } = render(<WorkspacePanel issueNumber={1} isAgentRunning={false} />)
+    const panel = container.firstElementChild as HTMLElement
+    const cls = panel.className
+    expect(cls).toContain('border-border')
+    expect(cls).toContain('bg-background')
+    expect(cls).not.toContain('border-gray-')
+    expect(cls).not.toContain('bg-white')
+    expect(cls).not.toContain('bg-gray-')
+    expect(cls).not.toContain('text-gray-')
+    expect(cls).not.toContain('text-green-')
+    expect(cls).not.toContain('text-amber-')
+    expect(cls).not.toContain('text-blue-')
+  })
+
+  it('workspace surface text uses semantic tokens instead of raw palette classes', () => {
+    mockWorkspaceStatus({ exists: true, branch: 'mo/issue-1', ahead: 0, behind: 3, canFastForward: false, isRebaseInProgress: false }, false)
+    const { container } = render(<WorkspacePanel issueNumber={1} isAgentRunning={false} isDone={true} />)
+    const html = container.innerHTML
+    expect(html).toContain('text-warning')
+    expect(html).toContain('text-muted-foreground')
+    expect(html).not.toContain('text-gray-')
+    expect(html).not.toContain('text-green-')
+    expect(html).not.toContain('text-amber-')
+    expect(html).not.toContain('text-blue-')
+  })
 })
