@@ -1,3 +1,6 @@
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -90,10 +93,29 @@ public class StageLockSpecs : WorkflowGrainSpecs
         Assert.Null(blocked);
 
         await ReportAsync(firstRunnerId, firstMerge.WorkflowRunId, firstMerge.WorkId, new WorkResult("completed"));
+        // issue-361 T-002: bus no longer dispatches lock-release; replay the
+        // persisted stage.completed row through the handler.
+        await DispatchStageCompletedAsync(firstMerge.WorkflowRunId, "integrate");
 
-        var secondIntegrate = await secondRunner.PollAsync(Services);
-        Assert.NotNull(secondIntegrate);
-        Assert.Equal(secondWorkflowId, secondIntegrate.WorkflowRunId);
+        // Confirm the lock grain has dropped the owner before polling for
+        // the second runner — the handler's grain call is awaited, so by
+        // the time it returns the owner is gone.
+        var lockStateAfter = await lockGrain.GetStateAsync();
+        Assert.Null(lockStateAfter?.Owner);
+
+        // Poll the second runner until the dispatch service claims the
+        // released lock and assigns the next integrate stage.
+        var secondIntegrate = await Mohist.Server.SpecTests.Support.TestWait.ForAsync(
+            async () => await secondRunner.PollAsync(Services),
+            work => work is not null
+                && work.WorkflowRunId == secondWorkflowId
+                && work.Stage == "integrate"
+                && work.WorkId.StartsWith("integrate:archive-change.", StringComparison.Ordinal),
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(50),
+            "second runner to claim integrate:archive-change after lock release");
+
+        Assert.Equal(secondWorkflowId, secondIntegrate!.WorkflowRunId);
         Assert.Equal("integrate", secondIntegrate.Stage);
         Assert.StartsWith("integrate:archive-change.", secondIntegrate.WorkId);
 
@@ -109,6 +131,11 @@ public class StageLockSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task FailedIntegrateStage_ReleasesSequentialLock()
     {
+        // issue-361 T-002: the bus is write-only, so the
+        // WorkflowStageLockReleaseHandler is no longer invoked inline.
+        // Drive it manually (as the future dispatcher will) so the
+        // failing run releases the sequential lock and the queued
+        // runner can claim the next integrate stage.
         var suffix = Guid.NewGuid().ToString("N");
         var projectId = $"stage-lock-fail-project-{suffix}";
         var resource = $"project-integration-fail-{suffix}";
@@ -141,6 +168,7 @@ public class StageLockSpecs : WorkflowGrainSpecs
         var wf1Integrate = await runner1.PollAsync(Services);
         Assert.NotNull(wf1Integrate);
         await ReportAsync(runner1Id, workflow1Id, wf1Integrate.WorkId, new WorkResult("failed", "merge conflict"));
+        await DispatchStageFailedAsync(workflow1Id, "integrate");
 
         var wf2Integrate = await runner2.PollAsync(Services);
         Assert.NotNull(wf2Integrate);
@@ -165,6 +193,11 @@ public class StageLockSpecs : WorkflowGrainSpecs
         // routes them back into the grain. Lock acquisition by the next
         // workflow run therefore requires the publish → handler → grain
         // round trip to complete before the next poll succeeds.
+        //
+        // issue-361 T-002: the bus is write-only, so the handler no
+        // longer fires inline with the publish. Drive the handler
+        // directly — that is the future dispatcher's job and the only
+        // path that completes the round trip today.
         var suffix = Guid.NewGuid().ToString("N");
         var projectId = $"stage-lock-bus-fail-project-{suffix}";
         var resource = $"project-integration-bus-fail-{suffix}";
@@ -204,11 +237,11 @@ public class StageLockSpecs : WorkflowGrainSpecs
 
         // Failing the integrate task emits StageFailed. The grain's On()
         // branch used to release the lock here; T-005 moves that into the
-        // WorkflowStageLockReleaseHandler bus subscription. After
-        // ReportAsync returns, the publish → handler → grain.ReleaseStageLocksAsync
-        // chain must have completed (publish is awaited before SaveRunAsync
-        // returns), so the lock grain must have dropped its owner.
+        // WorkflowStageLockReleaseHandler bus subscription. The dispatcher
+        // (future step 3) will replay the persisted row; until then,
+        // pull the row and run the handler manually.
         await ReportAsync(runner1Id, workflow1Id, wf1Integrate.WorkId, new WorkResult("failed", "merge conflict"));
+        await DispatchStageFailedAsync(workflow1Id, "integrate");
 
         var stateAfter = await lockGrain.GetStateAsync();
         Assert.Null(stateAfter?.Owner);
@@ -297,5 +330,39 @@ public class StageLockSpecs : WorkflowGrainSpecs
             {
                 ["projectId"] = projectId,
             }));
+    }
+
+    private async Task DispatchStageFailedAsync(string workflowRunId, string stage)
+    {
+        await DispatchStageTerminalAsync(workflowRunId, EventCatalog.ReverseDns.StageFailed, stage);
+    }
+
+    private async Task DispatchStageCompletedAsync(string workflowRunId, string stage)
+    {
+        await DispatchStageTerminalAsync(workflowRunId, EventCatalog.ReverseDns.StageCompleted, stage);
+    }
+
+    private async Task DispatchStageTerminalAsync(string workflowRunId, string type, string stage)
+    {
+        using var scope = Services.CreateScope();
+        var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+        var handler = new WorkflowStageLockReleaseHandler(
+            Grains,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<WorkflowStageLockReleaseHandler>.Instance);
+
+        var stored = await Mohist.Server.SpecTests.Support.TestWait.ForAsync(
+            async () =>
+            {
+                var list = await events.ListAsync(workflowRunId);
+                return list.FirstOrDefault(e =>
+                    e.Envelope.Type == type &&
+                    WorkflowStageLockReleaseHandler.ExtractStage(e.Envelope.Data) == stage);
+            },
+            envelope => envelope is not null,
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(50),
+            $"{type}({stage}) event row for {workflowRunId}");
+
+        await handler.HandleAsync(stored!.Envelope, CancellationToken.None);
     }
 }

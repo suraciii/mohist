@@ -29,14 +29,15 @@ namespace Mohist.Server.Events.Subscriptions;
 /// types — the public CloudEvents bus wildcard syntax does not match
 /// these two names with a single <c>.*</c> suffix.
 ///
-/// The router call is fired on a detached background task: the bus
-/// publishes from inside a workflow-grain call stack
-/// (WorkflowRunStore.SaveAsync → IEventPublisher.PublishAsync →
-/// in-process handlers), and the router then resolves the workflow
-/// grain again. Running the router synchronously would self-deadlock a
-/// non-reentrant workflow grain. Detaching preserves correctness
-/// (push failures are logged, never propagated) and avoids blocking
-/// the lifecycle commit.
+/// The router call is fired on a detached background task: the row is
+/// persisted from inside the workflow-grain state transaction
+/// (WorkflowRunStore.SaveAsync appends the event row before commit),
+/// and after step 3 (the dispatcher) lands the same delivery path
+/// will resolve the workflow grain again. Detaching preserves
+/// correctness (push failures are logged, never propagated) and
+/// avoids blocking the lifecycle commit. Until the dispatcher lands
+/// this handler is dormant — the row is durable but no in-process
+/// notification reaches it.
 /// </summary>
 [Subscription(Type = "com.mohist.workflow.run.completed|com.mohist.workflow.run.stopped")]
 public sealed class RunnerWorkflowTerminalStatusHandler : ICloudEventHandler

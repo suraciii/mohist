@@ -25,6 +25,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public ControllableReminderTable ControllableReminderTable => Cluster.GetSiloServiceProvider(null).GetRequiredService<ControllableReminderTable>();
 
     private readonly InMemoryEventBus _sharedEventBus = new(
+        new RecordingEventStore(),
         NullLogger<InMemoryEventBus>.Instance);
     private readonly RecordingEventStore _sharedEventStore = new();
     private SqliteConnection _keeper = null!;

@@ -5,15 +5,17 @@ using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
+using CloudEvent = Mohist.Server.Infrastructure.Events.CloudEvent;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
 /// <summary>
 /// End-to-end integration tests for the project-id isolation gate:
-/// bus emit → <see cref="EventBridge"/> → <see cref="UserNotificationDispatcher"/>
+/// <see cref="EventBridge"/> → <see cref="UserNotificationDispatcher"/>
 /// → per-connection routing via <see cref="ConnectionSubscriptionRegistry"/>.
-/// These tests exercise the full signal path the inbox hint takes in
-/// production; unit-level coverage of the dispatcher's gate lives in
+/// These tests exercise the signal path the inbox hint takes when
+/// the future dispatcher invokes <see cref="EventBridge.HandleAsync"/>;
+/// unit-level coverage of the dispatcher's gate lives in
 /// <c>UserNotificationDispatcherProjectFilterSpecs</c>.
 /// </summary>
 public class ProjectIsolationIntegrationSpecs
@@ -35,16 +37,13 @@ public class ProjectIsolationIntegrationSpecs
 
         var hub = new RecordingHubContext();
         var bridge = BuildBridge(registry, hub);
-        var bus = BuildBus(bridge);
 
-        await bus.PublishAsync(
-            data: new { ItemId = "item-1" },
-            type: InboxHintType,
-            source: "/mohist/inbox",
-            extensions: new Dictionary<string, string>
+        await bridge.HandleAsync(
+            BuildEvent(InboxHintType, "/mohist/inbox", new Dictionary<string, string>
             {
                 ["projectid"] = "proj-A",
-            });
+            }),
+            CancellationToken.None);
 
         var projectAMessage = Assert.Single(hub.Messages);
         Assert.Equal("conn-A", projectAMessage.ConnectionId);
@@ -69,16 +68,13 @@ public class ProjectIsolationIntegrationSpecs
 
         var hub = new RecordingHubContext();
         var bridge = BuildBridge(registry, hub);
-        var bus = BuildBus(bridge);
 
-        await bus.PublishAsync(
-            data: new { ItemId = "item-2" },
-            type: InboxHintType,
-            source: "/mohist/inbox",
-            extensions: new Dictionary<string, string>
+        await bridge.HandleAsync(
+            BuildEvent(InboxHintType, "/mohist/inbox", new Dictionary<string, string>
             {
                 ["projectid"] = "proj-B",
-            });
+            }),
+            CancellationToken.None);
 
         var message = Assert.Single(hub.Messages);
         Assert.Equal("conn-B", message.ConnectionId);
@@ -108,12 +104,10 @@ public class ProjectIsolationIntegrationSpecs
 
         var hub = new RecordingHubContext();
         var bridge = BuildBridge(registry, hub);
-        var bus = BuildBus(bridge);
 
-        await bus.PublishAsync(
-            data: new { ItemId = "item-3" },
-            type: InboxHintType,
-            source: "/mohist/inbox");
+        await bridge.HandleAsync(
+            BuildEvent(InboxHintType, "/mohist/inbox", extensions: null),
+            CancellationToken.None);
 
         // Both connections receive the message — the gate is
         // inert when extensions["projectid"] is absent, so
@@ -146,16 +140,13 @@ public class ProjectIsolationIntegrationSpecs
 
         var hub = new RecordingHubContext();
         var bridge = BuildBridge(registry, hub);
-        var bus = BuildBus(bridge);
 
-        await bus.PublishAsync(
-            data: new { ItemId = "item-4" },
-            type: InboxHintType,
-            source: "/mohist/inbox",
-            extensions: new Dictionary<string, string>
+        await bridge.HandleAsync(
+            BuildEvent(InboxHintType, "/mohist/inbox", new Dictionary<string, string>
             {
                 ["projectid"] = "proj-A",
-            });
+            }),
+            CancellationToken.None);
 
         var deliveredTo = hub.Messages.Select(m => m.ConnectionId).ToHashSet(StringComparer.Ordinal);
         Assert.Contains("conn-A", deliveredTo);
@@ -186,16 +177,13 @@ public class ProjectIsolationIntegrationSpecs
 
         var hub = new RecordingHubContext();
         var bridge = BuildBridge(registry, hub);
-        var bus = BuildBus(bridge);
 
-        await bus.PublishAsync(
-            data: new { ItemId = "item-5" },
-            type: InboxHintType,
-            source: "/mohist/inbox",
-            extensions: new Dictionary<string, string>
+        await bridge.HandleAsync(
+            BuildEvent(InboxHintType, "/mohist/inbox", new Dictionary<string, string>
             {
                 ["projectid"] = "proj-A",
-            });
+            }),
+            CancellationToken.None);
 
         var deliveredTo = hub.Messages.Select(m => m.ConnectionId).ToHashSet(StringComparer.Ordinal);
         Assert.Equal(4, deliveredTo.Count);
@@ -227,12 +215,10 @@ public class ProjectIsolationIntegrationSpecs
 
         var hub = new RecordingHubContext();
         var bridge = BuildBridge(registry, hub);
-        var bus = BuildBus(bridge);
 
-        await bus.PublishAsync(
-            data: new { Action = "started" },
-            type: LegacyType,
-            source: "/mohist/agent-session/sess-1");
+        await bridge.HandleAsync(
+            BuildEvent(LegacyType, "/mohist/agent-session/sess-1", extensions: null),
+            CancellationToken.None);
 
         Assert.Equal(2, hub.Messages.Count);
         Assert.Contains(hub.Messages, m => m.ConnectionId == "conn-A");
@@ -242,10 +228,14 @@ public class ProjectIsolationIntegrationSpecs
     private static EventBridge BuildBridge(ConnectionSubscriptionRegistry registry, IHubContext<MohistHub, IEventsClient> hub) =>
         new(new UserNotificationDispatcher(registry), hub, NullLogger<EventBridge>.Instance);
 
-    private static InMemoryEventBus BuildBus(EventBridge bridge) =>
+    private static CloudEvent BuildEvent(string type, string source, IReadOnlyDictionary<string, string>? extensions) =>
         new(
-            [new Subscription("com.mohist.*", bridge, (h, e, ct) => ((ICloudEventHandler)h).HandleAsync(e, ct))],
-            NullLogger<InMemoryEventBus>.Instance);
+            id: Guid.NewGuid().ToString(),
+            source: new Uri(source, UriKind.RelativeOrAbsolute),
+            type: type,
+            time: DateTimeOffset.UtcNow,
+            data: null,
+            extensions: extensions is null ? null : new Dictionary<string, string>(extensions, StringComparer.Ordinal));
 
     private sealed class RecordingHubContext : IHubContext<MohistHub, IEventsClient>
     {
@@ -258,7 +248,7 @@ public class ProjectIsolationIntegrationSpecs
 
         public List<RecordedHubEvent> Messages { get; } = [];
         public IHubClients<IEventsClient> Clients => _clients;
-        public IGroupManager Groups => new NoopGroupManager();
+        public IGroupManager Groups { get; } = new NoopGroupManager();
 
         private sealed class RecordingHubClients : IHubClients<IEventsClient>
         {

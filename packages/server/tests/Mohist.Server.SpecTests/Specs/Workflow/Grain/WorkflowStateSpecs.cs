@@ -2,6 +2,7 @@ using Mohist.Server.Runner.Grains;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using System.Text.Json;
@@ -280,6 +281,79 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(_workflowId, runtime.ActiveWorks.Select(w => w.OwnerId));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task StopAsync_StopEventAppendFailure_DoesNotPersistStoppedStateWithoutEvent()
+    {
+        var workflowId = $"wf-stop-fails-{Guid.NewGuid():N}";
+        var workflow = await StartWorkflowWithoutRunnerAsync(SingleStage(checks: []), workflowId);
+        var before = await LoadRunAsync(workflowId);
+
+        _fixture.EventStore.ThrowOnAppend = e => e.Type == EventCatalog.ReverseDns.WorkflowRunStopped;
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.StopAsync("event-store-down"));
+            await DeactivateWorkflowAsync(workflowId);
+
+            var after = await LoadRunAsync(workflowId);
+            Assert.Equal(before.Status, after.Status);
+            Assert.NotEqual(WorkflowRunStatus.Stopped, after.Status);
+            Assert.DoesNotContain(_fixture.EventStore.Appended,
+                e => e.Envelope.Source.ToString() == WorkflowRunSource(workflowId)
+                    && e.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStopped);
+        }
+        finally
+        {
+            _fixture.EventStore.ThrowOnAppend = null;
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task EventAwareSaveFailure_DeactivationDoesNotFlushMutatedRunStateOnly()
+    {
+        await ClearBacklogAsync();
+        var workflowId = $"wf-start-fails-{Guid.NewGuid():N}";
+        _workflowId = workflowId;
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), TestProjectId(workflowId));
+
+        _fixture.EventStore.ThrowOnAppend = e => e.Type == EventCatalog.ReverseDns.WorkflowRunStarted;
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.StartAsync(TestInput()));
+            await DeactivateWorkflowAsync(workflowId);
+
+            Assert.Null(await TryLoadRunAsync(workflowId));
+            Assert.DoesNotContain(_fixture.EventStore.Appended,
+                e => e.Envelope.Source.ToString() == WorkflowRunSource(workflowId)
+                    && e.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStarted);
+        }
+        finally
+        {
+            _fixture.EventStore.ThrowOnAppend = null;
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task StopAsync_AfterCommit_ReadbackKeepsStoppedEventAndState()
+    {
+        var workflowId = $"wf-stop-commit-{Guid.NewGuid():N}";
+        var workflow = await StartWorkflowWithoutRunnerAsync(SingleStage(checks: []), workflowId);
+
+        await workflow.StopAsync("user-stop");
+        await DeactivateWorkflowAsync(workflowId);
+
+        var after = await LoadRunAsync(workflowId);
+        Assert.Equal(WorkflowRunStatus.Stopped, after.Status);
+        var events = await EventStore.ListAsync(workflowId);
+        Assert.Contains(events, e => e.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStopped);
+    }
+
     // The offer/claim two-phase protocol was replaced by the reconciliation
     // model: ClaimNextAsync is the single write that starts work (claims the
     // next pending item and flips it to Running in one atomic transition).
@@ -322,4 +396,12 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var reentered = await workflow.ClaimNextAsync(runnerId);
         Assert.Null(reentered);
     }
+
+    private async Task<WorkflowRun?> TryLoadRunAsync(string workflowId)
+    {
+        var store = Services.GetRequiredService<IWorkflowRunStore>();
+        return await store.LoadAsync(workflowId);
+    }
+
+    private static string WorkflowRunSource(string workflowId) => $"/mohist/workflow-runs/{workflowId}";
 }

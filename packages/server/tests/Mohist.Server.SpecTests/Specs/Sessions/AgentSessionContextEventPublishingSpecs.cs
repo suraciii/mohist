@@ -1,6 +1,9 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -134,13 +137,11 @@ public class AgentSessionContextEventPublishingSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task SessionClosed_FailedWithContextExhaustion_EmitsReverseDnsDomainEvent()
+    public async Task SessionClosed_FailedWithContextExhaustion_PersistsContextExhaustedEventRow()
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
-
-        _fixture.RecordingPublisher.Clear();
 
         // Bring usage to 96%.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
@@ -156,27 +157,27 @@ public class AgentSessionContextEventPublishingSpecs
                 new AgentSessionRuntimeEventInput("session.closed", """{"status":"failed","exitCode":1}"""),
             }));
 
-        // The domain bus should have received the reverse-DNS
-        // AgentSessionContextExhausted event with the usage
-        // percent at failure time.
-        var exhaustion = _fixture.RecordingPublisher.Published
-            .FirstOrDefault(p => p.Type == EventCatalog.ReverseDns.AgentSessionContextExhausted);
-        Assert.NotNull(exhaustion);
-        Assert.NotNull(exhaustion!.Data);
-        Assert.Equal("context_exhaustion", exhaustion.Data!.Value.GetProperty("failureCategory").GetString());
-        Assert.Equal(96d, exhaustion.Data!.Value.GetProperty("contextUsagePercent").GetDouble());
+        // Force a flush so the post-state-save event rows are
+        // committed before we read them.
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(sessionId);
+        var exhaustion = Assert.Single(
+            stored,
+            s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionContextExhausted);
+        Assert.Equal("context_exhaustion", exhaustion.Envelope.Data!.Value.GetProperty("failureCategory").GetString());
+        Assert.Equal(96d, exhaustion.Envelope.Data!.Value.GetProperty("contextUsagePercent").GetDouble());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task UsageUpdated_EmitsReverseDnsContextHealthUpdatedEvent()
+    public async Task UsageUpdated_EmitsContextHealthUpdatedEventRow()
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(new OpenAgentSessionCommand(_runnerId, "opencode", WorkDir: "/work"));
-
-        _fixture.RecordingPublisher.Clear();
 
         // Bring usage to 50% (green) — first snapshot.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
@@ -185,11 +186,14 @@ public class AgentSessionContextEventPublishingSpecs
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":500,"contextWindowSize":1000}"""),
             }));
 
-        var health = _fixture.RecordingPublisher.Published
-            .FirstOrDefault(p => p.Type == EventCatalog.ReverseDns.AgentSessionContextHealthUpdated);
-        Assert.NotNull(health);
-        Assert.NotNull(health!.Data);
-        Assert.Equal("green", health.Data!.Value.GetProperty("healthStatus").GetString());
-        Assert.Equal(50d, health.Data!.Value.GetProperty("contextUsagePercent").GetDouble());
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(sessionId);
+        var health = Assert.Single(
+            stored,
+            s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionContextHealthUpdated);
+        Assert.Equal("green", health.Envelope.Data!.Value.GetProperty("healthStatus").GetString());
+        Assert.Equal(50d, health.Envelope.Data!.Value.GetProperty("contextUsagePercent").GetDouble());
     }
 }

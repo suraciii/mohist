@@ -247,12 +247,18 @@ internal static class InboxProjectionTestSupport
     public sealed class NoopEventStore : IEventStore
     {
         public Task AppendAsync(CloudEvent evt, CancellationToken ct = default) => Task.CompletedTask;
+        public Task AppendAsync(MohistDbContext db, CloudEvent evt, CancellationToken ct = default) => Task.CompletedTask;
         public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
         public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
         public Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
+public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
+        public Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<UndeliveredEvent>>(Array.Empty<UndeliveredEvent>());
     }
 
     public sealed class NoopEventPublisher : IEventPublisher
@@ -305,9 +311,9 @@ internal static class InboxProjectionTestSupport
                 services.AddScoped<InboxSubscriptionStore>();
                 services.AddScoped<IWorkflowRunStore>(sp => new WorkflowRunStore(
                     _database.Factory,
-                    new NoopEventStore(),
-                    new NoopEventPublisher()));
-                services.AddScoped<IStateStore<DomainIssue>>(sp => new IssueStore(_database.Factory));
+                    new NoopEventStore()));
+                services.AddScoped<IIssueStore>(sp => new IssueStore(_database.Factory, new NoopEventStore()));
+                services.AddScoped<IStateStore<DomainIssue>>(sp => sp.GetRequiredService<IIssueStore>());
                 configureServices?.Invoke(services);
                 return services.BuildServiceProvider();
             }

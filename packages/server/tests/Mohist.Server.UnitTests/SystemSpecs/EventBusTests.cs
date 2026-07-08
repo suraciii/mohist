@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.SystemSpecs;
@@ -9,7 +11,7 @@ public class EventBusTests
     [Fact]
     public async Task PublishAsync_NoSubscriber_DoesNotThrow()
     {
-        var bus = new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(new NoopEventStore(), NullLogger<InMemoryEventBus>.Instance);
 
         await bus.PublishAsync(
             data: new TestPayload("orphan"),
@@ -18,8 +20,9 @@ public class EventBusTests
     }
 
     [Fact]
-    public async Task PublishAsync_WithSubscriber_HandlerReceivesEnvelope()
+    public async Task PublishAsync_WithSubscriber_DoesNotInvokeHandler()
     {
+        var store = new RecordingEventStore();
         var received = new Queue<CloudEvent>();
         var subs = new List<Subscription>
         {
@@ -28,20 +31,45 @@ public class EventBusTests
                 onEvent: e => received.Enqueue(e)),
                 DispatchDynamic),
         };
-        var bus = new InMemoryEventBus(subs, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(subs, store, NullLogger<InMemoryEventBus>.Instance);
 
         await bus.PublishAsync(
             data: new TestPayload("hello"),
             type: "test.greeting",
             source: "test://greeting");
 
-        var match = received.Single(e => e.Type == "test.greeting");
-        Assert.NotNull(match.Data);
+        Assert.Empty(received);
+        var recorded = Assert.Single(store.Appended);
+        Assert.Equal("test.greeting", recorded.Envelope.Type);
+        Assert.Equal("test://greeting/", recorded.Envelope.Source.ToString());
+    }
+
+    [Fact]
+    public async Task PublishAsync_TypedOverload_PreservesSubjectDataAndExtensions()
+    {
+        var store = new RecordingEventStore();
+        var bus = new InMemoryEventBus(store, NullLogger<InMemoryEventBus>.Instance);
+        var extensions = new Dictionary<string, string>(StringComparer.Ordinal) { ["traceId"] = "tr_typed" };
+
+        await bus.PublishAsync(
+            data: new TestPayload("hello"),
+            type: "test.greeting",
+            source: "test://greeting",
+            subject: "subj-9",
+            extensions: extensions);
+
+        var recorded = Assert.Single(store.Appended);
+        Assert.Equal("test.greeting", recorded.Envelope.Type);
+        Assert.Equal("test://greeting/", recorded.Envelope.Source.ToString());
+        Assert.Equal("subj-9", recorded.Envelope.Subject);
+        Assert.Equal("tr_typed", recorded.Envelope.Extensions["traceId"]);
+        Assert.Contains("\"message\":\"hello\"", recorded.Envelope.Data!.Value.GetRawText());
     }
 
     [Fact]
     public async Task PublishAsync_FilteredOut_HandlerNotInvoked()
     {
+        var store = new RecordingEventStore();
         var received = new Queue<CloudEvent>();
         var subs = new List<Subscription>
         {
@@ -50,7 +78,7 @@ public class EventBusTests
                 onEvent: e => received.Enqueue(e)),
                 DispatchDynamic),
         };
-        var bus = new InMemoryEventBus(subs, NullLogger<InMemoryEventBus>.Instance);
+        var bus = new InMemoryEventBus(subs, store, NullLogger<InMemoryEventBus>.Instance);
 
         await bus.PublishAsync(
             data: new TestPayload("hello"),
@@ -58,6 +86,61 @@ public class EventBusTests
             source: "test://greeting");
 
         Assert.Empty(received);
+        Assert.Single(store.Appended);
+    }
+
+    [Fact]
+    public async Task PublishAsync_CloudEventOverload_AppendsSingleRowPreservingEnvelope()
+    {
+        var store = new RecordingEventStore();
+        var bus = new InMemoryEventBus(store, NullLogger<InMemoryEventBus>.Instance);
+
+        var data = JsonDocument.Parse("{\"k\":\"v\"}").RootElement;
+        var extensions = new Dictionary<string, string>(StringComparer.Ordinal) { ["traceId"] = "tr_1" };
+        var envelope = new CloudEvent(
+            id: "evt-raw-1",
+            source: new Uri("test://raw"),
+            type: "test.raw",
+            time: new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero),
+            data: data,
+            dataContentType: "application/json",
+            subject: "subj-1",
+            extensions: extensions);
+
+        await bus.PublishAsync(envelope);
+
+        var recorded = Assert.Single(store.Appended);
+        Assert.Same(envelope, recorded.Envelope);
+        Assert.Equal("test.raw", recorded.Envelope.Type);
+        Assert.Equal("test://raw/", recorded.Envelope.Source.ToString());
+        Assert.Equal("subj-1", recorded.Envelope.Subject);
+        Assert.Equal("tr_1", recorded.Envelope.Extensions["traceId"]);
+    }
+
+    [Fact]
+    public async Task PublishAsync_MatchingThrowingHandler_DoesNotDispatchAndAppendsRow()
+    {
+        // Publish is write-only: even a matching handler that would throw if
+        // dispatched must not affect the publish path. The row is appended and
+        // the handler is never invoked.
+        var store = new RecordingEventStore();
+        var received = new Queue<CloudEvent>();
+        var subs = new List<Subscription>
+        {
+            new("test.greeting", new RecordingHandler(
+                filter: _ => true,
+                onEvent: _ => throw new InvalidOperationException("handler exploded")),
+                DispatchDynamic),
+        };
+        var bus = new InMemoryEventBus(subs, store, NullLogger<InMemoryEventBus>.Instance);
+
+        await bus.PublishAsync(
+            data: new TestPayload("hello"),
+            type: "test.greeting",
+            source: "test://greeting");
+
+        Assert.Empty(received);
+        Assert.Single(store.Appended);
     }
 
     private sealed record TestPayload(string Message);

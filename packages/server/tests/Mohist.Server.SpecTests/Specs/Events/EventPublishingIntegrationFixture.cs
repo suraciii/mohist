@@ -10,12 +10,12 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Events;
 
 /// <summary>
-/// Integration fixture for the SignalR event-publishing spec tests.
-/// Wraps the production <see cref="IEventPublisher"/> with a
-/// <see cref="RecordingIEventPublisher"/> so tests can assert on
-/// <c>PublishAsync</c> call counts. Hosted in its own xUnit collection
-/// (<c>EventPublishing</c>) so the recording publisher does not leak
-/// into the shared <c>MohistIntegration</c> collection.
+/// Integration fixture for event-publishing specs. It replaces the
+/// realtime transcript publisher with a recorder and keeps a recording
+/// <see cref="IEventPublisher"/> available for tests that still exercise
+/// explicit publisher calls. Hosted in its own xUnit collection
+/// (<c>EventPublishing</c>) so test-only publishers do not leak into the
+/// shared <c>MohistIntegration</c> collection.
 /// </summary>
 public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
 {
@@ -38,6 +38,7 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
 
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client => _factory.CreateClient();
+    public IServiceProvider Services => _factory.Services;
     public RecordingIEventPublisher RecordingPublisher => _factory.RecordingPublisher;
     public RecordingTranscriptEventPublisher RecordingTranscriptPublisher => _factory.RecordingTranscriptPublisher;
 

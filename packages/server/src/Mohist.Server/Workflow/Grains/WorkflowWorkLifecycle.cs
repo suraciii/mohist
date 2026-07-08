@@ -82,7 +82,7 @@ internal sealed class WorkflowWorkLifecycle
         return Task.FromResult<IReadOnlyList<WorkflowEvent>>(run.ProcessCheckResults(report.Results, now));
     }
 
-    public async Task AbandonRunningWorkAsync(WorkflowRun run, string reason)
+    public async Task<IReadOnlyList<WorkflowEvent>> AbandonRunningWorkAsync(WorkflowRun run, string reason)
     {
         await _owner.ReleaseCurrentStageLocks(reason);
 
@@ -96,11 +96,10 @@ internal sealed class WorkflowWorkLifecycle
         if (runningTask is not null)
         {
             var events = run.FailTaskForStopped(reason, _owner.Now());
-            await _owner.SaveAsyncWithEvents(events);
-            return;
+            return events;
         }
 
-        await _owner.SaveAsync();
+        return [];
     }
 
     public async Task<string?> MarkTaskRunningAsync(

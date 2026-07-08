@@ -2,17 +2,29 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Events;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
+using DomainIssueEvent = Mohist.Server.Issue.Domain.Events.IssueEvent;
 
 namespace Mohist.Server.Infrastructure.Data.Issue;
 
-public class IssueStore : IStateStore<DomainIssue>
+public interface IIssueStore : IStateStore<DomainIssue>
 {
-    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    Task SaveAsync(string key, DomainIssue state, IReadOnlyList<DomainIssueEvent> events, CancellationToken ct = default);
+}
 
-    public IssueStore(IDbContextFactory<MohistDbContext> dbFactory)
+public class IssueStore : IIssueStore
+{
+    private const string SpecVersion = "1.0";
+
+    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly IEventStore _eventStore;
+
+    public IssueStore(IDbContextFactory<MohistDbContext> dbFactory, IEventStore eventStore)
     {
         _dbFactory = dbFactory;
+        _eventStore = eventStore;
     }
 
     public async Task<DomainIssue?> LoadAsync(string key)
@@ -39,9 +51,75 @@ public class IssueStore : IStateStore<DomainIssue>
         await db.SaveChangesAsync();
     }
 
+    public async Task SaveAsync(string key, DomainIssue state, IReadOnlyList<DomainIssueEvent> events, CancellationToken ct = default)
+    {
+        var source = IssueEventPersistence.IssueSource(state.Id);
+        var subject = state.Number.ToString();
+        var extensions = BuildIdentityExtensions(state);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            await StageIssueAsync(db, state, ct);
+            foreach (var evt in events)
+            {
+                if (evt is null) continue;
+                var envelope = ToCloudEvent(evt, source, subject, extensions);
+                await _eventStore.AppendAsync(db, envelope, ct);
+            }
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw;
+        }
+    }
+
     public Task DeleteAsync(string key) => throw new NotImplementedException();
 
     public Task<IReadOnlyList<DomainIssue>> ListAsync() => throw new NotImplementedException();
+
+    private static async Task StageIssueAsync(MohistDbContext db, DomainIssue state, CancellationToken ct)
+    {
+        var row = await db.Issues.FindAsync(new object[] { state.Id }, ct);
+        var json = Serialize(state);
+        if (row is null)
+        {
+            db.Issues.Add(new IssueRow { IssueId = state.Id, State = json, Risk = state.Risk });
+        }
+        else
+        {
+            row.State = json;
+            row.Risk = state.Risk;
+        }
+    }
+
+    private static CloudEvent ToCloudEvent(DomainIssueEvent evt, string source, string subject, IReadOnlyDictionary<string, string> extensions)
+    {
+        var type = IssueEventSerializer.BusType(evt);
+        var data = IssueEventSerializer.ToData(evt);
+        return new CloudEvent(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri(source, UriKind.Relative),
+            type: type,
+            time: DateTimeOffset.UtcNow,
+            data: data,
+            subject: subject,
+            specVersion: SpecVersion,
+            extensions: extensions);
+    }
+
+    private static Dictionary<string, string> BuildIdentityExtensions(DomainIssue state)
+    {
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["projectid"] = state.ProjectId,
+            ["issueid"] = state.Id,
+            ["issueno"] = state.Number.ToString(),
+        };
+    }
 
     public static DomainIssue? Deserialize(string json) =>
         string.IsNullOrEmpty(json) ? null : JSON.Deserialize<DomainIssue>(json);

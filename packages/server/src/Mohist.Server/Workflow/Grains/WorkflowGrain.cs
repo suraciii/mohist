@@ -25,6 +25,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private WorkflowRun? _run;
     private string? _cachedAssignedWorkerId;
     private bool _runDirty;
+    private bool _runReloadRequired;
     private readonly IWorkflowRunStore _runStore;
     private readonly WorkflowProfileManager _profileManager;
     private readonly WorkflowSessionHealthService _sessionHealth;
@@ -75,6 +76,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         _run = await _runStore.LoadAsync(GrainKey);
+        _runReloadRequired = false;
 
         await ClearStoppedRunStaleApprovalGateAsync(ct);
 
@@ -83,7 +85,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
     {
-        if (!_runDirty || _run is null) return;
+        if (!_runDirty || _runReloadRequired || _run is null) return;
 
         try
         {
@@ -139,14 +141,13 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         if (_run.Status is not (WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
-        _ = _run.Stop();
+        var stopEvents = _run.Stop();
 
-        await _workLifecycle.AbandonRunningWorkAsync(_run!, reason ?? "stopped");
-
-        await SaveRunAsync();
+        var abandonedEvents = await _workLifecycle.AbandonRunningWorkAsync(_run!, reason ?? "stopped");
+        var events = abandonedEvents.Concat(stopEvents).ToArray();
 
         _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);
-        await CommitAsync([new WorkflowRunStopped()], reason);
+        await CommitAsync(events, reason);
     }
 
     public async Task ApproveAsync()
@@ -196,19 +197,42 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
                 GrainKey, failedTaskId ?? "(none)", stageId ?? "(none)");
         }
 
+        var retriedStageId = _run.CurrentStageId;
         await ReleaseCurrentStageLocksAsync("retried");
         var events = _run.Retry(Now());
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
-        await CommitAsync(events);
+        try
+        {
+            await CommitAsync(events);
+        }
+        catch
+        {
+            // The retry did not persist. Re-acquire the lock for the stage we
+            // just released so the rolled-back run still holds its sequential
+            // lock until a later successful transition releases it.
+            if (retriedStageId is not null)
+                await AcquireStageLocksIfNeededAsync(retriedStageId);
+            throw;
+        }
     }
 
     public async Task RerunAsync()
     {
         EnsureRun();
+        var rerunStageId = _run.CurrentStageId;
         await ReleaseCurrentStageLocksAsync("rerun");
         var events = _run.Rerun(Now());
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
-        await CommitAsync(events);
+        try
+        {
+            await CommitAsync(events);
+        }
+        catch
+        {
+            if (rerunStageId is not null)
+                await AcquireStageLocksIfNeededAsync(rerunStageId);
+            throw;
+        }
     }
 
     public async Task<WorkflowControlResult> RerunFromStageAsync(string stageId)
@@ -225,10 +249,25 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         }
 
         var targetIdx = _run.Stages.FindIndex(s => s.Id == stageId);
+        var releasedStages = new List<string>();
         for (var i = targetIdx; i < _run.Stages.Count; i++)
+        {
+            releasedStages.Add(_run.Stages[i].Id);
             await ReleaseStageLocksAsync(_run.Stages[i].Id, "rerun-from-stage");
+        }
         _log.LogInformation("Workflow {Id} rerun-from-stage at stage={Stage}", GrainKey, stageId);
-        await CommitAsync(events);
+        try
+        {
+            await CommitAsync(events);
+        }
+        catch
+        {
+            // Re-acquire the locks for stages we released; the rerun-from-stage
+            // did not persist, so the rolled-back run still requires them.
+            foreach (var released in releasedStages)
+                await AcquireStageLocksIfNeededAsync(released);
+            throw;
+        }
         return WorkflowControlResult.Ok();
     }
 
@@ -268,6 +307,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public async Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId)
     {
+        RejectIfRunReloadRequired();
         if (_run is null) return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "missing");
         if (_run.Status.IsTerminal() || _run.Status is WorkflowRunStatus.Created or WorkflowRunStatus.Paused or WorkflowRunStatus.AwaitingApproval)
             return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
@@ -291,6 +331,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public async Task<WorkItem?> ClaimNextAsync(string workerId)
     {
+        RejectIfRunReloadRequired();
         if (_run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
             return null;
 
@@ -361,22 +402,26 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public Task<string?> GetRunStatusAsync()
     {
+        RejectIfRunReloadRequired();
         return Task.FromResult(_run?.Status.ToString());
     }
 
     public Task<bool> IsStoppedOrTerminalAsync()
     {
+        RejectIfRunReloadRequired();
         if (_run is null) return Task.FromResult(true);
         return Task.FromResult(_run.IsTerminal());
     }
 
     public Task<string?> GetAssignedWorkerIdAsync()
     {
+        RejectIfRunReloadRequired();
         return Task.FromResult(_run?.Assignment?.WorkerId ?? _cachedAssignedWorkerId);
     }
 
     public Task<string?> GetCurrentWorkIdAsync()
     {
+        RejectIfRunReloadRequired();
         var stage = _run?.CurrentStage();
         if (stage is null) return Task.FromResult<string?>(null);
         return Task.FromResult(stage.RunningTask?.WorkId ?? stage.ChecksWorkId);
@@ -384,6 +429,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId)
     {
+        RejectIfRunReloadRequired();
         return Task.FromResult(_readModel.GetActiveWork(workId));
     }
 
@@ -413,6 +459,18 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         if (_run is null)
             throw new InvalidOperationException($"Workflow '{GrainKey}' has no workflow run");
+        if (_runReloadRequired)
+            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed event-aware save");
+    }
+
+    // For entry points that return a result (not throw) when no run exists, a
+    // reload-required activation must still be rejected: the dirty in-memory
+    // run must not be mutated/persisted through these paths before the grain
+    // reloads from storage.
+    private void RejectIfRunReloadRequired()
+    {
+        if (_runReloadRequired)
+            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed event-aware save");
     }
 
     private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, CancellationToken ct = default)
@@ -508,12 +566,25 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         }
         catch (DbUpdateConcurrencyException ex)
         {
+            MarkRunReloadRequired();
             _log.LogWarning(ex,
                 "Workflow {Id} save failed because the persisted run ETag changed; deactivating grain to reload state",
                 GrainKey);
             DeactivateOnIdle();
             throw;
         }
+        catch
+        {
+            MarkRunReloadRequired();
+            DeactivateOnIdle();
+            throw;
+        }
+    }
+
+    private void MarkRunReloadRequired()
+    {
+        _runDirty = false;
+        _runReloadRequired = true;
     }
 
     private DateTimeOffset Now() => _timeProvider.GetUtcNow();

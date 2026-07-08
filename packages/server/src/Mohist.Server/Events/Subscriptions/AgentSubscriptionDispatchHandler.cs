@@ -45,13 +45,12 @@ namespace Mohist.Server.Events.Subscriptions;
 /// <b>Fire-and-forget.</b> <see cref="IAgentLauncher.LaunchAsync"/>
 /// awaits the AgentJobGrain's mint + enqueue but does not block on a
 /// runner response, mirroring the manual HTTP launch path's behavior
-/// (issue-391 T-001). The single-threaded InMemoryEventBus dispatch loop
-/// therefore only blocks for grain mint/enqueue — the runner itself runs
-/// out-of-band.
+/// (issue-391 T-001). The dispatch call therefore only blocks for grain
+/// mint/enqueue — the runner itself runs out-of-band.
 /// </para>
 /// <para>
 /// <b>Project resolution.</b> Issue events already stamp
-/// <c>extensions["projectid"]</c> (see <c>IssueGrain.PublishIssueEventsAsync</c>).
+/// <c>extensions["projectid"]</c> (see <c>IssueStore.SaveAsync</c>).
 /// Workflow events now stamp <c>extensions["projectid"]</c> at production time
 /// in <c>WorkflowRunStore.ToCloudEvent</c> using the run's metadata annotations.
 /// Events without a project id on the envelope are skipped gracefully.
@@ -174,7 +173,7 @@ public sealed class AgentSubscriptionDispatchHandler : ICloudEventHandler
     /// <summary>
     /// Returns the project id stamped on the CloudEvent envelope. Issue
     /// events stamp <c>extensions["projectid"]</c> at production time in
-    /// <c>IssueGrain.PublishIssueEventsAsync</c>; workflow events stamp it
+    /// <c>IssueStore.SaveAsync</c>; workflow events stamp it
     /// in <c>WorkflowRunStore.ToCloudEvent</c> from the run's metadata
     /// annotations. Events whose envelope cannot be resolved are skipped.
     /// </summary>

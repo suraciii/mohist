@@ -16,16 +16,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly IAgentSessionStore _stateStore;
     private readonly IAgentSessionTranscriptStore _transcriptStore;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IEventPublisher _eventPublisher;
     private readonly ITranscriptEventPublisher _transcriptPublisher;
     private readonly ILogger<AgentSessionGrain> _log;
     private readonly TimeProvider _timeProvider;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
+    private bool _sessionReloadRequired;
     private AgentSessionTranscriptSummary? _cachedSummary;
     private long _realtimeSequence;
     private IDisposable? _persistTimer;
     private bool _stateDirty;
+    private readonly List<AgentSessionEvent> _pendingDomainEvents = new();
     private string? _lastHealthStatus;
     private double? _lastHealthPercent;
 
@@ -33,7 +34,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IAgentSessionStore stateStore,
         IAgentSessionTranscriptStore transcriptStore,
         IDbContextFactory<MohistDbContext> dbFactory,
-        IEventPublisher eventPublisher,
         ITranscriptEventPublisher transcriptPublisher,
         TimeProvider timeProvider,
         ILogger<AgentSessionGrain> log)
@@ -41,7 +41,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _stateStore = stateStore;
         _transcriptStore = transcriptStore;
         _dbFactory = dbFactory;
-        _eventPublisher = eventPublisher;
         _transcriptPublisher = transcriptPublisher;
         _timeProvider = timeProvider;
         _log = log;
@@ -51,6 +50,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
+        _sessionReloadRequired = false;
         _session = await _stateStore.LoadAsync(SessionId);
     }
 
@@ -59,11 +59,18 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _persistTimer?.Dispose();
         _persistTimer = null;
 
+        // A quarantined activation was deactivated because an event-aware save
+        // failed; its in-memory session and pending events are dirty (the store
+        // rolled back). Do not attempt another flush from that dirty state.
+        if (_sessionReloadRequired)
+            return;
+
         await FlushAsync(ct);
     }
 
     public async Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command)
     {
+        RejectIfReloadRequired();
         if (_session is null)
         {
             _session = CreateSession(command);
@@ -270,13 +277,45 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _transcript.Accept(session, transcriptEntries, now);
         var transcript = _transcript.BuildFlush(session, now);
 
-        await _stateStore.SaveAsync(SessionId, session, events);
+        try
+        {
+            await _stateStore.SaveAsync(SessionId, session, events);
+        }
+        catch
+        {
+            // Recovery transitions (RebindRuntimeSession/RecordCompaction) have
+            // already mutated the live session. The store rolled back, so the
+            // committed state and AgentSessionEvents rows are unchanged.
+            // Quarantine the activation so the mutated in-memory session is
+            // not salvaged on a later command; the next activation reloads
+            // from storage. See CommitAsync for the same defense.
+            _sessionReloadRequired = true;
+            DeactivateOnIdle();
+            throw;
+        }
+        // The state/event transaction committed atomically. The recovery
+        // transitions are durable; a later Compact/Reset retry must not
+        // re-append them. Treat the transcript like the normal flush path:
+        // if its save fails, the committed domain events stay committed and
+        // the un-committed transcript flush stays in _transcript for the next
+        // retry. The recovery command returns success because the domain
+        // fact (rebind/compaction) is persistent; only the transcript
+        // evidence is pending.
+        _session = session;
         if (transcript is not null)
         {
-            await _transcriptStore.SaveAsync(transcript);
-            _transcript.CommitFlush();
+            try
+            {
+                await _transcriptStore.SaveAsync(transcript);
+                _transcript.CommitFlush();
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "AgentSessionGrain failed to save recovery transcript for {SessionId}; parts={PartCount}",
+                    SessionId, transcript.Parts.Count);
+            }
         }
-        _session = session;
 
         await FanOutRealtimeAsync(session, transcriptEntries, events);
     }
@@ -362,6 +401,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         _transcript.Accept(session, allEntries, now);
 
+        _pendingDomainEvents.AddRange(events);
         _session = session;
         _cachedSummary = null;
 
@@ -507,22 +547,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IReadOnlyList<RuntimeEventEnvelope> entries,
         IReadOnlyList<AgentSessionEvent> domainEvents)
     {
-        var source = AgentSessionSource(session);
-
-        foreach (var domainEvent in domainEvents)
-        {
-            try
-            {
-                await PublishAgentSessionLifecycleAsync(domainEvent, source, session.Id);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "AgentSessionGrain failed to publish domain event for {SessionId}",
-                    session.Id);
-            }
-        }
-
         if (entries.Count == 0) return;
 
         foreach (var row in entries)
@@ -589,50 +613,65 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private async Task<bool> FlushAsync(CancellationToken ct)
     {
         if (_session is null) return true;
+        // A prior event-aware save on this activation failed and quarantined
+        // it; do not attempt another flush from the same dirty state.
+        if (_sessionReloadRequired)
+            throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
 
         var now = Now();
         var transcript = _transcript.BuildFlush(_session, now);
-        var stateSaved = !_stateDirty;
 
         if (_stateDirty)
         {
+            var pendingEvents = _pendingDomainEvents.Count == 0
+                ? Array.Empty<AgentSessionEvent>()
+                : _pendingDomainEvents.ToArray();
             try
             {
-                await _stateStore.SaveAsync(SessionId, _session, Array.Empty<AgentSessionEvent>(), ct);
-                stateSaved = true;
+                await _stateStore.SaveAsync(SessionId, _session, pendingEvents, ct);
             }
             catch (Exception ex)
             {
                 _log.LogError(ex,
                     "AgentSessionGrain failed to save state for {SessionId}",
                     SessionId);
+                // The state/event transaction rolled back, but the live
+                // session and _pendingDomainEvents already absorbed the
+                // runtime activity. Quarantine the activation so a later
+                // command cannot persist the dirty state without the matching
+                // AgentSessionEvents rows. See CommitAsync for the same defense.
+                _sessionReloadRequired = true;
+                DeactivateOnIdle();
+                throw;
             }
-        }
-
-        var transcriptSaved = transcript is null;
-        if (transcript is not null)
-        {
-            try
-            {
-                await _transcriptStore.SaveAsync(transcript, ct);
-                transcriptSaved = true;
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "AgentSessionGrain failed to save transcript for {SessionId}; parts={PartCount}",
-                    SessionId, transcript.Parts.Count);
-            }
-        }
-
-        if (stateSaved && transcriptSaved)
-        {
-            if (transcript is not null)
-                _transcript.CommitFlush();
+            // The state/event transaction committed atomically. The domain
+            // events are now durable rows; clear them so a subsequent
+            // transcript-only retry cannot re-append them. Splitting the two
+            // retry states means a transcript failure no longer duplicates
+            // already-committed lifecycle events on the next flush.
+            _pendingDomainEvents.Clear();
             _stateDirty = false;
-            return true;
         }
-        return false;
+
+        if (transcript is null)
+            return true;
+
+        try
+        {
+            await _transcriptStore.SaveAsync(transcript, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "AgentSessionGrain failed to save transcript for {SessionId}; parts={PartCount}",
+                SessionId, transcript.Parts.Count);
+            // State/events already committed; only the transcript needs
+            // retry. _transcript keeps the un-committed flush, so the next
+            // PersistCallback re-attempts just the transcript.
+            return false;
+        }
+        _transcript.CommitFlush();
+        return true;
     }
 
     private void DisposePersistTimer()
@@ -643,6 +682,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public async Task<AgentSessionInfo?> GetAsync()
     {
+        // A quarantined activation holds a session mutated past a rolled-back
+        // state/event transaction. Do not expose that dirty view; reject until
+        // the grain reactivates and reloads from storage.
+        if (_sessionReloadRequired)
+            throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
         return _session is null ? null : await ToInfoAsync(_session);
     }
 
@@ -660,51 +704,39 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private async Task<AgentSession> GetRequiredAsync()
     {
+        if (_sessionReloadRequired)
+            throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
         if (_session is not null) return _session;
 
         _session = await _stateStore.LoadAsync(SessionId);
         return _session ?? throw new InvalidOperationException($"Agent session {SessionId} does not exist.");
     }
 
-    private async Task CommitAsync(AgentSession session, IReadOnlyList<AgentSessionEvent> events)
+    private void RejectIfReloadRequired()
     {
-        await _stateStore.SaveAsync(SessionId, session, events);
-        _session = session;
-
-        var source = AgentSessionSource(session);
-        foreach (var domainEvent in events)
-        {
-            try
-            {
-                await PublishAgentSessionLifecycleAsync(domainEvent, source, session.Id);
-            }
-            catch (InvalidOperationException)
-            {
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "AgentSessionGrain failed to publish lifecycle event for {SessionId}",
-                    session.Id);
-            }
-        }
+        if (_sessionReloadRequired)
+            throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
     }
 
-    private static string AgentSessionSource(AgentSession session) =>
-        $"/mohist/agent-session/{session.Id}";
-
-    private async Task PublishAgentSessionLifecycleAsync(AgentSessionEvent? domainEvent, string source, string subject)
+    private async Task CommitAsync(AgentSession session, IReadOnlyList<AgentSessionEvent> events)
     {
-        if (domainEvent is null) return;
-        var concrete = domainEvent.Value;
-        var type = AgentSessionEventSerializer.BusType(concrete);
-        var data = AgentSessionEventSerializer.ToData(concrete);
-        await _eventPublisher.PublishAsync(
-            data,
-            type,
-            source,
-            subject: subject,
-            ct: CancellationToken.None);
+        try
+        {
+            await _stateStore.SaveAsync(SessionId, session, events);
+        }
+        catch
+        {
+            // The store rolled back its transaction, but the transitions have
+            // already mutated the live session object (Runtime/Status/Usage).
+            // A retry on this activation could bind/record the mutation again
+            // with zero events and persist it through the no-events path,
+            // losing the AgentSessionEvents row. Quarantine the activation so
+            // GetRequiredAsync() rejects further work until it reloads.
+            _sessionReloadRequired = true;
+            DeactivateOnIdle();
+            throw;
+        }
+        _session = session;
     }
 
     private async Task<AgentSessionInfo> ToInfoAsync(AgentSession s)

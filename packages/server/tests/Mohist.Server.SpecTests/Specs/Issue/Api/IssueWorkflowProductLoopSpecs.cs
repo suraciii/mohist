@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events.Subscriptions;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -88,6 +91,13 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/approve");
 
         await DrainUntilDoneAsync(project.Id, issue.Number);
+
+        // issue-361 T-002: the bus is write-only, so the
+        // IssueWorkflowCompletionHandler is no longer invoked by the
+        // workflow-run.completed publish. Replay the persisted row
+        // through the handler — that is the future dispatcher's job
+        // and the only path that completes the issue end-to-end today.
+        await DispatchWorkflowRunCompletedAsync(startedIssue.WorkflowRunId!);
 
         var completed = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
         Assert.Equal("done", completed.Status);
@@ -548,6 +558,23 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
 
     private Task ReportAsync(string workflowRunId, string workId, string status, string? message = null, string? output = null, int? exitCode = null) =>
         _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workflowRunId, workId, status, message, output, exitCode });
+
+    private async Task DispatchWorkflowRunCompletedAsync(string workflowRunId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+        var handler = scope.ServiceProvider.GetRequiredService<IssueWorkflowCompletionHandler>();
+
+        var stored = await TestWait.ForAsync(
+            async () => (await events.ListAsync(workflowRunId))
+                .FirstOrDefault(e => e.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunCompleted),
+            envelope => envelope is not null,
+            TimeSpan.FromSeconds(3),
+            TimeSpan.FromMilliseconds(50),
+            $"workflow.run.completed event row for {workflowRunId}");
+
+        await handler.HandleAsync(stored!.Envelope, CancellationToken.None);
+    }
 
     private static string[] ParseCheckNames(string? with)
     {
