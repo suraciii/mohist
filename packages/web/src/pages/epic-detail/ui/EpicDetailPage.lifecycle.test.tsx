@@ -58,14 +58,6 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
   }
 })
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useNavigate: () => vi.fn(),
-  }
-})
-
 describe('EpicDetailPage lifecycle guards', () => {
   function makeEpic(overrides: Record<string, unknown> = {}) {
     return {

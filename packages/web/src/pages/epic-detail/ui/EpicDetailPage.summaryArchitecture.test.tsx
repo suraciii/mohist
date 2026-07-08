@@ -56,14 +56,6 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
   }
 })
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useNavigate: () => vi.fn(),
-  }
-})
-
 describe('EpicDetailPage summary-first information architecture (T-002)', () => {
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
