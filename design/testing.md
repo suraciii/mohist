@@ -192,6 +192,7 @@ SpecTests 默认开 `parallelizeTestCollections`（xUnit 默认），按 collect
 
 ### web（TSX）
 
+- 环境：vitest 按 project 拆分——纯逻辑 `.test.ts` 跑 `node` 环境（不起 jsdom，jsdom 实例化约占测试计算量三分之二）；`.test.tsx` / `tests/*.spec.tsx` 跑 `jsdom`。需要 DOM 的 `.test.ts`（`renderHook`、`document` 依赖）必须列入 `vite.config.ts` 的 `domDependentTestFiles`，否则在 node 环境下会挂。
 - 渲染：`tests/test-utils.tsx` 的 `customRender`（已包 `QueryClientProvider` + `ProjectProvider` + `Router`）。
 - 数据：`createQueryClient()`（`retry: false`，**应为 `gcTime: 0`**），优先 MSW `setupServer`，或 `vi.mock('entities/.../api/client')`。
 - 网络：MSW（推荐，spec 级）或 `vi.stubGlobal('fetch')`（unit 级），二者不要混用。
