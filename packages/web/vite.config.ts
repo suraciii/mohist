@@ -11,6 +11,7 @@ const domDependentTestFiles = [
   'src/app/providers/LiveTaskProvider.transcript.test.ts',
   'src/pages/issue-detail/model/useIssueDetailMutations.test.ts',
   'src/shared/lib/theme/theme.test.ts',
+  'src/widgets/coder-session/model/activity-cards.test.ts',
   'src/widgets/issue-event-timeline/useEventTimeline.test.ts',
   'src/widgets/issue-workflow/model/useWorkflowSessionFiltering.test.ts',
 ]
