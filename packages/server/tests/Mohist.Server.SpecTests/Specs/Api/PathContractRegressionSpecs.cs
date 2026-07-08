@@ -50,7 +50,7 @@ public class PathContractRegressionSpecs
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public void ProjectInfo_OmitsPathAndEffectivePath()
@@ -65,7 +65,7 @@ public class PathContractRegressionSpecs
         Assert.DoesNotContain("CheckoutPath", props);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public void RepositoryInfo_OmitsPathRemoteAndResolvedPath()
@@ -90,7 +90,7 @@ public class PathContractRegressionSpecs
     // slug() helper in packages/runner/src/runtime/workspace.ts. The
     // runner-equivalent test in workspace.spec.ts asserts the JS side; this
     // test pins the C# side with representative Unicode inputs.
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("my-project", "my-project")]

@@ -25,7 +25,7 @@ public static class MohistSiloRegistration
         // Default to the well-known localhost clustering ports, but allow tests to
         // override them (via TestClusterPortAllocator) so multiple silos can coexist
         // in one process without fighting over 11111 / 30000. See design/testing.md
-        // "并行与超时预算" and dotnet/orleans LocalhostSiloTests for the pattern.
+        // "并行与端口预算" and dotnet/orleans LocalhostSiloTests for the pattern.
         var siloPort = configuration.GetValue<int?>("Mohist:Silo:SiloPort") ?? EndpointOptions.DEFAULT_SILO_PORT;
         var gatewayPort = configuration.GetValue<int?>("Mohist:Silo:GatewayPort") ?? EndpointOptions.DEFAULT_GATEWAY_PORT;
         silo.UseLocalhostClustering(siloPort, gatewayPort);

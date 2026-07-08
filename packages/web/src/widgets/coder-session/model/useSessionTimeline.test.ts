@@ -1038,7 +1038,7 @@ describe('useSessionTimeline event-wiring integration', () => {
     expect(hook.result.current.rounds[0].agentText).toBe('first ')
 
     await act(async () => {
-      vi.advanceTimersToNextFrame()
+      vi.advanceTimersByTime(30)
     })
 
     expect(hook.result.current.rounds[0].agentText).toBe('first second')

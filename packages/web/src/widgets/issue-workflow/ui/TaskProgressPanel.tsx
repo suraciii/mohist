@@ -4,8 +4,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components
 import type { StageTaskState, WorkflowStage } from '../../../entities/issue'
 import { useWorkflowTimeline } from '../../../entities/issue'
 import { resolveDeliveryFailureFromMessage, resolveDeliveryFailureFromOutput } from '../../../shared/lib/delivery-failure'
-import { statusTreatment } from '@/shared/status-presentation'
-import { cn } from '@/shared/lib/utils'
 import { TaskLogPanel } from './TaskLogPanel'
 
 function parseTaskOutput(raw: string | null | undefined): unknown {
@@ -28,14 +26,14 @@ interface TaskProgressPanelProps {
 function StageTaskStatusIcon({ status }: { status: StageTaskState['status'] }) {
   if (status === 'failed') {
     return (
-      <svg className="h-4 w-4 text-danger flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+      <svg className="h-4 w-4 text-red-500 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
       </svg>
     )
   }
   if (status === 'completed') {
     return (
-      <svg className="h-4 w-4 text-success flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+      <svg className="h-4 w-4 text-green-500 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
       </svg>
     )
@@ -66,38 +64,19 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: Stage
   const failureKind = deliveryGuidance?.failureKind
   const isWorkspaceSetupFailure = failureKind === 'workspace-setup'
 
-  // Failure-row chrome: route the row border / hover through the danger
-  // family so the task row's red chrome agrees with `WorkflowConvergencePanel`
-  // and the kanban `blocked` indicator.
-  const failedTreatment = statusTreatment('workflow-stage', 'failed')
-
   return (
-    <div className={cn(
-      'rounded-md border overflow-hidden',
-      isFailed ? failedTreatment.border : 'border-border',
-    )}>
+    <div className={`rounded-md border ${isFailed ? 'border-red-200' : 'border'} overflow-hidden`}>
       <Button
         variant="ghost"
         onClick={() => canExpand && setExpanded(!expanded)}
-        className={cn(
-          'w-full flex items-center gap-2 px-2.5 py-2 text-left h-auto justify-start font-normal',
-          isFailed && cn('hover:bg-danger-subtle', failedTreatment.text),
-          canExpand && 'cursor-pointer',
-        )}
+        className={`w-full flex items-center gap-2 px-2.5 py-2 text-left h-auto justify-start font-normal ${isFailed ? 'hover:bg-red-50' : ''} ${canExpand ? 'cursor-pointer' : ''}`}
       >
         <StageTaskStatusIcon status={task.status} />
-        <span className={cn(
-          'text-sm flex-1 truncate',
-          isFailed
-            ? failedTreatment.text
-            : task.status === 'completed'
-              ? 'text-foreground/80'
-              : 'text-muted-foreground',
-        )}>
+        <span className={`text-sm flex-1 truncate ${isFailed ? 'text-red-700' : task.status === 'completed' ? 'text-foreground/80' : 'text-muted-foreground'}`}>
           {task.title}
         </span>
         {isInProgress && (
-          <svg className="h-3.5 w-3.5 text-info animate-spin flex-shrink-0" viewBox="0 0 24 24" fill="none">
+          <svg className="h-3.5 w-3.5 text-blue-500 animate-spin flex-shrink-0" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
@@ -114,44 +93,37 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: Stage
         )}
       </Button>
       {expanded && canExpand && (
-        <div className={cn(
-          'px-2.5 pb-2 border-t space-y-1.5',
-          isFailed
-            ? cn(failedTreatment.border, 'bg-danger-subtle/50')
-            : 'border-border bg-muted/30',
-        )}>
+        <div className={`px-2.5 pb-2 border-t space-y-1.5 ${isFailed ? 'border-red-100 bg-red-50/50' : 'border-slate-100 bg-slate-50/50'}`}>
           {isFailed && task.reason && (
-            <p className="text-xs text-warning">{task.reason}</p>
+            <p className="text-xs text-amber-600">{task.reason}</p>
           )}
           {deliveryGuidance && (
             <div
-              className={cn(
-                'rounded border px-2 py-1.5 text-xs space-y-1',
+              className={`rounded border px-2 py-1.5 text-xs space-y-1 ${
                 deliveryGuidance.failureKind === 'branch-invariant-violation'
-                  ? 'border-info-border bg-info-subtle text-info'
+                  ? 'border-purple-300 bg-purple-50 text-purple-800'
                   : isWorkspaceSetupFailure
-                    ? 'border-danger-border bg-danger-subtle text-danger'
-                    : 'border-danger-border bg-danger-subtle text-danger',
-              )}
+                    ? 'border-rose-300 bg-rose-50 text-rose-800'
+                    : 'border-red-200 bg-white text-red-700'
+              }`}
             >
               <div className="flex items-center gap-2 font-semibold">
                 <span className="text-[10px] uppercase tracking-wide opacity-80">Failure kind</span>
                 <span
-                  className={cn(
-                    'rounded px-1.5 py-0.5 font-mono text-[11px]',
+                  className={`rounded px-1.5 py-0.5 font-mono text-[11px] ${
                     deliveryGuidance.failureKind === 'branch-invariant-violation'
-                      ? 'bg-card/70'
+                      ? 'bg-white/70'
                       : isWorkspaceSetupFailure
-                        ? 'bg-card/70'
-                        : 'bg-danger/10',
-                  )}
+                        ? 'bg-white/70'
+                        : 'bg-red-100'
+                  }`}
                 >
                   {deliveryGuidance.failureKind}
                 </span>
                 <span>{deliveryGuidance.label}</span>
               </div>
               {deliveryGuidance.failureKind === 'branch-invariant-violation' && (
-                <div className="rounded bg-card/70 px-2 py-1 space-y-0.5 font-mono text-[11px]">
+                <div className="rounded bg-white/70 px-2 py-1 space-y-0.5 font-mono text-[11px]">
                   <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">
                     Attribution: runner/action (not issue work)
                   </div>
@@ -162,11 +134,11 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: Stage
                   )}
                   <div>
                     <span className="font-sans opacity-70">expected:</span>{' '}
-                    <span className="text-success">{branchEvidence?.expectedBranch || '(unknown)'}</span>
+                    <span className="text-green-700">{branchEvidence?.expectedBranch || '(unknown)'}</span>
                   </div>
                   <div>
                     <span className="font-sans opacity-70">observed:</span>{' '}
-                    <span className="text-danger">
+                    <span className="text-red-700">
                       {branchEvidence?.observedBranch
                         ? branchEvidence.observedBranch
                         : branchEvidence?.observedRef
@@ -177,7 +149,7 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: Stage
                 </div>
               )}
               {isWorkspaceSetupFailure && workspaceEvidence && (
-                <div className="rounded bg-card/70 px-2 py-1 space-y-0.5 font-mono text-[11px]">
+                <div className="rounded bg-white/70 px-2 py-1 space-y-0.5 font-mono text-[11px]">
                   <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">
                     Attribution: workflow infrastructure (not issue work)
                   </div>
@@ -193,7 +165,7 @@ function TaskItem({ task, isRunning, issueNumber, workflowRunId }: { task: Stage
             </div>
           )}
           {isFailed && (
-            <p className="text-xs text-danger whitespace-pre-wrap">
+            <p className="text-xs text-red-600 whitespace-pre-wrap">
               {typeof task.output === 'string' ? task.output : task.output != null ? JSON.stringify(task.output) : 'Task failed'}
             </p>
           )}
@@ -239,22 +211,20 @@ function ProgressBar({ completed, failed, total }: { completed: number; failed: 
   if (total === 0) return null
   const completedPct = (completed / total) * 100
   const failedPct = (failed / total) * 100
-  const successDot = statusTreatment('workflow-stage', 'passed').dot
-  const dangerDot = statusTreatment('workflow-stage', 'failed').dot
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-xs">
         <span className="text-muted-foreground">
           {completed}/{total} completed
-          {failed > 0 && <span className="text-danger ml-1">({failed} failed)</span>}
+          {failed > 0 && <span className="text-red-500 ml-1">({failed} failed)</span>}
         </span>
         <span className="text-muted-foreground/70">{Math.round((completed / total) * 100)}%</span>
       </div>
       <div className="h-2 rounded-full bg-muted overflow-hidden">
         <div className="flex h-full">
-          <div className={cn('h-full transition-all duration-300', successDot)} style={{ width: `${completedPct}%` }} />
-          <div className={cn('h-full transition-all duration-300', dangerDot)} style={{ width: `${failedPct}%` }} />
+          <div className="h-full bg-green-500 transition-all duration-300" style={{ width: `${completedPct}%` }} />
+          <div className="h-full bg-red-400 transition-all duration-300" style={{ width: `${failedPct}%` }} />
         </div>
       </div>
     </div>
@@ -301,16 +271,14 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
   const total = tasks.length
   const runningTask = tasks.find(t => t.status === 'running')
 
-  const runningTreatment = statusTreatment('workflow-run', 'running')
-
   return (
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">Task Progress</CardTitle>
           {isAgentRunning && (
-            <span className={`inline-flex items-center gap-1 text-xs ${runningTreatment.text}`}>
-              <span className={`inline-block h-1.5 w-1.5 rounded-full ${runningTreatment.dot} animate-pulse`} />
+            <span className="inline-flex items-center gap-1 text-xs text-blue-600">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
               Running
             </span>
           )}
@@ -320,7 +288,7 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
         <ProgressBar completed={completed} failed={failed} total={total} />
 
         {runningTask && isAgentRunning && (
-          <div className={`text-xs rounded-md px-2.5 py-1.5 ${runningTreatment.container}`}>
+          <div className="text-xs text-blue-600 bg-blue-50 rounded-md px-2.5 py-1.5">
             Current: {runningTask.title}
           </div>
         )}

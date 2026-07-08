@@ -268,7 +268,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         // CountRunningAssignedToAsync) have the column and index they
         // expect. Idempotent — safe to call before/after Migrate().
         GrainTestConfig.ApplyWorkflowRunsStatusSchemaFix(db);
-
     }
 
     private static string CreateWebRoot()

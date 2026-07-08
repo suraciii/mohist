@@ -7,7 +7,8 @@ export function PriorityChip({ priority }: { priority: string | null | undefined
   return (
     <span
       data-testid="priority-chip"
-      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${style.className}`}
+      className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+      style={{ backgroundColor: style.bg, color: style.text }}
     >
       {formatPriority(priority)}
     </span>

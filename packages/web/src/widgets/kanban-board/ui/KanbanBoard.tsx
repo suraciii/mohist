@@ -5,7 +5,7 @@ import { Input } from '@/shared/ui/components/input'
 import { Link } from 'react-router-dom'
 import { AlertTriangleIcon, SearchIcon, XIcon } from 'lucide-react'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStatus, attentionItemTreatment, attentionSummaryTreatment, deriveAttentionItems, type AttentionItem, type Issue } from '../../../entities/issue'
+import { IssueStatus, deriveAttentionItems, type Issue } from '../../../entities/issue'
 import { useRunnerSummary } from '../../../entities/runner/api/queries'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
@@ -26,7 +26,6 @@ import { deriveLabelPairsFromIssues, formatLabelToken } from '../../../entities/
 import { useProjectPath } from '../../../entities/project'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 import { getStageColors } from '../model/stage-colors'
-import { statusTreatment } from '../../../shared/status-presentation'
 
 interface Props {
   issues: Issue[]
@@ -70,9 +69,14 @@ function PriorityChips({
             onClick={() => onToggle(p)}
             data-testid={`priority-chip-${p}`}
             data-active={isActive}
-            className={`h-6 rounded-full border px-2 text-[11px] font-semibold ${style.className} ${
-              isActive ? 'ring-2 ring-offset-1 ring-foreground/40' : 'hover:opacity-80'
+            className={`h-6 rounded-full px-2 text-[11px] font-semibold ${
+              isActive ? 'ring-2 ring-offset-1' : 'hover:opacity-80'
             }`}
+            style={{
+              backgroundColor: style.bg,
+              color: style.text,
+              ...(isActive ? { boxShadow: `0 0 0 1px ${style.text}` } : {}),
+            }}
           >
             {p.toUpperCase()}
           </Button>
@@ -388,57 +392,51 @@ function FilterBar({
 function NeedsAttentionSummary({
   items,
 }: {
-  items: AttentionItem[]
+  items: Array<{ issueNumber: number; issueId: string; label: string; detail?: string }>
 }) {
   const toProjectPath = useProjectPath()
-  const summaryTreatment = attentionSummaryTreatment(items)
 
   if (items.length === 0) return null
 
   return (
     <div
       data-testid="needs-attention-summary"
-      data-family={summaryTreatment.family}
-      className={`relative border-b ${summaryTreatment.container}`}
+      className="relative bg-amber-50 bg-gradient-to-r from-amber-50 to-amber-50/40 border-b border-amber-200"
     >
-      <div className={`absolute left-0 top-0 bottom-0 w-1 ${summaryTreatment.dot}`} />
+      <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500" />
       <div className="px-4 sm:px-6 py-2.5 flex items-start gap-3">
         <div className="flex items-center gap-1.5 pt-0.5">
-          <span className={`inline-flex items-center justify-center size-5 rounded-full ${summaryTreatment.dot} text-foreground`}>
+          <span className="inline-flex items-center justify-center size-5 rounded-full bg-amber-500 text-white">
             <AlertTriangleIcon className="size-3" />
           </span>
-          <span className="text-xs font-semibold uppercase tracking-wide">
+          <span className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
             Needs attention
           </span>
-          <span className="text-xs font-medium opacity-80">
+          <span className="text-xs text-amber-700/80 font-medium">
             ({items.length})
           </span>
         </div>
         <div className="flex-1 flex flex-wrap gap-1.5 min-w-0">
-          {items.slice(0, 6).map((item) => {
-            const itemTreatment = attentionItemTreatment(item)
-            return (
-              <a
-                key={item.issueId}
-                href={toProjectPath(`/issues/${item.issueNumber}`)}
-                data-testid={`attention-link-${item.issueNumber}`}
-                data-family={itemTreatment.family}
-                className={`inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs shadow-sm hover:shadow border ${itemTreatment.border} transition-shadow`}
-              >
-                <span className={`font-mono font-semibold ${itemTreatment.text}`}>
-                  #{item.issueNumber}
+          {items.slice(0, 6).map((item) => (
+            <a
+              key={item.issueId}
+              href={toProjectPath(`/issues/${item.issueNumber}`)}
+              data-testid={`attention-link-${item.issueNumber}`}
+              className="inline-flex items-center gap-1.5 rounded-md bg-white px-2 py-1 text-xs shadow-sm hover:shadow border border-amber-200 transition-shadow"
+            >
+              <span className="font-mono font-semibold text-amber-700">
+                #{item.issueNumber}
+              </span>
+              <span className="font-medium text-amber-900">{item.label}</span>
+              {item.detail && (
+                <span className="text-muted-foreground max-w-[160px] truncate hidden sm:inline">
+                  {item.detail}
                 </span>
-                <span className="font-medium text-foreground">{item.label}</span>
-                {item.detail && (
-                  <span className="text-muted-foreground max-w-[160px] truncate hidden sm:inline">
-                    {item.detail}
-                  </span>
-                )}
-              </a>
-            )
-          })}
+              )}
+            </a>
+          ))}
           {items.length > 6 && (
-            <span className="text-xs self-center font-medium">
+            <span className="text-xs text-amber-700 self-center font-medium">
               +{items.length - 6} more
             </span>
           )}
@@ -455,15 +453,10 @@ function RunnerUnavailableBanner({
 }) {
   const { hasConnectedCapacity } = useRunnerSummary()
   const toProjectPath = useProjectPath()
-  const treatment = statusTreatment('runner', 'stale')
   if (hasConnectedCapacity) return null
 
   return (
-    <div
-      data-testid="runner-unavailable-banner"
-      data-family={treatment.family}
-      className={`px-4 py-2 border-b text-xs ${treatment.container}`}
-    >
+    <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
       {agentStatus.runnerMessage ?? 'No runner is connected.'}{' '}
       <Link to={toProjectPath('/activity')} className="underline hover:no-underline">
         View runner status
@@ -576,12 +569,18 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
                 data-active={active}
                 className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap snap-start transition-colors min-h-[44px] border-b-2 rounded-none ${
                   active
-                    ? `${colors.labelClass} ${colors.bottomBorder}`
+                    ? `${colors.labelClass}`
                     : 'text-muted-foreground border-transparent hover:text-foreground/80'
                 }`}
+                style={
+                  active
+                    ? { borderBottomColor: colors.accent, color: colors.accent }
+                    : undefined
+                }
               >
                 <span
-                  className={`inline-block h-2 w-2 rounded-full ${active ? colors.accent : 'bg-muted-foreground/40'}`}
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: active ? colors.accent : '#d1d5db' }}
                 />
                 {col.label}
                 <span

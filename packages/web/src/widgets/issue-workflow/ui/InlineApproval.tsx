@@ -137,7 +137,7 @@ export function InlineApprovalControls({
             data-testid="approve-button"
             className={`flex-1 ${
               hasApprovalOutput && classified === 'PASS'
-                ? 'bg-success hover:bg-success/90 text-foreground'
+                ? 'bg-success hover:bg-success/90 text-success-foreground'
                 : ''
             }`}
           >

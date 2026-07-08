@@ -20,7 +20,7 @@ public sealed class ConfigHotReloadSpecs : IDisposable
         Path.GetTempPath(),
         $"mohist-hot-reload-{Guid.NewGuid():N}.jsonc");
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
@@ -58,7 +58,7 @@ public sealed class ConfigHotReloadSpecs : IDisposable
         Assert.Equal(updatedBudget, harness.ReadSnapshot().StorageBudgetBytes);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
@@ -79,7 +79,7 @@ public sealed class ConfigHotReloadSpecs : IDisposable
         Assert.Equal(30, harness.ReadSnapshot().RetentionDays);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]

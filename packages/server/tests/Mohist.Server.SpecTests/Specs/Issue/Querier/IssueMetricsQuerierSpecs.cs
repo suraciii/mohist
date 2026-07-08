@@ -37,7 +37,7 @@ public class IssueMetricsQuerierSpecs
     // returned empty while delivery-time (which reads db.Issues directly) kept
     // working — a contradiction the closed-loop fixtures below could not catch
     // because they seeded via the very constant under test.
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void WorkCompletedConstant_MatchesIssueEventSerializerBusType()
@@ -47,7 +47,7 @@ public class IssueMetricsQuerierSpecs
             IssueEventSerializer.BusType(new IssueCompleted(WorkflowRunId: "wr_guard")));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void ClosedConstant_MatchesIssueEventSerializerBusType()
@@ -310,7 +310,7 @@ public class IssueMetricsQuerierSpecs
         Assert.Equal("2026-06-15", result.Buckets[^1].Boundary);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void StartOfIsoWeek_ReturnsMondayForAnyInput()

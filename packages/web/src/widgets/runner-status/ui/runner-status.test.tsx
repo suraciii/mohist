@@ -107,7 +107,7 @@ describe('RunnerSummary UI', () => {
   })
 
   describe('stale/offline state', () => {
-    it('shows stale badge when no connected capacity and a runner is stale', () => {
+    it('shows stale/offline badge when no connected capacity', () => {
       const rows = [makeRow({ status: 'stale', connectionState: 'disconnected' })]
       const summary = makeSummary({
         rows,
@@ -116,19 +116,7 @@ describe('RunnerSummary UI', () => {
         connectedBusyCount: 0,
       })
       renderInRouter(<RunnerSummary summary={summary} />)
-      const badge = screen.getByText('Runner stale').closest('[data-family]')
-      expect(badge).toHaveAttribute('data-family', 'warning')
-    })
-
-    it('shows offline badge when no connected capacity and no runner is stale', () => {
-      const rows = [makeRow({ status: 'offline', connectionState: 'disconnected' })]
-      const summary = makeSummary({
-        rows,
-        hasConnectedCapacity: false,
-      })
-      renderInRouter(<RunnerSummary summary={summary} />)
-      const badge = screen.getByText('Runner offline').closest('[data-family]')
-      expect(badge).toHaveAttribute('data-family', 'muted')
+      expect(screen.getByText('Runner stale/offline')).toBeInTheDocument()
     })
 
     it('shows startup hint for stale/offline state', () => {

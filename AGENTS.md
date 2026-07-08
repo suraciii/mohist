@@ -2,8 +2,6 @@
 
 ## Project Overview
 
-Mohist 是一个面向个人开发者的本地优先软件生产系统，通过可自定义的工作流推进 issue，扩大软件产出的规模。
-
 **本项目正处在积极开发过程中，无需考虑版本兼容**
 
 ## 技术栈
@@ -32,13 +30,8 @@ openspec/    工作流产出的变更产物
 npm run build          # 构建 .NET（dotnet build Mohist.sln）
 npm run dev            # 启动 server + Web UI（并发）
 npm run dev:runner     # 另一个终端启动 runner
-```
 
-重启受管理服务务必用 `mo update`（不要手动 `dotnet run`，会触发 runner id 漂移导致 workflow sticky assignment 失配）：
-
-```bash
-mo update server       # 重建并以 systemd 受管理方式重启 server
-mo update runner       # 同上，重启 runner
+mo update # 更新运行版本
 ```
 
 ## 测试与类型检查
@@ -67,7 +60,7 @@ npm test           -w packages/runner
 
 ## 设计原则
 
-* 数据模型应该尽可能地简洁，只包括必要的属性
+* 模型应该尽可能地简洁，只包括必要的属性
 
 ## 注释原则
 

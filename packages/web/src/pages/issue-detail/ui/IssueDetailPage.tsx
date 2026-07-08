@@ -234,9 +234,10 @@ export function IssueDetailPage() {
                     return (
                       <span
                         key={label}
-                        className={`inline-block rounded-full border px-2 font-medium ${
+                        className={`inline-block rounded-full px-2 font-medium ${
                           s.size === 'sm' ? 'text-[11px] py-0.5' : 'text-xs py-0.5'
-                        } ${s.className}`}
+                        }`}
+                        style={{ backgroundColor: s.bg, color: s.text }}
                       >
                         {label}
                       </span>

@@ -489,8 +489,7 @@ describe('LabelCatalogSection', () => {
 
     const errorEl = screen.getByTestId('label-catalog-add-error')
     expect(errorEl).toHaveAttribute('role', 'alert')
-    expect(errorEl.className).toContain('text-danger')
-    expect(errorEl.className).not.toContain('text-red-700')
+    expect(errorEl.className).toContain('text-red-700')
 
     expect(keyInput).toHaveAttribute('aria-invalid', 'true')
     expect(keyInput.getAttribute('aria-describedby')).toBe('label-catalog-add-error')
@@ -518,8 +517,7 @@ describe('LabelCatalogSection', () => {
 
     const errorEl = screen.getByTestId('label-catalog-edit-error-module')
     expect(errorEl).toHaveAttribute('role', 'alert')
-    expect(errorEl.className).toContain('text-danger')
-    expect(errorEl.className).not.toContain('text-red-700')
+    expect(errorEl.className).toContain('text-red-700')
 
     const descriptionInput = screen.getByTestId('label-catalog-edit-description-module')
     const valuesInput = screen.getByTestId('label-catalog-edit-values-module')

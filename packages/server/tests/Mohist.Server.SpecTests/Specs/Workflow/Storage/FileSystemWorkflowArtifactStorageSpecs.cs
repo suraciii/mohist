@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
 
-[Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+[Trait(Traits.Speed.Name, Traits.Speed.Service)]
 [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
 public class FileSystemWorkflowArtifactStorageSpecs : IDisposable
 {
