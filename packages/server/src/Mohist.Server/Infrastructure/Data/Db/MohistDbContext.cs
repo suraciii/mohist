@@ -130,6 +130,8 @@ public class MohistDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(WorkflowRunEventRow.Type), nameof(WorkflowRunEventRow.Source), nameof(WorkflowRunEventRow.Id));
+            entity.HasIndex(e => new { e.Type, e.Time })
+                .HasDatabaseName("IX_WorkflowRunEvents_Type_Time");
             entity.HasIndex(e => new { e.Source, e.Id })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_WorkflowRunEvents_Undelivered");
@@ -456,6 +458,8 @@ public class MohistDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.DispatchedAt);
             entity.HasIndex(nameof(IssueEventRow.Type), nameof(IssueEventRow.Source), nameof(IssueEventRow.Id));
+            entity.HasIndex(e => new { e.Type, e.Time })
+                .HasDatabaseName("IX_IssueEvents_Type_Time");
             entity.HasIndex(e => new { e.Source, e.Id })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_IssueEvents_Undelivered");

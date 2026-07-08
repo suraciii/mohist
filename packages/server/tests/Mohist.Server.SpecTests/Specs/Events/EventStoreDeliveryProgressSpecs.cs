@@ -189,6 +189,20 @@ public class EventStoreDeliveryProgressSpecs : IAsyncLifetime
         Assert.Equal(new long[] { 1, 2 }, listed.Select(e => e.Id));
     }
 
+    [Fact]
+    public async Task EnsureCreated_ConfiguresTypeTimeIndexesOnlyForWorkflowRunAndIssueEvents()
+    {
+        await using var db = new MohistDbContext(_options);
+
+        var workflowIndexes = await ReadIndexesAsync(db.Database.GetDbConnection(), "WorkflowRunEvents");
+        var issueIndexes = await ReadIndexesAsync(db.Database.GetDbConnection(), "IssueEvents");
+        var epicIndexes = await ReadIndexesAsync(db.Database.GetDbConnection(), "EpicEvents");
+
+        Assert.Contains(workflowIndexes, index => index.Columns.SequenceEqual([nameof(WorkflowRunEventRow.Type), nameof(WorkflowRunEventRow.Time)]));
+        Assert.Contains(issueIndexes, index => index.Columns.SequenceEqual([nameof(IssueEventRow.Type), nameof(IssueEventRow.Time)]));
+        Assert.DoesNotContain(epicIndexes, index => index.Columns.SequenceEqual([nameof(EpicEventRow.Type), nameof(EpicEventRow.Time)]));
+    }
+
     private static CloudEvent BuildEvent(string source, string type) =>
         new(
             id: Guid.NewGuid().ToString(),
@@ -205,4 +219,44 @@ public class EventStoreDeliveryProgressSpecs : IAsyncLifetime
 
         public MohistDbContext CreateDbContext() => new(_options);
     }
+
+    private static async Task<IReadOnlyList<SqliteIndexInfo>> ReadIndexesAsync(System.Data.Common.DbConnection connection, string tableName)
+    {
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync();
+        }
+
+        var indexes = new List<SqliteIndexInfo>();
+
+        await using (var list = connection.CreateCommand())
+        {
+            list.CommandText = $"PRAGMA index_list('{tableName}');";
+
+            await using var reader = await list.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                indexes.Add(new SqliteIndexInfo(reader.GetString(1), []));
+            }
+        }
+
+        for (var i = 0; i < indexes.Count; i++)
+        {
+            var columns = new List<string>();
+            await using var info = connection.CreateCommand();
+            info.CommandText = $"PRAGMA index_info('{indexes[i].Name}');";
+
+            await using var reader = await info.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                columns.Add(reader.GetString(2));
+            }
+
+            indexes[i] = indexes[i] with { Columns = columns };
+        }
+
+        return indexes;
+    }
+
+    private sealed record SqliteIndexInfo(string Name, IReadOnlyList<string> Columns);
 }
