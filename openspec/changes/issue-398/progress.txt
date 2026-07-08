@@ -347,3 +347,15 @@
   retired bespoke overlays (`border-amber-`, `bg-amber-`,
   `text-amber-`, `border-gray-`, `bg-white`, `text-gray-`,
   `border-slate-`, `bg-slate-`, `text-slate-`).
+
+## Fix-tests notes (fix-tests task)
+
+- **The failures were stale build artifacts from the pre-rename `Mohist.Server.Tests` project.** The verify.5 `core/script` output referenced `packages/server/tests/Mohist.Server.Tests/bin/Debug/net11.0/Mohist.Server.Tests.dll`, an old DLL left over from before commit `4cee0ec3f` ("test: Mohist.Server.Tests 改名 Mohist.Server.SpecTests"). The active project in `Mohist.sln` is `Mohist.Server.SpecTests`, and the source files for `OtlpRoutesIntegrationSpecs` / `OtelQueryRoutesIntegrationSpecs` live there and pass cleanly.
+- **Both failing tests timed out at `EnsureSchemaAsync`** (`Timed out waiting for the entry point to build the IHost after 00:05:00`). The WebApplicationFactory's host startup is the slow part; local reproduction after deleting the stale `bin/obj` finished in ~3m with all 4092 tests passing — so the timeout was transient (likely the verify container was resource-pressured or racing a warm host build).
+- **Root-cause fix:** delete `packages/server/tests/Mohist.Server.Tests/{bin,obj}/` so `dotnet test` doesn't discover the stale DLL. No code or test changes were needed; the assertion that timed out (verifying the persisted row exists in `OtelDb` after `POST /otel/v1/traces`) is correct as written.
+- **Verification (all five steps):**
+  - `dotnet test Mohist.sln --nologo` → 4092 passed, 10 skipped, 0 failed (≈3m).
+  - `npm run typecheck -w packages/web` → clean.
+  - `npm run test:run -w packages/web` → 4614 passed, 1 skipped.
+  - `npm run typecheck -w packages/runner` → clean.
+  - `npm run test -w packages/runner -- --no-file-parallelism` → 1031 passed.
