@@ -7,30 +7,6 @@ import { MemoryRouter } from 'react-router-dom'
 import { IssueStatus, IssueHealth } from '../../../entities/issue'
 import { makeIssue, makeIssues, mockAgentStatus } from './_kanbanBoardQueryTestUtils'
 
-const { LABELS_MOCK } = vi.hoisted(() => ({
-  LABELS_MOCK: ['kind', 'area', 'stream'],
-}))
-
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    archiveIssue: vi.fn(),
-    rerunIssue: vi.fn(),
-    resumeIssue: vi.fn(),
-    useLabels: vi.fn().mockReturnValue({ data: LABELS_MOCK, isLoading: false }),
-  }
-})
-
-vi.mock('../../../entities/runner/api/queries', () => ({
-  useRunnerSummary: vi.fn().mockReturnValue({
-    hasConnectedCapacity: true,
-    connectedIdleCount: 1,
-    connectedBusyCount: 0,
-    rows: [],
-  }),
-}))
-
 import { KanbanBoard } from './KanbanBoard'
 
 function renderBoard(issues = makeIssues(3, { status: IssueStatus.Backlog })) {
