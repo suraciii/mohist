@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => ({
   subscriptions: [] as Array<Record<string, unknown>>,
   subscriptionsLoading: false,
   subscriptionsSectionRendered: true,
-  routeParams: { agentId: 'agent-1' },
   archiveMutateCalls: [] as Array<{ id: string; options: { onSuccess?: () => void } | undefined }>,
   unarchiveMutateCalls: [] as Array<string>,
   archiveSubscriptionCalls: [] as Array<{ subscriptionId: string }>,
@@ -26,13 +25,6 @@ const mocks = vi.hoisted(() => ({
   unarchivePending: false,
 }))
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useParams: () => mocks.routeParams,
-  }
-})
 
 vi.mock('../../../entities/agent', () => ({
   useAgent: () => ({
@@ -173,7 +165,6 @@ describe('AgentDetailPage', () => {
     mocks.sessionsLoading = false
     mocks.subscriptions = []
     mocks.subscriptionsLoading = false
-    mocks.routeParams = { agentId: 'agent-1' }
     mocks.archiveMutateCalls.length = 0
     mocks.unarchiveMutateCalls.length = 0
     mocks.archiveSubscriptionCalls.length = 0

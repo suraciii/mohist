@@ -28,20 +28,9 @@ const mocks = vi.hoisted(() => ({
     isThinking: false,
     isStreaming: false,
   },
-  routeParams: {
-    number: '123',
-    sessionName: 'session-1',
-  },
   metadataOverride: null as AgentSessionMetadata | null,
 }))
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useParams: () => mocks.routeParams,
-  }
-})
 
 vi.mock('../../../entities/issue', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/issue')>()
@@ -170,7 +159,6 @@ function setupRunningIssueMocks() {
     isThinking: false,
     isStreaming: false,
   }
-  mocks.routeParams = { number: '123', sessionName: 'session-1' }
 }
 
 async function renderIssueSessionPage() {

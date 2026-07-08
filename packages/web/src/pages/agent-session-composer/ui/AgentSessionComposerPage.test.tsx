@@ -2,14 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { AgentInfo, AgentSessionLaunchResponse } from '../../../entities/agent'
 import { AgentSessionComposerPage } from './AgentSessionComposerPage'
 
 const mocks = vi.hoisted(() => ({
-  searchParams: new URLSearchParams(),
-  navigate: vi.fn(),
   agents: [] as AgentInfo[],
   agentsLoading: false,
   launchError: null as Error | null,
@@ -24,15 +22,6 @@ const mocks = vi.hoisted(() => ({
   }),
   toProjectPath: vi.fn((path: string) => `/Test${path}`),
 }))
-
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useSearchParams: () => [mocks.searchParams],
-    useNavigate: () => mocks.navigate,
-  }
-})
 
 vi.mock('../../../entities/agent', () => ({
   useAgents: () => ({
@@ -84,6 +73,11 @@ function makeAgent(id: string, overrides: Partial<AgentInfo> = {}): AgentInfo {
   }
 }
 
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="current-path">{location.pathname}</div>
+}
+
 function renderPage(initialEntries = ['/agent-sessions/new']) {
   const queryClient = createQueryClient()
   return render(
@@ -100,6 +94,7 @@ function renderPage(initialEntries = ['/agent-sessions/new']) {
           <Routes>
             <Route path="/agent-sessions/new" element={<AgentSessionComposerPage />} />
           </Routes>
+          <LocationProbe />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -108,14 +103,12 @@ function renderPage(initialEntries = ['/agent-sessions/new']) {
 
 describe('AgentSessionComposerPage', () => {
   beforeEach(() => {
-    mocks.searchParams = new URLSearchParams()
     mocks.agents = []
     mocks.agentsLoading = false
     mocks.launchError = null
     mocks.launchIsPending = false
     mocks.launchMutateArgs = null
     mocks.launchMutate.mockClear()
-    mocks.navigate.mockClear()
     mocks.toProjectPath.mockClear()
   })
 
@@ -127,7 +120,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('reads ?agent= to pre-select an agent', () => {
     mocks.agents = [makeAgent('agent-1', { name: 'Agent One' })]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     renderPage(['/agent-sessions/new?agent=agent-1'])
     expect(screen.getByTestId('agent-session-composer-page')).toBeInTheDocument()
     expect(screen.getByTestId('agent-selector-trigger')).toHaveTextContent('Agent One')
@@ -135,35 +127,30 @@ describe('AgentSessionComposerPage', () => {
 
   it('reads ?issue= to pre-fill an issue context ref', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('issue=42')
     renderPage(['/agent-sessions/new?issue=42'])
     expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
   })
 
   it('reads ?epic= to pre-fill an epic context ref', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('epic=epic-1')
     renderPage(['/agent-sessions/new?epic=epic-1'])
     expect(screen.getByTestId('context-ref-chip-epic')).toHaveTextContent('Epic: epic-1')
   })
 
   it('reads ?repo= to pre-fill a repo context ref', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('repo=org/repo')
     renderPage(['/agent-sessions/new?repo=org/repo'])
     expect(screen.getByTestId('context-ref-chip-repository')).toHaveTextContent('Repository: org/repo')
   })
 
   it('reads ?ws= to pre-fill a workspace path context ref', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('ws=/home/project')
     renderPage(['/agent-sessions/new?ws=/home/project'])
     expect(screen.getByTestId('context-ref-chip-workspace')).toHaveTextContent('Workspace: /home/project')
   })
 
   it('pre-fills multiple context refs simultaneously', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('issue=7&epic=epic-3&repo=my/repo')
     renderPage(['/agent-sessions/new?issue=7&epic=epic-3&repo=my/repo'])
     expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #7')
     expect(screen.getByTestId('context-ref-chip-epic')).toHaveTextContent('Epic: epic-3')
@@ -192,7 +179,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('disables launch when prompt is empty', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const button = screen.getByTestId('launch-button')
     expect(button).toBeDisabled()
@@ -200,7 +186,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('shows prompt error when textarea is blurred with empty value', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = screen.getByTestId('prompt-textarea')
     fireEvent.focus(textarea)
@@ -211,7 +196,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('enables launch when prompt is filled and agent selected', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = screen.getByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello agent' } })
@@ -223,7 +207,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('calls mutate with correct args on launch', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = screen.getByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello agent' } })
@@ -239,7 +222,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('passes context refs in launch body', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('agent=agent-1&issue=42&epic=epic-1')
     renderPage(['/agent-sessions/new?agent=agent-1&issue=42&epic=epic-1'])
     const textarea = screen.getByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Analyze this' } })
@@ -254,7 +236,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('navigates to session detail on success', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = screen.getByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Hello' } })
@@ -266,14 +247,13 @@ describe('AgentSessionComposerPage', () => {
     })
     fireEvent.click(screen.getByTestId('launch-button'))
     expect(mocks.toProjectPath).toHaveBeenCalledWith('/agent-sessions/sess-123')
-    expect(mocks.navigate).toHaveBeenCalledWith('/Test/agent-sessions/sess-123')
+    expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agent-sessions/sess-123')
   })
 
   /* ── Context-ref chip remove ──────────────────────────── */
 
   it('removes context ref chip when X is clicked', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('issue=42')
     renderPage(['/agent-sessions/new?issue=42'])
     expect(screen.getByTestId('context-ref-chip-issue')).toBeInTheDocument()
     fireEvent.click(screen.getByTestId('remove-ref-issue'))
@@ -284,7 +264,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('disables launch for archived agents', () => {
     mocks.agents = [makeAgent('agent-1', { status: 'archived' })]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     renderPage(['/agent-sessions/new?agent=agent-1'])
     expect(screen.getByTestId('archived-warning')).toBeInTheDocument()
     const button = screen.getByTestId('launch-button')
@@ -304,7 +283,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('shows the archived warning when ?agent= points at an archived agent even though it is not in the picker', () => {
     mocks.agents = [makeAgent('agent-1', { status: 'archived' })]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     renderPage(['/agent-sessions/new?agent=agent-1'])
     expect(screen.getByTestId('archived-warning')).toBeInTheDocument()
     expect(screen.getByTestId('launch-button')).toBeDisabled()
@@ -314,7 +292,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('surfaces no-available-runner error state', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     mocks.launchError = Object.assign(new Error('No available runner for selected agent'), { code: 'NO_AVAILABLE_RUNNER' })
     renderPage(['/agent-sessions/new?agent=agent-1'])
     expect(screen.getByTestId('error-no-runner')).toBeInTheDocument()
@@ -323,7 +300,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('surfaces external-agent-unavailable error state', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     mocks.launchError = Object.assign(new Error('External agent is unavailable'), { code: 'EXTERNAL_AGENT_UNAVAILABLE' })
     renderPage(['/agent-sessions/new?agent=agent-1'])
     expect(screen.getByTestId('error-external-agent')).toBeInTheDocument()
@@ -332,7 +308,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('matches no-runner error by message text fallback', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     mocks.launchError = new Error('No available runner for opencode')
     renderPage(['/agent-sessions/new?agent=agent-1'])
     expect(screen.getByTestId('error-no-runner')).toBeInTheDocument()
@@ -340,7 +315,6 @@ describe('AgentSessionComposerPage', () => {
 
   it('prevents launch when error is present', () => {
     mocks.agents = [makeAgent('agent-1')]
-    mocks.searchParams = new URLSearchParams('agent=agent-1')
     mocks.launchError = new Error('No available runner')
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = screen.getByTestId('prompt-textarea')
