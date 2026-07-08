@@ -1,17 +1,20 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
+import { ProjectProvider } from '../../../entities/project'
+import { TEST_PROJECT } from '../../../../tests/test-utils'
 import type { DeliveryTimeMetricsResponse } from '../../../entities/issue'
 
-type RangeCode = '7d' | '30d' | '90d'
-
-const mockUseDeliveryTime = vi.fn()
-vi.mock('../../../entities/issue', () => ({
-  useDeliveryTime: () => mockUseDeliveryTime(),
-}))
-
 import { CycleTimeChart } from './CycleTimeChart'
+
+useMswServer()
+
+type RangeCode = '7d' | '30d' | '90d'
 
 function buildData(overrides?: Partial<DeliveryTimeMetricsResponse>): DeliveryTimeMetricsResponse {
   return {
@@ -30,65 +33,105 @@ function buildEmpty(): DeliveryTimeMetricsResponse {
   return { points: [] }
 }
 
+const DELIVERY_PATH = '*/api/projects/:projectId/issues/metrics/delivery-time'
+
+function mockDeliveryResponse(data: DeliveryTimeMetricsResponse) {
+  server.use(
+    http.get(DELIVERY_PATH, () => HttpResponse.json({ success: true, data })),
+  )
+}
+
+function mockDeliveryPending() {
+  server.use(
+    http.get(DELIVERY_PATH, () => new Promise(() => {})),
+  )
+}
+
+function mockDeliveryError() {
+  server.use(
+    http.get(DELIVERY_PATH, () => HttpResponse.json({ success: false, error: { message: 'boom' } }, { status: 500 })),
+  )
+}
+
+function renderChart(range: RangeCode = '30d') {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+        <MemoryRouter initialEntries={['/']}>
+          <CycleTimeChart range={range} />
+        </MemoryRouter>
+      </ProjectProvider>
+    </QueryClientProvider>,
+  )
+}
+
 describe('CycleTimeChart', () => {
   afterEach(() => {
     cleanup()
-    mockUseDeliveryTime.mockReset()
   })
 
   // --- Three-state routing ---
 
   it('renders loading state via ChartContainer', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: undefined, isLoading: true, isError: false })
+    mockDeliveryPending()
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
     expect(screen.getByTestId('chart-container-loading')).toBeInTheDocument()
     expect(screen.queryByTestId('cycle-time-chart')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
 
-  it('renders error state via ChartContainer', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: new Error('fail') })
+  it('renders error state via ChartContainer', async () => {
+    mockDeliveryError()
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('chart-container-error')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-container-error')).toBeInTheDocument()
+    })
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
 
-  it('renders empty state with concrete next action when no delivered issues', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildEmpty(), isLoading: false, isError: false })
+  it('renders empty state with concrete next action when no delivered issues', async () => {
+    mockDeliveryResponse(buildEmpty())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const empty = screen.getByTestId('chart-container-empty')
-    expect(empty).toBeInTheDocument()
-    expect(empty.textContent).toContain('Cycle time appears once an issue completes on this project')
+    await waitFor(() => {
+      const empty = screen.getByTestId('chart-container-empty')
+      expect(empty).toBeInTheDocument()
+      expect(empty.textContent).toContain('Cycle time appears once an issue completes on this project')
+    })
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
 
-  it('renders empty state when no delivered issues (surface returned no points)', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: undefined, isLoading: false, isError: false })
+  it('renders empty state when no delivered issues (surface returned no points)', async () => {
+    mockDeliveryResponse(buildEmpty())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
+    })
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
 
-  it('renders empty state under cycle lens when all points have null cycleDays', () => {
+  it('renders empty state under cycle lens when all points have null cycleDays', async () => {
     const data: DeliveryTimeMetricsResponse = {
       points: [
         { issueNumber: 1, completedAt: '2026-06-10T00:00:00+00:00', leadDays: 2.0, cycleDays: null },
         { issueNumber: 2, completedAt: '2026-06-15T00:00:00+00:00', leadDays: 4.0, cycleDays: null },
       ],
     }
-    mockUseDeliveryTime.mockReturnValue({ data, isLoading: false, isError: false })
+    mockDeliveryResponse(data)
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
+    })
 
     fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
 
@@ -96,12 +139,14 @@ describe('CycleTimeChart', () => {
     expect(screen.queryByTestId('scatter-series')).not.toBeInTheDocument()
   })
 
-  it('renders resolved chart content with accessibility wrapper', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('renders resolved chart content with accessibility wrapper', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
+    })
     expect(screen.queryByTestId('chart-container-loading')).not.toBeInTheDocument()
     expect(screen.queryByTestId('chart-container-error')).not.toBeInTheDocument()
     expect(screen.queryByTestId('chart-container-empty')).not.toBeInTheDocument()
@@ -109,65 +154,75 @@ describe('CycleTimeChart', () => {
 
   // --- Scatter points ---
 
-  it('renders one scatter point per delivered issue under lead lens', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('renders one scatter point per delivered issue under lead lens', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const scatter = screen.getByTestId('scatter-series')
-    expect(scatter.children).toHaveLength(5)
-    for (let i = 1; i <= 5; i++) {
-      expect(screen.getByTestId(`scatter-point-${i}`)).toBeInTheDocument()
-    }
+    await waitFor(() => {
+      const scatter = screen.getByTestId('scatter-series')
+      expect(scatter.children).toHaveLength(5)
+      for (let i = 1; i <= 5; i++) {
+        expect(screen.getByTestId(`scatter-point-${i}`)).toBeInTheDocument()
+      }
+    })
   })
 
-  it('scatter points position by completion date (x) and duration (y)', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('scatter points position by completion date (x) and duration (y)', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const firstPoint = screen.getByTestId('scatter-point-1')
-    const fifthPoint = screen.getByTestId('scatter-point-5')
+    await waitFor(() => {
+      const firstPoint = screen.getByTestId('scatter-point-1')
+      const fifthPoint = screen.getByTestId('scatter-point-5')
 
-    const firstX = Number(firstPoint.getAttribute('cx'))
-    const fifthX = Number(fifthPoint.getAttribute('cx'))
-    expect(fifthX).toBeGreaterThan(firstX)
+      const firstX = Number(firstPoint.getAttribute('cx'))
+      const fifthX = Number(fifthPoint.getAttribute('cx'))
+      expect(fifthX).toBeGreaterThan(firstX)
 
-    const firstY = Number(firstPoint.getAttribute('cy'))
-    const fifthY = Number(fifthPoint.getAttribute('cy'))
-    expect(firstY).toBeGreaterThan(fifthY)
+      const firstY = Number(firstPoint.getAttribute('cy'))
+      const fifthY = Number(fifthPoint.getAttribute('cy'))
+      expect(firstY).toBeGreaterThan(fifthY)
+    })
   })
 
-  it('scatter uses fill-chart-2 theme token (no fill attribute)', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('scatter uses fill-chart-2 theme token (no fill attribute)', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const firstPoint = screen.getByTestId('scatter-point-1')
-    expect(firstPoint.getAttribute('class')).toContain('fill-chart-2')
-    expect(firstPoint.getAttribute('fill')).toBeNull()
+    await waitFor(() => {
+      const firstPoint = screen.getByTestId('scatter-point-1')
+      expect(firstPoint.getAttribute('class')).toContain('fill-chart-2')
+      expect(firstPoint.getAttribute('fill')).toBeNull()
+    })
   })
 
   // --- Lens toggle ---
 
-  it('lens toggle renders lead-time and cycle-time buttons with aria-pressed', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('lens toggle renders lead-time and cycle-time buttons with aria-pressed', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const lead = screen.getByTestId('cycle-time-lens-lead')
-    const cycle = screen.getByTestId('cycle-time-lens-cycle')
+    await waitFor(() => {
+      const lead = screen.getByTestId('cycle-time-lens-lead')
+      const cycle = screen.getByTestId('cycle-time-lens-cycle')
 
-    expect(lead).toHaveAttribute('aria-pressed', 'true')
-    expect(cycle).toHaveAttribute('aria-pressed', 'false')
+      expect(lead).toHaveAttribute('aria-pressed', 'true')
+      expect(cycle).toHaveAttribute('aria-pressed', 'false')
+    })
   })
 
-  it('selecting cycle lens excludes null-cycle issues from the scatter', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('selecting cycle lens excludes null-cycle issues from the scatter', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('scatter-point-5')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('scatter-point-5')).toBeInTheDocument()
+    })
 
     fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
 
@@ -178,11 +233,14 @@ describe('CycleTimeChart', () => {
     expect(scatter.children).toHaveLength(4)
   })
 
-  it('lens toggle does NOT mutate the underlying data (x driven by CompletedAt)', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('lens toggle does NOT mutate the underlying data (x driven by CompletedAt)', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('scatter-point-1')).toBeInTheDocument()
+    })
     const point1Lead = Number(screen.getByTestId('scatter-point-1').getAttribute('cx'))
 
     fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
@@ -194,22 +252,21 @@ describe('CycleTimeChart', () => {
     expect(point1Cycle).toBeGreaterThan(0)
   })
 
-  it('keeps non-null issue x positions stable when a null-cycle point is at the domain edge', () => {
-    mockUseDeliveryTime.mockReturnValue({
-      data: buildData({
-        points: [
-          { issueNumber: 1, completedAt: '2026-06-10T00:00:00+00:00', leadDays: 10.0, cycleDays: null },
-          { issueNumber: 2, completedAt: '2026-06-15T00:00:00+00:00', leadDays: 4.0, cycleDays: 3.0 },
-          { issueNumber: 3, completedAt: '2026-06-20T00:00:00+00:00', leadDays: 6.0, cycleDays: 5.0 },
-          { issueNumber: 4, completedAt: '2026-06-30T00:00:00+00:00', leadDays: 8.0, cycleDays: null },
-        ],
-      }),
-      isLoading: false,
-      isError: false,
+  it('keeps non-null issue x positions stable when a null-cycle point is at the domain edge', async () => {
+    mockDeliveryResponse(buildData({
+      points: [
+        { issueNumber: 1, completedAt: '2026-06-10T00:00:00+00:00', leadDays: 10.0, cycleDays: null },
+        { issueNumber: 2, completedAt: '2026-06-15T00:00:00+00:00', leadDays: 4.0, cycleDays: 3.0 },
+        { issueNumber: 3, completedAt: '2026-06-20T00:00:00+00:00', leadDays: 6.0, cycleDays: 5.0 },
+        { issueNumber: 4, completedAt: '2026-06-30T00:00:00+00:00', leadDays: 8.0, cycleDays: null },
+      ],
+    }))
+
+    renderChart()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('scatter-point-2')).toBeInTheDocument()
     })
-
-    render(<CycleTimeChart range="30d" />)
-
     const point2LeadCx = Number(screen.getByTestId('scatter-point-2').getAttribute('cx'))
     const point3LeadCx = Number(screen.getByTestId('scatter-point-3').getAttribute('cx'))
 
@@ -221,10 +278,14 @@ describe('CycleTimeChart', () => {
     expect(Number(screen.getByTestId('scatter-point-3').getAttribute('cx'))).toBe(point3LeadCx)
   })
 
-  it('switching the lens back to lead re-shows the null-cycle points', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('switching the lens back to lead re-shows the null-cycle points', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('scatter-point-1')).toBeInTheDocument()
+    })
 
     fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
     expect(screen.queryByTestId('scatter-point-5')).not.toBeInTheDocument()
@@ -235,30 +296,36 @@ describe('CycleTimeChart', () => {
 
   // --- Percentile overlays ---
 
-  it('renders a P50 path and a P85 path with deterministic colors', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('renders a P50 path and a P85 path with deterministic colors', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('p50-line')).toBeInTheDocument()
-    expect(screen.getByTestId('p85-line')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('p50-line')).toBeInTheDocument()
+      expect(screen.getByTestId('p85-line')).toBeInTheDocument()
 
-    const p50 = screen.getByTestId('p50-line')
-    expect(p50.getAttribute('class')).toContain('stroke-chart-5')
-    expect(p50.getAttribute('stroke-dasharray')).toBeNull()
+      const p50 = screen.getByTestId('p50-line')
+      expect(p50.getAttribute('class')).toContain('stroke-chart-5')
+      expect(p50.getAttribute('stroke-dasharray')).toBeNull()
 
-    const p85 = screen.getByTestId('p85-line')
-    expect(p85.getAttribute('class')).toContain('stroke-chart-3')
-    expect(p85.getAttribute('stroke-dasharray')).not.toBeNull()
+      const p85 = screen.getByTestId('p85-line')
+      expect(p85.getAttribute('class')).toContain('stroke-chart-3')
+      expect(p85.getAttribute('stroke-dasharray')).not.toBeNull()
+    })
   })
 
-  it('percentile overlays recompute when switching lenses (cycle lens excludes nulls)', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('percentile overlays recompute when switching lenses (cycle lens excludes nulls)', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
+
+    await waitFor(() => {
+      const p50Lead = screen.getByTestId('p50-line').getAttribute('d')
+      expect(p50Lead).toBeTruthy()
+    })
 
     const p50Lead = screen.getByTestId('p50-line').getAttribute('d')
-    expect(p50Lead).toBeTruthy()
 
     fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
 
@@ -267,142 +334,160 @@ describe('CycleTimeChart', () => {
     expect(p50Cycle).not.toEqual(p50Lead)
   })
 
-  it('a single delivered issue still plots drawable P50/P85 segments (one valid sample)', () => {
-    mockUseDeliveryTime.mockReturnValue({
-      data: {
-        points: [{ issueNumber: 1, completedAt: '2026-06-10T00:00:00+00:00', leadDays: 2.0, cycleDays: 1.5 }],
-      },
-      isLoading: false,
-      isError: false,
+  it('a single delivered issue still plots drawable P50/P85 segments (one valid sample)', async () => {
+    mockDeliveryResponse({
+      points: [{ issueNumber: 1, completedAt: '2026-06-10T00:00:00+00:00', leadDays: 2.0, cycleDays: 1.5 }],
     })
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const p50Path = screen.getByTestId('p50-line').getAttribute('d')
-    const p85Path = screen.getByTestId('p85-line').getAttribute('d')
+    await waitFor(() => {
+      const p50Path = screen.getByTestId('p50-line').getAttribute('d')
+      const p85Path = screen.getByTestId('p85-line').getAttribute('d')
 
-    expect(p50Path).toMatch(/^M[^L]+ L/)
-    expect(p85Path).toMatch(/^M[^L]+ L/)
+      expect(p50Path).toMatch(/^M[^L]+ L/)
+      expect(p85Path).toMatch(/^M[^L]+ L/)
+    })
   })
 
   // --- Legend ---
 
-  it('legend disambiguates scatter, P50 line, and P85 line by shape (dot/solid/dashed)', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('legend disambiguates scatter, P50 line, and P85 line by shape (dot/solid/dashed)', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const legend = screen.getByTestId('chart-legend')
-    expect(legend).toBeInTheDocument()
-    expect(legend.textContent).toContain('Delivered issue')
-    expect(legend.textContent).toContain('P50')
-    expect(legend.textContent).toContain('P85')
+    await waitFor(() => {
+      const legend = screen.getByTestId('chart-legend')
+      expect(legend).toBeInTheDocument()
+      expect(legend.textContent).toContain('Delivered issue')
+      expect(legend.textContent).toContain('P50')
+      expect(legend.textContent).toContain('P85')
 
-    const dotSwatch = legend.querySelector('.rounded-full')
-    expect(dotSwatch).toBeInTheDocument()
+      const dotSwatch = legend.querySelector('.rounded-full')
+      expect(dotSwatch).toBeInTheDocument()
 
-    const dashedSvg = legend.querySelector('polyline[stroke-dasharray]')
-    expect(dashedSvg).toBeInTheDocument()
+      const dashedSvg = legend.querySelector('polyline[stroke-dasharray]')
+      expect(dashedSvg).toBeInTheDocument()
+    })
   })
 
   // --- Token colors and labels ---
 
-  it('left axis uses stroke-chart-2 and fill-chart-2 theme tokens', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('left axis uses stroke-chart-2 and fill-chart-2 theme tokens', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const axis = screen.getByTestId('chart-axis-left')
-    const axisLine = axis.querySelector('line')
-    expect(axisLine?.getAttribute('class')).toContain('stroke-chart-2')
+    await waitFor(() => {
+      const axis = screen.getByTestId('chart-axis-left')
+      const axisLine = axis.querySelector('line')
+      expect(axisLine?.getAttribute('class')).toContain('stroke-chart-2')
 
-    const axisText = axis.querySelector('text')
-    expect(axisText?.getAttribute('class')).toContain('fill-chart-2')
-    expect(axisText?.getAttribute('class')).toContain('tabular-nums')
+      const axisText = axis.querySelector('text')
+      expect(axisText?.getAttribute('class')).toContain('fill-chart-2')
+      expect(axisText?.getAttribute('class')).toContain('tabular-nums')
+    })
   })
 
-  it('only one y-axis (single days unit)', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('only one y-axis (single days unit)', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('chart-axis-left')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-axis-left')).toBeInTheDocument()
+    })
     expect(screen.queryByTestId('chart-axis-right')).not.toBeInTheDocument()
   })
 
   // --- Accessibility ---
 
-  it('chart svg has role=img and aria-label', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('chart svg has role=img and aria-label', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const svg = document.querySelector('svg[role="img"]')
-    expect(svg).toBeInTheDocument()
-    expect(svg!.getAttribute('aria-label')).toContain('Cycle-time scatter control chart')
+    await waitFor(() => {
+      const svg = document.querySelector('svg[role="img"]')
+      expect(svg).toBeInTheDocument()
+      expect(svg!.getAttribute('aria-label')).toContain('Cycle-time scatter control chart')
+    })
   })
 
-  it('sr-only summary names window start/end and the active lens', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('sr-only summary names window start/end and the active lens', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const summary = screen.getByTestId('chart-sr-summary')
-    expect(summary).toBeInTheDocument()
-    expect(summary.textContent).toContain('Cycle-time scatter control chart')
-    expect(summary.textContent).toContain('lead')
-    expect(summary.textContent).toContain('Rolling P50')
-    expect(summary.textContent).toContain('Rolling P85')
+    await waitFor(() => {
+      const summary = screen.getByTestId('chart-sr-summary')
+      expect(summary).toBeInTheDocument()
+      expect(summary.textContent).toContain('Cycle-time scatter control chart')
+      expect(summary.textContent).toContain('lead')
+      expect(summary.textContent).toContain('Rolling P50')
+      expect(summary.textContent).toContain('Rolling P85')
+    })
   })
 
   // --- tabular-nums ---
 
-  it('numeric labels use tabular-nums', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('numeric labels use tabular-nums', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(document.querySelectorAll('.tabular-nums').length).toBeGreaterThan(0)
+    await waitFor(() => {
+      expect(document.querySelectorAll('.tabular-nums').length).toBeGreaterThan(0)
+    })
   })
 
   // --- Section heading ---
 
-  it('renders within a section with testid and aria-label', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('renders within a section with testid and aria-label', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const section = screen.getByTestId('cycle-time-chart')
-    expect(section).toBeInTheDocument()
-    expect(section).toHaveAttribute('aria-label', 'Cycle Time')
+    await waitFor(() => {
+      const section = screen.getByTestId('cycle-time-chart')
+      expect(section).toBeInTheDocument()
+      expect(section).toHaveAttribute('aria-label', 'Cycle Time')
+    })
   })
 
-  it('shows section heading', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('shows section heading', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByText('Lead Time')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Lead Time')).toBeInTheDocument()
+    })
   })
 
-  it('renders the default lead-lens title aligned with the default lens caliber', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('renders the default lead-lens title aligned with the default lens caliber', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const heading = screen.getByRole('heading', { level: 3, name: 'Lead Time' })
-    expect(heading).toBeInTheDocument()
+    await waitFor(() => {
+      const heading = screen.getByRole('heading', { level: 3, name: 'Lead Time' })
+      expect(heading).toBeInTheDocument()
 
-    expect(screen.getByTestId('cycle-time-lens-lead')).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByTestId('cycle-time-lens-cycle')).toHaveAttribute('aria-pressed', 'false')
+      expect(screen.getByTestId('cycle-time-lens-lead')).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByTestId('cycle-time-lens-cycle')).toHaveAttribute('aria-pressed', 'false')
+    })
   })
 
-  it('updates the card title to match the active lens when switching to cycle', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('updates the card title to match the active lens when switching to cycle', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByRole('heading', { level: 3, name: 'Lead Time' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 3, name: 'Lead Time' })).toBeInTheDocument()
+    })
 
     fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
 
@@ -410,10 +495,14 @@ describe('CycleTimeChart', () => {
     expect(screen.queryByRole('heading', { level: 3, name: 'Lead Time' })).not.toBeInTheDocument()
   })
 
-  it('restores the lead-lens title when toggling back to lead', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('restores the lead-lens title when toggling back to lead', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 3, name: 'Lead Time' })).toBeInTheDocument()
+    })
 
     fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
     expect(screen.getByRole('heading', { level: 3, name: 'Cycle Time' })).toBeInTheDocument()
@@ -423,12 +512,14 @@ describe('CycleTimeChart', () => {
     expect(screen.queryByRole('heading', { level: 3, name: 'Cycle Time' })).not.toBeInTheDocument()
   })
 
-  it('keeps the section aria-label stable across lens switches (h3 tracks the lens instead)', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('keeps the section aria-label stable across lens switches (h3 tracks the lens instead)', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('cycle-time-chart')).toHaveAttribute('aria-label', 'Cycle Time')
+    await waitFor(() => {
+      expect(screen.getByTestId('cycle-time-chart')).toHaveAttribute('aria-label', 'Cycle Time')
+    })
 
     fireEvent.click(screen.getByTestId('cycle-time-lens-cycle'))
     expect(screen.getByTestId('cycle-time-chart')).toHaveAttribute('aria-label', 'Cycle Time')
@@ -439,10 +530,14 @@ describe('CycleTimeChart', () => {
 
   // --- Post-completion edit safety ---
 
-  it('scatter x is driven by CompletedAt and does not move when a record is updated', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('scatter x is driven by CompletedAt and does not move when a record is updated', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('scatter-point-1')).toBeInTheDocument()
+    })
 
     const point1BeforeCx = Number(screen.getByTestId('scatter-point-1').getAttribute('cx'))
     expect(point1BeforeCx).toBeGreaterThan(0)
@@ -453,48 +548,84 @@ describe('CycleTimeChart', () => {
 
   // --- Window annotation ---
 
-  it('shows a 30d window badge in the header chrome', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('shows a 30d window badge in the header chrome', async () => {
+    mockDeliveryResponse(buildData())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    const badge = screen.getByTestId('cycle-time-chart-window')
-    expect(badge).toBeInTheDocument()
-    expect(badge.textContent).toBe('30d')
+    await waitFor(() => {
+      const badge = screen.getByTestId('cycle-time-chart-window')
+      expect(badge).toBeInTheDocument()
+      expect(badge.textContent).toBe('30d')
+    })
   })
 
-  it('keeps the window badge rendered when no delivered issues are present (empty state)', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildEmpty(), isLoading: false, isError: false })
+  it('keeps the window badge rendered when no delivered issues are present (empty state)', async () => {
+    mockDeliveryResponse(buildEmpty())
 
-    render(<CycleTimeChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('cycle-time-chart-window')).toBeInTheDocument()
-    expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('cycle-time-chart-window')).toBeInTheDocument()
+      expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
+    })
   })
 
   it.each<RangeCode>(['7d', '90d'])(
     'renders the window badge with the %s range code under the lead lens',
-    (range) => {
-      mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+    async (range) => {
+      mockDeliveryResponse(buildData())
 
-      render(<CycleTimeChart range={range} />)
+      renderChart(range)
 
-      const badge = screen.getByTestId('cycle-time-chart-window')
-      expect(badge).toBeInTheDocument()
-      expect(badge.textContent).toBe(range)
+      await waitFor(() => {
+        const badge = screen.getByTestId('cycle-time-chart-window')
+        expect(badge).toBeInTheDocument()
+        expect(badge.textContent).toBe(range)
+      })
     },
   )
 
-  it('updates the window badge when the page range changes', () => {
-    mockUseDeliveryTime.mockReturnValue({ data: buildData(), isLoading: false, isError: false })
+  it('updates the window badge when the page range changes', async () => {
+    mockDeliveryResponse(buildData())
 
-    const { rerender } = render(<CycleTimeChart range="7d" />)
-    expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('7d')
+    const { rerender } = render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={['/']}>
+            <CycleTimeChart range="7d" />
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('7d')
+    })
 
-    rerender(<CycleTimeChart range="30d" />)
-    expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('30d')
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={['/']}>
+            <CycleTimeChart range="30d" />
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('30d')
+    })
 
-    rerender(<CycleTimeChart range="90d" />)
-    expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('90d')
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          <MemoryRouter initialEntries={['/']}>
+            <CycleTimeChart range="90d" />
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('90d')
+    })
   })
 })

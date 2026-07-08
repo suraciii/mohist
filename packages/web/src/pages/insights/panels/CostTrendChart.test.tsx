@@ -1,16 +1,19 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
+import { ProjectProvider } from '../../../entities/project'
+import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { setPrefersReducedMotion } from '../../../../tests/setup'
 import type { AgentUsageTimeseriesDto } from '../../../entities/agent'
 
-const mockUseAgentUsage = vi.fn()
-vi.mock('../../../entities/agent', () => ({
-  useAgentUsage: () => mockUseAgentUsage(),
-}))
-
 import { CostTrendChart } from './CostTrendChart'
+
+useMswServer()
 
 function buildUsageData(overrides?: Partial<AgentUsageTimeseriesDto>): AgentUsageTimeseriesDto {
   return {
@@ -68,68 +71,100 @@ function buildZeroSampleUsageData(): AgentUsageTimeseriesDto {
   }
 }
 
+const USAGE_PATH = '*/api/projects/:projectId/agent/usage'
+
+function mockUsageResponse(data: AgentUsageTimeseriesDto) {
+  server.use(
+    http.get(USAGE_PATH, () => HttpResponse.json({ success: true, data })),
+  )
+}
+
+function mockUsagePending() {
+  server.use(
+    http.get(USAGE_PATH, () => new Promise(() => {})),
+  )
+}
+
+function mockUsageError() {
+  server.use(
+    http.get(USAGE_PATH, () => HttpResponse.json({ success: false, error: { message: 'boom' } }, { status: 500 })),
+  )
+}
+
+function renderChart() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+        <MemoryRouter initialEntries={['/']}>
+          <CostTrendChart range="30d" />
+        </MemoryRouter>
+      </ProjectProvider>
+    </QueryClientProvider>,
+  )
+}
+
 describe('CostTrendChart', () => {
   afterEach(() => {
     cleanup()
-    mockUseAgentUsage.mockReset()
   })
 
   // --- Three-state routing ---
 
   it('renders loading state via ChartContainer', () => {
-    mockUseAgentUsage.mockReturnValue({ data: undefined, isLoading: true, isError: false })
+    mockUsagePending()
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
     expect(screen.getByTestId('chart-container-loading')).toBeInTheDocument()
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
 
-  it('renders error state via ChartContainer', () => {
-    mockUseAgentUsage.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: new Error('fail') })
+  it('renders error state via ChartContainer', async () => {
+    mockUsageError()
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('chart-container-error')).toBeInTheDocument()
-    expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
-  })
-
-  it('renders empty state with next action when buckets are empty', () => {
-    mockUseAgentUsage.mockReturnValue({
-      data: buildUsageData({ buckets: [] }),
-      isLoading: false,
-      isError: false,
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-container-error')).toBeInTheDocument()
     })
-
-    render(<CostTrendChart range="30d" />)
-
-    const empty = screen.getByTestId('chart-container-empty')
-    expect(empty).toBeInTheDocument()
-    expect(empty.textContent).toContain('once an agent session reports usage')
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
 
-  it('renders empty state for the server zero-sample seven-bucket shape', () => {
-    mockUseAgentUsage.mockReturnValue({
-      data: buildZeroSampleUsageData(),
-      isLoading: false,
-      isError: false,
+  it('renders empty state with next action when buckets are empty', async () => {
+    mockUsageResponse(buildUsageData({ buckets: [] }))
+
+    renderChart()
+
+    await waitFor(() => {
+      const empty = screen.getByTestId('chart-container-empty')
+      expect(empty).toBeInTheDocument()
+      expect(empty.textContent).toContain('once an agent session reports usage')
     })
-
-    render(<CostTrendChart range="30d" />)
-
-    const empty = screen.getByTestId('chart-container-empty')
-    expect(empty).toBeInTheDocument()
-    expect(empty.textContent).toContain('once an agent session reports usage')
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
 
-  it('renders resolved chart content with accessibility wrapper', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('renders empty state for the server zero-sample seven-bucket shape', async () => {
+    mockUsageResponse(buildZeroSampleUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
+    await waitFor(() => {
+      const empty = screen.getByTestId('chart-container-empty')
+      expect(empty).toBeInTheDocument()
+      expect(empty.textContent).toContain('once an agent session reports usage')
+    })
+    expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
+  })
+
+  it('renders resolved chart content with accessibility wrapper', async () => {
+    mockUsageResponse(buildUsageData())
+
+    renderChart()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-accessibility')).toBeInTheDocument()
+    })
     expect(screen.queryByTestId('chart-container-loading')).not.toBeInTheDocument()
     expect(screen.queryByTestId('chart-container-error')).not.toBeInTheDocument()
     expect(screen.queryByTestId('chart-container-empty')).not.toBeInTheDocument()
@@ -137,92 +172,104 @@ describe('CostTrendChart', () => {
 
   // --- Bar values ---
 
-  it('renders one bar per bucket with height encoding cost', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('renders one bar per bucket with height encoding cost', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const barSeries = screen.getByTestId('bar-series')
-    expect(barSeries.children).toHaveLength(7)
-    for (let i = 0; i < 7; i++) {
-      expect(screen.getByTestId(`bar-${i}`)).toBeInTheDocument()
-    }
+    await waitFor(() => {
+      const barSeries = screen.getByTestId('bar-series')
+      expect(barSeries.children).toHaveLength(7)
+      for (let i = 0; i < 7; i++) {
+        expect(screen.getByTestId(`bar-${i}`)).toBeInTheDocument()
+      }
+    })
   })
 
-  it('zero-cost day renders a zero-height bar (not omitted)', () => {
+  it('zero-cost day renders a zero-height bar (not omitted)', async () => {
     const data = buildUsageData()
     data.buckets[2] = { ...data.buckets[2], costAmount: 0 }
 
-    mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
+    mockUsageResponse(data)
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const barSeries = screen.getByTestId('bar-series')
-    expect(barSeries.children).toHaveLength(7)
+    await waitFor(() => {
+      const barSeries = screen.getByTestId('bar-series')
+      expect(barSeries.children).toHaveLength(7)
 
-    const bar = screen.getByTestId('bar-2')
-    expect(bar.style.transform).toContain('scaleY(0)')
+      const bar = screen.getByTestId('bar-2')
+      expect(bar.style.transform).toContain('scaleY(0)')
+    })
   })
 
   // --- Trend values ---
 
-  it('trend line renders with markers for valid costPerShip points', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('trend line renders with markers for valid costPerShip points', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const lineSeries = screen.getByTestId('line-series')
-    expect(lineSeries).toBeInTheDocument()
+    await waitFor(() => {
+      const lineSeries = screen.getByTestId('line-series')
+      expect(lineSeries).toBeInTheDocument()
 
-    const markers = lineSeries.querySelectorAll('circle')
-    expect(markers.length).toBeGreaterThan(0)
+      const markers = lineSeries.querySelectorAll('circle')
+      expect(markers.length).toBeGreaterThan(0)
+    })
   })
 
-  it('skips null costPerShip points (undefined)', () => {
+  it('skips null costPerShip points (undefined)', async () => {
     const data = buildUsageData()
     if (data.cumulativeCostPerShip) {
       data.cumulativeCostPerShip[1] = { dayEnd: '2026-06-23T23:59:59', cumulativeCost: null, currency: null, cumulativeShippedCount: 0, costPerShip: null }
       data.cumulativeCostPerShip[3] = { dayEnd: '2026-06-25T23:59:59', cumulativeCost: null, currency: null, cumulativeShippedCount: 0, costPerShip: null }
     }
 
-    mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
+    mockUsageResponse(data)
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const lineSeries = screen.getByTestId('line-series')
-    const markers = lineSeries.querySelectorAll('circle')
-    expect(markers).toHaveLength(5)
+    await waitFor(() => {
+      const lineSeries = screen.getByTestId('line-series')
+      const markers = lineSeries.querySelectorAll('circle')
+      expect(markers).toHaveLength(5)
+    })
   })
 
-  it('does not bridge null costPerShip gaps in the trend path', () => {
+  it('does not bridge null costPerShip gaps in the trend path', async () => {
     const data = buildUsageData()
     if (data.cumulativeCostPerShip) {
       data.cumulativeCostPerShip[1] = { dayEnd: '2026-06-23T23:59:59', cumulativeCost: null, currency: null, cumulativeShippedCount: 0, costPerShip: null }
     }
 
-    mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
+    mockUsageResponse(data)
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const paths = screen.getByTestId('line-series').querySelectorAll('path')
-    expect(paths.length).toBeGreaterThan(1)
+    await waitFor(() => {
+      const paths = screen.getByTestId('line-series').querySelectorAll('path')
+      expect(paths.length).toBeGreaterThan(1)
+    })
   })
 
-  it('genuine zero costPerShip plots at value 0 (not skipped)', () => {
+  it('genuine zero costPerShip plots at value 0 (not skipped)', async () => {
     const data = buildUsageData()
     if (data.cumulativeCostPerShip) {
       data.cumulativeCostPerShip[0] = { dayEnd: '2026-06-22T23:59:59', cumulativeCost: 0, currency: 'USD', cumulativeShippedCount: 2, costPerShip: 0 }
     }
 
-    mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
+    mockUsageResponse(data)
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const markers = screen.getByTestId('line-series').querySelectorAll('circle')
-    expect(markers).toHaveLength(7)
+    await waitFor(() => {
+      const markers = screen.getByTestId('line-series').querySelectorAll('circle')
+      expect(markers).toHaveLength(7)
+    })
   })
 
-  it('renders without crashing when costPerShip is omitted (server WhenWritingNull wire format)', () => {
+  it('renders without crashing when costPerShip is omitted (server WhenWritingNull wire format)', async () => {
     // The server serializes null costPerShip with JsonIgnoreCondition.WhenWritingNull,
     // so the key is absent on the wire and parses as `undefined` (not `null`).
     const omittedPoints = buildUsageData().cumulativeCostPerShip!.map((p) => {
@@ -230,274 +277,298 @@ describe('CostTrendChart', () => {
       return rest
     }) as AgentUsageTimeseriesDto['cumulativeCostPerShip']
 
-    mockUseAgentUsage.mockReturnValue({
-      data: buildUsageData({ cumulativeCostPerShip: omittedPoints }),
-      isLoading: false,
-      isError: false,
+    mockUsageResponse(buildUsageData({ cumulativeCostPerShip: omittedPoints }))
+
+    renderChart()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('bar-series')).toBeInTheDocument()
     })
-
-    render(<CostTrendChart range="30d" />)
-
-    expect(screen.getByTestId('bar-series')).toBeInTheDocument()
     expect(screen.queryByTestId('line-series')).not.toBeInTheDocument()
   })
 
-  it('bars-only when cumulativeCostPerShip is absent', () => {
+  it('bars-only when cumulativeCostPerShip is absent', async () => {
     const data = buildUsageData({ cumulativeCostPerShip: null })
 
-    mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
+    mockUsageResponse(data)
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('bar-series')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('bar-series')).toBeInTheDocument()
+    })
     expect(screen.queryByTestId('line-series')).not.toBeInTheDocument()
   })
 
-  it('no legend when only one series (bars-only)', () => {
+  it('no legend when only one series (bars-only)', async () => {
     const data = buildUsageData({ cumulativeCostPerShip: null })
 
-    mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
+    mockUsageResponse(data)
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    expect(screen.queryByTestId('chart-legend')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByTestId('chart-legend')).not.toBeInTheDocument()
+    })
   })
 
-  it('legend rendered when both series present, ordered bar then line', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('legend rendered when both series present, ordered bar then line', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const legend = screen.getByTestId('chart-legend')
-    expect(legend).toBeInTheDocument()
-    expect(legend.textContent).toContain('Daily cost')
-    expect(legend.textContent).toContain('Cost per ship')
+    await waitFor(() => {
+      const legend = screen.getByTestId('chart-legend')
+      expect(legend).toBeInTheDocument()
+      expect(legend.textContent).toContain('Daily cost')
+      expect(legend.textContent).toContain('Cost per ship')
 
-    const entries = legend.querySelectorAll('span')
-    const dailyCostEntry = [...entries].find((e) => e.textContent === 'Daily cost')
-    const cpsEntry = [...entries].find((e) => e.textContent === 'Cost per ship')
-    expect(dailyCostEntry).toBeTruthy()
-    expect(cpsEntry).toBeTruthy()
+      const entries = legend.querySelectorAll('span')
+      const dailyCostEntry = [...entries].find((e) => e.textContent === 'Daily cost')
+      const cpsEntry = [...entries].find((e) => e.textContent === 'Cost per ship')
+      expect(dailyCostEntry).toBeTruthy()
+      expect(cpsEntry).toBeTruthy()
+    })
   })
 
   // --- Dual axis ---
 
-  it('renders left and right axes when trend is present', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('renders left and right axes when trend is present', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('chart-axis-left')).toBeInTheDocument()
-    expect(screen.getByTestId('chart-axis-right')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-axis-left')).toBeInTheDocument()
+      expect(screen.getByTestId('chart-axis-right')).toBeInTheDocument()
+    })
   })
 
-  it('only left axis when trend is absent', () => {
+  it('only left axis when trend is absent', async () => {
     const data = buildUsageData({ cumulativeCostPerShip: null })
 
-    mockUseAgentUsage.mockReturnValue({ data, isLoading: false, isError: false })
+    mockUsageResponse(data)
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByTestId('chart-axis-left')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-axis-left')).toBeInTheDocument()
+    })
     expect(screen.queryByTestId('chart-axis-right')).not.toBeInTheDocument()
   })
 
   // --- Token colors ---
 
-  it('bars use fill-chart-2 theme token', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('bars use fill-chart-2 theme token', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const bar = screen.getByTestId('bar-0')
-    const classes = bar.getAttribute('class') ?? ''
-    expect(classes).toContain('fill-chart-2')
-    expect(bar.getAttribute('fill')).toBeNull()
+    await waitFor(() => {
+      const bar = screen.getByTestId('bar-0')
+      const classes = bar.getAttribute('class') ?? ''
+      expect(classes).toContain('fill-chart-2')
+      expect(bar.getAttribute('fill')).toBeNull()
+    })
   })
 
-  it('trend line uses stroke-chart-5 theme token', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('trend line uses stroke-chart-5 theme token', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const path = screen.getByTestId('line-series').querySelector('path')
-    const classes = path?.getAttribute('class') ?? ''
-    expect(classes).toContain('stroke-chart-5')
+    await waitFor(() => {
+      const path = screen.getByTestId('line-series').querySelector('path')
+      const classes = path?.getAttribute('class') ?? ''
+      expect(classes).toContain('stroke-chart-5')
+    })
   })
 
-  it('left axis uses stroke-chart-2 and fill-chart-2', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('left axis uses stroke-chart-2 and fill-chart-2', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const axis = screen.getByTestId('chart-axis-left')
-    const axisLine = axis.querySelector('line')
-    expect(axisLine?.getAttribute('class')).toContain('stroke-chart-2')
-    const textEl = axis.querySelector('text')
-    expect(textEl?.getAttribute('class')).toContain('fill-chart-2')
+    await waitFor(() => {
+      const axis = screen.getByTestId('chart-axis-left')
+      const axisLine = axis.querySelector('line')
+      expect(axisLine?.getAttribute('class')).toContain('stroke-chart-2')
+      const textEl = axis.querySelector('text')
+      expect(textEl?.getAttribute('class')).toContain('fill-chart-2')
+    })
   })
 
-  it('right axis uses stroke-chart-5 and fill-chart-5', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('right axis uses stroke-chart-5 and fill-chart-5', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const axis = screen.getByTestId('chart-axis-right')
-    const axisLine = axis.querySelector('line')
-    expect(axisLine?.getAttribute('class')).toContain('stroke-chart-5')
-    const textEl = axis.querySelector('text')
-    expect(textEl?.getAttribute('class')).toContain('fill-chart-5')
+    await waitFor(() => {
+      const axis = screen.getByTestId('chart-axis-right')
+      const axisLine = axis.querySelector('line')
+      expect(axisLine?.getAttribute('class')).toContain('stroke-chart-5')
+      const textEl = axis.querySelector('text')
+      expect(textEl?.getAttribute('class')).toContain('fill-chart-5')
+    })
   })
 
   // --- Accessibility ---
 
-  it('accessibility sr-only summary is rendered', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('accessibility sr-only summary is rendered', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const summary = screen.getByTestId('chart-sr-summary')
-    expect(summary).toBeInTheDocument()
-    expect(summary.textContent).toContain('Daily cost bar chart')
-    expect(summary.textContent).toContain('Jun 22')
-    expect(summary.textContent).toContain('Total window cost')
-  })
-
-  it('sr-only summary uses the displayed last bucket day instead of exclusive rangeTo', () => {
-    mockUseAgentUsage.mockReturnValue({
-      data: buildUsageData({ rangeTo: '2026-06-29T00:00:00' }),
-      isLoading: false,
-      isError: false,
+    await waitFor(() => {
+      const summary = screen.getByTestId('chart-sr-summary')
+      expect(summary).toBeInTheDocument()
+      expect(summary.textContent).toContain('Daily cost bar chart')
+      expect(summary.textContent).toContain('Jun 22')
+      expect(summary.textContent).toContain('Total window cost')
     })
-
-    render(<CostTrendChart range="30d" />)
-
-    const summary = screen.getByTestId('chart-sr-summary')
-    expect(summary.textContent).toContain('Jun 22 to Jun 28')
-    expect(summary.textContent).not.toContain('Jun 29')
   })
 
-  it('chart svg has role=img and aria-label', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('sr-only summary uses the displayed last bucket day instead of exclusive rangeTo', async () => {
+    mockUsageResponse(buildUsageData({ rangeTo: '2026-06-29T00:00:00' }))
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const svg = document.querySelector('svg[role="img"]')
-    expect(svg).toBeInTheDocument()
-    expect(svg).toHaveAttribute('aria-label')
-    expect(svg!.getAttribute('aria-label')).toContain('Cost trend')
+    await waitFor(() => {
+      const summary = screen.getByTestId('chart-sr-summary')
+      expect(summary.textContent).toContain('Jun 22 to Jun 28')
+      expect(summary.textContent).not.toContain('Jun 29')
+    })
+  })
+
+  it('chart svg has role=img and aria-label', async () => {
+    mockUsageResponse(buildUsageData())
+
+    renderChart()
+
+    await waitFor(() => {
+      const svg = document.querySelector('svg[role="img"]')
+      expect(svg).toBeInTheDocument()
+      expect(svg).toHaveAttribute('aria-label')
+      expect(svg!.getAttribute('aria-label')).toContain('Cost trend')
+    })
   })
 
   // --- tabular-nums ---
 
-  it('numeric labels use tabular-nums', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('numeric labels use tabular-nums', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const axisTexts = document.querySelectorAll('.tabular-nums')
-    expect(axisTexts.length).toBeGreaterThan(0)
+    await waitFor(() => {
+      const axisTexts = document.querySelectorAll('.tabular-nums')
+      expect(axisTexts.length).toBeGreaterThan(0)
+    })
   })
 
   // --- Reduced motion ---
 
-  it('bars have transform transition by default', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('bars have transform transition by default', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const bar = screen.getByTestId('bar-0')
-    expect(bar.style.transition).toContain('transform')
+    await waitFor(() => {
+      const bar = screen.getByTestId('bar-0')
+      expect(bar.style.transition).toContain('transform')
+    })
   })
 
-  it('bars disable animation when prefers-reduced-motion: reduce', () => {
+  it('bars disable animation when prefers-reduced-motion: reduce', async () => {
     setPrefersReducedMotion(true)
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const bar = screen.getByTestId('bar-0')
-    expect(bar.style.transition).toBe('none')
+    await waitFor(() => {
+      const bar = screen.getByTestId('bar-0')
+      expect(bar.style.transition).toBe('none')
+    })
 
     setPrefersReducedMotion(false)
   })
 
   // --- Empty state next action ---
 
-  it('empty state has concrete next action text', () => {
-    mockUseAgentUsage.mockReturnValue({
-      data: buildUsageData({ buckets: [] }),
-      isLoading: false,
-      isError: false,
+  it('empty state has concrete next action text', async () => {
+    mockUsageResponse(buildUsageData({ buckets: [] }))
+
+    renderChart()
+
+    await waitFor(() => {
+      const empty = screen.getByTestId('chart-container-empty')
+      expect(empty.textContent).toContain('once an agent session reports usage on this project')
     })
-
-    render(<CostTrendChart range="30d" />)
-
-    const empty = screen.getByTestId('chart-container-empty')
-    expect(empty.textContent).toContain('once an agent session reports usage on this project')
   })
 
   // --- Widget section ---
 
-  it('renders within a section with testid', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('renders within a section with testid', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    const section = screen.getByTestId('cost-trend-chart')
-    expect(section).toBeInTheDocument()
-    expect(section).toHaveAttribute('aria-label', 'Cost Trend')
+    await waitFor(() => {
+      const section = screen.getByTestId('cost-trend-chart')
+      expect(section).toBeInTheDocument()
+      expect(section).toHaveAttribute('aria-label', 'Cost Trend')
+    })
   })
 
-  it('shows section heading', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('shows section heading', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByText('Cost Trend')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Cost Trend')).toBeInTheDocument()
+    })
   })
 
   // --- Day labels ---
 
-  it('renders day label for each bucket', () => {
-    mockUseAgentUsage.mockReturnValue({ data: buildUsageData(), isLoading: false, isError: false })
+  it('renders day label for each bucket', async () => {
+    mockUsageResponse(buildUsageData())
 
-    render(<CostTrendChart range="30d" />)
+    renderChart()
 
-    expect(screen.getByText('Jun 22')).toBeInTheDocument()
-    expect(screen.getByText('Jun 28')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Jun 22')).toBeInTheDocument()
+      expect(screen.getByText('Jun 28')).toBeInTheDocument()
+    })
   })
 
   // --- Window annotation ---
 
-  it('renders a window badge derived from rangeFrom/rangeTo when usage data is present', () => {
-    mockUseAgentUsage.mockReturnValue({
-      data: buildUsageData({
-        rangeFrom: '2026-06-22T00:00:00',
-        rangeTo: '2026-06-28T23:59:59',
-      }),
-      isLoading: false,
-      isError: false,
+  it('renders a window badge derived from rangeFrom/rangeTo when usage data is present', async () => {
+    mockUsageResponse(buildUsageData({
+      rangeFrom: '2026-06-22T00:00:00',
+      rangeTo: '2026-06-28T23:59:59',
+    }))
+
+    renderChart()
+
+    await waitFor(() => {
+      const badge = screen.getByTestId('cost-trend-chart-window')
+      expect(badge).toBeInTheDocument()
+      expect(badge.textContent).toContain('Jun 22')
+      expect(badge.textContent).toContain('Jun 28')
     })
-
-    render(<CostTrendChart range="30d" />)
-
-    const badge = screen.getByTestId('cost-trend-chart-window')
-    expect(badge).toBeInTheDocument()
-    expect(badge.textContent).toContain('Jun 22')
-    expect(badge.textContent).toContain('Jun 28')
   })
 
-  it('hides the window badge in the empty state', () => {
-    mockUseAgentUsage.mockReturnValue({
-      data: buildUsageData({ buckets: [] }),
-      isLoading: false,
-      isError: false,
+  it('hides the window badge in the empty state', async () => {
+    mockUsageResponse(buildUsageData({ buckets: [] }))
+
+    renderChart()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
     })
-
-    render(<CostTrendChart range="30d" />)
-
-    expect(screen.getByTestId('chart-container-empty')).toBeInTheDocument()
     expect(screen.queryByTestId('cost-trend-chart-window')).not.toBeInTheDocument()
   })
 })
