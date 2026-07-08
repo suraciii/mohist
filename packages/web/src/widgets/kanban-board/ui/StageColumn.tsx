@@ -71,7 +71,7 @@ export function StageColumn({
     <div
       data-testid={`stage-column-${status}`}
       data-stage={status}
-      className={`flex flex-col min-w-[280px] max-w-[320px] flex-1 rounded-xl border bg-card/50 ${
+      className={`flex flex-col min-w-[280px] max-w-[420px] flex-1 rounded-xl border bg-card/50 ${
         isDone ? 'opacity-70' : ''
       } ${colors.activeBorder}`}
     >

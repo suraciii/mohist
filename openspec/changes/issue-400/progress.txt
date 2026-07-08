@@ -1,0 +1,24 @@
+## Codebase Patterns
+
+- The desktop kanban row (`data-testid="kanban-board-row"`) is a `hidden md:flex flex-row gap-4 overflow-x-auto p-4 flex-1 min-w-0`. Its children are themselves flex items; `StageColumn` already bakes `flex-1` into its class string, so the three core columns absorb the reclaimed slot via `flex-1` without the row needing to know.
+- `StageColumn`'s column classes are `flex flex-col min-w-[280px] max-w-[420px] flex-1 rounded-xl border bg-card/50 ...` — the raised `max-w-[420px]` cap keeps the core groups from stretching into unreadable wide blocks at large viewports.
+- `filterCancelledFromColumns` is intentionally an identity function (documented seam); visibility is a render-time concern owned by `KanbanBoard.tsx` + `StageColumn`. Cancelled column carries full issue set through the pipeline so tab counts / counts / "n hidden" affordances stay stable.
+- State `showCancelled` is local React state. `cancelledCount` (derived from `allColumns`, pre-filter, pre-toggle) is what mobile tab counts and the in-list Show/Hide link read. This is the contract tested by the "Mobile cancelled tab count is independent of showCancelled" describe.
+
+## T-001 — Desktop Cancelled column default-collapse to compact stub reclaiming space for core groups
+
+- Replaced the showCancelled=false path of the Cancelled column: instead of a full `StageColumn` with `bodyHidden=true` + `emptyState="Cancelled issues hidden — N not shown"`, the desktop row now renders a lightweight collapsed stub (`data-testid="cancelled-collapsed-stub"`, `w-[140px] shrink-0`, `flex flex-col`) with the count chip + a single expand affordance (`data-testid="cancelled-collapsed-stub-expand"`).
+- Removed `bodyHidden` / `emptyState` from the StageColumn instantiation in `KanbanBoard.tsx`. The StageColumn's `bodyHidden` / `emptyState` props remain on the API (not removed) so we don't churn callers outside the cancelled-render path; no other caller uses them today.
+- Raised the column max-w cap in `StageColumn.tsx`: `max-w-[320px]` → `max-w-[420px]`. Min-w stays at `min-w-[280px]`. Together with the row's `flex-1` per column, the three core groups flex to fill the reclaimed Cancelled slot up to 420px without overflowing a common desktop width.
+- The stub itself is `w-[140px] shrink-0` — the three core columns get the reclaimed space via flex-1 / max-w-[420px] / min-w-[280px].
+- Preserved all existing testids for the expanded state (`stage-column-cancelled`, `cancelled-toggle`); new stub uses its own testids (`cancelled-collapsed-stub`, `cancelled-collapsed-stub-expand`) per design D6.
+- The `kanban-board-row` retains `overflow-x-auto min-w-0` as the escape hatch; the `kanban-board-containment.test.tsx` is left untouched and still passes.
+- Updated the cancelled-toggle bidirectional regression test in `kanban-board-query.regression.test.tsx` to assert the new default collapsed-stub path: stub renders with count, expand affordance click restores full `stage-column-cancelled` with `cancelled-toggle` reading 'Hide cancelled', and clicking 'Hide cancelled' collapses back to the stub (and `stage-column-cancelled` is gone).
+- The mobile tab badge (and `cancelledCount`) reads from `allColumns` (pre-filter, pre-toggle), so the existing mobile tab count independence test (`Mobile cancelled tab count is independent of showCancelled`) remains untouched and still passes — mobile layout is unaffected.
+- `npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes (4481 tests, 1 skipped pre-existing).
+
+## Gotchas
+
+- The StageColumn class string is on a single line in the source — editing it means re-matching the full string, since conditional whitespace inside the templated class is easy to mistype.
+- The DOM-trees-always-render split (desktop `hidden md:flex` + mobile `md:hidden`) means there's always both a desktop row and a mobile column in the document, even if jsdom-class-hidden. Tests that target the desktop board by testid (`kanban-board-row`, `stage-column-*`) still locate the right elements because each testid is rendered exactly once.
+- `filterCancelledFromColumns` is an identity seam by design; do not move visibility decisions back into the model — that would break tab counts (already covered by the "cancelled tab count is independent of showCancelled" test).
