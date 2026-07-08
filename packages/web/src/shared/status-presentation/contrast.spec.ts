@@ -16,7 +16,7 @@ const MUTED_BG = {
   dark: { L: 0.269, C: 0, H: 0 },
 } as const
 const MUTED_FG = {
-  light: { L: 0.556, C: 0, H: 0 },
+  light: { L: 0.52, C: 0, H: 0 },
   dark: { L: 0.708, C: 0, H: 0 },
 } as const
 
@@ -59,32 +59,7 @@ const COVERAGE: Coverage[] = [
 
 const THEMES: Theme[] = ['light', 'dark']
 
-/**
- * WCAG AA contrast thresholds:
- * - 4.5:1 for normal text (body copy, labels)
- * - 3:1 for "large text" (≥18pt regular, ≥14pt bold) and graphical objects
- *
- * Status pills on the production surfaces use `text-xs` (12px), which is
- * normal text. The spec asks for 4.5:1. The current `index.css` token values
- * for `warning` (yellow, hue 75) and `muted` (page neutral) yield light-theme
- * contrast between 4.2 and 4.4 against their subtle backgrounds — close but
- * not 4.5. To keep the spec assertable against the actual rendered treatment
- * (without a token change), the spec asserts 4.5:1 for the families where the
- * tokens clear it (`success`, `info`, `danger`) and 3:1 (WCAG AA Large Text)
- * for `warning` and `muted`, recording the gap so the next design pass can
- * tighten those token values.
- *
- * Dark theme clears 4.5:1 across all four families; the relaxed threshold only
- * applies to light-theme `warning` and `muted` combinations.
- */
-const LARGE_TEXT_AA = 3.0
 const NORMAL_TEXT_AA = 4.5
-
-function thresholdFor(family: Family | 'muted', theme: Theme): number {
-  if (theme === 'dark') return NORMAL_TEXT_AA
-  if (family === 'warning' || family === 'muted') return LARGE_TEXT_AA
-  return NORMAL_TEXT_AA
-}
 
 function familyFromTreatment(kind: StatusKind, state: string) {
   return statusTreatment(kind, state).family
@@ -112,11 +87,10 @@ describe('status-presentation contrast (WCAG AA)', () => {
       for (const theme of THEMES) {
         const { bg, fg } = familyTokens(family, theme)
         const ratio = contrastRatio(oklchToSrgb(bg), oklchToSrgb(fg))
-        const threshold = thresholdFor(family, theme)
         expect(
           ratio,
-          `${kind}/${state} ${theme} (family=${family}) contrast ${ratio.toFixed(3)} should be >= ${threshold}`,
-        ).toBeGreaterThanOrEqual(threshold)
+          `${kind}/${state} ${theme} (family=${family}) contrast ${ratio.toFixed(3)} should be >= ${NORMAL_TEXT_AA}`,
+        ).toBeGreaterThanOrEqual(NORMAL_TEXT_AA)
       }
     },
   )
@@ -134,7 +108,7 @@ describe('status-presentation contrast (WCAG AA)', () => {
     }
   })
 
-  it('blocking and approval states meet WCAG AA in both themes', () => {
+  it('blocking and approval states meet 4.5:1 WCAG AA in both themes', () => {
     const blockingOrApproval: Coverage[] = [
       { kind: 'issue-health', state: 'blocked' },
       { kind: 'workflow-run', state: 'failed' },
@@ -148,26 +122,24 @@ describe('status-presentation contrast (WCAG AA)', () => {
       for (const theme of THEMES) {
         const { bg, fg } = familyTokens(family, theme)
         const ratio = contrastRatio(oklchToSrgb(bg), oklchToSrgb(fg))
-        const threshold = thresholdFor(family, theme)
         expect(
           ratio,
-          `${kind}/${state} ${theme} (family=${family}) contrast ${ratio.toFixed(3)} should be >= ${threshold}`,
-        ).toBeGreaterThanOrEqual(threshold)
+          `${kind}/${state} ${theme} (family=${family}) contrast ${ratio.toFixed(3)} should be >= ${NORMAL_TEXT_AA}`,
+        ).toBeGreaterThanOrEqual(NORMAL_TEXT_AA)
       }
     }
   })
 
-  it('warning light-theme treatment documents the 3:1 acceptance threshold (pending token fix)', () => {
-    const { bg, fg } = familyTokens('warning', 'light')
-    const ratio = contrastRatio(oklchToSrgb(bg), oklchToSrgb(fg))
-    expect(ratio).toBeGreaterThanOrEqual(LARGE_TEXT_AA)
-    expect(ratio).toBeLessThan(NORMAL_TEXT_AA)
-  })
-
-  it('muted light-theme treatment documents the 3:1 acceptance threshold (pending token fix)', () => {
-    const { bg, fg } = familyTokens('muted', 'light')
-    const ratio = contrastRatio(oklchToSrgb(bg), oklchToSrgb(fg))
-    expect(ratio).toBeGreaterThanOrEqual(LARGE_TEXT_AA)
-    expect(ratio).toBeLessThan(NORMAL_TEXT_AA)
+  it('warning and muted pairs also clear strict 4.5:1 WCAG AA in both themes', () => {
+    for (const theme of THEMES) {
+      for (const family of ['warning', 'muted'] as const) {
+        const { bg, fg } = familyTokens(family, theme)
+        const ratio = contrastRatio(oklchToSrgb(bg), oklchToSrgb(fg))
+        expect(
+          ratio,
+          `${theme} ${family} pair contrast ${ratio.toFixed(3)} should be >= 4.5`,
+        ).toBeGreaterThanOrEqual(NORMAL_TEXT_AA)
+      }
+    }
   })
 })

@@ -59,6 +59,13 @@ describe('STAGE_COLORS - class strings, no inline hex', () => {
     expect(STAGE_COLORS[IssueStatus.Cancelled].bottomBorder).toMatch(/^border-b-danger-border\b/)
   })
 
+  it('bottomBorder is selected from explicit static classes so Tailwind can emit them', () => {
+    expect(STAGE_COLORS[IssueStatus.Backlog].bottomBorder).toBe('border-b-border')
+    expect(STAGE_COLORS[IssueStatus.InProgress].bottomBorder).toBe('border-b-warning-border')
+    expect(STAGE_COLORS[IssueStatus.Done].bottomBorder).toBe('border-b-success-border')
+    expect(STAGE_COLORS[IssueStatus.Cancelled].bottomBorder).toBe('border-b-danger-border')
+  })
+
   it('does not use raw text-amber-700 / bg-amber-50/60 / text-green-700 palette classes', () => {
     const all = Object.values(IssueStatus).flatMap((s) => allClassStrings(STAGE_COLORS[s]))
     for (const cls of all) {

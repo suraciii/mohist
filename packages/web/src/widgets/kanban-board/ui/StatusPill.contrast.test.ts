@@ -36,20 +36,13 @@ const MUTED_BG = {
   dark: { L: 0.269, C: 0, H: 0 },
 } as const
 const MUTED_FG = {
-  light: { L: 0.556, C: 0, H: 0 },
+  light: { L: 0.52, C: 0, H: 0 },
   dark: { L: 0.708, C: 0, H: 0 },
 } as const
 
 const THEMES: Theme[] = ['light', 'dark']
 
 const NORMAL_TEXT_AA = 4.5
-const LARGE_TEXT_AA = 3.0
-
-function thresholdFor(family: Family | 'muted', theme: Theme): number {
-  if (theme === 'dark') return NORMAL_TEXT_AA
-  if (family === 'warning' || family === 'muted') return LARGE_TEXT_AA
-  return NORMAL_TEXT_AA
-}
 
 function familyBgFg(family: Family | 'muted', theme: Theme) {
   if (family === 'muted') {
@@ -69,11 +62,10 @@ describe('StatusPill rendered treatment (kanban) — contrast', () => {
       for (const theme of THEMES) {
         const { bg, fg } = familyBgFg(treatment.family, theme)
         const ratio = contrastRatio(oklchToSrgb(bg), oklchToSrgb(fg))
-        const threshold = thresholdFor(treatment.family, theme)
         expect(
           ratio,
-          `${indicator} (family=${treatment.family}) ${theme} contrast ${ratio.toFixed(3)} should be >= ${threshold}`,
-        ).toBeGreaterThanOrEqual(threshold)
+          `${indicator} (family=${treatment.family}) ${theme} contrast ${ratio.toFixed(3)} should be >= ${NORMAL_TEXT_AA}`,
+        ).toBeGreaterThanOrEqual(NORMAL_TEXT_AA)
       }
     },
   )

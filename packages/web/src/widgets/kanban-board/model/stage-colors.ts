@@ -45,6 +45,14 @@ const STAGE_FAMILY: Record<IssueStatus, SemanticFamily> = {
   [IssueStatus.Cancelled]: 'danger',
 }
 
+const BOTTOM_BORDER_BY_FAMILY: Record<SemanticFamily, string> = {
+  success: 'border-b-success-border',
+  warning: 'border-b-warning-border',
+  info: 'border-b-info-border',
+  danger: 'border-b-danger-border',
+  muted: 'border-b-border',
+}
+
 function buildStageColorScheme(family: SemanticFamily): StageColorScheme {
   const treatment = TREATMENT_BY_FAMILY[family]
   const subtleBg = treatment.container.split(' ')[0]!
@@ -53,7 +61,7 @@ function buildStageColorScheme(family: SemanticFamily): StageColorScheme {
     labelClass: treatment.text,
     activeBg: family === 'muted' ? 'bg-muted' : `${subtleBg}/60`,
     activeBorder: treatment.border,
-    bottomBorder: family === 'muted' ? 'border-b-border' : `border-b-${family}-border`,
+    bottomBorder: BOTTOM_BORDER_BY_FAMILY[family],
   }
 }
 

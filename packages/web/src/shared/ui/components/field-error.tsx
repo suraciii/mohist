@@ -20,7 +20,7 @@ const FieldError = React.forwardRef<HTMLParagraphElement, FieldErrorProps>(
         ref={ref}
         id={errorId}
         role="alert"
-        className={cn("text-xs text-danger-foreground", className)}
+        className={cn("text-xs text-danger", className)}
         {...props}
       />
     )

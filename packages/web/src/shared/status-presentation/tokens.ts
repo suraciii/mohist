@@ -42,7 +42,7 @@ export const TOKENS: TokenTable = {
       border: { L: 0.84, C: 0.10, H: 145 },
     },
     warning: {
-      base: { L: 0.55, C: 0.15, H: 75 },
+      base: { L: 0.50, C: 0.15, H: 75 },
       subtle: { L: 0.96, C: 0.06, H: 75 },
       foreground: { L: 0.985, C: 0, H: 0 },
       border: { L: 0.84, C: 0.11, H: 75 },
