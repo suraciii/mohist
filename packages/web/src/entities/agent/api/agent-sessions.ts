@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { AgentSessionTranscriptResponse, AgentSessionUsage } from '../../coder-session/model/types'
 import { useProject } from '../../project/@x/project-context'
@@ -118,45 +119,55 @@ export function cancelGenericSession(projectId: string, sessionId: string) {
 
 /* ── Query hooks ────────────────────────────────────────── */
 
-export function useGenericSessionSummary(sessionId: string) {
-  const { projectId } = useProject()
-  return useQuery<GenericAgentSessionSummaryDto>({
+export function genericSessionSummaryQueryOptions(projectId: string | null | undefined, sessionId: string) {
+  return {
     queryKey: ['agent-session', projectId, sessionId],
     queryFn: () => getGenericSessionSummary(projectId!, sessionId),
     enabled: !!projectId && !!sessionId,
-    refetchInterval: (query) => {
-      const data = query.state.data as GenericAgentSessionSummaryDto | undefined
+    refetchInterval: (query: { state: { data: GenericAgentSessionSummaryDto | undefined } }) => {
+      const data = query.state.data
       if (!data) return 5000
       const terminal = data.status === 'completed' || data.status === 'failed' || data.status === 'stopped' || data.status === 'cancelled'
       return terminal ? false : 5000
     },
-  })
+  }
 }
 
-export function useGenericSessionTranscript(sessionId: string) {
+export function useGenericSessionSummary(sessionId: string) {
   const { projectId } = useProject()
-  return useQuery<AgentSessionTranscriptResponse>({
+  return useQuery<GenericAgentSessionSummaryDto>(genericSessionSummaryQueryOptions(projectId, sessionId))
+}
+
+export function genericSessionTranscriptQueryOptions(projectId: string | null | undefined, sessionId: string) {
+  return {
     queryKey: ['agent-session', projectId, sessionId, 'transcript'],
     queryFn: () => getGenericSessionTranscript(projectId!, sessionId),
     enabled: !!projectId && !!sessionId,
-    refetchInterval: (query) => {
-      const data = query.state.data as AgentSessionTranscriptResponse | undefined
+    refetchInterval: (query: { state: { data: AgentSessionTranscriptResponse | undefined } }) => {
+      const data = query.state.data
       if (!data || !data.turns) return 5000
       const hasIncomplete = data.turns.some(t => t.incomplete)
       return hasIncomplete ? 5000 : false
     },
-  })
+  }
+}
+
+export function useGenericSessionTranscript(sessionId: string) {
+  const { projectId } = useProject()
+  return useQuery<AgentSessionTranscriptResponse>(genericSessionTranscriptQueryOptions(projectId, sessionId))
 }
 
 /* ── Mutation hooks ─────────────────────────────────────── */
 
-export function useLaunchAgentSession() {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation<AgentSessionLaunchResponse, Error, { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null }>({
-    mutationFn: ({ agentRef, prompt, context }) =>
+type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
+
+const CANCEL_TERMINAL_STATES = new Set(['completed', 'failed', 'stopped', 'cancelled'])
+
+export function launchAgentSessionMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: ({ agentRef, prompt, context }: { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null }) =>
       launchAgentSession(projectId!, agentRef, { prompt, context }),
-    onSuccess: (_data, variables) => {
+    onSuccess: (_data: AgentSessionLaunchResponse, variables: { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null }) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['agents', projectId, variables.agentRef, 'sessions'] })
@@ -165,16 +176,20 @@ export function useLaunchAgentSession() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
 }
 
-export function useGenericFollowup() {
+export function useLaunchAgentSession() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation<{ status: string }, Error, { sessionId: string; text: string; agentRef?: string }>({
-    mutationFn: ({ sessionId, text }) =>
+  return useMutation(launchAgentSessionMutationOptions(projectId, queryClient))
+}
+
+export function genericFollowupMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: ({ sessionId, text }: { sessionId: string; text: string }) =>
       postGenericFollowup(projectId!, sessionId, { text }),
-    onSuccess: (_data, variables) => {
+    onSuccess: (_data: { status: string }, variables: { sessionId: string; text: string; agentRef?: string }) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['agent-session', projectId, variables.sessionId] })
@@ -187,18 +202,20 @@ export function useGenericFollowup() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
 }
 
-const CANCEL_TERMINAL_STATES = new Set(['completed', 'failed', 'stopped', 'cancelled'])
-
-export function useCancelGenericSession() {
+export function useGenericFollowup() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation<{ state?: string }, Error, { sessionId: string; agentRef?: string }>({
-    mutationFn: ({ sessionId }) =>
+  return useMutation(genericFollowupMutationOptions(projectId, queryClient))
+}
+
+export function cancelGenericSessionMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: ({ sessionId }: { sessionId: string }) =>
       cancelGenericSession(projectId!, sessionId),
-    onSuccess: (data, variables) => {
+    onSuccess: (data: { state?: string }, variables: { sessionId: string; agentRef?: string }) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['agent-session', projectId, variables.sessionId] })
@@ -215,5 +232,11 @@ export function useCancelGenericSession() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
+}
+
+export function useCancelGenericSession() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation(cancelGenericSessionMutationOptions(projectId, queryClient))
 }

@@ -1,210 +1,169 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
+import { toast } from 'sonner'
 import {
   cancelGenericSession,
+  cancelGenericSessionMutationOptions,
+  genericFollowupMutationOptions,
+  genericSessionSummaryQueryOptions,
+  genericSessionTranscriptQueryOptions,
   getAgentSessions,
   getGenericSessionSummary,
   getGenericSessionTranscript,
   launchAgentSession,
+  launchAgentSessionMutationOptions,
   postGenericFollowup,
-  useCancelGenericSession,
-  useGenericFollowup,
-  useGenericSessionSummary,
-  useGenericSessionTranscript,
-  useLaunchAgentSession,
 } from './agent-sessions'
 
-const useQueryMock = vi.fn()
-const useMutationMock = vi.fn()
-const useQueryClientMock = vi.fn()
-const useProjectMock = vi.fn()
-const invalidateQueriesMock = vi.fn()
-const toastSuccessMock = vi.fn()
-const toastErrorMock = vi.fn()
-const toastWarningMock = vi.fn()
+useMswServer()
 
-vi.mock('@tanstack/react-query', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQuery: (...args: unknown[]) => useQueryMock(...args),
-  useMutation: (...args: unknown[]) => useMutationMock(...args),
-  useQueryClient: () => useQueryClientMock(),
-}))
-
-vi.mock('../../project/@x/project-context', () => ({
-  useProject: () => useProjectMock(),
-}))
-
-vi.mock('sonner', () => ({
-  toast: {
-    success: (...args: unknown[]) => toastSuccessMock(...args),
-    error: (...args: unknown[]) => toastErrorMock(...args),
-    warning: (...args: unknown[]) => toastWarningMock(...args),
-  },
-}))
-
-beforeEach(() => {
-  useQueryMock.mockReset()
-  useMutationMock.mockReset()
-  useQueryClientMock.mockReset()
-  useProjectMock.mockReset()
-  invalidateQueriesMock.mockReset()
-  toastSuccessMock.mockReset()
-  toastErrorMock.mockReset()
-  toastWarningMock.mockReset()
-  useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-  useQueryClientMock.mockReturnValue({ invalidateQueries: invalidateQueriesMock })
-  useQueryMock.mockReturnValue({ data: null, isLoading: false })
-})
-
-afterEach(() => {
-  vi.restoreAllMocks()
-})
-
-function getLastQueryOptions() {
-  const calls = useQueryMock.mock.calls
-  return calls[calls.length - 1][0] as {
-    queryKey: unknown[]
-    queryFn: () => unknown
-    enabled: boolean
-    refetchInterval?: number | ((q: { state: { data: unknown } }) => number | false)
-  }
-}
-
-function getLastMutationOptions(): {
-  mutationFn: (...a: unknown[]) => unknown
-  onSuccess: (...a: unknown[]) => void
-  onError: (...a: unknown[]) => void
-} {
-  const calls = useMutationMock.mock.calls
-  const last = calls[calls.length - 1][0] as {
-    mutationFn: (...a: unknown[]) => unknown
-    onSuccess: (...a: unknown[]) => void
-    onError: (...a: unknown[]) => void
-  }
-  return last
-}
-
-function mockFetchResponse(data: unknown) {
-  return vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-    text: () => Promise.resolve(JSON.stringify({ success: true, data })),
-  } as Response)
+function createInvalidationClient() {
+  return { invalidateQueries: vi.fn() }
 }
 
 /* ── Client functions ───────────────────────────────────── */
 describe('getAgentSessions (client fn)', () => {
-  it('builds the correct agent-scoped URL', () => {
-    const fetchMock = mockFetchResponse([])
-
-    void getAgentSessions('proj-1', 'agent-foo', { status: 'running', limit: 5 })
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/proj-1/agents/agent-foo/sessions?status=running&limit=5',
-      expect.any(Object),
+  it('builds the correct agent-scoped URL', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agents/:agentRef/sessions', ({ request }) => {
+        urls.push(new URL(request.url).pathname + new URL(request.url).search)
+        return HttpResponse.json({ success: true, data: [] })
+      }),
     )
+
+    await getAgentSessions('proj-1', 'agent-foo', { status: 'running', limit: 5 })
+
+    expect(urls).toEqual(['/api/projects/proj-1/agents/agent-foo/sessions?status=running&limit=5'])
   })
 })
 
 describe('getGenericSessionSummary (client fn)', () => {
-  it('builds the correct URL for a session summary', () => {
-    const fetchMock = mockFetchResponse({ sessionId: 's1' })
-
-    void getGenericSessionSummary('proj-1', 'sess-abc')
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/proj-1/agent-sessions/sess-abc',
-      expect.any(Object),
+  it('builds the correct URL for a session summary', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agent-sessions/:sessionId', ({ request }) => {
+        urls.push(new URL(request.url).pathname)
+        return HttpResponse.json({ success: true, data: { sessionId: 's1' } })
+      }),
     )
+
+    await getGenericSessionSummary('proj-1', 'sess-abc')
+
+    expect(urls).toEqual(['/api/projects/proj-1/agent-sessions/sess-abc'])
   })
 })
 
 describe('getGenericSessionTranscript (client fn)', () => {
-  it('builds the correct URL for a session transcript', () => {
-    const fetchMock = mockFetchResponse({ turns: [], partCount: 0 })
-
-    void getGenericSessionTranscript('proj-1', 'sess-abc')
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/proj-1/agent-sessions/sess-abc/transcript',
-      expect.any(Object),
+  it('builds the correct URL for a session transcript', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agent-sessions/:sessionId/transcript', ({ request }) => {
+        urls.push(new URL(request.url).pathname)
+        return HttpResponse.json({ success: true, data: { turns: [], partCount: 0 } })
+      }),
     )
+
+    await getGenericSessionTranscript('proj-1', 'sess-abc')
+
+    expect(urls).toEqual(['/api/projects/proj-1/agent-sessions/sess-abc/transcript'])
   })
 })
 
 describe('launchAgentSession (client fn)', () => {
-  it('POSTs to the launch endpoint with prompt and context', () => {
-    const fetchMock = mockFetchResponse({ sessionId: 's1' })
+  it('POSTs to the launch endpoint with prompt and context', async () => {
+    const captured: { url: string; method: string; body: unknown }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agents/:agentRef/sessions', async ({ request }) => {
+        captured.push({
+          url: new URL(request.url).pathname,
+          method: request.method,
+          body: await request.json(),
+        })
+        return HttpResponse.json({ success: true, data: { sessionId: 's1' } })
+      }),
+    )
 
-    void launchAgentSession('proj-1', 'agent-foo', {
+    await launchAgentSession('proj-1', 'agent-foo', {
       prompt: 'Hello',
       context: { issueNumber: 42 },
     })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/proj-1/agents/agent-foo/sessions',
-      expect.objectContaining({
+    expect(captured).toEqual([
+      {
+        url: '/api/projects/proj-1/agents/agent-foo/sessions',
         method: 'POST',
-        body: JSON.stringify({ prompt: 'Hello', context: { issueNumber: 42 } }),
-      }),
-    )
+        body: { prompt: 'Hello', context: { issueNumber: 42 } },
+      },
+    ])
   })
 })
 
 describe('postGenericFollowup (client fn)', () => {
-  it('POSTs to the followup endpoint with text', () => {
-    const fetchMock = mockFetchResponse({ status: 'sent' })
-
-    void postGenericFollowup('proj-1', 'sess-abc', { text: 'Continue' })
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/proj-1/agent-sessions/sess-abc/followup',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ text: 'Continue' }),
+  it('POSTs to the followup endpoint with text', async () => {
+    const captured: { url: string; method: string; body: unknown }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agent-sessions/:sessionId/followup', async ({ request }) => {
+        captured.push({
+          url: new URL(request.url).pathname,
+          method: request.method,
+          body: await request.json(),
+        })
+        return HttpResponse.json({ success: true, data: { status: 'sent' } })
       }),
     )
+
+    await postGenericFollowup('proj-1', 'sess-abc', { text: 'Continue' })
+
+    expect(captured).toEqual([
+      {
+        url: '/api/projects/proj-1/agent-sessions/sess-abc/followup',
+        method: 'POST',
+        body: { text: 'Continue' },
+      },
+    ])
   })
 })
 
 describe('cancelGenericSession (client fn)', () => {
-  it('POSTs to the cancel endpoint', () => {
-    const fetchMock = mockFetchResponse({ state: 'cancelled' })
-
-    void cancelGenericSession('proj-1', 'sess-abc')
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/proj-1/agent-sessions/sess-abc/cancel',
-      expect.objectContaining({ method: 'POST' }),
+  it('POSTs to the cancel endpoint', async () => {
+    const captured: { url: string; method: string }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agent-sessions/:sessionId/cancel', ({ request }) => {
+        captured.push({ url: new URL(request.url).pathname, method: request.method })
+        return HttpResponse.json({ success: true, data: { state: 'cancelled' } })
+      }),
     )
+
+    await cancelGenericSession('proj-1', 'sess-abc')
+
+    expect(captured).toEqual([
+      { url: '/api/projects/proj-1/agent-sessions/sess-abc/cancel', method: 'POST' },
+    ])
   })
 })
 
-/* ── useGenericSessionSummary ───────────────────────────── */
-describe('useGenericSessionSummary', () => {
+/* ── genericSessionSummaryQueryOptions ─────────────────── */
+describe('genericSessionSummaryQueryOptions', () => {
   it('uses query key ["agent-session", projectId, sessionId]', () => {
-    useGenericSessionSummary('sess-abc')
-    const opts = getLastQueryOptions()
-    expect(opts.queryKey).toEqual(['agent-session', 'proj-1', 'sess-abc'])
+    expect(genericSessionSummaryQueryOptions('proj-1', 'sess-abc').queryKey).toEqual([
+      'agent-session',
+      'proj-1',
+      'sess-abc',
+    ])
   })
 
   it('is enabled only when projectId and sessionId are present', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-    useGenericSessionSummary('sess-abc')
-    expect(getLastQueryOptions().enabled).toBe(true)
-
-    useProjectMock.mockReturnValue({ projectId: null })
-    useGenericSessionSummary('sess-abc')
-    expect(getLastQueryOptions().enabled).toBe(false)
-
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-    useGenericSessionSummary('')
-    expect(getLastQueryOptions().enabled).toBe(false)
+    expect(genericSessionSummaryQueryOptions('proj-1', 'sess-abc').enabled).toBe(true)
+    expect(genericSessionSummaryQueryOptions(null, 'sess-abc').enabled).toBe(false)
+    expect(genericSessionSummaryQueryOptions('proj-1', '').enabled).toBe(false)
   })
 
   it('polls every 5s when session is not terminal', () => {
-    useQueryMock.mockReturnValue({ data: { status: 'running' } })
-    useGenericSessionSummary('sess-abc')
-    const opts = getLastQueryOptions()
+    const opts = genericSessionSummaryQueryOptions('proj-1', 'sess-abc')
     const interval = typeof opts.refetchInterval === 'function'
-      ? opts.refetchInterval({ state: { data: { status: 'running' } } })
+      ? opts.refetchInterval({ state: { data: { status: 'running' } as never } })
       : opts.refetchInterval
     expect(interval).toBe(5000)
   })
@@ -212,183 +171,162 @@ describe('useGenericSessionSummary', () => {
   it.each(['completed', 'failed', 'stopped', 'cancelled'])(
     'stops polling when session is terminal (%s)',
     (status) => {
-      useQueryMock.mockReturnValue({ data: { status } })
-      useGenericSessionSummary('sess-abc')
-      const opts = getLastQueryOptions()
+      const opts = genericSessionSummaryQueryOptions('proj-1', 'sess-abc')
       const interval = typeof opts.refetchInterval === 'function'
-        ? opts.refetchInterval({ state: { data: { status } } })
+        ? opts.refetchInterval({ state: { data: { status } as never } })
         : opts.refetchInterval
       expect(interval).toBe(false)
     },
   )
 })
 
-/* ── useGenericSessionTranscript ────────────────────────── */
-describe('useGenericSessionTranscript', () => {
+/* ── genericSessionTranscriptQueryOptions ──────────────── */
+describe('genericSessionTranscriptQueryOptions', () => {
   it('uses query key ["agent-session", projectId, sessionId, "transcript"]', () => {
-    useGenericSessionTranscript('sess-abc')
-    const opts = getLastQueryOptions()
-    expect(opts.queryKey).toEqual(['agent-session', 'proj-1', 'sess-abc', 'transcript'])
+    expect(genericSessionTranscriptQueryOptions('proj-1', 'sess-abc').queryKey).toEqual([
+      'agent-session',
+      'proj-1',
+      'sess-abc',
+      'transcript',
+    ])
   })
 
   it('is enabled only when projectId and sessionId are present', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-    useGenericSessionTranscript('sess-abc')
-    expect(getLastQueryOptions().enabled).toBe(true)
-
-    useProjectMock.mockReturnValue({ projectId: null })
-    useGenericSessionTranscript('sess-abc')
-    expect(getLastQueryOptions().enabled).toBe(false)
+    expect(genericSessionTranscriptQueryOptions('proj-1', 'sess-abc').enabled).toBe(true)
+    expect(genericSessionTranscriptQueryOptions(null, 'sess-abc').enabled).toBe(false)
   })
 
   it('polls when there are incomplete turns', () => {
-    useQueryMock.mockReturnValue({ data: { turns: [{ incomplete: true }] } })
-    useGenericSessionTranscript('sess-abc')
-    const opts = getLastQueryOptions()
+    const opts = genericSessionTranscriptQueryOptions('proj-1', 'sess-abc')
     const interval = typeof opts.refetchInterval === 'function'
-      ? opts.refetchInterval({ state: { data: { turns: [{ incomplete: true }] } } })
+      ? opts.refetchInterval({ state: { data: { turns: [{ incomplete: true }] } as never } })
       : opts.refetchInterval
     expect(interval).toBe(5000)
   })
 
   it('stops polling when no incomplete turns remain', () => {
-    useQueryMock.mockReturnValue({ data: { turns: [{ incomplete: false }] } })
-    useGenericSessionTranscript('sess-abc')
-    const opts = getLastQueryOptions()
+    const opts = genericSessionTranscriptQueryOptions('proj-1', 'sess-abc')
     const interval = typeof opts.refetchInterval === 'function'
-      ? opts.refetchInterval({ state: { data: { turns: [{ incomplete: false }] } } })
+      ? opts.refetchInterval({ state: { data: { turns: [{ incomplete: false }] } as never } })
       : opts.refetchInterval
     expect(interval).toBe(false)
   })
 })
 
-/* ── useLaunchAgentSession ──────────────────────────────── */
-describe('useLaunchAgentSession', () => {
-  beforeEach(() => {
-    useMutationMock.mockImplementation((options: unknown) => ({ mutate: vi.fn(), options }))
-  })
-
+/* ── launchAgentSessionMutationOptions ─────────────────── */
+describe('launchAgentSessionMutationOptions', () => {
   it('invalidates agent-status, agent-activity, and owning session list on success', () => {
-    useLaunchAgentSession()
-    getLastMutationOptions().onSuccess({ sessionId: 's1' } as never, { agentRef: 'agent-foo', prompt: 'Hi' })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
+    const qc = createInvalidationClient()
+    launchAgentSessionMutationOptions('proj-1', qc).onSuccess(
+      { sessionId: 's1' } as never,
+      { agentRef: 'agent-foo', prompt: 'Hi' },
+    )
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
   })
 
   it('shows success toast on launch', () => {
-    useLaunchAgentSession()
-    getLastMutationOptions().onSuccess({} as never, { agentRef: 'a', prompt: 'p' })
-    expect(toastSuccessMock).toHaveBeenCalledWith('Session launched')
+    launchAgentSessionMutationOptions('proj-1', createInvalidationClient()).onSuccess(
+      {} as never,
+      { agentRef: 'a', prompt: 'p' },
+    )
+    expect(toast.success).toHaveBeenCalledWith('Session launched')
   })
 
   it('shows error toast on failure', () => {
-    useLaunchAgentSession()
-    getLastMutationOptions().onError(new Error('NO_RUNNER'))
-    expect(toastErrorMock).toHaveBeenCalledWith('NO_RUNNER')
+    launchAgentSessionMutationOptions('proj-1', createInvalidationClient()).onError(new Error('NO_RUNNER'))
+    expect(toast.error).toHaveBeenCalledWith('NO_RUNNER')
   })
 })
 
-/* ── useGenericFollowup ─────────────────────────────────── */
-describe('useGenericFollowup', () => {
-  beforeEach(() => {
-    useMutationMock.mockImplementation((options: unknown) => ({ mutate: vi.fn(), options }))
-  })
-
+/* ── genericFollowupMutationOptions ────────────────────── */
+describe('genericFollowupMutationOptions', () => {
   it('invalidates agent-status, agent-activity, and session queries on success', () => {
-    useGenericFollowup()
-    getLastMutationOptions().onSuccess({}, { sessionId: 'sess-abc', text: 'go on', agentRef: 'agent-foo' })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc', 'transcript'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
+    const qc = createInvalidationClient()
+    genericFollowupMutationOptions('proj-1', qc).onSuccess({} as never, { sessionId: 'sess-abc', text: 'go on', agentRef: 'agent-foo' })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc', 'transcript'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
   })
 
   it('skips agent sessions invalidation when agentRef is omitted', () => {
-    useGenericFollowup()
-    getLastMutationOptions().onSuccess({}, { sessionId: 'sess-abc', text: 'go on' })
-    const agentSessionsCalls = invalidateQueriesMock.mock.calls.filter(
-      (c: unknown[]) => (c[0] as { queryKey: string[] }).queryKey[3] === 'sessions',
+    const qc = createInvalidationClient()
+    genericFollowupMutationOptions('proj-1', qc).onSuccess({} as never, { sessionId: 'sess-abc', text: 'go on' })
+    const agentSessionsCalls = qc.invalidateQueries.mock.calls.filter(
+      (c) => (c[0] as { queryKey: string[] }).queryKey[3] === 'sessions',
     )
     expect(agentSessionsCalls).toHaveLength(0)
   })
 
   it('shows success toast', () => {
-    useGenericFollowup()
-    getLastMutationOptions().onSuccess({}, { sessionId: 's1', text: 't' })
-    expect(toastSuccessMock).toHaveBeenCalledWith('Follow-up sent')
+    genericFollowupMutationOptions('proj-1', createInvalidationClient()).onSuccess({} as never, { sessionId: 's1', text: 't' })
+    expect(toast.success).toHaveBeenCalledWith('Follow-up sent')
   })
 
   it('shows error toast on failure', () => {
-    useGenericFollowup()
-    getLastMutationOptions().onError(new Error('SESSION_INACTIVE'))
-    expect(toastErrorMock).toHaveBeenCalledWith('SESSION_INACTIVE')
+    genericFollowupMutationOptions('proj-1', createInvalidationClient()).onError(new Error('SESSION_INACTIVE'))
+    expect(toast.error).toHaveBeenCalledWith('SESSION_INACTIVE')
   })
 })
 
-/* ── useCancelGenericSession ────────────────────────────── */
-describe('useCancelGenericSession', () => {
-  beforeEach(() => {
-    useMutationMock.mockImplementation((options: unknown) => ({ mutate: vi.fn(), options }))
-  })
-
+/* ── cancelGenericSessionMutationOptions ───────────────── */
+describe('cancelGenericSessionMutationOptions', () => {
   it('emits a success toast and invalidates session queries on cancelled', () => {
-    useCancelGenericSession()
-    getLastMutationOptions().onSuccess(
+    const qc = createInvalidationClient()
+    cancelGenericSessionMutationOptions('proj-1', qc).onSuccess(
       { state: 'cancelled' },
       { sessionId: 'sess-abc', agentRef: 'agent-foo' },
     )
-    expect(toastSuccessMock).toHaveBeenCalledWith('Session cancelled')
-    expect(toastWarningMock).not.toHaveBeenCalled()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
+    expect(toast.success).toHaveBeenCalledWith('Session cancelled')
+    expect(toast.warning).not.toHaveBeenCalled()
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
   })
 
   it.each(['completed', 'failed', 'stopped'])(
     'emits a success toast when the runner reports a terminal state (%s)',
     (terminalState) => {
-      useCancelGenericSession()
-      getLastMutationOptions().onSuccess(
+      cancelGenericSessionMutationOptions('proj-1', createInvalidationClient()).onSuccess(
         { state: terminalState },
         { sessionId: 'sess-abc', agentRef: 'agent-foo' },
       )
-      expect(toastSuccessMock).toHaveBeenCalledWith('Session cancelled')
-      expect(toastWarningMock).not.toHaveBeenCalled()
-      expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
+      expect(toast.success).toHaveBeenCalledWith('Session cancelled')
+      expect(toast.warning).not.toHaveBeenCalled()
     },
   )
 
   it('emits a warning toast and still invalidates session queries on not-cancellable', () => {
-    useCancelGenericSession()
-    getLastMutationOptions().onSuccess(
+    const qc = createInvalidationClient()
+    cancelGenericSessionMutationOptions('proj-1', qc).onSuccess(
       { state: 'not-cancellable' },
       { sessionId: 'sess-abc', agentRef: 'agent-foo' },
     )
-    expect(toastWarningMock).toHaveBeenCalledWith('Session could not be cancelled')
-    expect(toastSuccessMock).not.toHaveBeenCalled()
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
+    expect(toast.warning).toHaveBeenCalledWith('Session could not be cancelled')
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agents', 'proj-1', 'agent-foo', 'sessions'] })
   })
 
   it('skips agent sessions invalidation when agentRef is omitted', () => {
-    useCancelGenericSession()
-    getLastMutationOptions().onSuccess({ state: 'cancelled' }, { sessionId: 'sess-abc' })
-    const agentSessionsCalls = invalidateQueriesMock.mock.calls.filter(
-      (c: unknown[]) => (c[0] as { queryKey: string[] }).queryKey[3] === 'sessions',
+    const qc = createInvalidationClient()
+    cancelGenericSessionMutationOptions('proj-1', qc).onSuccess({ state: 'cancelled' }, { sessionId: 'sess-abc' })
+    const agentSessionsCalls = qc.invalidateQueries.mock.calls.filter(
+      (c) => (c[0] as { queryKey: string[] }).queryKey[3] === 'sessions',
     )
     expect(agentSessionsCalls).toHaveLength(0)
   })
 
   it('shows error toast on failure', () => {
-    useCancelGenericSession()
-    getLastMutationOptions().onError(new Error('NOT_CANCELLABLE'))
-    expect(toastErrorMock).toHaveBeenCalledWith('NOT_CANCELLABLE')
-    expect(toastSuccessMock).not.toHaveBeenCalled()
-    expect(toastWarningMock).not.toHaveBeenCalled()
+    cancelGenericSessionMutationOptions('proj-1', createInvalidationClient()).onError(new Error('NOT_CANCELLABLE'))
+    expect(toast.error).toHaveBeenCalledWith('NOT_CANCELLABLE')
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
   })
 })
