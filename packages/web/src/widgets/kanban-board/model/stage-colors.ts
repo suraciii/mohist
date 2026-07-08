@@ -9,7 +9,8 @@ import { TREATMENT_BY_FAMILY } from '../../../shared/status-presentation'
  * semantic families (per design D6):
  *
  * - `Backlog`     -> `muted`   (queue, not yet active)
- * - `InProgress`  -> `warning` (active but not done — blocking/warning semantics)
+ * - `InProgress`  -> `info`    (active, in-progress — same family as
+ *                              `issue-health.active` and `workflow-stage.running`)
  * - `Done`        -> `success` (terminal completion)
  * - `Cancelled`   -> `danger`  (terminal negative — operator attention)
  *
@@ -17,18 +18,12 @@ import { TREATMENT_BY_FAMILY } from '../../../shared/status-presentation'
  * hex literal) so column accent dots and bars are dark-mode-aware by
  * construction. `labelClass` / `activeBg` / `activeBorder` use the family's
  * soft treatment, also dark-mode-aware.
- *
- * Note: the kanban `InProgress` column is intentionally mapped to `warning`
- * (per task spec), not the generic `info` family used for `workflow-stage.running`.
- * The kanban board groups "things that need attention" visually; the workflow
- * run status is generic and may be in-progress-healthy (`info`). This is the
- * kanban-specific override documented in design D6.
  */
 
 export interface StageColorScheme {
-  /** token-backed class for the column accent dot/bar (e.g. `bg-warning`) */
+  /** token-backed class for the column accent dot/bar (e.g. `bg-info`) */
   accent: string
-  /** label text color, drawn from the family's text class (e.g. `text-warning`) */
+  /** label text color, drawn from the family's text class (e.g. `text-info`) */
   labelClass: string
   /** background tint when this column is "active" (selected / default) */
   activeBg: string
@@ -40,7 +35,7 @@ export interface StageColorScheme {
 
 const STAGE_FAMILY: Record<IssueStatus, SemanticFamily> = {
   [IssueStatus.Backlog]: 'muted',
-  [IssueStatus.InProgress]: 'warning',
+  [IssueStatus.InProgress]: 'info',
   [IssueStatus.Done]: 'success',
   [IssueStatus.Cancelled]: 'danger',
 }
@@ -80,6 +75,6 @@ export function getStageColors(status: IssueStatus): StageColorScheme {
  * Test-only export: documents the family reservation for each `IssueStatus`
  * used by the kanban column color scheme. Allows the equivalence spec to
  * assert that the kanban stage palette stays in sync with the documented
- * mapping (Backlog->muted, InProgress->warning, Done->success, Cancelled->danger).
+ * mapping (Backlog->muted, InProgress->info, Done->success, Cancelled->danger).
  */
 export const STAGE_FAMILY_RESERVATION: Record<IssueStatus, SemanticFamily> = { ...STAGE_FAMILY }

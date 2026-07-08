@@ -3,7 +3,8 @@ import '@testing-library/jest-dom'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { IssueHealth } from '@/entities/issue'
+import { IssueHealth, IssueStatus } from '@/entities/issue'
+import { STAGE_FAMILY_RESERVATION } from '@/widgets/kanban-board/model/stage-colors'
 import type { Issue } from '@/entities/issue'
 import type { AgentStatus } from '@/entities/agent'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -388,6 +389,19 @@ describe('cross-surface status equivalence (design D8)', () => {
       // Categorical — not a state semantic family — but dark-aware:
       expect(cls).toMatch(/bg-purple-100/)
       expect(cls).toMatch(/dark:/)
+    })
+  })
+
+  describe('kanban stage colors ↔ shared layer', () => {
+    it('InProgress column resolves to the same family as active issue-health and running workflow-stage', () => {
+      const kanbanFamily = STAGE_FAMILY_RESERVATION[IssueStatus.InProgress]
+      expect(kanbanFamily).toBe('info')
+      expect(kanbanFamily).toBe(familyFor('issue-health', 'active'))
+      expect(kanbanFamily).toBe(familyFor('workflow-stage', 'running'))
+    })
+
+    it('Done column stays in sync with the shared layer', () => {
+      expect(STAGE_FAMILY_RESERVATION[IssueStatus.Done]).toBe(familyFor('issue-health', 'done'))
     })
   })
 })

@@ -5,6 +5,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { RunnerList } from './RunnerList'
 import type { RunnerStatusRow } from '../../../entities/runner'
+import { statusTreatment } from '../../../shared/status-presentation'
 
 vi.mock('../../../entities/project', () => ({
   useProjectPath: () => (path: string) => `/demo${path}`,
@@ -82,5 +83,21 @@ describe('RunnerList - active work row uses semantic tokens', () => {
     expect(html).toContain('text-muted-foreground')
     expect(html).not.toContain('text-blue-')
     expect(html).not.toContain('text-gray-')
+  })
+})
+
+describe('RunnerList - capacity indicator resolves through the shared status layer', () => {
+  it.each([
+    { used: 0, total: 4, runnerState: 'idle', expectedFamily: 'success' },
+    { used: 1, total: 4, runnerState: 'busy', expectedFamily: 'info' },
+    { used: 4, total: 4, runnerState: 'stale', expectedFamily: 'warning' },
+  ])('used=$used/$total maps to $runnerState -> $expectedFamily', ({ used, total, runnerState, expectedFamily }) => {
+    const runner = makeRunner({ capacity: { usedSlots: used, totalSlots: total } })
+    renderList([runner])
+
+    const indicator = screen.getByTestId('runner-capacity')
+    const renderedFamily = indicator.getAttribute('data-family')
+    expect(renderedFamily).toBe(expectedFamily)
+    expect(renderedFamily).toBe(statusTreatment('runner', runnerState).family)
   })
 })
