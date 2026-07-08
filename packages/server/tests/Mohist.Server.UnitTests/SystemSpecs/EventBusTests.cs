@@ -44,6 +44,30 @@ public class EventBusTests
     }
 
     [Fact]
+    public async Task PublishAsync_TypedOverload_PreservesSubjectDataAndExtensions()
+    {
+        var store = new RecordingEventStore();
+        var bus = new InMemoryEventBus(store, NullLogger<InMemoryEventBus>.Instance);
+        var extensions = new Dictionary<string, string>(StringComparer.Ordinal) { ["traceId"] = "tr_typed" };
+
+        await bus.PublishAsync(
+            data: new TestPayload("hello"),
+            type: "test.greeting",
+            source: "test://greeting",
+            subject: "subj-9",
+            extensions: extensions);
+
+        var recorded = Assert.Single(store.Appended);
+        Assert.Equal("test.greeting", recorded.Envelope.Type);
+        Assert.Equal("test://greeting/", recorded.Envelope.Source.ToString());
+        Assert.Equal("subj-9", recorded.Envelope.Subject);
+        Assert.Equal("tr_typed", recorded.Envelope.Extensions["traceId"]);
+        Assert.Contains("\"message\":\"hello\"", recorded.Envelope.Data!.Value.GetRawText());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
     public async Task PublishAsync_FilteredOut_HandlerNotInvoked()
     {
         var store = new RecordingEventStore();

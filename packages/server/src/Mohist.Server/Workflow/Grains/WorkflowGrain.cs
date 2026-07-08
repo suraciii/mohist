@@ -197,19 +197,42 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
                 GrainKey, failedTaskId ?? "(none)", stageId ?? "(none)");
         }
 
+        var retriedStageId = _run.CurrentStageId;
         await ReleaseCurrentStageLocksAsync("retried");
         var events = _run.Retry(Now());
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
-        await CommitAsync(events);
+        try
+        {
+            await CommitAsync(events);
+        }
+        catch
+        {
+            // The retry did not persist. Re-acquire the lock for the stage we
+            // just released so the rolled-back run still holds its sequential
+            // lock until a later successful transition releases it.
+            if (retriedStageId is not null)
+                await AcquireStageLocksIfNeededAsync(retriedStageId);
+            throw;
+        }
     }
 
     public async Task RerunAsync()
     {
         EnsureRun();
+        var rerunStageId = _run.CurrentStageId;
         await ReleaseCurrentStageLocksAsync("rerun");
         var events = _run.Rerun(Now());
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
-        await CommitAsync(events);
+        try
+        {
+            await CommitAsync(events);
+        }
+        catch
+        {
+            if (rerunStageId is not null)
+                await AcquireStageLocksIfNeededAsync(rerunStageId);
+            throw;
+        }
     }
 
     public async Task<WorkflowControlResult> RerunFromStageAsync(string stageId)
@@ -226,10 +249,25 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         }
 
         var targetIdx = _run.Stages.FindIndex(s => s.Id == stageId);
+        var releasedStages = new List<string>();
         for (var i = targetIdx; i < _run.Stages.Count; i++)
+        {
+            releasedStages.Add(_run.Stages[i].Id);
             await ReleaseStageLocksAsync(_run.Stages[i].Id, "rerun-from-stage");
+        }
         _log.LogInformation("Workflow {Id} rerun-from-stage at stage={Stage}", GrainKey, stageId);
-        await CommitAsync(events);
+        try
+        {
+            await CommitAsync(events);
+        }
+        catch
+        {
+            // Re-acquire the locks for stages we released; the rerun-from-stage
+            // did not persist, so the rolled-back run still requires them.
+            foreach (var released in releasedStages)
+                await AcquireStageLocksIfNeededAsync(released);
+            throw;
+        }
         return WorkflowControlResult.Ok();
     }
 
@@ -364,22 +402,26 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public Task<string?> GetRunStatusAsync()
     {
+        RejectIfRunReloadRequired();
         return Task.FromResult(_run?.Status.ToString());
     }
 
     public Task<bool> IsStoppedOrTerminalAsync()
     {
+        RejectIfRunReloadRequired();
         if (_run is null) return Task.FromResult(true);
         return Task.FromResult(_run.IsTerminal());
     }
 
     public Task<string?> GetAssignedWorkerIdAsync()
     {
+        RejectIfRunReloadRequired();
         return Task.FromResult(_run?.Assignment?.WorkerId ?? _cachedAssignedWorkerId);
     }
 
     public Task<string?> GetCurrentWorkIdAsync()
     {
+        RejectIfRunReloadRequired();
         var stage = _run?.CurrentStage();
         if (stage is null) return Task.FromResult<string?>(null);
         return Task.FromResult(stage.RunningTask?.WorkId ?? stage.ChecksWorkId);
@@ -387,6 +429,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId)
     {
+        RejectIfRunReloadRequired();
         return Task.FromResult(_readModel.GetActiveWork(workId));
     }
 

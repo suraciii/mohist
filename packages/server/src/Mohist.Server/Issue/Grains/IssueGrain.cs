@@ -228,7 +228,24 @@ public class IssueGrain : Grain, IIssueGrain
                 Workspace: workspace));
 
         _issue!.Start(wrId, undeliveredPrerequisites);
-        await SaveIssueAsync();
+        try
+        {
+            await SaveIssueAsync();
+        }
+        catch
+        {
+            // The workflow run was already committed, but the issue state/event
+            // transaction rolled back. A retry would mint a new wrId and leave
+            // this run orphaned. Compensate by stopping the run so it does not
+            // linger as active work the issue no longer references.
+            try { await wfGrain.StopAsync("issue save failed; compensating orphaned workflow start"); }
+            catch (Exception compEx)
+            {
+                _log.LogWarning(compEx,
+                    "Issue {Key} compensating stop of orphaned workflow {WrId} failed", GrainKey, wrId);
+            }
+            throw;
+        }
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }
