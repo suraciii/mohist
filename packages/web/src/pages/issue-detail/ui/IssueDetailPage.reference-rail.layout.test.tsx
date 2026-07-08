@@ -12,16 +12,6 @@ import {
   renderPage,
 } from './_issueDetailReferenceRailTestUtils'
 
-const mockUseNavigate = vi.fn()
-
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useNavigate: () => mockUseNavigate,
-  }
-})
-
 const mockUseIssueDiff = vi.fn()
 const mockUseIssueCommits = vi.fn()
 const mockUseWorkflowTimeline = vi.fn()
