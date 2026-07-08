@@ -55,7 +55,11 @@ coverage/
 .mohist/*
 !.mohist/explores/
 !.mohist/explores/**
-.claude/
+
+# Claude Code: 忽略个人文件，但共享项目级 skills（软链）
+.claude/*
+!.claude/skills/
+!.claude/skills/**
 
 # OpenCode generated
 .opencode/package-lock.json
