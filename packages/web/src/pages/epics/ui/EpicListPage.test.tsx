@@ -3,17 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { toast } from 'sonner'
 import { EpicStatus } from '../../../entities/epic'
 import { EpicListPage } from './EpicListPage'
 
 const mockNavigate = vi.fn()
-
-const toastMocks = vi.hoisted(() => ({
-  success: vi.fn(),
-  error: vi.fn(),
-  warning: vi.fn(),
-  info: vi.fn(),
-}))
 
 const startIssueMock = vi.hoisted(() => vi.fn())
 
@@ -31,12 +25,6 @@ function passthroughStartIssue() {
     typeof mocks.useStartIssue
   >)
 }
-
-vi.mock('sonner', () => ({
-  toast: toastMocks,
-}))
-
-const toastError = toastMocks.error
 
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>()
@@ -508,7 +496,7 @@ describe('EpicListPage Start next issue action', () => {
     fireEvent.click(screen.getByTestId('epic-card-start'))
 
     await waitFor(() => {
-      expect(toastError).toHaveBeenCalledWith('Issue is still a draft')
+      expect(toast.error).toHaveBeenCalledWith('Issue is still a draft')
     })
   })
 

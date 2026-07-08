@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
 import { ProjectProvider } from '../../entities/project'
 import { REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
 import { LiveTaskProvider } from './LiveTaskProvider'
@@ -12,9 +13,6 @@ import { TEST_PROJECT, makeBaseIssue } from './_liveTaskProviderTestUtils'
 const mocks = vi.hoisted(() => ({
   useEventsConnection: vi.fn(),
   useAgentStatus: vi.fn(),
-  toastInfo: vi.fn(),
-  toastError: vi.fn(),
-  toastSuccess: vi.fn(),
 }))
 
 vi.mock('../../shared/api/events-hub', () => ({
@@ -24,14 +22,6 @@ vi.mock('../../shared/api/events-hub', () => ({
 vi.mock('../../entities/agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../entities/agent')>()),
   useAgentStatus: () => mocks.useAgentStatus(),
-}))
-
-vi.mock('sonner', () => ({
-  toast: {
-    info: (...args: unknown[]) => mocks.toastInfo(...args),
-    error: (...args: unknown[]) => mocks.toastError(...args),
-    success: (...args: unknown[]) => mocks.toastSuccess(...args),
-  },
 }))
 
 beforeEach(() => {
@@ -117,9 +107,9 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     // Reset toast mocks so the assertions below focus on the
     // rebase-completed path itself, not the seeding step that produced
     // its own toast.error('Rebase conflict on Issue #N').
-    mocks.toastInfo.mockClear()
-    mocks.toastError.mockClear()
-    mocks.toastSuccess.mockClear()
+    vi.mocked(toast.info).mockClear()
+    vi.mocked(toast.error).mockClear()
+    vi.mocked(toast.success).mockClear()
 
     act(() => {
       handleEvent(REVERSE_DNS_EVENT_TYPES.IssueCompleted, {
@@ -141,8 +131,8 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
         && arg.queryKey[0] === 'issues'
         && arg.queryKey[1] === 'detail')
     expect(detailInvalidations).toHaveLength(0)
-    expect(mocks.toastSuccess).not.toHaveBeenCalled()
-    expect(mocks.toastError).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
     // The conflict was cleared.
     expect(stateProbe.current?.rebaseConflict).toBeNull()
 
@@ -164,10 +154,10 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
       })
     })
 
-    expect(mocks.toastSuccess).toHaveBeenCalledTimes(1)
-    expect(mocks.toastSuccess).toHaveBeenCalledWith('Issue #13 merged successfully')
+    expect(toast.success).toHaveBeenCalledTimes(1)
+    expect(toast.success).toHaveBeenCalledWith('Issue #13 merged successfully')
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
-    expect(mocks.toastError).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('sets rebaseConflict, dispatches rebase_conflict, fires toast.error, and invalidates ["issues"] on WorkflowRunFailed + rebase payload', () => {
@@ -200,10 +190,10 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
         error: 'CONFLICT (content): Merge conflict in src/a.ts',
       },
     ])
-    expect(mocks.toastError).toHaveBeenCalledTimes(1)
-    expect(mocks.toastError).toHaveBeenCalledWith('Rebase conflict on Issue #21')
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledWith('Rebase conflict on Issue #21')
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
-    expect(mocks.toastSuccess).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
     expect(stateProbe.current?.rebaseConflict).toMatchObject({
       issueNumber: 21,
       conflicts: ['src/a.ts', 'src/b.ts'],
@@ -238,7 +228,7 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
       issueNumber: 33,
       status: 'failed',
     })
-    expect(mocks.toastError).toHaveBeenCalledWith('Rebase conflict on Issue #33')
+    expect(toast.error).toHaveBeenCalledWith('Rebase conflict on Issue #33')
 
     offRebase()
   })
@@ -261,10 +251,10 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
       })
     })
 
-    expect(mocks.toastError).toHaveBeenCalledTimes(1)
-    expect(mocks.toastError).toHaveBeenCalledWith('Merge failed for Issue #99')
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledWith('Merge failed for Issue #99')
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
-    expect(mocks.toastSuccess).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
     // The merge-failure arm intentionally does NOT dispatch a rebase event.
     expect(rebaseEvents).toEqual([])
 
@@ -295,9 +285,9 @@ describe('LiveTaskProvider reverse-DNS integration outcome (D2 test-first)', () 
     })
 
     expect(rebaseEvents).toEqual([])
-    expect(mocks.toastSuccess).not.toHaveBeenCalled()
-    expect(mocks.toastError).not.toHaveBeenCalled()
-    expect(mocks.toastInfo).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.info).not.toHaveBeenCalled()
     // The switch arm's default invalidations still run (they are not the
     // outcome handler's job):
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
@@ -354,9 +344,9 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
       })
     })
 
-    expect(mocks.toastInfo).toHaveBeenCalledTimes(1)
-    expect(mocks.toastInfo).toHaveBeenCalledWith('Issue #42 needs approval')
-    expect(mocks.toastError).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledTimes(1)
+    expect(toast.info).toHaveBeenCalledWith('Issue #42 needs approval')
+    expect(toast.error).not.toHaveBeenCalled()
     window.history.pushState({}, '', savedPathname)
   })
 
@@ -374,9 +364,9 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
       })
     })
 
-    expect(mocks.toastError).toHaveBeenCalledTimes(1)
-    expect(mocks.toastError).toHaveBeenCalledWith('Issue #51 encountered an error')
-    expect(mocks.toastInfo).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledWith('Issue #51 encountered an error')
+    expect(toast.info).not.toHaveBeenCalled()
     window.history.pushState({}, '', savedPathname)
   })
 
@@ -394,8 +384,8 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
       })
     })
 
-    expect(mocks.toastInfo).not.toHaveBeenCalled()
-    expect(mocks.toastError).not.toHaveBeenCalled()
+    expect(toast.info).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
     window.history.pushState({}, '', savedPathname)
   })
 
@@ -414,8 +404,8 @@ describe('LiveTaskProvider notifyRunLifecycleToast (D2 test-first)', () => {
       })
     })
 
-    expect(mocks.toastInfo).not.toHaveBeenCalled()
-    expect(mocks.toastError).not.toHaveBeenCalled()
+    expect(toast.info).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
     window.history.pushState({}, '', savedPathname)
   })
 })

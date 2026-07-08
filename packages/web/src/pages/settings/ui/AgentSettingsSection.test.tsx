@@ -2,16 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { baseRender, fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { toast } from 'sonner'
 import type { AgentRuntimeConfig, GeneralConfig } from '../../../entities/settings'
-
-const toast = vi.hoisted(() => ({
-  info: vi.fn(),
-  success: vi.fn(),
-  error: vi.fn(),
-  warning: vi.fn(),
-}))
-
-vi.mock('sonner', () => ({ toast }))
 
 const runtimeClient = vi.hoisted(() => ({
   getAgentRuntime: vi.fn(),
@@ -541,8 +533,8 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
   })
 
   it('does not add a sonner toast call from handleSave / confirmReset beyond what useSetAgentRuntime already does (T-003)', async () => {
-    const callsBefore = toast.error.mock.calls.length
-    const callsBeforeSuccess = toast.success.mock.calls.length
+    const callsBefore = vi.mocked(toast.error).mock.calls.length
+    const callsBeforeSuccess = vi.mocked(toast.success).mock.calls.length
 
     runtimeClient.updateAgentRuntime.mockImplementation(async () => {
       throw new Error('Inline only')
@@ -556,10 +548,10 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
 
     await screen.findByTestId('agent-runtime-save-error')
 
-    const callsAfterSave = toast.error.mock.calls.length - callsBefore
+    const callsAfterSave = vi.mocked(toast.error).mock.calls.length - callsBefore
     expect(callsAfterSave).toBe(1)
 
-    const callsBeforeReset = toast.error.mock.calls.length
+    const callsBeforeReset = vi.mocked(toast.error).mock.calls.length
     fireEvent.click(screen.getByRole('button', { name: /Reset to Defaults/ }))
     await screen.findByText('Reset Coder Agent Settings')
     fireEvent.click(screen.getByRole('button', { name: /^Reset$/ }))
@@ -568,9 +560,9 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
       expect(screen.getByTestId('agent-runtime-save-error')).toHaveTextContent(/Inline only/i)
     })
 
-    const callsAfterReset = toast.error.mock.calls.length - callsBeforeReset
+    const callsAfterReset = vi.mocked(toast.error).mock.calls.length - callsBeforeReset
     expect(callsAfterReset).toBe(1)
 
-    expect(toast.success.mock.calls.length - callsBeforeSuccess).toBe(0)
+    expect(vi.mocked(toast.success).mock.calls.length - callsBeforeSuccess).toBe(0)
   })
 })

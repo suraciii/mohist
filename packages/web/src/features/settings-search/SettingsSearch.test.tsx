@@ -16,15 +16,6 @@ import {
 import { settingsSearchRegistry } from './registry'
 import type { SettingsSearchEntry } from './types'
 
-const toast = vi.hoisted(() => ({
-  info: vi.fn(),
-  success: vi.fn(),
-  error: vi.fn(),
-  warning: vi.fn(),
-}))
-
-vi.mock('sonner', () => ({ toast }))
-
 const aiSettingsClient = vi.hoisted(() => ({
   useOpencodeRuntime: vi.fn(),
   useAvailableModelIds: vi.fn(),

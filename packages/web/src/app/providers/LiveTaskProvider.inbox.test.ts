@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
 import { ProjectProvider } from '../../entities/project'
 import { REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
 import { LiveTaskProvider } from './LiveTaskProvider'
@@ -10,9 +11,6 @@ import { TEST_PROJECT } from './_liveTaskProviderTestUtils'
 const mocks = vi.hoisted(() => ({
   useEventsConnection: vi.fn(),
   useAgentStatus: vi.fn(),
-  toastInfo: vi.fn(),
-  toastError: vi.fn(),
-  toastSuccess: vi.fn(),
 }))
 
 vi.mock('../../shared/api/events-hub', () => ({
@@ -22,14 +20,6 @@ vi.mock('../../shared/api/events-hub', () => ({
 vi.mock('../../entities/agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../entities/agent')>()),
   useAgentStatus: () => mocks.useAgentStatus(),
-}))
-
-vi.mock('sonner', () => ({
-  toast: {
-    info: (...args: unknown[]) => mocks.toastInfo(...args),
-    error: (...args: unknown[]) => mocks.toastError(...args),
-    success: (...args: unknown[]) => mocks.toastSuccess(...args),
-  },
 }))
 
 beforeEach(() => {
@@ -224,9 +214,9 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
       })
     })
 
-    expect(mocks.toastError).toHaveBeenCalledTimes(1)
-    expect(mocks.toastError).toHaveBeenCalledWith('Issue #42 encountered an error')
-    expect(mocks.toastInfo).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledWith('Issue #42 encountered an error')
+    expect(toast.info).not.toHaveBeenCalled()
   })
 
   it('shows an info notice for approval_requested hints', () => {
@@ -243,9 +233,9 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
       })
     })
 
-    expect(mocks.toastInfo).toHaveBeenCalledTimes(1)
-    expect(mocks.toastInfo).toHaveBeenCalledWith('Issue #99 needs approval')
-    expect(mocks.toastError).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledTimes(1)
+    expect(toast.info).toHaveBeenCalledWith('Issue #99 needs approval')
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('does NOT show a notice for issue_started hints', () => {
@@ -262,8 +252,8 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
       })
     })
 
-    expect(mocks.toastError).not.toHaveBeenCalled()
-    expect(mocks.toastInfo).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.info).not.toHaveBeenCalled()
   })
 
   it('does NOT show a notice for issue_completed hints', () => {
@@ -280,8 +270,8 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
       })
     })
 
-    expect(mocks.toastError).not.toHaveBeenCalled()
-    expect(mocks.toastInfo).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.info).not.toHaveBeenCalled()
   })
 
   it('does NOT show a notice for a hint that targets a different project (suppressed by applyInboxHint routing)', () => {
@@ -298,8 +288,8 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
       })
     })
 
-    expect(mocks.toastError).not.toHaveBeenCalled()
-    expect(mocks.toastInfo).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.info).not.toHaveBeenCalled()
   })
 
   it('does NOT show a notice when on the inbox page (suppression)', () => {
@@ -318,8 +308,8 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
       })
     })
 
-    expect(mocks.toastError).not.toHaveBeenCalled()
-    expect(mocks.toastInfo).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.info).not.toHaveBeenCalled()
     window.history.pushState({}, '', savedPathname)
   })
 
@@ -339,8 +329,8 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
       })
     })
 
-    expect(mocks.toastError).not.toHaveBeenCalled()
-    expect(mocks.toastInfo).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.info).not.toHaveBeenCalled()
     window.history.pushState({}, '', savedPathname)
   })
 
@@ -360,8 +350,8 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
       })
     })
 
-    expect(mocks.toastError).toHaveBeenCalledTimes(1)
-    expect(mocks.toastError).toHaveBeenCalledWith('Issue #42 encountered an error')
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledWith('Issue #42 encountered an error')
     window.history.pushState({}, '', savedPathname)
   })
 
@@ -387,7 +377,7 @@ describe('LiveTaskProvider high-attention inbox notice', () => {
     // The notice is delivered through sonner.toast.error — a purely in-app
     // DOM-based toast widget. No browser Notification permission, no Service
     // Worker push, no desktop notification, no email, no sound.
-    expect(mocks.toastError).toHaveBeenCalledTimes(1)
-    expect(mocks.toastError).toHaveBeenCalledWith('Issue #42 encountered an error')
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledWith('Issue #42 encountered an error')
   })
 })

@@ -18,8 +18,6 @@ const mocks = vi.hoisted(() => ({
   archivePending: false,
   restorePending: false,
   deletePending: false,
-  toastSuccess: vi.fn(),
-  toastError: vi.fn(),
 }))
 
 function makeSubscription(overrides: Partial<AgentSubscriptionDto> = {}): AgentSubscriptionDto {
@@ -103,13 +101,6 @@ vi.mock('../../../entities/agent', async (importOriginal) => {
   }
 })
 
-vi.mock('sonner', () => ({
-  toast: {
-    success: (...args: unknown[]) => mocks.toastSuccess(...args),
-    error: (...args: unknown[]) => mocks.toastError(...args),
-  },
-}))
-
 function renderSection(agent: AgentInfo = makeAgent()) {
   const queryClient = createQueryClient()
   return render(
@@ -139,8 +130,6 @@ describe('SubscriptionsSection', () => {
     mocks.archivePending = false
     mocks.restorePending = false
     mocks.deletePending = false
-    mocks.toastSuccess.mockReset()
-    mocks.toastError.mockReset()
   })
 
   afterEach(() => {

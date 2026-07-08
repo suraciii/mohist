@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { __testing__ } from '../src/app/providers/LiveTaskProvider'
 import { dispatchRebaseEvent, onRebaseEvent } from '../src/entities/issue/model/rebase-events'
 import { LiveTaskProvider } from '../src/app/providers/LiveTaskProvider'
@@ -8,15 +9,6 @@ import { RuntimeToastHost } from '../src/shared/ui/toast'
 import { ProjectProvider } from '../src/entities/project'
 import { useLiveTask } from '../src/entities/issue'
 import { onAgentEvent } from '../src/entities/agent'
-
-const toast = vi.hoisted(() => ({
-  info: vi.fn(),
-  success: vi.fn(),
-  error: vi.fn(),
-  warning: vi.fn(),
-}))
-
-vi.mock('sonner', () => ({ toast }))
 
 const eventsHub = vi.hoisted(() => ({
   useEventsConnection: vi.fn(),
@@ -127,7 +119,7 @@ function rtlRender(ui: React.ReactElement) {
 describe('LiveTaskProvider transcript routing', () => {
   beforeEach(() => {
     eventsHub.useEventsConnection.mockClear()
-    toast.info.mockClear()
+    vi.mocked(toast.info).mockClear()
   })
 
   it('unwraps transcript envelopes without dropping runtime row metadata', () => {

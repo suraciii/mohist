@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { toast } from 'sonner'
 
 import { IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'
 import { CreateIssueDialog } from './CreateIssueDialog'
@@ -65,16 +66,6 @@ const mocks = vi.hoisted(() => ({
   useIssueTemplates: vi.fn<() => { data: unknown[]; isLoading: boolean }>(() => ({ data: [], isLoading: false })),
   useIssueTemplate: vi.fn<(id: string | null) => { data: unknown }>(() => ({ data: undefined })),
   useIssues: vi.fn((_params?: { stage?: string; label?: string; projectId?: string }) => ({ data: [] as Issue[] | undefined, isLoading: false })),
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    warning: vi.fn(),
-    info: vi.fn(),
-  },
-}))
-
-vi.mock('sonner', () => ({
-  toast: mocks.toast,
 }))
 
 vi.mock('../../../entities/issue', async (importOriginal) => ({
@@ -186,10 +177,10 @@ describe('CreateIssueDialog toast feedback', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
     await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(mocks.toast.success).toHaveBeenCalledWith('Issue #223 created'))
-    expect(mocks.toast.success.mock.calls[0][0]).toBe('Issue #223 created')
-    expect(mocks.toast.success.mock.calls[0][0]).not.toMatch(/undefined/)
-    expect(mocks.toast.error).not.toHaveBeenCalled()
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Issue #223 created'))
+    expect(vi.mocked(toast.success).mock.calls[0][0]).toBe('Issue #223 created')
+    expect(vi.mocked(toast.success).mock.calls[0][0]).not.toMatch(/undefined/)
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('never reads the number from a { issue } wrapper (success path uses data.number)', async () => {
@@ -202,8 +193,8 @@ describe('CreateIssueDialog toast feedback', () => {
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'No wrapper' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.toast.success).toHaveBeenCalledTimes(1))
-    const message = mocks.toast.success.mock.calls[0][0] as string
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1))
+    const message = vi.mocked(toast.success).mock.calls[0][0] as string
     expect(message).toBe('Issue #9 created')
     expect(message).not.toMatch(/undefined/)
   })
@@ -215,9 +206,9 @@ describe('CreateIssueDialog toast feedback', () => {
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Boom' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith('Server unavailable'))
-    expect(mocks.toast.success).not.toHaveBeenCalled()
-    const errorMessage = mocks.toast.error.mock.calls[0][0] as string
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Server unavailable'))
+    expect(toast.success).not.toHaveBeenCalled()
+    const errorMessage = vi.mocked(toast.error).mock.calls[0][0] as string
     expect(errorMessage).toBe('Server unavailable')
     expect(errorMessage).not.toMatch(/undefined/)
     expect(errorMessage).not.toMatch(/#\d+/)
@@ -230,8 +221,8 @@ describe('CreateIssueDialog toast feedback', () => {
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Empty err' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith('Failed to create issue'))
-    const errorMessage = mocks.toast.error.mock.calls[0][0] as string
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to create issue'))
+    const errorMessage = vi.mocked(toast.error).mock.calls[0][0] as string
     expect(errorMessage).toBe('Failed to create issue')
     expect(errorMessage).not.toMatch(/undefined/)
     expect(errorMessage).not.toMatch(/#\d+/)
@@ -843,8 +834,8 @@ describe('CreateIssueDialog prerequisites', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
     await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(mocks.toast.success).toHaveBeenCalledWith('Issue #201 created'))
-    expect(mocks.toast.success.mock.calls[0][0]).toBe('Issue #201 created')
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Issue #201 created'))
+    expect(vi.mocked(toast.success).mock.calls[0][0]).toBe('Issue #201 created')
   })
 })
 

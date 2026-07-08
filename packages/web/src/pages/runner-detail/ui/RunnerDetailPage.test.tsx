@@ -4,15 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { toast } from 'sonner'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import type { RunnerStatusRow } from '../../../entities/runner'
 import { RunnerDetailPage } from './RunnerDetailPage'
-
-const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
-vi.mock('sonner', () => ({
-  toast: { error: toastError },
-}))
 
 const mocks = vi.hoisted(() => ({
   useProject: vi.fn(),
@@ -323,7 +319,7 @@ describe('RunnerDetailPage', () => {
     })
 
     it('shows toast on mutation error', () => {
-      toastError.mockClear()
+      vi.mocked(toast.error).mockClear()
       const mutate = vi.fn().mockImplementation((_vars, { onError }: { onError: (err: Error) => void }) => {
         onError(new Error('boom'))
       })
@@ -333,7 +329,7 @@ describe('RunnerDetailPage', () => {
       renderPage()
 
       fireEvent.click(screen.getByTestId('slots-editor-increase'))
-      expect(toastError).toHaveBeenCalledWith('Failed to update slots: boom')
+      expect(toast.error).toHaveBeenCalledWith('Failed to update slots: boom')
     })
   })
 
