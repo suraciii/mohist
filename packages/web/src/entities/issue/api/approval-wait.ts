@@ -31,12 +31,16 @@ export function invalidateApprovalWait(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: approvalWaitQueryKey() })
 }
 
-export function useApprovalWait() {
-  const { projectId } = useProject()
-  return useQuery({
+export function approvalWaitQueryOptions(projectId: string | null | undefined) {
+  return {
     queryKey: approvalWaitQueryKey(projectId),
     queryFn: () => fetchApprovalWait(projectId!),
     enabled: !!projectId,
     staleTime: 60_000,
-  })
+  } as const
+}
+
+export function useApprovalWait() {
+  const { projectId } = useProject()
+  return useQuery(approvalWaitQueryOptions(projectId))
 }

@@ -60,22 +60,30 @@ export const completionThroughputQueryKey = (projectId?: string | null, range?: 
     : ['issues', 'metrics', 'completion', 'day'] as const
 }
 
-export function useCompletionTrend(range?: InsightsRange) {
-  const { projectId } = useProject()
-  return useQuery({
+export function completionTrendQueryOptions(projectId: string | null | undefined, range?: InsightsRange) {
+  return {
     queryKey: completionTrendQueryKey(projectId, range),
     queryFn: () => fetchCompletionTrend(projectId!, 'week', range),
     enabled: !!projectId,
     staleTime: 60_000,
-  })
+  } as const
 }
 
-export function useCompletionThroughput(range?: InsightsRange) {
-  const { projectId } = useProject()
-  return useQuery({
+export function completionThroughputQueryOptions(projectId: string | null | undefined, range?: InsightsRange) {
+  return {
     queryKey: completionThroughputQueryKey(projectId, range),
     queryFn: () => fetchCompletionTrend(projectId!, 'day', range),
     enabled: !!projectId,
     staleTime: 60_000,
-  })
+  } as const
+}
+
+export function useCompletionTrend(range?: InsightsRange) {
+  const { projectId } = useProject()
+  return useQuery(completionTrendQueryOptions(projectId, range))
+}
+
+export function useCompletionThroughput(range?: InsightsRange) {
+  const { projectId } = useProject()
+  return useQuery(completionThroughputQueryOptions(projectId, range))
 }

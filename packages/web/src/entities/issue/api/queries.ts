@@ -29,14 +29,25 @@ function isMissingTaskLogEndpoint(err: ApiError): boolean {
   return err.message.startsWith('Empty response from ') || err.message.startsWith('Invalid JSON response from ')
 }
 
-export function useIssueWorkflowTaskLog(issueNumber: number, taskId: string | null | undefined, params: IssueWorkflowTaskLogParams = {}, enabled: boolean = true, workflowRunId?: string | null) {
-  const { projectId } = useProject()
+export function issueWorkflowTaskLogQueryOptions(
+  projectId: string | null | undefined,
+  issueNumber: number,
+  taskId: string | null | undefined,
+  params: IssueWorkflowTaskLogParams = {},
+  enabled: boolean = true,
+  workflowRunId?: string | null,
+) {
   const safeTaskId = typeof taskId === 'string' && taskId.length > 0 ? taskId : null
-  return useQuery({
-    queryKey: [issueNumber, safeTaskId, projectId, workflowRunId ?? null, 'workflow-task-log', params],
+  return {
+    queryKey: [issueNumber, safeTaskId, projectId, workflowRunId ?? null, 'workflow-task-log', params] as const,
     queryFn: () => fetchIssueWorkflowTaskLogOrEmpty(issueNumber, safeTaskId!, params, projectId!),
     enabled: enabled && issueNumber > 0 && !!safeTaskId && !!projectId,
-  })
+  } as const
+}
+
+export function useIssueWorkflowTaskLog(issueNumber: number, taskId: string | null | undefined, params: IssueWorkflowTaskLogParams = {}, enabled: boolean = true, workflowRunId?: string | null) {
+  const { projectId } = useProject()
+  return useQuery(issueWorkflowTaskLogQueryOptions(projectId, issueNumber, taskId, params, enabled, workflowRunId))
 }
 
 export function useIssueWorkflowArtifacts(issueNumber: number, params: IssueWorkflowArtifactListParams = {}, enabled: boolean = true) {
@@ -92,13 +103,17 @@ export function useIssueDiff(number: number) {
   })
 }
 
-export function useIssueEvents(number: number, enabled: boolean = true) {
-  const { projectId } = useProject()
-  return useQuery({
-    queryKey: ['issue-events', number, projectId],
+export function issueEventsQueryOptions(projectId: string | null | undefined, number: number, enabled: boolean = true) {
+  return {
+    queryKey: ['issue-events', number, projectId] as const,
     queryFn: () => getIssueEvents(number, projectId),
     enabled: enabled && number > 0 && !!projectId,
-  })
+  } as const
+}
+
+export function useIssueEvents(number: number, enabled: boolean = true) {
+  const { projectId } = useProject()
+  return useQuery(issueEventsQueryOptions(projectId, number, enabled))
 }
 
 export function useIssueCommits(number: number) {
@@ -137,18 +152,22 @@ export function useWorkflowYaml(workflowRunId: string | null | undefined, enable
   })
 }
 
-export function useWorkspaceStatus(issueNumber: number, enabled: boolean = true) {
-  const { projectId } = useProject()
-  return useQuery({
-    queryKey: ['issues', issueNumber, projectId, 'workspace-status'],
+export function workspaceStatusQueryOptions(projectId: string | null | undefined, issueNumber: number, enabled: boolean = true) {
+  return {
+    queryKey: ['issues', issueNumber, projectId, 'workspace-status'] as const,
     queryFn: () => getWorkspaceStatus(issueNumber, projectId),
     enabled: enabled && issueNumber > 0 && !!projectId,
-    refetchInterval: (query) => {
+    refetchInterval: (query: { state: { data?: unknown } }) => {
       const data = query.state.data as { exists?: boolean; reason?: string; ahead?: number; behind?: number } | undefined
       const missingAheadBehind = data?.exists === true && (typeof data.ahead !== 'number' || typeof data.behind !== 'number')
       return !!data?.reason || missingAheadBehind ? 5_000 : 30_000
     },
-  })
+  } as const
+}
+
+export function useWorkspaceStatus(issueNumber: number, enabled: boolean = true) {
+  const { projectId } = useProject()
+  return useQuery(workspaceStatusQueryOptions(projectId, issueNumber, enabled))
 }
 
 export function useArchivedIssues(params?: { projectId?: string }) {

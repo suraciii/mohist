@@ -60,12 +60,16 @@ export const qualityMetricsQueryKey = (projectId?: string | null, range?: Insigh
     : ['issues', 'metrics', 'quality'] as const
 }
 
-export function useQualityMetrics(range?: InsightsRange) {
-  const { projectId } = useProject()
-  return useQuery({
+export function qualityMetricsQueryOptions(projectId: string | null | undefined, range?: InsightsRange) {
+  return {
     queryKey: qualityMetricsQueryKey(projectId, range),
     queryFn: () => fetchQualityMetrics(projectId!, range),
     enabled: !!projectId,
     staleTime: 60_000,
-  })
+  } as const
+}
+
+export function useQualityMetrics(range?: InsightsRange) {
+  const { projectId } = useProject()
+  return useQuery(qualityMetricsQueryOptions(projectId, range))
 }
