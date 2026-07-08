@@ -3,7 +3,7 @@ import { TEST_PROJECT, baseRender, screen, waitFor } from './test-utils'
 import { SessionPage } from '../src/pages/session/ui/SessionPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import React from 'react'
 import type {
   AgentSessionMetadata,
@@ -17,16 +17,7 @@ const endpointMocks = vi.hoisted(() => ({
   issue: null as any,
   metadata: null as AgentSessionMetadata | null,
   transcript: { turns: [], partCount: 0, lastActivityAt: null } as AgentSessionTranscriptResponse,
-  params: { number: '42', sessionName: 'T-003.1' } as Record<string, string>,
 }))
-
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
-  return {
-    ...actual,
-    useParams: () => endpointMocks.params,
-  }
-})
 
 vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
   useCoderSessions: () => ({ sessions: endpointMocks.sessions, isLoading: endpointMocks.sessionsLoading }),
@@ -59,7 +50,6 @@ beforeEach(() => {
   endpointMocks.issue = null
   endpointMocks.metadata = null
   endpointMocks.transcript = { turns: [], partCount: 0, lastActivityAt: null }
-  endpointMocks.params = { number: '42', sessionName: 'T-003.1' }
   Element.prototype.scrollTo = vi.fn()
 })
 
@@ -85,7 +75,11 @@ function renderWithQueryClient(ui: React.ReactElement) {
   return baseRender(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
-        <MemoryRouter>{ui}</MemoryRouter>
+        <MemoryRouter initialEntries={['/issues/42/workflow/sessions/T-003.1']}>
+          <Routes>
+            <Route path="/issues/:number/workflow/sessions/:sessionName" element={ui} />
+          </Routes>
+        </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
   )
