@@ -114,9 +114,6 @@ vi.mock('../../../widgets/session-health', async (importOriginal) => {
   }
 })
 
-vi.mock('../../../shared/lib/useDocumentTitle', () => ({
-  useDocumentTitle: () => {},
-}))
 
 function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })

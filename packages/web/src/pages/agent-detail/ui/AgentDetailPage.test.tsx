@@ -82,9 +82,6 @@ vi.mock('../../../entities/agent', () => ({
   },
 }))
 
-vi.mock('../../../shared/lib/useDocumentTitle', () => ({
-  useDocumentTitle: () => {},
-}))
 
 vi.mock('../../../widgets/agent-profile-editor/ui/AgentProfileEditor', () => ({
   AgentProfileEditor: ({ open }: { open: boolean }) =>

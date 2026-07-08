@@ -25,9 +25,6 @@ vi.mock('../../../entities/agent', () => ({
   useAgentStatus: () => ({ data: { running: false, capacity: { active: 0, max: 8 } } }),
 }))
 
-vi.mock('../../../shared/lib/useDocumentTitle', () => ({
-  useDocumentTitle: () => {},
-}))
 
 vi.mock('../../../widgets/agent-profile-editor/ui/AgentProfileEditor', () => ({
   AgentProfileEditor: ({ agent, open }: { agent?: AgentInfo | null; open: boolean }) =>

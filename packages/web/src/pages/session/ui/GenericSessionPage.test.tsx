@@ -60,9 +60,6 @@ vi.mock('../../../widgets/session-health', () => ({
   CompactionLineageLink: () => <div data-testid="compaction-lineage-link" />,
 }))
 
-vi.mock('../../../shared/lib/useDocumentTitle', () => ({
-  useDocumentTitle: () => {},
-}))
 
 function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })

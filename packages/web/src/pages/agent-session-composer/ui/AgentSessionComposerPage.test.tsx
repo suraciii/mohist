@@ -35,9 +35,6 @@ vi.mock('../../../entities/agent', () => ({
   }),
 }))
 
-vi.mock('../../../shared/lib/useDocumentTitle', () => ({
-  useDocumentTitle: () => {},
-}))
 
 vi.mock('../../../shared/ui/attachment-composer', () => ({
   AttachmentComposer: ({ value, onChange, ...props }: { value: string; onChange: (v: string) => void; [key: string]: unknown }) =>
