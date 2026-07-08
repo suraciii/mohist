@@ -135,7 +135,7 @@ function waitingToCard(w: AgentActivityWaiting): WaitingCard {
 }
 
 export function useActivityCards() {
-  const { data } = useAgentActivity()
+  const { data, isLoading = false, isError = false } = useAgentActivity()
 
   return useMemo(() => {
     const cards = (data?.sessions ?? []).map(sessionToCard)
@@ -143,8 +143,15 @@ export function useActivityCards() {
     const recentCards = cards.filter((c) => !ACTIVE_STATUSES.has(c.status))
     const waitingCards = (data?.waiting ?? []).map(waitingToCard)
 
+    const activeCardByIssueNumber = new Map<number, SessionCard>()
+    for (const card of activeCards) {
+      const n = Number(card.issueNumber)
+      if (Number.isFinite(n)) activeCardByIssueNumber.set(n, card)
+    }
+
     return {
       activeCards,
+      activeCardByIssueNumber,
       recentCards,
       waitingCards,
       statusCounts: data?.summary ?? {
@@ -154,6 +161,8 @@ export function useActivityCards() {
         failed: 0,
       },
       slotUsage: data?.summary.slots ?? { active: 0, max: 0 },
+      isLoading,
+      isError,
     }
-  }, [data])
+  }, [data, isLoading, isError])
 }

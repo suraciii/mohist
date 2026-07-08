@@ -553,6 +553,85 @@ describe('AttentionHero - runner-down entry', () => {
   })
 })
 
+describe('AttentionHero - runner-capacity-limited entry', () => {
+  it('surfaces a runner-capacity-limited attention item under saturation with no issues', () => {
+    mocks.issues = []
+    mocks.agentStatus = makeAgentStatus({
+      runnerAvailable: true,
+      capacity: { active: 4, max: 4 },
+    })
+
+    renderHero()
+
+    expect(screen.queryByText('All clear')).not.toBeInTheDocument()
+    const entry = screen.getByTestId('runner-capacity-entry')
+    expect(entry).toBeInTheDocument()
+    expect(entry).toHaveAttribute('data-kind', 'runner-capacity-limited')
+    expect(entry).toHaveAttribute('data-family', 'warning')
+    expect(screen.getByTestId('runner-capacity-detail')).toHaveTextContent('4 of 4 slots in use')
+    expect(screen.getByTestId('runner-capacity-link')).toHaveAttribute('href', '/demo/activity')
+  })
+
+  it('surfaces a runner-capacity-limited attention item alongside issue items', () => {
+    mocks.issues = [
+      makeIssue({
+        id: 'awaiting-1',
+        number: 90,
+        title: 'Pending approval',
+        approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
+      }),
+    ]
+    mocks.agentStatus = makeAgentStatus({
+      runnerAvailable: true,
+      capacity: { active: 8, max: 8 },
+    })
+
+    renderHero()
+
+    expect(screen.getAllByTestId('attention-item')).toHaveLength(1)
+    expect(screen.getByTestId('runner-capacity-entry')).toBeInTheDocument()
+  })
+
+  it('does NOT surface a runner-capacity-limited attention item when active < max', () => {
+    mocks.issues = []
+    mocks.agentStatus = makeAgentStatus({
+      runnerAvailable: true,
+      capacity: { active: 2, max: 4 },
+    })
+
+    renderHero()
+
+    expect(screen.queryByTestId('runner-capacity-entry')).not.toBeInTheDocument()
+    expect(screen.getByText('All clear')).toBeInTheDocument()
+  })
+
+  it('does NOT surface a runner-capacity-limited attention item when max === 0', () => {
+    mocks.issues = []
+    mocks.agentStatus = makeAgentStatus({
+      runnerAvailable: true,
+      capacity: { active: 0, max: 0 },
+    })
+
+    renderHero()
+
+    expect(screen.queryByTestId('runner-capacity-entry')).not.toBeInTheDocument()
+    expect(screen.getByText('All clear')).toBeInTheDocument()
+  })
+
+  it('surfaces runner-unavailable (not capacity-limited) when runnerAvailable is false even at capacity', () => {
+    mocks.issues = []
+    mocks.agentStatus = makeAgentStatus({
+      runnerAvailable: false,
+      capacity: { active: 4, max: 4 },
+    })
+
+    renderHero()
+
+    expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    expect(screen.queryByTestId('runner-capacity-entry')).not.toBeInTheDocument()
+  })
+})
+
 describe('AttentionHero - all-clear state', () => {
   it('does not show All clear while issue data is still loading', () => {
     mocks.issues = undefined

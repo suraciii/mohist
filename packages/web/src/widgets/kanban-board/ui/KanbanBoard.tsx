@@ -5,7 +5,7 @@ import { Input } from '@/shared/ui/components/input'
 import { Link } from 'react-router-dom'
 import { AlertTriangleIcon, SearchIcon, XIcon } from 'lucide-react'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStatus, deriveAttentionItems, type Issue } from '../../../entities/issue'
+import { IssueStatus, deriveAttentionItems, isIssueAttentionItem, type AttentionItem, type Issue } from '../../../entities/issue'
 import { useRunnerSummary } from '../../../entities/runner/api/queries'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
@@ -392,52 +392,67 @@ function FilterBar({
 function NeedsAttentionSummary({
   items,
 }: {
-  items: Array<{ issueNumber: number; issueId: string; label: string; detail?: string }>
+  items: AttentionItem[]
 }) {
   const toProjectPath = useProjectPath()
+  const issueItems = items.filter(isIssueAttentionItem)
+  const summaryFamily = issueItems.some((item) => attentionFamily(item) === 'danger')
+    ? 'danger'
+    : 'warning'
+  const summaryContainer = summaryFamily === 'danger'
+    ? 'bg-danger-subtle border-danger-border'
+    : 'bg-warning-subtle border-warning-border'
+  const summaryDot = summaryFamily === 'danger' ? 'bg-danger' : 'bg-warning'
 
-  if (items.length === 0) return null
+  if (issueItems.length === 0) return null
 
   return (
     <div
       data-testid="needs-attention-summary"
-      className="relative bg-amber-50 bg-gradient-to-r from-amber-50 to-amber-50/40 border-b border-amber-200"
+      data-family={summaryFamily}
+      className={`relative border-b ${summaryContainer}`}
     >
-      <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500" />
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${summaryDot}`} />
       <div className="px-4 sm:px-6 py-2.5 flex items-start gap-3">
         <div className="flex items-center gap-1.5 pt-0.5">
-          <span className="inline-flex items-center justify-center size-5 rounded-full bg-amber-500 text-white">
+          <span className={`inline-flex items-center justify-center size-5 rounded-full ${summaryDot} text-warning-foreground`}>
             <AlertTriangleIcon className="size-3" />
           </span>
-          <span className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+          <span className="text-xs font-semibold uppercase tracking-wide">
             Needs attention
           </span>
-          <span className="text-xs text-amber-700/80 font-medium">
-            ({items.length})
+          <span className="text-xs font-medium opacity-80">
+            ({issueItems.length})
           </span>
         </div>
         <div className="flex-1 flex flex-wrap gap-1.5 min-w-0">
-          {items.slice(0, 6).map((item) => (
-            <a
-              key={item.issueId}
-              href={toProjectPath(`/issues/${item.issueNumber}`)}
-              data-testid={`attention-link-${item.issueNumber}`}
-              className="inline-flex items-center gap-1.5 rounded-md bg-white px-2 py-1 text-xs shadow-sm hover:shadow border border-amber-200 transition-shadow"
-            >
-              <span className="font-mono font-semibold text-amber-700">
-                #{item.issueNumber}
-              </span>
-              <span className="font-medium text-amber-900">{item.label}</span>
-              {item.detail && (
-                <span className="text-muted-foreground max-w-[160px] truncate hidden sm:inline">
-                  {item.detail}
+          {issueItems.slice(0, 6).map((item) => {
+            const family = attentionFamily(item)
+            const border = family === 'danger' ? 'border-danger-border' : 'border-warning-border'
+            const text = family === 'danger' ? 'text-danger' : 'text-warning'
+            return (
+              <a
+                key={item.issueId}
+                href={toProjectPath(`/issues/${item.issueNumber}`)}
+                data-testid={`attention-link-${item.issueNumber}`}
+                data-family={family}
+                className={`inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs shadow-sm hover:shadow border ${border} transition-shadow`}
+              >
+                <span className={`font-mono font-semibold ${text}`}>
+                  #{item.issueNumber}
                 </span>
-              )}
-            </a>
-          ))}
-          {items.length > 6 && (
-            <span className="text-xs text-amber-700 self-center font-medium">
-              +{items.length - 6} more
+                <span className="font-medium text-foreground">{item.label}</span>
+                {item.detail && (
+                  <span className="text-muted-foreground max-w-[160px] truncate hidden sm:inline">
+                    {item.detail}
+                  </span>
+                )}
+              </a>
+            )
+          })}
+          {issueItems.length > 6 && (
+            <span className="text-xs self-center font-medium">
+              +{issueItems.length - 6} more
             </span>
           )}
         </div>
@@ -446,6 +461,9 @@ function NeedsAttentionSummary({
   )
 }
 
+function attentionFamily(item: Extract<AttentionItem, { issueNumber: number }>): 'danger' | 'warning' {
+  return item.kind === 'approval-needed' ? 'warning' : 'danger'
+}
 function RunnerUnavailableBanner({
   agentStatus,
 }: {

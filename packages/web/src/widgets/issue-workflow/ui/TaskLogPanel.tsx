@@ -44,10 +44,10 @@ const TERMINAL_TASK_STATUSES: ReadonlySet<StageTaskStatus> = new Set<StageTaskSt
 function formatTimestamp(iso: string): string {
   const parsed = new Date(iso)
   if (Number.isNaN(parsed.getTime())) return iso
-  const hh = String(parsed.getHours()).padStart(2, '0')
-  const mm = String(parsed.getMinutes()).padStart(2, '0')
-  const ss = String(parsed.getSeconds()).padStart(2, '0')
-  const ms = String(parsed.getMilliseconds()).padStart(3, '0')
+  const hh = String(parsed.getUTCHours()).padStart(2, '0')
+  const mm = String(parsed.getUTCMinutes()).padStart(2, '0')
+  const ss = String(parsed.getUTCSeconds()).padStart(2, '0')
+  const ms = String(parsed.getUTCMilliseconds()).padStart(3, '0')
   return `${hh}:${mm}:${ss}.${ms}`
 }
 

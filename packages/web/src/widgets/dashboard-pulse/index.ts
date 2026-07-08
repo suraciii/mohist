@@ -1,2 +1,2 @@
 export { PulseZone } from './ui/PulseZone'
-export { CompactSessionCard } from './ui/CompactSessionCard'
+export { CompactSessionCard, IssueRow } from './ui/CompactSessionCard'
