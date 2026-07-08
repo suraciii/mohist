@@ -209,8 +209,7 @@ public class InboxSubscriptionStoreSpecs
             .UseSqlite(connection)
             .Options;
         var factory = new TestDbContextFactory(options);
-        using (var db = factory.CreateDbContext())
-            db.Database.Migrate();
+        MigratedSqliteTemplate.CopyTo(connection);
         return new TestDatabase(connection, factory);
     }
 

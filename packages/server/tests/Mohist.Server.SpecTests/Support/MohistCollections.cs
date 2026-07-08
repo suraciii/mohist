@@ -42,12 +42,12 @@ public class IntegrationRunnerCollection : ICollectionFixture<MohistIntegrationF
 [CollectionDefinition("IntegrationMisc")]
 public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-// OTLP/query route specs. Each class builds its own OtlpRoutesWebApplicationFactory
-// (with TestClusterPortAllocator-assigned silo/gateway ports), so no shared
-// ICollectionFixture. Grouped in one collection so their two silos don't run
-// simultaneously against the same OtlpPort (14318) Kestrel listen option.
+// OTLP/query route specs share one OtlpRoutesWebApplicationFactory (web host
+// + silo, TestClusterPortAllocator-assigned ports). Tests reset the otel
+// tables and collector status via OtlpRoutesHostFixture.ResetOtelStateAsync
+// instead of paying a per-test host start.
 [CollectionDefinition("IntegrationTelemetry")]
-public class IntegrationTelemetryCollection;
+public class IntegrationTelemetryCollection : ICollectionFixture<Specs.Telemetry.OtlpRoutesHostFixture>;
 
 [CollectionDefinition("MohistDb")]
 public class MohistDbCollection : ICollectionFixture<MohistDbFixture>;

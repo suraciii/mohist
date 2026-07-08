@@ -21,8 +21,8 @@ public class IssueDerivedColumnsSpecs
             .UseSqlite(connection)
             .Options;
 
+        MigratedSqliteTemplate.CopyTo(connection);
         await using var db = new MohistDbContext(options);
-        GrainTestConfig.MigrateWithSchemaFix(db);
 
         var issue = new IssueRow
         {
@@ -55,8 +55,8 @@ public class IssueDerivedColumnsSpecs
             .UseSqlite(connection)
             .Options;
 
+        MigratedSqliteTemplate.CopyTo(connection);
         await using var db = new MohistDbContext(options);
-        GrainTestConfig.MigrateWithSchemaFix(db);
 
         var legacyIssue = new IssueRow
         {

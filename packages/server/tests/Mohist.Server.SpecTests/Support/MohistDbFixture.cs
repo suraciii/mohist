@@ -116,19 +116,16 @@ public sealed class MohistDbFixture : IAsyncLifetime
 
         _services = services.BuildServiceProvider();
 
-        // The shared in-memory SQLite is created with the schema only when
-        // a connection first executes "CREATE TABLE". Run EF Core's
-        // Migrate() so the schema is identical to production (Migrate
-        // applies the EF migrations in Infrastructure/Data/Migrations;
-        // EnsureCreated would skip them and produce a different schema
-        // for SQLite, breaking IDENTITY columns and computed columns).
-        // Migration failures must surface loudly: a silent catch here would
-        // hide schema regressions from every spec using this fixture.
+        // The schema must be identical to production (the EF migrations in
+        // Infrastructure/Data/Migrations; EnsureCreated would skip them and
+        // produce a different schema for SQLite, breaking IDENTITY columns
+        // and computed columns). The migrated-template clone is exactly the
+        // Migrate() output without re-running the chain here.
+        MigratedSqliteTemplate.CopyTo(_keeper);
         using (var scope = _services.CreateScope())
         {
             var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
             using var db = dbFactory.CreateDbContext();
-            GrainTestConfig.MigrateWithSchemaFix(db);
             db.Database.ExecuteSqlRaw("""
                 CREATE TABLE IF NOT EXISTS "Attachments" (
                     "Id" TEXT NOT NULL CONSTRAINT "PK_Attachments" PRIMARY KEY,

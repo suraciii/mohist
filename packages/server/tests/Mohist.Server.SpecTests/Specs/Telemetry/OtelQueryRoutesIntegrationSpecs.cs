@@ -2,11 +2,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Otel;
 using Mohist.Server.SpecTests.Support;
-using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
@@ -16,56 +14,21 @@ namespace Mohist.Server.SpecTests.Specs.Telemetry;
 [Collection("IntegrationTelemetry")]
 public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
 {
-    private const int OtlpPort = 14318;
     private const string ListPath = "/otel/api/traces";
     private const string QueryPath = "/otel/api/query";
     private const string StatusPath = "/otel/api/status";
 
-    private SqliteConnection _keeper = null!;
-    private OtlpRoutesWebApplicationFactory _factory = null!;
-    private string _runnerRoot = null!;
-    private string _systemUpdateStatePath = null!;
-    private string _connectionString = null!;
-    private TestClusterPortAllocator? _portAllocator;
+    private readonly OtlpRoutesHostFixture _fixture;
+    private OtlpRoutesWebApplicationFactory _factory => _fixture.Factory;
 
-    public async Task InitializeAsync()
+    public OtelQueryRoutesIntegrationSpecs(OtlpRoutesHostFixture fixture)
     {
-        _connectionString = $"Data Source=otel-int-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(_connectionString);
-        await _keeper.OpenAsync();
-
-        _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-query-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_runnerRoot);
-        _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-query-{Guid.NewGuid():N}.json");
-
-        _portAllocator = new TestClusterPortAllocator();
-        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
-
-        _factory = new OtlpRoutesWebApplicationFactory(
-            _connectionString,
-            _runnerRoot,
-            _systemUpdateStatePath,
-            OtlpPort,
-            siloPort,
-            gatewayPort);
-        await _factory.EnsureSchemaAsync();
-
-        _ = _factory.Services;
-
-        // The production startup flips IsPortBound to true on the happy
-        // path; the test pipeline runs the same start, so the singleton
-        // is already populated. Tests that need a known offline state
-        // call SetPortBound(false) explicitly.
+        _fixture = fixture;
     }
 
-    public async Task DisposeAsync()
-    {
-        _factory?.Dispose();
-        _portAllocator?.Dispose();
-        await _keeper.DisposeAsync();
-        try { if (Directory.Exists(_runnerRoot)) Directory.Delete(_runnerRoot, recursive: true); } catch { }
-        try { if (File.Exists(_systemUpdateStatePath)) File.Delete(_systemUpdateStatePath); } catch { }
-    }
+    public Task InitializeAsync() => _fixture.ResetOtelStateAsync();
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
     public async Task GetTraces_OnMainApi_ReturnsEnvelopeWithArray()

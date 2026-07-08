@@ -305,8 +305,7 @@ public class EpicQuerierListAsyncSpecs
             .UseSqlite(connection)
             .Options;
         var factory = new TestDbContextFactory(options);
-        using (var db = factory.CreateDbContext())
-            GrainTestConfig.MigrateWithSchemaFix(db);
+        MigratedSqliteTemplate.CopyTo(connection);
         return new TestDatabase(connection, factory);
     }
 
@@ -316,11 +315,7 @@ public class EpicQuerierListAsyncSpecs
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
 
-        var migrateOptions = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-        using (var db = new MohistDbContext(migrateOptions))
-            GrainTestConfig.MigrateWithSchemaFix(db);
+        MigratedSqliteTemplate.CopyTo(connection);
 
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)

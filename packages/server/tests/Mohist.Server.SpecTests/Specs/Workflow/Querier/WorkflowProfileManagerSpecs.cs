@@ -42,8 +42,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             runProfileManager,
             new Mohist.Server.Issue.Services.WorkflowProfiles.EffectiveWorkflowProfileResolver(registry));
 
-        using var initDb = new MohistDbContext(_options);
-        initDb.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyTo(_keeper);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;

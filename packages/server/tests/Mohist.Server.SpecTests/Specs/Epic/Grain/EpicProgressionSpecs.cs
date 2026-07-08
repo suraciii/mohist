@@ -507,8 +507,7 @@ public class EpicProgressionSpecs
             .UseSqlite(connection)
             .Options;
         var factory = new TestDbContextFactory(options);
-        using (var db = factory.CreateDbContext())
-            GrainTestConfig.MigrateWithSchemaFix(db);
+        MigratedSqliteTemplate.CopyTo(connection);
         return new TestDatabase(connection, factory);
     }
 
