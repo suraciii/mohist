@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Infrastructure.Events;
@@ -15,11 +16,33 @@ public interface IEventStore
     Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default);
     Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default);
     Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string epicId, int limit = 200, CancellationToken ct = default);
+    Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default);
+    Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default);
 }
 
 public sealed record StoredCloudEvent(
     long Id,
     CloudEvent Envelope);
+
+public enum EventOrigin
+{
+    WorkflowRun,
+    Issue,
+    Epic,
+}
+
+public sealed record UndeliveredEvent(
+    EventOrigin Origin,
+    long Id,
+    string Source,
+    string EventId,
+    string Type,
+    DateTimeOffset Time,
+    string SpecVersion,
+    string? Subject,
+    string DataContentType,
+    JsonElement Data,
+    string ExtensionsJson);
 
 /// <summary>
 /// Legacy DTO retained for back-compat with the pre-envelope read path
