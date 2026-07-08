@@ -51,7 +51,7 @@ namespace Mohist.Server.Events.Subscriptions;
 /// </para>
 /// <para>
 /// <b>Project resolution.</b> Issue events already stamp
-/// <c>extensions["projectid"]</c> (see <c>IssueGrain.PublishIssueEventsAsync</c>).
+/// <c>extensions["projectid"]</c> (see <c>IssueStore.SaveAsync</c>).
 /// Workflow events now stamp <c>extensions["projectid"]</c> at production time
 /// in <c>WorkflowRunStore.ToCloudEvent</c> using the run's metadata annotations.
 /// Events without a project id on the envelope are skipped gracefully.
@@ -174,7 +174,7 @@ public sealed class AgentSubscriptionDispatchHandler : ICloudEventHandler
     /// <summary>
     /// Returns the project id stamped on the CloudEvent envelope. Issue
     /// events stamp <c>extensions["projectid"]</c> at production time in
-    /// <c>IssueGrain.PublishIssueEventsAsync</c>; workflow events stamp it
+    /// <c>IssueStore.SaveAsync</c>; workflow events stamp it
     /// in <c>WorkflowRunStore.ToCloudEvent</c> from the run's metadata
     /// annotations. Events whose envelope cannot be resolved are skipped.
     /// </summary>

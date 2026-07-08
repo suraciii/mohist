@@ -70,7 +70,8 @@ public static class MohistServiceRegistration
         services.AddDbContextFactory<MohistDbContext>(options =>
             options.UseSqlite(connectionString));
 
-        services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>, IssueStore>();
+        services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>>(sp => sp.GetRequiredService<IIssueStore>());
+        services.AddScoped<IIssueStore, IssueStore>();
         services.AddScoped<IStateStore<Mohist.Server.Agent.Domain.Agent>, AgentStore>();
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         services.AddScoped<WorkflowRunQuerier>();

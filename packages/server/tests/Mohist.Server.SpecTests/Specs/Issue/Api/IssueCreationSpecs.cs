@@ -94,7 +94,7 @@ public class IssueCreationSpecs
 
     // Regression guard for the bug that left IssueEvents permanently empty:
     // SaveIssueAsync snapshotted PendingEvents by reference, then
-    // ClearPendingEvents() drained the same list, so PublishIssueEventsAsync
+    // ClearPendingEvents() drained the same list, so the publish path
     // no-op'd on an empty collection and no issue lifecycle CloudEvent ever
     // reached EventStore. WorkflowRunEvents and EpicEvents worked because
     // their drain paths snapshot via ToList(). This spec is the only place
@@ -112,15 +112,11 @@ public class IssueCreationSpecs
         var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
         var stored = await events.ListIssueEventsAsync(issue.Id);
 
-        // issue-361 T-002: IEventPublisher converged to write-only, so
-        // IssueGrain's post-commit append-then-publish path now appends
-        // twice (once via _eventStore.AppendAsync, once via
-        // _eventPublisher.PublishAsync). The dedupe-to-one is owned by
-        // T-004 (which moves event writes inside the state transaction
-        // and drops the publish). For now: assert at least one durable
-        // row exists with the right shape; the count tightens in T-004.
-        Assert.NotEmpty(stored);
-        var created = stored.First(e => e.Envelope.Type == "com.mohist.issue.created");
+        // issue-361 T-004: events now append inside the state transaction
+        // exactly once per IssueEvent recorded by the aggregate, so the
+        // single IssuedCreated event lands as a single row.
+        var created = Assert.Single(stored);
+        Assert.Equal("com.mohist.issue.created", created.Envelope.Type);
         Assert.Equal($"/mohist/issues/{issue.Id}", created.Envelope.Source.ToString());
     }
 

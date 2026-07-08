@@ -6,9 +6,7 @@ using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Infrastructure.Workspace;
-using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
-using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
@@ -27,7 +25,7 @@ namespace Mohist.Server.Issue.Grains;
 public class IssueGrain : Grain, IIssueGrain
 {
     private Domain.Issue? _issue;
-    private readonly IStateStore<Domain.Issue> _issueStore;
+    private readonly IIssueStore _issueStore;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
@@ -37,14 +35,12 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IssueWorkflowProfileManager _issueProfileManager;
     private readonly AttachmentService _attachmentService;
-    private readonly IEventStore _eventStore;
-    private readonly IEventPublisher _eventBus;
     private readonly IConfiguration _configuration;
     private readonly IEnvironmentVariableProvider _environment;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
-        IStateStore<Domain.Issue> issueStore,
+        IIssueStore issueStore,
         IssueWorkflowProfileRegistry profiles,
         WorkflowQuerier workflowQuerier,
         IDbContextFactory<MohistDbContext> dbFactory,
@@ -54,8 +50,6 @@ public class IssueGrain : Grain, IIssueGrain
         ProjectWorkflowProfileManager projectProfileManager,
         IssueWorkflowProfileManager issueProfileManager,
         AttachmentService attachmentService,
-        IEventStore eventStore,
-        IEventPublisher eventBus,
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
         ILogger<IssueGrain> log)
@@ -70,8 +64,6 @@ public class IssueGrain : Grain, IIssueGrain
         _projectProfileManager = projectProfileManager;
         _issueProfileManager = issueProfileManager;
         _attachmentService = attachmentService;
-        _eventStore = eventStore;
-        _eventBus = eventBus;
         _configuration = configuration;
         _environment = environment;
         _log = log;
@@ -635,55 +627,17 @@ public class IssueGrain : Grain, IIssueGrain
         }
     }
 
-    private async Task SaveIssueAsync()
+    private Task SaveIssueAsync()
     {
-        if (_issue is null) return;
+        if (_issue is null) return Task.CompletedTask;
         // Snapshot before clearing: PendingEvents returns a live view over the
         // same _pendingEvents list, so ClearPendingEvents() would otherwise
-        // drain `pending` too and PublishIssueEventsAsync would no-op on an
+        // drain `pending` too and the events-aware save would no-op on an
         // empty collection — silently skipping every IssueEvents append (the
-        // regression that left IssueEvents permanently empty).
+        // regression that previously left IssueEvents permanently empty).
         var pending = _issue.PendingEvents.ToList();
         _issue.ClearPendingEvents();
-        await _issueStore.SaveAsync(_issue.Id, _issue);
-        await PublishIssueEventsAsync(pending);
-    }
-
-    private async Task PublishIssueEventsAsync(IReadOnlyList<Issue.Domain.Events.IssueEvent> events)
-    {
-        if (events.Count == 0 || _issue is null) return;
-        var source = IssueEventPersistence.IssueSource(_issue.Id);
-        var subject = _issue.Number.ToString();
-        var extensions = new Dictionary<string, string>
-        {
-            ["projectid"] = _issue.ProjectId,
-            ["issueid"] = _issue.Id,
-            ["issueno"] = subject,
-        };
-
-        try
-        {
-            foreach (var evt in events)
-            {
-                var type = IssueEventSerializer.BusType(evt);
-                var dataJson = IssueEventSerializer.ToData(evt);
-                var envelope = new CloudEvent(
-                    id: Guid.NewGuid().ToString(),
-                    source: new Uri(source, UriKind.Relative),
-                    type: type,
-                    time: DateTimeOffset.UtcNow,
-                    data: dataJson,
-                    subject: subject,
-                    extensions: extensions);
-
-                await _eventStore.AppendAsync(envelope);
-                await _eventBus.PublishAsync(envelope, CancellationToken.None);
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Post-commit publish failed for issue {IssueId}", _issue.Id);
-        }
+        return _issueStore.SaveAsync(_issue.Id, _issue, pending);
     }
 
     private void EnsureIssue()

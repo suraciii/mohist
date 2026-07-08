@@ -52,7 +52,8 @@ public static class MohistSiloRegistration
         silo.Services.AddCloudEventBus();
         silo.Services.AddSingleton<IEventStore, EventStore>();
         silo.Services.AddScoped<InboxStore>();
-        silo.Services.AddScoped<IStateStore<DomainIssue>, IssueStore>();
+        silo.Services.AddScoped<IStateStore<DomainIssue>>(sp => sp.GetRequiredService<IIssueStore>());
+        silo.Services.AddScoped<IIssueStore, IssueStore>();
         silo.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         silo.Services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
         silo.Services.AddSingleton<HermesIssueNotificationRenderer>();

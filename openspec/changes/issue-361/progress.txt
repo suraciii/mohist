@@ -378,3 +378,177 @@
     `WorkflowRunStoreEvent_PersistsRowButDoesNotSyncProjectToInbox`
     updated to `Assert.Single` (post-T-003 there is exactly one row
     per event, not `>1` from the post-commit publish loop).
+
+## T-004 progress notes
+
+### Codebase Patterns
+
+- `IssueStore.SaveAsync(key, state, events, ct)` mirrors the
+  `WorkflowRunStore.SaveAsync(run, events, ct)` transactional entry
+  point that T-003 introduced. Same shape: open the producer's
+  `MohistDbContext`, `BeginTransactionAsync`, stage the state row
+  with the existing JSON snapshot path, append every event row via
+  `_eventStore.AppendAsync(db, envelope, ct)` on the shared
+  `DbContext`, then `SaveChangesAsync` + `CommitAsync`. No own
+  transaction, no post-commit publish loop.
+
+- Envelope construction and identity stamping consolidate into the
+  store, completing the D5 pattern that T-003 started for
+  WorkflowRun. `IssueStore.ToCloudEvent` calls the existing
+  `IssueEventSerializer.BusType` / `ToData` helpers (the same ones
+  that the old `IssueGrain.PublishIssueEventsAsync` used) and stamps
+  `extensions["projectid"]` + `extensions["issueid"]` +
+  `extensions["issueno"]` from `state.ProjectId` / `state.Id` /
+  `state.Number`. The store does not accept identity from the
+  caller — it reads it from the persisted aggregate, which is the
+  single point of truth. `subject` is set to `state.Number.ToString()`
+  so the per-issue CloudEvents type contract stays unchanged.
+
+- `IssueStore.SaveAsync(key, state)` (no events, the existing
+  `IStateStore<DomainIssue>` overload) is preserved for any caller
+  with no pending events — same JSON snapshot path as before, no
+  new `BeginTransactionAsync` needed (single-write implicit
+  transaction). The grain takes the events-aware overload whenever
+  `PendingEvents` was non-empty.
+
+- `IIssueStore : IStateStore<DomainIssue>` is the new contract that
+  the grain consumes. It adds `SaveAsync(string key, DomainIssue
+  state, IReadOnlyList<IssueEvent> events, CancellationToken ct)`.
+  DI registers `IIssueStore` as the concrete `IssueStore` and the
+  legacy `IStateStore<DomainIssue>` resolution forwards to the same
+  instance, so existing in-memory consumers
+  (`InboxProjectionHandler`, `HermesIssueNotificationHandler`,
+  `InboxProjectionTestSupport`) keep their no-event view of the
+  store with zero behavioral change.
+
+- `IssueGrain` stops depending on `IEventStore` and
+  `IEventPublisher` after this task — `_eventStore`, `_eventBus`,
+  and `PublishIssueEventsAsync` are gone. The grain's `using
+  Mohist.Server.Infrastructure.Events;` and `using
+  Mohist.Server.Infrastructure.Data.Events;` imports drop with
+  them. Only the canonical `IIssueStore` (and the existing
+  `Mohist.Server.Infrastructure.Data.Issue` namespace that holds
+  `IStateStore<T>`) remains.
+
+### Gotchas
+
+- `Mohist.ServiceProvider.GetRequiredService<IIssueStore>()` in the
+  grain constructor means the DI registration order matters. The
+  silo registration registers `IssueStore` as `IIssueStore` first
+  and then binds `IStateStore<DomainIssue>` to the same scoped
+  instance. Resolving `IStateStore<DomainIssue>` before
+  `IIssueStore` would silently fall back to a null `IEventStore`
+  if a future change broke the chain — the forward registration
+  is the only thing keeping the no-events path safe today.
+
+- The no-events `SaveAsync(key, state)` path keeps its original
+  behavior verbatim: a single `FindAsync` on the `Issues` DbSet,
+  followed by `Add` or `State/Risk` mutation + `SaveChangesAsync`.
+  No `BeginTransactionAsync` (SQLite single-statement implicit
+  transaction is fine). T-004 does **not** open a transaction on
+  the no-events path; the events-aware path opens one because the
+  state row + every event row + their index updates are a single
+  atomic unit that needs explicit transactional boundaries.
+
+- The `ThrowingEventStore` private fake in the new spec throws on
+  the **second** `AppendAsync(db, envelope)` call, simulating a
+  mid-transaction event-row write failure (the same pattern as
+  T-003's `TransactionalEventAppendSpecs.ThrowingEventStore`). The
+  first event lands in `db.IssueEvents.Local` as `Added`, so the
+  test's verification on a fresh `DbContext` proves the rollback
+  wiped both staged state and event rows. The issue's existing
+  `IssueCreated` payload constructor requires
+  `(Title, Priority, Labels, Risk, RepositoryRef)` — pass `null`
+  for both optional strings to get a minimal record.
+
+- `IssueEvent` is a C# 14 union, so `IReadOnlyList<IssueEvent>`
+  compiles but `IReadOnlyList<IssueCreated>` does not (each
+  variant is a separate record). The new `IssueStore` and
+  `IIssueStore` save overload accept the union list, matching the
+  shape `_issue.PendingEvents.ToList()` returns from the grain.
+
+- `IssueWorkflowReadPathSpecs.ReadOnlyTrackingStateStore` (a fake
+  for the pure-query contract test) had to gain an
+  `IIssueStore` implementation of the events-aware overload to
+  compile against the new `IssueGrain` constructor signature.
+  Each save variant appends a discriminable tag to `_saveCalls`
+  (`events:N`) so a regression through the events-aware path is
+  visible without changing the existing zero-save assertion.
+
+- `IssueCreationSpecs.CreateIssue_PersistsCreatedEventToIssueEvents`
+  moves from `Assert.NotEmpty(stored)` +
+  `Assert.Contains(... IssueCreated ...)` to
+  `Assert.Single(stored)` + `Equal("com.mohist.issue.created", ...)`.
+  Before T-004 the spec tolerated `>1` rows because T-002's
+  publisher appending-then-the-grain's store append yielded
+  duplicates. After T-004 there is exactly one row per emitted
+  IssueEvent.
+
+- Doc-comments referencing
+  `IssueGrain.PublishIssueEventsAsync` were updated in:
+  - `Events/Subscriptions/AgentSubscriptionDispatchHandler.cs`
+    (two doc-comment locations referring to the projectid stamping
+    source);
+  - the test `AgentSubscriptionDispatchHandlerSpecs` (a comment in
+    a fixture and an inline comment in a test);
+  - no other production code referenced the method by name (verified
+    via grep).
+
+- The legacy migration
+  `Infrastructure/Data/Migrations/20260705132535_BackfillIssueCompletedEvents.cs`
+  doc-comment still mentions
+  `IssueGrain.PublishIssueEventsAsync` — left untouched because it
+  documents a historical bug and the migration's purpose is to
+  backfill events that the broken append path dropped, so the
+  reference is intentionally preserving the original terminology.
+
+### Open follow-ups for downstream tasks
+
+- T-005 (AgentSession producer) is the only remaining core
+  producer migration. Its pattern is now mechanical: introduce an
+  `IAgentSessionStore`-extending-or-namespace store with an
+  events-aware `SaveAsync`, write the event rows via the T-001
+  scoped overload, drop the publisher field and the post-commit
+  publish loop from `AgentSessionGrain.CommitAsync`. The
+  EventOrigin.AgentSession routing is already in place from T-001,
+  so the migration is a near-line-for-line port of T-003/T-004.
+
+- `IssueGrain` no longer consumes `IEventPublisher` after T-004;
+  the only production caller of `IEventPublisher` is now
+  `InboxProjectionHandler` (the inbox hint path stays on the
+  bus per design D3 / OQ4). The `MohistServiceRegistration.cs`
+  + `MohistSiloRegistration.cs` registrations for
+  `IEventPublisher` are unchanged because the bus still exists for
+  the dispatcher that step 3 will wire.
+
+### Verification
+
+- `dotnet build Mohist.sln` succeeds with 0 warnings
+  (TreatWarningsAsErrors active).
+- `dotnet test packages/server/tests/Mohist.Server.SpecTests`:
+  **4141** specs pass, 10 skipped, 0 failures (up from 4135 in
+  T-003 — 6 new specs in
+  `IssueTransactionalEventAppendSpecs`).
+- `dotnet test packages/server/tests/Mohist.Server.ArchTests`:
+  24 pass, 3 skipped, 0 failures.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests`: 865 pass,
+  0 failures.
+- New tests in
+  `packages/server/tests/Mohist.Server.SpecTests/Specs/Events/IssueTransactionalEventAppendSpecs.cs`
+  (6 specs): state and IssueEvent rows commit atomically;
+  event-row write failure rolls back and propagates (no
+  log-and-swallow); crash-after-commit leaves durable rows
+  readable on a fresh DbContext; identity stamping carries
+  `projectid`/`issueid`/`issueno` and `Subject = state.Number`;
+  events-aware path with empty events list still commits state
+  row only; the `IStateStore<DomainIssue>` no-events overload
+  continues to commit the state row cleanly.
+
+- `IssueWorkflowReadPathSpecs`: `ReadOnlyTrackingStateStore` now
+  implements `IIssueStore` end-to-end (both save overloads tracked
+  via the existing `SaveCalls` list). The pure-query contract
+  (`SaveCalls.Count == 0`) still holds across all three specs.
+- `IssueCreationSpecs.CreateIssue_PersistsCreatedEventToIssueEvents`:
+  assertion tightened to `Assert.Single` — exactly one durable
+  `IssueCreated` row per emitted event (T-002's publisher
+  duplicate append is gone).
