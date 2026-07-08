@@ -201,7 +201,8 @@ public async Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(s
                 throw new InvalidOperationException($"Epic event '{source}'/{id} was not found.");
             row.DispatchedAt = dispatchedAt;
         }
-        else if (source.StartsWith(WorkflowRunEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        else if (source.StartsWith(WorkflowRunEventPersistence.SourcePrefix, StringComparison.Ordinal)
+                 || string.Equals(source, "/mohist/inbox", StringComparison.Ordinal))
         {
             var row = await db.WorkflowRunEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
             if (row is null)

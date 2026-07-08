@@ -8,8 +8,11 @@ public class RecordingEventStore : IEventStore
     private readonly List<RecordedEnvelope> _events = [];
     private readonly Lock _gate = new();
 
+    public Func<CloudEvent, bool>? ThrowOnAppend { get; set; }
+
     public Task AppendAsync(CloudEvent envelope, CancellationToken ct = default)
     {
+        ThrowIfConfigured(envelope);
         lock (_gate)
         {
             _events.Add(new RecordedEnvelope(envelope));
@@ -19,6 +22,7 @@ public class RecordingEventStore : IEventStore
 
     public Task AppendAsync(MohistDbContext db, CloudEvent envelope, CancellationToken ct = default)
     {
+        ThrowIfConfigured(envelope);
         lock (_gate)
         {
             _events.Add(new RecordedEnvelope(envelope));
@@ -92,6 +96,12 @@ public Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string 
                 return _events.Select(r => new RecordedEnvelope(r.Envelope)).ToArray();
             }
         }
+    }
+
+    private void ThrowIfConfigured(CloudEvent envelope)
+    {
+        if (ThrowOnAppend?.Invoke(envelope) == true)
+            throw new InvalidOperationException("simulated IEventStore append failure");
     }
 
     public sealed record RecordedEnvelope(CloudEvent Envelope);

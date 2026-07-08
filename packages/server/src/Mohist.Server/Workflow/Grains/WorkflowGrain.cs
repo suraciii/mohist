@@ -25,6 +25,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private WorkflowRun? _run;
     private string? _cachedAssignedWorkerId;
     private bool _runDirty;
+    private bool _runReloadRequired;
     private readonly IWorkflowRunStore _runStore;
     private readonly WorkflowProfileManager _profileManager;
     private readonly WorkflowSessionHealthService _sessionHealth;
@@ -75,6 +76,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         _run = await _runStore.LoadAsync(GrainKey);
+        _runReloadRequired = false;
 
         await ClearStoppedRunStaleApprovalGateAsync(ct);
 
@@ -83,7 +85,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
     {
-        if (!_runDirty || _run is null) return;
+        if (!_runDirty || _runReloadRequired || _run is null) return;
 
         try
         {
@@ -139,14 +141,13 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         if (_run.Status is not (WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
-        _ = _run.Stop();
+        var stopEvents = _run.Stop();
 
-        await _workLifecycle.AbandonRunningWorkAsync(_run!, reason ?? "stopped");
-
-        await SaveRunAsync();
+        var abandonedEvents = await _workLifecycle.AbandonRunningWorkAsync(_run!, reason ?? "stopped");
+        var events = abandonedEvents.Concat(stopEvents).ToArray();
 
         _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);
-        await CommitAsync([new WorkflowRunStopped()], reason);
+        await CommitAsync(events, reason);
     }
 
     public async Task ApproveAsync()
@@ -413,6 +414,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         if (_run is null)
             throw new InvalidOperationException($"Workflow '{GrainKey}' has no workflow run");
+        if (_runReloadRequired)
+            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed event-aware save");
     }
 
     private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, CancellationToken ct = default)
@@ -508,12 +511,25 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         }
         catch (DbUpdateConcurrencyException ex)
         {
+            MarkRunReloadRequired();
             _log.LogWarning(ex,
                 "Workflow {Id} save failed because the persisted run ETag changed; deactivating grain to reload state",
                 GrainKey);
             DeactivateOnIdle();
             throw;
         }
+        catch
+        {
+            MarkRunReloadRequired();
+            DeactivateOnIdle();
+            throw;
+        }
+    }
+
+    private void MarkRunReloadRequired()
+    {
+        _runDirty = false;
+        _runReloadRequired = true;
     }
 
     private DateTimeOffset Now() => _timeProvider.GetUtcNow();
