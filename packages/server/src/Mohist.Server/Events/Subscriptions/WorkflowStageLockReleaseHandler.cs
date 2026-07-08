@@ -7,7 +7,8 @@ namespace Mohist.Server.Events.Subscriptions;
 
 /// <summary>
 /// Bus subscription that releases the workflow run's sequential stage lock
-/// when a <c>StageCompleted</c> or <c>StageFailed</c> event is committed.
+/// when a <c>StageCompleted</c> or <c>StageFailed</c> event row is
+/// persisted.
 ///
 /// Replaces the previous grain-internal <c>WorkflowGrain.On()</c> branch
 /// (<c>StageCompleted/Failed =&gt; ReleaseStageLocksAsync</c>) so the lock
@@ -17,8 +18,11 @@ namespace Mohist.Server.Events.Subscriptions;
 /// resolves the workflow run id from the CloudEvent source URI
 /// (<c>/mohist/workflow-runs/{id}</c>).
 ///
-/// The grain uses <c>[Reentrant]</c> so the bus dispatch can re-enter it
-/// from inside <c>WorkflowRunStore.SaveAsync</c> without deadlocking.
+/// The grain uses <c>[Reentrant]</c> so when the future dispatcher
+/// (issue-361 step 3) picks up the event row and re-enters the grain
+/// from the workflow-grain call stack, it does not deadlock. While the
+/// dispatcher is unimplemented the handler stays dormant — the rows
+/// are durable but the in-process notification is suspended.
 /// </summary>
 [Subscription(Type = "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed")]
 public sealed class WorkflowStageLockReleaseHandler : ICloudEventHandler
@@ -64,13 +68,14 @@ public sealed class WorkflowStageLockReleaseHandler : ICloudEventHandler
         }
         catch (Exception ex)
         {
-            // Failed handler dispatches are logged but never propagated — the
-            // InMemoryEventBus swallows handler exceptions by design, and the
-            // lock-grain state is authoritative: a missed release only stalls
-            // the next workflow run until the lock holder times out or is
-            // stopped. The pull-scheduling rediscovery path (the
-            // RequeueWorkflowIdAsync no-op T-005 cleanup) means any newly
-            // dispatched run still gets rediscovered from persisted state.
+            // Failed handler dispatches are logged but never propagated. The
+            // publish path no longer invokes handlers (it only appends an
+            // event row); when a dispatcher drives this handler, its
+            // exceptions are isolated here. Lock-grain state is authoritative:
+            // a missed release only stalls the next workflow run until the
+            // lock holder times out or is stopped, and pull-scheduling
+            // rediscovery still picks up newly dispatched runs from persisted
+            // state.
             _log.LogWarning(ex,
                 "Stage lock release failed for event {EventType} {EventId}",
                 evt.Type, evt.Id);

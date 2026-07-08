@@ -26,7 +26,7 @@ namespace Mohist.Server.SpecTests.Specs.Events.Subscriptions;
 ///         <c>agent-subscription-management#Lifecycle invariant</c>).</item>
 ///   <item>Envelope-only boundary: the handler reads
 ///         <c>extensions["projectid"]</c> from the envelope (issue events
-///         stamp it in <c>IssueGrain.PublishIssueEventsAsync</c>; workflow
+///         stamp it in <c>IssueStore.SaveAsync</c>; workflow
 ///         events stamp it in <c>WorkflowRunStore.ToCloudEvent</c> from the
 ///         run's metadata annotations) and skips when absent.</item>
 /// </list>
@@ -313,7 +313,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         await SeedSubscriptionAsync(scope, "proj_a", "agent_a",
             name: "issue-listener", filterType: "com.mohist.issue.*", priority: 5);
 
-        // Issue events stamp projectid on extensions (IssueGrain.PublishIssueEventsAsync).
+        // Issue events stamp projectid on extensions (IssueStore.SaveAsync).
         var evt = new CloudEvent(
             id: "evt_issue_1",
             source: new Uri("/mohist/issues/issue_x", UriKind.Relative),

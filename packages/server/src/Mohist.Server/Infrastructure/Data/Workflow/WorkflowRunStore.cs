@@ -21,16 +21,13 @@ public class WorkflowRunStore : IWorkflowRunStore
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventStore _eventStore;
-    private readonly IEventPublisher _eventPublisher;
 
     public WorkflowRunStore(
         IDbContextFactory<MohistDbContext> dbFactory,
-        IEventStore eventStore,
-        IEventPublisher eventPublisher)
+        IEventStore eventStore)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
-        _eventPublisher = eventPublisher;
     }
 
     public async Task SaveAsync(WorkflowRun run, CancellationToken ct = default)
@@ -43,48 +40,43 @@ public class WorkflowRunStore : IWorkflowRunStore
     public async Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default)
     {
         var source = WorkflowEventSource(run.Id);
+        var annotations = run.Metadata?.Annotations;
+        var projectId = annotations?.GetValueOrDefault("projectId");
+        var issueId = annotations?.GetValueOrDefault("issueId");
 
-        // 1. update workflow run state
-        await using (var db = await _dbFactory.CreateDbContextAsync(ct))
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        try
         {
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            try
+            await StageRunAsync(db, run, ct);
+            foreach (var evt in events)
             {
-                await StageRunAsync(db, run, ct);
-                await db.SaveChangesAsync(ct);
-                await transaction.CommitAsync(ct);
+                if (evt is null) continue;
+                var envelope = ToCloudEvent(evt, source, projectId, issueId);
+                await _eventStore.AppendAsync(db, envelope, ct);
             }
-            catch (DbUpdateConcurrencyException)
-            {
-                throw;
-            }
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
         }
-
-        // 2. insert + 3. publish: convert each event to a CloudEvent, persist via IEventStore, then publish
-        var projectId = run.Metadata?.Annotations?.GetValueOrDefault("projectId");
-        foreach (var evt in events)
+        catch (DbUpdateConcurrencyException)
         {
-            if (evt is null) continue;
-            var envelope = ToCloudEvent(evt, source, projectId);
-            await _eventStore.AppendAsync(envelope, ct);
-            try
-            {
-                await _eventPublisher.PublishAsync(envelope, ct);
-            }
-            catch
-            {
-                // publish failure must not break workflow execution
-            }
+            throw;
         }
     }
 
-    private static CloudEvent ToCloudEvent(WorkflowEvent evt, string source, string? projectId)
+    private static CloudEvent ToCloudEvent(WorkflowEvent evt, string source, string? projectId, string? issueId)
     {
         var type = WorkflowEventSerializer.BusType(evt);
         var data = WorkflowEventSerializer.ToData(evt);
-        var extensions = string.IsNullOrWhiteSpace(projectId)
-            ? null
-            : new Dictionary<string, string>(StringComparer.Ordinal) { ["projectid"] = projectId };
+        Dictionary<string, string>? extensions = null;
+        var hasProjectId = !string.IsNullOrWhiteSpace(projectId);
+        var hasIssueId = !string.IsNullOrWhiteSpace(issueId);
+        if (hasProjectId || hasIssueId)
+        {
+            extensions = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (hasProjectId) extensions["projectid"] = projectId!;
+            if (hasIssueId) extensions["issueid"] = issueId!;
+        }
         return new CloudEvent(
             id: Guid.NewGuid().ToString(),
             source: new Uri(source, UriKind.Relative),

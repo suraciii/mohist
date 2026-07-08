@@ -947,13 +947,10 @@ public class EpicGrain : Grain, IEpicGrain
 
     /// <summary>
     /// Post-commit, best-effort persistence of every domain event the
-    /// aggregate recorded since the last drain. Mirrors
-    /// <c>IssueGrain.PublishIssueEventsAsync</c>: append each envelope
-    /// through <see cref="IEventStore"/> wrapped in try/catch with
-    /// <c>_log.LogError</c> on failure (a crash or store error between
-    /// state commit and event append loses that mutation's events —
-    /// accepted as the timeline is informational and the authoritative
-    /// state lives in <c>EpicRow</c>).
+    /// aggregate recorded since the last drain. Epic event persistence is
+    /// intentionally still outside the transaction for this issue: a crash or
+    /// store error between state commit and event append loses that mutation's
+    /// events, while authoritative epic state remains in <c>EpicRow</c>.
     /// </summary>
     private async Task PersistEpicEventsAsync(
         EpicAggregate epic,

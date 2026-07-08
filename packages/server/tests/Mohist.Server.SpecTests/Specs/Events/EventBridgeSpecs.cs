@@ -20,12 +20,8 @@ public class EventBridgeSpecs
 
         var hub = new RecordingHubContext();
         var bridge = BuildBridge(registry, hub);
-        var bus = BuildBus(bridge);
 
-        await bus.PublishAsync(
-            data: new { Action = "started" },
-            type: EventCatalog.ReverseDns.StageStarted,
-            source: "/mohist/agent-session/sess-1");
+        await bridge.HandleAsync(BuildEvent(EventCatalog.ReverseDns.StageStarted, "/mohist/agent-session/sess-1"), CancellationToken.None);
 
         var message = Assert.Single(hub.Messages);
         Assert.Equal("conn-reverse-dns", message.ConnectionId);
@@ -56,12 +52,8 @@ public class EventBridgeSpecs
 
         var hub = new RecordingHubContext();
         var bridge = BuildBridge(registry, hub);
-        var bus = BuildBus(bridge);
 
-        await bus.PublishAsync(
-            data: new { Action = "started" },
-            type: EventCatalog.ReverseDns.StageStarted,
-            source: "/mohist/agent-session/sess-1");
+        await bridge.HandleAsync(BuildEvent(EventCatalog.ReverseDns.StageStarted, "/mohist/agent-session/sess-1"), CancellationToken.None);
 
         var message = Assert.Single(hub.Messages);
         Assert.Equal("conn-canonical", message.ConnectionId);
@@ -82,12 +74,8 @@ public class EventBridgeSpecs
 
         var hub = new RecordingHubContext();
         var bridge = BuildBridge(registry, hub);
-        var bus = BuildBus(bridge);
 
-        await bus.PublishAsync(
-            data: new { Action = "started" },
-            type: EventCatalog.ReverseDns.StageStarted,
-            source: "/mohist/agent-session/sess-1");
+        await bridge.HandleAsync(BuildEvent(EventCatalog.ReverseDns.StageStarted, "/mohist/agent-session/sess-1"), CancellationToken.None);
 
         Assert.Empty(hub.Messages);
     }
@@ -105,12 +93,8 @@ public class EventBridgeSpecs
 
         var hub = new RecordingHubContext();
         var bridge = BuildBridge(registry, hub);
-        var bus = BuildBus(bridge);
 
-        await bus.PublishAsync(
-            data: new { },
-            type: EventCatalog.ReverseDns.AgentSessionRuntimeBound,
-            source: "/mohist/agent-session/sess-1");
+        await bridge.HandleAsync(BuildEvent(EventCatalog.ReverseDns.AgentSessionRuntimeBound, "/mohist/agent-session/sess-1"), CancellationToken.None);
 
         Assert.Equal(2, hub.Messages.Count);
         Assert.Contains(hub.Messages, m => m.ConnectionId == "conn-A");
@@ -120,10 +104,13 @@ public class EventBridgeSpecs
     private static EventBridge BuildBridge(ConnectionSubscriptionRegistry registry, IHubContext<MohistHub, IEventsClient> hub) =>
         new(new UserNotificationDispatcher(registry), hub, NullLogger<EventBridge>.Instance);
 
-    private static InMemoryEventBus BuildBus(EventBridge bridge) =>
+    private static CloudEvent BuildEvent(string type, string source) =>
         new(
-            [new Subscription("com.mohist.*", bridge, (h, e, ct) => ((ICloudEventHandler)h).HandleAsync(e, ct))],
-            NullLogger<InMemoryEventBus>.Instance);
+            id: Guid.NewGuid().ToString(),
+            source: new Uri(source, UriKind.RelativeOrAbsolute),
+            type: type,
+            time: DateTimeOffset.UtcNow,
+            data: null);
 
     private sealed class RecordingHubContext : IHubContext<MohistHub, IEventsClient>
     {

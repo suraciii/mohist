@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
@@ -16,8 +15,7 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 /// <c>openspec/changes/issue-110</c>. These tests cover the grain-level
 /// orchestration in <c>AgentSessionGrain.AppendRuntimeEventsAsync</c>
 /// through the Orleans cluster and the event-publishing
-/// fixture (recording both <c>IEventPublisher</c> and
-/// <c>ITranscriptEventPublisher</c>).
+/// fixture (recording <c>ITranscriptEventPublisher</c>).
 /// </summary>
 [Collection("IntegrationSessions")]
 public class AgentSessionContextExhaustionSpecs

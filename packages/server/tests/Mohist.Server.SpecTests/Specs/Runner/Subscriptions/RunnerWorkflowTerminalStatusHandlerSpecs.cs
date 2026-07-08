@@ -141,15 +141,23 @@ public class RunnerWorkflowTerminalStatusHandlerSpecs : IAsyncLifetime
     [Fact]
     public async Task FailedTerminalEvent_RunnerConnected_PushesReceiveWorkflowRunStatus()
     {
+        // issue-361 T-002: the bus is write-only; the
+        // RunnerWorkflowTerminalStatusHandler no longer fires inline.
+        // The future dispatcher will replay the persisted event row;
+        // until then, drive the router directly — that is the same
+        // path the handler takes and the only path whose side effect
+        // (SignalR push) this spec is asserting on.
         var runnerId = await RegisterRunnerWithConnectionAsync("conn-failed-push");
         var workflowRunId = await SeedRunningWorkflowAsync(runnerId);
 
-        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
-        await workflow.StopAsync("test-failed-stop");
+        _hub.Clear();
+        var router = _fixture.Services.GetRequiredService<IRunnerWorkflowStatusRouter>();
+        await router.RouteAsync(workflowRunId, WorkflowRunStatus.Stopped);
 
-        var pushed = await WaitForPushAsync(connectionId: "conn-failed-push", workflowRunId: workflowRunId);
-        Assert.NotNull(pushed);
-        Assert.Equal("ReceiveWorkflowRunStatus", pushed!.Method);
+        var pushed = Assert.Single(_hub.SentMessages, m =>
+            m.Method == "ReceiveWorkflowRunStatus" &&
+            string.Equals(m.ConnectionId, "conn-failed-push", StringComparison.Ordinal));
+        Assert.Equal("ReceiveWorkflowRunStatus", pushed.Method);
         var payload = Assert.IsType<WorkflowRunStatusNotification>(Assert.Single(pushed.Arguments));
         Assert.Equal(workflowRunId, payload.WorkflowRunId);
         Assert.Equal("Stopped", payload.Status);

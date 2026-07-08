@@ -6,6 +6,7 @@ public partial class WorkflowGrain
 {
     public async Task<ReportAck> FailActiveWorkAsync(string workerId, string message)
     {
+        RejectIfRunReloadRequired();
         if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
         var activeWork = _run.CurrentActiveWorkFor(workerId);
         if (activeWork is null) return ReportAck.Stale;
@@ -33,6 +34,7 @@ public partial class WorkflowGrain
 
     public async Task<ReportAck> ReceiveTaskReportAsync(string workerId, string workId, TaskReport report)
     {
+        RejectIfRunReloadRequired();
         if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
         var activeWork = _run.FindActiveWork(workId, workerId);
         if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
@@ -49,6 +51,7 @@ public partial class WorkflowGrain
 
     public async Task<ReportAck> ReceiveCheckReportAsync(string workerId, string workId, CheckReport report)
     {
+        RejectIfRunReloadRequired();
         if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
         var activeWork = _run.FindActiveWork(workId, workerId);
         if (activeWork is null || !activeWork.IsChecks)

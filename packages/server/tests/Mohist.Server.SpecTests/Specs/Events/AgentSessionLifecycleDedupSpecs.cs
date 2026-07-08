@@ -26,11 +26,9 @@ public class AgentSessionLifecycleDedupSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task AttachPhysicalSessionAsync_PublishesRuntimeBoundExactlyOnce()
+    public async Task AttachPhysicalSessionAsync_PersistsRuntimeBoundExactlyOnce()
     {
         var session = await CreateSessionWithoutAttachAsync("dedup-attach-started");
-
-        _fixture.RecordingPublisher.Clear();
 
         await _fixture.Client.PostOkAsync(RunnerAgentSessionAttachPath(session),
             new { agentSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
@@ -42,19 +40,23 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
-        var bound = Assert.Single(_fixture.RecordingPublisher.Published,
-            p => p.Type == EventCatalog.ReverseDns.AgentSessionRuntimeBound);
-        Assert.Equal("/mohist/agent-session/" + session.Id, bound.Source);
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        var bound = Assert.Single(
+            stored,
+            s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionRuntimeBound);
+        Assert.Equal("/mohist/agent-session/" + session.Id, bound.Envelope.Source.ToString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task AttachThenFirstRuntimeAppend_PublishesRuntimeBoundOnceAcrossRuntimeEvents()
+    public async Task AttachThenFirstRuntimeAppend_PersistsRuntimeBoundOnceAcrossRuntimeEvents()
     {
         var session = await CreateSessionWithoutAttachAsync("attach-append");
-
-        _fixture.RecordingPublisher.Clear();
 
         await _fixture.Client.PostOkAsync(RunnerAgentSessionAttachPath(session),
             new { agentSessionId = session.Id, workDir = "/tmp", processPid = 4321 });
@@ -66,19 +68,22 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
-        Assert.Equal(1, _fixture.RecordingPublisher.CountOfType(EventCatalog.ReverseDns.AgentSessionRuntimeBound));
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        Assert.Equal(1, stored.Count(s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionRuntimeBound));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task AppendRuntimeEventsAsync_WithoutAttach_DoesNotPublishRuntimeBound()
+    public async Task AppendRuntimeEventsAsync_WithoutAttach_DoesNotPersistRuntimeBound()
     {
         // RuntimeBound means a real physical ACP session was attached. Plain
         // runtime events must not invent an ACP session id or emit it.
         var session = await CreateSessionWithoutAttachAsync("dedup-started");
-
-        _fixture.RecordingPublisher.Clear();
 
         await AppendEventsAsync(session, new
         {
@@ -104,17 +109,20 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
-        Assert.Equal(0, _fixture.RecordingPublisher.CountOfType(EventCatalog.ReverseDns.AgentSessionRuntimeBound));
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        Assert.Equal(0, stored.Count(s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionRuntimeBound));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task AppendRuntimeEventsAsync_SessionClosedDoesNotPublishTerminalDomainEvents()
+    public async Task AppendRuntimeEventsAsync_SessionClosedDoesNotPersistTerminalDomainEvents()
     {
         var session = await CreateStartedSessionAsync("dedup-completed");
-
-        _fixture.RecordingPublisher.Clear();
 
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
@@ -126,63 +134,77 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
-        Assert.Empty(_fixture.RecordingPublisher.Published);
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        // Only the RuntimeBound event from the attach may be present.
+        Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task AppendRuntimeEventsAsync_FailedClosedObservationDoesNotPublishFailedDomainEvent()
+    public async Task AppendRuntimeEventsAsync_FailedClosedObservationDoesNotPersistFailedDomainEvent()
     {
         var session = await CreateStartedSessionAsync("dedup-failed");
-
-        _fixture.RecordingPublisher.Clear();
 
         await AppendTerminalAsync(session, status: "failed", exitCode: 1, failureReason: "boom");
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
 
-        Assert.Empty(_fixture.RecordingPublisher.Published);
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task AppendRuntimeEventsAsync_CancelledClosedObservationDoesNotPublishCancelledDomainEvent()
+    public async Task AppendRuntimeEventsAsync_CancelledClosedObservationDoesNotPersistCancelledDomainEvent()
     {
         var session = await CreateStartedSessionAsync("dedup-cancelled");
-
-        _fixture.RecordingPublisher.Clear();
 
         await AppendTerminalAsync(session, status: "cancelled", exitCode: 0, failureReason: "user-cancel");
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
 
-        Assert.Empty(_fixture.RecordingPublisher.Published);
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        Assert.All(stored, s => Assert.NotEqual("session.closed", s.Envelope.Type));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task AppendRuntimeEventsAsync_LivenessDoesNotPublishDomainStatusEvents()
+    public async Task AppendRuntimeEventsAsync_LivenessDoesNotPersistDomainStatusEvents()
     {
         var session = await CreateStartedSessionAsync("dedup-liveness");
 
-        _fixture.RecordingPublisher.Clear();
-
         await AppendLivenessAsync(session, status: "running");
         await AppendLivenessAsync(session, status: "running");
         await AppendLivenessAsync(session, status: "running");
 
-        Assert.Empty(_fixture.RecordingPublisher.Published);
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        // Only the RuntimeBound event from the attach may be present.
+        Assert.All(stored, s => Assert.NotEqual("session.liveness", s.Envelope.Type));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task AppendRuntimeEventsAsync_TranscriptRows_DoNotPublishToDomainBus()
+    public async Task AppendRuntimeEventsAsync_TranscriptRows_DoNotPersistAsDomainEvents()
     {
         var session = await CreateStartedSessionAsync("dedup-transcript");
-
-        _fixture.RecordingPublisher.Clear();
 
         await AppendEventsAsync(session, new
         {
@@ -199,18 +221,23 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
         // None of the eight transcript runtime event types must ever
-        // appear in the domain bus. They flow through ITranscriptEventPublisher
-        // (out of scope for this recording publisher).
-        Assert.Equal(0, _fixture.RecordingPublisher.Published.Count(p =>
-            p.Type == "message.delta" ||
-            p.Type == "reasoning.delta" ||
-            p.Type == "tool_call.started" ||
-            p.Type == "ralph_task_update" ||
-            p.Type == "ralph_loop_progress" ||
-            p.Type == "session.liveness" ||
-            p.Type == "usage.updated" ||
-            p.Type == "model.resolved"));
+        // appear as persisted domain events. They flow through
+        // ITranscriptEventPublisher (out of scope for the event store).
+        Assert.Equal(0, stored.Count(s =>
+            s.Envelope.Type == "message.delta" ||
+            s.Envelope.Type == "reasoning.delta" ||
+            s.Envelope.Type == "tool_call.started" ||
+            s.Envelope.Type == "ralph_task_update" ||
+            s.Envelope.Type == "ralph_loop_progress" ||
+            s.Envelope.Type == "session.liveness" ||
+            s.Envelope.Type == "usage.updated" ||
+            s.Envelope.Type == "model.resolved"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -246,24 +273,25 @@ public class AgentSessionLifecycleDedupSpecs
     {
         var session = await CreateStartedSessionAsync("dedup-terminal-publishes");
 
-        _fixture.RecordingPublisher.Clear();
         _fixture.RecordingTranscriptPublisher.Clear();
 
         await AppendTerminalAsync(session, status: "completed", exitCode: 0);
 
-        Assert.Empty(_fixture.RecordingPublisher.Published);
         Assert.Single(_fixture.RecordingTranscriptPublisher.Published, p => p.Type == "session.closed");
-        Assert.Equal(0, _fixture.RecordingPublisher.CountOfType("session.closed"));
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        Assert.Equal(0, stored.Count(s => s.Envelope.Type == "session.closed"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task AppendRuntimeEventsAsync_UsageAndModelEventsCarryReverseDnsType()
+    public async Task AppendRuntimeEventsAsync_UsageAndModelEventsPersistReverseDnsType()
     {
         var session = await CreateStartedSessionAsync("dedup-bus-type");
-
-        _fixture.RecordingPublisher.Clear();
 
         await AppendEventsAsync(session, new
         {
@@ -274,12 +302,16 @@ public class AgentSessionLifecycleDedupSpecs
             }
         });
 
-        Assert.Contains(_fixture.RecordingPublisher.Published,
-            p => p.Type == EventCatalog.ReverseDns.AgentSessionUsageRecorded
-                 && p.Source == "/mohist/agent-session/" + session.Id);
-        Assert.Contains(_fixture.RecordingPublisher.Published,
-            p => p.Type == EventCatalog.ReverseDns.AgentSessionModelChanged
-                 && p.Source == "/mohist/agent-session/" + session.Id);
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await grain.FlushForTestAsync();
+        var eventStore = _fixture.Services.GetRequiredService<IEventStore>();
+        var stored = await eventStore.ListAgentSessionEventsAsync(session.Id);
+        Assert.Contains(stored,
+            s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionUsageRecorded
+                 && s.Envelope.Source.ToString() == "/mohist/agent-session/" + session.Id);
+        Assert.Contains(stored,
+            s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionModelChanged
+                 && s.Envelope.Source.ToString() == "/mohist/agent-session/" + session.Id);
     }
 
     private async Task<CreatedSession> CreateStartedSessionAsync(string name)

@@ -70,7 +70,8 @@ public static class MohistServiceRegistration
         services.AddDbContextFactory<MohistDbContext>(options =>
             options.UseSqlite(connectionString));
 
-        services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>, IssueStore>();
+        services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>>(sp => sp.GetRequiredService<IIssueStore>());
+        services.AddScoped<IIssueStore, IssueStore>();
         services.AddScoped<IStateStore<Mohist.Server.Agent.Domain.Agent>, AgentStore>();
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         services.AddScoped<WorkflowRunQuerier>();
@@ -78,7 +79,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
-        services.AddScoped<IEventStore, EventStore>();
+        services.AddSingleton<IEventStore, EventStore>();
         services.Configure<HermesNotificationOptions>(configuration.GetSection(HermesNotificationOptions.SectionName));
         services.AddSingleton<HermesIssueNotificationRenderer>();
         services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();

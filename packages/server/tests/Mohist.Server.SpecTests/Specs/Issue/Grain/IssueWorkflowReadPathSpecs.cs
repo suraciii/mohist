@@ -11,6 +11,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
@@ -171,7 +172,7 @@ public class IssueWorkflowReadPathSpecs
 
     private IssueGrain CreateGrain(
         IServiceProvider services,
-        IStateStore<DomainIssue> stateStore,
+        IIssueStore stateStore,
         string grainKey)
     {
         return new IssueGrain(
@@ -185,8 +186,6 @@ public class IssueWorkflowReadPathSpecs
             services.GetRequiredService<ProjectWorkflowProfileManager>(),
             services.GetRequiredService<IssueWorkflowProfileManager>(),
             services.GetRequiredService<AttachmentService>(),
-            services.GetRequiredService<IEventStore>(),
-            services.GetRequiredService<IEventPublisher>(),
             services.GetRequiredService<IConfiguration>(),
             services.GetRequiredService<IEnvironmentVariableProvider>(),
             services.GetRequiredService<ILogger<IssueGrain>>())
@@ -271,16 +270,17 @@ public class IssueWorkflowReadPathSpecs
     /// <c>LoadAsync</c> to the underlying <see cref="IssueStore"/> (so
     /// the grain can load the seeded DB row) but records every
     /// <c>SaveAsync</c> call. The pure-query read path MUST never
-    /// call <c>SaveAsync</c>; any call is a regression.
+    /// call <c>SaveAsync</c>; any call — state-only or
+    /// events-aware — is a regression.
     /// </summary>
-    private sealed class ReadOnlyTrackingStateStore : IStateStore<DomainIssue>
+    private sealed class ReadOnlyTrackingStateStore : IIssueStore
     {
-        private readonly IStateStore<DomainIssue> _delegate;
+        private readonly IIssueStore _delegate;
         private readonly List<string> _saveCalls = [];
 
         public ReadOnlyTrackingStateStore(IDbContextFactory<MohistDbContext> dbFactory)
         {
-            _delegate = new IssueStore(dbFactory);
+            _delegate = new IssueStore(dbFactory, new NoopEventStore());
         }
 
         public IReadOnlyList<string> SaveCalls => _saveCalls;
@@ -291,6 +291,12 @@ public class IssueWorkflowReadPathSpecs
         {
             _saveCalls.Add($"{key}@{state.Status}");
             return _delegate.SaveAsync(key, state);
+        }
+
+        public Task SaveAsync(string key, DomainIssue state, IReadOnlyList<IssueEvent> events, CancellationToken ct = default)
+        {
+            _saveCalls.Add($"{key}@{state.Status}+events:{events.Count}");
+            return _delegate.SaveAsync(key, state, events, ct);
         }
 
         public Task DeleteAsync(string key) => _delegate.DeleteAsync(key);

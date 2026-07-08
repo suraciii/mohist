@@ -1,6 +1,8 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Domain.Run;
@@ -10,11 +12,12 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
 
 /// <summary>
-/// Unit specs for <see cref="WorkflowRunStore"/>. issue-391 T-003: workflow
-/// CloudEvents produced by <see cref="WorkflowRunStore.SaveAsync(WorkflowRun, IReadOnlyList{WorkflowEvent}, CancellationToken)"/>
-/// must carry the run's <c>projectId</c> annotation on the envelope so the
-/// Agent subscription dispatch handler can resolve the project without
-/// reverse-querying the Workflow domain.
+/// Unit specs for <see cref="WorkflowRunStore"/> covering issue-361 T-003:
+/// the store now stamps both <c>projectid</c> and <c>issueid</c> onto the
+/// emitted WorkflowRun CloudEvent (read from
+/// <see cref="WorkflowRunMetadata.Annotations"/>), appends the event row in
+/// the same EF Core transaction as the run state, and lets an event-row
+/// write failure roll back the state transaction instead of swallowing it.
 /// </summary>
 public sealed class FakeWorkflowRunStoreDbContextFactory : IDbContextFactory<MohistDbContext>, IDisposable
 {
@@ -48,12 +51,11 @@ public class WorkflowRunStoreSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task SaveAsync_WithProjectAnnotation_StampsProjectIdOnCloudEventExtensions()
+    public async Task SaveAsync_WithProjectAnnotation_StampsProjectIdOnPersistedEventExtensions()
     {
         using var factory = new FakeWorkflowRunStoreDbContextFactory();
-        var captured = new List<CloudEvent>();
-        var publisher = new CapturingEventPublisher(captured);
-        var store = new WorkflowRunStore(factory, new NoopEventStore(), publisher);
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore);
 
         var run = new WorkflowRun
         {
@@ -72,7 +74,8 @@ public class WorkflowRunStoreSpecs
 
         await store.SaveAsync(run, [new WorkflowRunFailed("failed")]);
 
-        var envelope = Assert.Single(captured);
+        var stored = Assert.Single(await eventStore.ListAsync(WorkflowRunId));
+        var envelope = stored.Envelope;
         Assert.Equal("com.mohist.workflow.run.failed", envelope.Type);
         Assert.True(envelope.Extensions.TryGetValue("projectid", out var projectId));
         Assert.Equal(ProjectId, projectId);
@@ -81,12 +84,42 @@ public class WorkflowRunStoreSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task SaveAsync_WithIssueAnnotation_StampsIssueIdOnPersistedEventExtensions()
+    {
+        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore);
+
+        var run = new WorkflowRun
+        {
+            Id = WorkflowRunId,
+            Metadata = new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: DateTimeOffset.UtcNow,
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = ProjectId,
+                    ["issueId"] = IssueId,
+                    ["issueNumber"] = "1",
+                }),
+            Stages = [],
+        };
+
+        await store.SaveAsync(run, [new WorkflowRunFailed("failed")]);
+
+        var stored = Assert.Single(await eventStore.ListAsync(WorkflowRunId));
+        Assert.True(stored.Envelope.Extensions.TryGetValue("issueid", out var stampedIssueId));
+        Assert.Equal(IssueId, stampedIssueId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task SaveAsync_WithoutProjectAnnotation_DoesNotStampProjectIdExtension()
     {
         using var factory = new FakeWorkflowRunStoreDbContextFactory();
-        var captured = new List<CloudEvent>();
-        var publisher = new CapturingEventPublisher(captured);
-        var store = new WorkflowRunStore(factory, new NoopEventStore(), publisher);
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore);
 
         var run = new WorkflowRun
         {
@@ -99,32 +132,46 @@ public class WorkflowRunStoreSpecs
 
         await store.SaveAsync(run, [new WorkflowRunFailed("failed")]);
 
-        var envelope = Assert.Single(captured);
-        Assert.False(envelope.Extensions.ContainsKey("projectid"));
+        var stored = Assert.Single(await eventStore.ListAsync(WorkflowRunId));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("projectid"));
+        Assert.False(stored.Envelope.Extensions.ContainsKey("issueid"));
     }
 
-    private sealed class CapturingEventPublisher : IEventPublisher
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task SaveAsync_WithEvents_PersistsStateAndEventRowsInSameTransaction()
     {
-        private readonly List<CloudEvent> _events;
-        public CapturingEventPublisher(List<CloudEvent> events) => _events = events;
+        using var factory = new FakeWorkflowRunStoreDbContextFactory();
+        var eventStore = new EventStore(factory, NullLogger<EventStore>.Instance);
+        var store = new WorkflowRunStore(factory, eventStore);
 
-        public Task PublishAsync(CloudEvent envelope, CancellationToken ct = default)
+        var run = new WorkflowRun
         {
-            _events.Add(envelope);
-            return Task.CompletedTask;
-        }
+            Id = WorkflowRunId,
+            Metadata = new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: DateTimeOffset.UtcNow,
+                Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["projectId"] = ProjectId,
+                    ["issueId"] = IssueId,
+                }),
+            Stages = [],
+        };
 
-        public Task PublishAsync<TData>(TData data, string type, string source, string? subject = null, IReadOnlyDictionary<string, string>? extensions = null, CancellationToken ct = default)
-        {
-            _events.Add(new CloudEvent(
-                Guid.NewGuid().ToString(),
-                new Uri(source, UriKind.RelativeOrAbsolute),
-                type,
-                DateTimeOffset.UtcNow,
-                null,
-                subject: subject,
-                extensions: extensions));
-            return Task.CompletedTask;
-        }
+        await store.SaveAsync(run, [
+            new WorkflowRunStarted(),
+            new WorkflowRunFailed("boom"),
+        ]);
+
+        var stored = await eventStore.ListAsync(WorkflowRunId);
+        Assert.Equal(2, stored.Count);
+        Assert.Contains(stored, s => s.Envelope.Type == "com.mohist.workflow.run.started");
+        Assert.Contains(stored, s => s.Envelope.Type == "com.mohist.workflow.run.failed");
+
+        var loaded = await store.LoadAsync(WorkflowRunId);
+        Assert.NotNull(loaded);
+        Assert.Equal(WorkflowRunId, loaded!.Id);
     }
 }

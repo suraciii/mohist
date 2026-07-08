@@ -32,6 +32,7 @@ namespace Mohist.Server.SpecTests.Support;
 public sealed class MohistDbFixture : IAsyncLifetime
 {
     private readonly InMemoryEventBus _eventBus = new(
+        new NoopEventStore(),
         NullLogger<InMemoryEventBus>.Instance);
     private readonly RecordingEventStore _eventStore = new();
     private SqliteConnection _keeper = null!;

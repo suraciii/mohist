@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Mohist.Server.SystemInfo;
@@ -6,9 +7,7 @@ using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Infrastructure.Workspace;
-using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
-using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
@@ -27,7 +26,8 @@ namespace Mohist.Server.Issue.Grains;
 public class IssueGrain : Grain, IIssueGrain
 {
     private Domain.Issue? _issue;
-    private readonly IStateStore<Domain.Issue> _issueStore;
+    private bool _issueReloadRequired;
+    private readonly IIssueStore _issueStore;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
@@ -37,14 +37,12 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IssueWorkflowProfileManager _issueProfileManager;
     private readonly AttachmentService _attachmentService;
-    private readonly IEventStore _eventStore;
-    private readonly IEventPublisher _eventBus;
     private readonly IConfiguration _configuration;
     private readonly IEnvironmentVariableProvider _environment;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
-        IStateStore<Domain.Issue> issueStore,
+        IIssueStore issueStore,
         IssueWorkflowProfileRegistry profiles,
         WorkflowQuerier workflowQuerier,
         IDbContextFactory<MohistDbContext> dbFactory,
@@ -54,8 +52,6 @@ public class IssueGrain : Grain, IIssueGrain
         ProjectWorkflowProfileManager projectProfileManager,
         IssueWorkflowProfileManager issueProfileManager,
         AttachmentService attachmentService,
-        IEventStore eventStore,
-        IEventPublisher eventBus,
         IConfiguration configuration,
         IEnvironmentVariableProvider environment,
         ILogger<IssueGrain> log)
@@ -70,8 +66,6 @@ public class IssueGrain : Grain, IIssueGrain
         _projectProfileManager = projectProfileManager;
         _issueProfileManager = issueProfileManager;
         _attachmentService = attachmentService;
-        _eventStore = eventStore;
-        _eventBus = eventBus;
         _configuration = configuration;
         _environment = environment;
         _log = log;
@@ -83,6 +77,7 @@ public class IssueGrain : Grain, IIssueGrain
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
+        _issueReloadRequired = false;
         _issue = await _issueStore.LoadAsync(GrainKey);
     }
 
@@ -233,7 +228,24 @@ public class IssueGrain : Grain, IIssueGrain
                 Workspace: workspace));
 
         _issue!.Start(wrId, undeliveredPrerequisites);
-        await SaveIssueAsync();
+        try
+        {
+            await SaveIssueAsync();
+        }
+        catch
+        {
+            // The workflow run was already committed, but the issue state/event
+            // transaction rolled back. A retry would mint a new wrId and leave
+            // this run orphaned. Compensate by stopping the run so it does not
+            // linger as active work the issue no longer references.
+            try { await wfGrain.StopAsync("issue save failed; compensating orphaned workflow start"); }
+            catch (Exception compEx)
+            {
+                _log.LogWarning(compEx,
+                    "Issue {Key} compensating stop of orphaned workflow {WrId} failed", GrainKey, wrId);
+            }
+            throw;
+        }
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }
@@ -361,6 +373,7 @@ public class IssueGrain : Grain, IIssueGrain
 
     public async Task CompleteWorkAsync(string workflowRunId)
     {
+        RejectIfReloadRequired();
         if (_issue is null) return;
         if (!_issue.Complete(workflowRunId)) return;
         await SaveIssueAsync();
@@ -563,6 +576,7 @@ public class IssueGrain : Grain, IIssueGrain
 
     public async Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber)
     {
+        RejectIfReloadRequired();
         if (_issue is null)
             return IssuePrerequisiteResult.IssueNotFound();
         if (prerequisiteNumber == _issue.Number)
@@ -638,58 +652,51 @@ public class IssueGrain : Grain, IIssueGrain
     private async Task SaveIssueAsync()
     {
         if (_issue is null) return;
+
         // Snapshot before clearing: PendingEvents returns a live view over the
         // same _pendingEvents list, so ClearPendingEvents() would otherwise
-        // drain `pending` too and PublishIssueEventsAsync would no-op on an
+        // drain `pending` too and the events-aware save would no-op on an
         // empty collection — silently skipping every IssueEvents append (the
-        // regression that left IssueEvents permanently empty).
+        // regression that previously left IssueEvents permanently empty).
         var pending = _issue.PendingEvents.ToList();
-        _issue.ClearPendingEvents();
-        await _issueStore.SaveAsync(_issue.Id, _issue);
-        await PublishIssueEventsAsync(pending);
-    }
-
-    private async Task PublishIssueEventsAsync(IReadOnlyList<Issue.Domain.Events.IssueEvent> events)
-    {
-        if (events.Count == 0 || _issue is null) return;
-        var source = IssueEventPersistence.IssueSource(_issue.Id);
-        var subject = _issue.Number.ToString();
-        var extensions = new Dictionary<string, string>
-        {
-            ["projectid"] = _issue.ProjectId,
-            ["issueid"] = _issue.Id,
-            ["issueno"] = subject,
-        };
-
         try
         {
-            foreach (var evt in events)
-            {
-                var type = IssueEventSerializer.BusType(evt);
-                var dataJson = IssueEventSerializer.ToData(evt);
-                var envelope = new CloudEvent(
-                    id: Guid.NewGuid().ToString(),
-                    source: new Uri(source, UriKind.Relative),
-                    type: type,
-                    time: DateTimeOffset.UtcNow,
-                    data: dataJson,
-                    subject: subject,
-                    extensions: extensions);
-
-                await _eventStore.AppendAsync(envelope);
-                await _eventBus.PublishAsync(envelope, CancellationToken.None);
-            }
+            await _issueStore.SaveAsync(_issue.Id, _issue, pending);
         }
-        catch (Exception ex)
+        catch
         {
-            _log.LogError(ex, "Post-commit publish failed for issue {IssueId}", _issue.Id);
+            // The store rolled its transaction back, but the in-memory
+            // aggregate has already absorbed the state mutation. A retry on
+            // this activation could persist the mutated state through the
+            // no-events overload, losing the rolled-back IssueEvents row.
+            // Quarantine this activation: mark it reload required so
+            // EnsureIssue() rejects further work, then let the caller's
+            // exception surface while the grain deactivates and reloads from
+            // storage on its next activation.
+            _issueReloadRequired = true;
+            DeactivateOnIdle();
+            throw;
         }
+        _issue.ClearPendingEvents();
     }
 
+    [MemberNotNull(nameof(_issue))]
     private void EnsureIssue()
     {
         if (_issue is null)
             throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
+        if (_issueReloadRequired)
+            throw new InvalidOperationException($"Issue '{GrainKey}' must reload after a failed event-aware save");
+    }
+
+    // For entry points that return a result (not throw) when no issue exists,
+    // a reload-required activation must still be rejected: the dirty in-memory
+    // aggregate must not be mutated/persisted through these paths before the
+    // grain reloads from storage.
+    private void RejectIfReloadRequired()
+    {
+        if (_issueReloadRequired)
+            throw new InvalidOperationException($"Issue '{GrainKey}' must reload after a failed event-aware save");
     }
 
     private async Task<IssuePrerequisiteSummary?> LoadIssueSummaryAsync(int issueNumber)
@@ -746,6 +753,7 @@ public class IssueGrain : Grain, IIssueGrain
 
     public async Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null)
     {
+        RejectIfReloadRequired();
         if (_issue is null) throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
 
         var comment = new IssueCommentRow
