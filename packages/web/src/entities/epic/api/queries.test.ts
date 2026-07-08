@@ -1,148 +1,263 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useStartIssue } from './queries'
+import { describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
+import { toast } from 'sonner'
+import {
+  epicEventsQueryOptions,
+  pauseEpicMutationOptions,
+  reopenEpicMutationOptions,
+  resumeEpicMutationOptions,
+  startEpicMutationOptions,
+  startIssueMutationOptions,
+} from './queries'
 
-const useMutationMock = vi.fn()
-const useQueryClientMock = vi.fn()
-const useProjectMock = vi.fn()
-const startIssueMock = vi.fn()
-const toastSuccessMock = vi.fn()
-const toastErrorMock = vi.fn()
-const invalidateQueriesMock = vi.fn()
+useMswServer()
 
-vi.mock('@tanstack/react-query', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useMutation: (...args: unknown[]) => useMutationMock(...args),
-  useQueryClient: () => useQueryClientMock(),
-}))
-
-vi.mock('../../project/@x/project-context', () => ({
-  useProject: () => useProjectMock(),
-}))
-
-vi.mock('../../issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../issue')>()
-  return {
-    ...actual,
-    startIssue: (...args: unknown[]) => startIssueMock(...args),
-  }
-})
-
-vi.mock('sonner', () => ({
-  toast: {
-    success: (...args: unknown[]) => toastSuccessMock(...args),
-    error: (...args: unknown[]) => toastErrorMock(...args),
-  },
-}))
-
-beforeEach(() => {
-  useMutationMock.mockReset()
-  useQueryClientMock.mockReset()
-  useProjectMock.mockReset()
-  startIssueMock.mockReset()
-  toastSuccessMock.mockReset()
-  toastErrorMock.mockReset()
-  invalidateQueriesMock.mockReset()
-  useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-  useQueryClientMock.mockReturnValue({ invalidateQueries: invalidateQueriesMock })
-  // Default: capture the options object passed to useMutation so callbacks can be invoked
-  useMutationMock.mockImplementation((options: unknown) => ({ mutate: vi.fn(), options }))
-})
-
-function getLastMutationOptions(): { mutationFn: (n: number) => unknown; onSuccess: (...a: unknown[]) => void; onError: (...a: unknown[]) => void } {
-  const calls = useMutationMock.mock.calls
-  const last = calls[calls.length - 1][0] as { mutationFn: (n: number) => unknown; onSuccess: (...a: unknown[]) => void; onError: (...a: unknown[]) => void }
-  return last
+function createInvalidationClient() {
+  return { invalidateQueries: vi.fn() }
 }
 
-describe('useStartIssue', () => {
-  it('calls useMutation with a mutationFn that invokes startIssue(number, projectId)', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-abc' })
+/* ── startIssueMutationOptions ──────────────────────────── */
+describe('startIssueMutationOptions', () => {
+  it('invokes startIssue(number, projectId) in mutationFn', async () => {
+    const captured: { url: string; method: string }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/issues/:number/start', ({ request }) => {
+        captured.push({ url: new URL(request.url).pathname, method: request.method })
+        return HttpResponse.json({ success: true, data: { issue: { number: 7 }, message: 'started' } })
+      }),
+    )
 
-    useStartIssue()
+    await startIssueMutationOptions('proj-abc', createInvalidationClient()).mutationFn(7)
 
-    const options = getLastMutationOptions()
-    expect(typeof options.mutationFn).toBe('function')
-
-    startIssueMock.mockResolvedValue({ issue: { number: 7 }, message: 'started' })
-    void options.mutationFn(7)
-
-    expect(startIssueMock).toHaveBeenCalledWith(7, 'proj-abc')
+    expect(captured).toEqual([{ url: '/api/projects/proj-abc/issues/7/start', method: 'POST' }])
   })
 
-  it('forwards the projectId resolved from useProject at call time', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-xyz' })
+  it('forwards the projectId resolved from useProject at call time', async () => {
+    const captured: string[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/issues/:number/start', ({ request }) => {
+        captured.push(new URL(request.url).pathname)
+        return HttpResponse.json({ success: true, data: { issue: { number: 11 }, message: 'started' } })
+      }),
+    )
 
-    useStartIssue()
+    await startIssueMutationOptions('proj-xyz', createInvalidationClient()).mutationFn(11)
 
-    const options = getLastMutationOptions()
-    startIssueMock.mockResolvedValue({ issue: { number: 11 }, message: 'started' })
-    void options.mutationFn(11)
-
-    expect(startIssueMock).toHaveBeenCalledWith(11, 'proj-xyz')
+    expect(captured).toEqual(['/api/projects/proj-xyz/issues/11/start'])
   })
 
-  it('forwards a null/undefined projectId when useProject returns none', () => {
-    useProjectMock.mockReturnValue({ projectId: null })
-
-    useStartIssue()
-
-    const options = getLastMutationOptions()
-    startIssueMock.mockResolvedValue({ issue: { number: 1 }, message: 'started' })
-    void options.mutationFn(1)
-
-    expect(startIssueMock).toHaveBeenCalledWith(1, null)
+  it('throws when projectId is null (projectApiPath requires a project)', () => {
+    const options = startIssueMutationOptions(null, createInvalidationClient())
+    expect(() => options.mutationFn(1)).toThrow('Project is required')
   })
 
   it('invalidates both ["epics"] and ["issues"] query keys on success', () => {
-    useStartIssue()
+    const qc = createInvalidationClient()
+    startIssueMutationOptions('proj-1', qc).onSuccess()
 
-    const options = getLastMutationOptions()
-    options.onSuccess()
-
-    const invalidatedKeys = invalidateQueriesMock.mock.calls.map(call => call[0].queryKey)
+    const invalidatedKeys = qc.invalidateQueries.mock.calls.map((call) => call[0].queryKey)
     expect(invalidatedKeys).toContainEqual(['epics'])
     expect(invalidatedKeys).toContainEqual(['issues'])
-    expect(invalidateQueriesMock).toHaveBeenCalledTimes(2)
+    expect(qc.invalidateQueries).toHaveBeenCalledTimes(2)
   })
 
-  it('toasts success on success', () => {
-    useStartIssue()
-
-    const options = getLastMutationOptions()
-    options.onSuccess()
-
-    expect(toastSuccessMock).toHaveBeenCalledTimes(1)
-    expect(toastSuccessMock.mock.calls[0][0]).toBe('Issue started')
+  it('toasts "Issue started" on success', () => {
+    startIssueMutationOptions('proj-1', createInvalidationClient()).onSuccess()
+    expect(toast.success).toHaveBeenCalledWith('Issue started')
   })
 
   it('toasts the error message on failure', () => {
-    useStartIssue()
-
-    const options = getLastMutationOptions()
-    const error = new Error('start refused')
-    options.onError(error)
-
-    expect(toastErrorMock).toHaveBeenCalledTimes(1)
-    expect(toastErrorMock).toHaveBeenCalledWith('start refused')
+    startIssueMutationOptions('proj-1', createInvalidationClient()).onError(new Error('start refused'))
+    expect(toast.error).toHaveBeenCalledWith('start refused')
   })
 
   it('falls back to "Request failed" when the error has no message', () => {
-    useStartIssue()
-
-    const options = getLastMutationOptions()
-    options.onError(new Error(''))
-
-    expect(toastErrorMock).toHaveBeenCalledWith('Request failed')
+    startIssueMutationOptions('proj-1', createInvalidationClient()).onError(new Error(''))
+    expect(toast.error).toHaveBeenCalledWith('Request failed')
   })
 
   it('does NOT invalidate issue queries with a more specific key on success (only the prefix)', () => {
-    useStartIssue()
+    const qc = createInvalidationClient()
+    startIssueMutationOptions('proj-1', qc).onSuccess()
 
-    const options = getLastMutationOptions()
-    options.onSuccess()
-
-    const keys = invalidateQueriesMock.mock.calls.map(call => (call[0] as { queryKey: string[] }).queryKey)
-    // Only ['epics'] and ['issues'] are invalidated — no extra ['epics', epicId] call
+    const keys = qc.invalidateQueries.mock.calls.map((call) => call[0].queryKey)
     expect(keys).toEqual([['epics'], ['issues']])
+  })
+})
+
+/* ── pauseEpicMutationOptions ───────────────────────────── */
+describe('pauseEpicMutationOptions', () => {
+  it('calls pauseEpic(id, reason, projectId) in mutationFn', async () => {
+    const captured: { url: string; method: string; body: unknown }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/epics/:epicId/pause', async ({ request }) => {
+        captured.push({ url: new URL(request.url).pathname, method: request.method, body: await request.json() })
+        return HttpResponse.json({ success: true, data: { id: 'epic-1', status: 'paused' } })
+      }),
+    )
+
+    await pauseEpicMutationOptions('proj-1', createInvalidationClient()).mutationFn({ id: 'epic-1', reason: 'wait' })
+
+    expect(captured).toEqual([
+      { url: '/api/projects/proj-1/epics/epic-1/pause', method: 'POST', body: { reason: 'wait' } },
+    ])
+  })
+
+  it('invalidates the project-scoped detail query (["epics", projectId, id]) on success', () => {
+    const qc = createInvalidationClient()
+    pauseEpicMutationOptions('proj-1', qc).onSuccess({ id: 'epic-1', status: 'paused' } as never, { id: 'epic-1' })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['epics', 'proj-1', 'epic-1'] })
+    expect(qc.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['epics', 'epic-1'] })
+  })
+
+  it('toasts "Epic paused" on success', () => {
+    pauseEpicMutationOptions('proj-1', createInvalidationClient()).onSuccess({ id: 'epic-1', status: 'paused' } as never, { id: 'epic-1' })
+    expect(toast.success).toHaveBeenCalledWith('Epic paused')
+  })
+})
+
+/* ── resumeEpicMutationOptions ──────────────────────────── */
+describe('resumeEpicMutationOptions', () => {
+  it('calls resumeEpic(id, projectId) in mutationFn', async () => {
+    const captured: { url: string; method: string }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/epics/:epicId/resume', ({ request }) => {
+        captured.push({ url: new URL(request.url).pathname, method: request.method })
+        return HttpResponse.json({ success: true, data: { id: 'epic-1', status: 'running' } })
+      }),
+    )
+
+    await resumeEpicMutationOptions('proj-1', createInvalidationClient()).mutationFn('epic-1')
+
+    expect(captured).toEqual([{ url: '/api/projects/proj-1/epics/epic-1/resume', method: 'POST' }])
+  })
+
+  it('invalidates the project-scoped detail query on success', () => {
+    const qc = createInvalidationClient()
+    resumeEpicMutationOptions('proj-1', qc).onSuccess({ id: 'epic-1', status: 'running' } as never, 'epic-1')
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['epics', 'proj-1', 'epic-1'] })
+    expect(qc.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['epics', 'epic-1'] })
+  })
+
+  it('toasts "Epic resumed" on success', () => {
+    resumeEpicMutationOptions('proj-1', createInvalidationClient()).onSuccess({ id: 'epic-1', status: 'running' } as never, 'epic-1')
+    expect(toast.success).toHaveBeenCalledWith('Epic resumed')
+  })
+})
+
+/* ── startEpicMutationOptions ───────────────────────────── */
+describe('startEpicMutationOptions', () => {
+  it('calls startEpic(id, projectId) in mutationFn', async () => {
+    const captured: { url: string; method: string }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/epics/:epicId/start', ({ request }) => {
+        captured.push({ url: new URL(request.url).pathname, method: request.method })
+        return HttpResponse.json({ success: true, data: { id: 'epic-1', status: 'running' } })
+      }),
+    )
+
+    await startEpicMutationOptions('proj-1', createInvalidationClient()).mutationFn('epic-1')
+
+    expect(captured).toEqual([{ url: '/api/projects/proj-1/epics/epic-1/start', method: 'POST' }])
+  })
+
+  it('throws when projectId is null', () => {
+    const options = startEpicMutationOptions(null, createInvalidationClient())
+    expect(() => options.mutationFn('epic-1')).toThrow('Project is required')
+  })
+
+  it('invalidates the project-scoped epic detail query on success', () => {
+    const qc = createInvalidationClient()
+    startEpicMutationOptions('proj-1', qc).onSuccess({ id: 'epic-1', status: 'running' } as never, 'epic-1')
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['epics'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['epics', 'proj-1', 'epic-1'] })
+    expect(qc.invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['epics', 'epic-1'] })
+  })
+
+  it('toasts "Epic started" on success', () => {
+    startEpicMutationOptions('proj-1', createInvalidationClient()).onSuccess({ id: 'epic-1', status: 'running' } as never, 'epic-1')
+    expect(toast.success).toHaveBeenCalledWith('Epic started')
+  })
+
+  it('surfaces start failures through toast.error', () => {
+    startEpicMutationOptions('proj-1', createInvalidationClient()).onError(new Error('EPIC_NOT_RUNNING'))
+    expect(toast.error).toHaveBeenCalledWith('EPIC_NOT_RUNNING')
+  })
+})
+
+/* ── reopenEpicMutationOptions ──────────────────────────── */
+describe('reopenEpicMutationOptions', () => {
+  it('calls reopenEpic(id, projectId) in mutationFn', async () => {
+    const captured: { url: string; method: string }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/epics/:epicId/reopen', ({ request }) => {
+        captured.push({ url: new URL(request.url).pathname, method: request.method })
+        return HttpResponse.json({ success: true, data: { id: 'epic-1', status: 'idle' } })
+      }),
+    )
+
+    await reopenEpicMutationOptions('proj-1', createInvalidationClient()).mutationFn('epic-1')
+
+    expect(captured).toEqual([{ url: '/api/projects/proj-1/epics/epic-1/reopen', method: 'POST' }])
+  })
+
+  it('invalidates epic and issue caches after reopening an epic', () => {
+    const qc = createInvalidationClient()
+    reopenEpicMutationOptions('proj-1', qc).onSuccess({ id: 'epic-1', status: 'idle' } as never, 'epic-1')
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['epics'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['epics', 'proj-1', 'epic-1'] })
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['issues'] })
+  })
+
+  it('toasts "Epic reopened" on success', () => {
+    reopenEpicMutationOptions('proj-1', createInvalidationClient()).onSuccess({ id: 'epic-1', status: 'idle' } as never, 'epic-1')
+    expect(toast.success).toHaveBeenCalledWith('Epic reopened')
+  })
+})
+
+/* ── epicEventsQueryOptions ─────────────────────────────── */
+describe('epicEventsQueryOptions', () => {
+  it('uses queryKey ["epics", projectId, id, "events"] and disables the query when id is empty', () => {
+    const opts = epicEventsQueryOptions(null, 'proj-1')
+    expect(opts.queryKey).toEqual(['epics', 'proj-1', null, 'events'])
+    expect(opts.enabled).toBe(false)
+  })
+
+  it('fetches via getEpicEvents(epicId, projectId) and exposes the resolved data', async () => {
+    const events = [
+      {
+        id: 1,
+        eventId: 'evt-1',
+        source: '/mohist/epics/epic-1',
+        type: 'com.mohist.epic.created',
+        specVersion: '1.0',
+        subject: '1',
+        time: '2026-06-30T12:00:00+00:00',
+        dataContentType: 'application/json',
+        data: { title: 'Auth epic', description: 'desc', priority: 'p2' },
+        extensions: { projectid: 'proj-1', epicid: 'epic-1', epicno: '1' },
+      },
+    ]
+    const captured: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/epics/:epicId/events', ({ request }) => {
+        captured.push(new URL(request.url).pathname)
+        return HttpResponse.json({ success: true, data: events })
+      }),
+    )
+
+    const data = await epicEventsQueryOptions('epic-1', 'proj-1').queryFn()
+
+    expect(captured).toEqual(['/api/projects/proj-1/epics/epic-1/events'])
+    expect(data).toEqual(events)
+  })
+
+  it('does not enable the query when useProject has no projectId', () => {
+    expect(epicEventsQueryOptions('epic-1', null).enabled).toBe(false)
+  })
+
+  it('passes enabled=false through to the underlying query', () => {
+    expect(epicEventsQueryOptions('epic-1', 'proj-1', false).enabled).toBe(false)
   })
 })
