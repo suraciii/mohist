@@ -57,6 +57,12 @@ export default defineConfig({
     restoreMocks: true,
     unstubGlobals: true,
     unstubEnvs: true,
+    // 真外部边界的全局替身：所有文件看到同一实现，无 per-file 模块注册表
+    // 分叉（与 isolate:false 兼容）。这是唯一许可的"模块替换"形式，
+    // 新增替身需在 openspec/changes/web-test-boundary-mocks 方案内登记。
+    alias: {
+      sonner: path.resolve(__dirname, './tests/support/sonner-fake.ts'),
+    },
     exclude: [
       '**/*.a11y.spec.ts',
       '**/node_modules/**',
