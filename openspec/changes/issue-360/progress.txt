@@ -1,0 +1,6 @@
+## Codebase Patterns
+- Event delivery progress for T-001 lives directly on the three event row entities as nullable `DispatchedAt`; existing `List*Async` paths intentionally keep ignoring it so append/list semantics stay unchanged.
+- `IEventStore.ListUndeliveredAsync` is implemented as one raw SQLite `UNION ALL` query through `db.Database.SqlQueryRaw<UndeliveredSqlRow>` in `EventStore`, then mapped into the `UndeliveredEvent` record with `EventOrigin`.
+- `MarkDispatchedAsync` routes by event source prefix (`/mohist/issues/`, `/mohist/epics/`, otherwise workflow runs) and updates only the matching `(Source, Id)` row; missing rows are treated as no-op.
+- The first partial-index usage in the repo is on the three event tables in `MohistDbContext` with `.HasFilter("\"DispatchedAt\" IS NULL")` and explicit names `IX_<Table>_Undelivered`.
+- Event-store delivery-progress tests use in-memory shared-cache SQLite plus `EnsureCreated`, not migrations, so T-001 can verify model behavior before the unified migration task lands.
