@@ -142,7 +142,7 @@ describe('First-screen filter/search/sort reachability', () => {
       expect(classes).toContain('flex-wrap')
     })
 
-    it('places kanban-board-row after the FilterBar in DOM order within kanban-board-root so column content begins within the useful first screen', () => {
+    it('places kanban-board-row after the FilterBar in DOM order within kanban-board-root', () => {
       const issues = [
         makeIssue({ number: 1, status: IssueStatus.Backlog }),
         makeIssue({ number: 2, status: IssueStatus.InProgress }),
@@ -156,18 +156,6 @@ describe('First-screen filter/search/sort reachability', () => {
 
       expect(root.contains(filterBar)).toBe(true)
       expect(root.contains(boardRow)).toBe(true)
-
-      const position =
-        filterBar.compareDocumentPosition(boardRow) & Node.DOCUMENT_POSITION_FOLLOWING
-      expect(position).toBeTruthy()
-    })
-
-    it('keeps the FilterBar above the board row in DOM order so column content begins within the useful first screen', () => {
-      const issues = [makeIssue({ number: 1, status: IssueStatus.Backlog })]
-      renderWith(issues)
-
-      const filterBar = getDesktopFilterBar()
-      const boardRow = screen.getByTestId('kanban-board-row')
 
       const position =
         filterBar.compareDocumentPosition(boardRow) & Node.DOCUMENT_POSITION_FOLLOWING

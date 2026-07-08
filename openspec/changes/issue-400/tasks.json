@@ -25,7 +25,7 @@
       "type": "WRITE",
       "output": "Updated packages/web/src/widgets/kanban-board/ui/KanbanBoard.tsx (collapsed-stub rendering for Cancelled + core column flex/max-w tuning), StageColumn.tsx (raised max-w cap for core columns), and the cancelled-toggle regression test in kanban-board-query.regression.test.tsx",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Key files: KanbanBoard.tsx:644-679 (desktop column row rendering), StageColumn.tsx:74 (column width classes). The collapsed stub should be a lightweight element (count + expand button) — not a StageColumn instance. See design D1, D6."
     },
     {
@@ -48,7 +48,7 @@
       "type": "WRITE",
       "output": "Extended packages/web/src/widgets/kanban-board/ui/IssueCard.test.tsx with six-dimension invariant assertions and stage-fold health-signal coverage",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "The card structure is already correct (design D3). This task is purely additive test coverage — no production code change to IssueCard.tsx. Health signal is surfaced via the status pill for blocked/approval/waiting/drift; for active issues the workflow-stage-badge serves as the stage dimension. Assert via existing testids: issue-number, priority-chip, status-pill, workflow-stage-badge."
     },
     {
@@ -71,7 +71,7 @@
       "type": "WRITE",
       "output": "New or extended regression test(s) in packages/web/src/widgets/kanban-board/ui/ covering desktop single-row FilterBar and mobile disclosure reachability",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "FilterBar lives inside KanbanBoard.tsx:296-389. Desktop row is at line 298 (hidden md:flex flex-wrap); mobile section at line 330 (md:hidden). No production code change expected — the FilterBar already satisfies the spec; this task locks it with tests. Use renderBoard/makeIssue helpers from _kanbanBoardQueryTestUtils."
     },
     {

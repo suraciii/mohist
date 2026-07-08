@@ -655,19 +655,23 @@ export function KanbanBoard({
           const cancelledHasIssues = isCancelled && col.issues.length > 0
           const renderCollapsedStub = isCancelled && !showCancelled && cancelledHasIssues
           if (renderCollapsedStub) {
+            const colors = getStageColors(col.key)
             return (
               <div
                 key={col.key}
                 data-testid="cancelled-collapsed-stub"
                 data-stage={col.key}
-                className="flex flex-col w-[140px] shrink-0 rounded-xl border bg-card/40 border-red-200"
+                className={`flex flex-col w-[120px] shrink-0 rounded-xl border bg-card/40 ${colors.activeBorder}`}
               >
-                <div className="flex items-center gap-2 px-3 pt-2.5 pb-2 border-b border-red-100">
+                <div
+                  className="flex items-center gap-2 px-3 pt-2.5 pb-2 border-b"
+                  style={{ borderBottomColor: `${colors.accent}30` }}
+                >
                   <span
                     className="inline-block h-2 w-2 rounded-full shrink-0"
-                    style={{ backgroundColor: '#ef4444' }}
+                    style={{ backgroundColor: colors.accent }}
                   />
-                  <h2 className="text-xs font-semibold uppercase tracking-wide text-red-700">
+                  <h2 className={`text-xs font-semibold uppercase tracking-wide ${colors.labelClass}`}>
                     {col.label}
                   </h2>
                   <span className="ml-auto text-xs text-muted-foreground tabular-nums">

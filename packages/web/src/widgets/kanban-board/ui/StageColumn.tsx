@@ -19,8 +19,6 @@ interface Props {
   archivedCount?: number
   headerToggle?: ReactNode
   footerToggle?: ReactNode
-  bodyHidden?: boolean
-  emptyState?: ReactNode
 }
 
 export function StageColumn({
@@ -31,8 +29,6 @@ export function StageColumn({
   archivedCount = 0,
   headerToggle,
   footerToggle,
-  bodyHidden = false,
-  emptyState,
   status,
 }: Props & { status: IssueStatus }) {
   const queryClient = useQueryClient()
@@ -95,36 +91,28 @@ export function StageColumn({
       </div>
 
       <div className="flex-1 space-y-2 overflow-y-auto p-2 min-h-[120px]">
-        {bodyHidden ? (
+        {totalCount === 0 && (
           <div className="flex items-center justify-center py-8 text-xs text-muted-foreground/70">
-            {emptyState ?? 'No issues'}
+            No issues
           </div>
-        ) : (
-          <>
-            {totalCount === 0 && (
-              <div className="flex items-center justify-center py-8 text-xs text-muted-foreground/70">
-                No issues
-              </div>
-            )}
-            {visibleIssues.map((issue) => (
-              <IssueCard
-                key={issue.id}
-                issue={issue}
-                agentStatus={agentStatus}
-                showArchiveButton={isDone}
-              />
-            ))}
-            {isDone && hiddenCount > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setExpanded(!expanded)}
-                className="w-full text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
-              >
-                {expanded ? 'Show less' : `${hiddenCount} more`}
-              </Button>
-            )}
-          </>
+        )}
+        {visibleIssues.map((issue) => (
+          <IssueCard
+            key={issue.id}
+            issue={issue}
+            agentStatus={agentStatus}
+            showArchiveButton={isDone}
+          />
+        ))}
+        {isDone && hiddenCount > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setExpanded(!expanded)}
+            className="w-full text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+          >
+            {expanded ? 'Show less' : `${hiddenCount} more`}
+          </Button>
         )}
       </div>
 
