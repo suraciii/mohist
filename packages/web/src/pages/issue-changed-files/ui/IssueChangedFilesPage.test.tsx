@@ -2,10 +2,15 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { IssueChangedFilesPage } from './IssueChangedFilesPage'
 import { getFileContent } from '../../../entities/issue'
 import { parseDiff, parseDiffFiles } from '../../../widgets/issue-changed-files'
+
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="current-path">{location.pathname}{location.search}</div>
+}
 
 async function selectOption(label: string, option: string) {
   fireEvent.click(screen.getByRole('combobox', { name: label }))
@@ -18,17 +23,6 @@ async function selectOption(label: string, option: string) {
   fireEvent.pointerUp(item!)
   fireEvent.click(item!)
 }
-
-const mockUseNavigate = vi.fn()
-let mockRouteParams: { number?: string } | null = null
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useNavigate: () => mockUseNavigate,
-    useParams: () => mockRouteParams ?? actual.useParams(),
-  }
-})
 
 const mockUseIssue = vi.fn()
 const mockUseIssueDiff = vi.fn()
@@ -158,6 +152,7 @@ function renderPage(initialRoute = '/issues/123/files') {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialRoute]}>
+        <LocationProbe />
         <Routes>
           <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
           <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
@@ -170,7 +165,6 @@ function renderPage(initialRoute = '/issues/123/files') {
 describe('IssueChangedFilesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockRouteParams = null
     sessionStorage.clear()
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
       configurable: true,
@@ -181,7 +175,6 @@ describe('IssueChangedFilesPage', () => {
 
   afterEach(() => {
     cleanup()
-    mockRouteParams = null
     sessionStorage.clear()
   })
 
@@ -638,7 +631,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       const backLink = screen.getByText('View issue detail')
       expect(backLink).toBeTruthy()
       fireEvent.click(backLink)
-      expect(mockUseNavigate).toHaveBeenCalledWith('/issues/123')
+      expect(screen.getByTestId('current-path').textContent).toBe('/issues/123')
     })
 
     it('renders error state for invalid issue number', () => {
@@ -838,7 +831,6 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
         },
       })
 
-      mockRouteParams = { number: '123' }
       const { rerender } = renderPage('/issues/123/files')
 
       fireEvent.click(screen.getByText('package-lock.json'))
@@ -865,10 +857,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
         },
       })
 
-      mockRouteParams = { number: '124' }
       rerender(
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-          <MemoryRouter initialEntries={['/issues/123/files']}>
+          <MemoryRouter initialEntries={['/issues/124/files']}>
             <Routes>
               <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
               <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
