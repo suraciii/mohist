@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:ci": "vitest run",
+    "test:ci": "vitest run && node scripts/check-vi-mock-ratchet.mjs",
+    "lint:mocks": "node scripts/check-vi-mock-ratchet.mjs",
     "test:e2e": "playwright test -c playwright.config.ts",
     "test:a11y": "vitest run --config vitest.a11y.config.ts && playwright install --with-deps chromium && playwright test -c playwright.a11y.config.ts"
   },
