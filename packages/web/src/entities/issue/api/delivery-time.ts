@@ -37,12 +37,16 @@ export const deliveryTimeQueryKey = (projectId?: string | null, range?: Insights
     : ['issues', 'metrics', 'delivery-time'] as const
 }
 
-export function useDeliveryTime(range?: InsightsRange) {
-  const { projectId } = useProject()
-  return useQuery({
+export function deliveryTimeQueryOptions(projectId: string | null | undefined, range?: InsightsRange) {
+  return {
     queryKey: deliveryTimeQueryKey(projectId, range),
     queryFn: () => fetchDeliveryTime(projectId!, range),
     enabled: !!projectId,
     staleTime: 60_000,
-  })
+  } as const
+}
+
+export function useDeliveryTime(range?: InsightsRange) {
+  const { projectId } = useProject()
+  return useQuery(deliveryTimeQueryOptions(projectId, range))
 }

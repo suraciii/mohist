@@ -1,136 +1,92 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useIssueTemplate, useIssueTemplates } from './queries'
-import * as clientModule from './client'
+import { describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
+import { issueTemplateQueryOptions, issueTemplatesQueryOptions } from './queries'
 
-const useQueryMock = vi.fn()
-const useProjectMock = vi.fn()
-const getIssueTemplatesMock = vi.fn()
-const getIssueTemplateMock = vi.fn()
+const TEMPLATES_DTO = [
+  { id: 'feature', name: 'Feature', description: '', source: 'builtin' },
+]
 
-vi.mock('@tanstack/react-query', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQuery: (...args: unknown[]) => useQueryMock(...args),
-}))
+const TEMPLATE_DTO = {
+  id: 'feature',
+  name: 'Feature',
+  description: '',
+  body: '',
+  source: 'builtin',
+}
 
-vi.mock('../../project/@x/project-context', () => ({
-  useProject: () => useProjectMock(),
-}))
+function recordIssueTemplatesRequests() {
+  const urls: string[] = []
+  server.use(
+    http.get('*/api/issue-templates', ({ request }) => {
+      const url = new URL(request.url)
+      urls.push(url.pathname + url.search)
+      return HttpResponse.json({ success: true, data: TEMPLATES_DTO })
+    }),
+  )
+  return urls
+}
 
-vi.mock('./client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./client')>()
-  return {
-    ...actual,
-    getIssueTemplates: (...args: unknown[]) => getIssueTemplatesMock(...args),
-    getIssueTemplate: (...args: unknown[]) => getIssueTemplateMock(...args),
-  }
-})
+function recordIssueTemplateRequests() {
+  const urls: string[] = []
+  server.use(
+    http.get('*/api/issue-templates/mohist/default', ({ request }) => {
+      const url = new URL(request.url)
+      urls.push(url.pathname + url.search)
+      return HttpResponse.json({ success: true, data: TEMPLATE_DTO })
+    }),
+  )
+  return urls
+}
 
-beforeEach(() => {
-  useQueryMock.mockReset()
-  useProjectMock.mockReset()
-  getIssueTemplatesMock.mockReset()
-  getIssueTemplateMock.mockReset()
-  useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-  useQueryMock.mockReturnValue({ data: [], isLoading: false })
-  getIssueTemplatesMock.mockResolvedValue([])
-  getIssueTemplateMock.mockResolvedValue({
-    id: 'feature',
-    name: 'Feature',
-    description: '',
-    body: '',
-    source: 'builtin',
-  })
-  void clientModule
-})
+useMswServer()
 
-describe('useIssueTemplates', () => {
+describe('issueTemplatesQueryOptions', () => {
   it('uses a project-scoped query key', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-
-    useIssueTemplates()
-
-    expect(useQueryMock).toHaveBeenCalledTimes(1)
-    const config = useQueryMock.mock.calls[0][0]
-    expect(config.queryKey).toEqual(['issue-templates', 'proj-1'])
+    expect(issueTemplatesQueryOptions('proj-1').queryKey).toEqual(['issue-templates', 'proj-1'])
   })
 
-  it('invokes getIssueTemplates(projectId) as the query function', async () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-    getIssueTemplatesMock.mockResolvedValue([])
+  it('fetches the issue templates endpoint scoped to the projectId', async () => {
+    const urls = recordIssueTemplatesRequests()
 
-    useIssueTemplates()
+    const data = await issueTemplatesQueryOptions('proj-1').queryFn()
 
-    const config = useQueryMock.mock.calls[0][0]
-    expect(typeof config.queryFn).toBe('function')
-    await config.queryFn()
-    expect(getIssueTemplatesMock).toHaveBeenCalledWith('proj-1')
+    expect(urls).toEqual(['/api/issue-templates?projectId=proj-1'])
+    expect(data).toEqual(TEMPLATES_DTO)
   })
 
   it('is disabled when projectId is missing', () => {
-    useProjectMock.mockReturnValue({ projectId: null })
-
-    useIssueTemplates()
-
-    const config = useQueryMock.mock.calls[0][0]
-    expect(config.enabled).toBe(false)
+    expect(issueTemplatesQueryOptions(null).enabled).toBe(false)
   })
 
   it('is enabled when projectId is set', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-
-    useIssueTemplates()
-
-    const config = useQueryMock.mock.calls[0][0]
-    expect(config.enabled).toBe(true)
+    expect(issueTemplatesQueryOptions('proj-1').enabled).toBe(true)
   })
 })
 
-describe('useIssueTemplate', () => {
+describe('issueTemplateQueryOptions', () => {
   it('uses a query key keyed on (projectId, name)', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-
-    useIssueTemplate('mohist/default')
-
-    const config = useQueryMock.mock.calls[0][0]
-    expect(config.queryKey).toEqual(['issue-template', 'proj-1', 'mohist/default'])
+    expect(issueTemplateQueryOptions('proj-1', 'mohist/default').queryKey).toEqual(['issue-template', 'proj-1', 'mohist/default'])
   })
 
-  it('invokes getIssueTemplate(name, projectId) as the query function', async () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-    getIssueTemplateMock.mockResolvedValue({})
+  it('fetches the issue template endpoint for (name, projectId)', async () => {
+    const urls = recordIssueTemplateRequests()
 
-    useIssueTemplate('mohist/default')
+    const data = await issueTemplateQueryOptions('proj-1', 'mohist/default').queryFn()
 
-    const config = useQueryMock.mock.calls[0][0]
-    expect(typeof config.queryFn).toBe('function')
-    await config.queryFn()
-    expect(getIssueTemplateMock).toHaveBeenCalledWith('mohist/default', 'proj-1')
+    expect(urls).toEqual(['/api/issue-templates/mohist/default?projectId=proj-1'])
+    expect(data).toEqual(TEMPLATE_DTO)
   })
 
   it('is disabled when projectId is missing', () => {
-    useProjectMock.mockReturnValue({ projectId: null })
-
-    useIssueTemplate('mohist/default')
-
-    const config = useQueryMock.mock.calls[0][0]
-    expect(config.enabled).toBe(false)
+    expect(issueTemplateQueryOptions(null, 'mohist/default').enabled).toBe(false)
   })
 
   it('is disabled when name is null', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-
-    useIssueTemplate(null)
-
-    const config = useQueryMock.mock.calls[0][0]
-    expect(config.enabled).toBe(false)
+    expect(issueTemplateQueryOptions('proj-1', null).enabled).toBe(false)
   })
 
   it('is enabled when both projectId and name are set', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-
-    useIssueTemplate('mohist/default')
-
-    const config = useQueryMock.mock.calls[0][0]
-    expect(config.enabled).toBe(true)
+    expect(issueTemplateQueryOptions('proj-1', 'mohist/default').enabled).toBe(true)
   })
 })

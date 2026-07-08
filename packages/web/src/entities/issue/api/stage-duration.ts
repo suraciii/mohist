@@ -49,12 +49,16 @@ export const stageDurationQueryKey = (projectId?: string | null, range?: Insight
     : ['issues', 'metrics', 'stage-duration'] as const
 }
 
-export function useStageDuration(range?: InsightsRange) {
-  const { projectId } = useProject()
-  return useQuery({
+export function stageDurationQueryOptions(projectId: string | null | undefined, range?: InsightsRange) {
+  return {
     queryKey: stageDurationQueryKey(projectId, range),
     queryFn: () => fetchStageDuration(projectId!, range),
     enabled: !!projectId,
     staleTime: 60_000,
-  })
+  } as const
+}
+
+export function useStageDuration(range?: InsightsRange) {
+  const { projectId } = useProject()
+  return useQuery(stageDurationQueryOptions(projectId, range))
 }
