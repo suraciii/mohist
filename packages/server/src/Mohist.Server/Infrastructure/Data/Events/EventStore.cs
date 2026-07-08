@@ -25,10 +25,51 @@ public class EventStore : IEventStore
             source, envelope.Type, envelope.Id, envelope.Subject);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            await AppendAsync(db, envelope, ct);
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            _log.LogInformation(
+                "[event-store] AppendAsync: persisted source={Source} type={Type} eventId={EventId}",
+                source, envelope.Type, envelope.Id);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "[event-store] AppendAsync: FAILED source={Source} type={Type} eventId={EventId}",
+                source, envelope.Type, envelope.Id);
+            throw;
+        }
+    }
+
+    public async Task AppendAsync(MohistDbContext db, CloudEvent envelope, CancellationToken ct = default)
+    {
+        var source = envelope.Source.ToString();
+
+        if (source.StartsWith(AgentSessionEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        {
+            var nextId = await NextAgentSessionIdAsync(db, source, ct);
+            db.AgentSessionEvents.Add(new AgentSessionEventRow
+            {
+                Id = nextId,
+                Source = source,
+                EventId = envelope.Id,
+                Type = envelope.Type,
+                Time = envelope.Time,
+                SpecVersion = envelope.SpecVersion,
+                Subject = envelope.Subject,
+                DataContentType = envelope.DataContentType ?? "application/json",
+                Data = envelope.Data ?? JsonDocument.Parse("null").RootElement,
+                ExtensionsJson = SerializeExtensions(envelope.Extensions),
+            });
+            return;
+        }
 
         if (source.StartsWith(IssueEventPersistence.SourcePrefix, StringComparison.Ordinal))
         {
-            var nextId = await NextIssueIdAsync(source, ct);
+            var nextId = await NextIssueIdAsync(db, source, ct);
             db.IssueEvents.Add(new IssueEventRow
             {
                 Id = nextId,
@@ -42,26 +83,12 @@ public class EventStore : IEventStore
                 Data = envelope.Data ?? JsonDocument.Parse("null").RootElement,
                 ExtensionsJson = SerializeExtensions(envelope.Extensions),
             });
-            try
-            {
-                var saved = await db.SaveChangesAsync(ct);
-                _log.LogInformation(
-                    "[event-store] AppendAsync: persisted source={Source} type={Type} id={Id} eventId={EventId} rows={Rows}",
-                    source, envelope.Type, nextId, envelope.Id, saved);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "[event-store] AppendAsync: FAILED source={Source} type={Type} eventId={EventId} at id={Id}",
-                    source, envelope.Type, envelope.Id, nextId);
-                throw;
-            }
             return;
         }
 
         if (source.StartsWith(EpicEventPersistence.SourcePrefix, StringComparison.Ordinal))
         {
-            var nextId = await NextEpicIdAsync(source, ct);
+            var nextId = await NextEpicIdAsync(db, source, ct);
             db.EpicEvents.Add(new EpicEventRow
             {
                 Id = nextId,
@@ -75,24 +102,10 @@ public class EventStore : IEventStore
                 Data = envelope.Data ?? JsonDocument.Parse("null").RootElement,
                 ExtensionsJson = SerializeExtensions(envelope.Extensions),
             });
-            try
-            {
-                var saved = await db.SaveChangesAsync(ct);
-                _log.LogInformation(
-                    "[event-store] AppendAsync: persisted source={Source} type={Type} id={Id} eventId={EventId} rows={Rows}",
-                    source, envelope.Type, nextId, envelope.Id, saved);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "[event-store] AppendAsync: FAILED source={Source} type={Type} eventId={EventId} at id={Id}",
-                    source, envelope.Type, envelope.Id, nextId);
-                throw;
-            }
             return;
         }
 
-        var workflowNextId = await NextWorkflowIdAsync(source, ct);
+        var workflowNextId = await NextWorkflowIdAsync(db, source, ct);
         db.WorkflowRunEvents.Add(new WorkflowRunEventRow
         {
             Id = workflowNextId,
@@ -106,20 +119,6 @@ public class EventStore : IEventStore
             Data = envelope.Data ?? JsonDocument.Parse("null").RootElement,
             ExtensionsJson = SerializeExtensions(envelope.Extensions),
         });
-        try
-        {
-            var saved = await db.SaveChangesAsync(ct);
-            _log.LogInformation(
-                "[event-store] AppendAsync: persisted source={Source} type={Type} id={Id} eventId={EventId} rows={Rows}",
-                source, envelope.Type, workflowNextId, envelope.Id, saved);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex,
-                "[event-store] AppendAsync: FAILED source={Source} type={Type} eventId={EventId} at id={Id}",
-                source, envelope.Type, envelope.Id, workflowNextId);
-            throw;
-        }
     }
 
     public async Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default)
@@ -164,6 +163,76 @@ public class EventStore : IEventStore
         return rows.Select(ToEpicStored).ToList();
     }
 
+public async Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        if (source.StartsWith(AgentSessionEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        {
+            var row = await db.AgentSessionEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+            if (row is null)
+                throw new InvalidOperationException($"Agent session event '{source}'/{id} was not found.");
+            row.DispatchedAt = dispatchedAt;
+        }
+        else if (source.StartsWith(IssueEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        {
+            var row = await db.IssueEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+            if (row is null)
+                throw new InvalidOperationException($"Issue event '{source}'/{id} was not found.");
+            row.DispatchedAt = dispatchedAt;
+        }
+        else if (source.StartsWith(EpicEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        {
+            var row = await db.EpicEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+            if (row is null)
+                throw new InvalidOperationException($"Epic event '{source}'/{id} was not found.");
+            row.DispatchedAt = dispatchedAt;
+        }
+        else if (source.StartsWith(WorkflowRunEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        {
+            var row = await db.WorkflowRunEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+            if (row is null)
+                throw new InvalidOperationException($"Workflow run event '{source}'/{id} was not found.");
+            row.DispatchedAt = dispatchedAt;
+        }
+        else
+        {
+            throw new ArgumentException($"Unrecognized event source '{source}'.", nameof(source));
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        const string sql = """
+            SELECT 'WorkflowRun' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
+                   "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
+            FROM "WorkflowRunEvents" WHERE "DispatchedAt" IS NULL
+            UNION ALL
+            SELECT 'Issue' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
+                   "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
+            FROM "IssueEvents" WHERE "DispatchedAt" IS NULL
+            UNION ALL
+            SELECT 'Epic' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
+                   "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
+            FROM "EpicEvents" WHERE "DispatchedAt" IS NULL
+            UNION ALL
+            SELECT 'AgentSession' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
+                   "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
+            FROM "AgentSessionEvents" WHERE "DispatchedAt" IS NULL
+            ORDER BY "Source", "Id"
+            LIMIT @limit
+            """;
+
+        var parameter = new Microsoft.Data.Sqlite.SqliteParameter("@limit", limit);
+        var rows = await db.Database
+            .SqlQueryRaw<UndeliveredSqlRow>(sql, parameter)
+            .ToListAsync(ct);
+
+        return rows.Select(ToUndeliveredEvent).ToList();
+    }
     private static StoredCloudEvent ToStored(WorkflowRunEventRow row) =>
         new(row.Id, new CloudEvent(
             id: row.EventId,
@@ -207,30 +276,70 @@ public class EventStore : IEventStore
         JsonSerializer.Deserialize<Dictionary<string, string>>(json, CloudEvent.JsonOptions)
             ?? new Dictionary<string, string>();
 
-    private async Task<long> NextWorkflowIdAsync(string source, CancellationToken ct)
+    private static Task<long> NextWorkflowIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
+        NextIdAsync(db.WorkflowRunEvents, source, ct);
+
+    private static Task<long> NextIssueIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
+        NextIdAsync(db.IssueEvents, source, ct);
+
+    private static Task<long> NextEpicIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
+        NextIdAsync(db.EpicEvents, source, ct);
+
+    private static Task<long> NextAgentSessionIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
+        NextIdAsync(db.AgentSessionEvents, source, ct);
+
+    private static async Task<long> NextIdAsync<T>(DbSet<T> set, string source, CancellationToken ct)
+        where T : class, IEventRow
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return (await db.WorkflowRunEvents
-            .Where(e => e.Source == source)
-            .Select(e => (long?)e.Id)
-            .MaxAsync(ct) ?? 0) + 1;
+        var localMax = set.Local
+            .Where(r => r.Source == source)
+            .Select(r => (long?)r.Id)
+            .DefaultIfEmpty()
+            .Max();
+        var committedMax = await set
+            .Where(r => r.Source == source)
+            .Select(r => (long?)r.Id)
+            .MaxAsync(ct);
+        return Math.Max(localMax ?? 0, committedMax ?? 0) + 1;
+    }
+private sealed class UndeliveredSqlRow
+    {
+        public string Origin { get; set; } = "";
+        public long Id { get; set; }
+        public string Source { get; set; } = "";
+        public string EventId { get; set; } = "";
+        public string Type { get; set; } = "";
+        public DateTimeOffset Time { get; set; }
+        public string SpecVersion { get; set; } = "";
+        public string? Subject { get; set; }
+        public string DataContentType { get; set; } = "";
+        public string Data { get; set; } = "null";
+        public string ExtensionsJson { get; set; } = "{}";
     }
 
-    private async Task<long> NextIssueIdAsync(string source, CancellationToken ct)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return (await db.IssueEvents
-            .Where(e => e.Source == source)
-            .Select(e => (long?)e.Id)
-            .MaxAsync(ct) ?? 0) + 1;
-    }
+    private static UndeliveredEvent ToUndeliveredEvent(UndeliveredSqlRow row) =>
+        new(
+            Origin: ParseOrigin(row.Origin),
+            Id: row.Id,
+            Source: row.Source,
+            EventId: row.EventId,
+            Type: row.Type,
+            Time: row.Time,
+            SpecVersion: row.SpecVersion,
+            Subject: row.Subject,
+            DataContentType: row.DataContentType,
+            Data: ParseJsonElement(row.Data),
+            ExtensionsJson: row.ExtensionsJson);
 
-    private async Task<long> NextEpicIdAsync(string source, CancellationToken ct)
+    private static EventOrigin ParseOrigin(string text) => text switch
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return (await db.EpicEvents
-            .Where(e => e.Source == source)
-            .Select(e => (long?)e.Id)
-            .MaxAsync(ct) ?? 0) + 1;
-    }
+        "WorkflowRun" => EventOrigin.WorkflowRun,
+        "Issue" => EventOrigin.Issue,
+        "Epic" => EventOrigin.Epic,
+        "AgentSession" => EventOrigin.AgentSession,
+        _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
+    };
+
+    private static JsonElement ParseJsonElement(string json) =>
+        JsonDocument.Parse(string.IsNullOrEmpty(json) ? "null" : json).RootElement.Clone();
 }

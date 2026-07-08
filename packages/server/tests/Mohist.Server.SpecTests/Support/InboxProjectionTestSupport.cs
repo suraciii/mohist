@@ -247,6 +247,7 @@ internal static class InboxProjectionTestSupport
     public sealed class NoopEventStore : IEventStore
     {
         public Task AppendAsync(CloudEvent evt, CancellationToken ct = default) => Task.CompletedTask;
+        public Task AppendAsync(MohistDbContext db, CloudEvent evt, CancellationToken ct = default) => Task.CompletedTask;
         public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<StoredCloudEvent>>(Array.Empty<StoredCloudEvent>());
         public Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default) =>

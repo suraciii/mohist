@@ -1,0 +1,122 @@
+## T-001 progress notes
+
+### Codebase Patterns
+
+- Per-source Id (`MAX(Id)+1`) on SQLite has been implemented in two places
+  (`EventStore.NextWorkflowIdAsync`, `NextIssueIdAsync`, `NextEpicIdAsync`).
+  All three currently open their own `DbContext` to query `MAX`. The new
+  scoped overload (`AppendAsync(MohistDbContext db, ...)`) takes the
+  caller's `DbContext` directly so the per-source Id sequence is correct
+  for events appended inside the same transaction.
+
+- Routing for the source prefix in `EventStore.AppendAsync` is a chain of
+  `StartsWith(SourcePrefix)` checks (`Issue`, `Epic`, with
+  `WorkflowRun` as the implicit default). The implicit default
+  misroutes `/mohist/agent-session/` to `WorkflowRunEvents` today —
+  T-001 adds an explicit agent-session branch before the workflow
+  default so the misrouting is gone.
+
+- All event-row tables (`WorkflowRunEventRow`, `IssueEventRow`,
+  `EpicEventRow`) share the same column shape (Id + Source composite
+  PK, EventId, Type, Time, SpecVersion, Subject, DataContentType, Data,
+  ExtensionsJson, DispatchedAt). T-001 introduces `IEventRow` to
+  express the shared shape (`Id`, `Source`) so the per-source MAX
+  helper can be one generic method (`NextIdAsync<T>`) instead of four
+  copies.
+
+- `MohistDbContext.OnModelCreating` mirrors each event-row table with
+  the same configuration block. The new `AgentSessionEventRow`
+  configuration mirrors `EpicEventRow` exactly (Type/Source/Id index +
+  partial `IX_AgentSessionEvents_Undelivered`). The earlier
+  `EventDeliveryProgressAndDeadLetters` migration already added
+  `DispatchedAt` columns to the existing tables; the new
+  `AddAgentSessionEvents` migration only creates the table + indexes
+  (no backfill, no `UPDATE` statements) — same pattern as
+  `AddEpicEvents`.
+
+- `IEventStore` fakes are spread across `Support/` (top-level:
+  `NoopEventStore`, `RecordingEventStore`) and inside individual spec
+  files (`InboxProjectionTestSupport.NoopEventStore`,
+  `EpicEventPublishSpecs.ThrowingEventStore`). All four fakes were
+  updated to implement the new scoped overload.
+
+- Producer-side touches are intentionally zero. T-001 owns ALL
+  `IEventStore` / `EventStore` changes; downstream tasks (T-003, T-004,
+  T-005) only call the new scoped overload from their respective
+  stores. `WorkflowRunStore`, `IssueStore`, `AgentSessionStore`,
+  `InMemoryEventBus` were not modified.
+
+### Gotchas
+
+- EF Core's `DbSet<T>.Local` returns a `LocalView<T>` that exposes
+  Added/Unchanged/Modified entities for the set. The next
+  `MAX(Id)+1` call after `db.<Set>.Add(...)` therefore sees the
+  pending row immediately, which is what makes the per-source Id
+  sequence correct for multiple events appended in one transaction.
+  Tests verify this with three consecutive `AppendAsync` calls in a
+  single `BeginTransactionAsync` block yielding Id 1, 2, 3.
+
+- `MarkDispatchedAsync` is intentionally NOT updated to use the
+  shared DbContext — it still owns its own DbContext + transaction
+  because the dispatcher (step 3, future issue) runs outside any
+  producer's state transaction.
+
+- The `AppendAsync(CloudEvent)` non-scoped overload now opens a
+  transaction even though SQLite + a single-statement write would not
+  technically need one. This preserves the same observable behavior
+  for existing callers (e.g. `InboxProjectionHandler` hint path) and
+  keeps the entry point a single SaveChanges boundary.
+
+- The migration was generated with `dotnet ef migrations add
+  AddAgentSessionEvents` and the resulting
+  `20260708053533_AddAgentSessionEvents.cs` matches the expected
+  schema (table + `IX_AgentSessionEvents_Undelivered` partial index,
+  no `IX_AgentSessionEvents_Type_Time` since lifecycle events are not
+  timeline-queried the way workflow/issue events are).
+
+- `EnsureCreated` produces a different partial-index SQL than
+  `Migrate()` on SQLite (the older `EventStoreDeliveryProgressSpecs`
+  test confirms this). The new
+  `AgentSessionEventsMigrationSpecs` uses `Migrate()` so the
+  DDL matches production.
+
+- The scoped overload must NOT call `SaveChangesAsync`; the producer's
+  transaction owns the commit. Verified by spec
+  `AppendAsync_DoesNotCallSaveChangesAsync_OnScopedOverload` which
+  asserts that after `AppendAsync(db, evt)`, the row is in
+  `db.WorkflowRunEvents.Local` with state `Added` while
+  `db.WorkflowRunEvents.AsNoTracking().ToList()` returns nothing.
+
+### Open follow-ups for downstream tasks
+
+- T-002 (IEventPublisher write-only) needs to inject `IEventStore`
+  into `InMemoryEventBus` and replace the in-publish dispatch loop
+  with a delegated `IEventStore.AppendAsync(envelope)` call. The
+  scoped overload is not needed for `IEventPublisher` because the
+  inbox hint is written outside any producer's state transaction.
+
+- T-003 / T-004 / T-005 should call `_eventStore.AppendAsync(db,
+  envelope, ct)` inside their existing `BeginTransactionAsync`
+  blocks; identity stamping (projectid, issueid, issueno, session
+  id) is owned by the producer tasks, not T-001.
+
+### Verification
+
+- `dotnet build Mohist.sln` succeeds with 0 warnings
+  (TreatWarningsAsErrors active).
+- `dotnet test Mohist.sln` passes (4128 server specs, 865 CLI specs,
+  24 arch tests, 0 failures; 13 skipped tests are pre-existing).
+- New tests:
+  - `EventStoreScopedAppendSpecs` (10 specs): scoped append, visible
+    inside tx, durable after commit, per-source Id accounts for
+    pending rows (3 events in one tx → Ids 1,2,3), per-source Id
+    across separate transactions, non-scoped overload still opens
+    own transaction, agent-session source lands in
+    `AgentSessionEvents` via scoped overload, agent-session source
+    appears in `ListUndeliveredAsync`, agent-session source omitted
+    from `ListUndeliveredAsync` after `MarkDispatchedAsync`,
+    non-scoped overload routes agent-session source to the right
+    table.
+  - `AgentSessionEventsMigrationSpecs` (3 specs): table + index
+    created via `Migrate()`, applies cleanly on DB seeded with
+    previous migration, no `IX_AgentSessionEvents_Type_Time` index.

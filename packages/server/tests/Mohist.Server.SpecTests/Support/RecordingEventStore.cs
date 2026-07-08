@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 
 namespace Mohist.Server.SpecTests.Support;
@@ -8,6 +9,15 @@ public class RecordingEventStore : IEventStore
     private readonly Lock _gate = new();
 
     public Task AppendAsync(CloudEvent envelope, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            _events.Add(new RecordedEnvelope(envelope));
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task AppendAsync(MohistDbContext db, CloudEvent envelope, CancellationToken ct = default)
     {
         lock (_gate)
         {

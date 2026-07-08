@@ -10,7 +10,7 @@ namespace Mohist.Server.Infrastructure.Data.Events;
 /// tables so issue and epic remain distinct bounded contexts at the
 /// storage layer.
 /// </summary>
-public sealed class EpicEventRow
+public sealed class EpicEventRow : IEventRow
 {
     public required long Id { get; init; }
     public required string Source { get; init; }
