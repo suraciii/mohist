@@ -1,17 +1,32 @@
 // @vitest-environment jsdom
+import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
+import {
+  IssueHealth,
+  IssueStatus,
+  WorkflowStage,
+  type Issue,
+} from '../../../entities/issue'
+import type { AgentStatus } from '../../../entities/agent'
 
 const mocks = vi.hoisted(() => ({
   projects: [] as any[],
   isLoading: false,
-  agentStatus: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } } as any,
+  agentStatus: {
+    running: false,
+    issueId: null,
+    issueNumber: null,
+    activeAgents: [],
+    capacity: { active: 0, max: 8 },
+  } as AgentStatus,
   createProjectMutate: vi.fn(),
   useIssuesMock: vi.fn(),
   useArchivedIssuesMock: vi.fn(),
+  useAgentActivityMock: vi.fn(),
   epics: undefined as any[] | undefined,
   completionTrend: undefined as { bucket: string; window: { from: string; to: string }; buckets: { boundary: string; completed: number; failed: number }[] } | undefined,
   completionThroughput: { bucket: 'day', window: { from: '2026-06-01T00:00:00', to: '2026-06-07T23:59:59' }, buckets: [] } as { bucket: string; window: { from: string; to: string }; buckets: { boundary: string; completed: number; failed: number }[] },
@@ -34,25 +49,24 @@ vi.mock('../../../entities/project', async (importOriginal) => {
   }
 })
 
-vi.mock('../../../entities/agent', () => ({
-  useAgentStatus: () => ({ data: mocks.agentStatus }),
-  useCostRollup: () => ({ data: undefined }),
-  useAgentUsage: () => ({ data: undefined, isLoading: false, isError: false }),
-}))
+vi.mock('../../../entities/agent', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/agent')>()
+  return {
+    ...actual,
+    useAgentStatus: () => ({ data: mocks.agentStatus }),
+    useAgentActivity: () => mocks.useAgentActivityMock(),
+    useCostRollup: () => ({ data: undefined }),
+    useAgentUsage: () => ({ data: undefined, isLoading: false, isError: false }),
+  }
+})
 
 vi.mock('../../../entities/issue/api/queries', () => ({
   useIssues: (...args: unknown[]) => mocks.useIssuesMock(...args),
   useArchivedIssues: (...args: unknown[]) => mocks.useArchivedIssuesMock(...args),
 }))
 
-vi.mock('@/widgets/coder-session/model/activity-cards', () => ({
-  useActivityCards: () => ({
-    activeCards: [],
-    recentCards: [],
-    waitingCards: [],
-    statusCounts: { active: 0, waiting: 0, completed: 0, failed: 0 },
-    slotUsage: { active: 0, max: 0 },
-  }),
+vi.mock('../../../widgets/coder-session/model/activity-cards', () => ({
+  useActivityCards: () => mocks.useAgentActivityMock(),
 }))
 
 vi.mock('../../../widgets/create-project-dialog/ui/CreateProjectDialog', () => ({
@@ -89,11 +103,52 @@ vi.mock('../../../entities/issue/api/delivery-time', () => ({
 
 import { DashboardPage } from './DashboardPage'
 
+const NO_AGENT_ACTIVITY = {
+  activeCards: [],
+  activeCardByIssueNumber: new Map<number, unknown>(),
+  recentCards: [],
+  waitingCards: [],
+  statusCounts: { active: 0, waiting: 0, completed: 0, failed: 0 },
+  slotUsage: { active: 0, max: 0 },
+}
+
+function makeIssue(overrides: Partial<Issue> = {}): Issue {
+  return {
+    id: overrides.id ?? `issue-${Math.random().toString(36).slice(2, 8)}`,
+    number: overrides.number ?? 1,
+    title: overrides.title ?? 'Issue title',
+    status: overrides.status ?? IssueStatus.Backlog,
+    health: overrides.health ?? IssueHealth.Active,
+    projectId: 'p1',
+    labels: {},
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    isDraft: false,
+    canStart: true,
+    blocker: null,
+    workflowStage: overrides.workflowStage ?? null,
+    ...overrides,
+  }
+}
+
+function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
+  return {
+    running: false,
+    issueId: null,
+    issueNumber: null,
+    activeAgents: [],
+    capacity: { active: 0, max: 8 },
+    runnerAvailable: true,
+    runnerMessage: null,
+    ...overrides,
+  }
+}
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider>
+      <ProjectProvider initialProjectId="p1" initialProjects={mocks.projects}>
         <MemoryRouter initialEntries={['/']}>
           <DashboardPage />
         </MemoryRouter>
@@ -102,203 +157,528 @@ function renderPage() {
   )
 }
 
-describe('DashboardPage', () => {
+function resetMocks() {
+  mocks.projects = []
+  mocks.isLoading = false
+  mocks.agentStatus = makeAgentStatus({ capacity: { active: 0, max: 8 } })
+  mocks.useIssuesMock.mockReset()
+  mocks.useIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
+  mocks.useArchivedIssuesMock.mockReset()
+  mocks.useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
+  mocks.useAgentActivityMock.mockReset()
+  mocks.useAgentActivityMock.mockReturnValue({ ...NO_AGENT_ACTIVITY, activeCardByIssueNumber: new Map() })
+  mocks.epics = undefined
+  mocks.completionTrend = undefined
+  mocks.approvalWait = undefined
+  mocks.qualityMetrics = undefined
+  mocks.deliveryTime = undefined
+}
+
+describe('DashboardPage — attention-first zone hierarchy', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.projects = []
-    mocks.isLoading = false
-    mocks.useIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
-    mocks.epics = undefined
-    mocks.completionTrend = undefined
-    mocks.approvalWait = undefined
-    mocks.qualityMetrics = undefined
-    mocks.deliveryTime = undefined
+    resetMocks()
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('keeps slot identities stable when projects exist and omits the productivity slot', () => {
-    mocks.projects = [
-      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-    ]
+  describe('project gating', () => {
+    it('shows the project empty-state instead of zones when no projects exist', () => {
+      mocks.projects = []
 
-    renderPage()
+      renderPage()
 
-    const attention = screen.getByTestId('dashboard-zone-attention')
-    const pulse = screen.getByTestId('dashboard-zone-pulse')
-    const digest = screen.getByTestId('dashboard-zone-digest')
+      expect(screen.getByTestId('dashboard-empty-state')).toBeInTheDocument()
+      expect(screen.getByText('No projects yet')).toBeInTheDocument()
+      expect(screen.getByTestId('dashboard-create-project')).toBeInTheDocument()
 
-    expect(attention).toHaveAttribute('data-zone', 'attention')
-    expect(pulse).toHaveAttribute('data-zone', 'pulse')
-    expect(digest).toHaveAttribute('data-zone', 'digest')
-    expect(screen.queryByTestId('dashboard-zone-productivity')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('productivity-zone')).not.toBeInTheDocument()
-  })
-
-  it('mounts the dashboard-digest widget inside the digest zone slot', () => {
-    mocks.projects = [
-      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-    ]
-
-    const { container } = renderPage()
-
-    const digestSlot = screen.getByTestId('dashboard-zone-digest')
-    // The digest widget should be present inside the digest slot wrapper.
-    expect(digestSlot.contains(screen.getByTestId('dashboard-digest-empty'))).toBe(true)
-    // Sanity: the widget is NOT mounted into the other slots.
-    expect(container.querySelector('[data-testid="dashboard-zone-attention"] [data-testid="dashboard-digest-empty"]')).toBeNull()
-    expect(container.querySelector('[data-testid="dashboard-zone-pulse"] [data-testid="dashboard-digest-empty"]')).toBeNull()
-  })
-
-  it('mounts AttentionHero in the hero slot and zone content in every surviving dashboard zone slot', () => {
-    mocks.projects = [
-      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-    ]
-
-    const { container } = renderPage()
-
-    const attentionSlots = screen.getAllByTestId('dashboard-zone-attention')
-    expect(attentionSlots).toHaveLength(1)
-    const attention = attentionSlots[0]
-    const pulse = screen.getByTestId('dashboard-zone-pulse')
-    const digest = screen.getByTestId('dashboard-zone-digest')
-
-    expect(attention.className).not.toMatch(/border-dashed/)
-    expect(pulse.className).toMatch(/border-dashed/)
-
-    expect(attention.childElementCount).toBeGreaterThan(0)
-    expect(pulse.childElementCount).toBeGreaterThan(0)
-
-    expect(pulse.contains(screen.getByTestId('pulse-zone'))).toBe(true)
-    expect(pulse.contains(screen.getByTestId('pulse-empty-state'))).toBe(true)
-
-    expect(screen.getByTestId('dashboard-hero').contains(attention)).toBe(true)
-    expect(screen.getByTestId('dashboard-zones').contains(attention)).toBe(false)
-
-    expect(attention.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
-    expect(pulse.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
-
-    expect(digest.querySelector('[data-testid="pulse-zone"], [data-testid="pulse-empty-state"]')).toBeNull()
-    expect(container).toBeTruthy()
-  })
-
-  it('renders the factory status headline at the top of the page', () => {
-    mocks.projects = [
-      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-    ]
-
-    renderPage()
-
-    expect(screen.getByTestId('factory-status-headline')).toBeInTheDocument()
-    expect(screen.getByTestId('factory-status-runner')).toBeInTheDocument()
-  })
-
-  it('renders the three-stack layout in top-to-bottom order', () => {
-    mocks.projects = [
-      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-    ]
-
-    renderPage()
-
-    const page = screen.getByTestId('dashboard-page')
-    const headline = screen.getByTestId('dashboard-headline')
-    const hero = screen.getByTestId('dashboard-hero')
-    const zones = screen.getByTestId('dashboard-zones')
-
-    expect(page.contains(headline)).toBe(true)
-    expect(page.contains(hero)).toBe(true)
-    expect(page.contains(zones)).toBe(true)
-
-    expect(headline.compareDocumentPosition(hero) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(hero.compareDocumentPosition(zones) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  })
-
-  it('renders digest content inside the digest slot when the widget has resolved data', () => {
-    mocks.projects = [
-      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-    ]
-    mocks.useIssuesMock.mockReturnValue({
-      data: [
-        {
-          id: 'i-1',
-          number: 7,
-          title: 'Done thing',
-          status: 'done',
-          health: 'active',
-          projectId: 'p1',
-          labels: {},
-          createdAt: '2026-01-01T00:00:00Z',
-          updatedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-          archivedAt: undefined,
-          isDraft: false,
-          canStart: true,
-          blocker: null,
-        },
-      ],
-      isLoading: false,
+      expect(screen.queryByTestId('dashboard-zone-attention')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('dashboard-zone-pulse')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('dashboard-zone-capacity')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('dashboard-zone-digest')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
     })
-    mocks.useArchivedIssuesMock.mockReturnValue({ data: [], isLoading: false })
 
-    renderPage()
+    it('opens the CreateProjectDialog when the empty-state action is activated', async () => {
+      mocks.projects = []
 
-    const digestSlot = screen.getByTestId('dashboard-zone-digest')
-    expect(digestSlot.contains(screen.getByTestId('dashboard-digest-content'))).toBe(true)
-    expect(digestSlot.contains(screen.getByText('Done thing'))).toBe(true)
-  })
+      renderPage()
 
-  it('does not render the Kanban board on the dashboard', () => {
-    mocks.projects = [
-      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-    ]
+      expect(screen.queryByTestId('create-project-dialog')).not.toBeInTheDocument()
 
-    renderPage()
+      fireEvent.click(screen.getByTestId('dashboard-create-project'))
 
-    expect(screen.queryByTestId('needs-attention-summary')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('search-input')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('priority-chip-p0')).not.toBeInTheDocument()
-  })
-
-  it('shows the project empty-state instead of zones when no projects exist', () => {
-    mocks.projects = []
-
-    renderPage()
-
-    expect(screen.getByTestId('dashboard-empty-state')).toBeInTheDocument()
-    expect(screen.getByText('No projects yet')).toBeInTheDocument()
-    expect(screen.getByTestId('dashboard-create-project')).toBeInTheDocument()
-
-    expect(screen.queryByTestId('dashboard-zone-attention')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('dashboard-zone-pulse')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('dashboard-zone-productivity')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('dashboard-zone-digest')).not.toBeInTheDocument()
-  })
-
-  it('opens the CreateProjectDialog when the empty-state action is activated', async () => {
-    mocks.projects = []
-
-    renderPage()
-
-    expect(screen.queryByTestId('create-project-dialog')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByTestId('dashboard-create-project'))
-
-    await waitFor(() => {
-      expect(screen.getByTestId('create-project-dialog')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByTestId('create-project-dialog')).toBeInTheDocument()
+      })
     })
   })
 
-  it('does not render the Ask Agent entry in the dashboard hero', () => {
-    mocks.projects = [
-      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-    ]
+  describe('headline subordination', () => {
+    it('always renders the factory status headline above the attention zone when attention exists', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'await-1',
+            number: 11,
+            title: 'Awaiting approval',
+            approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
+          }),
+        ],
+        isLoading: false,
+      })
 
-    renderPage()
+      renderPage()
 
-    const hero = screen.getByTestId('dashboard-hero')
-    expect(hero.querySelector('[data-testid="ask-agent-project"]')).toBeNull()
-    expect(screen.queryByTestId('ask-agent-project')).not.toBeInTheDocument()
+      const headline = screen.getByTestId('factory-status-headline')
+      const attention = screen.getByTestId('dashboard-zone-attention')
+
+      expect(headline).toBeInTheDocument()
+      expect(attention).toBeInTheDocument()
+
+      expect(headline.compareDocumentPosition(attention) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it('renders the headline as a compact strip (no data-zone attribute, single section)', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+
+      renderPage()
+
+      const headline = screen.getByTestId('factory-status-headline')
+      expect(headline).toBeInTheDocument()
+      expect(headline.querySelector('[data-testid="factory-status-runner"]')).toBeInTheDocument()
+    })
+  })
+
+  describe('zone priority order', () => {
+    it('renders the four levels in priority order (attention → pulse → capacity → digest) when all are populated', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = makeAgentStatus({ capacity: { active: 2, max: 8 } })
+      mocks.useIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'blocked-issue',
+            number: 1,
+            title: 'Blocked issue',
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Blocked,
+            workflowStage: WorkflowStage.Build,
+          }),
+          makeIssue({
+            id: 'running-issue',
+            number: 2,
+            title: 'Running issue',
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Active,
+            workflowStage: WorkflowStage.Build,
+          }),
+        ],
+        isLoading: false,
+      })
+      mocks.useArchivedIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'archived-1',
+            number: 99,
+            title: 'Old archived issue',
+            status: IssueStatus.Done,
+            archivedAt: '2026-06-30T00:00:00Z',
+          }),
+        ],
+        isLoading: false,
+      })
+
+      renderPage()
+
+      const attention = screen.getByTestId('dashboard-zone-attention')
+      const pulse = screen.getByTestId('dashboard-zone-pulse')
+      const capacity = screen.getByTestId('dashboard-zone-capacity')
+      const digest = screen.getByTestId('dashboard-zone-digest')
+
+      expect(
+        attention.compareDocumentPosition(pulse) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+      expect(
+        pulse.compareDocumentPosition(capacity) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+      expect(
+        capacity.compareDocumentPosition(digest) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+    })
+  })
+
+  describe('empty zone collapse', () => {
+    it('omits the digest zone from the DOM when the digest has no items', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'await-1',
+            number: 11,
+            title: 'Awaiting approval',
+            approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
+          }),
+        ],
+        isLoading: false,
+      })
+      mocks.useArchivedIssuesMock.mockReturnValue({ data: [], isLoading: false })
+
+      renderPage()
+
+      expect(screen.getByTestId('dashboard-zone-attention')).toBeInTheDocument()
+      expect(screen.queryByTestId('dashboard-zone-digest')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('dashboard-digest-empty')).not.toBeInTheDocument()
+    })
+
+    it('omits the active-production zone when no running issues and no active sessions', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'await-1',
+            number: 12,
+            title: 'Awaiting approval',
+            approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
+          }),
+        ],
+        isLoading: false,
+      })
+
+      renderPage()
+
+      expect(screen.getByTestId('dashboard-zone-attention')).toBeInTheDocument()
+      expect(screen.queryByTestId('dashboard-zone-pulse')).not.toBeInTheDocument()
+    })
+
+    it('omits the capacity zone when capacity data is absent', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = makeAgentStatus({ capacity: { active: 0, max: 0 } })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-zone-capacity')).not.toBeInTheDocument()
+    })
+
+    it('omits the capacity zone when agentStatus is undefined', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = undefined as unknown as AgentStatus
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-zone-capacity')).not.toBeInTheDocument()
+    })
+
+    it('does not reserve a fixed-height box for absent zones', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'await-1',
+            number: 13,
+            title: 'Awaiting approval',
+            approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
+          }),
+        ],
+        isLoading: false,
+      })
+
+      const { container } = renderPage()
+
+      expect(container.querySelector('.min-h-\\[160px\\]')).toBeNull()
+    })
+  })
+
+  describe('ready state when idle', () => {
+    it('renders the concise ready state when there are no attention items and no active work', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({ data: [], isLoading: false })
+      mocks.useArchivedIssuesMock.mockReturnValue({ data: [], isLoading: false })
+
+      renderPage()
+
+      expect(screen.getByTestId('dashboard-ready-state')).toBeInTheDocument()
+      expect(screen.getByText(/Nothing needs your attention right now/i)).toBeInTheDocument()
+
+      expect(screen.queryByTestId('dashboard-zone-attention')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('dashboard-zone-pulse')).not.toBeInTheDocument()
+    })
+
+    it('does not render the ready state when attention items exist', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'await-1',
+            number: 14,
+            title: 'Awaiting approval',
+            approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
+          }),
+        ],
+        isLoading: false,
+      })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
+      expect(screen.getByTestId('dashboard-zone-attention')).toBeInTheDocument()
+    })
+
+    it('does not render the ready state when running issues exist (active-only state)', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'running-1',
+            number: 20,
+            title: 'Running',
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Active,
+            workflowStage: WorkflowStage.Build,
+          }),
+        ],
+        isLoading: false,
+      })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
+      expect(screen.getByTestId('dashboard-zone-pulse')).toBeInTheDocument()
+    })
+
+    it('shows the ready state with the digest as a subordinate strip when digest has items', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({ data: [], isLoading: false })
+      mocks.useArchivedIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'archived-1',
+            number: 88,
+            title: 'Old done',
+            status: IssueStatus.Done,
+            archivedAt: '2026-06-30T00:00:00Z',
+          }),
+        ],
+        isLoading: false,
+      })
+
+      renderPage()
+
+      const ready = screen.getByTestId('dashboard-ready-state')
+      const digest = screen.getByTestId('dashboard-zone-digest')
+
+      expect(ready).toBeInTheDocument()
+      expect(digest).toBeInTheDocument()
+      expect(ready.compareDocumentPosition(digest) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+  })
+
+  describe('capacity level rendering and collapse', () => {
+    it('renders the dashboard-zone-capacity when capacity data is present', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = makeAgentStatus({ capacity: { active: 4, max: 8 } })
+
+      renderPage()
+
+      const capacity = screen.getByTestId('dashboard-zone-capacity')
+      expect(capacity).toBeInTheDocument()
+      expect(capacity).toHaveAttribute('data-zone', 'capacity')
+      expect(capacity).toHaveAttribute('data-active', '4')
+      expect(capacity).toHaveAttribute('data-max', '8')
+      expect(screen.getByTestId('dashboard-zone-capacity-label')).toHaveTextContent('Runner capacity')
+      expect(screen.getByTestId('dashboard-zone-capacity-count')).toHaveTextContent('4/8')
+    })
+
+    it('collapses the capacity level when max is zero', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = makeAgentStatus({ capacity: { active: 0, max: 0 } })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-zone-capacity')).not.toBeInTheDocument()
+    })
+
+    it('collapses the capacity level when capacity field has max=0', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = makeAgentStatus({ capacity: { active: 0, max: 0 } })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-zone-capacity')).not.toBeInTheDocument()
+    })
+
+    it('renders the capacity level between active-production and digest', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = makeAgentStatus({ capacity: { active: 2, max: 8 } })
+      mocks.useIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'running-1',
+            number: 30,
+            title: 'Running',
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Active,
+            workflowStage: WorkflowStage.Build,
+          }),
+        ],
+        isLoading: false,
+      })
+      mocks.useArchivedIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'archived-1',
+            number: 88,
+            title: 'Old done',
+            status: IssueStatus.Done,
+            archivedAt: '2026-06-30T00:00:00Z',
+          }),
+        ],
+        isLoading: false,
+      })
+
+      renderPage()
+
+      const pulse = screen.getByTestId('dashboard-zone-pulse')
+      const capacity = screen.getByTestId('dashboard-zone-capacity')
+      const digest = screen.getByTestId('dashboard-zone-digest')
+
+      expect(
+        pulse.compareDocumentPosition(capacity) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+      expect(
+        capacity.compareDocumentPosition(digest) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+    })
+
+    it('keeps the capacity level independent of active-production (renders without active work)', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = makeAgentStatus({ capacity: { active: 3, max: 8 } })
+      mocks.useIssuesMock.mockReturnValue({ data: [], isLoading: false })
+      mocks.useArchivedIssuesMock.mockReturnValue({ data: [], isLoading: false })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-zone-pulse')).not.toBeInTheDocument()
+      expect(screen.getByTestId('dashboard-zone-capacity')).toBeInTheDocument()
+    })
+  })
+
+  describe('centralized predicates', () => {
+    it('renders the attention zone only when deriveAttentionItems produces items', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = makeAgentStatus({ runnerAvailable: false })
+
+      renderPage()
+
+      expect(screen.getByTestId('dashboard-zone-attention')).toBeInTheDocument()
+    })
+
+    it('renders the active-production zone when an in-progress issue is present', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'running-1',
+            number: 50,
+            title: 'Running',
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Active,
+            workflowStage: WorkflowStage.Build,
+          }),
+        ],
+        isLoading: false,
+      })
+
+      renderPage()
+
+      expect(screen.getByTestId('dashboard-zone-pulse')).toBeInTheDocument()
+    })
+  })
+
+  describe('test-id preservation', () => {
+    it('preserves the factory-status-headline, dashboard-zone-attention/-pulse/-digest and dashboard-zone-capacity test-ids', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = makeAgentStatus({ capacity: { active: 1, max: 4 } })
+      mocks.useIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'await-1',
+            number: 60,
+            title: 'Awaiting approval',
+            approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' },
+          }),
+          makeIssue({
+            id: 'running-1',
+            number: 61,
+            title: 'Running',
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Active,
+            workflowStage: WorkflowStage.Build,
+          }),
+        ],
+        isLoading: false,
+      })
+      mocks.useArchivedIssuesMock.mockReturnValue({
+        data: [
+          makeIssue({
+            id: 'archived-1',
+            number: 99,
+            title: 'Old done',
+            status: IssueStatus.Done,
+            archivedAt: '2026-06-30T00:00:00Z',
+          }),
+        ],
+        isLoading: false,
+      })
+
+      renderPage()
+
+      expect(screen.getByTestId('factory-status-headline')).toBeInTheDocument()
+      expect(screen.getByTestId('dashboard-zone-attention')).toBeInTheDocument()
+      expect(screen.getByTestId('dashboard-zone-pulse')).toBeInTheDocument()
+      expect(screen.getByTestId('dashboard-zone-capacity')).toBeInTheDocument()
+      expect(screen.getByTestId('dashboard-zone-digest')).toBeInTheDocument()
+    })
   })
 })
