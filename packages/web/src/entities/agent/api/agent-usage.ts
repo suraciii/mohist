@@ -51,12 +51,16 @@ export const agentUsageQueryKey = (projectId?: string | null, range?: InsightsRa
     : ['agent', 'usage'] as const
 }
 
-export function useAgentUsage(range?: InsightsRange) {
-  const { projectId } = useProject()
-  return useQuery({
+export function agentUsageQueryOptions(projectId: string | null | undefined, range?: InsightsRange) {
+  return {
     queryKey: agentUsageQueryKey(projectId, range),
     queryFn: () => fetchAgentUsage(projectId!, range),
     enabled: !!projectId,
     staleTime: 60_000,
-  })
+  } as const
+}
+
+export function useAgentUsage(range?: InsightsRange) {
+  const { projectId } = useProject()
+  return useQuery(agentUsageQueryOptions(projectId, range))
 }
