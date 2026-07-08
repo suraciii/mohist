@@ -35,4 +35,4 @@ Note: `design/eventbus-v2.md` predates the `EpicEvents` table (added by #94) —
 - **No web / CLI / runner changes** — pure server storage layer; no user-visible behavior change.
 - **Dependencies / APIs**: no new external dependencies; no HTTP contract change.
 - **Risk** (medium): schema migration across three populated tables + a new table + partial indexes; SQLite partial-index syntax and migration ordering validated in design.md. The `(Type, Time)` index is additive and non-breaking. No existing read/write path changes.
-- **Verification**: `npm test` (server) must pass; new storage unit tests added.
+- **Verification**: `dotnet test Mohist.sln -p:SkipWebBuild=true` must pass; new storage unit tests added.

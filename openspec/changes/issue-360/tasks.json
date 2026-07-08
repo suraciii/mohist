@@ -15,9 +15,9 @@
         "Re-marking an already-delivered row succeeds and leaves it delivered (idempotent).",
         "`ListUndeliveredAsync` returns undelivered rows from all three tables in one query, excludes rows with non-null `DispatchedAt`, and orders by `Source` then `Id` (per-stream FIFO) — asserted with two undelivered rows in the same `Source` at ascending `Id`.",
         "`AppendAsync` leaves `DispatchedAt` NULL; existing `List*Async` return the same rows in the same order regardless of `DispatchedAt` value (delivered and undelivered returned identically).",
-        "`NoopEventStore`, `RecordingEventStore`, and `InboxProjectionTestSupport.NoopEventStore` implement the two new members (no-op / empty list) so `npm run build` and `npm test` compile.",
+        "`NoopEventStore`, `RecordingEventStore`, and `InboxProjectionTestSupport.NoopEventStore` implement the two new members (no-op / empty list) so `npm run build` and `dotnet test Mohist.sln -p:SkipWebBuild=true` compile.",
         "New unit tests (in-memory shared-cache SQLite, `EnsureCreated`) cover: append leaves NULL, mark sets only the matched row, re-mark idempotent, list-undelivered spans three tables, delivered rows excluded, per-stream FIFO ordering. All timestamps are fixed constants (no wall clock, no FakeTimeProvider needed since the timestamp is a parameter).",
-        "`npm test` (server) is green; `TreatWarningsAsErrors` lint gate passes."
+        "`dotnet test Mohist.sln -p:SkipWebBuild=true` is green; `TreatWarningsAsErrors` lint gate passes."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -41,7 +41,7 @@
         "`IDeadLetterStore` → `DeadLetterStore` is registered in `CloudEventBusServiceCollectionExtensions` (Scoped or Transient to match sibling stores).",
         "`NoopDeadLetterStore` exists under `tests/.../Support/` and is usable as a test fake.",
         "New unit tests (in-memory shared-cache SQLite, `EnsureCreated`) cover: write-then-list round-trip, second write appends (does not overwrite), envelope snapshot fields preserved. Timestamps are fixed constants.",
-        "`npm test` (server) is green; `TreatWarningsAsErrors` lint gate passes."
+        "`dotnet test Mohist.sln -p:SkipWebBuild=true` is green; `TreatWarningsAsErrors` lint gate passes."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -61,7 +61,7 @@
         "`EpicEventRow` does NOT receive a `(Type, Time)` index — asserted by a unit test inspecting the model/indexes.",
         "No existing read operation (`List*Async`, `AppendAsync`, querier paths) changes its result set, ordering, or return shape.",
         "A unit test (in-memory SQLite, `EnsureCreated`) asserts the `(Type, Time)` index exists on the two tables and is absent on `EpicEvents`.",
-        "`npm test` (server) is green; `TreatWarningsAsErrors` lint gate passes."
+        "`dotnet test Mohist.sln -p:SkipWebBuild=true` is green; `TreatWarningsAsErrors` lint gate passes."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -83,7 +83,7 @@
         "Migration unit test (Migrate-based, in-memory SQLite) asserts `sqlite_master` contains a partial index entry with `WHERE \"DispatchedAt\" IS NULL` on each of the three event tables — guards the D3 quoting risk.",
         "Migration unit test asserts the `(Type, Time)` index exists on `WorkflowRunEvents` + `IssueEvents` and is absent on `EpicEvents` post-Migrate.",
         "Migration applies cleanly on a database seeded with the previous migration (idempotent additive schema change).",
-        "Full `npm test` (server) is green, including any EventStoreSpecs scenarios that require the Migrate() path.",
+        "Full `dotnet test Mohist.sln -p:SkipWebBuild=true` is green, including any EventStoreSpecs scenarios that require the Migrate() path.",
         "`TreatWarningsAsErrors` lint gate passes."
       ],
       "priority": 2,

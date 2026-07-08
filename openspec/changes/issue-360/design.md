@@ -191,7 +191,7 @@ public interface IDeadLetterStore
 1. **Code first, schema via `dotnet ef migrations add`.** Implement the three row classes (`DispatchedAt`), `DeadLetterRow`, `MohistDbContext` configuration (columns + indexes + partial indexes + `DeadLetters` DbSet), the port additions on `IEventStore`, `IDeadLetterStore` + `DeadLetterStore` impl, and the `EventStore` method impls.
 2. **Scaffold the migration** with `dotnet ef migrations add AddEventDeliveryProgressAndDeadLetters` under `Infrastructure/Data/Migrations/` following the `YYYYMMDDHHMMSS_PascalCaseDescription.cs` convention. Inspect the generated `Up` for the three partial-index `WHERE` clauses and the UNION-friendly column orderings.
 3. **Fix compilation breaks** in the three `IEventStore` fakes (`Support/NoopEventStore.cs`, `Support/RecordingEventStore.cs`, nested `InboxProjectionTestSupport.NoopEventStore`) — add no-op `MarkDispatchedAsync` / empty `ListUndeliveredAsync`. Add a `NoopDeadLetterStore` to `Support/`.
-4. **Add tests** (see below), then `npm test` (server). `TreatWarningsAsErrors` is the C# lint gate.
+4. **Add tests** (see below), then `dotnet test Mohist.sln -p:SkipWebBuild=true` (server). `TreatWarningsAsErrors` is the C# lint gate.
 5. **Deploy:** the migration runs on server startup (`db.Database.Migrate()`). Additive nullable columns + new indexes + new table — no lock contention concern at single-developer scale.
 
 **Rollback:** `dotnet ef migrations script <new> <prev>` produces the Down SQL; or `dotnet ef database update <prev>`. The Down path drops indexes → drops `DispatchedAt` columns → drops `DeadLetters`. No data loss except the (empty-at-this-point) DLQ rows. Existing event rows are untouched by rollback since `DispatchedAt` is additive.

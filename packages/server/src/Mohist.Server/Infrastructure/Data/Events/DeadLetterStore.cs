@@ -44,9 +44,8 @@ public sealed class DeadLetterStore : IDeadLetterStore
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.DeadLetters.AsNoTracking()
-            .OrderByDescending(e => e.DeadLetterId)
-            .Take(limit)
             .OrderBy(e => e.DeadLetterId)
+            .Take(limit)
             .ToListAsync(ct);
 
         return rows.Select(ToRecord).ToList();

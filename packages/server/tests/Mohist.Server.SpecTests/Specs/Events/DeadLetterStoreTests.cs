@@ -69,6 +69,46 @@ public sealed class DeadLetterStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ListAsync_WithMoreThanLimit_ReturnsEarliestSliceInAppendOrder()
+    {
+        var records = Enumerable.Range(0, 5)
+            .Select(i => BuildRecord(deadLetteredAt: FirstTime.AddMinutes(i)))
+            .ToList();
+
+        foreach (var record in records)
+        {
+            await _store.WriteAsync(record);
+        }
+
+        var listed = await _store.ListAsync(limit: 3);
+        Assert.Equal(3, listed.Count);
+        AssertRecord(listed[0], records[0]);
+        AssertRecord(listed[1], records[1]);
+        AssertRecord(listed[2], records[2]);
+    }
+
+    [Fact]
+    public async Task ListAsync_DefaultLimit_ReturnsFirstHundredRows()
+    {
+        var records = Enumerable.Range(0, 101)
+            .Select(i => BuildRecord(deadLetteredAt: FirstTime.AddMinutes(i)))
+            .ToList();
+
+        foreach (var record in records)
+        {
+            await _store.WriteAsync(record);
+        }
+
+        var listed = await _store.ListAsync();
+        Assert.Equal(100, listed.Count);
+
+        for (int i = 0; i < 100; i++)
+        {
+            AssertRecord(listed[i], records[i]);
+        }
+    }
+
+    [Fact]
     public void NoopDeadLetterStore_IsUsableFake()
     {
         IDeadLetterStore store = new NoopDeadLetterStore();
