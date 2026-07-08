@@ -1,0 +1,54 @@
+{
+  "project": "mohist-local",
+  "description": "Land a self-driven, self-healing Orleans cluster-singleton event dispatcher that pulls undelivered event rows from all four truth tables each tick, fans them out by type to matching [Subscription] handlers with per-handler retry, dead-letters poison messages, and marks each row delivered — reactivating the dormant cross-aggregate reactions. Re-creates the DeadLetters persistence layer as a prerequisite.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Re-create the DeadLetters persistence layer",
+      "spec": "specs/dead-letter/spec.md#Dead-letter rows queryable",
+      "description": "Re-introduce the DeadLetters persistence layer deleted in ba50c2089. Add a DeadLetterRow entity (PK DeadLetterId; event snapshot Origin/Id/Source/EventId/Type/Time/SpecVersion/Subject/DataContentType/Data/ExtensionsJson; plus FailingHandler/Error/Reason/AttemptCount/DeadLetteredAt) with a DeadLetters DbSet in MohistDbContext (indexes on DeadLetteredAt and (FailingHandler, DeadLetteredAt)), an IDeadLetterStore (WriteAsync / QueryAsync with failing-handler filter / GetAsync by id) backed by DeadLetterStore plus a NoopDeadLetterStore test fake, and one EF migration creating the table. This is a self-contained persistence + query module that the dispatcher (T-002) consumes on poison-message exhaustion and for manual re-delivery.",
+      "acceptanceCriteria": [
+        "DeadLetterRow entity exists and DeadLetters DbSet is registered in MohistDbContext with PK DeadLetterId and indexes HasIndex(DeadLetteredAt) and HasIndex(FailingHandler, DeadLetteredAt).",
+        "A new EF migration creates the DeadLetters table with the above indexes; the migration applies cleanly against MigratedSqliteTemplate and MohistDbContextModelSnapshot is consistent (no model drift).",
+        "IDeadLetterStore is implemented by DeadLetterStore exposing WriteAsync(DeadLetterRow), QueryAsync(string? failingHandler, int limit), GetAsync(long deadLetterId); NoopDeadLetterStore is provided as the test fake and registered via TryAdd so tests can override it.",
+        "WriteAsync persists a row; QueryAsync returns rows (ordered by DeadLetteredAt) and narrows by FailingHandler when the filter is supplied; GetAsync retrieves a single row by DeadLetterId.",
+        "Store tests cover write, query (with and without handler filter), and get-by-id; the server test suite (npm test) is green and TreatWarningsAsErrors stays clean."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Infrastructure/Data/Events/DeadLetterRow.cs, Infrastructure/Events/IDeadLetterStore.cs, Infrastructure/Data/Events/DeadLetterStore.cs, a NoopDeadLetterStore fake, MohistDbContext DeadLetters registration, one new EF migration, and store tests (unit/spec).",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Model the row on the historical shape deleted in ba50c2089, but extend Origin handling to include AgentSession (the historical ParseOrigin only covered WorkflowRun/Issue/Epic). The three migration .Designer.cs snapshots that still reference DeadLetterRow are frozen historical artifacts and do NOT participate in EF diffing — only MohistDbContextModelSnapshot.cs does, and it is clean of DeadLetter, so the new migration will be a clean CreateTable. DispatchedAt already exists on all four event truth tables, so this task touches only the DeadLetters table."
+    },
+    {
+      "id": "T-002",
+      "title": "Implement the self-driven cluster-singleton event dispatcher",
+      "spec": "specs/event-dispatch/spec.md#Cluster-singleton self-waking sole notifier",
+      "description": "Build the sole, self-healing notifier as an Orleans cluster-singleton grain that is a thin shell over a pure-DI fan-out service. Add IDispatcherGrain (IGrainWithStringKey + IRemindable, fixed key \"dispatcher\") that registers a ~1s persisted reminder on activation and delegates ReceiveReminder and PulseAsync to EventDispatcherService.DispatchAsync. EventDispatcherService (silo-container singleton) pulls via IEventStore.ListUndeliveredAsync, fans each event out by type using CloudEventTypeMatcher over the registered IEnumerable<Subscription>, invokes matching DispatchDelegates with per-handler retry (fixed attempt cap, hand-rolled — no Polly), writes a DeadLetterRow and sets DispatchedAt on exhaustion, and marks each row DispatchedAt (from injected TimeProvider) only after all matching handlers settle; processing is serial in (Source, Id) order. Also fix the closed-generic handler discovery bug in the reflection scan, inject TimeProvider into InMemoryEventBus (remove DateTimeOffset.UtcNow), register the service/store/grain in the silo container, and add a RedeliverAsync entry point that re-dispatches a dead-lettered event to its matching handlers.",
+      "acceptanceCriteria": [
+        "IDispatcherGrain (IGrainWithStringKey, IRemindable) and DispatcherGrain exist with fixed key \"dispatcher\"; the grain registers a persisted reminder (~1s, cadence configurable) on activation, and both ReceiveReminder and PulseAsync run exactly one pull–fan-out–mark cycle by delegating to EventDispatcherService.DispatchAsync.",
+        "EventDispatcherService is a plain DI singleton taking IEventStore, IEnumerable<Subscription>, IDeadLetterStore, TimeProvider, ILogger; every DispatchedAt/DeadLetteredAt timestamp is sourced from the injected TimeProvider (no DateTimeOffset.UtcNow in the dispatch path).",
+        "Each tick calls IEventStore.ListUndeliveredAsync (the single UNION over WorkflowRun/Issue/Epic/AgentSession truth tables), processes the batch serially in (Source, Id) order, and applies CloudEventTypeMatcher.Matches(subscription.Type, event.Type) to decide fan-out per subscription.",
+        "Per-handler retry uses a fixed attempt cap: a transient handler failure is retried and, on eventual success, the event is delivered for that handler; when a handler's retries exhaust, a DeadLetterRow (FailingHandler + error + attempt count) is written via IDeadLetterStore and the original event row's DispatchedAt is set so the dispatcher stops retrying it.",
+        "Per-handler isolation holds: when an event matches two handlers and one exhausts, the sibling handler still receives the event independently and its outcome does not depend on the failing handler.",
+        "Per-row DispatchedAt is set only after all matching handlers have settled (succeeded or dead-lettered); no undelivered row is marked before delivery.",
+        "The closed-generic discovery bug in AddCloudEventHandlersFromAssembly is fixed (proper ICloudEventHandler<> closed-generic scan) so EpicAutoDoneHandler and EpicCancelledReconcileHandler are registered and invoked in the fan-out.",
+        "InMemoryEventBus no longer reads DateTimeOffset.UtcNow; it uses an injected TimeProvider for the envelope timestamp.",
+        "RedeliverAsync(deadLetterId) loads the dead-letter row and re-dispatches the event to its matching handlers (fresh dispatch to all matching handlers).",
+        "EventDispatcherService, IDeadLetterStore→DeadLetterStore (with NoopDeadLetterStore via TryAdd), and the dispatcher grain are registered in the silo container (MohistSiloRegistration).",
+        "Unit tests (fake IEventStore + fake/Noop IDeadLetterStore + FakeTimeProvider) cover: pull→match→invoke→mark; per-stream FIFO (Source,Id) ordering with no skip; per-handler retry-then-succeed; exhaustion → dead-letter written + DispatchedAt set + not retried next tick; per-handler isolation; deliver-before-mark crash → row stays undelivered → re-delivered on next tick; CloudEventTypeMatcher fan-out including a closed-generic handler.",
+        "Spec/integration tests (WorkflowGrainFixture or MohistIntegrationFixture) cover: an appended event is delivered after a reminder tick (or Pulse); Pulse triggers an immediate tick; a closed-generic Epic handler is invoked on a matching event.",
+        "Server npm test is green and TreatWarningsAsErrors stays clean."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "IDispatcherGrain.cs, DispatcherGrain.cs, EventDispatcherService.cs (+ IEventDispatcherService if used for the seam), the closed-generic scan fix in CloudEventBusServiceCollectionExtensions.cs, the InMemoryEventBus TimeProvider edit, MohistSiloRegistration silo-container registrations, and unit + spec/integration tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Follow design.md decisions D1–D10. Retry is hand-rolled with a fixed attempt cap and NO backoff/jitter in v1 (D6) — do NOT add Polly (it is not referenced in Directory.Packages.props; the proposal's claim that it is already referenced is false). The grain is a one-line delegator; all logic lives in EventDispatcherService so it is unit-testable with fakes + FakeTimeProvider (D1, per eventbus-v2.md:178-189). Apply CloudEventTypeMatcher explicitly in the fan-out — AddCloudEventHandlersFromAssembly stores Subscription.Type raw and the bus path has no type-matching step today. Reminder service, TimeProvider.System, and AddCloudEventHandlersFromAssembly are already wired in MohistSiloRegistration; grains are convention-discovered (no explicit grain registration needed). For reminder timing in tests, drive ticks via PulseAsync (pure-DI path) and add at most one integration spec asserting the reminder actually fires (WorkflowGrainFixture already exposes a ControllableReminderTable). Producers are NOT wired to call Pulse in this issue (best-effort, follow-up) — only the entry point is exposed."
+    }
+  ]
+}
