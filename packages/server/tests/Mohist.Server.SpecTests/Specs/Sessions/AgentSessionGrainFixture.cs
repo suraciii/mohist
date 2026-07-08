@@ -42,8 +42,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         _keeper = new SqliteConnection(ConnectionString);
         _keeper.Open();
 
-        using (var db = GrainTestConfig.CreateDbContext(ConnectionString))
-            GrainTestConfig.MigrateWithSchemaFix(db);
+        MigratedSqliteTemplate.CopyTo(_keeper);
 
         var builder = new InProcessTestClusterBuilder();
         builder.ConfigureSilo((_, siloBuilder) =>

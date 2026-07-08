@@ -10,6 +10,7 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.SpecTests.Support;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events.Subscriptions;
@@ -100,8 +101,7 @@ internal static class AgentSubscriptionDispatchTestSupport
                 Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning))
             .Options;
         var factory = new TestDbContextFactory(options);
-        using (var db = factory.CreateDbContext())
-            db.Database.Migrate();
+        MigratedSqliteTemplate.CopyTo(connection);
         return new TestDatabase(connection, factory);
     }
 

@@ -30,8 +30,7 @@ public class TaskLogStoreSpecs : IAsyncLifetime
             .Options;
         _store = new TaskLogStore(new Factory(_options), _timeProvider);
 
-        using var db = new MohistDbContext(_options);
-        db.Database.EnsureCreated();
+        MigratedSqliteTemplate.CopyTo(_keeper);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;

@@ -2,12 +2,10 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using Google.Protobuf;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api;
 using Mohist.Server.Otel;
 using Mohist.Server.SpecTests.Support;
-using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;
@@ -17,51 +15,20 @@ namespace Mohist.Server.SpecTests.Specs.Telemetry;
 [Collection("IntegrationTelemetry")]
 public class OtlpRoutesIntegrationSpecs : IAsyncLifetime
 {
-    private const int OtlpPort = 14318;
+    private const int OtlpPort = OtlpRoutesHostFixture.OtlpPort;
     private const string OtlpPath = "/otel/v1/traces";
 
-    private SqliteConnection _keeper = null!;
-    private OtlpRoutesWebApplicationFactory _factory = null!;
-    private string _runnerRoot = null!;
-    private string _systemUpdateStatePath = null!;
-    private string _connectionString = null!;
-    private TestClusterPortAllocator? _portAllocator;
+    private readonly OtlpRoutesHostFixture _fixture;
+    private OtlpRoutesWebApplicationFactory _factory => _fixture.Factory;
 
-    public async Task InitializeAsync()
+    public OtlpRoutesIntegrationSpecs(OtlpRoutesHostFixture fixture)
     {
-        _connectionString = $"Data Source=otel-int-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(_connectionString);
-        await _keeper.OpenAsync();
-
-        _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-otel-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_runnerRoot);
-        _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-otel-{Guid.NewGuid():N}.json");
-
-        _portAllocator = new TestClusterPortAllocator();
-        var (siloPort, gatewayPort) = _portAllocator.AllocateConsecutivePortPairs(1);
-
-        _factory = new OtlpRoutesWebApplicationFactory(
-            _connectionString,
-            _runnerRoot,
-            _systemUpdateStatePath,
-            OtlpPort,
-            siloPort,
-            gatewayPort);
-        await _factory.EnsureSchemaAsync();
-
-        // Force the server to materialize so middleware and routes are
-        // registered (MohistWebApplicationFactory is lazy by default).
-        _ = _factory.Services;
+        _fixture = fixture;
     }
 
-    public async Task DisposeAsync()
-    {
-        _factory?.Dispose();
-        _portAllocator?.Dispose();
-        await _keeper.DisposeAsync();
-        try { if (Directory.Exists(_runnerRoot)) Directory.Delete(_runnerRoot, recursive: true); } catch { }
-        try { if (File.Exists(_systemUpdateStatePath)) File.Delete(_systemUpdateStatePath); } catch { }
-    }
+    public Task InitializeAsync() => _fixture.ResetOtelStateAsync();
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
     public async Task PostValidJson_IngestPayload_Returns200AndEmptyObject()

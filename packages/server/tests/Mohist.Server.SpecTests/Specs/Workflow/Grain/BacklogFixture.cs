@@ -24,8 +24,7 @@ public class BacklogFixture : IAsyncLifetime
         _keeper = new SqliteConnection(connectionString);
         _keeper.Open();
 
-        using (var db = GrainTestConfig.CreateDbContext(connectionString))
-            GrainTestConfig.MigrateWithSchemaFix(db);
+        MigratedSqliteTemplate.CopyTo(_keeper);
 
         var builder = new InProcessTestClusterBuilder();
         builder.Options.InitialSilosCount = 1;

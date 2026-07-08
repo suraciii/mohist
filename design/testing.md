@@ -177,7 +177,7 @@ SpecTests 默认开 `parallelizeTestCollections`（xUnit 默认），按 collect
 - 时间：`Microsoft.Extensions.TimeProvider.Testing.FakeTimeProvider`，注册进 `GrainTestConfig` / `MohistIntegrationFixture`（`MohistIntegrationFixture` 已注入 fake time，默认起点 `2026-06-30`）。
 - HTTP：`WebApplicationFactory<Program>` + `TestServer`，客户端走 `HttpClient`，不经真网络。
 - Grain：`InProcessTestCluster`（`WorkflowGrainFixture` 等），`ControllableReminderTable` 做确定性 reminder 控制。
-- DB：in-memory shared-cache SQLite + keeper 连接。`MohistDbFixture` 用于 DI + EF，`MohistIntegrationFixture` 用于全栈。
+- DB：in-memory shared-cache SQLite + keeper 连接。`MohistDbFixture` 用于 DI + EF，`MohistIntegrationFixture` 用于全栈。schema 一律从 `MigratedSqliteTemplate.CopyTo`（进程级迁移模板的 backup 克隆，毫秒级）取得，**不要在测试里重跑 `Database.Migrate()` / `EnsureCreated()`**；例外是验证迁移本身的 `*MigrationSpecs` 与 `DatabaseInitializationSpecs`，它们必须走真实 `Migrate()`。
 - 第三方端口：`FakeGitService`、`FakeRunnerWorkspaceClient`、`RecordingRunnerHubContext`、`RecordingIEventPublisher`、`InMemoryStateStore`、`NoopEventStore`。
 - 测试数据：`Support/TestData/*` 工厂，**禁止在 fixture 里用 `DateTime.UtcNow` / `Guid.NewGuid` 造可被断言的数据**。
 
