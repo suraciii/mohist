@@ -2,21 +2,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
 import { RuntimeToastHost, useRuntimeToast } from '../../../shared/ui/toast'
 
-const mockUseNavigate = vi.fn()
-
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useNavigate: () => mockUseNavigate,
-  }
-})
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="current-path">{location.pathname}{location.search}</div>
+}
 
 const mockUseIssueDiff = vi.fn()
 const mockUseIssueCommits = vi.fn()
@@ -108,6 +103,7 @@ function renderPage() {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/issues/14']}>
         <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
+          <LocationProbe />
           <Routes>
             <Route path="/issues/:number" element={<IssueDetailPage />} />
           </Routes>
@@ -528,6 +524,7 @@ function renderPageWithToastHost() {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/issues/14']}>
         <ProjectProvider initialProjects={projects} initialProjectId="proj-1">
+          <LocationProbe />
           <RuntimeToastHost>
             <Routes>
               <Route path="/issues/:number" element={<IssueDetailPage />} />
@@ -1104,9 +1101,7 @@ describe('IssueDetailPage Ask Agent entry (T-005)', () => {
     const button = await waitFor(() => screen.getByTestId('ask-agent-issue'))
     fireEvent.click(button)
 
-    expect(mockUseNavigate).toHaveBeenCalledWith(
-      expect.stringContaining('/agent-sessions/new?issue=14'),
-    )
+    expect(screen.getByTestId('current-path').textContent).toContain('/agent-sessions/new?issue=14')
   })
 
   it('uses encodeURIComponent for the issue number in the navigation URL', async () => {
@@ -1121,8 +1116,7 @@ describe('IssueDetailPage Ask Agent entry (T-005)', () => {
     const button = await waitFor(() => screen.getByTestId('ask-agent-issue'))
     fireEvent.click(button)
 
-    const callArg = mockUseNavigate.mock.calls[0][0] as string
-    expect(callArg).toMatch(/\/agent-sessions\/new\?issue=14(&|$)/)
+    expect(screen.getByTestId('current-path').textContent).toMatch(/\/agent-sessions\/new\?issue=14(&|$)/)
   })
 })
 

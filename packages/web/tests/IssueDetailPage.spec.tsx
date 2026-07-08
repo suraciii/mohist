@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { baseRender, screen, fireEvent, waitFor, within } from './test-utils'
 import { IssueDetailPage } from '../src/pages/issue-detail/ui/IssueDetailPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import React from 'react'
 import { IssueHealth, WorkflowStage } from '../src/entities/issue'
 
@@ -11,8 +11,6 @@ const mocks = vi.hoisted(() => {
   return {
     issue: null as any,
     agentStatus: null as any,
-    params: { number: '1' },
-    navigate: vi.fn(),
     addCommentMutation: {
       mutate: vi.fn(),
       mutateAsync: vi.fn(),
@@ -36,15 +34,6 @@ const mocks = vi.hoisted(() => {
     updateIssueWorkflowProfileMutate: vi.fn(),
     updateIssueWorkflowProfileMutateAsync: vi.fn(),
     updateIssueWorkflowProfileIsPending: false,
-  }
-})
-
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
-  return {
-    ...actual,
-    useParams: () => mocks.params,
-    useNavigate: () => mocks.navigate,
   }
 })
 
@@ -166,7 +155,6 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.issue = null
   mocks.agentStatus = { activeAgents: [], maxConcurrentAgents: 3 }
-  mocks.params = { number: '1' }
   mocks.workflowProfile = null
   mocks.workflowProfileLoading = false
   mocks.workflowProfileError = null
@@ -233,7 +221,11 @@ function fileList(files: File[]) {
 function renderWithQueryClient(ui: React.ReactElement) {
   return baseRender(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={['/issues/1']}>
+        <Routes>
+          <Route path="/issues/:number" element={ui} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }

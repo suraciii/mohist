@@ -13,7 +13,6 @@ const sessionPageMocks = vi.hoisted(() => ({
   turns: null as SessionTurn[] | null,
   detailError: null as Error | null,
   detailPending: false,
-  params: { number: '123', sessionName: 'session-123' },
   workflowRunSessions: [] as Array<{
     id: string
     sessionName: string
@@ -21,14 +20,6 @@ const sessionPageMocks = vi.hoisted(() => ({
     createdAt: string
   }>,
 }))
-
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
-  return {
-    ...actual,
-    useParams: () => sessionPageMocks.params,
-  }
-})
 
 vi.mock('../../../entities/coder-session/model/useCoderSessions', () => ({
   useCoderSessions: () => ({ sessions: sessionPageMocks.sessions, isLoading: sessionPageMocks.sessionsLoading }),
@@ -79,7 +70,6 @@ beforeEach(() => {
   sessionPageMocks.turns = null
   sessionPageMocks.detailError = null
   sessionPageMocks.detailPending = false
-  sessionPageMocks.params = { number: '123', sessionName: 'session-123' }
   sessionPageMocks.workflowRunSessions = []
   Element.prototype.scrollTo = vi.fn()
 })
