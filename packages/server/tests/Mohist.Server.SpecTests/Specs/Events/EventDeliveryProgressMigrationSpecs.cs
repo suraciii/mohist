@@ -1,9 +1,11 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using System.IO;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Migrations;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -67,6 +69,32 @@ public class EventDeliveryProgressMigrationSpecs
         await AssertHasPartialUndeliveredIndexAsync(database.Connection, "EpicEvents");
         Assert.True(await TableExistsAsync(database.Connection, "DeadLetters"));
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void Migration_Down_DropsDeadLettersBeforeDispatchedAtColumns_AndHasNoBackfill()
+    {
+        var source = File.ReadAllText(MigrationSourcePath);
+
+        var dropTableIndex = source.IndexOf("migrationBuilder.DropTable(", StringComparison.Ordinal);
+        var deadLettersNameIndex = source.IndexOf("name: \"DeadLetters\"", dropTableIndex, StringComparison.Ordinal);
+        var dropWorkflowColumnIndex = source.IndexOf("migrationBuilder.DropColumn(", dropTableIndex, StringComparison.Ordinal);
+
+        Assert.True(dropTableIndex >= 0, "Expected Down() to drop DeadLetters.");
+        Assert.True(deadLettersNameIndex > dropTableIndex, "Expected DropTable to target DeadLetters.");
+        Assert.True(dropWorkflowColumnIndex > deadLettersNameIndex,
+            "Expected DeadLetters to be dropped before DispatchedAt columns.");
+
+        Assert.DoesNotContain("migrationBuilder.UpdateData(", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("UPDATE ", source, StringComparison.Ordinal);
+    }
+
+    private static string MigrationSourcePath => Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory,
+        "..", "..", "..", "..", "..",
+        "src", "Mohist.Server", "Infrastructure", "Data", "Migrations",
+        "20260708015352_AddEventDeliveryProgressAndDeadLetters.cs"));
 
     private static async Task AssertHasPartialUndeliveredIndexAsync(SqliteConnection connection, string tableName)
     {

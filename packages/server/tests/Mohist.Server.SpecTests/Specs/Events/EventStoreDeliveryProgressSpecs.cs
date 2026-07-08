@@ -101,6 +101,29 @@ public class EventStoreDeliveryProgressSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MarkDispatchedAsync_ThrowsWhenRowIsMissing()
+    {
+        var markAt = new DateTimeOffset(2026, 7, 2, 0, 0, 0, TimeSpan.Zero);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _store.MarkDispatchedAsync("/mohist/workflow-runs/wr_missing", 42, markAt));
+
+        Assert.Contains("wr_missing", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("42", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MarkDispatchedAsync_ThrowsWhenSourceIsUnrecognized()
+    {
+        var markAt = new DateTimeOffset(2026, 7, 2, 0, 0, 0, TimeSpan.Zero);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+            _store.MarkDispatchedAsync("/mohist/unknown/entity_1", 1, markAt));
+
+        Assert.Equal("source", ex.ParamName);
+    }
+
+    [Fact]
     public async Task ListUndeliveredAsync_ReturnsRowsFromAllThreeTables()
     {
         await _store.AppendAsync(BuildEvent("/mohist/workflow-runs/wr_1", "com.mohist.workflow.task.completed"));

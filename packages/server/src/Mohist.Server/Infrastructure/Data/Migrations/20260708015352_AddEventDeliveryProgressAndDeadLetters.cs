@@ -119,6 +119,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 name: "IX_EpicEvents_Undelivered",
                 table: "EpicEvents");
 
+            migrationBuilder.DropTable(
+                name: "DeadLetters");
+
             migrationBuilder.DropColumn(
                 name: "DispatchedAt",
                 table: "WorkflowRunEvents");
@@ -130,9 +133,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             migrationBuilder.DropColumn(
                 name: "DispatchedAt",
                 table: "EpicEvents");
-
-            migrationBuilder.DropTable(
-                name: "DeadLetters");
         }
     }
 }

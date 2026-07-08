@@ -170,20 +170,27 @@ public class EventStore : IEventStore
         if (source.StartsWith(IssueEventPersistence.SourcePrefix, StringComparison.Ordinal))
         {
             var row = await db.IssueEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
-            if (row is null) return;
+            if (row is null)
+                throw new InvalidOperationException($"Issue event '{source}'/{id} was not found.");
             row.DispatchedAt = dispatchedAt;
         }
         else if (source.StartsWith(EpicEventPersistence.SourcePrefix, StringComparison.Ordinal))
         {
             var row = await db.EpicEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
-            if (row is null) return;
+            if (row is null)
+                throw new InvalidOperationException($"Epic event '{source}'/{id} was not found.");
+            row.DispatchedAt = dispatchedAt;
+        }
+        else if (source.StartsWith(WorkflowRunEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        {
+            var row = await db.WorkflowRunEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+            if (row is null)
+                throw new InvalidOperationException($"Workflow run event '{source}'/{id} was not found.");
             row.DispatchedAt = dispatchedAt;
         }
         else
         {
-            var row = await db.WorkflowRunEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
-            if (row is null) return;
-            row.DispatchedAt = dispatchedAt;
+            throw new ArgumentException($"Unrecognized event source '{source}'.", nameof(source));
         }
 
         await db.SaveChangesAsync(ct);
