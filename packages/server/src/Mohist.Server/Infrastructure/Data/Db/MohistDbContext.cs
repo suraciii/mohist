@@ -53,6 +53,7 @@ public class MohistDbContext : DbContext
     public DbSet<AgentSubscriptionRow> AgentSubscriptions { get; set; } = null!;
     public DbSet<IssueEventRow> IssueEvents { get; set; } = null!;
     public DbSet<EpicEventRow> EpicEvents { get; set; } = null!;
+    public DbSet<DeadLetterRow> DeadLetters { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
     public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
@@ -197,6 +198,60 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_AgentSessions_LabelAgentLaunchIssueNumber");
             entity.HasIndex(e => e.LabelAgentLaunchEpicNumber)
                 .HasDatabaseName("IX_AgentSessions_LabelAgentLaunchEpicNumber");
+        });
+
+        modelBuilder.Entity<DeadLetterRow>(entity =>
+        {
+            entity.ToTable("DeadLetters");
+            entity.HasKey(e => e.DeadLetterId);
+            entity.Property(e => e.DeadLetterId)
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.Origin)
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(e => e.Id).IsRequired();
+            entity.Property(e => e.Source)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.EventId)
+                .HasMaxLength(128)
+                .IsRequired();
+            entity.Property(e => e.Type)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.SpecVersion)
+                .HasMaxLength(16)
+                .IsRequired();
+            entity.Property(e => e.Subject)
+                .HasMaxLength(256);
+            entity.Property(e => e.DataContentType)
+                .HasMaxLength(64)
+                .IsRequired();
+            entity.Property(e => e.Data)
+                .IsRequired()
+                .HasColumnType("JSON")
+                .HasConversion(
+                    data => data.GetRawText(),
+                    json => JsonDocument.Parse(json).RootElement.Clone());
+            entity.Property(e => e.ExtensionsJson)
+                .HasColumnType("JSON")
+                .HasConversion(
+                    json => json,
+                    raw => raw);
+            entity.Property(e => e.Time)
+                .IsRequired();
+            entity.Property(e => e.FailingHandler)
+                .HasMaxLength(512)
+                .IsRequired();
+            entity.Property(e => e.ErrorMessage)
+                .IsRequired();
+            entity.Property(e => e.ErrorStack);
+            entity.Property(e => e.AttemptCount)
+                .IsRequired();
+            entity.Property(e => e.DeadLetteredAt)
+                .IsRequired();
+            entity.HasIndex(e => e.DeadLetteredAt);
+            entity.HasIndex(e => new { e.FailingHandler, e.DeadLetteredAt });
         });
 
         modelBuilder.Entity<AgentSessionTranscriptTurnRow>(entity =>

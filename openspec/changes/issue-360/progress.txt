@@ -4,3 +4,5 @@
 - `MarkDispatchedAsync` routes by event source prefix (`/mohist/issues/`, `/mohist/epics/`, otherwise workflow runs) and updates only the matching `(Source, Id)` row; missing rows are treated as no-op.
 - The first partial-index usage in the repo is on the three event tables in `MohistDbContext` with `.HasFilter("\"DispatchedAt\" IS NULL")` and explicit names `IX_<Table>_Undelivered`.
 - Event-store delivery-progress tests use in-memory shared-cache SQLite plus `EnsureCreated`, not migrations, so T-001 can verify model behavior before the unified migration task lands.
+- `IDeadLetterStore` is registered from `AddCloudEventBus()`, which is already called by both `MohistServiceRegistration` and `MohistSiloRegistration`; this keeps dead-letter DI aligned with the event-bus composition point without duplicating registration in both roots.
+- `DeadLetterStore.ListAsync` follows the repo's usual newest-N query shape: take descending by time/id to honor limit, then re-order ascending for stable chronological inspection output.
