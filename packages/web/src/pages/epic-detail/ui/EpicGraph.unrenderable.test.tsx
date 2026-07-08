@@ -62,14 +62,6 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
   }
 })
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useNavigate: () => vi.fn(),
-  }
-})
-
 vi.mock('../../../widgets/epic-dependency-graph', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../widgets/epic-dependency-graph')>()
   const { useEffect: useEffectMock, createElement } = await import('react')
