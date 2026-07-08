@@ -1,191 +1,215 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
+import { toast } from 'sonner'
 import {
-  useCreateLabelDefinition,
-  useDeleteLabelDefinition,
-  useLabelCatalog,
-  useUpdateLabelDefinition,
+  catalogQueryKey,
+  createLabelDefinitionMutationOptions,
+  deleteLabelDefinitionMutationOptions,
+  labelCatalogQueryOptions,
+  updateLabelDefinitionMutationOptions,
 } from './queries'
 
-const useQueryMock = vi.fn()
-const useMutationMock = vi.fn()
-const useQueryClientMock = vi.fn()
-const useProjectMock = vi.fn()
-const getLabelCatalogMock = vi.fn()
-const createLabelDefinitionMock = vi.fn()
-const updateLabelDefinitionMock = vi.fn()
-const deleteLabelDefinitionMock = vi.fn()
-const invalidateQueriesMock = vi.fn()
+const CATALOG_DTO = [
+  { key: 'module', description: 'subsystem', supportedValues: null },
+]
 
-vi.mock('@tanstack/react-query', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@tanstack/react-query')>()
-  return {
-    ...actual,
-    useQuery: (...args: unknown[]) => useQueryMock(...args),
-    useMutation: (...args: unknown[]) => useMutationMock(...args),
-    useQueryClient: () => useQueryClientMock(),
-  }
+function recordCatalogRequests() {
+  const requests: { method: string; url: string; body: unknown }[] = []
+  server.use(
+    http.get('*/api/projects/:projectId/labels/catalog', ({ request }) => {
+      requests.push({ method: request.method, url: request.url, body: null })
+      return HttpResponse.json({ success: true, data: CATALOG_DTO })
+    }),
+    http.post('*/api/projects/:projectId/labels/catalog', async ({ request }) => {
+      requests.push({
+        method: request.method,
+        url: request.url,
+        body: await request.json(),
+      })
+      return HttpResponse.json({
+        success: true,
+        data: { key: 'module', description: 'subsystem', supportedValues: null },
+      })
+    }),
+    http.patch('*/api/projects/:projectId/labels/catalog/:key', async ({ request }) => {
+      requests.push({
+        method: request.method,
+        url: request.url,
+        body: await request.json(),
+      })
+      return HttpResponse.json({
+        success: true,
+        data: { key: 'module', description: 'new', supportedValues: null },
+      })
+    }),
+    http.delete('*/api/projects/:projectId/labels/catalog/:key', ({ request }) => {
+      requests.push({ method: request.method, url: request.url, body: null })
+      return new HttpResponse(null, { status: 204 })
+    }),
+  )
+  return requests
+}
+
+useMswServer()
+
+function createInvalidationClient() {
+  return { invalidateQueries: vi.fn() }
+}
+
+describe('catalogQueryKey', () => {
+  it('scopes the key to the project', () => {
+    expect(catalogQueryKey('proj-1')).toEqual(['label-catalog', 'proj-1'])
+  })
 })
 
-vi.mock('../../project/@x/project-context', () => ({
-  useProject: () => useProjectMock(),
-}))
-
-vi.mock('./client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./client')>()
-  return {
-    ...actual,
-    getLabelCatalog: (...args: unknown[]) => getLabelCatalogMock(...args),
-    createLabelDefinition: (...args: unknown[]) => createLabelDefinitionMock(...args),
-    updateLabelDefinition: (...args: unknown[]) => updateLabelDefinitionMock(...args),
-    deleteLabelDefinition: (...args: unknown[]) => deleteLabelDefinitionMock(...args),
-  }
-})
-
-beforeEach(() => {
-  useQueryMock.mockReset()
-  useMutationMock.mockReset()
-  useProjectMock.mockReset()
-  getLabelCatalogMock.mockReset()
-  createLabelDefinitionMock.mockReset()
-  updateLabelDefinitionMock.mockReset()
-  deleteLabelDefinitionMock.mockReset()
-  invalidateQueriesMock.mockReset()
-  useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-  useQueryClientMock.mockReturnValue({ invalidateQueries: invalidateQueriesMock })
-  useQueryMock.mockReturnValue({ data: [], isLoading: false })
-  getLabelCatalogMock.mockResolvedValue([])
-})
-
-describe('useLabelCatalog', () => {
+describe('labelCatalogQueryOptions', () => {
   it('uses a project-scoped query key', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-
-    useLabelCatalog()
-
-    const config = useQueryMock.mock.calls[0][0]
-    expect(config.queryKey).toEqual(['label-catalog', 'proj-1'])
+    expect(labelCatalogQueryOptions('proj-1').queryKey).toEqual(['label-catalog', 'proj-1'])
   })
 
-  it('invokes getLabelCatalog(projectId) as the query function', async () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-    getLabelCatalogMock.mockResolvedValue([])
+  it('fetches the project labels catalog endpoint', async () => {
+    const requests = recordCatalogRequests()
 
-    useLabelCatalog()
+    const data = await labelCatalogQueryOptions('proj-1').queryFn()
 
-    const config = useQueryMock.mock.calls[0][0]
-    await config.queryFn()
-    expect(getLabelCatalogMock).toHaveBeenCalledWith('proj-1')
+    expect(requests.map((r) => r.method + ' ' + new URL(r.url).pathname)).toEqual([
+      'GET /api/projects/proj-1/labels/catalog',
+    ])
+    expect(data).toEqual(CATALOG_DTO)
+  })
+
+  it('is enabled when projectId is present', () => {
+    expect(labelCatalogQueryOptions('proj-1').enabled).toBe(true)
   })
 
   it('is disabled when projectId is missing', () => {
-    useProjectMock.mockReturnValue({ projectId: null })
-
-    useLabelCatalog()
-
-    const config = useQueryMock.mock.calls[0][0]
-    expect(config.enabled).toBe(false)
+    expect(labelCatalogQueryOptions(null).enabled).toBe(false)
+    expect(labelCatalogQueryOptions(undefined).enabled).toBe(false)
   })
 })
 
-describe('useCreateLabelDefinition', () => {
-  it('passes the input through to createLabelDefinition for the active project', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+describe('createLabelDefinitionMutationOptions', () => {
+  it('POSTs the label input to the project catalog endpoint', async () => {
+    const requests = recordCatalogRequests()
 
-    useCreateLabelDefinition()
-
-    const config = useMutationMock.mock.calls[0][0]
-    config.mutationFn({ key: 'module', description: 'subsystem' })
-
-    expect(createLabelDefinitionMock).toHaveBeenCalledWith('proj-1', {
+    await createLabelDefinitionMutationOptions('proj-1', createInvalidationClient()).mutationFn({
       key: 'module',
       description: 'subsystem',
     })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0].method).toBe('POST')
+    expect(new URL(requests[0].url).pathname).toBe('/api/projects/proj-1/labels/catalog')
+    expect(requests[0].body).toEqual({ key: 'module', description: 'subsystem' })
   })
 
   it('rejects when projectId is missing', () => {
-    useProjectMock.mockReturnValue({ projectId: null })
-
-    useCreateLabelDefinition()
-
-    const config = useMutationMock.mock.calls[0][0]
-    expect(() => config.mutationFn({ key: 'module', description: 'x' })).toThrow(
+    const options = createLabelDefinitionMutationOptions(null, createInvalidationClient())
+    expect(() => options.mutationFn({ key: 'module', description: 'x' })).toThrow(
       'Project is required',
     )
   })
 
   it('invalidates the catalog query on success', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-
-    useCreateLabelDefinition()
-
-    const config = useMutationMock.mock.calls[0][0]
-    config.onSuccess()
-
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({
+    const qc = createInvalidationClient()
+    createLabelDefinitionMutationOptions('proj-1', qc).onSuccess()
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ['label-catalog', 'proj-1'],
     })
   })
+
+  it('toasts "Label definition added" on success', () => {
+    createLabelDefinitionMutationOptions('proj-1', createInvalidationClient()).onSuccess()
+    expect(toast.success).toHaveBeenCalledWith('Label definition added')
+  })
+
+  it('toasts the error message on failure', () => {
+    createLabelDefinitionMutationOptions('proj-1', createInvalidationClient()).onError(
+      new Error('duplicate key'),
+    )
+    expect(toast.error).toHaveBeenCalledWith('duplicate key')
+  })
+
+  it('falls back to "Failed to add label definition" on empty error message', () => {
+    createLabelDefinitionMutationOptions('proj-1', createInvalidationClient()).onError(
+      new Error(''),
+    )
+    expect(toast.error).toHaveBeenCalledWith('Failed to add label definition')
+  })
 })
 
-describe('useUpdateLabelDefinition', () => {
-  it('passes the key + patch to updateLabelDefinition', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+describe('updateLabelDefinitionMutationOptions', () => {
+  it('PATCHes the key + patch to the project catalog endpoint', async () => {
+    const requests = recordCatalogRequests()
 
-    useUpdateLabelDefinition()
-
-    const config = useMutationMock.mock.calls[0][0]
-    config.mutationFn({ key: 'module', patch: { description: 'new' } })
-
-    expect(updateLabelDefinitionMock).toHaveBeenCalledWith('proj-1', 'module', {
-      description: 'new',
+    await updateLabelDefinitionMutationOptions('proj-1', createInvalidationClient()).mutationFn({
+      key: 'module',
+      patch: { description: 'new' },
     })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0].method).toBe('PATCH')
+    expect(new URL(requests[0].url).pathname).toBe('/api/projects/proj-1/labels/catalog/module')
+    expect(requests[0].body).toEqual({ description: 'new' })
   })
 
   it('invalidates the catalog query on success', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-
-    useUpdateLabelDefinition()
-
-    const config = useMutationMock.mock.calls[0][0]
-    config.onSuccess()
-
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({
+    const qc = createInvalidationClient()
+    updateLabelDefinitionMutationOptions('proj-1', qc).onSuccess()
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ['label-catalog', 'proj-1'],
     })
   })
+
+  it('toasts "Label definition updated" on success', () => {
+    updateLabelDefinitionMutationOptions('proj-1', createInvalidationClient()).onSuccess()
+    expect(toast.success).toHaveBeenCalledWith('Label definition updated')
+  })
+
+  it('falls back to "Failed to update label definition" on empty error message', () => {
+    updateLabelDefinitionMutationOptions('proj-1', createInvalidationClient()).onError(
+      new Error(''),
+    )
+    expect(toast.error).toHaveBeenCalledWith('Failed to update label definition')
+  })
 })
 
-describe('useDeleteLabelDefinition', () => {
-  it('passes the key to deleteLabelDefinition', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+describe('deleteLabelDefinitionMutationOptions', () => {
+  it('DELETEs the key from the project catalog endpoint', async () => {
+    const requests = recordCatalogRequests()
 
-    useDeleteLabelDefinition()
+    await deleteLabelDefinitionMutationOptions('proj-1', createInvalidationClient()).mutationFn(
+      'module',
+    )
 
-    const config = useMutationMock.mock.calls[0][0]
-    config.mutationFn('module')
-
-    expect(deleteLabelDefinitionMock).toHaveBeenCalledWith('proj-1', 'module')
+    expect(requests).toHaveLength(1)
+    expect(requests[0].method).toBe('DELETE')
+    expect(new URL(requests[0].url).pathname).toBe('/api/projects/proj-1/labels/catalog/module')
   })
 
   it('rejects when projectId is missing', () => {
-    useProjectMock.mockReturnValue({ projectId: null })
-
-    useDeleteLabelDefinition()
-
-    const config = useMutationMock.mock.calls[0][0]
-    expect(() => config.mutationFn('module')).toThrow('Project is required')
+    const options = deleteLabelDefinitionMutationOptions(null, createInvalidationClient())
+    expect(() => options.mutationFn('module')).toThrow('Project is required')
   })
 
   it('invalidates the catalog query on success', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
-
-    useDeleteLabelDefinition()
-
-    const config = useMutationMock.mock.calls[0][0]
-    config.onSuccess()
-
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({
+    const qc = createInvalidationClient()
+    deleteLabelDefinitionMutationOptions('proj-1', qc).onSuccess()
+    expect(qc.invalidateQueries).toHaveBeenCalledWith({
       queryKey: ['label-catalog', 'proj-1'],
     })
+  })
+
+  it('toasts "Label definition removed" on success', () => {
+    deleteLabelDefinitionMutationOptions('proj-1', createInvalidationClient()).onSuccess()
+    expect(toast.success).toHaveBeenCalledWith('Label definition removed')
+  })
+
+  it('falls back to "Failed to remove label definition" on empty error message', () => {
+    deleteLabelDefinitionMutationOptions('proj-1', createInvalidationClient()).onError(
+      new Error(''),
+    )
+    expect(toast.error).toHaveBeenCalledWith('Failed to remove label definition')
   })
 })
