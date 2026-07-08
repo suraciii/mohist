@@ -1,32 +1,38 @@
 import { useEffect } from 'react'
 import Markdown from 'react-markdown'
 import { Button } from '@/shared/ui/components/button'
+import { statusTreatment, type StatusTreatment } from '@/shared/status-presentation'
 import type { ReviewOutput } from './ReviewSummary'
 
+const REVIEW_STATE_BY_CLASSIFIED = {
+  PASS: { kind: 'workflow-run' as const, state: 'completed' },
+  FAIL: { kind: 'workflow-run' as const, state: 'failed' },
+  UNKNOWN: { kind: 'workflow-run' as const, state: 'pending' },
+}
+
 export function ResultBadge({ classified }: { classified: 'PASS' | 'FAIL' | 'UNKNOWN' }) {
-  if (classified === 'PASS') {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-sm font-semibold text-green-800">
+  const binding = REVIEW_STATE_BY_CLASSIFIED[classified]
+  const treatment: StatusTreatment = statusTreatment(binding.kind, binding.state)
+  const Icon = classified === 'PASS'
+    ? () => (
         <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
         </svg>
-        PASS
-      </span>
-    )
-  }
-  if (classified === 'FAIL') {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-800">
+      )
+    : () => (
         <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
         </svg>
-        FAIL
-      </span>
-    )
-  }
+      )
+  const label = classified === 'UNKNOWN' ? 'REVIEW' : classified
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1 text-sm font-semibold text-gray-700">
-      REVIEW
+    <span
+      data-testid={`review-result-${classified.toLowerCase()}`}
+      data-family={treatment.family}
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${treatment.container}`}
+    >
+      <Icon />
+      {label}
     </span>
   )
 }

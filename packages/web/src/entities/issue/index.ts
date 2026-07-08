@@ -11,6 +11,7 @@ export type { DeliveryTimeMetricsResponse, DeliveryTimePointDto } from './api/de
 export { fetchStageDuration, stageDurationQueryKey, useStageDuration } from './api/stage-duration'
 export type { StageDurationMetricsResponse, StageDurationMetricsWindow, StageDurationStageDto, StageDurationWaitBreakoutDto } from './api/stage-duration'
 export { statusBadge, statusLabel } from './lib/status-badge'
+export { attentionItemTreatment, attentionSummaryTreatment } from './lib/attention-treatment'
 export { deriveCompletionSnapshot, useCompletionSnapshot } from './lib/completion-snapshot'
 export type { CompletionSnapshot } from './lib/completion-snapshot'
 export { deriveRecentDigest, useRecentDigest, DIGEST_TOP_N } from './lib/recent-digest'

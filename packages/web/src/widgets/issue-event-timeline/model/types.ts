@@ -1,3 +1,5 @@
+import { statusTreatment, type StatusTreatment } from '@/shared/status-presentation'
+
 export type TimelineCategory = 'workflow' | 'approval' | 'integration' | 'success' | 'failure' | 'metadata'
 
 export type TimelineSource = 'ISSUE' | 'WORKFLOW'
@@ -16,6 +18,7 @@ export interface TimelineEntry {
 }
 
 export interface CategoryStyle {
+  container: string
   dot: string
   accentDot: string
   bg: string
@@ -24,55 +27,32 @@ export interface CategoryStyle {
   label: string
 }
 
-const NEUTRAL_DOT = 'bg-gray-300'
+function buildCategoryStyle(treatment: StatusTreatment, label: string): CategoryStyle {
+  return {
+    container: treatment.container,
+    bg: treatment.container.split(' ')[0]!,
+    dot: treatment.dot,
+    accentDot: treatment.dot,
+    text: treatment.text,
+    border: treatment.border,
+    label,
+  }
+}
+
+const CATEGORY_TREATMENTS: Record<TimelineCategory, StatusTreatment> = {
+  workflow: statusTreatment('workflow-run', 'running'),
+  approval: statusTreatment('approval', 'awaiting'),
+  integration: statusTreatment('workflow-run', 'running'),
+  success: statusTreatment('workflow-run', 'completed'),
+  failure: statusTreatment('severity', 'ERROR'),
+  metadata: statusTreatment('severity', 'DEBUG'),
+}
 
 export const CATEGORY_STYLES: Record<TimelineCategory, CategoryStyle> = {
-  workflow: {
-    dot: NEUTRAL_DOT,
-    accentDot: NEUTRAL_DOT,
-    bg: 'bg-gray-100',
-    text: 'text-gray-600',
-    border: 'border-gray-200',
-    label: 'Workflow',
-  },
-  approval: {
-    dot: NEUTRAL_DOT,
-    accentDot: NEUTRAL_DOT,
-    bg: 'bg-gray-100',
-    text: 'text-gray-600',
-    border: 'border-gray-200',
-    label: 'Approval',
-  },
-  integration: {
-    dot: NEUTRAL_DOT,
-    accentDot: NEUTRAL_DOT,
-    bg: 'bg-gray-100',
-    text: 'text-gray-600',
-    border: 'border-gray-200',
-    label: 'Integration',
-  },
-  success: {
-    dot: NEUTRAL_DOT,
-    accentDot: NEUTRAL_DOT,
-    bg: 'bg-gray-100',
-    text: 'text-gray-600',
-    border: 'border-gray-200',
-    label: 'Success',
-  },
-  failure: {
-    dot: 'bg-red-500',
-    accentDot: 'bg-red-500',
-    bg: 'bg-red-50',
-    text: 'text-red-700',
-    border: 'border-red-200',
-    label: 'Failure',
-  },
-  metadata: {
-    dot: NEUTRAL_DOT,
-    accentDot: NEUTRAL_DOT,
-    bg: 'bg-gray-100',
-    text: 'text-gray-600',
-    border: 'border-gray-200',
-    label: 'Metadata',
-  },
+  workflow: buildCategoryStyle(CATEGORY_TREATMENTS.workflow, 'Workflow'),
+  approval: buildCategoryStyle(CATEGORY_TREATMENTS.approval, 'Approval'),
+  integration: buildCategoryStyle(CATEGORY_TREATMENTS.integration, 'Integration'),
+  success: buildCategoryStyle(CATEGORY_TREATMENTS.success, 'Success'),
+  failure: buildCategoryStyle(CATEGORY_TREATMENTS.failure, 'Failure'),
+  metadata: buildCategoryStyle(CATEGORY_TREATMENTS.metadata, 'Metadata'),
 }

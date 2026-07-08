@@ -99,6 +99,7 @@ describe('deriveAttentionItems — approval-pending rule', () => {
     ], NO_AGENT)
 
     expect(items).toEqual([{
+      kind: 'approval-needed',
       issueNumber: 11,
       issueId: 'await-1',
       label: 'Approval needed',
@@ -143,6 +144,7 @@ describe('deriveAttentionItems — integrate-failure rule', () => {
     ], NO_AGENT)
 
     expect(items).toEqual([{
+      kind: 'integration-failed',
       issueNumber: 21,
       issueId: 'int-block-1',
       label: 'Integration failed',
@@ -162,6 +164,7 @@ describe('deriveAttentionItems — integrate-failure rule', () => {
     ], NO_AGENT)
 
     expect(items).toEqual([{
+      kind: 'integration-failed',
       issueNumber: 22,
       issueId: 'int-int-1',
       label: 'Integration failed',
@@ -183,6 +186,7 @@ describe('deriveAttentionItems — interrupted rule (non-integrate)', () => {
     ], NO_AGENT)
 
     expect(items).toEqual([{
+      kind: 'interrupted',
       issueNumber: 31,
       issueId: 'int-build-1',
       label: 'Interrupted',
@@ -205,6 +209,7 @@ describe('deriveAttentionItems — blocked rule with blockedReason fallback', ()
     ], NO_AGENT)
 
     expect(items).toEqual([{
+      kind: 'blocked',
       issueNumber: 41,
       issueId: 'blk-1',
       label: 'Needs action',
@@ -224,6 +229,7 @@ describe('deriveAttentionItems — blocked rule with blockedReason fallback', ()
     ], NO_AGENT)
 
     expect(items).toEqual([{
+      kind: 'blocked',
       issueNumber: 42,
       issueId: 'blk-2',
       label: 'Needs action',
@@ -250,6 +256,7 @@ describe('deriveAttentionItems — first match wins', () => {
 
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({
+      kind: 'approval-needed',
       issueId: 'multi-1',
       label: 'Approval needed',
     })
@@ -392,6 +399,7 @@ describe('deriveAttentionItems — output typing and signature', () => {
     ], NO_AGENT)
 
     expect(Array.isArray(items)).toBe(true)
+    expect(items[0]?.kind).toBe('blocked')
     expect(items[0]?.label).toBe('Needs action')
   })
 

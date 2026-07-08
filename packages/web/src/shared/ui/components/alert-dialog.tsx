@@ -1,6 +1,5 @@
 import * as React from "react"
 
-import { cn } from "@/shared/lib/utils"
 import { Button } from "@/shared/ui/components/button"
 import {
   Dialog,
@@ -47,8 +46,6 @@ function AlertDialog({
   }
 
   const confirmVariant = tone === "destructive" ? "destructive" : "default"
-  const confirmClassName =
-    tone === "destructive" ? "bg-red-600 text-white hover:bg-red-700" : undefined
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -76,7 +73,6 @@ function AlertDialog({
             onClick={handleConfirm}
             disabled={loading}
             data-testid={`${testId}-confirm`}
-            className={cn(confirmClassName)}
             type="button"
           >
             {loading ? "Working..." : confirmLabel}

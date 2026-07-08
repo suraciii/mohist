@@ -76,12 +76,11 @@ export function StageColumn({
       } ${colors.activeBorder}`}
     >
       <div
-        className="flex items-center gap-2 px-3 pt-2.5 pb-2 border-b"
-        style={{ borderBottomColor: `${colors.accent}30` }}
+        className={`flex items-center gap-2 px-3 pt-2.5 pb-2 border-b ${colors.bottomBorder}`}
+        data-stage-accent={status}
       >
         <span
-          className="inline-block h-2 w-2 rounded-full shrink-0"
-          style={{ backgroundColor: colors.accent }}
+          className={`inline-block h-2 w-2 rounded-full shrink-0 ${colors.accent}`}
         />
         <h2
           className={`text-xs font-semibold uppercase tracking-wide ${colors.labelClass}`}

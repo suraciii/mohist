@@ -109,16 +109,11 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
                     variant="ghost"
                     size="xs"
                     onClick={() => setPriority(p)}
-                    className={`rounded-full ${
+                    className={`rounded-full border ${style.className} ${
                       priority === p
-                        ? 'ring-1 ring-offset-1'
+                        ? 'ring-1 ring-offset-1 ring-foreground/40'
                         : 'hover:opacity-80'
                     }`}
-                    style={{
-                      backgroundColor: style.bg,
-                      color: style.text,
-                      ...(priority === p ? { ringColor: style.text } : {}),
-                    }}
                   >
                     {p.toUpperCase()}
                   </Button>

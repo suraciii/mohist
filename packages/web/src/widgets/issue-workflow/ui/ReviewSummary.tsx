@@ -1,3 +1,5 @@
+import { statusTreatment, type StatusTreatment } from '@/shared/status-presentation'
+
 export type ReviewDimension = {
   name: string
   status: string
@@ -71,17 +73,22 @@ function XIcon({ className }: { className?: string }) {
 
 function ResultBanner({ classified, review }: { classified: 'PASS' | 'FAIL' | 'UNKNOWN'; review: ReviewOutput }) {
   if (classified === 'PASS') {
+    const treatment: StatusTreatment = statusTreatment('workflow-run', 'completed')
     const dims = review.dimensions ?? []
     const passCount = dims.filter((d) => d.status.toUpperCase() === 'PASS').length
     const total = dims.length
     const ratio = total > 0 ? `${passCount}/${total}` : ''
     return (
-      <div className="rounded-lg bg-green-50 border border-green-200 p-4 flex items-start gap-3">
-        <CheckIcon className="h-6 w-6 text-green-600 flex-shrink-0 mt-0.5" />
+      <div
+        data-testid="review-result-banner"
+        data-family={treatment.family}
+        className={`rounded-lg border p-4 flex items-start gap-3 ${treatment.container} ${treatment.border}`}
+      >
+        <CheckIcon className={`h-6 w-6 shrink-0 mt-0.5 ${treatment.text}`} />
         <div>
-          <div className="text-sm font-semibold text-green-800">All checks passed</div>
+          <div className={`text-sm font-semibold ${treatment.text}`}>All checks passed</div>
           {ratio && (
-            <div className="text-xs text-green-600 mt-0.5">{ratio} dimensions passed</div>
+            <div className={`text-xs mt-0.5 ${treatment.text}/80`}>{ratio} dimensions passed</div>
           )}
         </div>
       </div>
@@ -89,36 +96,46 @@ function ResultBanner({ classified, review }: { classified: 'PASS' | 'FAIL' | 'U
   }
 
   if (classified === 'FAIL') {
+    const treatment: StatusTreatment = statusTreatment('workflow-run', 'failed')
     const failDims = (review.dimensions ?? []).filter(
       (d) => d.status.toUpperCase() === 'FAIL',
     )
     const totalIssues = failDims.reduce((sum, d) => sum + (d.issues?.length ?? 0), 0)
     const failNames = failDims.map((d) => d.name)
     return (
-      <div className="rounded-lg bg-red-50 border border-red-200 p-4 flex items-start gap-3">
-        <XIcon className="h-6 w-6 text-red-600 flex-shrink-0 mt-0.5" />
+      <div
+        data-testid="review-result-banner"
+        data-family={treatment.family}
+        className={`rounded-lg border p-4 flex items-start gap-3 ${treatment.container} ${treatment.border}`}
+      >
+        <XIcon className={`h-6 w-6 shrink-0 mt-0.5 ${treatment.text}`} />
         <div>
-          <div className="text-sm font-semibold text-red-800">
+          <div className={`text-sm font-semibold ${treatment.text}`}>
             {totalIssues > 0 ? `${totalIssues} issue${totalIssues !== 1 ? 's' : ''} found` : 'Issues found'}
           </div>
           {failNames.length > 0 && (
-            <div className="text-xs text-red-600 mt-0.5">{failNames.join(' · ')}</div>
+            <div className={`text-xs mt-0.5 ${treatment.text}/80`}>{failNames.join(' · ')}</div>
           )}
         </div>
       </div>
     )
   }
 
+  const treatment: StatusTreatment = statusTreatment('workflow-run', 'pending')
   return (
-    <div className="rounded-lg bg-gray-50 border border-gray-200 p-4 flex items-start gap-3">
-      <svg className="h-6 w-6 text-gray-500 flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+    <div
+      data-testid="review-result-banner"
+      data-family={treatment.family}
+      className={`rounded-lg border p-4 flex items-start gap-3 ${treatment.container} ${treatment.border}`}
+    >
+      <svg className={`h-6 w-6 shrink-0 mt-0.5 ${treatment.text}`} viewBox="0 0 20 20" fill="currentColor">
         <path
           fillRule="evenodd"
           d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z"
           clipRule="evenodd"
         />
       </svg>
-      <div className="text-sm font-semibold text-gray-700">Review required</div>
+      <div className={`text-sm font-semibold ${treatment.text}`}>Review required</div>
     </div>
   )
 }
@@ -127,11 +144,13 @@ function IssueSummary({ review, classified }: { review: ReviewOutput; classified
   const dims = review.dimensions ?? []
   const failDims = dims.filter((d) => d.status.toUpperCase() === 'FAIL')
   const passDims = dims.filter((d) => d.status.toUpperCase() === 'PASS')
+  const failedTreatment = statusTreatment('workflow-run', 'failed')
+  const successTreatment = statusTreatment('workflow-run', 'completed')
 
   if (dims.length === 0) {
     if (classified === 'FAIL') {
       return (
-        <div className="text-sm text-gray-500 mt-3">
+        <div className="text-sm text-muted-foreground mt-3">
           Issues found. View full report for details.
         </div>
       )
@@ -146,22 +165,22 @@ function IssueSummary({ review, classified }: { review: ReviewOutput; classified
           {failDims.map((dim) => (
             <div
               key={dim.name}
-              className="rounded-md border border-red-100 bg-white p-3"
+              className={`rounded-md border p-3 ${failedTreatment.container} ${failedTreatment.border}`}
             >
               <div className="flex items-center gap-1.5 mb-1">
-                <span className="inline-block h-2 w-2 rounded-full bg-red-500 flex-shrink-0" />
-                <span className="text-sm font-medium text-gray-900">{dim.name}</span>
+                <span className={`inline-block h-2 w-2 rounded-full shrink-0 ${failedTreatment.dot}`} />
+                <span className="text-sm font-medium text-foreground">{dim.name}</span>
               </div>
               {dim.issues && dim.issues.length > 0 ? (
                 <ul className="ml-3.5 space-y-0.5">
                   {dim.issues.map((issue, i) => (
-                    <li key={i} className="text-sm text-gray-600 list-disc">
+                    <li key={i} className="text-sm text-muted-foreground list-disc">
                       {issue}
                     </li>
                   ))}
                 </ul>
               ) : (
-                <div className="text-sm text-gray-400 ml-3.5">No specific issues listed</div>
+                <div className="text-sm text-muted-foreground ml-3.5">No specific issues listed</div>
               )}
             </div>
           ))}
@@ -170,14 +189,14 @@ function IssueSummary({ review, classified }: { review: ReviewOutput; classified
 
       {passDims.length > 0 && (
         <div className="flex items-center gap-1.5 py-1">
-          <svg className="h-4 w-4 text-green-500 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+          <svg className={`h-4 w-4 shrink-0 ${successTreatment.text}`} viewBox="0 0 20 20" fill="currentColor">
             <path
               fillRule="evenodd"
               d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
               clipRule="evenodd"
             />
           </svg>
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-muted-foreground">
             {passDims.map((d) => d.name).join(' · ')}
           </span>
         </div>

@@ -1,5 +1,6 @@
 import { AlertTriangleIcon, CircleAlertIcon } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
+import { statusTreatment } from '@/shared/status-presentation'
 import { clampPercent, isContextHealthStatus, type ContextHealthStatus } from '../model/context-health'
 
 export interface ContextHealthIndicatorProps {
@@ -28,25 +29,10 @@ export interface ContextHealthIndicatorProps {
   ariaLabel?: string
 }
 
-const DOT_CLASS: Record<ContextHealthStatus, string> = {
-  green: 'bg-gray-400',
-  yellow: 'bg-yellow-500',
-  red: 'bg-red-500',
-}
-
-const TEXT_CLASS: Record<ContextHealthStatus, string> = {
-  // Healthy usage is deliberately quiet: neutral gray, no warning
-  // color, no background pill. The alert treatment reserved for
-  // yellow/red signals "this needs attention".
-  green: 'text-gray-600',
-  yellow: 'text-yellow-800',
-  red: 'text-red-800',
-}
-
-const CONTAINER_CLASS: Record<ContextHealthStatus, string> = {
-  green: '',
-  yellow: 'rounded px-1.5 bg-yellow-50 border border-yellow-300',
-  red: 'rounded px-1.5 bg-red-50 border border-red-300',
+const HEALTH_TO_CONTEXT: Record<ContextHealthStatus, ContextHealthStatus> = {
+  green: 'green',
+  yellow: 'yellow',
+  red: 'red',
 }
 
 const SEVERITY_LABEL: Record<ContextHealthStatus, 'ok' | 'warning' | 'critical'> = {
@@ -77,13 +63,17 @@ function buildSeverityTooltip(status: ContextHealthStatus, percent: number): str
  * cards, and the session page. Renders a colored dot plus the current
  * usage percentage (and optionally a "X / Y" token label).
  *
- * Alert treatment is centralized here so every surface renders the
+ * Alert treatment is centralized in the shared status-presentation
+ * layer (`@/shared/status-presentation`) so every surface renders the
  * same warning behavior:
- *   - yellow (60 – 79.99%)  → warning glyph + role="status"
+ *   - yellow (60 – 79.99%)  → `warning` family, warning glyph + role="status"
  *     + descriptive "near limit" tooltip
- *   - red    (>= 80%)       → error glyph + role="alert"
+ *   - red    (>= 80%)       → `danger` family, error glyph + role="alert"
  *     + aria-live="polite" + descriptive "at limit" tooltip
- *   - green  (< 60%)        → quiet, neutral gray, no glyph / role / aria-live
+ *   - green  (< 60%)        → `success` family (soft tinted). The "quiet"
+ *     intent is preserved by mapping to `success` (not reintroducing
+ *     `bg-gray-400`); no glyph / role / aria-live on the green path so
+ *     healthy sessions do not advertise a non-existent problem.
  *   - missing / non-finite / non-positive-window → renders nothing
  *     so a session that has not yet received a `usage.updated` event
  *     does not display a misleading empty indicator.
@@ -106,18 +96,19 @@ export function ContextHealthIndicator({
   const label = `${Math.round(percent)}%`
   const description = ariaLabel ?? buildSeverityTooltip(status, percent)
   const severity = SEVERITY_LABEL[status]
+  const treatment = statusTreatment('context-health', HEALTH_TO_CONTEXT[status])
 
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 text-[10px] font-medium',
-        TEXT_CLASS[status],
-        CONTAINER_CLASS[status],
+        'inline-flex items-center gap-1 rounded-4xl border px-1.5 py-0.5 text-[10px] font-medium',
+        treatment.container,
         className,
       )}
       data-testid="context-health-indicator"
       data-status={status}
       data-severity={severity}
+      data-family={treatment.family}
       title={description}
       aria-label={description}
       role={status === 'red' ? 'alert' : status === 'yellow' ? 'status' : undefined}
@@ -138,12 +129,12 @@ export function ContextHealthIndicator({
         />
       )}
       <span
-        className={cn('inline-block h-1.5 w-1.5 rounded-full', DOT_CLASS[status])}
+        className={cn('inline-block h-1.5 w-1.5 rounded-full', treatment.dot)}
         aria-hidden="true"
       />
       <span className="tabular-nums">{label}</span>
       {showTokens && contextWindowUsed != null && contextWindowSize != null && (
-        <span className="text-gray-500 font-normal ml-0.5">
+        <span className="text-muted-foreground font-normal ml-0.5">
           ({formatCompactPair(contextWindowUsed, contextWindowSize)})
         </span>
       )}
