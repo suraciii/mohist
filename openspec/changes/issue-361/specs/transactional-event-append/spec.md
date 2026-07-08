@@ -92,7 +92,7 @@ The three producers (`WorkflowRunStore`, `IssueGrain`, `AgentSessionGrain`) SHAL
 
 ### Requirement: Identity stamped into event extensions at append time
 
-When an event row is appended, the owning identity SHALL be stamped into the CloudEvent `extensions` at write time. `WorkflowRunStore` SHALL stamp both `projectid` and `issueid` (today it stamps only `projectid` and omits `issueid`). `IssueGrain` SHALL continue to stamp `projectid` and `issueid`. Identity SHALL be present on the persisted event row so consumers can read it directly from extensions without performing a reverse database lookup to recover the owning aggregate.
+When an event row is appended, the owning identity SHALL be stamped into the CloudEvent `extensions` at write time. `WorkflowRunStore` SHALL stamp both `projectid` and `issueid` (today it stamps only `projectid` and omits `issueid`). The issue save path (`IssueStore`, taking over from `IssueGrain`) SHALL stamp `projectid`, `issueid`, and `issueno`. Identity SHALL be present on the persisted event row so consumers can read it directly from extensions without performing a reverse database lookup to recover the owning aggregate.
 
 #### Scenario: WorkflowRun event carries both projectid and issueid
 
