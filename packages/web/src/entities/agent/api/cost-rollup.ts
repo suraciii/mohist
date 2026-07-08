@@ -45,12 +45,16 @@ export const costRollupQueryKey = (projectId?: string | null, range?: InsightsRa
     : ['agent', 'cost-rollup'] as const
 }
 
-export function useCostRollup(range?: InsightsRange) {
-  const { projectId } = useProject()
-  return useQuery({
+export function costRollupQueryOptions(projectId: string | null | undefined, range?: InsightsRange) {
+  return {
     queryKey: costRollupQueryKey(projectId, range),
     queryFn: () => fetchCostRollup(projectId!, range),
     enabled: !!projectId,
     staleTime: 60_000,
-  })
+  } as const
+}
+
+export function useCostRollup(range?: InsightsRange) {
+  const { projectId } = useProject()
+  return useQuery(costRollupQueryOptions(projectId, range))
 }

@@ -119,9 +119,18 @@ afterEach(() => {
 每个导出 `defaultXxxHandlers(overrides?)`，返回该 entity 常用端点的 happy-path 响应。
 数据用固定常量（禁 `Date.now()`/`Math.random()`，testing.md 硬约束）。
 参照 `src/entities/template/api/useProjectTemplates.test.tsx` 里 `defaultHandlers` 的形状。
-MSW server 单例放 `tests/support/msw.ts`：`setupServer()` + `listen({ onUnhandledRequest: 'error' })`，
-在 setup.ts 注册 `beforeAll listen / afterEach resetHandlers / afterAll close`。
-`onUnhandledRequest: 'error'` 是关键——未 mock 的请求必须炸而不是静默，这是 S6 的执行机制。
+MSW server 单例放 `tests/support/msw.ts`，**两阶段接线**（执行中修正）：
+
+- **迁移期（isolate:true）**：导出共享 `server` + `useMswServer(...handlers)` 文件级
+  helper（beforeAll listen('error') / afterEach resetHandlers+复挂基础 handler / afterAll close）。
+  不接进全局 setup.ts——立即全局 listen 会与 12 个既有自建 `setupServer` 文件冲突，
+  且 'error' 模式会炸掉当前"容忍后台请求静默失败"的未迁移测试。
+- **翻转前整合步（§7 前置）**：既有自建 setupServer 文件全部迁到共享 server 后，
+  listen/close 收敛到 setup.ts 全局一次，移除各文件 beforeAll/afterAll，
+  onUnhandledRequest 全局收紧为 'error'。per-file listen/close 与 isolate:false
+  不兼容（close 会拔掉同 worker 后续文件的拦截器），此整合是翻转的硬前置。
+
+`onUnhandledRequest: 'error'` 是 S6 的执行机制——未 mock 的请求必须炸而不是静默。
 
 ### 0.5 customRender 扩展
 
@@ -160,9 +169,24 @@ Router 从 BrowserRouter 换 MemoryRouter（行为等价 + 可控 initialEntries
 3. 下调棘轮 baseline，原子提交：`test(web): 边界 mock 迁移 <范围>，vi.mock 432→N`。
 4. 记录全量 no-isolate 失败数变化（进度指标，写进提交信息）。
 
-### 波1：entities api 测试（~60–70 文件，最机械，先打样 4 个文件）
+### 波1：entities api 测试（~60–70 文件，最机械，先打样）
 
-**打样**：`src/entities/agent/api/` 下 4 个文件走通全流程后再放量。
+**打样结论（2026-07-08，agent-usage + cost-rollup 已迁，全绿）**：
+
+- 模式 1a 成立：queryOptions seam（src 侧 +9 行/模块）+ options 对象断言 + MSW fetcher
+  断言，测试数逐条等价保留，零 vi.mock，文件留在 node project。
+- **node 环境两个技术细节（后续批次必须遵守）**：
+  1. fetch 相对路径适配器包在 MSW 代理外层（`tests/support/msw.ts` 的
+     `absolutizeRelativeFetchUrls`，listen 之后安装）；不要放 setup.ts——会被
+     MSW 的 fetchProxy 盖在外面而失效。
+  2. handler 路径一律用 `*/api/...` 通配前缀；裸相对路径在 node 下匹配不到
+     绝对 URL 请求。
+- **范围修正**：mutation + toast 型文件（agent-sessions、subscription-queries 等
+  同时 vi.mock useMutation/useQueryClient/sonner 的）不属于纯 1a，依赖波 3 的
+  sonner 决策，划入波 3 之后的批次；波 1 只收 query 型文件。
+- glue 覆盖：hook 一行 `useQuery(xxxQueryOptions(useProject().projectId))` 不再有
+  直接单测，由渲染该 hook 的页面/面板 spec 传递覆盖；若某 entity 无任何上层
+  spec 覆盖，在该 entity 批次里补一个合并的 hooks-glue jsdom 测试文件。
 
 两个子模式，**优先 1a**（保住 node 环境收益）：
 
