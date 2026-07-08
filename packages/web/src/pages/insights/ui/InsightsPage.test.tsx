@@ -1,29 +1,30 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import { InsightsPage } from './InsightsPage'
 
-const mocks = vi.hoisted(() => ({
-  useCompletionThroughput: vi.fn(),
-  useDeliveryTime: vi.fn(),
-  useQualityMetrics: vi.fn(),
-  useStageDuration: vi.fn(),
-}))
+useMswServer()
 
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    useCompletionThroughput: mocks.useCompletionThroughput,
-    useDeliveryTime: mocks.useDeliveryTime,
-    useQualityMetrics: mocks.useQualityMetrics,
-    useStageDuration: mocks.useStageDuration,
-  }
-})
+const EMPTY_HANDLERS = [
+  http.get('*/api/projects/:projectId/issues/metrics/completion', () =>
+    HttpResponse.json({ success: true, data: { bucket: 'day', window: null, buckets: [] } }),
+  ),
+  http.get('*/api/projects/:projectId/issues/metrics/delivery-time', () =>
+    HttpResponse.json({ success: true, data: { window: null, buckets: [] } }),
+  ),
+  http.get('*/api/projects/:projectId/issues/metrics/quality', () =>
+    HttpResponse.json({ success: true, data: { window: null, ftrRate: null, bucketCount: 0, buckets: [] } }),
+  ),
+  http.get('*/api/projects/:projectId/issues/metrics/stage-duration', () =>
+    HttpResponse.json({ success: true, data: { window: null, stages: null } }),
+  ),
+]
 
 const TEST_PROJECT = {
   id: 'proj-1',
@@ -34,6 +35,7 @@ const TEST_PROJECT = {
 }
 
 function renderPage() {
+  server.use(...EMPTY_HANDLERS)
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
@@ -45,14 +47,6 @@ function renderPage() {
     </QueryClientProvider>,
   )
 }
-
-beforeEach(() => {
-  vi.clearAllMocks()
-  mocks.useCompletionThroughput.mockReturnValue({ data: undefined, isLoading: false })
-  mocks.useDeliveryTime.mockReturnValue({ data: undefined, isLoading: false })
-  mocks.useQualityMetrics.mockReturnValue({ data: undefined, isLoading: false })
-  mocks.useStageDuration.mockReturnValue({ data: undefined, isLoading: false })
-})
 
 afterEach(() => {
   cleanup()
