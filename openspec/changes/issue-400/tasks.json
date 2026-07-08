@@ -94,7 +94,7 @@
       "type": "WRITE",
       "output": "New or extended regression test(s) in packages/web/src/widgets/kanban-board/ui/ covering mobile stage-tab / card / primary-action non-overlap",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Mobile layout lives in KanbanBoard.tsx:576-642. The mobile container is 'md:hidden flex flex-col flex-1'; the tab strip is at line 577 (flex overflow-x-auto snap-x border-b shrink-0); the card list is at line 631 (flex-1 overflow-y-auto). Cards render via IssueCard which is a <Link>. Use renderBoard/makeIssue helpers from _kanbanBoardQueryTestUtils."
     }
   ]
