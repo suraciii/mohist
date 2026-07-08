@@ -147,7 +147,7 @@ public class IssueTitleLookupSpecs
         Assert.DoesNotContain(titles, pair => pair.Value == "Foreign #1");
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_StoredTitle_ReturnedVerbatim()
@@ -157,7 +157,7 @@ public class IssueTitleLookupSpecs
         Assert.Equal("Stored", IssueTitleLookup.Resolve(titles, 42));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_AbsentNumber_FallsBackToIssueHash()
@@ -167,7 +167,7 @@ public class IssueTitleLookupSpecs
         Assert.Equal("Issue #7", IssueTitleLookup.Resolve(titles, 7));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_WhitespaceTitle_FallsBackToIssueHash()
@@ -184,7 +184,7 @@ public class IssueTitleLookupSpecs
         Assert.Equal("Issue #3", IssueTitleLookup.Resolve(titles, 3));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_NumberZero_UsesLiteralZeroInFallback()
@@ -241,7 +241,7 @@ public class IssueTitleLookupSpecs
         Assert.Equal(fromQuerierPath[33], fromAssemblerPath[33]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void AgentSessionQuerier_NoLongerExposesLoadIssueTitlesAsyncOrIssueTitle()

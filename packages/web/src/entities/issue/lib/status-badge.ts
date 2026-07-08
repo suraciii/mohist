@@ -1,17 +1,18 @@
 import { IssueHealth } from '../model/types'
-import { statusTreatment } from '@/shared/status-presentation'
 
-/**
- * Legacy entry point. New code should call
- * `statusTreatment('issue-health', health)` from `@/shared/status-presentation`
- * directly; the helper is retained here so call sites that already pass a
- * class string to a JSX element (`className={statusBadge(health)}`) keep
- * compiling. The returned string is composed entirely of semantic-token
- * utilities — no raw Tailwind palette classes — so the visual treatment is
- * still owned by the shared layer.
- */
-export function statusBadge(health: IssueHealth | string): string {
-  return statusTreatment('issue-health', health).container
+export function statusBadge(health: IssueHealth): string {
+  switch (health) {
+    case IssueHealth.Active:
+      return 'text-green-700 bg-green-50'
+    case IssueHealth.Paused:
+      return 'text-amber-700 bg-amber-50'
+    case IssueHealth.Blocked:
+      return 'text-red-700 bg-red-50'
+    case IssueHealth.Interrupted:
+      return 'text-orange-700 bg-orange-50'
+    default:
+      return 'text-gray-700 bg-gray-50'
+  }
 }
 
 export function statusLabel(health: IssueHealth): string {

@@ -164,66 +164,6 @@ public class EventStore : IEventStore
         return rows.Select(ToEpicStored).ToList();
     }
 
-    public async Task MarkDispatchedAsync(string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        if (source.StartsWith(IssueEventPersistence.SourcePrefix, StringComparison.Ordinal))
-        {
-            var row = await db.IssueEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
-            if (row is null)
-                throw new InvalidOperationException($"Issue event '{source}'/{id} was not found.");
-            row.DispatchedAt = dispatchedAt;
-        }
-        else if (source.StartsWith(EpicEventPersistence.SourcePrefix, StringComparison.Ordinal))
-        {
-            var row = await db.EpicEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
-            if (row is null)
-                throw new InvalidOperationException($"Epic event '{source}'/{id} was not found.");
-            row.DispatchedAt = dispatchedAt;
-        }
-        else if (source.StartsWith(WorkflowRunEventPersistence.SourcePrefix, StringComparison.Ordinal))
-        {
-            var row = await db.WorkflowRunEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
-            if (row is null)
-                throw new InvalidOperationException($"Workflow run event '{source}'/{id} was not found.");
-            row.DispatchedAt = dispatchedAt;
-        }
-        else
-        {
-            throw new ArgumentException($"Unrecognized event source '{source}'.", nameof(source));
-        }
-
-        await db.SaveChangesAsync(ct);
-    }
-
-    public async Task<IReadOnlyList<UndeliveredEvent>> ListUndeliveredAsync(int limit = 100, CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-
-        const string sql = """
-            SELECT 'WorkflowRun' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
-                   "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
-            FROM "WorkflowRunEvents" WHERE "DispatchedAt" IS NULL
-            UNION ALL
-            SELECT 'Issue' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
-                   "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
-            FROM "IssueEvents" WHERE "DispatchedAt" IS NULL
-            UNION ALL
-            SELECT 'Epic' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
-                   "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
-            FROM "EpicEvents" WHERE "DispatchedAt" IS NULL
-            ORDER BY "Source", "Id"
-            LIMIT @limit
-            """;
-
-        var parameter = new Microsoft.Data.Sqlite.SqliteParameter("@limit", limit);
-        var rows = await db.Database
-            .SqlQueryRaw<UndeliveredSqlRow>(sql, parameter)
-            .ToListAsync(ct);
-
-        return rows.Select(ToUndeliveredEvent).ToList();
-    }
-
     private static StoredCloudEvent ToStored(WorkflowRunEventRow row) =>
         new(row.Id, new CloudEvent(
             id: row.EventId,
@@ -293,44 +233,4 @@ public class EventStore : IEventStore
             .Select(e => (long?)e.Id)
             .MaxAsync(ct) ?? 0) + 1;
     }
-
-    private sealed class UndeliveredSqlRow
-    {
-        public string Origin { get; set; } = "";
-        public long Id { get; set; }
-        public string Source { get; set; } = "";
-        public string EventId { get; set; } = "";
-        public string Type { get; set; } = "";
-        public DateTimeOffset Time { get; set; }
-        public string SpecVersion { get; set; } = "";
-        public string? Subject { get; set; }
-        public string DataContentType { get; set; } = "";
-        public string Data { get; set; } = "null";
-        public string ExtensionsJson { get; set; } = "{}";
-    }
-
-    private static UndeliveredEvent ToUndeliveredEvent(UndeliveredSqlRow row) =>
-        new(
-            Origin: ParseOrigin(row.Origin),
-            Id: row.Id,
-            Source: row.Source,
-            EventId: row.EventId,
-            Type: row.Type,
-            Time: row.Time,
-            SpecVersion: row.SpecVersion,
-            Subject: row.Subject,
-            DataContentType: row.DataContentType,
-            Data: ParseJsonElement(row.Data),
-            ExtensionsJson: row.ExtensionsJson);
-
-    private static EventOrigin ParseOrigin(string text) => text switch
-    {
-        "WorkflowRun" => EventOrigin.WorkflowRun,
-        "Issue" => EventOrigin.Issue,
-        "Epic" => EventOrigin.Epic,
-        _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
-    };
-
-    private static JsonElement ParseJsonElement(string json) =>
-        JsonDocument.Parse(string.IsNullOrEmpty(json) ? "null" : json).RootElement.Clone();
 }

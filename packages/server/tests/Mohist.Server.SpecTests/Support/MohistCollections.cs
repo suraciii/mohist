@@ -22,7 +22,7 @@ public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationF
 // number of these collections. Classes that mutate process-global state
 // (RunnerRegistryKeys.Global, IManagementGrain.ForceActivationCollection,
 // cross-class FakeTimeProvider.Advance) stay in the serial MohistIntegration
-// collection above. See design/testing.md "并行与超时预算".
+// collection above. See design/testing.md "并行与端口预算".
 
 [CollectionDefinition("IntegrationIssue")]
 public class IntegrationIssueCollection : ICollectionFixture<MohistIntegrationFixture>;

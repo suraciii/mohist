@@ -62,7 +62,7 @@ public class OtelSourceSubscriptionSpecs
         Assert.Equal(200, inbound[0].GetTagItem("http.response.status_code"));
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void ConfigureTracing_SubscribesSignalRServerSource()

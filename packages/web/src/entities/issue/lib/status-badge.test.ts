@@ -1,70 +1,42 @@
 import { describe, it, expect } from 'vitest'
 import { statusBadge, statusLabel } from './status-badge'
 import { IssueHealth } from '../model/types'
-import { familyFor, statusTreatment } from '@/shared/status-presentation'
 
 describe('statusBadge', () => {
-  it('Active resolves through the shared layer to the info family', () => {
+  it('returns green classes for Active', () => {
+    expect(statusBadge(IssueHealth.Active)).toBe('text-green-700 bg-green-50')
+  })
+
+  it('returns amber classes for Paused', () => {
+    expect(statusBadge(IssueHealth.Paused)).toBe('text-amber-700 bg-amber-50')
+  })
+
+  it('returns red classes for Blocked', () => {
+    expect(statusBadge(IssueHealth.Blocked)).toBe('text-red-700 bg-red-50')
+  })
+
+  it('returns orange classes for Interrupted', () => {
+    expect(statusBadge(IssueHealth.Interrupted)).toBe('text-orange-700 bg-orange-50')
+  })
+
+  it('returns gray classes for unknown/default', () => {
+    expect(statusBadge('unknown' as IssueHealth)).toBe('text-gray-700 bg-gray-50')
+  })
+
+  it('Active uses green-700 NOT green-600 (Issue #30 regression)', () => {
     const result = statusBadge(IssueHealth.Active)
-    expect(familyFor('issue-health', IssueHealth.Active)).toBe('info')
-    expect(result).toBe(statusTreatment('issue-health', IssueHealth.Active).container)
+    expect(result).toContain('text-green-700')
+    expect(result).toContain('bg-green-50')
+    expect(result).not.toContain('green-600')
   })
 
-  it('Paused resolves through the shared layer to the muted family', () => {
-    const result = statusBadge(IssueHealth.Paused)
-    expect(familyFor('issue-health', IssueHealth.Paused)).toBe('muted')
-    expect(result).toBe(statusTreatment('issue-health', IssueHealth.Paused).container)
-  })
-
-  it('Blocked resolves through the shared layer to the danger family', () => {
+  it('Blocked uses red-700 NOT red-600 (Issue #30 regression)', () => {
     const result = statusBadge(IssueHealth.Blocked)
-    expect(familyFor('issue-health', IssueHealth.Blocked)).toBe('danger')
-    expect(result).toBe(statusTreatment('issue-health', IssueHealth.Blocked).container)
+    expect(result).toContain('text-red-700')
+    expect(result).not.toContain('red-600')
   })
 
-  it('Interrupted resolves through the shared layer to the warning family', () => {
-    const result = statusBadge(IssueHealth.Interrupted)
-    expect(familyFor('issue-health', IssueHealth.Interrupted)).toBe('warning')
-    expect(result).toBe(statusTreatment('issue-health', IssueHealth.Interrupted).container)
-  })
-
-  it('Done resolves through the shared layer to the success family', () => {
-    const result = statusBadge(IssueHealth.Done)
-    expect(familyFor('issue-health', IssueHealth.Done)).toBe('success')
-    expect(result).toBe(statusTreatment('issue-health', IssueHealth.Done).container)
-  })
-
-  it('Cancelled resolves through the shared layer to the muted family', () => {
-    const result = statusBadge(IssueHealth.Cancelled)
-    expect(familyFor('issue-health', IssueHealth.Cancelled)).toBe('muted')
-    expect(result).toBe(statusTreatment('issue-health', IssueHealth.Cancelled).container)
-  })
-
-  it('unknown health resolves to the muted treatment (no throw)', () => {
-    const result = statusBadge('unknown' as IssueHealth)
-    expect(result).toBe(statusTreatment('issue-health', 'unknown').container)
-    expect(result).toContain('bg-muted')
-  })
-
-  it('contains no raw Tailwind palette classes', () => {
-    const palette = ['emerald', 'green-', 'amber-', 'red-', 'orange-', 'gray-']
-    const allHealths: IssueHealth[] = [
-      IssueHealth.Active,
-      IssueHealth.Paused,
-      IssueHealth.Blocked,
-      IssueHealth.Interrupted,
-      IssueHealth.Cancelled,
-      IssueHealth.Done,
-    ]
-    for (const h of allHealths) {
-      const result = statusBadge(h)
-      for (const p of palette) {
-        expect(result.includes(p), `palette ${p} should not appear for ${h}`).toBe(false)
-      }
-    }
-  })
-
-  it('covers all IssueHealth enum values without throwing', () => {
+  it('covers all IssueHealth enum values', () => {
     const allHealths: IssueHealth[] = [
       IssueHealth.Active,
       IssueHealth.Paused,
@@ -76,6 +48,7 @@ describe('statusBadge', () => {
     for (const s of allHealths) {
       const result = statusBadge(s)
       expect(result.length).toBeGreaterThan(0)
+      expect(result).toMatch(/^text-\w+-\d+ bg-\w+-\d+$/)
     }
   })
 })

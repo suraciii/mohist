@@ -1,51 +1,45 @@
 import { IssueStatus } from '../../../entities/issue'
-import type { SemanticFamily } from '../../../shared/status-presentation'
-import { TREATMENT_BY_FAMILY } from '../../../shared/status-presentation'
+
+export type StageColorKey = 'gray' | 'blue' | 'amber' | 'green' | 'red'
 
 export interface StageColorScheme {
+  /** solid color used for the column title dot / accent bar */
   accent: string
+  /** tailwind class set for the column title text */
   labelClass: string
+  /** background tint when this column is "active" (selected on mobile, or default on desktop) */
   activeBg: string
+  /** border color when this column is "active" */
   activeBorder: string
-  bottomBorder: string
-}
-
-const STAGE_FAMILY: Record<IssueStatus, SemanticFamily> = {
-  [IssueStatus.Backlog]: 'muted',
-  [IssueStatus.InProgress]: 'info',
-  [IssueStatus.Done]: 'success',
-  [IssueStatus.Cancelled]: 'muted',
-}
-
-const BOTTOM_BORDER_BY_FAMILY: Record<SemanticFamily, string> = {
-  success: 'border-b-success-border',
-  warning: 'border-b-warning-border',
-  info: 'border-b-info-border',
-  danger: 'border-b-danger-border',
-  muted: 'border-b-border',
-}
-
-function buildStageColorScheme(family: SemanticFamily): StageColorScheme {
-  const treatment = TREATMENT_BY_FAMILY[family]
-  const subtleBg = treatment.container.split(' ')[0]!
-  return {
-    accent: treatment.dot,
-    labelClass: treatment.text,
-    activeBg: family === 'muted' ? 'bg-muted' : `${subtleBg}/60`,
-    activeBorder: treatment.border,
-    bottomBorder: BOTTOM_BORDER_BY_FAMILY[family],
-  }
 }
 
 export const STAGE_COLORS: Record<IssueStatus, StageColorScheme> = {
-  [IssueStatus.Backlog]: buildStageColorScheme(STAGE_FAMILY[IssueStatus.Backlog]),
-  [IssueStatus.InProgress]: buildStageColorScheme(STAGE_FAMILY[IssueStatus.InProgress]),
-  [IssueStatus.Done]: buildStageColorScheme(STAGE_FAMILY[IssueStatus.Done]),
-  [IssueStatus.Cancelled]: buildStageColorScheme(STAGE_FAMILY[IssueStatus.Cancelled]),
+  [IssueStatus.Backlog]: {
+    accent: '#9ca3af',
+    labelClass: 'text-muted-foreground',
+    activeBg: 'bg-gray-50',
+    activeBorder: 'border-gray-200',
+  },
+  [IssueStatus.InProgress]: {
+    accent: '#f59e0b',
+    labelClass: 'text-amber-700',
+    activeBg: 'bg-amber-50/60',
+    activeBorder: 'border-amber-200',
+  },
+  [IssueStatus.Done]: {
+    accent: '#22c55e',
+    labelClass: 'text-green-700',
+    activeBg: 'bg-green-50/40',
+    activeBorder: 'border-green-200',
+  },
+  [IssueStatus.Cancelled]: {
+    accent: '#ef4444',
+    labelClass: 'text-red-700',
+    activeBg: 'bg-red-50/40',
+    activeBorder: 'border-red-200',
+  },
 }
 
 export function getStageColors(status: IssueStatus): StageColorScheme {
   return STAGE_COLORS[status] ?? STAGE_COLORS[IssueStatus.Backlog]
 }
-
-export const STAGE_FAMILY_RESERVATION: Record<IssueStatus, SemanticFamily> = { ...STAGE_FAMILY }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { cleanup, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { SessionCard } from '@/widgets/coder-session/model/activity-cards'
@@ -263,37 +263,10 @@ describe('CompactSessionCard', () => {
     expect(screen.queryByTestId('active-session-anomalies')).not.toBeInTheDocument()
   })
 
-  it('stages use the dark-aware STAGE_COLORS map for plan stage', () => {
+  it('stages use the STAGE_COLORS map for plan stage', () => {
     renderCard(makeCard({ issueStage: 'Plan' }))
     const stage = screen.getByTestId('pulse-compact-stage')
     expect(stage.className).toContain('bg-blue-100')
-    expect(stage.className).toContain('dark:bg-blue-900/40')
-  })
-
-  it.each([
-    { stage: 'Build', light: 'bg-purple-100', dark: 'dark:bg-purple-900/40' },
-    { stage: 'Plan', light: 'bg-blue-100', dark: 'dark:bg-blue-900/40' },
-    { stage: 'Review', light: 'bg-teal-100', dark: 'dark:bg-teal-900/40' },
-    { stage: 'Check', light: 'bg-orange-100', dark: 'dark:bg-orange-900/40' },
-    { stage: 'Integrate', light: 'bg-slate-100', dark: 'dark:bg-slate-800/60' },
-  ])(
-    'stage chip for $stage carries a dark: counterpart (categorical dark-aware palette)',
-    ({ stage, light, dark }) => {
-      renderCard(makeCard({ issueStage: stage }))
-      const chip = screen.getByTestId('pulse-compact-stage')
-      expect(chip.className).toContain(light)
-      expect(chip.className).toContain(dark)
-    },
-  )
-
-  it('stage chip never carries an inline hex literal in its rendered style', () => {
-    for (const stage of ['Build', 'Plan', 'Review', 'Check', 'Integrate']) {
-      renderCard(makeCard({ issueStage: stage }))
-      const chip = screen.getByTestId('pulse-compact-stage') as HTMLElement
-      const styleAttr = chip.getAttribute('style') ?? ''
-      expect(styleAttr).not.toMatch(/#[0-9a-f]{3,8}\b/i)
-      cleanup()
-    }
   })
 
   it('renders a context-usage trend mini-chart when the activity source carries a usage history', () => {

@@ -16,7 +16,7 @@ public class WorkflowProfileCatalogSpecs
 
     // ===================== Profile ID constants =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void IssueWorkflowProfiles_ExposesDefaultSystemId()
@@ -24,7 +24,7 @@ public class WorkflowProfileCatalogSpecs
         Assert.Equal("mohist/local", IssueWorkflowProfiles.LocalId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void IssueWorkflowProfiles_ExposesGithubPrSystemId()
@@ -34,7 +34,7 @@ public class WorkflowProfileCatalogSpecs
 
     // ===================== Registry =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Registry_ListReturnsImplementedProfilesOnly()
@@ -48,7 +48,7 @@ public class WorkflowProfileCatalogSpecs
         Assert.Contains(list, p => p.Id == IssueWorkflowProfiles.GithubPrId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Registry_DefaultIsMarkedDefault()
@@ -61,7 +61,7 @@ public class WorkflowProfileCatalogSpecs
         Assert.Equal(IssueWorkflowProfiles.LocalId, defaultEntry.Id);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void Registry_ProfileDescriptions_ArePresentForAiMatching()
@@ -75,7 +75,7 @@ public class WorkflowProfileCatalogSpecs
 
     // ===================== System templates =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SystemTemplates_ListExposesImplementedProfilesOnly()
@@ -91,7 +91,7 @@ public class WorkflowProfileCatalogSpecs
 
     // ===================== GetSystemTemplateDefinition =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GetSystemTemplateDefinition_QuickFix_ReturnsNullUntilImplemented()
@@ -101,7 +101,7 @@ public class WorkflowProfileCatalogSpecs
         Assert.Null(def);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GetSystemTemplateDefinition_Experiment_ReturnsNullUntilImplemented()
@@ -111,7 +111,7 @@ public class WorkflowProfileCatalogSpecs
         Assert.Null(def);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GetSystemTemplateDefinition_Default_StillWorks()
@@ -122,7 +122,7 @@ public class WorkflowProfileCatalogSpecs
         Assert.NotEmpty(def!.Stages);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GetSystemTemplateDefinition_Unknown_ReturnsNull()
@@ -132,7 +132,7 @@ public class WorkflowProfileCatalogSpecs
 
     // ===================== GetSystemTemplateInfo =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GetSystemTemplateInfo_Default_ReturnsFriendlyDisplayNameAndYamlDescription()
@@ -145,7 +145,7 @@ public class WorkflowProfileCatalogSpecs
         Assert.Equal(MohistWorkflow.ResolveDescription(MohistWorkflow.Definition), info.Description);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GetSystemTemplateInfo_QuickFix_ReturnsNullUntilImplemented()
@@ -155,7 +155,7 @@ public class WorkflowProfileCatalogSpecs
         Assert.Null(info);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GetSystemTemplateInfo_Experiment_ReturnsNullUntilImplemented()
@@ -165,7 +165,7 @@ public class WorkflowProfileCatalogSpecs
         Assert.Null(info);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void GetSystemTemplateInfo_Unknown_ReturnsNull()
@@ -175,7 +175,7 @@ public class WorkflowProfileCatalogSpecs
 
     // ===================== Detail endpoint metadata =====================
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SystemTemplateInfo_DefaultHasFriendlyNameAndIsDefaultFlag()

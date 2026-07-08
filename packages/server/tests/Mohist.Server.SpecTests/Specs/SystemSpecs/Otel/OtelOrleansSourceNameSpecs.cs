@@ -40,7 +40,7 @@ public class OtelOrleansSourceNameSpecs : IClassFixture<BacklogFixture>
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void ProductionOtelRegistration_SubscribesAllFourOrleansSourceNames()

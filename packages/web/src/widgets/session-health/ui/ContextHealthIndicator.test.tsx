@@ -100,7 +100,7 @@ describe('ContextHealthIndicator', () => {
       expect(screen.queryByTestId('context-health-glyph')).toBeNull()
     })
 
-    it('uses success-family treatment (no warning color)', () => {
+    it('uses neutral gray text (no warning color)', () => {
       render(
         <ContextHealthIndicator
           contextWindowUsed={450_000}
@@ -110,19 +110,13 @@ describe('ContextHealthIndicator', () => {
         />,
       )
       const indicator = screen.getByTestId('context-health-indicator')
-      // The shared status-presentation layer maps healthy (green) to the
-      // `success` family; the indicator carries `bg-success-subtle` /
-      // `text-success` and a `data-family="success"` hook. It deliberately
-      // does NOT carry warning/danger family classes.
-      expect(indicator.className).toContain('bg-success-subtle')
-      expect(indicator.className).toContain('text-success')
-      expect(indicator.className).not.toContain('text-warning')
-      expect(indicator.className).not.toContain('text-danger')
-      expect(indicator.className).not.toContain('text-red-')
+      expect(indicator.className).toContain('text-gray-600')
+      expect(indicator.className).not.toContain('text-green-')
       expect(indicator.className).not.toContain('text-yellow-')
+      expect(indicator.className).not.toContain('text-red-')
     })
 
-    it('uses success-family dot (no warning color)', () => {
+    it('uses neutral gray dot (no warning color)', () => {
       render(
         <ContextHealthIndicator
           contextWindowUsed={450_000}
@@ -132,7 +126,7 @@ describe('ContextHealthIndicator', () => {
         />,
       )
       const dot = screen.getByTestId('context-health-indicator').querySelector('span[aria-hidden="true"]')
-      expect(dot?.className).toContain('bg-success')
+      expect(dot?.className).toContain('bg-gray-400')
       expect(dot?.className).not.toContain('bg-yellow-')
       expect(dot?.className).not.toContain('bg-red-')
       expect(dot?.className).not.toContain('bg-green-')
@@ -155,7 +149,7 @@ describe('ContextHealthIndicator', () => {
       expect(indicator).toHaveTextContent('72%')
     })
 
-    it('uses warning-family text color and dot color', () => {
+    it('uses yellow text color and yellow dot color', () => {
       render(
         <ContextHealthIndicator
           contextWindowUsed={720_000}
@@ -165,11 +159,9 @@ describe('ContextHealthIndicator', () => {
         />,
       )
       const indicator = screen.getByTestId('context-health-indicator')
-      expect(indicator.className).toContain('text-warning')
-      expect(indicator.className).not.toContain('text-yellow-')
+      expect(indicator.className).toContain('text-yellow-')
       const dot = indicator.querySelector('span[aria-hidden="true"]')
-      expect(dot?.className).toContain('bg-warning')
-      expect(dot?.className).not.toContain('bg-yellow-')
+      expect(dot?.className).toContain('bg-yellow-')
     })
 
     it('renders a warning glyph', () => {
@@ -248,7 +240,7 @@ describe('ContextHealthIndicator', () => {
       expect(indicator).toHaveTextContent('95%')
     })
 
-    it('uses danger-family text color and dot color', () => {
+    it('uses red text color and red dot color', () => {
       render(
         <ContextHealthIndicator
           contextWindowUsed={950_000}
@@ -258,11 +250,9 @@ describe('ContextHealthIndicator', () => {
         />,
       )
       const indicator = screen.getByTestId('context-health-indicator')
-      expect(indicator.className).toContain('text-danger')
-      expect(indicator.className).not.toContain('text-red-')
+      expect(indicator.className).toContain('text-red-')
       const dot = indicator.querySelector('span[aria-hidden="true"]')
-      expect(dot?.className).toContain('bg-danger')
-      expect(dot?.className).not.toContain('bg-red-')
+      expect(dot?.className).toContain('bg-red-')
     })
 
     it('renders an error glyph', () => {

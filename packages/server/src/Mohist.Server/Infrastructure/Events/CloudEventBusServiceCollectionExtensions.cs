@@ -2,7 +2,6 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Infrastructure.Data.Events;
 
 namespace Mohist.Server.Infrastructure.Events;
 
@@ -12,7 +11,6 @@ public static class CloudEventBusServiceCollectionExtensions
     {
         services.AddSingleton<InMemoryEventBus>();
         services.AddSingleton<IEventPublisher>(sp => sp.GetRequiredService<InMemoryEventBus>());
-        services.AddScoped<IDeadLetterStore, DeadLetterStore>();
         return services;
     }
 

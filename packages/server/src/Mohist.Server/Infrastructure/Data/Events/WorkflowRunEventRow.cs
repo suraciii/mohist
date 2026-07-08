@@ -22,5 +22,4 @@ public sealed class WorkflowRunEventRow
     public required string DataContentType { get; init; }
     public required JsonElement Data { get; init; }
     public required string ExtensionsJson { get; init; }
-    public DateTimeOffset? DispatchedAt { get; set; }
 }

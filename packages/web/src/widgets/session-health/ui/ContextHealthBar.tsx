@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/components/button'
 import { formatCompact } from '@/shared/lib/format-compact'
-import { statusTreatment } from '@/shared/status-presentation'
 import type { ContextHealthStatus } from '../model/context-health'
 import { clampPercent, isContextHealthStatus } from '../model/context-health'
 
@@ -29,10 +28,16 @@ export interface ContextHealthBarProps {
   showWarning?: boolean
 }
 
-const HEALTH_TO_CONTEXT: Record<ContextHealthStatus, ContextHealthStatus> = {
-  green: 'green',
-  yellow: 'yellow',
-  red: 'red',
+const STATUS_BAR_CLASS: Record<ContextHealthStatus, string> = {
+  green: 'bg-green-500',
+  yellow: 'bg-yellow-500',
+  red: 'bg-red-500',
+}
+
+const STATUS_DOT_CLASS: Record<ContextHealthStatus, string> = {
+  green: 'bg-green-500',
+  yellow: 'bg-yellow-500',
+  red: 'bg-red-500',
 }
 
 /**
@@ -66,11 +71,10 @@ export function ContextHealthBar({
 
   const percent = clampPercent(contextUsagePercent)
   const status = healthStatus
-  const treatment = statusTreatment('context-health', HEALTH_TO_CONTEXT[status])
 
   const label = formatUsageLabel(contextWindowUsed ?? null, contextWindowSize ?? null, percent)
   const showWarningBanner = showWarning
-    && status === 'red'
+    && percent >= 80
     && (onCompact != null || onReset != null)
     && !warningDismissed
 
@@ -78,12 +82,12 @@ export function ContextHealthBar({
     <div className={cn('flex flex-col gap-2', className)}>
       {showWarningBanner && (
         <div
-          className={cn('flex items-start gap-2 rounded-md border px-3 py-2 text-xs', treatment.container)}
-          role="alert"
-          aria-live="assertive"
+          className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800"
+          role="status"
+          aria-live="polite"
         >
           <svg
-            className={cn('h-4 w-4 shrink-0', treatment.text)}
+            className="h-4 w-4 shrink-0 text-red-500"
             viewBox="0 0 20 20"
             fill="currentColor"
             aria-hidden="true"
@@ -105,20 +109,20 @@ export function ContextHealthBar({
                   variant="link"
                   size="sm"
                   onClick={onCompact}
-                  className={cn('h-auto p-0 text-xs font-medium hover:opacity-80', treatment.text)}
+                  className="h-auto p-0 text-xs font-medium text-red-700 hover:text-red-900"
                 >
                   {compactLabel}
                 </Button>
               )}
               {onCompact != null && onReset != null && (
-                <span className={cn(treatment.text, 'opacity-40')}>·</span>
+                <span className="text-red-300">·</span>
               )}
               {onReset != null && (
                 <Button
                   variant="link"
                   size="sm"
                   onClick={onReset}
-                  className={cn('h-auto p-0 text-xs font-medium hover:opacity-80', treatment.text)}
+                  className="h-auto p-0 text-xs font-medium text-red-700 hover:text-red-900"
                 >
                   {resetLabel}
                 </Button>
@@ -127,7 +131,7 @@ export function ContextHealthBar({
                 variant="link"
                 size="sm"
                 onClick={() => setWarningDismissed(true)}
-                className={cn('h-auto p-0 text-xs font-normal opacity-70 hover:opacity-100', treatment.text)}
+                className="h-auto p-0 text-xs font-normal text-red-500 hover:text-red-700"
                 aria-label="Dismiss context warning"
               >
                 Dismiss
@@ -137,14 +141,14 @@ export function ContextHealthBar({
         </div>
       )}
 
-      <div className="flex flex-col gap-1" data-testid="context-health-bar" data-status={status} data-family={treatment.family}>
+      <div className="flex flex-col gap-1" data-testid="context-health-bar" data-status={status}>
         <div className="flex items-center gap-2 text-xs">
-          <span className={cn('inline-block h-2 w-2 rounded-full', treatment.dot)} aria-hidden="true" />
-          <span className="font-mono text-muted-foreground" data-testid="context-health-label">{label}</span>
+          <span className={cn('inline-block h-2 w-2 rounded-full', STATUS_DOT_CLASS[status])} aria-hidden="true" />
+          <span className="font-mono text-gray-700" data-testid="context-health-label">{label}</span>
         </div>
-        <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+        <div className="h-1.5 w-full rounded-full bg-gray-200 overflow-hidden">
           <div
-            className={cn('h-full rounded-full transition-all duration-300', treatment.dot)}
+            className={cn('h-full rounded-full transition-all duration-300', STATUS_BAR_CLASS[status])}
             style={{ width: `${percent}%` }}
             data-testid="context-health-fill"
             data-percent={Math.round(percent)}

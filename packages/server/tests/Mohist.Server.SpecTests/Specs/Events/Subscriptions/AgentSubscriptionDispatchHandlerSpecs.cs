@@ -33,7 +33,7 @@ namespace Mohist.Server.SpecTests.Specs.Events.Subscriptions;
 /// </summary>
 public class AgentSubscriptionDispatchHandlerSpecs
 {
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_HighestPriorityAgentWins_OnlyOneLaunchFires()
@@ -60,7 +60,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Equal("high-takeover", launch.Prompt); // rendered prompt (no placeholders)
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_FallbackAndTakeover_SourceConstraintPicksTakeoverForThatRunOnly()
@@ -101,7 +101,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Equal("fallback-agent", Assert.Single(recorder.Calls).Agent.Name);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_NoMatch_NoLaunchFires()
@@ -124,7 +124,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Empty(recorder.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_SameAgentMultipleMatches_OnlyHighestPriorityFires()
@@ -152,7 +152,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Equal("high", launch.Prompt); // subscription name = response prompt
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_EqualPriorityAcrossAgents_DeterministicTieBreakBySubscriptionId()
@@ -184,7 +184,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Equal("subs_aaa", launch.Prompt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_EqualPriorityWithinAgent_DeterministicTieBreakBySubscriptionId()
@@ -212,7 +212,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Equal("earlier-name", launch.Prompt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_ReproducibleForSameInputs()
@@ -245,7 +245,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         }
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_ArchivedSubscription_DoesNotFire()
@@ -274,7 +274,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Equal("active", launch.Prompt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_ArchivedAgent_DoesNotFireItsSubscriptions()
@@ -300,7 +300,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Equal("active-sub", launch.Prompt);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_IssueEventCarriesProjectIdExtension_DispatchesToIssueProjectSubscriptions()
@@ -332,7 +332,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Equal("proj_a", Assert.Single(recorder.Calls).Context.ProjectId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_WorkflowEventWithProductionEnvelope_Dispatches()
@@ -360,7 +360,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Equal("proj_a", launch.Context.ProjectId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_EventWithoutProjectIdExtension_DegradesToSkip()
@@ -386,7 +386,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Empty(recorder.Calls);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_StampsTriggerLabelsOnLaunch()
@@ -416,7 +416,7 @@ public class AgentSubscriptionDispatchHandlerSpecs
         Assert.Equal("subs_xyz", launch.TriggerLabels[GenericAgentSessionMetadata.TriggerSubscriptionId]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
     public async Task HandleAsync_RenderedPromptReplacesVariablesBeforeLaunch()
@@ -446,71 +446,6 @@ public class AgentSubscriptionDispatchHandlerSpecs
             "review run=wr_render stage=plan event=com.mohist.workflow.stage.approval-requested",
             launch.Prompt);
     }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Fact]
-    public void Arbitrate_NoCandidates_ReturnsNull()
-    {
-        Assert.Null(AgentSubscriptionDispatchHandler.Arbitrate(Array.Empty<AgentSubscription>()));
-        Assert.Null(AgentSubscriptionDispatchHandler.Arbitrate(null!));
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Fact]
-    public void Arbitrate_HighPriorityGroupWins()
-    {
-        var s1 = NewSubscription("subs_a", "agent_a", priority: 5);
-        var s2 = NewSubscription("subs_b", "agent_b", priority: 100);
-
-        var winner = AgentSubscriptionDispatchHandler.Arbitrate(new[] { s1, s2 });
-
-        Assert.NotNull(winner);
-        Assert.Equal("subs_b", winner!.Id);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Fact]
-    public void Arbitrate_TiedGroups_DeterministicBySubscriptionId()
-    {
-        var s1 = NewSubscription("subs_zzz", "agent_a", priority: 10);
-        var s2 = NewSubscription("subs_aaa", "agent_b", priority: 10);
-
-        var winner = AgentSubscriptionDispatchHandler.Arbitrate(new[] { s1, s2 });
-
-        Assert.NotNull(winner);
-        Assert.Equal("subs_aaa", winner!.Id);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
-    [Fact]
-    public void Arbitrate_TiedWithinAgent_DeterministicBySubscriptionId()
-    {
-        var s1 = NewSubscription("subs_zzz", "agent_a", priority: 10);
-        var s2 = NewSubscription("subs_aaa", "agent_a", priority: 10);
-
-        var winner = AgentSubscriptionDispatchHandler.Arbitrate(new[] { s1, s2 });
-
-        Assert.NotNull(winner);
-        Assert.Equal("subs_aaa", winner!.Id);
-    }
-
-    private static AgentSubscription NewSubscription(
-        string id, string agentId, int? priority) =>
-        new()
-        {
-            Id = id,
-            ProjectId = "proj_a",
-            AgentId = agentId,
-            Name = id,
-            Filter = new SubscriptionFilter { Type = "com.mohist.workflow.stage.*" },
-            ResponsePrompt = id,
-            Priority = priority,
-            Status = SubscriptionStatus.Active,
-        };
 
     private static async Task SeedSubscriptionAsync(
         TestScope scope,

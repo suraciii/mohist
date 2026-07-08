@@ -340,9 +340,14 @@ export function CreateIssueDialog({ open, onClose }: Props) {
                       setRisk(r)
                       setRiskTouched(true)
                     }}
-                    className={`rounded-full border capitalize ${style.className} ${
-                      risk === r ? 'ring-1 ring-offset-1 ring-foreground/40' : 'hover:opacity-80'
+                    className={`rounded-full capitalize ${
+                      risk === r ? 'ring-1 ring-offset-1' : 'hover:opacity-80'
                     }`}
+                    style={{
+                      backgroundColor: style.bg,
+                      color: style.text,
+                      ...(risk === r ? { ringColor: style.text } : {}),
+                    }}
                   >
                     {r}
                   </Button>
@@ -413,11 +418,16 @@ export function CreateIssueDialog({ open, onClose }: Props) {
                     variant="ghost"
                     size="xs"
                     onClick={() => setPriority(p)}
-                    className={`rounded-full border ${style.className} ${
+                    className={`rounded-full ${
                       priority === p
-                        ? 'ring-1 ring-offset-1 ring-foreground/40'
+                        ? 'ring-1 ring-offset-1'
                         : 'hover:opacity-80'
                     }`}
+                    style={{
+                      backgroundColor: style.bg,
+                      color: style.text,
+                      ...(priority === p ? { ringColor: style.text } : {}),
+                    }}
                   >
                     {p.toUpperCase()}
                   </Button>

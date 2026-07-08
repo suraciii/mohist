@@ -2,7 +2,6 @@ import type { AgentStatus } from '../../agent'
 import { IssueHealth, WorkflowStage, type Issue } from '..'
 
 export interface AttentionItem {
-  kind: 'approval-needed' | 'integration-failed' | 'interrupted' | 'blocked'
   issueNumber: number
   issueId: string
   label: string
@@ -29,7 +28,6 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
     if (issue.approvalState?.status === 'awaiting') {
       seen.add(issue.id)
       items.push({
-        kind: 'approval-needed',
         issueNumber: issue.number,
         issueId: issue.id,
         label: 'Approval needed',
@@ -38,7 +36,6 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
     } else if (isIntegrateFailure(issue)) {
       seen.add(issue.id)
       items.push({
-        kind: 'integration-failed',
         issueNumber: issue.number,
         issueId: issue.id,
         label: 'Integration failed',
@@ -47,7 +44,6 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
     } else if (issue.health === IssueHealth.Interrupted) {
       seen.add(issue.id)
       items.push({
-        kind: 'interrupted',
         issueNumber: issue.number,
         issueId: issue.id,
         label: 'Interrupted',
@@ -56,7 +52,6 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
     } else if (issue.health === IssueHealth.Blocked) {
       seen.add(issue.id)
       items.push({
-        kind: 'blocked',
         issueNumber: issue.number,
         issueId: issue.id,
         label: 'Needs action',

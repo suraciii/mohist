@@ -60,7 +60,13 @@ Mohist 的测试分两条轨道，写之前先回答："这条测试属于哪条
 - 文件叫 `*Specs.cs`、标 `Speed=Unit`，验证的却是一个模块的内部行为（不是产品契约）→ 轨道错位，它是 unit，改名 `*Tests.cs` 并移出 spec 目录。
 - 把 arch 规则文件塞进 `Specs/`，和带 fixture 的行为测试同处 → 依赖面混淆。
 
-**落地现状**：server 已定稿拆 `UnitTests` / `SpecTests` / `ArchTests` 三项目（UnitTests 禁依赖重型 fixture、ArchTests 禁依赖任何测试基建，均为编译不变量）；cli 进 sln、runner 补 unit 轨道、web 顶层改 `*.spec.tsx` 同步推进。由改造 issue 落地，落地后删本注记。
+**落地现状**（spec 是目标，以下是差距脚注，逐批收敛后删本注记）：
+
+- **server**：三项目骨架已建——`SpecTests`（已改名、在 sln）、`ArchTests`（已实装、在 sln）、`UnitTests`（骨架已建）。`Speed=Unit` trait 在历史上被当作"相对快的测试"速档滥用，真正的纯 unit 文件仍混在 SpecTests 里，需逐 context 判定后迁入 `UnitTests`。迁移分批推进，从 `Foundation` 起逐 context 迁。
+- **"禁依赖"靠约定，不靠编译**：`UnitTests` 不引用 `WebApplicationFactory` / `Orleans.TestingHost` 是当前事实，但没有任何 analyzer / BannedApi / ArchTest 守卫，纯靠 review。要把它变真约束，待加 ArchTest 守卫或 BannedApiAnalyzer。
+- **cli**：生产 + 测试项目已进 sln，命名二分 `*Tests.cs` / `*Specs.cs`。
+- **runner**：引入 `*.test.ts` unit 轨道（首批 6 个纯函数已迁），剩余 `*.spec.ts` 逐文件判定中。
+- **web**：顶层 page 级测试 `*.test.tsx` → `*.spec.tsx` 的 rename 未按字面执行；实际落地的约定是 `.test` = src/ collocated、`.spec` = `tests/` 跨切面，后缀编码位置而非 unit/spec 语义。`SessionPage.test.tsx` 多对象反例已拆分。
 
 ## 硬性原则
 

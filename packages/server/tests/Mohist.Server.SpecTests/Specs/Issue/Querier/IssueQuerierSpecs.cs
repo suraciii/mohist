@@ -761,7 +761,7 @@ public class IssueQuerierSpecs
         Assert.Equal("justatoken", noEquals.Value);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void LabelFilterTokens_SplitsCommaJoinedLegacyQuery()

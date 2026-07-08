@@ -1,95 +1,45 @@
-type LabelSize = 'sm' | 'md'
-
-/**
- * Class-string label/priority/risk style.
- *
- * `className` is a Tailwind utility class string the consumer applies
- * directly — no inline hex literals. The previous `{ bg, text }` shape
- * forced every call site to build `style={{ backgroundColor, color }}`
- * inline, which is invisible to dark theme and inconsistent with the
- * rest of the Web UI.
- *
- * `size` keeps the existing chip-size distinction (sm vs md) so call
- * sites can choose chip dimensions without rebuilding the visual
- * treatment.
- */
-export type LabelStyle = {
-  className: string
-  size: LabelSize
+type LabelStyle = {
+  bg: string
+  text: string
+  size: 'sm' | 'md'
 }
 
-const SIZE_SM: LabelSize = 'sm'
-const SIZE_MD: LabelSize = 'md'
-
-/**
- * Type-label palette. Type is state-bearing (bug = danger, feature = success,
- * enhancement = info, tech-debt = muted, performance = warning), so it routes
- * through the same semantic families used by the status-presentation layer
- * (D6). The class strings are token-backed (`bg-<family>-subtle
- * text-<family> border-<family>-border`) and are dark-mode-aware by
- * construction.
- */
 const TYPE_LABEL_COLORS: Record<string, LabelStyle> = {
-  bug: { className: 'bg-danger-subtle text-danger border-danger-border', size: SIZE_MD },
-  feature: { className: 'bg-success-subtle text-success border-success-border', size: SIZE_MD },
-  enhancement: { className: 'bg-info-subtle text-info border-info-border', size: SIZE_MD },
-  'tech-debt': { className: 'bg-muted text-muted-foreground border-border', size: SIZE_MD },
-  performance: { className: 'bg-warning-subtle text-warning border-warning-border', size: SIZE_MD },
+  bug: { bg: '#fee2e2', text: '#ef4444', size: 'md' },
+  feature: { bg: '#dcfce7', text: '#22c55e', size: 'md' },
+  enhancement: { bg: '#dbeafe', text: '#3b82f6', size: 'md' },
+  'tech-debt': { bg: '#f3f4f6', text: '#6b7280', size: 'md' },
+  performance: { bg: '#fef9c3', text: '#eab308', size: 'md' },
 }
 
-/**
- * Urgency-label palette. Categorical, not state-meaningful — kept on a
- * documented dark-aware class palette (per design D6: priority/area/urgency
- * stay off the semantic families to avoid overloading the meaning reservation).
- */
 const URGENCY_LABEL_COLORS: Record<string, LabelStyle> = {
-  critical: {
-    className: 'bg-red-700 text-white border-red-700 dark:bg-red-500 dark:text-white dark:border-red-500',
-    size: SIZE_MD,
-  },
+  critical: { bg: '#991b1b', text: '#ffffff', size: 'md' },
 }
 
-/**
- * Area-label palette. Categorical, not state-meaningful — same rationale as
- * urgency: areas are stream labels (agent, webui, api, ...), they don't
- * express production state and so don't route through `success`/`warning`/
- * `info`/`danger`. Documented dark-aware class palette.
- */
 const AREA_LABEL_COLORS: Record<string, LabelStyle> = {
-  agent: { className: 'bg-muted text-muted-foreground border-border dark:bg-muted/40', size: SIZE_SM },
-  webui: { className: 'bg-muted text-muted-foreground border-border dark:bg-muted/40', size: SIZE_SM },
-  api: { className: 'bg-muted text-muted-foreground border-border dark:bg-muted/40', size: SIZE_SM },
-  frontend: { className: 'bg-muted text-muted-foreground border-border dark:bg-muted/40', size: SIZE_SM },
-  logging: { className: 'bg-muted text-muted-foreground border-border dark:bg-muted/40', size: SIZE_SM },
-  'data-model': { className: 'bg-muted text-muted-foreground border-border dark:bg-muted/40', size: SIZE_SM },
-  recovery: { className: 'bg-muted text-muted-foreground border-border dark:bg-muted/40', size: SIZE_SM },
-  explore: { className: 'bg-muted text-muted-foreground border-border dark:bg-muted/40', size: SIZE_SM },
+  agent: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  webui: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  api: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  frontend: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  logging: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  'data-model': { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  recovery: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
+  explore: { bg: '#f3f4f6', text: '#6b7280', size: 'sm' },
 }
 
-const DEFAULT_STYLE: LabelStyle = {
-  className: 'bg-muted text-muted-foreground border-border dark:bg-muted/40',
-  size: SIZE_MD,
-}
+const DEFAULT_STYLE: LabelStyle = { bg: '#f3f4f6', text: '#6b7280', size: 'md' }
 
 const AREA_LABELS = new Set(Object.keys(AREA_LABEL_COLORS))
 const URGENCY_LABELS = new Set(Object.keys(URGENCY_LABEL_COLORS))
 const TYPE_LABELS = new Set(Object.keys(TYPE_LABEL_COLORS))
 
-/**
- * Type strip palette. Strips reuse the family foreground from `TYPE_LABEL_COLORS`
- * (per D6). Used as a background-color class (`bg-<family>`) on the type-strip
- * element; the family token is dark-mode-aware so the strip resolves correctly
- * in both themes.
- */
-const TYPE_STRIP_CLASS: Record<string, string> = {
-  bug: 'bg-danger',
-  feature: 'bg-success',
-  enhancement: 'bg-info',
-  'tech-debt': 'bg-muted-foreground',
-  performance: 'bg-warning',
+const TYPE_STRIP_COLORS: Record<string, string> = {
+  bug: '#ef4444',
+  feature: '#22c55e',
+  enhancement: '#3b82f6',
+  'tech-debt': '#6b7280',
+  performance: '#eab308',
 }
-
-const TYPE_STRIP_FALLBACK = 'bg-muted-foreground'
 
 const STRIP_PRIORITY = ['bug', 'feature', 'enhancement', 'tech-debt', 'performance']
 
@@ -101,17 +51,17 @@ export function getLabelStyle(label: string): LabelStyle {
 }
 
 export function getStripColor(labels: Record<string, string> | string[] | undefined | null): string {
-  if (!labels) return TYPE_STRIP_FALLBACK
+  if (!labels) return '#6b7280'
   if (Array.isArray(labels)) {
     for (const type of STRIP_PRIORITY) {
-      if (labels.includes(type)) return TYPE_STRIP_CLASS[type]
+      if (labels.includes(type)) return TYPE_STRIP_COLORS[type]
     }
-    return TYPE_STRIP_FALLBACK
+    return '#6b7280'
   }
   for (const type of STRIP_PRIORITY) {
-    if (type in labels) return TYPE_STRIP_CLASS[type]
+    if (type in labels) return TYPE_STRIP_COLORS[type]
   }
-  return TYPE_STRIP_FALLBACK
+  return '#6b7280'
 }
 
 export function isTypeLabel(label: string): boolean {
@@ -126,10 +76,10 @@ export function isAreaLabel(label: string): boolean {
   return AREA_LABELS.has(label)
 }
 
-export function getTypeColor(label: string): LabelStyle {
+export function getTypeColor(label: string): { bg: string; text: string } {
   const style = TYPE_LABEL_COLORS[label]
-  if (style) return style
-  return DEFAULT_STYLE
+  if (style) return { bg: style.bg, text: style.text }
+  return { bg: '#f3f4f6', text: '#6b7280' }
 }
 
 export function formatPriority(priority: string): string {
@@ -137,84 +87,41 @@ export function formatPriority(priority: string): string {
   return priority.toUpperCase()
 }
 
-/**
- * Priority strip palette. Priority is ordinal, NOT state-meaningful
- * (per design D6: collapsing priority onto semantic families would overload
- * the meaning reservation, since p3 is not 'healthy'). Five documented
- * ordinal hues preserved in both themes via `dark:` variants. Each entry
- * pairs a light-theme border-left color with its dark-theme counterpart so
- * the priority strip survives dark mode.
- */
-const PRIORITY_STRIP_CLASS: Record<string, string> = {
-  p0: 'border-l-red-600 dark:border-l-red-400',
-  p1: 'border-l-orange-600 dark:border-l-orange-400',
-  p2: 'border-l-yellow-600 dark:border-l-yellow-400',
-  p3: 'border-l-green-600 dark:border-l-green-400',
-  p4: 'border-l-gray-500 dark:border-l-gray-400',
+const PRIORITY_STRIP_COLORS: Record<string, string> = {
+  p0: '#dc2626',
+  p1: '#ea580c',
+  p2: '#ca8a04',
+  p3: '#16a34a',
+  p4: '#6b7280',
 }
 
-const PRIORITY_STRIP_FALLBACK = 'border-l-gray-500 dark:border-l-gray-400'
+const PRIORITY_STRIP_FALLBACK = '#6b7280'
 
 export function getPriorityStripColor(priority: string | null | undefined): string {
   if (!priority) return PRIORITY_STRIP_FALLBACK
-  return PRIORITY_STRIP_CLASS[priority] ?? PRIORITY_STRIP_FALLBACK
+  return PRIORITY_STRIP_COLORS[priority] ?? PRIORITY_STRIP_FALLBACK
 }
 
-/**
- * Priority chip palette. Same ordinal rationale as `PRIORITY_STRIP_CLASS`.
- * Five documented light/dark-aware chip class sets — each entry has a
- * light bg/text pair and a `dark:` counterpart that preserves the ordinal
- * hue (red/orange/yellow/green/gray) in both themes.
- */
-const PRIORITY_COLORS: Record<string, LabelStyle> = {
-  p0: {
-    className: 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/40 dark:text-red-200 dark:border-red-800',
-    size: SIZE_MD,
-  },
-  p1: {
-    className: 'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/40 dark:text-orange-200 dark:border-orange-800',
-    size: SIZE_MD,
-  },
-  p2: {
-    className: 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/40 dark:text-yellow-200 dark:border-yellow-800',
-    size: SIZE_MD,
-  },
-  p3: {
-    className: 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/40 dark:text-green-200 dark:border-green-800',
-    size: SIZE_MD,
-  },
-  p4: {
-    className: 'bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800/40 dark:text-gray-200 dark:border-gray-700',
-    size: SIZE_MD,
-  },
+const PRIORITY_COLORS: Record<string, { bg: string; text: string }> = {
+  p0: { bg: '#fee2e2', text: '#7f1d1d' },
+  p1: { bg: '#ffedd5', text: '#7c2d12' },
+  p2: { bg: '#fef9c3', text: '#713f12' },
+  p3: { bg: '#dcfce7', text: '#14532d' },
+  p4: { bg: '#f3f4f6', text: '#1f2937' },
 }
 
-const PRIORITY_FALLBACK: LabelStyle = PRIORITY_COLORS.p2!
-
-export function getPriorityStyle(priority: string): LabelStyle {
-  return PRIORITY_COLORS[priority] ?? PRIORITY_FALLBACK
+export function getPriorityStyle(priority: string): { bg: string; text: string } {
+  return PRIORITY_COLORS[priority] ?? { bg: '#fef9c3', text: '#713f12' }
 }
 
-/**
- * Risk chip palette. Risk IS state-meaningful (per D6) — `low` is healthy,
- * `medium` needs attention, `high` is blocking — so it routes through the
- * semantic families. Each entry is the family's soft-tinted treatment
- * (`bg-<family>-subtle text-<family> border-<family>-border`), which is
- * dark-mode-aware by construction.
- */
-const RISK_COLORS: Record<string, LabelStyle> = {
-  low: { className: 'bg-success-subtle text-success border-success-border', size: SIZE_MD },
-  medium: { className: 'bg-warning-subtle text-warning border-warning-border', size: SIZE_MD },
-  high: { className: 'bg-danger-subtle text-danger border-danger-border', size: SIZE_MD },
+const RISK_COLORS: Record<string, { bg: string; text: string }> = {
+  low: { bg: '#dcfce7', text: '#16a34a' },
+  medium: { bg: '#fef9c3', text: '#ca8a04' },
+  high: { bg: '#fee2e2', text: '#dc2626' },
 }
 
-const RISK_FALLBACK: LabelStyle = {
-  className: 'bg-muted text-muted-foreground border-border',
-  size: SIZE_MD,
-}
-
-export function getRiskStyle(risk: string): LabelStyle {
-  return RISK_COLORS[risk] ?? RISK_FALLBACK
+export function getRiskStyle(risk: string): { bg: string; text: string } {
+  return RISK_COLORS[risk] ?? { bg: '#f3f4f6', text: '#6b7280' }
 }
 
 export function formatLabelEntry(key: string, value: string): string {

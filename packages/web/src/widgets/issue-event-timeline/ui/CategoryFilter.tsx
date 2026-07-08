@@ -6,6 +6,9 @@ interface CategoryFilterProps {
   counts: Record<TimelineCategory, number>
 }
 
+const NEUTRAL_CHIP_ACTIVE = 'bg-gray-900 text-white border-gray-900'
+const NEUTRAL_CHIP_INACTIVE = 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
+
 export function CategoryFilter({ selected, onToggle, counts }: CategoryFilterProps) {
   const categories = Object.keys(CATEGORY_STYLES) as TimelineCategory[]
 
@@ -15,9 +18,7 @@ export function CategoryFilter({ selected, onToggle, counts }: CategoryFilterPro
         const active = selected.has(category)
         const style = CATEGORY_STYLES[category]
         const count = counts[category] ?? 0
-        const chipClass = active
-          ? style.container
-          : `${style.border} ${style.bg} ${style.text} hover:opacity-90`
+        const chipClass = active ? NEUTRAL_CHIP_ACTIVE : NEUTRAL_CHIP_INACTIVE
         return (
           <button
             key={category}

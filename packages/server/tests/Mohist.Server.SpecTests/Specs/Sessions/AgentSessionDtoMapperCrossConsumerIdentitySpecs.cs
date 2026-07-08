@@ -102,7 +102,7 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         Assert.Equal(AgentSessionDtoMapper.BuildLineageDto(session), lineage);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void Labels_SkipsBlankKeysAndValues_AndUsesOrdinalComparison()
