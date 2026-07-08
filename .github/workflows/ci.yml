@@ -100,16 +100,10 @@ jobs:
       - name: Test
         run: npm run test:ci -w packages/runner
 
-  # web 测试是 node 侧墙钟大头（~4400 个测试）。vitest --shard 按文件
-  # 确定性二分，两片并行，互不重叠、并集为全量。
   web-test:
-    name: Web tests (${{ matrix.shard }}/2)
+    name: Web tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
 
     steps:
       - name: Checkout
@@ -126,7 +120,7 @@ jobs:
         run: npm ci
 
       - name: Test
-        run: npm run test:ci -w packages/web -- --shard=${{ matrix.shard }}/2
+        run: npm run test:ci -w packages/web
 
   build-and-test:
     name: Build and test
