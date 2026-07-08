@@ -48,7 +48,7 @@
         "T-001"
       ],
       "passes": false,
-      "notes": "Implements design D4. Depends on T-001 for the shared issueNeedsOwnerAction predicate (co-located with the attention model). Capacity usage display relocates to the capacity level built in T-003; until then the capacity-limited attention item from T-001 still surfaces runner saturation. Verify with: npm run typecheck -w packages/web && npm run test:run -w packages/web."
+      "notes": "Implements design D4. Creates the shared issueNeedsOwnerAction predicate (co-located with the attention model from T-001) and updates deriveAttentionItems to use it, so the inline cue and the attention entry never disagree. Capacity usage display relocates to the capacity level built in T-003; until then the capacity-limited attention item from T-001 still surfaces runner saturation. Verify with: npm run typecheck -w packages/web && npm run test:run -w packages/web."
     },
     {
       "id": "T-003",
