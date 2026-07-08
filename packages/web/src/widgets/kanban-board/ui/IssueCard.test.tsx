@@ -161,6 +161,29 @@ describe('IssueCard - blocker rendering for waiting-for issues', () => {
     renderCard(waitingButCancelled)
     expect(screen.queryByTestId('blocker-reason')).not.toBeInTheDocument()
   })
+
+  it('routes blocked reason text through the danger token and no raw red palette', () => {
+    const blocked = makeIssue({
+      health: IssueHealth.Blocked,
+      blockedReason: 'Waiting on external dependency',
+    })
+    renderCard(blocked)
+    const reason = screen.getByTestId('blocked-reason')
+    expect(reason.className).toContain('text-danger')
+    expect(reason.className).not.toContain('text-red-')
+  })
+
+  it('routes waiting-for blocker text through the warning token and no raw amber palette', () => {
+    const waiting = makeIssue({
+      isDraft: false,
+      canStart: false,
+      blocker: { kind: 'waiting-for', issue: { number: 200, title: 'Foundational work' } },
+    })
+    renderCard(waiting)
+    const reason = screen.getByTestId('blocker-reason')
+    expect(reason.className).toContain('text-warning')
+    expect(reason.className).not.toContain('text-amber-')
+  })
 })
 
 describe('IssueCard - no legacy startEligibility fields rendered', () => {
@@ -221,63 +244,84 @@ describe('IssueCard - workflow profile is hover-only with inspectable data hook'
   })
 })
 
-function hexToRgbString(hex: string): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
-  if (!m) throw new Error(`Invalid hex: ${hex}`)
-  const v = m[1]!
-  const r = parseInt(v.slice(0, 2), 16)
-  const g = parseInt(v.slice(2, 4), 16)
-  const b = parseInt(v.slice(4, 6), 16)
-  return `rgb(${r}, ${g}, ${b})`
+function classSet(className: string): Set<string> {
+  return new Set(className.split(/\s+/).filter(Boolean))
 }
+
+const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4'] as const
 
 describe('IssueCard - left color strip is priority-driven', () => {
   it.each(['p0', 'p1', 'p2', 'p3', 'p4'] as const)(
-    'uses getPriorityStripColor(priority) for the left strip border (priority=%s)',
+    'applies getPriorityStripColor(priority) as the left strip class (priority=%s)',
     (priority) => {
       const issue = makeIssue({ priority })
       renderCard(issue)
 
       const card = screen.getByTestId('issue-card')
-      const style = (card as HTMLElement).style
-      const expected = hexToRgbString(getPriorityStripColor(priority))
-      expect(style.borderLeftColor).toBe(expected)
+      const expected = getPriorityStripColor(priority).split(/\s+/)
+      const actual = classSet(card.className)
+      for (const cls of expected) {
+        expect(actual.has(cls)).toBe(true)
+      }
     },
   )
 
-  it('falls back to the gray priority strip color when priority is null', () => {
+  it('falls back to the gray priority strip class when priority is null', () => {
     const issue = makeIssue({ priority: null })
     renderCard(issue)
 
     const card = screen.getByTestId('issue-card')
-    const style = (card as HTMLElement).style
-    expect(style.borderLeftColor).toBe(hexToRgbString(getPriorityStripColor(null)))
+    const expected = getPriorityStripColor(null).split(/\s+/)
+    const actual = classSet(card.className)
+    for (const cls of expected) {
+      expect(actual.has(cls)).toBe(true)
+    }
   })
 
-  it('renders distinct strip colors for distinct priorities', () => {
+  it('does not apply inline hex color or inline style on the priority strip', () => {
+    const issue = makeIssue({ priority: 'p1' })
+    renderCard(issue)
+
+    const card = screen.getByTestId('issue-card') as HTMLElement
+    expect(card.style.borderLeftColor).toBe('')
+    expect(card.getAttribute('style') ?? '').not.toMatch(/#[0-9a-f]{3,8}/i)
+  })
+
+  it('renders distinct strip class sets for distinct priorities', () => {
     const rendered: Record<string, string> = {}
     for (const priority of ['p0', 'p1', 'p2', 'p3', 'p4'] as const) {
       const issue = makeIssue({ priority, number: 200 + parseInt(priority.slice(1), 10) })
       const { unmount } = renderCard(issue)
-      const card = screen.getByTestId('issue-card') as HTMLElement
-      rendered[priority] = card.style.borderLeftColor
+      const card = screen.getByTestId('issue-card')
+      rendered[priority] = card.className
       unmount()
       cleanup()
     }
-    const uniqueStripColors = new Set(Object.values(rendered))
+    const stripParts = (className: string) =>
+      className
+        .split(/\s+/)
+        .filter((c) => c.startsWith('border-l-') || c.startsWith('dark:border-l-'))
+        .join('|')
+    const uniqueStripColors = new Set(PRIORITIES.map((p) => stripParts(rendered[p])))
     expect(uniqueStripColors.size).toBe(5)
   })
 
-  it('does not derive the strip color from labels (no type labels still produces a colored strip)', () => {
+  it('does not derive the strip class from labels (no type labels still produces a colored strip)', () => {
     const issue = makeIssue({ priority: 'p1', labels: {} })
     renderCard(issue)
 
-    const card = screen.getByTestId('issue-card') as HTMLElement
-    const strip = card.style.borderLeftColor
-    const expectedP1 = hexToRgbString(getPriorityStripColor('p1'))
-    const expectedP4 = hexToRgbString(getPriorityStripColor('p4'))
-    expect(strip).toBe(expectedP1)
-    expect(strip).not.toBe(expectedP4)
+    const card = screen.getByTestId('issue-card')
+    const stripClasses = card.className
+      .split(/\s+/)
+      .filter((c) => c.startsWith('border-l-') || c.startsWith('dark:border-l-'))
+    const expectedP1 = getPriorityStripColor('p1').split(/\s+/)
+    const expectedP4 = getPriorityStripColor('p4').split(/\s+/)
+    for (const cls of expectedP1) {
+      expect(stripClasses).toContain(cls)
+    }
+    for (const cls of expectedP4) {
+      expect(stripClasses).not.toContain(cls)
+    }
   })
 })
 

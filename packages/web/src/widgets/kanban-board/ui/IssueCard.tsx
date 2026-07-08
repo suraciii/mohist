@@ -9,7 +9,7 @@ import { archiveIssue, rerunIssue, resumeIssue } from '../../../entities/issue'
 import { getPriorityStripColor, getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { getStageColors } from '../model/stage-colors'
+import { statusTreatment, type StatusKind, type StatusTreatment } from '@/shared/status-presentation'
 
 export const APPROVAL_STAGES = new Set<string>([WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check])
 
@@ -73,13 +73,18 @@ const STATUS_PILL_LABEL: Record<NonNullable<StatusIndicator>, string> = {
   drift: 'Drift',
 }
 
-export const STATUS_PILL_PAIRS: Record<NonNullable<StatusIndicator>, { bg: string; text: string }> = {
-  blocked: { bg: '#ffe2e2', text: '#9f0712' },
-  cancelled: { bg: '#e5e7eb', text: '#364153' },
-  approval: { bg: '#fef3c6', text: '#973c00' },
-  running: { bg: '#dbeafe', text: '#193cb8' },
-  waiting: { bg: '#fffbeb', text: '#973c00' },
-  drift: { bg: '#ffedd4', text: '#9f2d00' },
+interface IndicatorBinding {
+  kind: StatusKind
+  state: string
+}
+
+const INDICATOR_TO_TREATMENT: Record<NonNullable<StatusIndicator>, IndicatorBinding> = {
+  blocked: { kind: 'issue-health', state: IssueHealth.Blocked },
+  cancelled: { kind: 'issue-health', state: IssueHealth.Cancelled },
+  approval: { kind: 'approval', state: 'awaiting' },
+  running: { kind: 'workflow-run', state: 'running' },
+  waiting: { kind: 'workflow-run', state: 'awaiting-approval' },
+  drift: { kind: 'workflow-run', state: 'drift' },
 }
 
 function DraftPill() {
@@ -111,98 +116,55 @@ function StatusPill({
       : baseLabel
   const stagePrefixId = `${indicator}-${stageLabel ?? 'none'}-${progressLabel ?? 'none'}`
 
-  if (indicator === 'blocked') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center gap-1 rounded-full bg-red-100 text-red-800 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-700" />
-        {fullLabel}
-      </span>
-    )
-  }
-  if (indicator === 'cancelled') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center rounded-full bg-gray-200 text-gray-700 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        {fullLabel}
-      </span>
-    )
-  }
-  if (indicator === 'approval') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-700" />
-        {fullLabel}
-      </span>
-    )
-  }
-  if (indicator === 'running') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-800 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-700 animate-pulse" />
-        {fullLabel}
-      </span>
-    )
-  }
-  if (indicator === 'waiting') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center rounded-full bg-amber-50 text-amber-800 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        {fullLabel}
-      </span>
-    )
-  }
-  if (indicator === 'drift') {
-    return (
-      <span
-        data-testid="status-pill"
-        data-stage-fold-id={stagePrefixId}
-        className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-800 px-2 py-0.5 text-[10px] font-semibold"
-      >
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-orange-700" />
-        {fullLabel}
-      </span>
-    )
-  }
-  return null
+  const binding = INDICATOR_TO_TREATMENT[indicator]
+  const treatment: StatusTreatment = statusTreatment(binding.kind, binding.state)
+  const dotClass = treatment.dot
+  const showDot = indicator !== 'cancelled' && indicator !== 'waiting'
+  const animate = indicator === 'running' ? 'animate-pulse' : ''
+
+  return (
+    <span
+      data-testid="status-pill"
+      data-stage-fold-id={stagePrefixId}
+      data-indicator={indicator}
+      data-family={treatment.family}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${treatment.container}`}
+    >
+      {showDot && (
+        <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass} ${animate}`} aria-hidden="true" />
+      )}
+      {fullLabel}
+    </span>
+  )
+}
+
+function deriveWorkflowStageState(
+  progress?: WorkflowStageProgress | null,
+): string {
+  if (!progress || progress.total === 0) return 'not-started'
+  if (progress.running > 0) return 'running'
+  if (progress.failed > 0) return 'failed'
+  if (progress.completed > 0 && progress.completed === progress.total) return 'passed'
+  return 'pending'
 }
 
 function WorkflowStagePill({ issue }: { issue: Issue }) {
   const stage = issue.workflowStage
   if (!stage || !WORKFLOW_STAGE_LABELS[stage]) return null
 
-  const colors = getStageColors(
-    issue.status === IssueStatus.Done
-      ? IssueStatus.Done
-      : IssueStatus.InProgress,
+  const treatment = statusTreatment(
+    'workflow-stage',
+    deriveWorkflowStageState(issue.workflowStageProgress),
   )
 
   return (
     <span
       data-testid="workflow-stage-badge"
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-      style={{ backgroundColor: `${colors.accent}1a`, color: colors.accent }}
+      data-family={treatment.family}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${treatment.container}`}
     >
       <span
-        className="inline-block h-1.5 w-1.5 rounded-full"
-        style={{ backgroundColor: colors.accent }}
+        className={`inline-block h-1.5 w-1.5 rounded-full ${treatment.dot}`}
       />
       {WORKFLOW_STAGE_LABELS[stage]}
     </span>
@@ -215,8 +177,7 @@ function PriorityChip({ priority }: { priority: string | null | undefined }) {
   return (
     <span
       data-testid="priority-chip"
-      className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
-      style={{ backgroundColor: style.bg, color: style.text }}
+      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${style.className}`}
     >
       {formatPriority(priority)}
     </span>
@@ -310,8 +271,8 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
       to={toProjectPath(`/issues/${issue.number}`)}
       data-testid="issue-card"
       data-draft={isDraft ? 'true' : undefined}
-      className={`block rounded-lg border border-l-4 bg-background shadow-sm hover:border-muted hover:shadow-md transition-colors relative overflow-hidden ${cardDeEmphasis}`}
-      style={{ borderLeftColor: getPriorityStripColor(issue.priority) }}
+      data-priority-strip={issue.priority ?? 'none'}
+      className={`block rounded-lg border border-l-4 bg-background shadow-sm hover:border-muted hover:shadow-md transition-colors relative overflow-hidden ${cardDeEmphasis} ${getPriorityStripColor(issue.priority)}`}
     >
       {isCancelled && (
         <div className="absolute inset-0 bg-muted-foreground/40 z-10 flex items-center justify-center pointer-events-none">
@@ -348,15 +309,22 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               <WorkflowStageProgressIndicator progress={issue.workflowStageProgress} />
             </>
           )}
-          {isIntegrateWithFailure && (
-            <span
-              data-testid="integration-badge"
-              className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-800 px-2 py-0.5 text-[10px] font-semibold"
-            >
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-700 animate-pulse" />
-              {issue.blockedReason ? 'Integration Failed' : 'Integrating'}
-            </span>
-          )}
+          {isIntegrateWithFailure && (() => {
+            const integrationTreatment = statusTreatment(
+              issue.blockedReason ? 'workflow-run' : 'workflow-stage',
+              issue.blockedReason ? 'failed' : 'running',
+            )
+            return (
+              <span
+                data-testid="integration-badge"
+                data-family={integrationTreatment.family}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${integrationTreatment.container}`}
+              >
+                <span className={`inline-block h-1.5 w-1.5 rounded-full ${integrationTreatment.dot} animate-pulse`} aria-hidden="true" />
+                {issue.blockedReason ? 'Integration Failed' : 'Integrating'}
+              </span>
+            )
+          })()}
           {showArchiveButton && isDone && (
             <Button
               variant="ghost"
@@ -396,10 +364,9 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               return (
                 <span
                   key={label}
-                  className={`inline-block rounded-full px-1.5 font-medium whitespace-nowrap ${
+                  className={`inline-block rounded-full border px-1.5 font-medium whitespace-nowrap ${
                     s.size === 'sm' ? 'text-[10px] py-px' : 'text-xs py-0.5'
-                  }`}
-                  style={{ backgroundColor: s.bg, color: s.text }}
+                  } ${s.className}`}
                 >
                   {label}
                 </span>
@@ -454,7 +421,8 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
         {issue.blockedReason && indicator === 'blocked' && (
           <div className="mt-1.5">
             <p
-              className="text-[11px] text-red-800"
+              data-testid="blocked-reason"
+              className="text-[11px] text-danger"
               style={{
                 display: '-webkit-box',
                 WebkitLineClamp: 1,
@@ -474,7 +442,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
           <div className="mt-1.5">
             <p
               data-testid="blocker-reason"
-              className="text-[11px] text-amber-800"
+              className="text-[11px] text-warning"
               style={{
                 display: '-webkit-box',
                 WebkitLineClamp: 1,

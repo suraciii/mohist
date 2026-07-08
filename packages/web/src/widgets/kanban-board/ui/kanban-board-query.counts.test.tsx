@@ -82,6 +82,10 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     )
 
     expect(screen.getByText(/No runner is connected/i)).toBeInTheDocument()
+    const banner = screen.getByTestId('runner-unavailable-banner')
+    expect(banner).toHaveAttribute('data-family', 'warning')
+    expect(banner.className).toContain('bg-warning-subtle')
+    expect(banner.className).not.toMatch(/amber-|bg-white/)
   })
 
   it('does not show runner unavailable banner when connected idle runner exists', () => {
@@ -231,11 +235,15 @@ describe('Needs attention summary - user-action wording', () => {
       </QueryClientProvider>,
     )
 
-    const summary = document.querySelector('.bg-amber-50')!
+    const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
+    expect(summary).toHaveAttribute('data-family', 'warning')
+    expect(summary.className).toContain('bg-warning-subtle')
+    expect(summary.className).not.toMatch(/amber-|bg-white/)
     expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/Approval needed/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/#180/i)).toBeInTheDocument()
+    expect(screen.getByTestId('attention-link-180')).toHaveAttribute('data-family', 'warning')
   })
 
   it('renders attention summary item with user-action label for interrupted issue', () => {
@@ -255,8 +263,9 @@ describe('Needs attention summary - user-action wording', () => {
       </QueryClientProvider>,
     )
 
-    const summary = document.querySelector('.bg-amber-50')!
+    const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
+    expect(summary).toHaveAttribute('data-family', 'warning')
     expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/Interrupted/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/#17/i)).toBeInTheDocument()
@@ -281,8 +290,9 @@ describe('Needs attention summary - user-action wording', () => {
       </QueryClientProvider>,
     )
 
-    const summary = document.querySelector('.bg-amber-50')!
+    const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
+    expect(summary).toHaveAttribute('data-family', 'danger')
     expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/Integration failed/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/#206/i)).toBeInTheDocument()
@@ -307,7 +317,7 @@ describe('Needs attention summary - user-action wording', () => {
       </QueryClientProvider>,
     )
 
-    const summary = document.querySelector('.bg-amber-50')!
+    const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
     expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/Integration failed/i)).toBeInTheDocument()
@@ -333,7 +343,7 @@ describe('Needs attention summary - user-action wording', () => {
       </QueryClientProvider>,
     )
 
-    const summary = document.querySelector('.bg-amber-50')!
+    const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
     expect(within(summary as HTMLElement).getByText(/Integration failed/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).queryByText(/Needs action/i)).not.toBeInTheDocument()
@@ -357,7 +367,7 @@ describe('Needs attention summary - user-action wording', () => {
       </QueryClientProvider>,
     )
 
-    const summary = document.querySelector('.bg-amber-50')
+    const summary = screen.queryByTestId('needs-attention-summary')
     expect(summary).toBeNull()
   })
 
@@ -449,11 +459,13 @@ describe('Needs attention summary - user-action wording', () => {
       </QueryClientProvider>,
     )
 
-    const summary = document.querySelector('.bg-amber-50')!
+    const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
+    expect(summary).toHaveAttribute('data-family', 'danger')
     expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/Needs action/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/#99/i)).toBeInTheDocument()
+    expect(screen.getByTestId('attention-link-99')).toHaveAttribute('data-family', 'danger')
   })
 
   it('does not render attention summary when no actionable items exist', () => {

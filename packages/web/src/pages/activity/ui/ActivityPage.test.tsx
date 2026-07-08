@@ -166,7 +166,7 @@ describe('ActivityPage', () => {
       expect(badge.textContent).toMatch(/1 runner ready/)
     })
 
-    it('keeps the runner overview badge when capacity is missing (stale/offline)', () => {
+    it('keeps the runner overview badge when a runner is stale', () => {
       mocks.summary = {
         connectedIdleCount: 0,
         connectedBusyCount: 0,
@@ -177,7 +177,21 @@ describe('ActivityPage', () => {
       renderWith()
 
       const badge = getRunnerBadgeButton()
-      expect(badge.textContent).toMatch(/Runner stale\/offline/)
+      expect(badge.textContent).toMatch(/Runner stale/)
+    })
+
+    it('keeps the runner overview badge when runners are offline', () => {
+      mocks.summary = {
+        connectedIdleCount: 0,
+        connectedBusyCount: 0,
+        hasConnectedCapacity: false,
+        rows: [makeRow({ status: 'offline' })],
+      }
+
+      renderWith()
+
+      const badge = getRunnerBadgeButton()
+      expect(badge.textContent).toMatch(/Runner offline/)
     })
 
     it('keeps the runner overview badge when runners are busy', () => {
@@ -231,7 +245,7 @@ describe('ActivityPage', () => {
       expect(screen.getByTestId('route-pathname').textContent).toBe('/TestProject/runners')
     })
 
-    it('navigates to /runners when the stale/offline badge is activated', () => {
+    it('navigates to /runners when the stale badge is activated', () => {
       mocks.summary = {
         connectedIdleCount: 0,
         connectedBusyCount: 0,
@@ -241,7 +255,7 @@ describe('ActivityPage', () => {
 
       renderWith()
       const badge = getRunnerBadgeButton()
-      expect(badge.textContent).toMatch(/Runner stale\/offline/)
+      expect(badge.textContent).toMatch(/Runner stale/)
 
       fireEvent.click(badge)
 

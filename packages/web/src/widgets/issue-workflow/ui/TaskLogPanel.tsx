@@ -5,6 +5,8 @@ import { DiamondIcon } from 'lucide-react'
 import { useProject } from '../../../entities/project'
 import { useIssueWorkflowTaskLog, type TaskLogLine, type TaskLogPage } from '../../../entities/issue'
 import { useWorkflowRunSessions } from '../../../entities/coder-session'
+import { Button } from '@/shared/ui/components/button'
+import { Badge } from '@/shared/ui/components/badge'
 import {
   useEventsConnection,
   subscribeTaskLog,
@@ -317,14 +319,14 @@ export function TaskLogPanel({
 
   const renderScrollBody = () => {
     if (isLoading || (isSessionSummaryLoading && lines.length === 0 && milestones.length === 0)) {
-      return <div className="text-slate-400">Loading execution log…</div>
+      return <div className="text-muted-foreground">Loading execution log…</div>
     }
     if (isError) {
-      return <div className="text-slate-400">Execution log unavailable</div>
+      return <div className="text-muted-foreground">Execution log unavailable</div>
     }
     if (lines.length === 0 && milestones.length === 0) {
       return (
-        <div className="text-slate-400" data-testid="task-log-empty">
+        <div className="text-muted-foreground" data-testid="task-log-empty">
           No execution log captured for this task.
         </div>
       )
@@ -333,13 +335,13 @@ export function TaskLogPanel({
     if (filteredRows.length === 0) {
       if (trimmedQuery) {
         return (
-          <div className="text-slate-400" data-testid="task-log-no-search-match">
+          <div className="text-muted-foreground" data-testid="task-log-no-search-match">
             No lines match &lsquo;{trimmedQuery}&rsquo;
           </div>
         )
       }
       return (
-        <div className="text-slate-400" data-testid="task-log-no-source-match">
+        <div className="text-muted-foreground" data-testid="task-log-no-source-match">
           No lines match the active source filters
         </div>
       )
@@ -353,7 +355,7 @@ export function TaskLogPanel({
               data-testid={`task-log-milestone-${row.kind}`}
               className="flex gap-2 whitespace-pre-wrap break-words rounded border border-violet-400/40 bg-violet-400/10 px-1.5"
             >
-              <span className="text-slate-500 flex-shrink-0">{formatTimestamp(row.timestamp)}</span>
+              <span className="text-muted-foreground flex-shrink-0">{formatTimestamp(row.timestamp)}</span>
               <DiamondIcon
                 className="h-3 w-3 flex-shrink-0 text-violet-300"
                 aria-label="Session event"
@@ -368,7 +370,7 @@ export function TaskLogPanel({
             </li>
           ) : (
             <li key={row.seq} className="flex gap-2 whitespace-pre-wrap break-words">
-              <span className="text-slate-500 flex-shrink-0">{formatTimestamp(row.timestamp)}</span>
+              <span className="text-muted-foreground flex-shrink-0">{formatTimestamp(row.timestamp)}</span>
               <span className="text-sky-300 flex-shrink-0">[{row.source}]</span>
               <span className="flex-1 min-w-0">{row.text}</span>
             </li>
@@ -379,21 +381,18 @@ export function TaskLogPanel({
   }
 
   return (
-    <div className="rounded border border-slate-200 bg-white px-2 py-1.5 space-y-1" data-testid="task-log-panel">
-      <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-slate-500">
+    <div className="rounded border border-border bg-background px-2 py-1.5 space-y-1" data-testid="task-log-panel">
+      <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
         <span className="shrink-0">Execution log</span>
         {truncated && (
-          <span
-            className="rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 font-mono normal-case tracking-normal"
-            data-testid="task-log-truncation-indicator"
-          >
+          <Badge variant="warning" className="font-mono normal-case tracking-normal" data-testid="task-log-truncation-indicator">
             Earlier lines truncated — showing retained tail
-          </span>
+          </Badge>
         )}
         <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 normal-case tracking-normal sm:flex-initial">
           <div className="relative min-w-0 flex-1 basis-44 sm:flex-initial sm:basis-auto">
             <svg
-              className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"
+              className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground"
               viewBox="0 0 20 20"
               fill="currentColor"
               aria-hidden="true"
@@ -411,23 +410,25 @@ export function TaskLogPanel({
               placeholder="Search log lines…"
               aria-label="Search log lines"
               data-testid="task-log-search-input"
-              className="w-full rounded-md border border-slate-300 bg-white pl-7 pr-3 py-1 text-[11px] text-slate-900 placeholder-slate-400 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 focus:outline-none min-h-[28px] sm:w-48"
+              className="w-full rounded-md border border-input bg-background pl-7 pr-3 py-1 text-[11px] text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 focus:outline-none min-h-[28px] sm:w-48"
             />
           </div>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={handleDownload}
             disabled={visibleLines === 0}
             aria-label="Download execution log"
             data-testid="task-log-download-button"
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors min-h-[28px]"
+            className="min-h-[28px] px-2.5 text-[11px]"
           >
             <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
               <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
               <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
             </svg>
             <span>Download</span>
-          </button>
+          </Button>
         </div>
       </div>
       {sources.length > 0 && (
@@ -435,20 +436,21 @@ export function TaskLogPanel({
           {sources.map((source) => {
             const disabled = disabledSources.has(source)
             return (
-              <button
+              <Badge
                 key={source}
-                type="button"
-                onClick={() => toggleSource(source)}
-                aria-pressed={!disabled}
-                data-testid={`task-log-source-chip-${source}`}
-                className={
-                  disabled
-                    ? 'inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-semibold text-slate-400 line-through transition-colors'
-                    : 'inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-200 transition-colors'
+                variant={disabled ? 'outline' : 'secondary'}
+                render={
+                  <button
+                    type="button"
+                    onClick={() => toggleSource(source)}
+                    aria-pressed={!disabled}
+                  />
                 }
+                data-testid={`task-log-source-chip-${source}`}
+                className={disabled ? 'opacity-60 line-through' : undefined}
               >
                 {source}
-              </button>
+              </Badge>
             )
           })}
         </div>

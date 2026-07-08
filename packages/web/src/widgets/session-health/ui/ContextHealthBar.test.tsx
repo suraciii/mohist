@@ -155,7 +155,7 @@ describe('ContextHealthBar', () => {
         onReset={() => {}}
       />,
     )
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('hides the warning banner when usage is at 79.9% (just below the threshold)', () => {
@@ -169,7 +169,7 @@ describe('ContextHealthBar', () => {
         onReset={() => {}}
       />,
     )
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('shows the warning banner when usage is at 80%', () => {
@@ -183,7 +183,7 @@ describe('ContextHealthBar', () => {
         onReset={() => {}}
       />,
     )
-    const banner = screen.getByRole('status')
+    const banner = screen.getByRole('alert')
     expect(banner).toBeInTheDocument()
     expect(banner).toHaveTextContent(/80%/)
   })
@@ -199,9 +199,24 @@ describe('ContextHealthBar', () => {
         onReset={() => {}}
       />,
     )
-    const banner = screen.getByRole('status')
+    const banner = screen.getByRole('alert')
     expect(banner).toBeInTheDocument()
     expect(banner).toHaveTextContent(/95%/)
+  })
+
+  it('does not show the critical banner when server health is yellow at high percent', () => {
+    render(
+      <ContextHealthBar
+        contextWindowUsed={950_000}
+        contextWindowSize={1_000_000}
+        contextUsagePercent={95}
+        healthStatus="yellow"
+        onCompact={() => {}}
+        onReset={() => {}}
+      />,
+    )
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'yellow')
   })
 
   it('renders both Compact and Reset action links in the warning banner', () => {
@@ -215,7 +230,7 @@ describe('ContextHealthBar', () => {
         onReset={() => {}}
       />,
     )
-    const banner = screen.getByRole('status')
+    const banner = screen.getByRole('alert')
     const compactButton = screen.getByRole('button', { name: 'Compact' })
     const resetButton = screen.getByRole('button', { name: 'Reset' })
     expect(banner).toContainElement(compactButton)
@@ -264,7 +279,7 @@ describe('ContextHealthBar', () => {
         onCompact={() => {}}
       />,
     )
-    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toBeInTheDocument()
   })
 
   it('hides the warning banner when no recovery callbacks are provided', () => {
@@ -276,7 +291,7 @@ describe('ContextHealthBar', () => {
         healthStatus="red"
       />,
     )
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'red')
   })
 
@@ -293,7 +308,7 @@ describe('ContextHealthBar', () => {
     )
     const dismiss = screen.getByRole('button', { name: 'Dismiss context warning' })
     fireEvent.click(dismiss)
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('respects showWarning=false and hides the warning banner even at high usage', () => {
@@ -308,7 +323,7 @@ describe('ContextHealthBar', () => {
         showWarning={false}
       />,
     )
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'red')
   })
 
@@ -323,7 +338,7 @@ describe('ContextHealthBar', () => {
         onReset={() => {}}
       />,
     )
-    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toBeInTheDocument()
 
     rerender(
       <ContextHealthBar
@@ -335,7 +350,7 @@ describe('ContextHealthBar', () => {
         onReset={() => {}}
       />,
     )
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByTestId('context-health-bar')).toHaveAttribute('data-status', 'green')
   })
 })

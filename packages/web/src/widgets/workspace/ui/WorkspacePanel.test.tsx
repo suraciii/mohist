@@ -142,4 +142,75 @@ describe('WorkspacePanel', () => {
     render(<WorkspacePanel issueNumber={1} isAgentRunning={true} isDone={true} />)
     expect(screen.getByText('Clean up after completion')).toBeInTheDocument()
   })
+
+  it('rebase action uses Button variant — warning variant behind master, no amber color overlay', () => {
+    mockWorkspaceStatus({ exists: true, branch: 'mo/issue-1', ahead: 0, behind: 3, canFastForward: false, isRebaseInProgress: false }, false)
+    render(<WorkspacePanel issueNumber={1} isAgentRunning={false} />)
+    const rebase = screen.getByRole('button', { name: /rebase onto master/i })
+    expect(rebase.dataset.slot).toBe('button')
+    expect(rebase.className).toContain('border-warning-border')
+    expect(rebase.className).toContain('bg-warning-subtle')
+    expect(rebase.className).not.toContain('border-amber-')
+    expect(rebase.className).not.toContain('bg-amber-')
+    expect(rebase.className).not.toContain('text-amber-')
+  })
+
+  it('rebase action uses Button variant — outline variant when not behind, no gray color overlay', () => {
+    mockWorkspaceStatus({ exists: true, branch: 'mo/issue-1', ahead: 2, behind: 0, canFastForward: true, isRebaseInProgress: false }, false)
+    render(<WorkspacePanel issueNumber={1} isAgentRunning={false} />)
+    const rebase = screen.getByRole('button', { name: /rebase onto master/i })
+    expect(rebase.dataset.slot).toBe('button')
+    expect(rebase.className).toContain('border-border')
+    expect(rebase.className).toContain('bg-background')
+    expect(rebase.className).not.toContain('border-gray-')
+    expect(rebase.className).not.toContain('bg-white')
+    expect(rebase.className).not.toContain('text-gray-')
+  })
+
+  it('cleanup action uses Button variant — outline variant, no gray color overlay', () => {
+    mockWorkspaceStatus({ exists: true, branch: 'mo/issue-1', ahead: 0, behind: 0, canFastForward: true, isRebaseInProgress: false }, false)
+    render(<WorkspacePanel issueNumber={1} isAgentRunning={false} isDone={true} />)
+    const cleanup = screen.getByRole('button', { name: /clean up workspace/i })
+    expect(cleanup.dataset.slot).toBe('button')
+    expect(cleanup.className).not.toContain('border-gray-')
+    expect(cleanup.className).not.toContain('bg-white')
+    expect(cleanup.className).not.toContain('text-gray-')
+  })
+
+  it('rebase action uses primitive disabled treatment when rebasing', () => {
+    mockWorkspaceStatus({ exists: true, branch: 'mo/issue-1', ahead: 0, behind: 3, canFastForward: false, rebaseInProgress: true }, false)
+    render(<WorkspacePanel issueNumber={1} isAgentRunning={false} />)
+    const rebase = screen.getByRole('button', { name: /rebasing/i })
+    expect((rebase as HTMLButtonElement).disabled).toBe(true)
+    expect(rebase.className).toContain('disabled:pointer-events-none')
+    expect(rebase.className).toContain('disabled:opacity-50')
+  })
+
+  it('panel chrome uses semantic tokens, not raw light-only palette classes', () => {
+    mockWorkspaceStatus({ exists: true, branch: 'mo/issue-1', ahead: 0, behind: 0, canFastForward: true, isRebaseInProgress: false }, false)
+    const { container } = render(<WorkspacePanel issueNumber={1} isAgentRunning={false} />)
+    const panel = container.firstElementChild as HTMLElement
+    const cls = panel.className
+    expect(cls).toContain('border-border')
+    expect(cls).toContain('bg-background')
+    expect(cls).not.toContain('border-gray-')
+    expect(cls).not.toContain('bg-white')
+    expect(cls).not.toContain('bg-gray-')
+    expect(cls).not.toContain('text-gray-')
+    expect(cls).not.toContain('text-green-')
+    expect(cls).not.toContain('text-amber-')
+    expect(cls).not.toContain('text-blue-')
+  })
+
+  it('workspace surface text uses semantic tokens instead of raw palette classes', () => {
+    mockWorkspaceStatus({ exists: true, branch: 'mo/issue-1', ahead: 0, behind: 3, canFastForward: false, isRebaseInProgress: false }, false)
+    const { container } = render(<WorkspacePanel issueNumber={1} isAgentRunning={false} isDone={true} />)
+    const html = container.innerHTML
+    expect(html).toContain('text-warning')
+    expect(html).toContain('text-muted-foreground')
+    expect(html).not.toContain('text-gray-')
+    expect(html).not.toContain('text-green-')
+    expect(html).not.toContain('text-amber-')
+    expect(html).not.toContain('text-blue-')
+  })
 })

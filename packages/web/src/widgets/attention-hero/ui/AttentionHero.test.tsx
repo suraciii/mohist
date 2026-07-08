@@ -156,16 +156,20 @@ describe('AttentionHero - has-attention state', () => {
     const root = screen.getByTestId('dashboard-zone-attention')
     expect(root).toBeInTheDocument()
     expect(root).toHaveAttribute('data-zone', 'attention')
+    expect(root).toHaveAttribute('data-family', 'danger')
 
     const rows = screen.getAllByTestId('attention-item')
     expect(rows).toHaveLength(3)
 
     expect(rows[0]).toHaveAttribute('data-issue-number', '10')
     expect(rows[0]).toHaveAttribute('data-label', 'Approval needed')
+    expect(rows[0]).toHaveAttribute('data-family', 'warning')
     expect(rows[1]).toHaveAttribute('data-issue-number', '20')
     expect(rows[1]).toHaveAttribute('data-label', 'Needs action')
+    expect(rows[1]).toHaveAttribute('data-family', 'danger')
     expect(rows[2]).toHaveAttribute('data-issue-number', '30')
     expect(rows[2]).toHaveAttribute('data-label', 'Integration failed')
+    expect(rows[2]).toHaveAttribute('data-family', 'danger')
 
     expect(screen.getByText('Awaiting approval on schema')).toBeInTheDocument()
     expect(screen.getByText('Waiting on infra fix')).toBeInTheDocument()
@@ -221,9 +225,9 @@ describe('AttentionHero - has-attention state', () => {
 
     const shared = deriveAttentionItems(issues, agentStatus)
     expect(shared).toHaveLength(3)
-    expect(shared[0]).toMatchObject({ label: 'Approval needed', issueNumber: 10 })
-    expect(shared[1]).toMatchObject({ label: 'Needs action', issueNumber: 20 })
-    expect(shared[2]).toMatchObject({ label: 'Integration failed', issueNumber: 30 })
+    expect(shared[0]).toMatchObject({ kind: 'approval-needed', label: 'Approval needed', issueNumber: 10 })
+    expect(shared[1]).toMatchObject({ kind: 'blocked', label: 'Needs action', issueNumber: 20 })
+    expect(shared[2]).toMatchObject({ kind: 'integration-failed', label: 'Integration failed', issueNumber: 30 })
 
     const rendered = screen.getAllByTestId('attention-item')
     expect(rendered).toHaveLength(shared.length)
@@ -447,6 +451,66 @@ describe('AttentionHero - per-item actions', () => {
     expect(links).toHaveLength(2)
     expect(links[0]).toHaveAttribute('href', '/demo/issues/11')
     expect(links[1]).toHaveAttribute('href', '/demo/issues/22')
+  })
+
+  it('Approve and Resume buttons use the Button primitive, not hand-rolled color classes', () => {
+    mocks.issues = [
+      makeIssue({
+        id: 'awaiting-1',
+        number: 11,
+        title: 'a',
+        approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
+      }),
+      makeIssue({
+        id: 'b-1',
+        number: 22,
+        title: 'b',
+        workflowStage: WorkflowStage.Build,
+        health: IssueHealth.Interrupted,
+      }),
+    ]
+
+    renderHero()
+
+    const approve = screen.getByTestId('attention-item-approve')
+    expect(approve.dataset.slot).toBe('button')
+    expect(approve.className).not.toContain('text-white')
+    expect(approve.className).not.toContain('bg-warning hover:bg-warning/80')
+
+    const resume = screen.getByTestId('attention-item-resume')
+    expect(resume.dataset.slot).toBe('button')
+    expect(resume.className).not.toContain('text-background')
+    expect(resume.className).not.toContain('bg-foreground/90')
+  })
+
+  it('Approve and Resume actions use Button variants directly', () => {
+    mocks.issues = [
+      makeIssue({
+        id: 'awaiting-1',
+        number: 11,
+        title: 'a',
+        approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
+      }),
+      makeIssue({
+        id: 'b-1',
+        number: 22,
+        title: 'b',
+        workflowStage: WorkflowStage.Build,
+        health: IssueHealth.Interrupted,
+      }),
+    ]
+
+    renderHero()
+
+    const approve = screen.getByTestId('attention-item-approve')
+    expect(approve.className).toContain('border-warning-border')
+    expect(approve.className).toContain('bg-warning-subtle')
+    expect(approve.className).not.toContain('text-white')
+
+    const resume = screen.getByTestId('attention-item-resume')
+    expect(resume.className).toContain('bg-primary')
+    expect(resume.className).toContain('text-primary-foreground')
+    expect(resume.className).not.toContain('text-background')
   })
 })
 
