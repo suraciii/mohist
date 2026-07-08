@@ -425,36 +425,51 @@ public class ArchitectureRules
             "enforce IEnvironmentVariableProvider usage at compile time: " + string.Join(", ", missing));
     }
 
-    private const int SpecFileSizeBudgetBytes = 160_000;
-    private static string SpecTestsRoot => Path.GetFullPath(Path.Combine(
-        AppContext.BaseDirectory,
-        "..", "..", "..", "..", "Mohist.Server.SpecTests", "Specs"));
+    private const int SpecFileSizeBudgetBytes = 24_000;
 
+    /// <summary>
+    /// Spec files in <c>Specs/</c> must end with <c>Specs</c> or
+    /// <c>Collection</c> (or be <c>Index.md</c>). Prevents accidental
+    /// mis-naming that breaks the "find the spec for SUT X" intuition.
+    /// </summary>
     [Fact]
-    public void SpecClassFiles_MustHaveSpecsSuffix()
+    public void SpecFiles_MustHaveSpecOrCollectionSuffix()
     {
-        var specsRoot = SpecTestsRoot;
+        var specsRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "Specs"));
         if (!Directory.Exists(specsRoot))
             return; // Specs dir not present (fresh checkout?); rule is vacuous.
 
-        var specClassRegex = new System.Text.RegularExpressions.Regex(@"\bclass\s+\w+Specs\b");
-        var violations = Directory.EnumerateFiles(specsRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(p => specClassRegex.IsMatch(File.ReadAllText(p)))
+        var specFiles = Directory.EnumerateFiles(
+            specsRoot, "*.cs", SearchOption.AllDirectories);
+
+        var violations = specFiles
             .Select(p => Path.GetFileNameWithoutExtension(p)!)
-            .Where(name => !name.EndsWith("Specs"))
+            .Where(name => !name.EndsWith("Specs")
+                        && !name.EndsWith("Collection")
+                        && !name.Equals("Index", StringComparison.Ordinal))
             .OrderBy(name => name)
             .ToList();
 
         Assert.True(
             violations.Count == 0,
-            "Spec class files must end with 'Specs'. Violations: " +
+            "Spec files must end with 'Specs' or 'Collection'. Violations: " +
             string.Join(", ", violations));
     }
 
+    /// <summary>
+    /// Spec files must stay under ~24 KB so contributors notice when a
+    /// file has grown past a comfortable reading size. Larger files
+    /// should be split by lifecycle phase, behavior scenario, or
+    /// SUT-prefix grouping.
+    /// </summary>
     [Fact]
-    public void SpecFiles_MustStayBelowSizeBudget()
+    public void SpecFiles_MustStayBellowSizeBudget()
     {
-        var specsRoot = SpecTestsRoot;
+        var specsRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "Specs"));
         if (!Directory.Exists(specsRoot))
             return;
 
@@ -480,7 +495,9 @@ public class ArchitectureRules
     [Fact]
     public void SpecClasses_MustBePublic()
     {
-        var specsRoot = SpecTestsRoot;
+        var specsRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "Specs"));
         if (!Directory.Exists(specsRoot))
             return;
 
@@ -507,10 +524,18 @@ public class ArchitectureRules
             "Spec classes must be public. Violations: " + string.Join(", ", violations));
     }
 
+    /// <summary>
+    /// Spec files in <c>Specs/</c> must declare a namespace under
+    /// <c>Mohist.Server.Tests.Specs</c>. Prevents accidentally placing
+    /// test code outside the Specs sub-namespace, which would break
+    /// test discovery and namespace-based filtering.
+    /// </summary>
     [Fact]
     public void SpecNamespaces_MustBeUnderSpecs()
     {
-        var specsRoot = SpecTestsRoot;
+        var specsRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "Specs"));
         if (!Directory.Exists(specsRoot))
             return;
 
@@ -530,14 +555,7 @@ public class ArchitectureRules
                 continue;
             }
             var ns = m.Groups[1].Value;
-            if (ns.StartsWith("Mohist.Server.Tests.Specs", StringComparison.Ordinal))
-            {
-                violations.Add($"{Path.GetRelativePath(specsRoot, path)}: {ns}");
-                continue;
-            }
-
-            if (!ns.StartsWith("Mohist.Server.SpecTests.Specs", StringComparison.Ordinal)
-                && !ns.StartsWith("Mohist.Server.", StringComparison.Ordinal))
+            if (!ns.StartsWith("Mohist.Server.Tests.Specs", StringComparison.Ordinal))
             {
                 violations.Add($"{Path.GetRelativePath(specsRoot, path)}: {ns}");
             }
@@ -545,7 +563,7 @@ public class ArchitectureRules
 
         Assert.True(
             violations.Count == 0,
-            "Spec namespaces must be under 'Mohist.Server.SpecTests.Specs' or a Mohist.Server white-box namespace. Violations: " +
+            "Spec namespaces must be under 'Mohist.Server.Tests.Specs'. Violations: " +
             string.Join(", ", violations));
     }
 }

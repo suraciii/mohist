@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
@@ -54,49 +53,6 @@ public class RunnerHeartbeatConnectionApiSpecs
             await PostHeartbeatAsync(runnerId, new { connectionId = "C-1" });
 
             Assert.Equal("C-1", Tracker.GetConnectionId(runnerId));
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
-    [Fact]
-    public async Task Heartbeat_WithConnectionIdOnly_PreservesRegisteredRunnerInfo()
-    {
-        var runnerId = $"runner-hb-preserve-{Guid.NewGuid():N}";
-        var response = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
-        {
-            capabilities = new[] { "spec/*", "workflow" },
-            hostname = "preserve-host",
-            projectId = "preserve-project",
-            coderModels = new[] { "openai/gpt-4" },
-            buildGitHash = "0123456789abcdef0123456789abcdef01234567",
-            coderModelVariants = new Dictionary<string, string[]>
-            {
-                ["openai/gpt-4"] = ["high"],
-            },
-        });
-        response.EnsureSuccessStatusCode();
-
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        var before = await runner.GetInfoAsync();
-
-        try
-        {
-            await PostHeartbeatAsync(runnerId, new { connectionId = "C-1" });
-
-            var after = await runner.GetInfoAsync();
-            Assert.NotNull(before);
-            Assert.NotNull(after);
-            Assert.Equal(before.Capabilities, after.Capabilities);
-            Assert.Equal(before.Hostname, after.Hostname);
-            Assert.Equal(before.ProjectId, after.ProjectId);
-            Assert.Equal(before.CoderModels, after.CoderModels);
-            Assert.Equal(before.BuildGitHash, after.BuildGitHash);
-            Assert.Equal(before.CoderModelVariants!["openai/gpt-4"], after.CoderModelVariants!["openai/gpt-4"]);
         }
         finally
         {

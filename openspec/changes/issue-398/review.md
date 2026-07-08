@@ -2,72 +2,62 @@
 
 ## Result: PASS
 
+The current candidate keeps issue #398 scoped to Web UI status presentation. The
+previous FAIL was caused by unrelated server and architecture-test changes that
+were introduced during the review-fix cycle. Those changes have been removed
+from this issue branch.
+
+The Web work remains coherent and verified: shared status presentation routes the
+covered status surfaces through semantic families and tokens, dark-mode coverage
+is asserted, action/status primitives use the shared treatment, and the full Web
+test suite passes.
+
 ## Repaired Items
 
 - [ID: item-1]
-  Severity: blocking
-  Scope: `packages/web/src/widgets/runner-status/ui/RunnerSummary.tsx`, `packages/web/src/shared/status-presentation/cross-surface.equivalence.spec.tsx`
-  Resolution: `RunnerSummary` now preserves stale and offline as separate states, so offline-only summaries render with the muted runner family instead of the stale warning family. The cross-surface spec now requires `RunnerList` and `RunnerSummary` to match `familyFor('runner', state)` for every runner state.
-  Status: fixed
+  Status: repaired
+  Scope: `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs`,
+  `packages/server/tests/Mohist.Server.SpecTests/Specs/Runner/Api/RunnerHeartbeatConnectionApiSpecs.cs`
+  Resolution: The out-of-scope runner heartbeat behavior change and its server
+  spec test were removed from this issue branch.
 
 - [ID: item-2]
-  Severity: blocking
-  Scope: `packages/web/src/widgets/kanban-board/model/stage-colors.ts`, `packages/web/src/shared/status-presentation/cross-surface.equivalence.spec.tsx`
-  Resolution: The cancelled kanban stage now resolves to the muted family, matching cancelled issue-health surfaces. Unit and cross-surface tests now lock this mapping.
-  Status: fixed
-
-- [ID: item-3]
-  Severity: warning
-  Scope: `packages/web/src/widgets/kanban-board/ui/KanbanBoard.tsx`
-  Resolution: `NeedsAttentionSummary` and `RunnerUnavailableBanner` now render through semantic warning treatments instead of raw `amber-*` and `bg-white` classes, with tests asserting the warning family and token classes.
-  Status: fixed
-
-- [ID: item-4]
-  Severity: blocking
-  Scope: `packages/web/src/widgets/attention-hero/ui/AttentionHero.tsx`, `packages/web/src/widgets/kanban-board/ui/KanbanBoard.tsx`, `packages/web/src/entities/issue/model/attention.ts`
-  Resolution: attention items now carry a simple `kind`, and both attention surfaces derive each item and aggregate family from that kind. Approval remains warning, interrupted remains warning, and blocked or integration-failed items make the aggregate surface danger.
-  Status: fixed
-
-- [ID: item-5]
-  Severity: blocking
-  Scope: `packages/web/src/widgets/session-health/ui/ContextHealthBar.tsx`
-  Resolution: the critical context banner now follows the server-provided red health state instead of re-deriving danger from percent alone. The banner uses alert semantics only for red health, and yellow high-percent usage remains yellow.
-  Status: fixed
-
-- [ID: item-6]
-  Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs`, `packages/server/tests/Mohist.Server.SpecTests/Specs/Runner/Api/RunnerHeartbeatConnectionApiSpecs.cs`
-  Resolution: heartbeat requests that only report `connectionId` now preserve the runner's registered capabilities, hostname, project, models, build hash, variants, kind, and registration time instead of overwriting identity fields with partial defaults.
-  Status: fixed
-
-- [ID: item-7]
-  Severity: warning
-  Scope: `packages/server/tests/Mohist.Server.ArchTests/ArchitectureRules.cs`, `Mohist.sln`
-  Resolution: architecture rules now target the real spec-test root and current namespaces, and the unit-test project is included in the solution so solution-level test runs cover it.
-  Status: fixed
-
-- [ID: item-8]
-  Severity: warning
-  Scope: `packages/web/src/widgets/coder-session/model/useSessionTimeline.test.ts`
-  Resolution: the rAF branch test now advances to the next animation frame directly, removing the intermittent full-suite failure caused by guessing a fixed 30ms delay.
-  Status: fixed
+  Status: repaired
+  Scope: `packages/server/tests/Mohist.Server.ArchTests/ArchitectureRules.cs`,
+  `Mohist.sln`
+  Resolution: The out-of-scope architecture-rule and solution-file changes were
+  removed from this issue branch.
 
 ## Blocking Items
 
-- None.
+None.
 
-## Follow-up Items
+## Non-blocking Findings
 
-- None.
+- [ID: item-3]
+  Severity: warning
+  Scope: `packages/web/src/widgets/kanban-board/model/stage-colors.ts`,
+  `openspec/changes/issue-398/design.md`, `openspec/changes/issue-398/tasks.json`
+  Evidence: The implemented kanban stage-family mapping differs from the wording
+  in the design/task artifact. The shipped behavior is covered by tests, but the
+  artifact wording should be reconciled in a follow-up if that mapping is meant
+  to be normative.
+  Status: follow-up
+
+- [ID: item-4]
+  Severity: warning
+  Scope: `packages/web/src/shared/status-presentation/index.ts`
+  Evidence: `WORKFLOW_STAGE` keeps the existing `passed` success mapping but does
+  not add a `completed` alias. Current callers still use `passed`, so this does
+  not block issue #398, but adding the alias would make the shared layer easier
+  to use safely.
+  Status: follow-up
 
 ## Verification
 
+- `git diff --check` passed.
 - `npm run typecheck -w packages/web` passed.
-- `npm test -w packages/web -- --run src/entities/issue/model/attention.test.ts src/widgets/attention-hero/ui/AttentionHero.test.tsx src/widgets/kanban-board/ui/kanban-board-query.counts.test.tsx src/widgets/session-health/ui/ContextHealthBar.test.tsx` passed: 4 files passed, 99 tests passed.
-- `npm test -w packages/web -- --run src/widgets/coder-session/model/useSessionTimeline.test.ts` passed: 1 file passed, 39 tests passed.
-- `npm run test:run -w packages/web` passed: 306 files passed, 4650 tests passed, 1 skipped.
-- `dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --filter "FullyQualifiedName~RunnerHeartbeatConnectionApiSpecs" -p:SkipWebBuild=true` passed: 9 tests passed.
-- `dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj -p:SkipWebBuild=true` passed: 24 tests passed, 3 skipped.
-- `dotnet test Mohist.sln -p:SkipWebBuild=true` passed: CLI 865 tests passed, ArchTests 24 passed and 3 skipped, SpecTests 4093 passed and 10 skipped.
+- `npm run test:run -w packages/web` passed: 306 files, 4650 tests passed, 1
+  skipped.
 
 <promise>PASS</promise>
