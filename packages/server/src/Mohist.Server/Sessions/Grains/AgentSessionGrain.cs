@@ -21,6 +21,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly TimeProvider _timeProvider;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
+    private bool _sessionReloadRequired;
     private AgentSessionTranscriptSummary? _cachedSummary;
     private long _realtimeSequence;
     private IDisposable? _persistTimer;
@@ -49,6 +50,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
+        _sessionReloadRequired = false;
         _session = await _stateStore.LoadAsync(SessionId);
     }
 
@@ -62,6 +64,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public async Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command)
     {
+        RejectIfReloadRequired();
         if (_session is null)
         {
             _session = CreateSession(command);
@@ -268,7 +271,22 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _transcript.Accept(session, transcriptEntries, now);
         var transcript = _transcript.BuildFlush(session, now);
 
-        await _stateStore.SaveAsync(SessionId, session, events);
+        try
+        {
+            await _stateStore.SaveAsync(SessionId, session, events);
+        }
+        catch
+        {
+            // Recovery transitions (RebindRuntimeSession/RecordCompaction) have
+            // already mutated the live session. The store rolled back, so the
+            // committed state and AgentSessionEvents rows are unchanged.
+            // Quarantine the activation so the mutated in-memory session is
+            // not salvaged on a later command; the next activation reloads
+            // from storage. See CommitAsync for the same defense.
+            _sessionReloadRequired = true;
+            DeactivateOnIdle();
+            throw;
+        }
         if (transcript is not null)
         {
             await _transcriptStore.SaveAsync(transcript);
@@ -572,10 +590,13 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private async Task<bool> FlushAsync(CancellationToken ct)
     {
         if (_session is null) return true;
+        // A prior event-aware save on this activation failed and quarantined
+        // it; do not attempt another flush from the same dirty state.
+        if (_sessionReloadRequired)
+            throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
 
         var now = Now();
         var transcript = _transcript.BuildFlush(_session, now);
-        var stateSaved = !_stateDirty;
 
         if (_stateDirty)
         {
@@ -585,43 +606,49 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             try
             {
                 await _stateStore.SaveAsync(SessionId, _session, pendingEvents, ct);
-                stateSaved = true;
             }
             catch (Exception ex)
             {
                 _log.LogError(ex,
                     "AgentSessionGrain failed to save state for {SessionId}",
                     SessionId);
+                // The state/event transaction rolled back, but the live
+                // session and _pendingDomainEvents already absorbed the
+                // runtime activity. Quarantine the activation so a later
+                // command cannot persist the dirty state without the matching
+                // AgentSessionEvents rows. See CommitAsync for the same defense.
+                _sessionReloadRequired = true;
+                DeactivateOnIdle();
                 throw;
             }
-        }
-
-        var transcriptSaved = transcript is null;
-        if (transcript is not null)
-        {
-            try
-            {
-                await _transcriptStore.SaveAsync(transcript, ct);
-                transcriptSaved = true;
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "AgentSessionGrain failed to save transcript for {SessionId}; parts={PartCount}",
-                    SessionId, transcript.Parts.Count);
-            }
-        }
-
-        if (stateSaved && transcriptSaved)
-        {
-            if (transcript is not null)
-                _transcript.CommitFlush();
-            if (_stateDirty)
-                _pendingDomainEvents.Clear();
+            // The state/event transaction committed atomically. The domain
+            // events are now durable rows; clear them so a subsequent
+            // transcript-only retry cannot re-append them. Splitting the two
+            // retry states means a transcript failure no longer duplicates
+            // already-committed lifecycle events on the next flush.
+            _pendingDomainEvents.Clear();
             _stateDirty = false;
-            return true;
         }
-        return false;
+
+        if (transcript is null)
+            return true;
+
+        try
+        {
+            await _transcriptStore.SaveAsync(transcript, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "AgentSessionGrain failed to save transcript for {SessionId}; parts={PartCount}",
+                SessionId, transcript.Parts.Count);
+            // State/events already committed; only the transcript needs
+            // retry. _transcript keeps the un-committed flush, so the next
+            // PersistCallback re-attempts just the transcript.
+            return false;
+        }
+        _transcript.CommitFlush();
+        return true;
     }
 
     private void DisposePersistTimer()
@@ -649,15 +676,38 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private async Task<AgentSession> GetRequiredAsync()
     {
+        if (_sessionReloadRequired)
+            throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
         if (_session is not null) return _session;
 
         _session = await _stateStore.LoadAsync(SessionId);
         return _session ?? throw new InvalidOperationException($"Agent session {SessionId} does not exist.");
     }
 
+    private void RejectIfReloadRequired()
+    {
+        if (_sessionReloadRequired)
+            throw new InvalidOperationException($"Agent session {SessionId} must reload after a failed event-aware save");
+    }
+
     private async Task CommitAsync(AgentSession session, IReadOnlyList<AgentSessionEvent> events)
     {
-        await _stateStore.SaveAsync(SessionId, session, events);
+        try
+        {
+            await _stateStore.SaveAsync(SessionId, session, events);
+        }
+        catch
+        {
+            // The store rolled back its transaction, but the transitions have
+            // already mutated the live session object (Runtime/Status/Usage).
+            // A retry on this activation could bind/record the mutation again
+            // with zero events and persist it through the no-events path,
+            // losing the AgentSessionEvents row. Quarantine the activation so
+            // GetRequiredAsync() rejects further work until it reloads.
+            _sessionReloadRequired = true;
+            DeactivateOnIdle();
+            throw;
+        }
         _session = session;
     }
 

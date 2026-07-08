@@ -68,13 +68,14 @@ public sealed class WorkflowStageLockReleaseHandler : ICloudEventHandler
         }
         catch (Exception ex)
         {
-            // Failed handler dispatches are logged but never propagated — the
-            // InMemoryEventBus swallows handler exceptions by design, and the
-            // lock-grain state is authoritative: a missed release only stalls
-            // the next workflow run until the lock holder times out or is
-            // stopped. The pull-scheduling rediscovery path (the
-            // RequeueWorkflowIdAsync no-op T-005 cleanup) means any newly
-            // dispatched run still gets rediscovered from persisted state.
+            // Failed handler dispatches are logged but never propagated. The
+            // publish path no longer invokes handlers (it only appends an
+            // event row); when a dispatcher drives this handler, its
+            // exceptions are isolated here. Lock-grain state is authoritative:
+            // a missed release only stalls the next workflow run until the
+            // lock holder times out or is stopped, and pull-scheduling
+            // rediscovery still picks up newly dispatched runs from persisted
+            // state.
             _log.LogWarning(ex,
                 "Stage lock release failed for event {EventType} {EventId}",
                 evt.Type, evt.Id);

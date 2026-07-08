@@ -1,7 +1,9 @@
 namespace Mohist.Server.Infrastructure.Events;
 
 /// <summary>
-/// Publishes events to the in-process event bus.
+/// Appends one durable event row per call. Publish is write-only: it does not
+/// invoke handlers. A separate dispatcher (planned) reads undelivered rows and
+/// fans them out to <see cref="ICloudEventHandler"/> subscriptions.
 /// </summary>
 public interface IEventPublisher
 {

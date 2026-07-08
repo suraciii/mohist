@@ -269,6 +269,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public async Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId)
     {
+        RejectIfRunReloadRequired();
         if (_run is null) return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "missing");
         if (_run.Status.IsTerminal() || _run.Status is WorkflowRunStatus.Created or WorkflowRunStatus.Paused or WorkflowRunStatus.AwaitingApproval)
             return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
@@ -292,6 +293,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public async Task<WorkItem?> ClaimNextAsync(string workerId)
     {
+        RejectIfRunReloadRequired();
         if (_run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
             return null;
 
@@ -414,6 +416,16 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         if (_run is null)
             throw new InvalidOperationException($"Workflow '{GrainKey}' has no workflow run");
+        if (_runReloadRequired)
+            throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed event-aware save");
+    }
+
+    // For entry points that return a result (not throw) when no run exists, a
+    // reload-required activation must still be rejected: the dirty in-memory
+    // run must not be mutated/persisted through these paths before the grain
+    // reloads from storage.
+    private void RejectIfRunReloadRequired()
+    {
         if (_runReloadRequired)
             throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed event-aware save");
     }

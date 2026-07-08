@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Mohist.Server.SystemInfo;
@@ -25,6 +26,7 @@ namespace Mohist.Server.Issue.Grains;
 public class IssueGrain : Grain, IIssueGrain
 {
     private Domain.Issue? _issue;
+    private bool _issueReloadRequired;
     private readonly IIssueStore _issueStore;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly WorkflowQuerier _workflowQuerier;
@@ -75,6 +77,7 @@ public class IssueGrain : Grain, IIssueGrain
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
+        _issueReloadRequired = false;
         _issue = await _issueStore.LoadAsync(GrainKey);
     }
 
@@ -627,23 +630,44 @@ public class IssueGrain : Grain, IIssueGrain
         }
     }
 
-    private Task SaveIssueAsync()
+    private async Task SaveIssueAsync()
     {
-        if (_issue is null) return Task.CompletedTask;
+        if (_issue is null) return;
+
         // Snapshot before clearing: PendingEvents returns a live view over the
         // same _pendingEvents list, so ClearPendingEvents() would otherwise
         // drain `pending` too and the events-aware save would no-op on an
         // empty collection — silently skipping every IssueEvents append (the
         // regression that previously left IssueEvents permanently empty).
         var pending = _issue.PendingEvents.ToList();
+        try
+        {
+            await _issueStore.SaveAsync(_issue.Id, _issue, pending);
+        }
+        catch
+        {
+            // The store rolled its transaction back, but the in-memory
+            // aggregate has already absorbed the state mutation. A retry on
+            // this activation could persist the mutated state through the
+            // no-events overload, losing the rolled-back IssueEvents row.
+            // Quarantine this activation: mark it reload required so
+            // EnsureIssue() rejects further work, then let the caller's
+            // exception surface while the grain deactivates and reloads from
+            // storage on its next activation.
+            _issueReloadRequired = true;
+            DeactivateOnIdle();
+            throw;
+        }
         _issue.ClearPendingEvents();
-        return _issueStore.SaveAsync(_issue.Id, _issue, pending);
     }
 
+    [MemberNotNull(nameof(_issue))]
     private void EnsureIssue()
     {
         if (_issue is null)
             throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
+        if (_issueReloadRequired)
+            throw new InvalidOperationException($"Issue '{GrainKey}' must reload after a failed event-aware save");
     }
 
     private async Task<IssuePrerequisiteSummary?> LoadIssueSummaryAsync(int issueNumber)

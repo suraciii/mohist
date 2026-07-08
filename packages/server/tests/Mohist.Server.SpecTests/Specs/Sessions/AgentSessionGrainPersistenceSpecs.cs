@@ -84,8 +84,16 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
     public AgentSessionGrainPersistStateFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task FlushForTestAsync_StateSaveFailure_LogsErrorAndRetries()
+    public async Task FlushForTestAsync_StateSaveFailure_PropagatesAndQuarantinesActivation()
     {
+        // A failed event-aware save must propagate and quarantine the
+        // activation: the store's transaction rolled back, but the live
+        // session already absorbed the runtime activity. The dirty in-memory
+        // state must not be salvaged through a second save on the same
+        // activation — the grain deactivates and the next call reloads from
+        // storage. (The "same activation rejects further work" guarantee is
+        // covered by IssueGrainEventSaveFailureSpecs, which constructs the
+        // grain directly so DeactivateOnIdle does not reload it.)
         var grain = NewGrain();
         await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
 
@@ -100,38 +108,15 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => grain.FlushForTestAsync());
         Assert.Contains("state store down", ex.Message);
+        // The faulted save did not increment the count (ThrowIfPending fires
+        // before SaveCount++), and the dirty state was not salvaged by the
+        // failing flush.
         Assert.Equal(1, Fixture.StateStore.SaveCount);
         Assert.Empty(Fixture.TranscriptStore.Flushes);
 
-        await grain.FlushForTestAsync();
-
-        Assert.Equal(2, Fixture.StateStore.SaveCount);
-        Assert.Single(Fixture.TranscriptStore.Flushes);
         var stateError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Contains("failed to save state", stateError.Message);
         Assert.Contains("state store down", stateError.Exception?.Message ?? string.Empty);
-        var retryFlush = Fixture.TranscriptStore.Flushes[0];
-        var part = Assert.Single(retryFlush.Parts);
-        Assert.Equal("world", part.TextDelta);
-    }
-
-    [Fact]
-    public async Task FlushForTestAsync_StateSaveFailure_PropagatesException()
-    {
-        var grain = NewGrain();
-        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
-
-        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
-            new List<AgentSessionRuntimeEventInput>
-            {
-                new AgentSessionRuntimeEventInput("session.input", "{\"text\":\"hello\",\"kind\":\"task\"}")
-            }));
-
-        Fixture.StateStore.NextException = new InvalidOperationException("state store down");
-
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => grain.FlushForTestAsync());
-        Assert.Contains("state store down", ex.Message);
-        Assert.Equal(1, Fixture.StateStore.SaveCount);
     }
 }
 
@@ -142,8 +127,12 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
     public AgentSessionGrainPersistTranscriptFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task FlushForTestAsync_TranscriptSaveFailure_LogsErrorAndRetriesWithoutCommit()
+    public async Task FlushForTestAsync_TranscriptSaveFailure_RetriesOnlyTranscriptWithoutDuplicateEvents()
     {
+        // State/event and transcript retry states are split: a transcript
+        // save failure happens AFTER the state/event transaction commits, so
+        // the next flush must retry only the transcript and never re-save
+        // state (which would re-append already-committed lifecycle events).
         var grain = NewGrain();
         await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
 
@@ -158,12 +147,14 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
 
         await grain.FlushForTestAsync();
 
+        // State/event committed on the first flush; no second state save.
         Assert.Equal(2, Fixture.StateStore.SaveCount);
         Assert.Empty(Fixture.TranscriptStore.Flushes);
 
         await grain.FlushForTestAsync();
 
-        Assert.Equal(3, Fixture.StateStore.SaveCount);
+        // SaveCount must stay at 2: the retry is transcript-only.
+        Assert.Equal(2, Fixture.StateStore.SaveCount);
         var transcriptError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Contains("failed to save transcript", transcriptError.Message);
         Assert.Contains("1", transcriptError.Message);

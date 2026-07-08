@@ -16,6 +16,7 @@ public class AgentSessionEventsMigrationSpecs
 {
     private const string PreviousMigrationId = "20260708015352_AddEventDeliveryProgressAndDeadLetters";
     private const string MigrationId = "20260708053533_AddAgentSessionEvents";
+    private const string TypeTimeMigrationId = "20260708113254_AddAgentSessionEventsTypeTimeIndex";
 
     [Fact]
     public async Task DatabaseMigrate_CreatesAgentSessionEventsTableWithDispatchedAtAndUndeliveredIndex()
@@ -28,6 +29,7 @@ public class AgentSessionEventsMigrationSpecs
         Assert.True(await TableExistsAsync(database.Connection, "AgentSessionEvents"));
         await AssertColumnExistsAsync(database.Connection, "AgentSessionEvents", "DispatchedAt");
         await AssertHasPartialUndeliveredIndexAsync(database.Connection, "AgentSessionEvents");
+        await AssertHasTypeTimeIndexAsync(database.Connection, "AgentSessionEvents");
     }
 
     [Fact]
@@ -49,9 +51,12 @@ public class AgentSessionEventsMigrationSpecs
     }
 
     [Fact]
-    public void Migration_Up_CreatesNoTypeTimeIndexOnAgentSessionEvents()
+    public void FirstMigration_Up_CreatesTableWithoutTypeTimeIndex()
     {
-        var source = File.ReadAllText(MigrationSourcePath);
+        // The first AgentSessionEvents migration lays down the table and the
+        // undelivered index; the Type/Time index is added by the follow-up
+        // migration (covered by SecondMigration_Up_AddsTypeTimeIndex).
+        var source = File.ReadAllText(MigrationSourcePath(MigrationId));
 
         var tableIndex = source.IndexOf("CreateTable", StringComparison.Ordinal);
         Assert.True(tableIndex >= 0, "Expected Up() to call CreateTable.");
@@ -61,11 +66,20 @@ public class AgentSessionEventsMigrationSpecs
         Assert.Contains("IX_AgentSessionEvents_Undelivered", source, StringComparison.Ordinal);
     }
 
-    private static string MigrationSourcePath => Path.GetFullPath(Path.Combine(
+    [Fact]
+    public void SecondMigration_Up_AddsTypeTimeIndex()
+    {
+        var source = File.ReadAllText(MigrationSourcePath(TypeTimeMigrationId));
+
+        Assert.Contains("IX_AgentSessionEvents_Type_Time", source, StringComparison.Ordinal);
+        Assert.Contains("CreateIndex", source, StringComparison.Ordinal);
+    }
+
+    private static string MigrationSourcePath(string migrationId) => Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory,
         "..", "..", "..", "..", "..",
         "src", "Mohist.Server", "Infrastructure", "Data", "Migrations",
-        $"{MigrationId}.cs"));
+        $"{migrationId}.cs"));
 
     private static async Task AssertColumnExistsAsync(SqliteConnection connection, string tableName, string columnName)
     {
@@ -78,6 +92,12 @@ public class AgentSessionEventsMigrationSpecs
     {
         var sql = await ReadIndexSqlAsync(connection, tableName);
         Assert.Contains(sql, statement => statement.Contains("WHERE \"DispatchedAt\" IS NULL", StringComparison.Ordinal));
+    }
+
+    private static async Task AssertHasTypeTimeIndexAsync(SqliteConnection connection, string tableName)
+    {
+        var sql = await ReadIndexSqlAsync(connection, tableName);
+        Assert.Contains(sql, statement => statement.Contains("IX_AgentSessionEvents_Type_Time", StringComparison.Ordinal));
     }
 
     private static async Task<IReadOnlyList<string>> ReadIndexSqlAsync(SqliteConnection connection, string tableName)

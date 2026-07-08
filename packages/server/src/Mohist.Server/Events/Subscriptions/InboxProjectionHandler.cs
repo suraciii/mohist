@@ -28,7 +28,7 @@ namespace Mohist.Server.Events.Subscriptions;
 /// <see cref="WorkflowStageLockReleaseHandler.ExtractWorkflowRunId"/>
 /// for workflow events, or read the issue-event
 /// <c>projectid</c>/<c>issueid</c>/<c>issueno</c> extensions
-/// stamped by <c>IssueGrain</c>.
+/// stamped by <c>IssueStore</c> when it appends the event row.
 ///
 /// Identity resolution starts from event metadata, then validates it
 /// against the loaded issue before writing an inbox item:
@@ -97,12 +97,13 @@ public sealed class InboxProjectionHandler : ICloudEventHandler
         }
         catch (Exception ex)
         {
-            // The bus already swallows handler exceptions by design; this
-            // catch is the handler-side mirror of the same defense — we
-            // log and never propagate. The source-of-truth events are
-            // durable in the event store; a future event-store replay /
-            // backfill keyed on SourceEventId would re-create the missed
-            // item without duplicates.
+            // The publish path only appends an event row and does not invoke
+            // this handler; dispatch is a future dispatcher's job. Until that
+            // dispatcher lands, this handler is exercised only by replay/test
+            // paths. Either way a projection failure must never break the
+            // source event: source-of-truth events are durable in the event
+            // store, so a future replay/backfill keyed on SourceEventId would
+            // re-create the missed item without duplicates.
             _log.LogWarning(ex,
                 "Inbox projection handler failed for event {EventType} {EventId}",
                 evt.Type, evt.Id);
