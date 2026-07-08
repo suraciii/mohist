@@ -2,31 +2,32 @@
 
 ## Result: PASS
 
-The current candidate keeps issue #398 scoped to Web UI status presentation. The
-previous FAIL was caused by unrelated server and architecture-test changes that
-were introduced during the review-fix cycle. Those changes have been removed
-from this issue branch.
+This review evaluates issue #398 against the correct base: local `master` and
+`origin/master` both point at `77245d7d9047e318af2665694594bcc2acdbfce9`.
+Earlier scope failures came from comparing the issue branch against a stale local
+`master` ref, which made already-merged server, runner, CLI, and testing-track
+work look like part of this candidate.
 
-The Web work remains coherent and verified: shared status presentation routes the
-covered status surfaces through semantic families and tokens, dark-mode coverage
-is asserted, action/status primitives use the shared treatment, and the full Web
-test suite passes.
+With the base corrected, the candidate is scoped to Web UI status presentation
+and OpenSpec artifacts. The previous out-of-scope server/solution files have
+been removed from the issue branch, and the remaining Web work is coherent and
+verified.
 
 ## Repaired Items
 
 - [ID: item-1]
   Status: repaired
-  Scope: `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs`,
-  `packages/server/tests/Mohist.Server.SpecTests/Specs/Runner/Api/RunnerHeartbeatConnectionApiSpecs.cs`
-  Resolution: The out-of-scope runner heartbeat behavior change and its server
-  spec test were removed from this issue branch.
+  Scope: local review base
+  Resolution: The issue workspace's local `master` ref was aligned to
+  `origin/master`, so review commands using `master..HEAD` no longer include
+  already-merged server/runner/CLI/testing commits.
 
 - [ID: item-2]
   Status: repaired
-  Scope: `packages/server/tests/Mohist.Server.ArchTests/ArchitectureRules.cs`,
-  `Mohist.sln`
-  Resolution: The out-of-scope architecture-rule and solution-file changes were
-  removed from this issue branch.
+  Scope: previous server and solution scope creep
+  Resolution: The branch no longer includes changes under `Mohist.sln`,
+  `packages/server/`, `packages/cli/`, `packages/runner/`, `AGENTS.md`,
+  `design/testing.md`, or `.gitignore` when compared with `master...HEAD`.
 
 ## Blocking Items
 
@@ -55,6 +56,11 @@ None.
 
 ## Verification
 
+- `git rev-parse master` and `git rev-parse origin/master` both returned
+  `77245d7d9047e318af2665694594bcc2acdbfce9`.
+- `git diff --name-status master...HEAD -- Mohist.sln packages/server
+  packages/cli packages/runner AGENTS.md design/testing.md .gitignore` returned
+  no changes.
 - `git diff --check` passed.
 - `npm run typecheck -w packages/web` passed.
 - `npm run test:run -w packages/web` passed: 306 files, 4650 tests passed, 1
