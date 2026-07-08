@@ -70,7 +70,7 @@ export function ContextHealthBar({
 
   const label = formatUsageLabel(contextWindowUsed ?? null, contextWindowSize ?? null, percent)
   const showWarningBanner = showWarning
-    && percent >= 80
+    && status === 'red'
     && (onCompact != null || onReset != null)
     && !warningDismissed
 
@@ -78,12 +78,12 @@ export function ContextHealthBar({
     <div className={cn('flex flex-col gap-2', className)}>
       {showWarningBanner && (
         <div
-          className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger"
-          role="status"
-          aria-live="polite"
+          className={cn('flex items-start gap-2 rounded-md border px-3 py-2 text-xs', treatment.container)}
+          role="alert"
+          aria-live="assertive"
         >
           <svg
-            className="h-4 w-4 shrink-0 text-danger"
+            className={cn('h-4 w-4 shrink-0', treatment.text)}
             viewBox="0 0 20 20"
             fill="currentColor"
             aria-hidden="true"
@@ -105,20 +105,20 @@ export function ContextHealthBar({
                   variant="link"
                   size="sm"
                   onClick={onCompact}
-                  className="h-auto p-0 text-xs font-medium text-danger hover:text-danger/80"
+                  className={cn('h-auto p-0 text-xs font-medium hover:opacity-80', treatment.text)}
                 >
                   {compactLabel}
                 </Button>
               )}
               {onCompact != null && onReset != null && (
-                <span className="text-danger/40">·</span>
+                <span className={cn(treatment.text, 'opacity-40')}>·</span>
               )}
               {onReset != null && (
                 <Button
                   variant="link"
                   size="sm"
                   onClick={onReset}
-                  className="h-auto p-0 text-xs font-medium text-danger hover:text-danger/80"
+                  className={cn('h-auto p-0 text-xs font-medium hover:opacity-80', treatment.text)}
                 >
                   {resetLabel}
                 </Button>
@@ -127,7 +127,7 @@ export function ContextHealthBar({
                 variant="link"
                 size="sm"
                 onClick={() => setWarningDismissed(true)}
-                className="h-auto p-0 text-xs font-normal text-danger/70 hover:text-danger"
+                className={cn('h-auto p-0 text-xs font-normal opacity-70 hover:opacity-100', treatment.text)}
                 aria-label="Dismiss context warning"
               >
                 Dismiss

@@ -4,6 +4,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangleIcon, CheckCircle2Icon, PlayIcon, ShieldOffIcon } from 'lucide-react'
 import {
   approveIssue,
+  attentionItemTreatment,
+  attentionSummaryTreatment,
   deriveAttentionItems,
   invalidateApprovalWait,
   resumeIssue,
@@ -20,14 +22,12 @@ import { cn } from '@/shared/lib/utils'
 import { statusTreatment, type StatusTreatment } from '@/shared/status-presentation'
 import { Button } from '@/shared/ui/components/button'
 
-const APPROVAL_LABEL = 'Approval needed'
-
 function isApprovalItem(item: AttentionItem): boolean {
-  return item.label === APPROVAL_LABEL
+  return item.kind === 'approval-needed'
 }
 
 function isResumableItem(item: AttentionItem): boolean {
-  return item.label !== APPROVAL_LABEL
+  return item.kind !== 'approval-needed'
 }
 
 export interface AttentionHeroProps {
@@ -85,10 +85,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
 
   const isPending = approveMutation.isPending || resumeMutation.isPending
   const totalCount = items.length + (runnerDown ? 1 : 0)
-  // The hero "needs attention" surface uses the warning family per
-  // design D2 (`awaiting-approval`/`blocked` → warning). Background,
-  // border, and label all derive from the same family.
-  const heroTreatment = statusTreatment('workflow-run', 'awaiting-approval')
+  const heroTreatment = attentionSummaryTreatment(items)
 
   return (
     <section
@@ -96,15 +93,12 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
       data-zone="attention"
       data-family={heroTreatment.family}
       aria-label="Attention"
-      className={cn('rounded-lg border p-4', heroTreatment.container, 'border-warning-border')}
+      className={cn('rounded-lg border p-4', heroTreatment.container)}
     >
       <div className="flex items-center gap-2 mb-3">
         <span className={cn(
-          'inline-flex items-center justify-center size-6 rounded-full text-white',
-          // Solid warning fill keeps the "needs attention" glyph prominent
-          // at-a-glance (design risk note: blocking signals must remain
-          // visually prominent in dark mode).
-          'bg-warning',
+          'inline-flex items-center justify-center size-6 rounded-full text-foreground',
+          heroTreatment.dot,
         )}>
           <AlertTriangleIcon className="size-3.5" />
         </span>
@@ -114,7 +108,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
         )}>
           Needs attention
         </span>
-        <span className="text-xs text-warning font-medium">({totalCount})</span>
+        <span className={cn('text-xs font-medium', heroTreatment.text)}>({totalCount})</span>
       </div>
       <ApprovalWaitSummary approvalWait={approvalWait} />
       <ul className="flex flex-col gap-2" data-testid="attention-items">
@@ -161,16 +155,13 @@ function AttentionItemRow({
 }: AttentionItemRowProps) {
   const showApprove = isApprovalItem(item)
   const showResume = isResumableItem(item)
-  // Items on this surface map to the same warning family as the hero
-  // (approval/blocked/drift → warning). The row's container / text /
-  // border all derive from one treatment so the row cannot disagree
-  // with the hero.
-  const itemTreatment: StatusTreatment = statusTreatment('workflow-run', 'awaiting-approval')
+  const itemTreatment: StatusTreatment = attentionItemTreatment(item)
   return (
     <li
       data-testid="attention-item"
       data-issue-number={item.issueNumber}
       data-label={item.label}
+      data-kind={item.kind}
       data-family={itemTreatment.family}
       className={cn(
         'flex items-center gap-3 rounded-md px-3 py-2 border',

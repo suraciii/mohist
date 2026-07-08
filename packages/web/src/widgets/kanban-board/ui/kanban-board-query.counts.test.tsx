@@ -243,6 +243,7 @@ describe('Needs attention summary - user-action wording', () => {
     expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/Approval needed/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/#180/i)).toBeInTheDocument()
+    expect(screen.getByTestId('attention-link-180')).toHaveAttribute('data-family', 'warning')
   })
 
   it('renders attention summary item with user-action label for interrupted issue', () => {
@@ -264,6 +265,7 @@ describe('Needs attention summary - user-action wording', () => {
 
     const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
+    expect(summary).toHaveAttribute('data-family', 'warning')
     expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/Interrupted/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/#17/i)).toBeInTheDocument()
@@ -290,6 +292,7 @@ describe('Needs attention summary - user-action wording', () => {
 
     const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
+    expect(summary).toHaveAttribute('data-family', 'danger')
     expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/Integration failed/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/#206/i)).toBeInTheDocument()
@@ -458,9 +461,11 @@ describe('Needs attention summary - user-action wording', () => {
 
     const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
+    expect(summary).toHaveAttribute('data-family', 'danger')
     expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/Needs action/i)).toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/#99/i)).toBeInTheDocument()
+    expect(screen.getByTestId('attention-link-99')).toHaveAttribute('data-family', 'danger')
   })
 
   it('does not render attention summary when no actionable items exist', () => {

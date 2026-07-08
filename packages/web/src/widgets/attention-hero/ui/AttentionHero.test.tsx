@@ -156,16 +156,20 @@ describe('AttentionHero - has-attention state', () => {
     const root = screen.getByTestId('dashboard-zone-attention')
     expect(root).toBeInTheDocument()
     expect(root).toHaveAttribute('data-zone', 'attention')
+    expect(root).toHaveAttribute('data-family', 'danger')
 
     const rows = screen.getAllByTestId('attention-item')
     expect(rows).toHaveLength(3)
 
     expect(rows[0]).toHaveAttribute('data-issue-number', '10')
     expect(rows[0]).toHaveAttribute('data-label', 'Approval needed')
+    expect(rows[0]).toHaveAttribute('data-family', 'warning')
     expect(rows[1]).toHaveAttribute('data-issue-number', '20')
     expect(rows[1]).toHaveAttribute('data-label', 'Needs action')
+    expect(rows[1]).toHaveAttribute('data-family', 'danger')
     expect(rows[2]).toHaveAttribute('data-issue-number', '30')
     expect(rows[2]).toHaveAttribute('data-label', 'Integration failed')
+    expect(rows[2]).toHaveAttribute('data-family', 'danger')
 
     expect(screen.getByText('Awaiting approval on schema')).toBeInTheDocument()
     expect(screen.getByText('Waiting on infra fix')).toBeInTheDocument()
@@ -221,9 +225,9 @@ describe('AttentionHero - has-attention state', () => {
 
     const shared = deriveAttentionItems(issues, agentStatus)
     expect(shared).toHaveLength(3)
-    expect(shared[0]).toMatchObject({ label: 'Approval needed', issueNumber: 10 })
-    expect(shared[1]).toMatchObject({ label: 'Needs action', issueNumber: 20 })
-    expect(shared[2]).toMatchObject({ label: 'Integration failed', issueNumber: 30 })
+    expect(shared[0]).toMatchObject({ kind: 'approval-needed', label: 'Approval needed', issueNumber: 10 })
+    expect(shared[1]).toMatchObject({ kind: 'blocked', label: 'Needs action', issueNumber: 20 })
+    expect(shared[2]).toMatchObject({ kind: 'integration-failed', label: 'Integration failed', issueNumber: 30 })
 
     const rendered = screen.getAllByTestId('attention-item')
     expect(rendered).toHaveLength(shared.length)

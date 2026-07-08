@@ -48,14 +48,17 @@ public static class RunnerRoutes
 
             if (req is not null)
             {
+                var current = await runner.GetInfoAsync();
                 var info = new RunnerInfo(
                     runnerId,
-                    req.Capabilities ?? [],
-                    req.Hostname ?? Environment.MachineName,
-                    req.ProjectId,
-                    req.CoderModels,
-                    BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
-                    CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants));
+                    req.Capabilities ?? current?.Capabilities ?? [],
+                    req.Hostname ?? current?.Hostname ?? Environment.MachineName,
+                    req.ProjectId ?? current?.ProjectId,
+                    req.CoderModels ?? current?.CoderModels,
+                    current?.Kind ?? "external",
+                    current?.RegisteredAt,
+                    NormalizeBuildGitHash(req.BuildGitHash) ?? current?.BuildGitHash,
+                    NormalizeCoderModelVariants(req.CoderModelVariants) ?? current?.CoderModelVariants);
                 await runner.HeartbeatRepairAsync(info);
 
                 if (!string.IsNullOrWhiteSpace(req.ConnectionId))

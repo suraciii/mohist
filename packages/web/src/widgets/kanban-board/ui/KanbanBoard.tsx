@@ -5,7 +5,7 @@ import { Input } from '@/shared/ui/components/input'
 import { Link } from 'react-router-dom'
 import { AlertTriangleIcon, SearchIcon, XIcon } from 'lucide-react'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStatus, deriveAttentionItems, type Issue } from '../../../entities/issue'
+import { IssueStatus, attentionItemTreatment, attentionSummaryTreatment, deriveAttentionItems, type AttentionItem, type Issue } from '../../../entities/issue'
 import { useRunnerSummary } from '../../../entities/runner/api/queries'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
@@ -388,23 +388,23 @@ function FilterBar({
 function NeedsAttentionSummary({
   items,
 }: {
-  items: Array<{ issueNumber: number; issueId: string; label: string; detail?: string }>
+  items: AttentionItem[]
 }) {
   const toProjectPath = useProjectPath()
-  const treatment = statusTreatment('approval', 'awaiting')
+  const summaryTreatment = attentionSummaryTreatment(items)
 
   if (items.length === 0) return null
 
   return (
     <div
       data-testid="needs-attention-summary"
-      data-family={treatment.family}
-      className={`relative border-b ${treatment.container}`}
+      data-family={summaryTreatment.family}
+      className={`relative border-b ${summaryTreatment.container}`}
     >
-      <div className={`absolute left-0 top-0 bottom-0 w-1 ${treatment.dot}`} />
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${summaryTreatment.dot}`} />
       <div className="px-4 sm:px-6 py-2.5 flex items-start gap-3">
         <div className="flex items-center gap-1.5 pt-0.5">
-          <span className={`inline-flex items-center justify-center size-5 rounded-full ${treatment.dot} text-foreground`}>
+          <span className={`inline-flex items-center justify-center size-5 rounded-full ${summaryTreatment.dot} text-foreground`}>
             <AlertTriangleIcon className="size-3" />
           </span>
           <span className="text-xs font-semibold uppercase tracking-wide">
@@ -415,24 +415,28 @@ function NeedsAttentionSummary({
           </span>
         </div>
         <div className="flex-1 flex flex-wrap gap-1.5 min-w-0">
-          {items.slice(0, 6).map((item) => (
-            <a
-              key={item.issueId}
-              href={toProjectPath(`/issues/${item.issueNumber}`)}
-              data-testid={`attention-link-${item.issueNumber}`}
-              className={`inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs shadow-sm hover:shadow border ${treatment.border} transition-shadow`}
-            >
-              <span className={`font-mono font-semibold ${treatment.text}`}>
-                #{item.issueNumber}
-              </span>
-              <span className="font-medium text-foreground">{item.label}</span>
-              {item.detail && (
-                <span className="text-muted-foreground max-w-[160px] truncate hidden sm:inline">
-                  {item.detail}
+          {items.slice(0, 6).map((item) => {
+            const itemTreatment = attentionItemTreatment(item)
+            return (
+              <a
+                key={item.issueId}
+                href={toProjectPath(`/issues/${item.issueNumber}`)}
+                data-testid={`attention-link-${item.issueNumber}`}
+                data-family={itemTreatment.family}
+                className={`inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs shadow-sm hover:shadow border ${itemTreatment.border} transition-shadow`}
+              >
+                <span className={`font-mono font-semibold ${itemTreatment.text}`}>
+                  #{item.issueNumber}
                 </span>
-              )}
-            </a>
-          ))}
+                <span className="font-medium text-foreground">{item.label}</span>
+                {item.detail && (
+                  <span className="text-muted-foreground max-w-[160px] truncate hidden sm:inline">
+                    {item.detail}
+                  </span>
+                )}
+              </a>
+            )
+          })}
           {items.length > 6 && (
             <span className="text-xs self-center font-medium">
               +{items.length - 6} more
