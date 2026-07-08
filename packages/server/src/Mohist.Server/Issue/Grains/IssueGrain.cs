@@ -356,6 +356,7 @@ public class IssueGrain : Grain, IIssueGrain
 
     public async Task CompleteWorkAsync(string workflowRunId)
     {
+        RejectIfReloadRequired();
         if (_issue is null) return;
         if (!_issue.Complete(workflowRunId)) return;
         await SaveIssueAsync();
@@ -558,6 +559,7 @@ public class IssueGrain : Grain, IIssueGrain
 
     public async Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber)
     {
+        RejectIfReloadRequired();
         if (_issue is null)
             return IssuePrerequisiteResult.IssueNotFound();
         if (prerequisiteNumber == _issue.Number)
@@ -670,6 +672,16 @@ public class IssueGrain : Grain, IIssueGrain
             throw new InvalidOperationException($"Issue '{GrainKey}' must reload after a failed event-aware save");
     }
 
+    // For entry points that return a result (not throw) when no issue exists,
+    // a reload-required activation must still be rejected: the dirty in-memory
+    // aggregate must not be mutated/persisted through these paths before the
+    // grain reloads from storage.
+    private void RejectIfReloadRequired()
+    {
+        if (_issueReloadRequired)
+            throw new InvalidOperationException($"Issue '{GrainKey}' must reload after a failed event-aware save");
+    }
+
     private async Task<IssuePrerequisiteSummary?> LoadIssueSummaryAsync(int issueNumber)
     {
         if (_issue is null) return null;
@@ -724,6 +736,7 @@ public class IssueGrain : Grain, IIssueGrain
 
     public async Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null)
     {
+        RejectIfReloadRequired();
         if (_issue is null) throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
 
         var comment = new IssueCommentRow

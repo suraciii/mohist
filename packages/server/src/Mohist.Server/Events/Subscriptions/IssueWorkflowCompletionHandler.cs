@@ -38,9 +38,9 @@ namespace Mohist.Server.Events.Subscriptions;
 /// </para>
 /// <para>
 /// Handler exceptions are swallowed and logged so a dispatch/handling
-/// failure never propagates into the workflow-run commit that triggered
-/// the event. This matches the best-effort in-memory event delivery
-/// model (no outbox, no retry); idempotency is inherited from
+/// failure never propagates into the workflow-run commit that recorded
+/// the event. The event row remains durable for replay/backfill;
+/// idempotency is inherited from
 /// <see cref="IIssueGrain.CompleteWorkAsync"/> via its
 /// <c>Status == InProgress</c> and <c>workflowRunId</c> match guards.
 /// </para>

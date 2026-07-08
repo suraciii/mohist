@@ -167,6 +167,46 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
 
 [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
 [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrainPersistenceSpecsBase
+{
+    public AgentSessionGrainRecoveryTranscriptFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
+
+    [Fact]
+    public async Task CompactAsync_TranscriptSaveFailure_CommitsRecoveryOnceAndDoesNotRetry()
+    {
+        // Recovery (Compact/Reset) state/event transaction and transcript
+        // evidence share the FlushAsync split: when state/events commit but
+        // transcript save fails, the recovery domain fact is durable and the
+        // command must succeed so a client retry does not re-append duplicate
+        // recovery events. The transcript flush stays pending for the next
+        // flush cycle.
+        var grain = NewGrain();
+        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "test"));
+        var openedSaveCount = Fixture.StateStore.SaveCount;
+
+        Fixture.TranscriptStore.NextException = new InvalidOperationException("transcript store down");
+
+        var result = await grain.CompactAsync(
+            new CompactAgentSessionCommand(NewAgentSessionId: "acp-after-compact", Summary: "s"));
+
+        // The recovery command succeeds even though the transcript failed:
+        // the rebind/compaction domain events committed atomically.
+        Assert.Equal("acp-after-compact", result.AgentSessionId);
+        Assert.True(result.WasCompacted);
+
+        // Exactly one recovery save happened (the event-aware commit). A
+        // duplicate would require a second recovery save, which does not
+        // occur because the command did not throw.
+        Assert.Equal(openedSaveCount + 1, Fixture.StateStore.SaveCount);
+
+        var transcriptError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
+        Assert.Contains("recovery transcript", transcriptError.Message);
+        Assert.Contains("transcript store down", transcriptError.Exception?.Message ?? string.Empty);
+    }
+}
+
+[Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+[Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
 public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainDeactivationSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }

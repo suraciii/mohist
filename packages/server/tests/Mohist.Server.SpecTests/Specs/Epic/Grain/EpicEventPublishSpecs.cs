@@ -245,8 +245,8 @@ public class EpicEventPublishSpecs
         var throwingStore = new ThrowingEventStore();
 
         var grain = CreateGrain(database.Factory, $"{ProjectId}:{EpicId}", throwingStore, time);
-        // The grain's state must commit and the throw must be swallowed by
-        // the best-effort catch — same contract as IssueGrain.
+        // Epic event writes stay on their existing best-effort path for this
+        // issue: epic producer convergence is explicitly out of scope.
         await grain.StartAsync();
 
         await using var verify = database.CreateDbContext();

@@ -342,10 +342,7 @@ public class IssueCreationSpecs
         Assert.Null(await runner.PollAsync(_services));
 
         var events = await GetWorkflowEventsAsync(workflowRunId);
-        // See CreateIssue_PersistsCreatedEventToIssueEvents: T-002
-        // double-appends until T-003 lands. Assert at least one row.
-        Assert.NotEmpty(events);
-        Assert.Contains(events, e => e.Envelope.Type == "com.mohist.workflow.run.stopped");
+        Assert.Single(events, e => e.Envelope.Type == "com.mohist.workflow.run.stopped");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

@@ -91,6 +91,46 @@ public class IssueGrainEventSaveFailureSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task EventAwareSaveFailure_QuarantinesActivation_CompleteWorkMustReload()
+    {
+        // CompleteWorkAsync historically bypassed EnsureIssue() and read
+        // _issue directly, so after a rolled-back event-aware save it could
+        // persist mutated in-memory state on the same dirty activation. The
+        // reload-required guard must reject it before it touches _issue.
+        const string projectId = "proj-fault";
+        const string issueId = "issue-fault-complete";
+        const int issueNumber = 902;
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        await using (var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContext())
+        {
+            await SeedIssueAsync(db, projectId, issueId, issueNumber, IssueStatus.Cancelled);
+        }
+
+        var failingStore = new FailingIssueStore(
+            scopeFactory: _fixture.Services,
+            failEventsSaveOnce: true);
+
+        IssueGrain grain;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            grain = CreateGrain(scope.ServiceProvider, failingStore, issueId);
+            await grain.OnActivateAsync(CancellationToken.None);
+        }
+
+        // Quarantine the activation via a failing save.
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => grain.ReopenAsync());
+
+        // The delivery path must not mutate/persist on the dirty activation.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => grain.CompleteWorkAsync("wr-anything"));
+        Assert.Contains("must reload", ex.Message);
+    }
+
     private static IssueGrain CreateGrain(
         IServiceProvider services,
         IIssueStore stateStore,

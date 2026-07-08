@@ -287,12 +287,29 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             DeactivateOnIdle();
             throw;
         }
+        // The state/event transaction committed atomically. The recovery
+        // transitions are durable; a later Compact/Reset retry must not
+        // re-append them. Treat the transcript like the normal flush path:
+        // if its save fails, the committed domain events stay committed and
+        // the un-committed transcript flush stays in _transcript for the next
+        // retry. The recovery command returns success because the domain
+        // fact (rebind/compaction) is persistent; only the transcript
+        // evidence is pending.
+        _session = session;
         if (transcript is not null)
         {
-            await _transcriptStore.SaveAsync(transcript);
-            _transcript.CommitFlush();
+            try
+            {
+                await _transcriptStore.SaveAsync(transcript);
+                _transcript.CommitFlush();
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "AgentSessionGrain failed to save recovery transcript for {SessionId}; parts={PartCount}",
+                    SessionId, transcript.Parts.Count);
+            }
         }
-        _session = session;
 
         await FanOutRealtimeAsync(session, transcriptEntries, events);
     }

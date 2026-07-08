@@ -45,9 +45,8 @@ namespace Mohist.Server.Events.Subscriptions;
 /// <b>Fire-and-forget.</b> <see cref="IAgentLauncher.LaunchAsync"/>
 /// awaits the AgentJobGrain's mint + enqueue but does not block on a
 /// runner response, mirroring the manual HTTP launch path's behavior
-/// (issue-391 T-001). The single-threaded InMemoryEventBus dispatch loop
-/// therefore only blocks for grain mint/enqueue — the runner itself runs
-/// out-of-band.
+/// (issue-391 T-001). The dispatch call therefore only blocks for grain
+/// mint/enqueue — the runner itself runs out-of-band.
 /// </para>
 /// <para>
 /// <b>Project resolution.</b> Issue events already stamp
