@@ -231,13 +231,6 @@ describe('cross-surface status equivalence (design D8)', () => {
         const listFamily = listBadge?.getAttribute('data-family') ?? null
         cleanup()
 
-        // RunnerSummary rendering. The summary's badge label changes by
-        // state: idle → "Runner idle", busy → "Runner busy",
-        // stale/offline (no connected capacity) → "Runner stale/offline".
-        // Both stale and offline share the same `stale` family on the
-        // summary because the summary surfaces them as a single
-        // "needs-attention" composite; the per-runner row carries the
-        // granular family.
         const summary: RunnerStatusSummary = {
           rows: [row],
           connectedIdleCount: state === 'idle' ? 1 : 0,
@@ -248,26 +241,10 @@ describe('cross-surface status equivalence (design D8)', () => {
         const summaryBadge = document.querySelector('[data-family]') as HTMLElement | null
         const summaryFamily = summaryBadge?.getAttribute('data-family') ?? null
 
-        // The shared layer (`familyFor('runner', state)`) is the single
-        // source of truth — both widgets must agree with it. The
-        // summary's "stale/offline" composite maps to `stale` family by
-        // design (the aggregate state is "needs attention"), so accept
-        // either `stale` (summary composite) or the granular family
-        // (`offline`/etc) as long as both come from the shared layer.
-        const expectedListFamily = familyFor('runner', state)
-        const expectedSummaryFamily = state === 'idle' || state === 'busy'
-          ? expectedListFamily
-          : familyFor('runner', 'stale')
-        expect(listFamily, `RunnerList family for ${state}`).toBe(expectedListFamily)
-        expect(summaryFamily, `RunnerSummary family for ${state}`).toBe(expectedSummaryFamily)
-        // Idle and busy families must agree cross-surface (no
-        // emerald/green divergence). Stale/offline: both widgets route
-        // through the shared layer.
-        if (state === 'idle' || state === 'busy') {
-          expect(listFamily, 'cross-surface family must agree').toBe(summaryFamily)
-        } else {
-          expect(summaryFamily).toBe('warning')
-        }
+        const expectedFamily = familyFor('runner', state)
+        expect(listFamily, `RunnerList family for ${state}`).toBe(expectedFamily)
+        expect(summaryFamily, `RunnerSummary family for ${state}`).toBe(expectedFamily)
+        expect(listFamily, 'cross-surface family must agree').toBe(summaryFamily)
       },
     )
   })
@@ -402,6 +379,10 @@ describe('cross-surface status equivalence (design D8)', () => {
 
     it('Done column stays in sync with the shared layer', () => {
       expect(STAGE_FAMILY_RESERVATION[IssueStatus.Done]).toBe(familyFor('issue-health', 'done'))
+    })
+
+    it('Cancelled column stays in sync with the shared layer', () => {
+      expect(STAGE_FAMILY_RESERVATION[IssueStatus.Cancelled]).toBe(familyFor('issue-health', 'cancelled'))
     })
   })
 })

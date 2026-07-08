@@ -21,8 +21,8 @@ describe('STAGE_COLORS - family reservation (per design D6)', () => {
     expect(STAGE_FAMILY_RESERVATION[IssueStatus.Done]).toBe('success')
   })
 
-  it('Cancelled resolves to danger', () => {
-    expect(STAGE_FAMILY_RESERVATION[IssueStatus.Cancelled]).toBe('danger')
+  it('Cancelled resolves to muted', () => {
+    expect(STAGE_FAMILY_RESERVATION[IssueStatus.Cancelled]).toBe('muted')
   })
 })
 
@@ -38,32 +38,32 @@ describe('STAGE_COLORS - class strings, no inline hex', () => {
     expect(STAGE_COLORS[IssueStatus.Backlog].accent).toMatch(/^bg-(muted-foreground|muted)\b/)
     expect(STAGE_COLORS[IssueStatus.InProgress].accent).toMatch(/^bg-info\b/)
     expect(STAGE_COLORS[IssueStatus.Done].accent).toMatch(/^bg-success\b/)
-    expect(STAGE_COLORS[IssueStatus.Cancelled].accent).toMatch(/^bg-danger\b/)
+    expect(STAGE_COLORS[IssueStatus.Cancelled].accent).toMatch(/^bg-(muted-foreground|muted)\b/)
   })
 
   it('labelClass uses the family text class (e.g. text-info)', () => {
     expect(STAGE_COLORS[IssueStatus.InProgress].labelClass).toMatch(/^text-info\b/)
     expect(STAGE_COLORS[IssueStatus.Done].labelClass).toMatch(/^text-success\b/)
-    expect(STAGE_COLORS[IssueStatus.Cancelled].labelClass).toMatch(/^text-danger\b/)
+    expect(STAGE_COLORS[IssueStatus.Cancelled].labelClass).toMatch(/^text-muted-foreground\b/)
   })
 
   it('activeBorder uses the family border class (e.g. border-info-border)', () => {
     expect(STAGE_COLORS[IssueStatus.InProgress].activeBorder).toMatch(/^border-info-border\b/)
     expect(STAGE_COLORS[IssueStatus.Done].activeBorder).toMatch(/^border-success-border\b/)
-    expect(STAGE_COLORS[IssueStatus.Cancelled].activeBorder).toMatch(/^border-danger-border\b/)
+    expect(STAGE_COLORS[IssueStatus.Cancelled].activeBorder).toMatch(/^border-border\b/)
   })
 
   it('bottomBorder uses direction-specific Tailwind border color utility', () => {
     expect(STAGE_COLORS[IssueStatus.InProgress].bottomBorder).toMatch(/^border-b-info-border\b/)
     expect(STAGE_COLORS[IssueStatus.Done].bottomBorder).toMatch(/^border-b-success-border\b/)
-    expect(STAGE_COLORS[IssueStatus.Cancelled].bottomBorder).toMatch(/^border-b-danger-border\b/)
+    expect(STAGE_COLORS[IssueStatus.Cancelled].bottomBorder).toMatch(/^border-b-border\b/)
   })
 
   it('bottomBorder is selected from explicit static classes so Tailwind can emit them', () => {
     expect(STAGE_COLORS[IssueStatus.Backlog].bottomBorder).toBe('border-b-border')
     expect(STAGE_COLORS[IssueStatus.InProgress].bottomBorder).toBe('border-b-info-border')
     expect(STAGE_COLORS[IssueStatus.Done].bottomBorder).toBe('border-b-success-border')
-    expect(STAGE_COLORS[IssueStatus.Cancelled].bottomBorder).toBe('border-b-danger-border')
+    expect(STAGE_COLORS[IssueStatus.Cancelled].bottomBorder).toBe('border-b-border')
   })
 
   it('does not use raw text-amber-700 / bg-amber-50/60 / text-green-700 palette classes', () => {

@@ -30,6 +30,10 @@ function SummaryBadge({
   )
 }
 
+function noCapacityRunnerState(rows: RunnerStatusSummary['rows']): 'stale' | 'offline' {
+  return rows.some((row) => row.status === 'stale') ? 'stale' : 'offline'
+}
+
 export function RunnerSummary({ summary }: RunnerSummaryProps) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
@@ -58,7 +62,8 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
   const { connectedIdleCount, connectedBusyCount, hasConnectedCapacity } = summary
 
   if (!hasConnectedCapacity) {
-    const treatment = statusTreatment('runner', 'stale')
+    const runnerState = noCapacityRunnerState(rows)
+    const treatment = statusTreatment('runner', runnerState)
     return (
       <button
         onClick={() => navigate(toProjectPath('/runners'))}
@@ -73,7 +78,7 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
             </svg>
           }
         >
-          Runner stale/offline
+          {runnerState === 'stale' ? 'Runner stale' : 'Runner offline'}
         </SummaryBadge>
         <span className="text-muted-foreground">{RUNNER_START_HINT}</span>
       </button>
