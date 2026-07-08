@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { Epic, EpicDetail, EpicWithProgress, StoredCloudEventDto } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
 import { startIssue } from '../../issue'
 import { addEpicIssue, batchAddEpicIssues, batchRemoveEpicIssues, closeEpic, createEpic, getEpic, getEpicEvents, getEpics, markEpicDone, pauseEpic, removeEpicIssue, reopenEpic, resumeEpic, startEpic, updateEpic, type BatchMembershipResponse, type UpdateEpicInput } from './client'
+
+type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
 
 export interface UseEpicsParams {
   search?: string
@@ -112,11 +115,9 @@ export function useBatchRemoveEpicIssues() {
   })
 }
 
-export function useStartIssue() {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation<Awaited<ReturnType<typeof startIssue>>, Error, number>({
-    mutationFn: (number) => startIssue(number, projectId),
+export function startIssueMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: (number: number) => startIssue(number, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -125,7 +126,13 @@ export function useStartIssue() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
+}
+
+export function useStartIssue() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation(startIssueMutationOptions(projectId, queryClient))
 }
 
 export function useMarkEpicDone() {
@@ -160,12 +167,10 @@ export function useCloseEpic() {
   })
 }
 
-export function usePauseEpic() {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation<Epic, Error, { id: string; reason?: string | null }>({
-    mutationFn: ({ id, reason }) => pauseEpic(id, reason, projectId),
-    onSuccess: (_data, variables) => {
+export function pauseEpicMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: ({ id, reason }: { id: string; reason?: string | null }) => pauseEpic(id, reason, projectId),
+    onSuccess: (_data: Epic, variables: { id: string }) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', projectId, variables.id] })
       toast.success('Epic paused')
@@ -173,15 +178,19 @@ export function usePauseEpic() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
 }
 
-export function useResumeEpic() {
+export function usePauseEpic() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation<Epic, Error, string>({
-    mutationFn: (id) => resumeEpic(id, projectId),
-    onSuccess: (_data, id) => {
+  return useMutation(pauseEpicMutationOptions(projectId, queryClient))
+}
+
+export function resumeEpicMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: (id: string) => resumeEpic(id, projectId),
+    onSuccess: (_data: Epic, id: string) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', projectId, id] })
       toast.success('Epic resumed')
@@ -189,15 +198,19 @@ export function useResumeEpic() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
 }
 
-export function useStartEpic() {
+export function useResumeEpic() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation<Epic, Error, string>({
-    mutationFn: (id) => startEpic(id, projectId),
-    onSuccess: (_data, id) => {
+  return useMutation(resumeEpicMutationOptions(projectId, queryClient))
+}
+
+export function startEpicMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: (id: string) => startEpic(id, projectId),
+    onSuccess: (_data: Epic, id: string) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', projectId, id] })
       toast.success('Epic started')
@@ -205,15 +218,19 @@ export function useStartEpic() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
 }
 
-export function useReopenEpic() {
+export function useStartEpic() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation<Epic, Error, string>({
-    mutationFn: (id) => reopenEpic(id, projectId),
-    onSuccess: (_data, id) => {
+  return useMutation(startEpicMutationOptions(projectId, queryClient))
+}
+
+export function reopenEpicMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+  return {
+    mutationFn: (id: string) => reopenEpic(id, projectId),
+    onSuccess: (_data: Epic, id: string) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', projectId, id] })
       queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -222,7 +239,13 @@ export function useReopenEpic() {
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
-  })
+  }
+}
+
+export function useReopenEpic() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation(reopenEpicMutationOptions(projectId, queryClient))
 }
 
 export function useUpdateEpic() {
@@ -242,12 +265,20 @@ export function useUpdateEpic() {
   })
 }
 
-export function useEpicEvents(id: string | null | undefined, enabled: boolean = true) {
-  const { projectId } = useProject()
+export function epicEventsQueryOptions(
+  id: string | null | undefined,
+  projectId: string | null | undefined,
+  enabled: boolean = true,
+) {
   const safeId = typeof id === 'string' && id.length > 0 ? id : null
-  return useQuery<StoredCloudEventDto[]>({
+  return {
     queryKey: ['epics', projectId, safeId, 'events'],
     queryFn: () => getEpicEvents(safeId!, projectId),
     enabled: enabled && !!projectId && !!safeId,
-  })
+  }
+}
+
+export function useEpicEvents(id: string | null | undefined, enabled: boolean = true) {
+  const { projectId } = useProject()
+  return useQuery<StoredCloudEventDto[]>(epicEventsQueryOptions(id, projectId, enabled))
 }
