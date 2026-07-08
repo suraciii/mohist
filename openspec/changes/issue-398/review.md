@@ -10,44 +10,36 @@
 
 - [ID: item-1]
   Severity: blocking
-  Scope: `packages/web/src/shared/ui/components/{badge.tsx,button.tsx,field-error.tsx}`
-  Evidence: The new semantic variants render soft-tinted backgrounds (`bg-*-subtle`) with `text-*-foreground`, and `FieldError` now uses `text-danger-foreground`. In this theme, `*-foreground` is near-white in light mode (`packages/web/src/app/styles/index.css:85,89,93,97`), which the shared status layer explicitly documents as unreadable on subtle backgrounds (`packages/web/src/shared/status-presentation/index.ts:127-133`). That makes semantic badges/buttons and inline field errors low-contrast or effectively invisible in light theme, directly violating the dark/light legibility acceptance criteria for semantic primitives. The tests codify the same wrong class choice instead of catching it (`packages/web/src/shared/ui/components/{badge,button,field-error}.test.tsx`). [disallowed:product behavior changes]
-  SuggestedAction: Change soft-tinted semantic variants and `FieldError` to use readable text tokens for subtle surfaces, then update the primitive tests to assert the corrected class contract and contrast expectation.
-  Verification: Render semantic `Badge`, semantic `Button`, and `FieldError` in light theme and verify readable contrast; run `npm run test:run -w packages/web`.
+  Scope: `packages/web` verification surface
+  Evidence: The candidate does not satisfy the required green web test suite. `npm run test:run -w packages/web` currently fails with 12 tests, including `src/shared/ui/components/badge-button.test.tsx`, `src/shared/ui/components/alert-dialog.test.tsx`, `src/pages/epic-detail/ui/LinkedIssueRow.removeConfirm.test.tsx`, `src/pages/settings/ui/LabelCatalogSection.test.tsx`, and `src/pages/settings/ui/AgentSettingsSection.test.tsx`. The implementation intentionally switched semantic text from `*-foreground` to `text-*` in `packages/web/src/shared/status-presentation/index.ts`, `packages/web/src/shared/ui/components/button.tsx`, `packages/web/src/shared/ui/components/badge.tsx`, and `packages/web/src/shared/ui/components/field-error.tsx`, but the shipped tests still assert the old `*-foreground` contract. That leaves the post-build candidate red and violates the issue/tasks acceptance criteria that require `npm run test:run -w packages/web` to pass.
+  SuggestedAction: Update the stale tests and any remaining callers that still encode the old `*-foreground` expectation so the verified contract matches the implemented token treatment, then rerun `npm run test:run -w packages/web`.
+  Verification: `npm run test:run -w packages/web`
   Status: open
 
 - [ID: item-2]
   Severity: blocking
-  Scope: `packages/web/src/widgets/kanban-board/model/stage-colors.ts`
-  Evidence: `bottomBorder` is built with a runtime template string, ``border-b-${family}-border`` (`packages/web/src/widgets/kanban-board/model/stage-colors.ts:56`). Tailwind's static extraction will not generate those classes from a dynamic string, so active kanban column bottom borders can silently fall back to the default `border-b` color in production. The current test only checks the returned string shape (`packages/web/src/widgets/kanban-board/model/stage-colors.test.ts:56-59`) and does not verify that CSS is actually emitted. This breaks the stage-accent acceptance criterion on a core board surface.
-  SuggestedAction: Replace the dynamic template with an explicit per-family class map so Tailwind can see every `border-b-*-border` token at build time, and add a rendered assertion on the active column styling if possible.
-  Verification: Build or run the web app and inspect active kanban column headers for `InProgress`, `Done`, and `Cancelled` to confirm the bottom border color changes from the default border; run `npm run test:run -w packages/web`.
-  Status: open
-
-- [ID: item-3]
-  Severity: blocking
-  Scope: `packages/web/src/shared/status-presentation/contrast.spec.ts`, `packages/web/src/widgets/kanban-board/ui/StatusPill.contrast.test.ts`
-  Evidence: The specs explicitly require WCAG AA >= 4.5:1 for covered status text in both themes, but both new contrast suites intentionally relax light-theme `warning` and `muted` to 3:1 (`packages/web/src/shared/status-presentation/contrast.spec.ts:62-79,160-172` and `packages/web/src/widgets/kanban-board/ui/StatusPill.contrast.test.ts:45-52`). That means the implementation knowingly fails the documented acceptance criteria while the tests still pass. This is not just a test gap; it masks a spec violation on status pills and badges across covered surfaces. [disallowed:product behavior changes]
-  SuggestedAction: Either adjust the token values/treatments until the rendered warning and muted combinations meet 4.5:1, or update the spec through the normal product/design path before merging. The review candidate cannot pass while tests assert a weaker threshold than the issue requires.
-  Verification: Recompute contrast from the rendered treatment fixture for all covered states and confirm every case is >= 4.5:1 in light and dark themes.
+  Scope: `widgets/issue-event-timeline/*`
+  Evidence: The issue acceptance criteria and specs explicitly include the activity surface and require consistent status rendering on activity pages. The candidate only rewired the timeline row marker override in `packages/web/src/widgets/issue-event-timeline/ui/EventTimelineRow.tsx`, but the category style registry still hardcodes the old failure palette in `packages/web/src/widgets/issue-event-timeline/model/types.ts`: `bg-red-50`, `text-red-700`, `border-red-200`, and `bg-red-500`. Those values are still consumed by activity UI such as `packages/web/src/widgets/issue-event-timeline/ui/CategoryFilter.tsx`, so the activity surface still has a parallel status color system and still ships light-only status combinations on a covered page. Repair was considered, but replacing the category styling is a visible product-surface behavior change across the activity UI and is disallowed by the repair policy.
+  SuggestedAction: Route `CATEGORY_STYLES` and its consumers through the shared status-presentation/theme-token layer, including failure/attention category chips and related activity badges, and add coverage that exercises the rendered activity surface rather than only the marker dot.
+  Verification: Inspect the rendered activity filter/timeline classes and rerun `npm run test:run -w packages/web`.
   Status: open
 
 ## Follow-up Items
 
-- [ID: item-4]
+- [ID: item-3]
   Severity: follow-up
-  Scope: `packages/web/src/widgets/dashboard-pulse/ui/CompactSessionCard.tsx`
-  Evidence: The local stage-identity palette is dark-aware and hex-free, but it still uses raw Tailwind palette classes rather than a shared documented registry. This is acceptable for this issue's stated design, yet it leaves another color registry to keep in sync if additional stage-identity consumers appear.
-  SuggestedAction: Extract the stage-identity palette into a shared registry once a second consumer appears.
+  Scope: `packages/web/src/shared/status-presentation/cross-surface.equivalence.spec.tsx`
+  Evidence: The new equivalence spec deliberately allows stale/offline divergence in runner summary at `packages/web/src/shared/status-presentation/cross-surface.equivalence.spec.tsx`: offline in `RunnerList` may still render differently from the aggregated stale/offline summary state. That may be intentional UX, but it weakens the stated invariant that the same domain state renders identically across covered surfaces.
+  SuggestedAction: Either narrow the product/spec wording to allow aggregated runner-summary semantics, or strengthen the implementation/spec so offline is rendered consistently cross-surface.
   Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-5]
+- [ID: item-4]
   Severity: info
-  Scope: non-covered web surfaces outside this milestone
-  Evidence: There are still many raw palette classes and light-only combinations elsewhere in the web app, for example `widgets/coder-session/ui/SessionTimeline.tsx`, `widgets/issue-event-timeline/ui/ActivityDialog.tsx`, and several session transcript surfaces. These are outside the reviewed candidate's covered scope unless they are explicitly part of the changed surfaces.
-  SuggestedAction: Address them in later UI consistency issues rather than treating them as blockers for issue 398.
+  Scope: uncovered non-milestone surfaces outside the issue's covered pages
+  Evidence: There are still many raw palette classes elsewhere in the web app, for example in session transcript, settings, inbox, and other pages. I did not treat those as blockers because issue #398 and the associated specs scope this milestone to dashboard, board, issue detail, activity, session, runner, and the covered shared primitives/surfaces.
+  SuggestedAction: Continue the token/status cleanup in later issues once the current milestone passes on its covered surfaces.
   Status: out-of-scope
 
 <promise>FAIL</promise>

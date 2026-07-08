@@ -309,7 +309,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     expect(errorBanner).toHaveAttribute('role', 'alert')
     expect(errorBanner).toHaveAttribute('aria-live', 'polite')
     expect(errorBanner).toHaveTextContent(/agentTimeout must be a number/i)
-    expect(errorBanner.className).toContain('text-red-700')
+    expect(errorBanner.className).toContain('text-danger')
     expect(screen.queryByText(/Settings saved successfully/i)).not.toBeInTheDocument()
   })
 
@@ -506,7 +506,7 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
 
     const validationError = screen.getByText('Must be at least 1 minute')
     expect(validationError).toBeInTheDocument()
-    expect(validationError.className).toContain('text-danger-foreground')
+    expect(validationError.className).toContain('text-danger')
     expect(validationError.className).not.toContain('text-red-700')
     expect(validationError).toHaveAttribute('role', 'alert')
 

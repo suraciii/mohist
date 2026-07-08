@@ -216,7 +216,7 @@ describe('shared/ui AlertDialog', () => {
 
     const confirm = withinDialog(dialog).getByTestId('alert-dialog-confirm')
     expect(confirm.className).toContain('bg-danger-subtle')
-    expect(confirm.className).toContain('text-danger-foreground')
+    expect(confirm.className).toContain('text-danger')
     expect(confirm.className).toContain('border-danger-border')
     expect(confirm.className).not.toContain('bg-red-600')
     expect(confirm.className).not.toContain('bg-red-700')

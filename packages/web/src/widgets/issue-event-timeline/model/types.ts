@@ -1,3 +1,5 @@
+import { statusTreatment } from '@/shared/status-presentation'
+
 export type TimelineCategory = 'workflow' | 'approval' | 'integration' | 'success' | 'failure' | 'metadata'
 
 export type TimelineSource = 'ISSUE' | 'WORKFLOW'
@@ -16,6 +18,7 @@ export interface TimelineEntry {
 }
 
 export interface CategoryStyle {
+  container: string
   dot: string
   accentDot: string
   bg: string
@@ -25,54 +28,66 @@ export interface CategoryStyle {
 }
 
 const NEUTRAL_DOT = 'bg-gray-300'
+const NEUTRAL_BG = 'bg-muted'
+const NEUTRAL_TEXT = 'text-muted-foreground'
+const NEUTRAL_BORDER = 'border-border'
+
+const FAILURE_TREATMENT = statusTreatment('severity', 'ERROR')
+const ATTENTION_TREATMENT = statusTreatment('severity', 'WARN')
 
 export const CATEGORY_STYLES: Record<TimelineCategory, CategoryStyle> = {
   workflow: {
+    container: `${NEUTRAL_BG} ${NEUTRAL_TEXT} ${NEUTRAL_BORDER}`,
     dot: NEUTRAL_DOT,
     accentDot: NEUTRAL_DOT,
-    bg: 'bg-gray-100',
-    text: 'text-gray-600',
-    border: 'border-gray-200',
+    bg: NEUTRAL_BG,
+    text: NEUTRAL_TEXT,
+    border: NEUTRAL_BORDER,
     label: 'Workflow',
   },
   approval: {
-    dot: NEUTRAL_DOT,
-    accentDot: NEUTRAL_DOT,
-    bg: 'bg-gray-100',
-    text: 'text-gray-600',
-    border: 'border-gray-200',
+    container: ATTENTION_TREATMENT.container,
+    dot: ATTENTION_TREATMENT.dot,
+    accentDot: ATTENTION_TREATMENT.dot,
+    bg: ATTENTION_TREATMENT.container,
+    text: ATTENTION_TREATMENT.text,
+    border: ATTENTION_TREATMENT.border,
     label: 'Approval',
   },
   integration: {
+    container: `${NEUTRAL_BG} ${NEUTRAL_TEXT} ${NEUTRAL_BORDER}`,
     dot: NEUTRAL_DOT,
     accentDot: NEUTRAL_DOT,
-    bg: 'bg-gray-100',
-    text: 'text-gray-600',
-    border: 'border-gray-200',
+    bg: NEUTRAL_BG,
+    text: NEUTRAL_TEXT,
+    border: NEUTRAL_BORDER,
     label: 'Integration',
   },
   success: {
+    container: `${NEUTRAL_BG} ${NEUTRAL_TEXT} ${NEUTRAL_BORDER}`,
     dot: NEUTRAL_DOT,
     accentDot: NEUTRAL_DOT,
-    bg: 'bg-gray-100',
-    text: 'text-gray-600',
-    border: 'border-gray-200',
+    bg: NEUTRAL_BG,
+    text: NEUTRAL_TEXT,
+    border: NEUTRAL_BORDER,
     label: 'Success',
   },
   failure: {
-    dot: 'bg-red-500',
-    accentDot: 'bg-red-500',
-    bg: 'bg-red-50',
-    text: 'text-red-700',
-    border: 'border-red-200',
+    container: FAILURE_TREATMENT.container,
+    dot: FAILURE_TREATMENT.dot,
+    accentDot: FAILURE_TREATMENT.dot,
+    bg: FAILURE_TREATMENT.container,
+    text: FAILURE_TREATMENT.text,
+    border: FAILURE_TREATMENT.border,
     label: 'Failure',
   },
   metadata: {
+    container: `${NEUTRAL_BG} ${NEUTRAL_TEXT} ${NEUTRAL_BORDER}`,
     dot: NEUTRAL_DOT,
     accentDot: NEUTRAL_DOT,
-    bg: 'bg-gray-100',
-    text: 'text-gray-600',
-    border: 'border-gray-200',
+    bg: NEUTRAL_BG,
+    text: NEUTRAL_TEXT,
+    border: NEUTRAL_BORDER,
     label: 'Metadata',
   },
 }
