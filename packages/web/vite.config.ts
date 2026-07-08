@@ -3,6 +3,18 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+// 需要 DOM 的 .test.ts（renderHook、document/matchMedia 依赖）。其余
+// .test.ts 一律视为纯逻辑，跑 node 环境；新文件若确实要 DOM，加进这里。
+const domDependentTestFiles = [
+  'src/app/providers/LiveTaskProvider.inbox.test.ts',
+  'src/app/providers/LiveTaskProvider.lifecycle.test.ts',
+  'src/app/providers/LiveTaskProvider.transcript.test.ts',
+  'src/pages/issue-detail/model/useIssueDetailMutations.test.ts',
+  'src/shared/lib/theme/theme.test.ts',
+  'src/widgets/issue-event-timeline/useEventTimeline.test.ts',
+  'src/widgets/issue-workflow/model/useWorkflowSessionFiltering.test.ts',
+]
+
 export default defineConfig({
   plugins: [
     react(),
@@ -51,6 +63,31 @@ export default defineConfig({
       'dist/**',
       'tests/a11y/**',
       'tests/e2e/**',
+    ],
+    // jsdom 实例化是测试计算量的大头（CI 上约为测试体本身的 2 倍），而纯
+    // 逻辑 .test.ts 根本不碰 DOM。按环境拆两个 project：.test.ts 走 node，
+    // 组件/页面/跨切面测试走 jsdom。
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'node',
+          environment: 'node',
+          include: ['src/**/*.test.ts'],
+          exclude: domDependentTestFiles,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'jsdom',
+          include: [
+            'src/**/*.test.tsx',
+            'tests/**/*.spec.tsx',
+            ...domDependentTestFiles,
+          ],
+        },
+      },
     ],
   },
 })
