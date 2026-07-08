@@ -62,6 +62,7 @@ export default defineConfig({
     // 新增替身需在 openspec/changes/web-test-boundary-mocks 方案内登记。
     alias: {
       sonner: path.resolve(__dirname, './tests/support/sonner-fake.ts'),
+      '@microsoft/signalr': path.resolve(__dirname, './tests/support/signalr-fake.ts'),
     },
     exclude: [
       '**/*.a11y.spec.ts',

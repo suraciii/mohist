@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { HubConnectionBuilder } from '@microsoft/signalr'
+
 import { axe } from 'vitest-axe'
 import { ProjectProvider } from '../../src/entities/project'
 import { getIssueWorkflowTaskLog } from '../../src/entities/issue'
@@ -11,14 +11,6 @@ import { getWorkflowRunSessions } from '../../src/entities/coder-session/api/cli
 import { TaskLogPanel } from '../../src/widgets/issue-workflow/ui/TaskLogPanel'
 import type { TaskLogLine, TaskLogPage } from '../../src/entities/issue'
 import type { WorkflowRunSession } from '../../src/entities/coder-session/model/types'
-
-vi.mock('@microsoft/signalr', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@microsoft/signalr')>()
-  return {
-    ...actual,
-    HubConnectionBuilder: vi.fn(),
-  }
-})
 
 vi.mock('../../src/entities/issue/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/entities/issue/api/client')>()
@@ -75,69 +67,6 @@ function agentSessionFixture(overrides: Partial<WorkflowRunSession>): WorkflowRu
   }
 }
 
-type Listener = (...args: unknown[]) => void
-
-interface FakeConnection {
-  state: number
-  onreconnecting: (handler?: Listener) => Listener | null | void
-  onreconnected: (handler?: Listener) => Listener | null | void
-  onclose: (handler?: Listener) => Listener | null | void
-  on: (event: string, handler: Listener) => void
-  start: () => Promise<void>
-  stop: () => Promise<void>
-  invoke: (...args: unknown[]) => Promise<unknown>
-  handlers: Map<string, Listener>
-  reconnectHandler: Listener | null
-}
-
-const fakeConnections: FakeConnection[] = []
-
-function makeFakeConnection(): FakeConnection {
-  const handlers = new Map<string, Listener>()
-  const conn: FakeConnection = {
-    state: 0,
-    reconnectHandler: null,
-    onreconnecting() {
-      if (undefined === undefined) return undefined
-    },
-    onreconnected(handler) {
-      conn.reconnectHandler = handler ?? null
-      if (handler === undefined) return undefined
-    },
-    onclose() {
-      if (undefined === undefined) return undefined
-    },
-    on: vi.fn((event: string, handler: Listener) => {
-      handlers.set(event, handler)
-    }),
-    start: vi.fn(async () => {
-      conn.state = 1
-    }),
-    stop: vi.fn(async () => {
-      conn.state = 0
-    }),
-    invoke: vi.fn(async () => undefined),
-    handlers,
-  }
-  fakeConnections.push(conn)
-  return conn
-}
-
-function mockConnectionBuilder() {
-  function FakeBuilder(this: unknown) {
-    return {
-      withUrl: () => ({
-        withAutomaticReconnect: () => ({
-          configureLogging: () => ({
-            build: () => makeFakeConnection(),
-          }),
-        }),
-      }),
-    }
-  }
-  vi.mocked(HubConnectionBuilder).mockImplementation(FakeBuilder as unknown as typeof HubConnectionBuilder)
-}
-
 const projects = [
   {
     id: 'proj-a11y',
@@ -175,9 +104,7 @@ const focusableSelector = [
 describe('TaskLogPanel accessibility structural baseline', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    fakeConnections.length = 0
     sessionEventHandlers.clear()
-    mockConnectionBuilder()
     mockedGetIssueWorkflowTaskLog.mockResolvedValue({ lines: [], nextCursor: null, truncated: false })
     mockedGetWorkflowRunSessions.mockResolvedValue([])
   })
@@ -323,9 +250,7 @@ describe('TaskLogPanel accessibility structural baseline', () => {
 describe('TaskLogPanel accessibility — milestone rows (Phase 3b)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    fakeConnections.length = 0
     sessionEventHandlers.clear()
-    mockConnectionBuilder()
     mockedGetIssueWorkflowTaskLog.mockResolvedValue({ lines: [], nextCursor: null, truncated: false })
     mockedGetWorkflowRunSessions.mockResolvedValue([])
   })

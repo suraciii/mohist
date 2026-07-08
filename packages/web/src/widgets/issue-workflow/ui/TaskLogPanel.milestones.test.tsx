@@ -19,14 +19,6 @@ import {
   sessionFixture,
 } from './_taskLogPanelTestUtils'
 
-vi.mock('@microsoft/signalr', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@microsoft/signalr')>()
-  return {
-    ...actual,
-    HubConnectionBuilder: vi.fn(),
-  }
-})
-
 vi.mock('../../../entities/issue/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/issue/api/client')>()
   return {

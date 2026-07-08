@@ -2,6 +2,7 @@ import '@testing-library/jest-dom'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 import { resetSonnerFake } from './support/sonner-fake'
+import { resetSignalrFake } from './support/signalr-fake'
 
 let _reducedMotionOverride: boolean | undefined
 
@@ -12,6 +13,7 @@ afterEach(() => {
   cleanup()
   _reducedMotionOverride = undefined
   resetSonnerFake()
+  resetSignalrFake()
   vi.useRealTimers()
   if (typeof window !== 'undefined') {
     window.localStorage.clear()
