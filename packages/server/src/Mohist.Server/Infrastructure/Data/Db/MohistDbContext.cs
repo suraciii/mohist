@@ -72,23 +72,14 @@ public class MohistDbContext : DbContext
     public DbSet<TaskLogEntryRow> TaskLogEntries { get; set; } = null!;
     public DbSet<TaskLogBatchRow> TaskLogBatches { get; set; } = null!;
 
-    public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
+    public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(SuppressPendingModelChanges(options))
     {
     }
 
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-    {
-        base.OnConfiguring(optionsBuilder);
-        // issue-360 T-001 (pre-T-004): the three event tables gained a
-        // nullable DispatchedAt column + partial undelivered index ahead
-        // of the migration. T-004 materializes them on disk. Until then,
-        // suppress the pending-changes warning so every test fixture and
-        // the production host can migrate with the older snapshot. With
-        // T-004 landed the model matches the snapshot and the Ignore is a
-        // no-op.
-        optionsBuilder.ConfigureWarnings(w => w.Ignore(
-            RelationalEventId.PendingModelChangesWarning));
-    }
+    private static DbContextOptions<MohistDbContext> SuppressPendingModelChanges(DbContextOptions<MohistDbContext> options) =>
+        new DbContextOptionsBuilder<MohistDbContext>(options)
+            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
+            .Options;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
