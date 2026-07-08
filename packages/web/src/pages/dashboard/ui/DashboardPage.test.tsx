@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     capacity: { active: 0, max: 8 },
   } as AgentStatus | undefined,
   agentStatusLoading: false,
+  agentStatusError: false,
   createProjectMutate: vi.fn(),
   useIssuesMock: vi.fn(),
   useArchivedIssuesMock: vi.fn(),
@@ -54,7 +55,7 @@ vi.mock('../../../entities/agent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/agent')>()
   return {
     ...actual,
-    useAgentStatus: () => ({ data: mocks.agentStatus, isLoading: mocks.agentStatusLoading }),
+    useAgentStatus: () => ({ data: mocks.agentStatus, isLoading: mocks.agentStatusLoading, isError: mocks.agentStatusError }),
     useAgentActivity: () => mocks.useAgentActivityMock(),
     useCostRollup: () => ({ data: undefined }),
     useAgentUsage: () => ({ data: undefined, isLoading: false, isError: false }),
@@ -198,6 +199,7 @@ function resetMocks() {
   mocks.isLoading = false
   mocks.agentStatus = makeAgentStatus({ capacity: { active: 0, max: 8 } })
   mocks.agentStatusLoading = false
+  mocks.agentStatusError = false
   mocks.useIssuesMock.mockReset()
   mocks.useIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
   mocks.useArchivedIssuesMock.mockReset()
@@ -484,6 +486,32 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
         ...NO_AGENT_ACTIVITY,
         activeCardByIssueNumber: new Map(),
       })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
+      expect(screen.queryByText(/Nothing needs your attention right now/i)).not.toBeInTheDocument()
+    })
+
+    it('does not render the ready state when the issue query has failed without data', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.useIssuesMock.mockReturnValue({ data: undefined, isLoading: false, isError: true })
+
+      renderPage()
+
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
+      expect(screen.queryByText(/Nothing needs your attention right now/i)).not.toBeInTheDocument()
+    })
+
+    it('does not render the ready state when the runner-status query has failed without data', () => {
+      mocks.projects = [
+        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+      ]
+      mocks.agentStatus = undefined
+      mocks.agentStatusError = true
+      mocks.useIssuesMock.mockReturnValue({ data: [], isLoading: false })
 
       renderPage()
 

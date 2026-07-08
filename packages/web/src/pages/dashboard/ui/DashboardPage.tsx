@@ -33,8 +33,8 @@ const defaultAgentStatus: AgentStatus = {
 export function DashboardPage() {
   const { data: projects, isLoading: projectsLoading } = useProjects()
   const { currentProject, projectId } = useProject()
-  const { data: agentStatus, isLoading: agentStatusLoading } = useAgentStatus()
-  const { data: fetchedIssues, isLoading: issuesLoading } = useIssues(projectId ? { projectId } : undefined)
+  const { data: agentStatus, isLoading: agentStatusLoading, isError: agentStatusError } = useAgentStatus()
+  const { data: fetchedIssues, isLoading: issuesLoading, isError: issuesError } = useIssues(projectId ? { projectId } : undefined)
   const {
     activeCards,
     isLoading: activityLoading,
@@ -64,9 +64,9 @@ export function DashboardPage() {
     completed.length > 0 || failed.length > 0 || archived.length > 0
   const hasCapacityData =
     agentStatus?.capacity != null && agentStatus.capacity.max > 0
-  const issuesResolved = fetchedIssues !== undefined || !issuesLoading
+  const issuesResolved = fetchedIssues !== undefined || (!issuesLoading && !issuesError)
   const activityResolved = !activityLoading && !activityError
-  const agentStatusResolved = agentStatus !== undefined || !agentStatusLoading
+  const agentStatusResolved = agentStatus !== undefined || (!agentStatusLoading && !agentStatusError)
 
   const showAttentionHero = hasAttention
   const showReadyState = issuesResolved && activityResolved && agentStatusResolved && !hasAttention && !hasActiveWork
