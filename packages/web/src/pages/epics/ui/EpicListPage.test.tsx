@@ -2,12 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { toast } from 'sonner'
 import { EpicStatus } from '../../../entities/epic'
 import { EpicListPage } from './EpicListPage'
-
-const mockNavigate = vi.fn()
 
 const startIssueMock = vi.hoisted(() => vi.fn())
 
@@ -26,13 +24,10 @@ function passthroughStartIssue() {
   >)
 }
 
-vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>()
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  }
-})
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="current-path">{location.pathname}{location.search}</div>
+}
 
 vi.mock('../../../entities/issue', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/issue')>()
@@ -180,6 +175,7 @@ function renderPage() {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/epics']}>
+        <LocationProbe />
         <Routes>
           <Route path="/epics" element={<EpicListPage />} />
         </Routes>
@@ -194,7 +190,6 @@ describe('EpicListPage four-group rendering', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockNavigate.mockClear()
     mocks.useEpics.mockReturnValue({
       data: [runningEpic, readyToStartEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic, doneEpic, closedEpic],
       isLoading: false,
@@ -321,7 +316,6 @@ describe('EpicListPage per-group card content', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockNavigate.mockClear()
     mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
     mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
   })
@@ -431,7 +425,6 @@ describe('EpicListPage Start next issue action', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockNavigate.mockClear()
     mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
     passthroughStartIssue()
     startIssueMock.mockReset()
@@ -455,7 +448,7 @@ describe('EpicListPage Start next issue action', () => {
       expect(startIssueMock).toHaveBeenCalledWith(3, null)
     })
     expect(startIssueMock).toHaveBeenCalledTimes(1)
-    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(screen.getByTestId('current-path').textContent).toBe('/epics')
   })
 
   it('calls stopPropagation on the click event so the card does not navigate', () => {
@@ -518,7 +511,6 @@ describe('EpicListPage basic actions', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockNavigate.mockClear()
     mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
     mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
     mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
@@ -612,7 +604,7 @@ describe('EpicListPage basic actions', () => {
       11,
       expect.objectContaining({ onSettled: expect.any(Function) }),
     )
-    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(screen.getByTestId('current-path').textContent).toBe('/epics')
   })
 
   it('keeps the legacy paused progress fallback for waiting, ready-to-mark-done, and empty paused cards', () => {
@@ -699,7 +691,7 @@ describe('EpicListPage basic actions', () => {
 
     fireEvent.click(screen.getByText('Ready To Start Epic'))
 
-    expect(mockNavigate).toHaveBeenCalledWith('/epics/epic-ready-to-start')
+    expect(screen.getByTestId('current-path').textContent).toBe('/epics/epic-ready-to-start')
   })
 })
 
@@ -709,7 +701,6 @@ describe('EpicListPage numbered display', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockNavigate.mockClear()
     mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
     mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
   })
@@ -762,7 +753,6 @@ describe('EpicListPage mobile no-overflow invariants', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockNavigate.mockClear()
     mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
     mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
   })
@@ -894,7 +884,6 @@ describe('EpicListPage search and sort controls', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockNavigate.mockClear()
     mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
     mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
   })
