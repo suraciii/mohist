@@ -14,7 +14,7 @@ namespace Mohist.Server.SpecTests.Specs.Events;
 [Trait(Traits.Sut.Name, Traits.Sut.System)]
 public class AgentSessionEventsMigrationSpecs
 {
-    private const string PreviousMigrationId = "20260708015352_AddEventDeliveryProgressAndDeadLetters";
+    private const string PreviousMigrationId = "20260707120000_WorkflowWorkerAssignment";
     private const string MigrationId = "20260708053533_AddAgentSessionEvents";
     private const string TypeTimeMigrationId = "20260708113254_AddAgentSessionEventsTypeTimeIndex";
 

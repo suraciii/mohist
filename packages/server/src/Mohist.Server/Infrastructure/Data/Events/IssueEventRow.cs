@@ -22,4 +22,5 @@ public sealed class IssueEventRow : IEventRow
     public required string DataContentType { get; init; }
     public required JsonElement Data { get; init; }
     public required string ExtensionsJson { get; init; }
+    public DateTimeOffset? DispatchedAt { get; set; }
 }

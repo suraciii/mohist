@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.SystemSpecs;
@@ -65,8 +66,6 @@ public class EventBusTests
         Assert.Contains("\"message\":\"hello\"", recorded.Envelope.Data!.Value.GetRawText());
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task PublishAsync_FilteredOut_HandlerNotInvoked()
     {
@@ -90,8 +89,6 @@ public class EventBusTests
         Assert.Single(store.Appended);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task PublishAsync_CloudEventOverload_AppendsSingleRowPreservingEnvelope()
     {
@@ -120,8 +117,6 @@ public class EventBusTests
         Assert.Equal("tr_1", recorded.Envelope.Extensions["traceId"]);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task PublishAsync_MatchingThrowingHandler_DoesNotDispatchAndAppendsRow()
     {
