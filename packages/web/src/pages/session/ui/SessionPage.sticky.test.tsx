@@ -3,20 +3,43 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import { SessionPage } from './SessionPage'
+import { useMswServer } from '../../../../tests/support/msw'
+
+let _issueData: unknown = null
+let _coderSessionsData: unknown[] = []
+let _metadataData: unknown = null
+let _transcriptData: { turns: unknown[]; partCount: number; lastActivityAt: string } = {
+  turns: [
+    { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' }, parts: [] },
+    { id: 'turn-2', index: 1, kind: 'response', role: 'assistant', content: { text: 'Done' }, parts: [] },
+  ],
+  partCount: 2,
+  lastActivityAt: '2026-06-15T10:29:55.000Z',
+}
+let _workflowRunSessionsData: unknown[] = []
+
+useMswServer(
+  http.get('/api/projects/:projectId/issues/:number', () =>
+    HttpResponse.json({ success: true, data: _issueData }),
+  ),
+  http.get('/api/projects/:projectId/issues/:number/coder-sessions', () =>
+    HttpResponse.json({ success: true, data: _coderSessionsData }),
+  ),
+  http.get('/api/projects/:projectId/issues/:number/sessions/:name', () =>
+    HttpResponse.json({ success: true, data: _metadataData }),
+  ),
+  http.get('/api/projects/:projectId/issues/:number/sessions/:name/transcript', () =>
+    HttpResponse.json({ success: true, data: _transcriptData }),
+  ),
+  http.get('/api/workflow-runs/:workflowRunId/sessions', () =>
+    HttpResponse.json({ success: true, data: _workflowRunSessionsData }),
+  ),
+)
 
 const mocks = vi.hoisted(() => ({
-  useIssueData: undefined as any,
-  useCoderSessionsReturn: {
-    sessions: [] as any[],
-    isLoading: false,
-  },
-  siblingReturn: {
-    previous: null,
-    next: null,
-    sessions: [] as any[],
-  },
   transcriptReturn: {
     turns: [] as any[],
     transcriptVersion: 0,
@@ -28,70 +51,6 @@ const mocks = vi.hoisted(() => ({
     isStreaming: false,
   },
 }))
-
-
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    useIssue: () => ({ data: mocks.useIssueData }),
-  }
-})
-
-vi.mock('../../../entities/coder-session', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/coder-session')>()
-  return {
-    ...actual,
-    useCoderSessions: () => mocks.useCoderSessionsReturn,
-    getAgentSessionMetadata: vi.fn().mockResolvedValue({
-      id: 'agent-session-1',
-      sessionName: 'session-1',
-      acpSessionId: 'acp-1',
-      title: 'Test session',
-      status: 'completed',
-      statusKind: 'completed',
-      stage: 'build',
-      model: 'minimax/MiniMax-M3',
-      createdAt: '2026-06-15T10:00:00.000Z',
-      completedAt: '2026-06-15T10:30:00.000Z',
-      lastActivityAt: '2026-06-15T10:29:55.000Z',
-      lastDataAt: '2026-06-15T10:29:55.000Z',
-      changedFiles: [],
-      metadata: { partCount: 4, toolCount: 2 },
-      usage: {
-        inputTokens: 1000,
-        outputTokens: 500,
-        totalTokens: 1500,
-        costAmount: 0.01,
-        costCurrency: 'USD',
-        contextWindowUsed: 12000,
-        contextWindowSize: 32000,
-        contextUsagePercent: 37.5,
-        healthStatus: 'green',
-      },
-      eventSummary: {
-        resolvedModel: 'minimax/MiniMax-M3',
-        toolCallCount: 2,
-        toolErrorCount: 0,
-      },
-    }),
-    getAgentSessionTranscript: vi.fn().mockResolvedValue({
-      turns: [
-        { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' }, parts: [] },
-        { id: 'turn-2', index: 1, kind: 'response', role: 'assistant', content: { text: 'Done' }, parts: [] },
-      ],
-      lastActivityAt: '2026-06-15T10:29:55.000Z',
-    }),
-  }
-})
-
-vi.mock('../../../widgets/issue-workflow', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../widgets/issue-workflow')>()
-  return {
-    ...actual,
-    useSiblingSessions: () => mocks.siblingReturn,
-  }
-})
 
 vi.mock('../../../widgets/session-transcript', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../widgets/session-transcript')>()
@@ -186,8 +145,6 @@ async function renderPage() {
       </ProjectProvider>
     </QueryClientProvider>,
   )
-  // The metadata/transcript queries are async; wait for them to resolve
-  // before rendering assertions so the page reaches the main transcript state.
   await waitFor(() => {
     if (!result.container.querySelector('[data-testid="session-transcript-scroll-container"]')) {
       throw new Error('not ready yet')
@@ -197,7 +154,7 @@ async function renderPage() {
 }
 
 function setupDefaultMocks() {
-  mocks.useIssueData = {
+  _issueData = {
     id: '123',
     number: 123,
     title: 'Test issue',
@@ -210,32 +167,61 @@ function setupDefaultMocks() {
     projectId: 'proj-1',
     workflowRunId: 'wr-1',
   }
-  mocks.useCoderSessionsReturn = {
-    sessions: [
-      {
-        id: 'session-1',
-        sessionName: 'session-1',
-        workflowRunId: 'wr-1',
-        acpSessionId: 'acp-1',
-        projectId: 'proj-1',
-        issueNumber: 123,
-        runnerId: 'runner-1',
-        status: 'completed',
-        stage: 'build',
-        model: 'minimax/MiniMax-M3',
-        workDir: null,
-        processPid: null,
-        createdAt: '2026-06-15T10:00:00.000Z',
-        startedAt: '2026-06-15T10:00:05.000Z',
-        completedAt: '2026-06-15T10:30:00.000Z',
-        lastDataAt: '2026-06-15T10:29:55.000Z',
-        failureReason: null,
-        exitCode: 0,
-      },
-    ],
-    isLoading: false,
+  _coderSessionsData = [
+    {
+      id: 'session-1',
+      sessionName: 'session-1',
+      workflowRunId: 'wr-1',
+      acpSessionId: 'acp-1',
+      projectId: 'proj-1',
+      issueNumber: 123,
+      runnerId: 'runner-1',
+      status: 'completed',
+      stage: 'build',
+      model: 'minimax/MiniMax-M3',
+      workDir: null,
+      processPid: null,
+      createdAt: '2026-06-15T10:00:00.000Z',
+      startedAt: '2026-06-15T10:00:05.000Z',
+      completedAt: '2026-06-15T10:30:00.000Z',
+      lastDataAt: '2026-06-15T10:29:55.000Z',
+      failureReason: null,
+      exitCode: 0,
+    },
+  ]
+  _workflowRunSessionsData = []
+  _metadataData = {
+    id: 'agent-session-1',
+    sessionName: 'session-1',
+    acpSessionId: 'acp-1',
+    title: 'Test session',
+    status: 'completed',
+    statusKind: 'completed',
+    stage: 'build',
+    model: 'minimax/MiniMax-M3',
+    createdAt: '2026-06-15T10:00:00.000Z',
+    completedAt: '2026-06-15T10:30:00.000Z',
+    lastActivityAt: '2026-06-15T10:29:55.000Z',
+    lastDataAt: '2026-06-15T10:29:55.000Z',
+    changedFiles: [],
+    metadata: { partCount: 4, toolCount: 2 },
+    usage: {
+      inputTokens: 1000,
+      outputTokens: 500,
+      totalTokens: 1500,
+      costAmount: 0.01,
+      costCurrency: 'USD',
+      contextWindowUsed: 12000,
+      contextWindowSize: 32000,
+      contextUsagePercent: 37.5,
+      healthStatus: 'green',
+    },
+    eventSummary: {
+      resolvedModel: 'minimax/MiniMax-M3',
+      toolCallCount: 2,
+      toolErrorCount: 0,
+    },
   }
-  mocks.siblingReturn = { previous: null, next: null, sessions: [] }
   mocks.transcriptReturn = {
     turns: [
       { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' } },
@@ -324,7 +310,6 @@ describe('SessionPage sticky recovery bar (issue-245 T-004)', () => {
     await waitFor(() => {
       const title = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')
       if (!title) throw new Error('sticky title not rendered yet')
-      // Wait until the transcript data resolves so turnCount is 2
       if (!title.textContent?.includes('2 turns')) throw new Error('turn count not resolved yet')
     })
 
@@ -349,13 +334,10 @@ describe('SessionPage sticky recovery bar (issue-245 T-004)', () => {
     const scrollContainer = container.querySelector('[data-testid="session-transcript-scroll-container"]')
     expect(scrollContainer).not.toBeNull()
 
-    // The sticky title strip sits inside the scroll container.
     const stickyTitle = scrollContainer!.querySelector('[data-testid="session-sticky-title"]')
     expect(stickyTitle).not.toBeNull()
     expect(stickyTitle!.className).toContain('sticky')
 
-    // The outer SessionHeader (a sibling of the scroll container) must not
-    // carry any sticky positioning class.
     const stickyHeaderElements = Array.from(
       container.querySelectorAll('[class*="sticky"]'),
     ).filter((el) => !scrollContainer!.contains(el))
@@ -398,9 +380,6 @@ describe('SessionPage sticky recovery bar (issue-245 T-004)', () => {
     const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect
 
     try {
-      // Simulate both sticky regions pinned in a scrolled transcript. The
-      // title is pinned to the container top; the recovery bar is pinned below
-      // the title so the two regions do not overlap.
       Element.prototype.getBoundingClientRect = vi.fn(function mockRect(this: Element) {
         const testId = (this as HTMLElement).getAttribute?.('data-testid') ?? ''
         if (testId === 'session-transcript-scroll-container') {
@@ -415,7 +394,6 @@ describe('SessionPage sticky recovery bar (issue-245 T-004)', () => {
         if (testId === 'session-transcript-layout') {
           return { top: 216, bottom: 2400, left: 0, right: 800, width: 800, height: 2184, x: 0, y: 216, toJSON: () => ({}) } as DOMRect
         }
-        // Default: leave behaviour unchanged.
         return originalGetBoundingClientRect.call(this)
       })
 
@@ -437,8 +415,6 @@ describe('SessionPage sticky recovery bar (issue-245 T-004)', () => {
       expect(barRect.top).toBe(titleRect.bottom)
       expect(barRect.bottom).toBeLessThanOrEqual(scrollRect.bottom)
 
-      // The Compact / Reset affordances inside the bar remain reachable even
-      // when the transcript body is scrolled past.
       const compact = recoveryBar!.querySelector('[data-testid="session-recovery-compact"]')
       const reset = recoveryBar!.querySelector('[data-testid="session-recovery-reset"]')
       expect(compact).not.toBeNull()
