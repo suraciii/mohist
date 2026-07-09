@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
+import { useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import type {
   CompletionTrendResponse,
@@ -13,34 +15,47 @@ import type {
 } from '../../../entities/issue'
 import type { AgentUsageTimeseriesDto } from '../../../entities/agent'
 
-const mocks = vi.hoisted(() => ({
-  useCompletionThroughput: vi.fn(),
-  useCompletionTrend: vi.fn(),
-  useDeliveryTime: vi.fn(),
-  useStageDuration: vi.fn(),
-  useQualityMetrics: vi.fn(),
-  useAgentUsage: vi.fn(),
-}))
+import { InsightsCharts } from './InsightsCharts'
 
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    useCompletionThroughput: mocks.useCompletionThroughput,
-    useCompletionTrend: mocks.useCompletionTrend,
-    useDeliveryTime: mocks.useDeliveryTime,
-    useStageDuration: mocks.useStageDuration,
-    useQualityMetrics: mocks.useQualityMetrics,
-  }
-})
+let _completionDay: CompletionTrendResponse
+let _completionWeek: CompletionTrendResponse
+let _delivery: DeliveryTimeMetricsResponse
+let _stageDuration: StageDurationMetricsResponse
+let _quality: QualityMetricsResponse
+let _agentUsage: AgentUsageTimeseriesDto
 
-vi.mock('../../../entities/agent', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/agent')>()
-  return {
-    ...actual,
-    useAgentUsage: mocks.useAgentUsage,
-  }
-})
+let _capturedUrls: string[]
+
+const COMPLETION_PATH = '*/api/projects/:projectId/issues/metrics/completion'
+const DELIVERY_TIME_PATH = '*/api/projects/:projectId/issues/metrics/delivery-time'
+const STAGE_DURATION_PATH = '*/api/projects/:projectId/issues/metrics/stage-duration'
+const QUALITY_PATH = '*/api/projects/:projectId/issues/metrics/quality'
+const USAGE_PATH = '*/api/projects/:projectId/agent/usage'
+
+useMswServer(
+  http.get(COMPLETION_PATH, ({ request }) => {
+    _capturedUrls.push(request.url)
+    const bucket = new URL(request.url).searchParams.get('bucket')
+    const data = bucket === 'week' ? _completionWeek : _completionDay
+    return HttpResponse.json({ success: true, data })
+  }),
+  http.get(DELIVERY_TIME_PATH, ({ request }) => {
+    _capturedUrls.push(request.url)
+    return HttpResponse.json({ success: true, data: _delivery })
+  }),
+  http.get(STAGE_DURATION_PATH, ({ request }) => {
+    _capturedUrls.push(request.url)
+    return HttpResponse.json({ success: true, data: _stageDuration })
+  }),
+  http.get(QUALITY_PATH, ({ request }) => {
+    _capturedUrls.push(request.url)
+    return HttpResponse.json({ success: true, data: _quality })
+  }),
+  http.get(USAGE_PATH, ({ request }) => {
+    _capturedUrls.push(request.url)
+    return HttpResponse.json({ success: true, data: _agentUsage })
+  }),
+)
 
 const TEST_PROJECT = {
   id: 'proj-1',
@@ -162,16 +177,14 @@ function buildAgentUsage(): AgentUsageTimeseriesDto {
   }
 }
 
-import { InsightsCharts } from './InsightsCharts'
-
 beforeEach(() => {
-  vi.clearAllMocks()
-  mocks.useCompletionThroughput.mockReturnValue({ data: buildThroughput(), isLoading: false, isError: false })
-  mocks.useCompletionTrend.mockReturnValue({ data: buildCompletionTrend(), isLoading: false, isError: false })
-  mocks.useDeliveryTime.mockReturnValue({ data: buildDeliveryTime(), isLoading: false, isError: false })
-  mocks.useStageDuration.mockReturnValue({ data: buildStageDuration(), isLoading: false, isError: false })
-  mocks.useQualityMetrics.mockReturnValue({ data: buildQuality(), isLoading: false, isError: false })
-  mocks.useAgentUsage.mockReturnValue({ data: buildAgentUsage(), isLoading: false, isError: false })
+  _capturedUrls = []
+  _completionDay = buildThroughput()
+  _completionWeek = buildCompletionTrend()
+  _delivery = buildDeliveryTime()
+  _stageDuration = buildStageDuration()
+  _quality = buildQuality()
+  _agentUsage = buildAgentUsage()
 })
 
 afterEach(() => {
@@ -179,9 +192,17 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
+async function waitForChartGroupsLoaded(count: number) {
+  await waitFor(() => {
+    expect(screen.getAllByTestId('insights-chart-group')).toHaveLength(count)
+  })
+}
+
 describe('InsightsCharts four fixed dimension groups', () => {
-  it('renders exactly four dimension groups in the fixed order', () => {
+  it('renders exactly four dimension groups in the fixed order', async () => {
     renderCharts()
+
+    await waitForChartGroupsLoaded(4)
 
     const groups = screen.getAllByTestId('insights-chart-group')
     expect(groups).toHaveLength(4)
@@ -193,14 +214,18 @@ describe('InsightsCharts four fixed dimension groups', () => {
     ])
   })
 
-  it('does not render the M1 chart-placeholder zone', () => {
+  it('does not render the M1 chart-placeholder zone', async () => {
     renderCharts()
+
+    await waitForChartGroupsLoaded(4)
 
     expect(screen.queryByTestId('insights-chart-placeholder')).not.toBeInTheDocument()
   })
 
-  it('does not render the removed Investment or In-progress Epic progress panels', () => {
+  it('does not render the removed Investment or In-progress Epic progress panels', async () => {
     renderCharts()
+
+    await waitForChartGroupsLoaded(4)
 
     expect(screen.queryByTestId('productivity-investment')).not.toBeInTheDocument()
     expect(screen.queryByTestId('productivity-investment-toggle')).not.toBeInTheDocument()
@@ -214,76 +239,95 @@ describe('InsightsCharts four fixed dimension groups', () => {
 })
 
 describe('InsightsCharts group structure', () => {
-  it('renders the 产出 group with Throughput and Completion Trend in fixed order', () => {
+  it('renders the 产出 group with Throughput and Completion Trend in fixed order', async () => {
     renderCharts()
+
+    await waitFor(() => {
+      const group = screen.getAllByTestId('insights-chart-group').find(
+        (g) => g.getAttribute('data-dimension') === 'output',
+      )!
+      const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
+      const charts = Array.from(chartContainer.querySelectorAll('[data-testid="throughput-chart"], [data-testid="productivity-trend"]'))
+      expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
+        'throughput-chart',
+        'productivity-trend',
+      ])
+    })
 
     const group = screen.getAllByTestId('insights-chart-group').find(
       (g) => g.getAttribute('data-dimension') === 'output',
     )!
-    const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
-    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="throughput-chart"], [data-testid="productivity-trend"]'))
-
-    expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
-      'throughput-chart',
-      'productivity-trend',
-    ])
-
     const heading = group.querySelector('[data-testid="insights-chart-group-title"]')!
     expect(heading.textContent).toBe('产出')
     const question = group.querySelector('[data-testid="insights-chart-group-question"]')!
     expect(question.textContent).toBe('你交付了多少？')
   })
 
-  it('renders the 交付效率 group with its two charts', () => {
+  it('renders the 交付效率 group with its two charts', async () => {
     renderCharts()
+
+    await waitFor(() => {
+      const group = screen.getAllByTestId('insights-chart-group').find(
+        (g) => g.getAttribute('data-dimension') === 'delivery',
+      )!
+      const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
+      const charts = Array.from(chartContainer.querySelectorAll('[data-testid="cycle-time-chart"], [data-testid="stage-duration-chart"]'))
+      expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
+        'cycle-time-chart',
+        'stage-duration-chart',
+      ])
+    })
 
     const group = screen.getAllByTestId('insights-chart-group').find(
       (g) => g.getAttribute('data-dimension') === 'delivery',
     )!
-    const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
-    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="cycle-time-chart"], [data-testid="stage-duration-chart"]'))
-    expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
-      'cycle-time-chart',
-      'stage-duration-chart',
-    ])
-
     const heading = group.querySelector('[data-testid="insights-chart-group-title"]')!
     expect(heading.textContent).toBe('交付效率')
     const question = group.querySelector('[data-testid="insights-chart-group-question"]')!
     expect(question.textContent).toBe('多快？')
   })
 
-  it('renders the 质量 group with its two charts', () => {
+  it('renders the 质量 group with its two charts', async () => {
     renderCharts()
+
+    await waitFor(() => {
+      const group = screen.getAllByTestId('insights-chart-group').find(
+        (g) => g.getAttribute('data-dimension') === 'quality',
+      )!
+      const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
+      const charts = Array.from(chartContainer.querySelectorAll('[data-testid="productivity-quality"], [data-testid="ftr-trend-chart"]'))
+      expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
+        'productivity-quality',
+        'ftr-trend-chart',
+      ])
+    })
 
     const group = screen.getAllByTestId('insights-chart-group').find(
       (g) => g.getAttribute('data-dimension') === 'quality',
     )!
-    const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
-    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="productivity-quality"], [data-testid="ftr-trend-chart"]'))
-    expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
-      'productivity-quality',
-      'ftr-trend-chart',
-    ])
-
     const heading = group.querySelector('[data-testid="insights-chart-group-title"]')!
     expect(heading.textContent).toBe('质量')
     const question = group.querySelector('[data-testid="insights-chart-group-question"]')!
     expect(question.textContent).toBe('一次做对了吗？')
   })
 
-  it('renders the 投入 group with only Cost Trend', () => {
+  it('renders the 投入 group with only Cost Trend', async () => {
     renderCharts()
+
+    await waitFor(() => {
+      const group = screen.getAllByTestId('insights-chart-group').find(
+        (g) => g.getAttribute('data-dimension') === 'investment',
+      )!
+      const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
+      const charts = Array.from(chartContainer.querySelectorAll('[data-testid="cost-trend-chart"]'))
+      expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
+        'cost-trend-chart',
+      ])
+    })
 
     const group = screen.getAllByTestId('insights-chart-group').find(
       (g) => g.getAttribute('data-dimension') === 'investment',
     )!
-    const chartContainer = group.querySelector('[data-testid="insights-chart-group-charts"]')!
-    const charts = Array.from(chartContainer.querySelectorAll('[data-testid="cost-trend-chart"]'))
-    expect(charts.map((el) => el.getAttribute('data-testid'))).toEqual([
-      'cost-trend-chart',
-    ])
-
     const heading = group.querySelector('[data-testid="insights-chart-group-title"]')!
     expect(heading.textContent).toBe('投入')
     const question = group.querySelector('[data-testid="insights-chart-group-question"]')!
@@ -292,18 +336,22 @@ describe('InsightsCharts group structure', () => {
 })
 
 describe('InsightsCharts time-window annotations', () => {
-  it('renders the five D4 window badges in the populated state', () => {
+  it('renders the five D4 window badges in the populated state', async () => {
     renderCharts()
 
-    expect(screen.getByTestId('throughput-chart-window')).toBeInTheDocument()
-    expect(screen.getByTestId('cycle-time-chart-window')).toBeInTheDocument()
-    expect(screen.getByTestId('stage-duration-chart-window')).toBeInTheDocument()
-    expect(screen.getByTestId('ftr-trend-chart-window')).toBeInTheDocument()
-    expect(screen.getByTestId('cost-trend-chart-window')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('throughput-chart-window')).toBeInTheDocument()
+      expect(screen.getByTestId('cycle-time-chart-window')).toBeInTheDocument()
+      expect(screen.getByTestId('stage-duration-chart-window')).toBeInTheDocument()
+      expect(screen.getByTestId('ftr-trend-chart-window')).toBeInTheDocument()
+      expect(screen.getByTestId('cost-trend-chart-window')).toBeInTheDocument()
+    })
   })
 
-  it('does not render a time-range selector anywhere in the chart groups', () => {
+  it('does not render a time-range selector anywhere in the chart groups', async () => {
     renderCharts()
+
+    await waitForChartGroupsLoaded(4)
 
     const groups = screen.getAllByTestId('insights-chart-group')
     for (const group of groups) {
@@ -328,35 +376,31 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
     )
   }
 
-  it('forwards the range to every chart panel hook', () => {
-    mocks.useCompletionThroughput.mockClear()
-    mocks.useCompletionTrend.mockClear()
-    mocks.useDeliveryTime.mockClear()
-    mocks.useStageDuration.mockClear()
-    mocks.useQualityMetrics.mockClear()
-    mocks.useAgentUsage.mockClear()
-
+  it('forwards the range to every chart panel hook', async () => {
     renderChartsWithRange('7d')
 
-    expect(mocks.useCompletionThroughput).toHaveBeenCalledWith('7d')
-    expect(mocks.useCompletionTrend).toHaveBeenCalledWith('7d')
-    expect(mocks.useDeliveryTime).toHaveBeenCalledWith('7d')
-    expect(mocks.useStageDuration).toHaveBeenCalledWith('7d')
-    expect(mocks.useQualityMetrics).toHaveBeenCalledWith('7d')
-    expect(mocks.useAgentUsage).toHaveBeenCalledWith('7d')
+    await waitFor(() => {
+      expect(_capturedUrls.length).toBeGreaterThan(0)
+    })
+
+    const completionUrls = _capturedUrls.filter((u) => u.includes('/issues/metrics/completion'))
+    expect(completionUrls.length).toBe(2)
+    expect(completionUrls.some((u) => u.includes('bucket=day') && u.includes('range=7d'))).toBe(true)
+    expect(completionUrls.some((u) => u.includes('bucket=week') && u.includes('range=7d'))).toBe(true)
+    expect(_capturedUrls.some((u) => u.includes('/issues/metrics/delivery-time') && u.includes('range=7d'))).toBe(true)
+    expect(_capturedUrls.some((u) => u.includes('/issues/metrics/stage-duration') && u.includes('range=7d'))).toBe(true)
+    expect(_capturedUrls.some((u) => u.includes('/issues/metrics/quality') && u.includes('range=7d'))).toBe(true)
+    expect(_capturedUrls.some((u) => u.includes('/agent/usage') && u.includes('range=7d'))).toBe(true)
   })
 
-  it('re-applies the new range when the prop changes from 30d to 90d', () => {
-    mocks.useCompletionThroughput.mockClear()
-    mocks.useCompletionTrend.mockClear()
-    mocks.useDeliveryTime.mockClear()
-    mocks.useStageDuration.mockClear()
-    mocks.useQualityMetrics.mockClear()
-    mocks.useAgentUsage.mockClear()
-
+  it('re-applies the new range when the prop changes from 30d to 90d', async () => {
     const { rerender } = renderChartsWithRange('30d')
 
-    expect(mocks.useCompletionThroughput).toHaveBeenLastCalledWith('30d')
+    await waitFor(() => {
+      expect(_capturedUrls.filter((u) => u.includes('range=30d')).length).toBeGreaterThan(0)
+    })
+
+    _capturedUrls = []
 
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     rerender(
@@ -369,14 +413,12 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
       </QueryClientProvider>,
     )
 
-    expect(mocks.useCompletionThroughput).toHaveBeenLastCalledWith('90d')
-    expect(mocks.useDeliveryTime).toHaveBeenLastCalledWith('90d')
-    expect(mocks.useStageDuration).toHaveBeenLastCalledWith('90d')
-    expect(mocks.useQualityMetrics).toHaveBeenLastCalledWith('90d')
-    expect(mocks.useAgentUsage).toHaveBeenLastCalledWith('90d')
+    await waitFor(() => {
+      expect(_capturedUrls.filter((u) => u.includes('range=90d')).length).toBeGreaterThan(0)
+    })
   })
 
-  it('reflects the selected range on every retained chart window indicator', () => {
+  it('reflects the selected range on every retained chart window indicator', async () => {
     const rangeByCode = {
       '7d': {
         stage: { from: '2026-06-23T00:00:00+00:00', to: '2026-06-30T23:59:59+00:00' },
@@ -400,47 +442,34 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
 
     function setupRange(range: '7d' | '30d' | '90d') {
       const cfg = rangeByCode[range]
-      mocks.useStageDuration.mockReturnValue({
-        data: {
-          window: cfg.stage,
-          stages: [
-            { stage: 'plan', sampleCount: 3, averageSeconds: 1800, medianSeconds: 1500 },
-            { stage: 'build', sampleCount: 3, averageSeconds: 5400, medianSeconds: 4800 },
-          ],
-          flowEfficiencyRatio: 0.6,
-          waitBreakout: { averageApprovalGateWaitSeconds: 600, averageInactiveGapSeconds: 1200 },
+      _stageDuration = {
+        window: cfg.stage,
+        stages: [
+          { stage: 'plan', sampleCount: 3, averageSeconds: 1800, medianSeconds: 1500 },
+          { stage: 'build', sampleCount: 3, averageSeconds: 5400, medianSeconds: 4800 },
+        ],
+        flowEfficiencyRatio: 0.6,
+        waitBreakout: { averageApprovalGateWaitSeconds: 600, averageInactiveGapSeconds: 1200 },
+      }
+      _quality = {
+        window: cfg.qualityWindow,
+        trend: {
+          bucket: 'day',
+          from: cfg.ftr.from,
+          to: cfg.ftr.to,
+          points: [{ boundary: cfg.ftr.from, sampleCount: 3, firstTimeRightRate: 0.7, reworkRate: 0.1 }],
         },
-        isLoading: false,
-        isError: false,
-      })
-      mocks.useQualityMetrics.mockReturnValue({
-        data: {
-          window: cfg.qualityWindow,
-          trend: {
-            bucket: 'day',
-            from: cfg.ftr.from,
-            to: cfg.ftr.to,
-            points: [{ boundary: cfg.ftr.from, sampleCount: 3, firstTimeRightRate: 0.7, reworkRate: 0.1 }],
-          },
-        },
-        isLoading: false,
-        isError: false,
-      })
-      mocks.useAgentUsage.mockReturnValue({
-        data: {
-          rangeFrom: cfg.cost.rangeFrom,
-          rangeTo: cfg.cost.rangeTo,
-          bucketGranularity: 'day',
-          buckets: [{ bucketStart: cfg.cost.rangeFrom, bucketEnd: cfg.cost.rangeTo, inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 5, costCurrency: 'USD' }],
-          cumulativeCostPerShip: null,
-        },
-        isLoading: false,
-        isError: false,
-      })
+      }
+      _agentUsage = {
+        rangeFrom: cfg.cost.rangeFrom,
+        rangeTo: cfg.cost.rangeTo,
+        bucketGranularity: 'day',
+        buckets: [{ bucketStart: cfg.cost.rangeFrom, bucketEnd: cfg.cost.rangeTo, inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 5, costCurrency: 'USD' }],
+        cumulativeCostPerShip: null,
+      }
     }
 
-    function renderWithMocks(range: '7d' | '30d' | '90d') {
-      setupRange(range)
+    function renderWithRange(range: '7d' | '30d' | '90d') {
       const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
       return render(
         <QueryClientProvider client={queryClient}>
@@ -453,15 +482,19 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
       )
     }
 
-    const { rerender } = renderWithMocks('7d')
-    expect(screen.getByTestId('throughput-chart-window').textContent).toBe('7d')
-    expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('7d')
-    expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jun 23')
-    expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jun 30')
-    expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 23')
-    expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 30')
-    expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Jun 23')
-    expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Jun 30')
+    setupRange('7d')
+    const { rerender } = renderWithRange('7d')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('throughput-chart-window').textContent).toBe('7d')
+      expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('7d')
+      expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jun 23')
+      expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jun 30')
+      expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 23')
+      expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 30')
+      expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Jun 23')
+      expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Jun 30')
+    })
 
     setupRange('90d')
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -475,13 +508,15 @@ describe('InsightsCharts range forwarding to panel hooks', () => {
       </QueryClientProvider>,
     )
 
-    expect(screen.getByTestId('throughput-chart-window').textContent).toBe('90d')
-    expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('90d')
-    expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Apr 2')
-    expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jul 1')
-    expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Apr 2')
-    expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 30')
-    expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Apr 2')
-    expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Jun 30')
+    await waitFor(() => {
+      expect(screen.getByTestId('throughput-chart-window').textContent).toBe('90d')
+      expect(screen.getByTestId('cycle-time-chart-window').textContent).toBe('90d')
+      expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Apr 2')
+      expect(screen.getByTestId('stage-duration-chart-window').textContent).toContain('Jul 1')
+      expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Apr 2')
+      expect(screen.getByTestId('ftr-trend-chart-window').textContent).toContain('Jun 30')
+      expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Apr 2')
+      expect(screen.getByTestId('cost-trend-chart-window').textContent).toContain('Jun 30')
+    })
   })
 })
