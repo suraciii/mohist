@@ -29,12 +29,7 @@ const mocks = vi.hoisted(() => ({
   useIssuesMock: vi.fn(),
   useArchivedIssuesMock: vi.fn(),
   useAgentActivityMock: vi.fn(),
-  epics: undefined as any[] | undefined,
-  completionTrend: undefined as { bucket: string; window: { from: string; to: string }; buckets: { boundary: string; completed: number; failed: number }[] } | undefined,
-  completionThroughput: { bucket: 'day', window: { from: '2026-06-01T00:00:00', to: '2026-06-07T23:59:59' }, buckets: [] } as { bucket: string; window: { from: string; to: string }; buckets: { boundary: string; completed: number; failed: number }[] },
   approvalWait: undefined as { window: { from: string; to: string }; sampleCount: number; averageSeconds: number | null; medianSeconds: number | null; maxSeconds: number | null } | undefined,
-  qualityMetrics: undefined as any,
-  deliveryTime: undefined as { points: { issueNumber: number; completedAt: string; leadDays: number; cycleDays: number | null }[] } | undefined,
 }))
 
 vi.mock('../../../entities/project', async (importOriginal) => {
@@ -82,25 +77,8 @@ vi.mock('../../../widgets/create-project-dialog/ui/CreateProjectDialog', () => (
     ) : null,
 }))
 
-vi.mock('../../../entities/epic/api/queries', () => ({
-  useEpics: () => ({ data: mocks.epics }),
-}))
-
-vi.mock('../../../entities/issue/api/completion-trend', () => ({
-  useCompletionTrend: () => ({ data: mocks.completionTrend }),
-  useCompletionThroughput: () => ({ data: mocks.completionThroughput }),
-}))
-
 vi.mock('../../../entities/issue/api/approval-wait', () => ({
   useApprovalWait: () => ({ data: mocks.approvalWait }),
-}))
-
-vi.mock('../../../entities/issue/api/quality-metrics', () => ({
-  useQualityMetrics: () => ({ data: mocks.qualityMetrics }),
-}))
-
-vi.mock('../../../entities/issue/api/delivery-time', () => ({
-  useDeliveryTime: () => ({ data: mocks.deliveryTime, isLoading: false, isError: false }),
 }))
 
 import { DashboardPage } from './DashboardPage'
@@ -206,11 +184,7 @@ function resetMocks() {
   mocks.useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
   mocks.useAgentActivityMock.mockReset()
   mocks.useAgentActivityMock.mockReturnValue({ ...NO_AGENT_ACTIVITY, activeCardByIssueNumber: new Map() })
-  mocks.epics = undefined
-  mocks.completionTrend = undefined
   mocks.approvalWait = undefined
-  mocks.qualityMetrics = undefined
-  mocks.deliveryTime = undefined
 }
 
 describe('DashboardPage — attention-first zone hierarchy', () => {
