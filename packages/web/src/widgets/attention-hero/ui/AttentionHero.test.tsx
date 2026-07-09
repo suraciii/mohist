@@ -4,47 +4,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import {
   IssueHealth,
   IssueStatus,
   WorkflowStage,
-  approveIssue,
   deriveAttentionItems,
-  resumeIssue,
   type ApprovalWaitMetricsResponse,
   type Issue,
 } from '../../../entities/issue'
 import { type AgentStatus } from '../../../entities/agent'
 import { ProjectProvider } from '../../../entities/project'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { AttentionHero } from './AttentionHero'
 
-const mocks = vi.hoisted(() => ({
-  issues: undefined as Issue[] | undefined,
-  agentStatus: undefined as AgentStatus | undefined,
-  approvalWait: undefined as ApprovalWaitMetricsResponse | undefined,
-}))
+useMswServer()
 
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    approveIssue: vi.fn(),
-    resumeIssue: vi.fn(),
-    useIssues: () => ({ data: mocks.issues, isLoading: false }),
-    useApprovalWait: () => ({ data: mocks.approvalWait, isLoading: false }),
-  }
-})
+const ISSUES_PATH = '*/api/projects/:projectId/issues'
+const AGENT_STATUS_PATH = '*/api/projects/:projectId/agent/status'
+const APPROVAL_WAIT_PATH = '*/api/projects/:projectId/issues/metrics/approval-wait'
+const APPROVE_PATH = '*/api/projects/:projectId/issues/:issueNumber/approve'
+const RESUME_PATH = '*/api/projects/:projectId/issues/:issueNumber/resume'
 
-vi.mock('../../../entities/agent', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/agent')>()
-  return {
-    ...actual,
-    useAgentStatus: () => ({ data: mocks.agentStatus, isLoading: false }),
-  }
-})
-
-const mockedApproveIssue = vi.mocked(approveIssue)
-const mockedResumeIssue = vi.mocked(resumeIssue)
+let _issues: Issue[] | undefined
+let _agentStatus: AgentStatus | undefined
+let _approvalWait: ApprovalWaitMetricsResponse | null
+const _approveHandler = vi.fn()
+const _resumeHandler = vi.fn()
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -115,9 +101,51 @@ function renderHeroWithClient(queryClient: QueryClient) {
 }
 
 beforeEach(() => {
-  mocks.issues = []
-  mocks.agentStatus = makeAgentStatus({ runnerAvailable: true })
-  mocks.approvalWait = undefined
+  _issues = []
+  _agentStatus = makeAgentStatus({ runnerAvailable: true })
+  _approvalWait = null
+
+  server.use(
+    http.get(ISSUES_PATH, () => {
+      if (_issues === undefined) {
+        return HttpResponse.json({ success: false, error: 'not available' }, { status: 500 })
+      }
+      return HttpResponse.json({ success: true, data: _issues })
+    }),
+    http.get(AGENT_STATUS_PATH, () => {
+      if (_agentStatus === undefined) {
+        return HttpResponse.json({ success: false, error: 'not available' }, { status: 500 })
+      }
+      return HttpResponse.json({ success: true, data: _agentStatus })
+    }),
+    http.get(APPROVAL_WAIT_PATH, () => {
+      if (_approvalWait === undefined) {
+        return HttpResponse.json({ success: false, error: 'not available' }, { status: 500 })
+      }
+      return HttpResponse.json({ success: true, data: _approvalWait })
+    }),
+    http.post(APPROVE_PATH, async ({ params }) => {
+      _approveHandler(Number(params.issueNumber), params.projectId)
+      return HttpResponse.json({
+        success: true,
+        data: {
+          issue: makeIssue({ number: Number(params.issueNumber) }),
+          context: null,
+          message: 'approved',
+        },
+      })
+    }),
+    http.post(RESUME_PATH, async ({ params }) => {
+      _resumeHandler(Number(params.issueNumber), params.projectId)
+      return HttpResponse.json({
+        success: true,
+        data: {
+          issue: makeIssue({ number: Number(params.issueNumber) }),
+          message: 'resumed',
+        },
+      })
+    }),
+  )
 })
 
 afterEach(() => {
@@ -126,8 +154,8 @@ afterEach(() => {
 })
 
 describe('AttentionHero - has-attention state', () => {
-  it('renders one entry per AttentionItem in evaluation order with label and detail', () => {
-    mocks.issues = [
+  it('renders one entry per AttentionItem in evaluation order with label and detail', async () => {
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 10,
@@ -153,12 +181,16 @@ describe('AttentionHero - has-attention state', () => {
 
     renderHero()
 
+    await waitFor(() => {
+      const rows = screen.getAllByTestId('attention-item')
+      expect(rows).toHaveLength(3)
+    })
+
     const root = screen.getByTestId('dashboard-zone-attention')
     expect(root).toBeInTheDocument()
     expect(root).toHaveAttribute('data-zone', 'attention')
 
     const rows = screen.getAllByTestId('attention-item')
-    expect(rows).toHaveLength(3)
 
     expect(rows[0]).toHaveAttribute('data-issue-number', '10')
     expect(rows[0]).toHaveAttribute('data-label', 'Approval needed')
@@ -172,8 +204,8 @@ describe('AttentionHero - has-attention state', () => {
     expect(screen.getByText('Failed merge attempt')).toBeInTheDocument()
   })
 
-  it('does NOT render the all-clear state when attention items are present', () => {
-    mocks.issues = [
+  it('does NOT render the all-clear state when attention items are present', async () => {
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 11,
@@ -184,11 +216,15 @@ describe('AttentionHero - has-attention state', () => {
 
     renderHero()
 
+    await waitFor(() => {
+      expect(screen.queryByTestId('attention-item')).toBeInTheDocument()
+    })
+
     expect(screen.queryByText('All clear')).not.toBeInTheDocument()
     expect(screen.queryByTestId('productivity-placeholder')).not.toBeInTheDocument()
   })
 
-  it('Hero and the shared derivation produce identical attention items for the same input', () => {
+  it('Hero and the shared derivation produce identical attention items for the same input', async () => {
     const issues: Issue[] = [
       makeIssue({
         id: 'awaiting-1',
@@ -214,10 +250,14 @@ describe('AttentionHero - has-attention state', () => {
     ]
     const agentStatus = makeAgentStatus({ runnerAvailable: true })
 
-    mocks.issues = issues
-    mocks.agentStatus = agentStatus
+    _issues = issues
+    _agentStatus = agentStatus
 
     renderHero()
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('attention-item')).toHaveLength(3)
+    })
 
     const shared = deriveAttentionItems(issues, agentStatus)
     expect(shared).toHaveLength(3)
@@ -232,8 +272,8 @@ describe('AttentionHero - has-attention state', () => {
     expect(rendered[2]).toHaveAttribute('data-label', shared[2]!.label)
   })
 
-  it('contains no local copy of the four attention rules (only delegates to deriveAttentionItems)', () => {
-    mocks.issues = [
+  it('contains no local copy of the four attention rules (only delegates to deriveAttentionItems)', async () => {
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 1,
@@ -242,16 +282,19 @@ describe('AttentionHero - has-attention state', () => {
       }),
     ]
     renderHero()
-    // Single source of truth: Hero produces the same items the shared derivation does.
-    const shared = deriveAttentionItems(mocks.issues ?? [], mocks.agentStatus ?? NO_AGENT)
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('attention-item')).toHaveLength(1)
+    })
+
+    const shared = deriveAttentionItems(_issues ?? [], _agentStatus ?? NO_AGENT)
     expect(shared.map((i) => i.label)).toEqual(['Approval needed'])
-    expect(screen.getAllByTestId('attention-item')).toHaveLength(1)
   })
 })
 
 describe('AttentionHero - per-item actions', () => {
   it('Approval-needed item exposes Approve and invokes approveIssue with projectId and issueNumber', async () => {
-    mocks.issues = [
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 12,
@@ -259,25 +302,20 @@ describe('AttentionHero - per-item actions', () => {
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
     ]
-    mockedApproveIssue.mockResolvedValue({
-      issue: makeIssue({ id: 'awaiting-1', number: 12 }),
-      context: null,
-      message: 'approved',
-    })
 
     renderHero()
 
-    const approveBtn = screen.getByTestId('attention-item-approve')
+    const approveBtn = await screen.findByTestId('attention-item-approve')
     expect(approveBtn).toHaveAttribute('data-action', 'approve')
     fireEvent.click(approveBtn)
 
     await waitFor(() => {
-      expect(mockedApproveIssue).toHaveBeenCalledWith(12, 'proj-1')
+      expect(_approveHandler).toHaveBeenCalledWith(12, 'proj-1')
     })
   })
 
-  it('does NOT render an Approve button for non-approval items', () => {
-    mocks.issues = [
+  it('does NOT render an Approve button for non-approval items', async () => {
+    _issues = [
       makeIssue({
         id: 'blocked-1',
         number: 22,
@@ -289,11 +327,15 @@ describe('AttentionHero - per-item actions', () => {
     ]
     renderHero()
 
+    await waitFor(() => {
+      expect(screen.queryByTestId('attention-item')).toBeInTheDocument()
+    })
+
     expect(screen.queryByTestId('attention-item-approve')).not.toBeInTheDocument()
   })
 
-  it('Resume action is offered for Interrupted, Needs action, and Integration failed items', () => {
-    mocks.issues = [
+  it('Resume action is offered for Interrupted, Needs action, and Integration failed items', async () => {
+    _issues = [
       makeIssue({
         id: 'integrate-1',
         number: 31,
@@ -320,15 +362,17 @@ describe('AttentionHero - per-item actions', () => {
 
     renderHero()
 
-    const resumeButtons = screen.getAllByTestId('attention-item-resume')
-    expect(resumeButtons).toHaveLength(3)
-    resumeButtons.forEach((btn) => {
-      expect(btn).toHaveAttribute('data-action', 'resume')
+    await waitFor(() => {
+      const resumeButtons = screen.getAllByTestId('attention-item-resume')
+      expect(resumeButtons).toHaveLength(3)
+      resumeButtons.forEach((btn) => {
+        expect(btn).toHaveAttribute('data-action', 'resume')
+      })
     })
   })
 
   it('Resume click invokes resumeIssue(issueNumber, projectId)', async () => {
-    mocks.issues = [
+    _issues = [
       makeIssue({
         id: 'interrupted-1',
         number: 40,
@@ -337,17 +381,14 @@ describe('AttentionHero - per-item actions', () => {
         health: IssueHealth.Interrupted,
       }),
     ]
-    mockedResumeIssue.mockResolvedValue({
-      issue: makeIssue({ id: 'interrupted-1', number: 40 }),
-      message: 'resumed',
-    })
 
     renderHero()
 
-    fireEvent.click(screen.getByTestId('attention-item-resume'))
+    const resumeBtn = await screen.findByTestId('attention-item-resume')
+    fireEvent.click(resumeBtn)
 
     await waitFor(() => {
-      expect(mockedResumeIssue).toHaveBeenCalledWith(40, 'proj-1')
+      expect(_resumeHandler).toHaveBeenCalledWith(40, 'proj-1')
     })
   })
 
@@ -355,7 +396,7 @@ describe('AttentionHero - per-item actions', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
-    mocks.issues = [
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 50,
@@ -363,15 +404,11 @@ describe('AttentionHero - per-item actions', () => {
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
     ]
-    mockedApproveIssue.mockResolvedValue({
-      issue: makeIssue({ id: 'awaiting-1', number: 50 }),
-      context: null,
-      message: 'ok',
-    })
 
     renderHeroWithClient(queryClient)
 
-    fireEvent.click(screen.getByTestId('attention-item-approve'))
+    const approveBtn = await screen.findByTestId('attention-item-approve')
+    fireEvent.click(approveBtn)
 
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
@@ -383,7 +420,7 @@ describe('AttentionHero - per-item actions', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
-    mocks.issues = [
+    _issues = [
       makeIssue({
         id: 'blocked-1',
         number: 60,
@@ -393,14 +430,11 @@ describe('AttentionHero - per-item actions', () => {
         blockedReason: 'x',
       }),
     ]
-    mockedResumeIssue.mockResolvedValue({
-      issue: makeIssue({ id: 'blocked-1', number: 60 }),
-      message: 'ok',
-    })
 
     renderHeroWithClient(queryClient)
 
-    fireEvent.click(screen.getByTestId('attention-item-resume'))
+    const resumeBtn = await screen.findByTestId('attention-item-resume')
+    fireEvent.click(resumeBtn)
 
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
@@ -408,8 +442,8 @@ describe('AttentionHero - per-item actions', () => {
     })
   })
 
-  it('navigation affordance links to the issue detail route via useProjectPath', () => {
-    mocks.issues = [
+  it('navigation affordance links to the issue detail route via useProjectPath', async () => {
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 77,
@@ -420,12 +454,12 @@ describe('AttentionHero - per-item actions', () => {
 
     renderHero()
 
-    const link = screen.getByTestId('attention-item-link')
+    const link = await screen.findByTestId('attention-item-link')
     expect(link).toHaveAttribute('href', '/demo/issues/77')
   })
 
-  it('renders one Open link per attention item pointing to its own issue detail route', () => {
-    mocks.issues = [
+  it('renders one Open link per attention item pointing to its own issue detail route', async () => {
+    _issues = [
       makeIssue({
         id: 'a-1',
         number: 11,
@@ -443,32 +477,37 @@ describe('AttentionHero - per-item actions', () => {
 
     renderHero()
 
-    const links = screen.getAllByTestId('attention-item-link')
-    expect(links).toHaveLength(2)
-    expect(links[0]).toHaveAttribute('href', '/demo/issues/11')
-    expect(links[1]).toHaveAttribute('href', '/demo/issues/22')
+    await waitFor(() => {
+      const links = screen.getAllByTestId('attention-item-link')
+      expect(links).toHaveLength(2)
+      expect(links[0]).toHaveAttribute('href', '/demo/issues/11')
+      expect(links[1]).toHaveAttribute('href', '/demo/issues/22')
+    })
   })
 })
 
 describe('AttentionHero - runner-down entry', () => {
-  it('renders a Runner-down entry when runnerAvailable is false', () => {
-    mocks.issues = []
-    mocks.agentStatus = makeAgentStatus({
+  it('renders a Runner-down entry when runnerAvailable is false', async () => {
+    _issues = []
+    _agentStatus = makeAgentStatus({
       runnerAvailable: false,
       runnerMessage: 'Embedded runner is offline',
     })
 
     renderHero()
 
-    expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    })
+
     expect(screen.getByTestId('runner-down-message')).toHaveTextContent('Embedded runner is offline')
     expect(screen.getByTestId('runner-down-link')).toHaveAttribute('href', '/demo/activity')
 
     expect(screen.queryByText('All clear')).not.toBeInTheDocument()
   })
 
-  it('renders Runner-down entry alongside attention items when both are present', () => {
-    mocks.issues = [
+  it('renders Runner-down entry alongside attention items when both are present', async () => {
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 88,
@@ -476,68 +515,86 @@ describe('AttentionHero - runner-down entry', () => {
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
     ]
-    mocks.agentStatus = makeAgentStatus({ runnerAvailable: false, runnerMessage: 'down' })
+    _agentStatus = makeAgentStatus({ runnerAvailable: false, runnerMessage: 'down' })
 
     renderHero()
 
-    expect(screen.getAllByTestId('attention-item')).toHaveLength(1)
-    expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('attention-item')).toHaveLength(1)
+      expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    })
   })
 
-  it('renders Runner-down entry even when deriveAttentionItems returns an empty list', () => {
-    mocks.issues = []
-    mocks.agentStatus = makeAgentStatus({ runnerAvailable: false, runnerMessage: 'down' })
+  it('renders Runner-down entry even when deriveAttentionItems returns an empty list', async () => {
+    _issues = []
+    _agentStatus = makeAgentStatus({ runnerAvailable: false, runnerMessage: 'down' })
 
     renderHero()
 
-    expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    })
+
     expect(screen.queryByTestId('attention-item')).not.toBeInTheDocument()
     expect(screen.queryByText('All clear')).not.toBeInTheDocument()
   })
 
-  it('renders Runner-down entry with the default message when runnerMessage is null', () => {
-    mocks.issues = []
-    mocks.agentStatus = makeAgentStatus({ runnerAvailable: false, runnerMessage: null })
+  it('renders Runner-down entry with the default message when runnerMessage is null', async () => {
+    _issues = []
+    _agentStatus = makeAgentStatus({ runnerAvailable: false, runnerMessage: null })
 
     renderHero()
 
-    expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    })
+
     expect(screen.getByTestId('runner-down-message')).toHaveTextContent('No runner is connected.')
   })
 
-  it('renders Runner-down entry with default message when runnerMessage is undefined', () => {
-    mocks.issues = []
+  it('renders Runner-down entry with default message when runnerMessage is undefined', async () => {
+    _issues = []
     const status = { ...makeAgentStatus({ runnerAvailable: false }) }
     delete (status as Partial<AgentStatus>).runnerMessage
-    mocks.agentStatus = status
+    _agentStatus = status
 
     renderHero()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    })
 
     expect(screen.getByTestId('runner-down-message')).toHaveTextContent('No runner is connected.')
   })
 
-  it('does NOT render Runner-down entry when runnerAvailable is true', () => {
-    mocks.issues = []
-    mocks.agentStatus = makeAgentStatus({ runnerAvailable: true })
+  it('does NOT render Runner-down entry when runnerAvailable is true', async () => {
+    _issues = []
+    _agentStatus = makeAgentStatus({ runnerAvailable: true })
 
     renderHero()
 
+    await waitFor(() => {
+      expect(screen.getByText('All clear')).toBeInTheDocument()
+    })
+
     expect(screen.queryByTestId('runner-down-entry')).not.toBeInTheDocument()
-    expect(screen.getByText('All clear')).toBeInTheDocument()
   })
 
-  it('does NOT render Runner-down entry when agentStatus is undefined (loading)', () => {
-    mocks.issues = []
-    mocks.agentStatus = undefined
+  it('does NOT render Runner-down entry when agentStatus is undefined (loading)', async () => {
+    _issues = []
+    _agentStatus = undefined
 
     renderHero()
 
+    await waitFor(() => {
+      expect(screen.getByText('All clear')).toBeInTheDocument()
+    })
+
     expect(screen.queryByTestId('runner-down-entry')).not.toBeInTheDocument()
-    expect(screen.getByText('All clear')).toBeInTheDocument()
   })
 
-  it('does NOT render Runner-down entry when only attention items are present and runner is up', () => {
-    mocks.issues = [
+  it('does NOT render Runner-down entry when only attention items are present and runner is up', async () => {
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 88,
@@ -545,35 +602,42 @@ describe('AttentionHero - runner-down entry', () => {
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
     ]
-    mocks.agentStatus = makeAgentStatus({ runnerAvailable: true })
+    _agentStatus = makeAgentStatus({ runnerAvailable: true })
 
     renderHero()
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('attention-item')).toHaveLength(1)
+    })
 
     expect(screen.queryByTestId('runner-down-entry')).not.toBeInTheDocument()
   })
 })
 
 describe('AttentionHero - runner-capacity-limited entry', () => {
-  it('surfaces a runner-capacity-limited attention item under saturation with no issues', () => {
-    mocks.issues = []
-    mocks.agentStatus = makeAgentStatus({
+  it('surfaces a runner-capacity-limited attention item under saturation with no issues', async () => {
+    _issues = []
+    _agentStatus = makeAgentStatus({
       runnerAvailable: true,
       capacity: { active: 4, max: 4 },
     })
 
     renderHero()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('runner-capacity-entry')).toBeInTheDocument()
+    })
+
     expect(screen.queryByText('All clear')).not.toBeInTheDocument()
     const entry = screen.getByTestId('runner-capacity-entry')
-    expect(entry).toBeInTheDocument()
     expect(entry).toHaveAttribute('data-kind', 'runner-capacity-limited')
     expect(entry).toHaveAttribute('data-family', 'warning')
     expect(screen.getByTestId('runner-capacity-detail')).toHaveTextContent('4 of 4 slots in use')
     expect(screen.getByTestId('runner-capacity-link')).toHaveAttribute('href', '/demo/activity')
   })
 
-  it('surfaces a runner-capacity-limited attention item alongside issue items', () => {
-    mocks.issues = [
+  it('surfaces a runner-capacity-limited attention item alongside issue items', async () => {
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 90,
@@ -581,104 +645,129 @@ describe('AttentionHero - runner-capacity-limited entry', () => {
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
     ]
-    mocks.agentStatus = makeAgentStatus({
+    _agentStatus = makeAgentStatus({
       runnerAvailable: true,
       capacity: { active: 8, max: 8 },
     })
 
     renderHero()
 
-    expect(screen.getAllByTestId('attention-item')).toHaveLength(1)
-    expect(screen.getByTestId('runner-capacity-entry')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('attention-item')).toHaveLength(1)
+      expect(screen.getByTestId('runner-capacity-entry')).toBeInTheDocument()
+    })
   })
 
-  it('does NOT surface a runner-capacity-limited attention item when active < max', () => {
-    mocks.issues = []
-    mocks.agentStatus = makeAgentStatus({
+  it('does NOT surface a runner-capacity-limited attention item when active < max', async () => {
+    _issues = []
+    _agentStatus = makeAgentStatus({
       runnerAvailable: true,
       capacity: { active: 2, max: 4 },
     })
 
     renderHero()
 
+    await waitFor(() => {
+      expect(screen.getByText('All clear')).toBeInTheDocument()
+    })
+
     expect(screen.queryByTestId('runner-capacity-entry')).not.toBeInTheDocument()
-    expect(screen.getByText('All clear')).toBeInTheDocument()
   })
 
-  it('does NOT surface a runner-capacity-limited attention item when max === 0', () => {
-    mocks.issues = []
-    mocks.agentStatus = makeAgentStatus({
+  it('does NOT surface a runner-capacity-limited attention item when max === 0', async () => {
+    _issues = []
+    _agentStatus = makeAgentStatus({
       runnerAvailable: true,
       capacity: { active: 0, max: 0 },
     })
 
     renderHero()
 
+    await waitFor(() => {
+      expect(screen.getByText('All clear')).toBeInTheDocument()
+    })
+
     expect(screen.queryByTestId('runner-capacity-entry')).not.toBeInTheDocument()
-    expect(screen.getByText('All clear')).toBeInTheDocument()
   })
 
-  it('surfaces runner-unavailable (not capacity-limited) when runnerAvailable is false even at capacity', () => {
-    mocks.issues = []
-    mocks.agentStatus = makeAgentStatus({
+  it('surfaces runner-unavailable (not capacity-limited) when runnerAvailable is false even at capacity', async () => {
+    _issues = []
+    _agentStatus = makeAgentStatus({
       runnerAvailable: false,
       capacity: { active: 4, max: 4 },
     })
 
     renderHero()
 
-    expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('runner-down-entry')).toBeInTheDocument()
+    })
+
     expect(screen.queryByTestId('runner-capacity-entry')).not.toBeInTheDocument()
   })
 })
 
 describe('AttentionHero - all-clear state', () => {
-  it('does not show All clear while issue data is still loading', () => {
-    mocks.issues = undefined
-    mocks.agentStatus = makeAgentStatus({ runnerAvailable: true })
+  it('does not show All clear while issue data is still loading', async () => {
+    _issues = undefined
+    _agentStatus = makeAgentStatus({ runnerAvailable: true })
 
     renderHero()
 
-    expect(screen.getByText('Checking attention')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Checking attention')).toBeInTheDocument()
+    })
+
     expect(screen.queryByText('All clear')).not.toBeInTheDocument()
     expect(screen.queryByTestId('productivity-placeholder')).not.toBeInTheDocument()
     expect(screen.queryByTestId('attention-item')).not.toBeInTheDocument()
   })
 
-  it('does not show All clear while issue and runner data are still loading', () => {
-    mocks.issues = undefined
-    mocks.agentStatus = undefined
+  it('does not show All clear while issue and runner data are still loading', async () => {
+    _issues = undefined
+    _agentStatus = undefined
 
     renderHero()
 
-    expect(screen.getByText('Checking attention')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Checking attention')).toBeInTheDocument()
+    })
+
     expect(screen.queryByText('All clear')).not.toBeInTheDocument()
     expect(screen.queryByTestId('runner-down-entry')).not.toBeInTheDocument()
   })
 
-  it('can rerender from loading to all-clear without changing hook order', () => {
-    mocks.issues = undefined
-    mocks.agentStatus = makeAgentStatus({ runnerAvailable: true })
+  it('can rerender from loading to all-clear without changing hook order', async () => {
+    _issues = undefined
+    _agentStatus = makeAgentStatus({ runnerAvailable: true })
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
     const { rerender } = render(renderHeroTree(queryClient))
 
-    expect(screen.getByText('Checking attention')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Checking attention')).toBeInTheDocument()
+    })
 
-    mocks.issues = []
+    _issues = []
+    queryClient.invalidateQueries({ queryKey: ['issues'] })
     rerender(renderHeroTree(queryClient))
 
-    expect(screen.getByText('All clear')).toBeInTheDocument()
-    expect(screen.queryByText('Checking attention')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('All clear')).toBeInTheDocument()
+      expect(screen.queryByText('Checking attention')).not.toBeInTheDocument()
+    })
   })
 
-  it('renders the all-clear state with All clear message and excludes the Productivity placeholder when no items and runner available', () => {
-    mocks.issues = []
-    mocks.agentStatus = makeAgentStatus({ runnerAvailable: true })
+  it('renders the all-clear state with All clear message and excludes the Productivity placeholder when no items and runner available', async () => {
+    _issues = []
+    _agentStatus = makeAgentStatus({ runnerAvailable: true })
 
     renderHero()
 
-    expect(screen.getByText('All clear')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('All clear')).toBeInTheDocument()
+    })
+
     const root = screen.getByTestId('dashboard-zone-attention')
     expect(root).toBeInTheDocument()
     expect(root).toHaveAttribute('data-zone', 'attention')
@@ -687,8 +776,8 @@ describe('AttentionHero - all-clear state', () => {
     expect(screen.queryByTestId('runner-down-entry')).not.toBeInTheDocument()
   })
 
-  it('renders the all-clear state when only healthy issues are present', () => {
-    mocks.issues = [
+  it('renders the all-clear state when only healthy issues are present', async () => {
+    _issues = [
       makeIssue({
         id: 'healthy-1',
         number: 90,
@@ -704,28 +793,34 @@ describe('AttentionHero - all-clear state', () => {
         health: IssueHealth.Done,
       }),
     ]
-    mocks.agentStatus = makeAgentStatus({ runnerAvailable: true })
+    _agentStatus = makeAgentStatus({ runnerAvailable: true })
 
     renderHero()
 
-    expect(screen.getByText('All clear')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('All clear')).toBeInTheDocument()
+    })
+
     expect(screen.queryByTestId('attention-item')).not.toBeInTheDocument()
   })
 
-  it('renders the all-clear state when agentStatus is undefined and no items', () => {
-    mocks.issues = []
-    mocks.agentStatus = undefined
+  it('renders the all-clear state when agentStatus is undefined and no items', async () => {
+    _issues = []
+    _agentStatus = undefined
 
     renderHero()
 
-    expect(screen.getByText('All clear')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('All clear')).toBeInTheDocument()
+    })
+
     expect(screen.queryByTestId('productivity-placeholder')).not.toBeInTheDocument()
   })
 })
 
 describe('AttentionHero - passive surface', () => {
-  it('does not mutate workflow state on render (no approve/resume call without click)', () => {
-    mocks.issues = [
+  it('does not mutate workflow state on render (no approve/resume call without click)', async () => {
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 12,
@@ -736,21 +831,26 @@ describe('AttentionHero - passive surface', () => {
 
     renderHero()
 
-    expect(mockedApproveIssue).not.toHaveBeenCalled()
-    expect(mockedResumeIssue).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(screen.getByTestId('attention-item')).toBeInTheDocument()
+    })
+
+    expect(_approveHandler).not.toHaveBeenCalled()
+    expect(_resumeHandler).not.toHaveBeenCalled()
   })
 })
 
 describe('AttentionHero - data-testid/data-zone hook', () => {
-  it('preserves the dashboard-zone-attention testid and data-zone attribute on both states', () => {
-    // All-clear state
+  it('preserves the dashboard-zone-attention testid and data-zone attribute on both states', async () => {
+    _issues = []
+    _agentStatus = makeAgentStatus({ runnerAvailable: true })
+
     renderHero()
-    const allClearRoot = screen.getByTestId('dashboard-zone-attention')
+    const allClearRoot = await screen.findByTestId('dashboard-zone-attention')
     expect(allClearRoot).toHaveAttribute('data-zone', 'attention')
     cleanup()
 
-    // Has-attention state
-    mocks.issues = [
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 100,
@@ -759,14 +859,14 @@ describe('AttentionHero - data-testid/data-zone hook', () => {
       }),
     ]
     renderHero()
-    const hasAttentionRoot = screen.getByTestId('dashboard-zone-attention')
+    const hasAttentionRoot = await screen.findByTestId('dashboard-zone-attention')
     expect(hasAttentionRoot).toHaveAttribute('data-zone', 'attention')
   })
 })
 
 describe('AttentionHero - approval-wait metric', () => {
-  it('shows the aggregate average approval wait from the aggregation', () => {
-    mocks.issues = [
+  it('shows the aggregate average approval wait from the aggregation', async () => {
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 200,
@@ -774,7 +874,7 @@ describe('AttentionHero - approval-wait metric', () => {
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
     ]
-    mocks.approvalWait = {
+    _approvalWait = {
       window: { from: '2026-06-20T00:00:00.000Z', to: '2026-06-27T00:00:00.000Z' },
       sampleCount: 3,
       averageSeconds: 3.2 * 3_600,
@@ -784,6 +884,10 @@ describe('AttentionHero - approval-wait metric', () => {
 
     renderHero()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('attention-item')).toBeInTheDocument()
+    })
+
     const value = screen.getByTestId('approval-wait-value')
     expect(value).toHaveAttribute('data-state', 'value')
     expect(value).toHaveTextContent('3.2h')
@@ -791,8 +895,8 @@ describe('AttentionHero - approval-wait metric', () => {
     expect(screen.queryByTestId('approval-wait-empty')).not.toBeInTheDocument()
   })
 
-  it('renders a defined empty presentation when the aggregation has zero samples', () => {
-    mocks.issues = [
+  it('renders a defined empty presentation when the aggregation has zero samples', async () => {
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 201,
@@ -800,7 +904,7 @@ describe('AttentionHero - approval-wait metric', () => {
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
     ]
-    mocks.approvalWait = {
+    _approvalWait = {
       window: { from: '2026-06-20T00:00:00.000Z', to: '2026-06-27T00:00:00.000Z' },
       sampleCount: 0,
       averageSeconds: null,
@@ -810,14 +914,18 @@ describe('AttentionHero - approval-wait metric', () => {
 
     renderHero()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('attention-item')).toBeInTheDocument()
+    })
+
     const empty = screen.getByTestId('approval-wait-empty')
     expect(empty).toHaveAttribute('data-state', 'empty')
     expect(empty).toHaveClass('text-muted-foreground')
     expect(screen.queryByTestId('approval-wait-value')).not.toBeInTheDocument()
   })
 
-  it('accepts an approvalWait prop that overrides the internal hook', () => {
-    mocks.issues = [
+  it('accepts an approvalWait prop that overrides the internal hook', async () => {
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 202,
@@ -825,7 +933,7 @@ describe('AttentionHero - approval-wait metric', () => {
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
     ]
-    mocks.approvalWait = {
+    _approvalWait = {
       window: { from: '2026-06-20T00:00:00.000Z', to: '2026-06-27T00:00:00.000Z' },
       sampleCount: 0,
       averageSeconds: null,
@@ -851,6 +959,10 @@ describe('AttentionHero - approval-wait metric', () => {
       </QueryClientProvider>,
     )
 
+    await waitFor(() => {
+      expect(screen.getByTestId('attention-item')).toBeInTheDocument()
+    })
+
     expect(screen.getByTestId('approval-wait-value')).toHaveTextContent('5h')
     expect(screen.queryByTestId('approval-wait-empty')).not.toBeInTheDocument()
   })
@@ -859,7 +971,7 @@ describe('AttentionHero - approval-wait metric', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
-    mocks.issues = [
+    _issues = [
       makeIssue({
         id: 'awaiting-1',
         number: 203,
@@ -867,15 +979,11 @@ describe('AttentionHero - approval-wait metric', () => {
         approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
       }),
     ]
-    mockedApproveIssue.mockResolvedValue({
-      issue: makeIssue({ id: 'awaiting-1', number: 203 }),
-      context: null,
-      message: 'ok',
-    })
 
     renderHeroWithClient(queryClient)
 
-    fireEvent.click(screen.getByTestId('attention-item-approve'))
+    const approveBtn = await screen.findByTestId('attention-item-approve')
+    fireEvent.click(approveBtn)
 
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
