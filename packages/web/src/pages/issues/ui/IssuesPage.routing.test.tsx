@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   issuesLoading: false,
   archivedIssues: [] as any[],
   agentStatus: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } } as any,
-  labels: [] as string[],
   detailRenderCount: 0,
   boardRenderCount: 0,
 }))
@@ -18,7 +17,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../entities/issue/api/queries', () => ({
   useIssues: () => ({ data: mocks.issues, isLoading: mocks.issuesLoading }),
   useArchivedIssues: () => ({ data: mocks.archivedIssues }),
-  useLabels: () => ({ data: mocks.labels }),
 }))
 
 vi.mock('../../../entities/agent', () => ({

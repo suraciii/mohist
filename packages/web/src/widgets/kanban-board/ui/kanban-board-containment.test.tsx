@@ -16,26 +16,6 @@ import {
   type Issue,
 } from '../../../entities/issue'
 
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    archiveIssue: () => Promise.resolve({ archived: 0, skipped: 0 }),
-    rerunIssue: () => Promise.resolve(),
-    resumeIssue: () => Promise.resolve(),
-    useLabels: () => ({ data: [], isLoading: false }),
-  }
-})
-
-vi.mock('../../../entities/runner/api/queries', () => ({
-  useRunnerSummary: () => ({
-    hasConnectedCapacity: true,
-    connectedIdleCount: 1,
-    connectedBusyCount: 0,
-    rows: [],
-  }),
-}))
-
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     id: `issue-${Math.random().toString(36).slice(2)}`,

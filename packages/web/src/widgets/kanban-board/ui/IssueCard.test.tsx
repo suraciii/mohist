@@ -9,16 +9,6 @@ import { IssueStatus, IssueHealth, WorkflowStage, type Issue } from '../../../en
 import { getPriorityStripColor } from '../../../shared/lib/label-colors'
 import type { AgentStatus } from '../../../entities/agent'
 
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    archiveIssue: vi.fn(),
-    rerunIssue: vi.fn(),
-    resumeIssue: vi.fn(),
-  }
-})
-
 const mockAgentStatus: AgentStatus = {
   running: false,
   issueId: null,
