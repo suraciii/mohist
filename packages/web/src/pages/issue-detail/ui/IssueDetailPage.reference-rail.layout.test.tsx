@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import {
   DEFAULT_RECOVERY,
-  enabledString,
   expectPreceding,
   makeIssue,
   mockMatchMedia,
@@ -13,17 +12,6 @@ import {
 } from './_issueDetailReferenceRailTestUtils'
 import { mockIssue, mountIssueDetail } from './_issueDetailMsw'
 
-vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
-  EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null; enabled?: boolean }) => (
-    <div
-      data-testid="event-timeline-panel-mock"
-      data-issue-number={props.issueNumber}
-      data-issue-id={props.issueId ?? ''}
-      data-workflow-status={props.workflowStatus ?? ''}
-      data-enabled={enabledString(props.enabled)}
-    />
-  )),
-}))
 
 mountIssueDetail({ issue: makeIssue() })
 
