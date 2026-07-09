@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
@@ -11,22 +11,6 @@ import { TaskLogPanel } from '../../src/widgets/issue-workflow/ui/TaskLogPanel'
 import { server } from '../support/msw'
 import type { TaskLogLine, TaskLogPage } from '../../src/entities/issue'
 import type { WorkflowRunSession } from '../../src/entities/coder-session/model/types'
-
-const sessionEventHandlers = new Map<string, ((detail: unknown) => void)[]>()
-
-vi.mock('../../src/entities/agent/@x/events', () => ({
-  onAgentEvent: vi.fn((name: string, handler: (detail: unknown) => void) => {
-    if (!sessionEventHandlers.has(name)) sessionEventHandlers.set(name, [])
-    sessionEventHandlers.get(name)!.push(handler)
-    return () => {
-      const handlers = sessionEventHandlers.get(name)
-      if (handlers) {
-        const idx = handlers.indexOf(handler)
-        if (idx !== -1) handlers.splice(idx, 1)
-      }
-    }
-  }),
-}))
 
 let taskLogPage: TaskLogPage = { lines: [], nextCursor: null, truncated: false }
 let workflowRunSessions: WorkflowRunSession[] = []
@@ -111,7 +95,6 @@ const focusableSelector = [
 
 describe('TaskLogPanel accessibility structural baseline', () => {
   beforeEach(() => {
-    sessionEventHandlers.clear()
     taskLogPage = { lines: [], nextCursor: null, truncated: false }
     workflowRunSessions = []
   })
@@ -255,7 +238,6 @@ describe('TaskLogPanel accessibility structural baseline', () => {
 
 describe('TaskLogPanel accessibility — milestone rows (Phase 3b)', () => {
   beforeEach(() => {
-    sessionEventHandlers.clear()
     taskLogPage = { lines: [], nextCursor: null, truncated: false }
     workflowRunSessions = []
   })
