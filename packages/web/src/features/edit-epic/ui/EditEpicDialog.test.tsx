@@ -2,24 +2,29 @@
 import '@testing-library/jest-dom'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { EditEpicDialog } from './EditEpicDialog'
 import type { EpicDetail, EpicStatus } from '../../../entities/epic'
 import { EPIC_DESCRIPTION_TEMPLATE } from '@/shared/lib/epic-description-template'
+import { useMswServer } from '../../../../tests/support/msw'
 
-const mocks = vi.hoisted(() => ({
-  useUpdateEpic: vi.fn(),
-}))
+let _updateResponse: EpicDetail | null = null
 
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
-  return {
-    ...actual,
-    useUpdateEpic: mocks.useUpdateEpic,
+const updateHandler = vi.fn(async (info: { request: Request }) => {
+  const body = await info.request.clone().json()
+  void body
+  if (_updateResponse) {
+    return HttpResponse.json({ success: true, data: _updateResponse })
   }
+  return HttpResponse.json({ success: true, data: makeEpic() })
 })
+
+useMswServer(
+  http.patch('*/api/projects/:projectId/epics/:id', updateHandler),
+)
 
 const project = {
   id: 'proj-edit',
@@ -55,23 +60,14 @@ function makeEpic(overrides: Partial<EpicDetail> = {}): EpicDetail {
   }
 }
 
-afterEach(() => {
-  cleanup()
-  vi.clearAllMocks()
-})
-
-function renderDialog(props: {
-  open?: boolean
-  onClose?: () => void
-  epic?: EpicDetail
-} = {}) {
+function renderDialog(props: { open?: boolean; onClose?: () => void; epic?: EpicDetail } = {}) {
   const open = props.open ?? true
   const onClose = props.onClose ?? vi.fn()
   const epic = props.epic ?? makeEpic()
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  const view = render(
+  return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjects={[project]} initialProjectId={project.id}>
         <MemoryRouter>
@@ -80,41 +76,6 @@ function renderDialog(props: {
       </ProjectProvider>
     </QueryClientProvider>,
   )
-  return { queryClient, onClose, epic, ...view }
-}
-
-/**
- * Returns a mock `mutate` that triggers `useMutation`-style `onSuccess`
- * synchronously. The dialog's handleSubmit calls `mutate(variables, { onSuccess })`,
- * so we replay that contract in the same way EpicCreateDialog does.
- */
-function makeAutoSuccessMutate() {
-  return (
-    variables: unknown,
-    options?: { onSuccess?: (data: { id: string; number: number; title: string }) => void },
-  ) => {
-    const epic = variables as { id: string }
-    options?.onSuccess?.({ id: epic.id, number: 17, title: 'Existing milestone' })
-  }
-}
-
-function mockUseUpdateEpic({
-  mutate,
-  isPending = false,
-  isError = false,
-  error,
-}: {
-  mutate: ((...args: unknown[]) => void) | ((...args: never[]) => void)
-  isPending?: boolean
-  isError?: boolean
-  error?: Error | null
-}) {
-  mocks.useUpdateEpic.mockReturnValue({
-    mutate: mutate as unknown as (...args: unknown[]) => void,
-    isPending,
-    isError,
-    error: error ?? null,
-  })
 }
 
 function stubWidth(width: number) {
@@ -128,9 +89,13 @@ function stubWidth(width: number) {
   })
 }
 
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
+
 describe('EditEpicDialog verbatim load', () => {
   it('populates the description textarea with the existing markdown verbatim', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
     const existing = 'Pre-existing markdown body.\n\nWith paragraphs.'
     renderDialog({ epic: makeEpic({ description: existing }) })
 
@@ -139,7 +104,6 @@ describe('EditEpicDialog verbatim load', () => {
   })
 
   it('does not auto-rewrite existing content into the Goal / Background / Non-goals / Scope template', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
     const existing = 'Pre-existing markdown body.\n\nWith paragraphs.'
     renderDialog({ epic: makeEpic({ description: existing }) })
 
@@ -152,19 +116,16 @@ describe('EditEpicDialog verbatim load', () => {
   })
 
   it('preserves structured markdown that already happens to contain a Goal heading without rewriting it', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
     const existing = '## Goal\nCustom user-authored goal.\n\n## Background\nCustom background.'
     renderDialog({ epic: makeEpic({ description: existing }) })
 
     const description = screen.getByLabelText('Description') as HTMLTextAreaElement
     expect(description.value).toBe(existing)
-    // No new headers from the scaffold should be silently added.
     expect(description.value).not.toContain('## Scope')
     expect(description.value).not.toContain('## Non-goals')
   })
 
   it('loads an empty description verbatim without injecting any template content', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
     renderDialog({ epic: makeEpic({ description: '' }) })
 
     const description = screen.getByLabelText('Description') as HTMLTextAreaElement
@@ -173,7 +134,6 @@ describe('EditEpicDialog verbatim load', () => {
   })
 
   it('reloads state when a different epic is passed in (e.g. reopened for another epic)', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
     const first = makeEpic({ id: 'epic-A', description: 'A body' })
     const second = makeEpic({ id: 'epic-B', description: 'B body' })
 
@@ -213,46 +173,39 @@ describe('EditEpicDialog verbatim load', () => {
 
 describe('EditEpicDialog save preserves content', () => {
   it('submits the pre-existing markdown exactly when saved without edits', async () => {
-    const mutate = vi.fn()
-    mockUseUpdateEpic({ mutate })
     const existing = 'Pre-existing markdown body.\n\nWith paragraphs.'
     renderDialog({ epic: makeEpic({ description: existing }) })
 
     fireEvent.click(screen.getByTestId('edit-epic-submit'))
 
-    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1))
-    const [payload] = mutate.mock.calls[0] as [
-      { id: string; data: { title: string; description: string; priority: string } },
-    ]
-    expect(payload.id).toBe('epic-edit-1')
-    expect(payload.data.description).toBe(existing)
-    // No template content is silently injected on save.
-    expect(payload.data.description).not.toContain('## Goal')
-    expect(payload.data.description).not.toContain('## Background')
-    expect(payload.data.description).not.toContain('## Non-goals')
-    expect(payload.data.description).not.toContain('## Scope')
+    await waitFor(() => expect(updateHandler).toHaveBeenCalledTimes(1))
+    const call = updateHandler.mock.calls[0]![0]
+    const url = new URL(call.request.url)
+    expect(url.pathname).toContain('/epics/epic-edit-1')
+    const body = await call.request.clone().json()
+    expect(body.description).toBe(existing)
+    expect(body.description).not.toContain('## Goal')
+    expect(body.description).not.toContain('## Background')
+    expect(body.description).not.toContain('## Non-goals')
+    expect(body.description).not.toContain('## Scope')
   })
 
   it('submits only the resulting markdown description (no structured fields in payload)', async () => {
-    const mutate = vi.fn()
-    mockUseUpdateEpic({ mutate })
     const existing = 'Plain authored body.'
     renderDialog({ epic: makeEpic({ description: existing }) })
 
     fireEvent.click(screen.getByTestId('edit-epic-submit'))
 
-    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1))
-    const [payload] = mutate.mock.calls[0] as [{ data: Record<string, unknown> }]
-    // Only the resulting markdown string is sent — no separate goal/background/non-goals/scope fields.
-    expect(payload.data).not.toHaveProperty('goal')
-    expect(payload.data).not.toHaveProperty('background')
-    expect(payload.data).not.toHaveProperty('nonGoals')
-    expect(payload.data).not.toHaveProperty('scope')
+    await waitFor(() => expect(updateHandler).toHaveBeenCalledTimes(1))
+    const call = updateHandler.mock.calls[0]![0]
+    const body = await call.request.clone().json()
+    expect(body).not.toHaveProperty('goal')
+    expect(body).not.toHaveProperty('background')
+    expect(body).not.toHaveProperty('nonGoals')
+    expect(body).not.toHaveProperty('scope')
   })
 
   it('submits the user-authored description verbatim after edits', async () => {
-    const mutate = vi.fn()
-    mockUseUpdateEpic({ mutate })
     renderDialog({ epic: makeEpic({ description: 'Original body' }) })
 
     const description = screen.getByLabelText('Description') as HTMLTextAreaElement
@@ -260,15 +213,14 @@ describe('EditEpicDialog save preserves content', () => {
 
     fireEvent.click(screen.getByTestId('edit-epic-submit'))
 
-    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1))
-    const [payload] = mutate.mock.calls[0] as [{ data: { description: string } }]
-    expect(payload.data.description).toBe('Edited body without any scaffolding.')
+    await waitFor(() => expect(updateHandler).toHaveBeenCalledTimes(1))
+    const call = updateHandler.mock.calls[0]![0]
+    const body = await call.request.clone().json()
+    expect(body.description).toBe('Edited body without any scaffolding.')
   })
 
   it('closes the dialog after a successful save', async () => {
     const onClose = vi.fn()
-    const mutate = vi.fn(makeAutoSuccessMutate())
-    mockUseUpdateEpic({ mutate })
     renderDialog({ onClose })
 
     fireEvent.click(screen.getByTestId('edit-epic-submit'))
@@ -279,7 +231,6 @@ describe('EditEpicDialog save preserves content', () => {
 
 describe('EditEpicDialog opt-in Insert template', () => {
   it('offers the Insert-template action on an empty description (visible when empty)', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
     renderDialog({ epic: makeEpic({ description: '' }) })
 
     const insertButton = screen.getByRole('button', { name: 'Insert template' })
@@ -288,7 +239,6 @@ describe('EditEpicDialog opt-in Insert template', () => {
   })
 
   it('does not auto-apply the template on an empty description — the field stays empty until the user clicks Insert', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
     renderDialog({ epic: makeEpic({ description: '' }) })
 
     const description = screen.getByLabelText('Description') as HTMLTextAreaElement
@@ -296,14 +246,12 @@ describe('EditEpicDialog opt-in Insert template', () => {
   })
 
   it('keeps the Insert-template action available on demand when the description already has content', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
     renderDialog({ epic: makeEpic({ description: 'Existing notes' }) })
 
     expect(screen.getByRole('button', { name: 'Insert template' })).toBeInTheDocument()
   })
 
   it('sets the description to the template when Insert is clicked on an empty value', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
     renderDialog({ epic: makeEpic({ description: '' }) })
 
     const description = screen.getByLabelText('Description') as HTMLTextAreaElement
@@ -313,7 +261,6 @@ describe('EditEpicDialog opt-in Insert template', () => {
   })
 
   it('preserves existing user text when Insert is clicked on a non-empty value', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
     const existing = 'Existing notes'
     renderDialog({ epic: makeEpic({ description: existing }) })
 
@@ -325,39 +272,33 @@ describe('EditEpicDialog opt-in Insert template', () => {
   })
 
   it('does not destroy the pre-existing markdown when Insert is clicked', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
     const existing = '## Goal\nCustom user-authored goal.\n\n## Background\nCustom background.'
     renderDialog({ epic: makeEpic({ description: existing }) })
 
     const description = screen.getByLabelText('Description') as HTMLTextAreaElement
     fireEvent.click(screen.getByRole('button', { name: 'Insert template' }))
 
-    // The original user-authored content must remain intact.
     expect(description.value).toContain('## Goal\nCustom user-authored goal.')
     expect(description.value).toContain('## Background\nCustom background.')
     expect(description.value).toContain(EPIC_DESCRIPTION_TEMPLATE)
   })
 
   it('does not save the template content on its own — the user must explicitly invoke Insert', async () => {
-    const mutate = vi.fn()
-    mockUseUpdateEpic({ mutate })
     const existing = 'Pre-existing markdown body.'
     renderDialog({ epic: makeEpic({ description: existing }) })
 
-    // Just open and save without clicking Insert.
     fireEvent.click(screen.getByTestId('edit-epic-submit'))
 
-    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1))
-    const [payload] = mutate.mock.calls[0] as [{ data: { description: string } }]
-    expect(payload.data.description).toBe(existing)
-    expect(payload.data.description).not.toContain('## Goal')
+    await waitFor(() => expect(updateHandler).toHaveBeenCalledTimes(1))
+    const call = updateHandler.mock.calls[0]![0]
+    const body = await call.request.clone().json()
+    expect(body.description).toBe(existing)
+    expect(body.description).not.toContain('## Goal')
   })
 })
 
 describe('EditEpicDialog mobile-safe layout', () => {
   it('renders without horizontal overflow at 320, 390, and 430 px', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
-
     for (const width of [320, 390, 430]) {
       cleanup()
       stubWidth(width)
@@ -368,8 +309,6 @@ describe('EditEpicDialog mobile-safe layout', () => {
   })
 
   it('keeps the submit action reachable through a sticky footer (footer is outside the scroll region)', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
-
     renderDialog()
 
     const footer = screen.getByTestId('edit-epic-footer')
@@ -380,26 +319,39 @@ describe('EditEpicDialog mobile-safe layout', () => {
 
     const scrollRegion = screen.getByTestId('edit-epic-scroll-region')
     expect(scrollRegion).toBeInTheDocument()
-    // The footer must NOT live inside the scroll region.
     expect(scrollRegion.contains(footer)).toBe(false)
   })
 
   it('keeps the cancel action in the same sticky footer', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
-
     renderDialog()
 
     const footer = screen.getByTestId('edit-epic-footer')
     expect(footer.contains(screen.getByTestId('edit-epic-cancel'))).toBe(true)
   })
 
-  it('keeps the title and description fields inside the scroll region', () => {
-    mockUseUpdateEpic({ mutate: vi.fn() })
-
+  it('keeps both actions in the same footer outside the scroll region', () => {
     renderDialog()
 
+    const footer = screen.getByTestId('edit-epic-footer')
     const scrollRegion = screen.getByTestId('edit-epic-scroll-region')
-    expect(scrollRegion.contains(screen.getByLabelText('Title'))).toBe(true)
-    expect(scrollRegion.contains(screen.getByLabelText('Description'))).toBe(true)
+    expect(footer.contains(screen.getByTestId('edit-epic-submit'))).toBe(true)
+    expect(footer.contains(screen.getByTestId('edit-epic-cancel'))).toBe(true)
+    expect(scrollRegion.contains(footer)).toBe(false)
+  })
+})
+
+describe('EditEpicDialog error handling', () => {
+  it('does not close the dialog when the mutation handler reports a failure', async () => {
+    const onClose = vi.fn()
+    updateHandler.mockImplementationOnce(async (info: { request: Request }) => {
+      void await info.request.clone().json()
+      return HttpResponse.json({ success: false, error: 'Server unavailable' }, { status: 500 })
+    })
+    renderDialog({ onClose })
+
+    fireEvent.click(screen.getByTestId('edit-epic-submit'))
+
+    await waitFor(() => expect(screen.queryByTestId('edit-epic-cancel')).toBeInTheDocument())
+    expect(onClose).not.toHaveBeenCalled()
   })
 })
