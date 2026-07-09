@@ -1,32 +1,22 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { type AgentStatus } from '../../../entities/agent'
 import { ProjectProvider } from '../../../entities/project'
+import { server, useMswServer } from '../../../../tests/support/msw'
+import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { DashboardCapacityZone } from './DashboardCapacityZone'
 
-const mocks = vi.hoisted(() => ({
-  agentStatus: undefined as AgentStatus | undefined,
-  useAgentStatus: vi.fn(() => ({ data: mocks.agentStatus })),
-}))
+useMswServer()
 
-vi.mock('../../../entities/agent', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/agent')>()
-  return {
-    ...actual,
-    useAgentStatus: () => mocks.useAgentStatus(),
-  }
-})
+const STATUS_PATH = '*/api/projects/:projectId/agent/status'
 
-const demoProject = {
-  id: 'proj-1',
-  name: 'demo',
-  createdAt: '',
-  updatedAt: '',
-  repositories: [],
+function mockStatusResponse(data: AgentStatus) {
+  server.use(http.get(STATUS_PATH, () => HttpResponse.json({ success: true, data })))
 }
 
 function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
@@ -45,8 +35,8 @@ function renderZone() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
-        <MemoryRouter initialEntries={['/demo']}>
+      <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+        <MemoryRouter initialEntries={[`/${TEST_PROJECT.name}`]}>
           <DashboardCapacityZone />
         </MemoryRouter>
       </ProjectProvider>
@@ -55,9 +45,7 @@ function renderZone() {
 }
 
 beforeEach(() => {
-  mocks.agentStatus = undefined
-  mocks.useAgentStatus.mockClear()
-  mocks.useAgentStatus.mockImplementation(() => ({ data: mocks.agentStatus }))
+  server.use(http.get(STATUS_PATH, () => HttpResponse.json({ success: false, error: 'unhandled' }, { status: 404 })))
 })
 
 afterEach(() => {
@@ -65,13 +53,16 @@ afterEach(() => {
 })
 
 describe('DashboardCapacityZone', () => {
-  it('renders the dashboard-zone-capacity strip with usage and link when capacity data is present', () => {
-    mocks.agentStatus = makeAgentStatus({ capacity: { active: 4, max: 8 } })
+  it('renders the dashboard-zone-capacity strip with usage and link when capacity data is present', async () => {
+    mockStatusResponse(makeAgentStatus({ capacity: { active: 4, max: 8 } }))
 
     renderZone()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('dashboard-zone-capacity')).toBeInTheDocument()
+    })
+
     const zone = screen.getByTestId('dashboard-zone-capacity')
-    expect(zone).toBeInTheDocument()
     expect(zone).toHaveAttribute('data-zone', 'capacity')
     expect(zone).toHaveAttribute('data-active', '4')
     expect(zone).toHaveAttribute('data-max', '8')
@@ -83,40 +74,41 @@ describe('DashboardCapacityZone', () => {
     expect(screen.getByTestId('dashboard-zone-capacity-link')).toBeInTheDocument()
   })
 
-  it('marks the strip as saturated when active equals or exceeds max', () => {
-    mocks.agentStatus = makeAgentStatus({ capacity: { active: 8, max: 8 } })
+  it('marks the strip as saturated when active equals or exceeds max', async () => {
+    mockStatusResponse(makeAgentStatus({ capacity: { active: 8, max: 8 } }))
 
     renderZone()
 
-    const zone = screen.getByTestId('dashboard-zone-capacity')
-    expect(zone).toHaveAttribute('data-state', 'saturated')
+    await waitFor(() => {
+      expect(screen.getByTestId('dashboard-zone-capacity')).toHaveAttribute('data-state', 'saturated')
+    })
     expect(screen.getByTestId('dashboard-zone-capacity-count')).toHaveTextContent('8/8')
   })
 
-  it('collapses (renders nothing) when capacity data is absent', () => {
-    mocks.agentStatus = undefined
+  it('collapses (renders nothing) when capacity data is absent', async () => {
+    const { container } = renderZone()
+
+    await waitFor(() => {
+      expect(container.firstChild).toBeNull()
+    })
+  })
+
+  it('collapses (renders nothing) when capacity.max is zero (unconfigured runner)', async () => {
+    mockStatusResponse(makeAgentStatus({ capacity: { active: 0, max: 0 } }))
 
     const { container } = renderZone()
 
-    expect(screen.queryByTestId('dashboard-zone-capacity')).not.toBeInTheDocument()
-    expect(container.firstChild).toBeNull()
+    await waitFor(() => {
+      expect(container.firstChild).toBeNull()
+    })
   })
 
-  it('collapses (renders nothing) when capacity.max is zero (unconfigured runner)', () => {
-    mocks.agentStatus = makeAgentStatus({ capacity: { active: 0, max: 0 } })
-
-    const { container } = renderZone()
-
-    expect(screen.queryByTestId('dashboard-zone-capacity')).not.toBeInTheDocument()
-    expect(container.firstChild).toBeNull()
-  })
-
-  it('links to runner management using the project-scoped path', () => {
-    mocks.agentStatus = makeAgentStatus({ capacity: { active: 2, max: 4 } })
+  it('links to runner management using the project-scoped path', async () => {
+    mockStatusResponse(makeAgentStatus({ capacity: { active: 2, max: 4 } }))
 
     renderZone()
 
-    const link = screen.getByTestId('dashboard-zone-capacity-link')
-    expect(link).toHaveAttribute('href', '/demo/runners')
+    const link = await waitFor(() => screen.getByTestId('dashboard-zone-capacity-link'))
+    expect(link).toHaveAttribute('href', `/${encodeURIComponent(TEST_PROJECT.name)}/runners`)
   })
 })
