@@ -4,15 +4,12 @@ import { useSessionTranscript } from '../src/widgets/session-transcript/model/us
 import { dispatchAgentEvent } from '../src/entities/agent'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import React from 'react'
-import type { SessionTurn, TextPart, ToolPart, ErrorPart, CoderSessionDetail } from '../src/entities/coder-session'
+import type { SessionTurn, TextPart, ToolPart, ErrorPart } from '../src/entities/coder-session'
 
 const sessionPageMocks = vi.hoisted(() => ({
   sessions: [] as any[],
   sessionsLoading: false,
   issue: null as any,
-  detail: null as CoderSessionDetail | null,
-  detailError: null as Error | null,
-  detailPending: false,
 }))
 
 vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
@@ -23,15 +20,6 @@ vi.mock('../src/entities/issue/api/queries', () => ({
   useIssue: () => ({ data: sessionPageMocks.issue }),
 }))
 
-vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/entities/coder-session/api/client')>()),
-  getCoderSessionDetail: vi.fn(() => {
-    if (sessionPageMocks.detailPending) return new Promise(() => {})
-    if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
-    return Promise.resolve(sessionPageMocks.detail)
-  }),
-}))
-
 const originalScrollTo = Element.prototype.scrollTo
 const queryClients: QueryClient[] = []
 
@@ -40,9 +28,6 @@ beforeEach(() => {
   sessionPageMocks.sessions = []
   sessionPageMocks.sessionsLoading = false
   sessionPageMocks.issue = null
-  sessionPageMocks.detail = null
-  sessionPageMocks.detailError = null
-  sessionPageMocks.detailPending = false
   Element.prototype.scrollTo = vi.fn()
 })
 
