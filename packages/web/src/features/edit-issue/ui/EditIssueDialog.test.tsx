@@ -8,13 +8,11 @@ import { IssueHealth, IssueStatus, type Issue } from '@/entities/issue'
 
 const mocks = vi.hoisted(() => ({
   updateIssue: vi.fn(),
-  useLabels: vi.fn(() => ({ data: [] })),
 }))
 
 vi.mock('../../../entities/issue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../entities/issue')>()),
   updateIssue: mocks.updateIssue,
-  useLabels: mocks.useLabels,
 }))
 
 describe('EditIssueDialog', () => {

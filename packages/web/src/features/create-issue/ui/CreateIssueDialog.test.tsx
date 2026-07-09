@@ -53,7 +53,6 @@ const TEMPLATE_FIXTURES = {
 
 const mocks = vi.hoisted(() => ({
   createIssue: vi.fn(),
-  useLabels: vi.fn(() => ({ data: [] })),
   useProject: vi.fn(() => ({ projectId: 'proj_create', projects: [{ id: 'proj_create', name: 'Project' }] })),
   useRepositories: vi.fn(() => ({ data: [{ name: 'main', isDefault: true }] })),
   useAvailableModelIds: vi.fn<() => { data: { models: string[]; modelVariants: Record<string, string[]> } | undefined; isLoading: boolean; error: unknown }>(() => ({ data: { models: [], modelVariants: {} }, isLoading: false, error: null })),
@@ -71,7 +70,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../entities/issue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../entities/issue')>()),
   createIssue: mocks.createIssue,
-  useLabels: mocks.useLabels,
   useIssues: mocks.useIssues,
 }))
 
