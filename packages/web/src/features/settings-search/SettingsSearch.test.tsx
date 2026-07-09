@@ -16,66 +16,9 @@ import {
 import { settingsSearchRegistry } from './registry'
 import type { SettingsSearchEntry } from './types'
 
-const aiSettingsClient = vi.hoisted(() => ({
-  useOpencodeRuntime: vi.fn(),
-  useAvailableModelIds: vi.fn(),
-  useOpencodeModel: vi.fn(),
-  useUpdateOpencodeModel: vi.fn(),
-  useStageModels: vi.fn(),
-  useSetStageModels: vi.fn(),
-}))
-
-const RUNTIME_CONFIG = {
-  timeout: 1800000,
-  stageTimeout: 3600000,
-  taskTimeout: 600000,
-  maxConcurrent: 8,
-  maxGracePeriods: 2,
-  pollInterval: 30000,
-}
-
-const GENERAL_CONFIG = {
-  agentTimeout: 1800,
-  taskTimeout: 600,
-  stageTimeout: 3600,
-  maxConcurrentAgents: 8,
-  maxGracePeriods: 2,
-  pollInterval: 30000,
-  logLevel: 'INFO',
-}
-
-vi.mock('../../entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../entities/settings')>()
-  return {
-    ...actual,
-    useOpencodeRuntime: aiSettingsClient.useOpencodeRuntime,
-    useAvailableModelIds: aiSettingsClient.useAvailableModelIds,
-    useOpencodeModel: aiSettingsClient.useOpencodeModel,
-    useUpdateOpencodeModel: aiSettingsClient.useUpdateOpencodeModel,
-    useStageModels: aiSettingsClient.useStageModels,
-    useSetStageModels: aiSettingsClient.useSetStageModels,
-    useAgentRuntime: () => ({
-      data: RUNTIME_CONFIG,
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    }),
-    useConfig: () => ({ data: GENERAL_CONFIG }),
-    useSetAgentRuntime: () => ({ mutateAsync: vi.fn() }),
-  }
-})
-
 function arrangeAiLoaded() {
-  aiSettingsClient.useOpencodeRuntime.mockReturnValue({ isLoading: false, error: null })
-  aiSettingsClient.useAvailableModelIds.mockReturnValue({
-    data: { models: ['openai/gpt-4', 'anthropic/claude-3'], modelVariants: {} },
-    isLoading: false,
-    error: null,
-  })
-  aiSettingsClient.useOpencodeModel.mockReturnValue({ data: { model: null, variant: null } })
-  aiSettingsClient.useUpdateOpencodeModel.mockReturnValue({ mutate: vi.fn() })
-  aiSettingsClient.useStageModels.mockReturnValue({ data: { stageModels: null, stageModelVariants: null } })
-  aiSettingsClient.useSetStageModels.mockReturnValue({ mutate: vi.fn() })
+  // SettingsSearch reads only the static settingsSearchRegistry; no live
+  // settings hooks are invoked by the component under test.
 }
 
 function makeQueryClient() {
