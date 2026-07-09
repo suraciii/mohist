@@ -10,13 +10,11 @@ style: ["短索引，只说明入口。"]
 ## 全局基础
 
 - [architecture.md](architecture.md) — 运行时边界、控制平面/执行平面职责、放置规则。
-- [domain-analysis.md](domain-analysis.md) — 问题空间和子域划分。
-- [context-map.md](context-map.md) — 限界上下文和模型依赖方向。
+- [domain-analysis.md](domain-analysis.md) — 领域分析与上下文映射：子域划分、限界上下文关系、依赖不变量。
 - [conventions.md](conventions.md) — 命名、分层、变量等约定。
 - [cli.md](cli.md) — 命令面设计契约：句法（资源在前）、命令树形状、资源命名（作用域用 flag、子资源挂父资源下）、动词一致性、唯一入口与全局 flag 约定。
 - [testing.md](testing.md) — 测试两条轨道（spec/unit）、外部依赖、时间依赖、fake 入口速查。
-- [eventbus.md](eventbus.md) — 事件总线边界和 CloudEvent 约定（as-is，当前运行时）。
-- [eventbus-v2.md](eventbus-v2.md) — 事件总线目标态：复用已落盘事件表 + 单分发器可靠 at-least-once 通知（设计已收敛，**未交付**，跟踪 epic #36）。
+- [eventbus.md](eventbus.md) — 事件总线：CloudEvent 订阅契约 + 单分发器可靠 at-least-once 通知（分发器**未交付**）。
 - [agent-subscriptions.md](agent-subscriptions.md) — Agent 事件订阅（**WIP**）：Agent 监听 CloudEvent、按订阅响应提示词自动启动。归属 Agent 上下文，消费 PL；handler 只读信封、Agent 用 `mo workflow show <runId>` 自拉上下文；前置依赖 mo workflow 命令套件已由 issue #381 交付。
 
 ## Workflow 核心域
@@ -25,6 +23,7 @@ style: ["短索引，只说明入口。"]
 - [workflow/builtin-workflows/](workflow/builtin-workflows/) — 内置 workflow；一个 workflow 一个文件。
 - [workflow/profile.md](workflow/profile.md) — profile = template + variables 的加载与合并。
 - [workflow/task-dispatch.md](workflow/task-dispatch.md) — task.with 模板展开和 dispatch 输入。
+- [workflow/recovery.md](workflow/recovery.md) — 失败恢复：recovery 声明、when 匹配、runner 构造恢复任务。
 - [workflow/scheduling.md](workflow/scheduling.md) — runner claim、pull、report、supervision。
 - [workflow/issue-coordination.md](workflow/issue-coordination.md) — Issue、WorkflowRun、Runner、Session 的跨聚合交互。
 - [workflow/boundaries/issue.md](workflow/boundaries/issue.md) — Workflow 与 Issue 的依赖方向和 profile 归属。
