@@ -7,7 +7,6 @@ vi.mock('../src/entities/issue', async (importOriginal) => {
   return {
     ...actual,
     createIssue: vi.fn(),
-    useLabels: vi.fn(),
   }
 })
 
@@ -29,7 +28,7 @@ vi.mock('../src/entities/project', async (importOriginal) => {
   }
 })
 
-const { createIssue, useLabels } = await import('../src/entities/issue')
+const { createIssue } = await import('../src/entities/issue')
 const { useWorkflowProfiles, useEffectiveDefaultWorkflowProfile, useAvailableModelIds } = await import('../src/entities/settings')
 const { useRepositories } = await import('../src/entities/project')
 
@@ -40,7 +39,6 @@ const PROFILES = [
 
 function mockHooks() {
   ;(useRepositories as ReturnType<typeof vi.fn>).mockReturnValue({ data: [] })
-  ;(useLabels as ReturnType<typeof vi.fn>).mockReturnValue({ data: [] })
   ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({ data: PROFILES })
   ;(useEffectiveDefaultWorkflowProfile as ReturnType<typeof vi.fn>).mockReturnValue({
     effectiveTemplateId: 'mohist/local',
