@@ -29,8 +29,6 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     startIssue: (...args: unknown[]) => mockStartIssue(...args),
     updateIssue: (...args: unknown[]) => mockUpdateIssue(...args),
     getIssueWorkflowVariables: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
-    patchIssueWorkflowDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
-    patchIssueWorkflowStageDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
   }
 })
 
