@@ -16,10 +16,9 @@ public class BackfillIssueCompletedAtMigrationSpecs
     [Fact]
     public async Task Up_BackfillsDoneIssue_FromWorkCompletedEvent()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_done_1", "done",
                 """
                 {"id":"issue_done_1","projectId":"proj_a","number":1,"title":"Done issue","status":"done","createdAt":"2026-06-28T10:00:00Z","updatedAt":"2026-06-28T12:00:00Z"}
@@ -41,10 +40,9 @@ public class BackfillIssueCompletedAtMigrationSpecs
     [Fact]
     public async Task Up_BackfillsCancelledIssue_FromClosedEvent()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_cancelled_1", "cancelled",
                 """
                 {"id":"issue_cancelled_1","projectId":"proj_a","number":2,"title":"Cancelled issue","status":"cancelled","createdAt":"2026-06-27T10:00:00Z","updatedAt":"2026-06-27T14:00:00Z"}
@@ -66,10 +64,9 @@ public class BackfillIssueCompletedAtMigrationSpecs
     [Fact]
     public async Task Up_SecondRun_IsIdempotent()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_done_2", "done",
                 """
                 {"id":"issue_done_2","projectId":"proj_a","number":3,"title":"Done issue 2","status":"done","createdAt":"2026-06-25T10:00:00Z","updatedAt":"2026-06-25T13:00:00Z"}
@@ -98,10 +95,9 @@ public class BackfillIssueCompletedAtMigrationSpecs
     [Fact]
     public async Task Up_DoesNotClobber_AlreadySetCompletedAt()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             var existingCompletedAt = "2026-06-26T09:00:00Z";
             await SeedIssueAsync(setup, "issue_done_3", "done",
                 $$"""
@@ -124,10 +120,9 @@ public class BackfillIssueCompletedAtMigrationSpecs
     [Fact]
     public async Task Up_RoundTripsBackfilledValue_ThroughIssueStore()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_rt_1", "done",
                 """
                 {"id":"issue_rt_1","projectId":"proj_a","number":5,"title":"Round-trip issue","status":"done","createdAt":"2026-06-28T10:00:00Z","updatedAt":"2026-06-28T12:30:00Z"}
@@ -155,10 +150,9 @@ public class BackfillIssueCompletedAtMigrationSpecs
     [Fact]
     public async Task Up_NonTerminalIssue_RemainsNull()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_backlog_1", "backlog",
                 """
                 {"id":"issue_backlog_1","projectId":"proj_a","number":6,"title":"Backlog issue","status":"backlog","createdAt":"2026-06-28T10:00:00Z","updatedAt":"2026-06-28T10:00:00Z"}
@@ -285,6 +279,18 @@ public class BackfillIssueCompletedAtMigrationSpecs
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        var factory = new TestDbContextFactory(options);
+        return new TestDatabase(connection, factory);
+    }
+
+    private static TestDatabase CreateModelSchemaDatabase()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        MigratedSqliteTemplate.CopyModelSchemaTo(connection);
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;

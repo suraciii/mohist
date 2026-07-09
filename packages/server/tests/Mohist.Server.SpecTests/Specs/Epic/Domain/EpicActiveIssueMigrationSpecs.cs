@@ -16,11 +16,10 @@ public class EpicActiveIssueMigrationSpecs
     [Fact]
     public async Task Migration_BackfillsActiveMembershipSlotsOnlyForNonTerminalOwners()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260626200645_AddEpicListDerivedColumns");
         await using var context = database.CreateDbContext();
         var migrator = context.GetService<IMigrator>();
 
-        await migrator.MigrateAsync("20260626200645_AddEpicListDerivedColumns");
         Assert.False(await TableExistsAsync(context, "EpicActiveIssues"));
 
         var createdAt = DateTimeOffset.UtcNow;
@@ -105,10 +104,11 @@ public class EpicActiveIssueMigrationSpecs
         return Convert.ToInt32(await command.ExecuteScalarAsync()) == 1;
     }
 
-    private static TestDatabase CreateDatabase()
+    private static TestDatabase CreateDatabase(string migratedTo)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        MigratedSqliteTemplate.CopyTo(connection, migratedTo);
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;

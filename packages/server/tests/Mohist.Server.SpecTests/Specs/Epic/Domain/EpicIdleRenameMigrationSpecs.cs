@@ -18,10 +18,9 @@ public class EpicIdleRenameMigrationSpecs
         // so we can drop in a row with the legacy "active" status,
         // then apply the rename migration's Up SQL directly to prove
         // the rename is data-only and acts on the row.
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             setup.Epics.Add(new EpicRow
             {
                 Id = "epic_legacy_active",
@@ -69,10 +68,9 @@ public class EpicIdleRenameMigrationSpecs
         // Build the schema, drop a "active" row in, run the rename Up
         // SQL (turning it "idle"), then run the rename Down SQL —
         // round-trip back to "active".
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             setup.Epics.Add(new EpicRow
             {
                 Id = "epic_round_trip",
@@ -154,6 +152,18 @@ public class EpicIdleRenameMigrationSpecs
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        var factory = new TestDbContextFactory(options);
+        return new TestDatabase(connection, factory);
+    }
+
+    private static TestDatabase CreateModelSchemaDatabase()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        MigratedSqliteTemplate.CopyModelSchemaTo(connection);
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;
