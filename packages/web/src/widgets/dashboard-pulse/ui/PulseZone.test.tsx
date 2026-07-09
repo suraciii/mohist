@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { render, screen, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '@/entities/project/model/ProjectContext'
 import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from '@/entities/issue'
 import type {
@@ -11,37 +12,36 @@ import type {
   AgentActivity,
   AgentActivitySession,
 } from '@/entities/agent/model/types'
+import { server, useMswServer } from '../../../../tests/support/msw'
+import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { PulseZone } from './PulseZone'
 
-const mocks = vi.hoisted(() => ({
-  activity: null as AgentActivity | null | undefined,
-  issues: null as Issue[] | null | undefined,
-  agentStatus: undefined as AgentStatus | undefined,
-  useAgentActivity: vi.fn(() => ({ data: mocks.activity })),
-  useIssues: vi.fn((_params?: unknown) => ({ data: mocks.issues })),
-}))
+useMswServer()
 
-vi.mock('@/entities/agent/api/queries', () => ({
-  useAgentActivity: mocks.useAgentActivity,
-  useAgentStatus: () => ({ data: mocks.agentStatus }),
-  useGlobalAgentSessions: () => ({ data: [] }),
-}))
+const ISSUES_PATH = '*/api/projects/:projectId/issues'
+const STATUS_PATH = '*/api/projects/:projectId/agent/status'
+const ACTIVITY_PATH = '*/api/projects/:projectId/agent/activity'
 
-vi.mock('@/entities/issue/api/queries', () => ({
-  useIssues: (params?: unknown) => mocks.useIssues(params),
-  useArchivedIssues: () => ({ data: [] }),
-}))
+function mockIssuesResponse(issues: Issue[]) {
+  server.use(http.get(ISSUES_PATH, () => HttpResponse.json({ success: true, data: issues })))
+}
 
-const TEST_PROJECT = {
-  id: 'test-project',
-  name: 'demo',
-  createdAt: '2024-01-01T00:00:00.000Z',
-  updatedAt: '2024-01-01T00:00:00.000Z',
-  repositories: [],
+function mockAgentStatusResponse(data: AgentStatus) {
+  server.use(http.get(STATUS_PATH, () => HttpResponse.json({ success: true, data })))
+}
+
+function mockAgentActivityResponse(data: AgentActivity | null) {
+  server.use(
+    http.get(ACTIVITY_PATH, () =>
+      data
+        ? HttpResponse.json({ success: true, data })
+        : HttpResponse.json({ success: true, data: null }),
+    ),
+  )
 }
 
 function renderZone() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
@@ -125,29 +125,33 @@ function makeActivity(
   }
 }
 
-describe('PulseZone — issue-led active production', () => {
-  beforeEach(() => {
-    mocks.activity = null
-    mocks.issues = null
-    mocks.agentStatus = undefined
-    mocks.useAgentActivity.mockClear()
-    mocks.useIssues.mockClear()
-  })
+beforeEach(() => {
+  mockIssuesResponse([])
+  mockAgentActivityResponse(null)
+  mockAgentStatusResponse(makeAgentStatus())
+})
 
-  it('keeps an in-progress issue visible with its workflow stage even when no agent session is active', () => {
-    mocks.issues = [
+afterEach(() => {
+  cleanup()
+})
+
+describe('PulseZone — issue-led active production', () => {
+  it('keeps an in-progress issue visible with its workflow stage even when no agent session is active', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'paused-issue',
         number: 50,
         title: 'Refactor the dashboard',
         workflowStage: WorkflowStage.Build,
       }),
-    ]
-    mocks.activity = makeActivity([])
+    ])
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
-    expect(screen.queryByTestId('pulse-empty-state')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByTestId('pulse-empty-state')).not.toBeInTheDocument()
+    })
     const card = screen.getByTestId('pulse-compact-card')
     expect(card).toHaveAttribute('data-issue-number', '50')
     expect(within(card).getByTestId('pulse-compact-title')).toHaveTextContent('Refactor the dashboard')
@@ -155,26 +159,26 @@ describe('PulseZone — issue-led active production', () => {
     expect(within(card).getByTestId('pulse-compact-paused-dot')).toBeInTheDocument()
   })
 
-  it('renders the stage chip with the categorical stage-identity palette', () => {
-    mocks.issues = [
+  it('renders the stage chip with the categorical stage-identity palette', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'plan-issue',
         number: 60,
         title: 'Draft implementation plan',
         workflowStage: WorkflowStage.Plan,
       }),
-    ]
-    mocks.activity = makeActivity([])
+    ])
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
-    const stageChip = screen.getByTestId('pulse-compact-stage')
+    const stageChip = await waitFor(() => screen.getByTestId('pulse-compact-stage'))
     expect(stageChip.className).toContain('bg-blue-100')
     expect(stageChip.className).toContain('dark:bg-blue-900/40')
   })
 
-  it('shows the owner-action cue for a blocked in-progress issue', () => {
-    mocks.issues = [
+  it('shows the owner-action cue for a blocked in-progress issue', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'blocked-issue',
         number: 70,
@@ -183,20 +187,20 @@ describe('PulseZone — issue-led active production', () => {
         health: IssueHealth.Blocked,
         blockedReason: 'Cannot reach auth provider',
       }),
-    ]
-    mocks.activity = makeActivity([])
+    ])
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
-    const cue = screen.getByTestId('pulse-compact-owner-action-cue')
+    const cue = await waitFor(() => screen.getByTestId('pulse-compact-owner-action-cue'))
     expect(cue).toHaveTextContent('Owner action')
     expect(cue).toHaveAttribute('data-family', 'danger')
     expect(cue.className).toContain('bg-danger-subtle')
     expect(cue.className).toContain('text-danger')
   })
 
-  it('hides the owner-action cue for a normally-running issue', () => {
-    mocks.issues = [
+  it('hides the owner-action cue for a normally-running issue', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'normal-issue',
         number: 80,
@@ -204,17 +208,20 @@ describe('PulseZone — issue-led active production', () => {
         workflowStage: WorkflowStage.Build,
         health: IssueHealth.Active,
       }),
-    ]
-    mocks.activity = makeActivity([])
+    ])
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('pulse-compact-card')).toBeInTheDocument()
+    })
     expect(screen.queryByTestId('pulse-compact-owner-action-cue')).not.toBeInTheDocument()
     expect(screen.getByTestId('pulse-compact-card')).toBeInTheDocument()
   })
 
-  it('shows the cue for an awaiting-approval issue', () => {
-    mocks.issues = [
+  it('shows the cue for an awaiting-approval issue', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'await-issue',
         number: 90,
@@ -226,20 +233,20 @@ describe('PulseZone — issue-led active production', () => {
           requestedAt: '2026-01-01T00:00:00.000Z',
         },
       }),
-    ]
-    mocks.activity = makeActivity([])
+    ])
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
-    const cue = screen.getByTestId('pulse-compact-owner-action-cue')
+    const cue = await waitFor(() => screen.getByTestId('pulse-compact-owner-action-cue'))
     expect(cue).toBeInTheDocument()
     expect(cue).toHaveAttribute('data-family', 'warning')
     expect(cue.className).toContain('bg-warning-subtle')
     expect(cue.className).toContain('text-warning')
   })
 
-  it('shows the cue for an Integrate-stage Blocked issue (integration-failed)', () => {
-    mocks.issues = [
+  it('shows the cue for an Integrate-stage Blocked issue (integration-failed)', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'integrate-blocked',
         number: 100,
@@ -247,16 +254,18 @@ describe('PulseZone — issue-led active production', () => {
         workflowStage: WorkflowStage.Integrate,
         health: IssueHealth.Blocked,
       }),
-    ]
-    mocks.activity = makeActivity([])
+    ])
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
-    expect(screen.getByTestId('pulse-compact-owner-action-cue')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('pulse-compact-owner-action-cue')).toBeInTheDocument()
+    })
   })
 
-  it('shows the cue for a non-integrate Interrupted issue', () => {
-    mocks.issues = [
+  it('shows the cue for a non-integrate Interrupted issue', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'build-interrupted',
         number: 110,
@@ -264,16 +273,18 @@ describe('PulseZone — issue-led active production', () => {
         workflowStage: WorkflowStage.Build,
         health: IssueHealth.Interrupted,
       }),
-    ]
-    mocks.activity = makeActivity([])
+    ])
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
-    expect(screen.getByTestId('pulse-compact-owner-action-cue')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('pulse-compact-owner-action-cue')).toBeInTheDocument()
+    })
   })
 
-  it('joins active session telemetry into the matching running-issue row by issue number', () => {
-    mocks.issues = [
+  it('joins active session telemetry into the matching running-issue row by issue number', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'with-session',
         number: 120,
@@ -281,91 +292,103 @@ describe('PulseZone — issue-led active production', () => {
         workflowStage: WorkflowStage.Build,
         health: IssueHealth.Active,
       }),
-    ]
-    mocks.activity = makeActivity([
-      makeSession({
-        sessionId: 'session-120',
-        issueId: 'with-session',
-        issueNumber: 120,
-        issueTitle: 'Issue with active session',
-        issueStage: 'Build',
-        taskProgress: { completed: 3, total: 8 },
-        usage: {
-          totalTokens: 15_600,
-          costAmount: 0.18,
-          costCurrency: 'USD',
-        },
-      }),
     ])
+    mockAgentActivityResponse(
+      makeActivity([
+        makeSession({
+          sessionId: 'session-120',
+          issueId: 'with-session',
+          issueNumber: 120,
+          issueTitle: 'Issue with active session',
+          issueStage: 'Build',
+          taskProgress: { completed: 3, total: 8 },
+          usage: {
+            totalTokens: 15_600,
+            costAmount: 0.18,
+            costCurrency: 'USD',
+          },
+        }),
+      ]),
+    )
 
     renderZone()
 
-    expect(screen.getByTestId('pulse-compact-usage')).toHaveTextContent('15.6k tok')
+    await waitFor(() => {
+      expect(screen.getByTestId('pulse-compact-usage')).toHaveTextContent('15.6k tok')
+    })
     expect(screen.getByTestId('pulse-compact-progress')).toHaveTextContent('3/8 tasks')
   })
 
-  it('shows an active session even when no in-progress issue row exists', () => {
-    mocks.issues = []
-    mocks.activity = makeActivity([
-      makeSession({
-        sessionId: 'session-only-999',
-        issueId: 'session-only-issue',
-        issueNumber: 999,
-        issueTitle: 'Session-only active work',
-        issueStage: 'Check',
-        taskDescription: 'Continue active session',
-      }),
-    ])
+  it('shows an active session even when no in-progress issue row exists', async () => {
+    mockIssuesResponse([])
+    mockAgentActivityResponse(
+      makeActivity([
+        makeSession({
+          sessionId: 'session-only-999',
+          issueId: 'session-only-issue',
+          issueNumber: 999,
+          issueTitle: 'Session-only active work',
+          issueStage: 'Check',
+          taskDescription: 'Continue active session',
+        }),
+      ]),
+    )
 
     renderZone()
 
-    expect(screen.queryByTestId('pulse-empty-state')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByTestId('pulse-empty-state')).not.toBeInTheDocument()
+    })
     const card = screen.getByTestId('pulse-compact-card')
     expect(card).toHaveAttribute('data-issue-number', '999')
     expect(within(card).getByTestId('pulse-compact-title')).toHaveTextContent('Continue active session')
     expect(within(card).getByTestId('pulse-compact-stage')).toHaveTextContent('Check')
   })
 
-  it('renders an active-agent placeholder when runner status has active work but activity cards are empty', () => {
-    mocks.issues = []
-    mocks.activity = makeActivity([])
-    mocks.agentStatus = makeAgentStatus({
-      activeAgents: [
-        {
-          issueId: 'agent-only-issue',
-          issueNumber: 432,
-          projectId: TEST_PROJECT.id,
-          progress: {
-            stage: 'check',
-            lastActivityAt: '2026-01-01T00:00:00.000Z',
+  it('renders an active-agent placeholder when runner status has active work but activity cards are empty', async () => {
+    mockIssuesResponse([])
+    mockAgentActivityResponse(makeActivity([]))
+    mockAgentStatusResponse(
+      makeAgentStatus({
+        activeAgents: [
+          {
+            issueId: 'agent-only-issue',
+            issueNumber: 432,
+            projectId: TEST_PROJECT.id,
+            progress: {
+              stage: 'check',
+              lastActivityAt: '2026-01-01T00:00:00.000Z',
+            },
           },
-        },
-      ],
-    })
+        ],
+      }),
+    )
 
     renderZone()
 
-    expect(screen.queryByTestId('pulse-empty-state')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByTestId('pulse-empty-state')).not.toBeInTheDocument()
+    })
     const card = screen.getByTestId('pulse-agent-status-card')
     expect(card).toHaveAttribute('data-issue-number', '432')
     expect(within(card).getByTestId('pulse-agent-status-title')).toHaveTextContent('Agent active')
     expect(within(card).getByTestId('pulse-agent-status-stage')).toHaveTextContent('Check')
   })
 
-  it('renders a generic active-agent placeholder when runner status has no issue number', () => {
-    mocks.issues = []
-    mocks.activity = makeActivity([])
-    mocks.agentStatus = makeAgentStatus({ running: true, issueNumber: null })
+  it('renders a generic active-agent placeholder when runner status has no issue number', async () => {
+    mockIssuesResponse([])
+    mockAgentActivityResponse(makeActivity([]))
+    mockAgentStatusResponse(makeAgentStatus({ running: true, issueNumber: null }))
 
     renderZone()
 
-    const card = screen.getByTestId('pulse-agent-status-card')
+    const card = await waitFor(() => screen.getByTestId('pulse-agent-status-card'))
     expect(card).toHaveAttribute('data-issue-number', 'unknown')
     expect(card.getAttribute('href')).toMatch(/\/activity$/)
   })
 
-  it('uses the current issue title and workflow stage when session telemetry is stale', () => {
-    mocks.issues = [
+  it('uses the current issue title and workflow stage when session telemetry is stale', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'authoritative-issue',
         number: 125,
@@ -373,29 +396,31 @@ describe('PulseZone — issue-led active production', () => {
         workflowStage: WorkflowStage.Check,
         health: IssueHealth.Active,
       }),
-    ]
-    mocks.activity = makeActivity([
-      makeSession({
-        sessionId: 'session-125',
-        issueId: 'authoritative-issue',
-        issueNumber: 125,
-        issueTitle: 'Stale session issue title',
-        issueStage: 'Plan',
-        taskDescription: 'Stale session task description',
-        currentWorkItem: {
-          type: 'task',
-          id: 'task-1',
-          title: 'Stale current work title',
-          stage: 'Plan',
-          sessionWorkType: null,
-        },
-        taskProgress: { completed: 1, total: 3 },
-      }),
     ])
+    mockAgentActivityResponse(
+      makeActivity([
+        makeSession({
+          sessionId: 'session-125',
+          issueId: 'authoritative-issue',
+          issueNumber: 125,
+          issueTitle: 'Stale session issue title',
+          issueStage: 'Plan',
+          taskDescription: 'Stale session task description',
+          currentWorkItem: {
+            type: 'task',
+            id: 'task-1',
+            title: 'Stale current work title',
+            stage: 'Plan',
+            sessionWorkType: null,
+          },
+          taskProgress: { completed: 1, total: 3 },
+        }),
+      ]),
+    )
 
     renderZone()
 
-    const card = screen.getByTestId('pulse-compact-card')
+    const card = await waitFor(() => screen.getByTestId('pulse-compact-card'))
     expect(within(card).getByTestId('pulse-compact-title')).toHaveTextContent('Current issue title')
     expect(within(card).getByTestId('pulse-compact-stage')).toHaveTextContent('Check')
     expect(within(card).queryByText('Stale current work title')).not.toBeInTheDocument()
@@ -403,8 +428,8 @@ describe('PulseZone — issue-led active production', () => {
     expect(within(card).getByTestId('pulse-compact-progress')).toHaveTextContent('1/3 tasks')
   })
 
-  it('does NOT hide an in-progress issue that lacks an active session', () => {
-    mocks.issues = [
+  it('does NOT hide an in-progress issue that lacks an active session', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'no-session',
         number: 130,
@@ -412,22 +437,22 @@ describe('PulseZone — issue-led active production', () => {
         workflowStage: WorkflowStage.Check,
         health: IssueHealth.Paused,
       }),
-    ]
-    mocks.activity = makeActivity([
-      makeSession({ sessionId: 'unrelated', issueNumber: 999 }),
     ])
+    mockAgentActivityResponse(
+      makeActivity([makeSession({ sessionId: 'unrelated', issueNumber: 999 })]),
+    )
 
     renderZone()
 
-    const cards = screen.getAllByTestId('pulse-compact-card')
+    const cards = await waitFor(() => screen.getAllByTestId('pulse-compact-card'))
     expect(cards.map((card) => card.getAttribute('data-issue-number'))).toContain('130')
     const issueCard = cards.find((card) => card.getAttribute('data-issue-number') === '130')
     if (!issueCard) throw new Error('Expected issue 130 to render')
     expect(within(issueCard).getByTestId('pulse-compact-title')).toHaveTextContent('Work paused between stages')
   })
 
-  it('renders the cue on a session-enriched row when the issue also needs owner action', () => {
-    mocks.issues = [
+  it('renders the cue on a session-enriched row when the issue also needs owner action', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'session-blocked',
         number: 140,
@@ -436,40 +461,47 @@ describe('PulseZone — issue-led active production', () => {
         health: IssueHealth.Blocked,
         blockedReason: 'merge lock',
       }),
-    ]
-    mocks.activity = makeActivity([
-      makeSession({
-        sessionId: 'session-140',
-        issueId: 'session-blocked',
-        issueNumber: 140,
-        issueStage: 'Build',
-      }),
     ])
+    mockAgentActivityResponse(
+      makeActivity([
+        makeSession({
+          sessionId: 'session-140',
+          issueId: 'session-blocked',
+          issueNumber: 140,
+          issueStage: 'Build',
+        }),
+      ]),
+    )
 
     renderZone()
 
-    expect(screen.getByTestId('pulse-compact-owner-action-cue')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('pulse-compact-owner-action-cue')).toBeInTheDocument()
+    })
     expect(screen.getByTestId('pulse-compact-card')).toHaveAttribute('data-issue-number', '140')
   })
 
-  it('does not render the removed pulse-capacity-header or pulse-slots (capacity relocated to its own level)', () => {
-    mocks.issues = [
+  it('does not render the removed pulse-capacity-header or pulse-slots (capacity relocated to its own level)', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'i-1',
         number: 150,
         title: 'With capacity data present',
         workflowStage: WorkflowStage.Build,
       }),
-    ]
-    mocks.activity = makeActivity([], { active: 4, slots: { active: 4, max: 4 } })
+    ])
+    mockAgentActivityResponse(makeActivity([], { active: 4, slots: { active: 4, max: 4 } }))
 
     renderZone()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('pulse-compact-card')).toBeInTheDocument()
+    })
     expect(screen.queryByTestId('pulse-capacity-header')).not.toBeInTheDocument()
     expect(screen.queryByTestId('pulse-slots')).not.toBeInTheDocument()
   })
 
-  it('caps at 4 cards and shows a +N more overflow link when running issues exceed the cap', () => {
+  it('caps at 4 cards and shows a +N more overflow link when running issues exceed the cap', async () => {
     const issues = Array.from({ length: 6 }, (_, i) =>
       makeRunningIssue({
         id: `overflow-${i}`,
@@ -478,18 +510,20 @@ describe('PulseZone — issue-led active production', () => {
         workflowStage: WorkflowStage.Build,
       }),
     )
-    mocks.issues = issues
-    mocks.activity = makeActivity([])
+    mockIssuesResponse(issues)
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
-    expect(screen.getAllByTestId('pulse-compact-card')).toHaveLength(4)
+    await waitFor(() => {
+      expect(screen.getAllByTestId('pulse-compact-card')).toHaveLength(4)
+    })
     const link = screen.getByTestId('pulse-overflow-link')
     expect(link).toHaveTextContent('+2 more active items')
     expect(link.getAttribute('href')).toMatch(/\/issues$/)
   })
 
-  it('shows the overflow link as +1 more when only one card is over the cap', () => {
+  it('shows the overflow link as +1 more when only one card is over the cap', async () => {
     const issues = Array.from({ length: 5 }, (_, i) =>
       makeRunningIssue({
         id: `overflow2-${i}`,
@@ -498,17 +532,19 @@ describe('PulseZone — issue-led active production', () => {
         workflowStage: WorkflowStage.Build,
       }),
     )
-    mocks.issues = issues
-    mocks.activity = makeActivity([])
+    mockIssuesResponse(issues)
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
-    expect(screen.getAllByTestId('pulse-compact-card')).toHaveLength(4)
+    await waitFor(() => {
+      expect(screen.getAllByTestId('pulse-compact-card')).toHaveLength(4)
+    })
     expect(screen.getByTestId('pulse-overflow-link')).toHaveTextContent('+1 more active items')
   })
 
-  it('renders an empty-state affordance when there are no running issues or active sessions', () => {
-    mocks.issues = [
+  it('renders an empty-state affordance when there are no running issues or active sessions', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'done-issue',
         number: 400,
@@ -527,50 +563,52 @@ describe('PulseZone — issue-led active production', () => {
         status: IssueStatus.Backlog,
         health: IssueHealth.Active,
       }),
-    ]
-    mocks.activity = makeActivity([])
+    ])
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
-    const empty = screen.getByTestId('pulse-empty-state')
+    const empty = await waitFor(() => screen.getByTestId('pulse-empty-state'))
     expect(empty).toHaveTextContent('No active production')
     expect(screen.queryByTestId('pulse-compact-card')).not.toBeInTheDocument()
   })
 
-  it('preserves existing pulse-compact-* test-ids', () => {
-    mocks.issues = [
+  it('preserves existing pulse-compact-* test-ids', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'i-testids',
         number: 500,
         title: 'Verify testids',
         workflowStage: WorkflowStage.Build,
       }),
-    ]
-    mocks.activity = makeActivity([])
+    ])
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
-    expect(screen.getByTestId('pulse-compact-card')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('pulse-compact-card')).toBeInTheDocument()
+    })
     expect(screen.getByTestId('pulse-compact-title')).toBeInTheDocument()
     expect(screen.getByTestId('pulse-compact-stage')).toBeInTheDocument()
   })
 
-  it('lists multiple running issues and ranks them by issue number ascending', () => {
-    mocks.issues = [
+  it('lists multiple running issues and ranks them by issue number ascending', async () => {
+    mockIssuesResponse([
       makeRunningIssue({ id: 'big', number: 30, title: 'Thirty', workflowStage: WorkflowStage.Build }),
       makeRunningIssue({ id: 'small', number: 5, title: 'Five', workflowStage: WorkflowStage.Plan }),
       makeRunningIssue({ id: 'mid', number: 12, title: 'Twelve', workflowStage: WorkflowStage.Check }),
-    ]
-    mocks.activity = makeActivity([])
+    ])
+    mockAgentActivityResponse(makeActivity([]))
 
     renderZone()
 
-    const cards = screen.getAllByTestId('pulse-compact-card')
+    const cards = await waitFor(() => screen.getAllByTestId('pulse-compact-card'))
     expect(cards.map((card) => card.getAttribute('data-issue-number'))).toEqual(['5', '12', '30'])
   })
 
-  it('lists active sessions that do not have a matching running issue row', () => {
-    mocks.issues = [
+  it('lists active sessions that do not have a matching running issue row', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'done-with-session',
         number: 600,
@@ -583,25 +621,27 @@ describe('PulseZone — issue-led active production', () => {
         title: 'In progress, no session',
         workflowStage: WorkflowStage.Build,
       }),
-    ]
-    mocks.activity = makeActivity([
-      makeSession({
-        sessionId: 'session-600',
-        issueId: 'done-with-session',
-        issueNumber: 600,
-        issueStatus: 'done',
-      }),
     ])
+    mockAgentActivityResponse(
+      makeActivity([
+        makeSession({
+          sessionId: 'session-600',
+          issueId: 'done-with-session',
+          issueNumber: 600,
+          issueStatus: 'done',
+        }),
+      ]),
+    )
 
     renderZone()
 
-    const cards = screen.getAllByTestId('pulse-compact-card')
+    const cards = await waitFor(() => screen.getAllByTestId('pulse-compact-card'))
     expect(cards).toHaveLength(2)
     expect(cards.map((card) => card.getAttribute('data-issue-number'))).toEqual(['601', '600'])
   })
 
-  it('renders both a session-enriched row and a session-less row side by side (mixed state)', () => {
-    mocks.issues = [
+  it('renders both a session-enriched row and a session-less row side by side (mixed state)', async () => {
+    mockIssuesResponse([
       makeRunningIssue({
         id: 'with-session',
         number: 700,
@@ -616,19 +656,21 @@ describe('PulseZone — issue-led active production', () => {
         workflowStage: WorkflowStage.Check,
         health: IssueHealth.Paused,
       }),
-    ]
-    mocks.activity = makeActivity([
-      makeSession({
-        sessionId: 'session-700',
-        issueId: 'with-session',
-        issueNumber: 700,
-        issueStage: 'Build',
-      }),
     ])
+    mockAgentActivityResponse(
+      makeActivity([
+        makeSession({
+          sessionId: 'session-700',
+          issueId: 'with-session',
+          issueNumber: 700,
+          issueStage: 'Build',
+        }),
+      ]),
+    )
 
     renderZone()
 
-    const cards = screen.getAllByTestId('pulse-compact-card')
+    const cards = await waitFor(() => screen.getAllByTestId('pulse-compact-card'))
     expect(cards).toHaveLength(2)
     expect(screen.queryByTestId('pulse-compact-paused-dot')).toBeInTheDocument()
   })
