@@ -2,64 +2,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { cleanup, screen } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 
 import { EpicStatus } from '../../../entities/epic'
 import { IssueStatus, WorkflowStage } from '../../../entities/issue'
 
 import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
+import { useMswServer } from '../../../../tests/support/msw'
 
-/**
- * Tests for the Next Issue / advancement-copy region rendered inside <EpicDetailPage/>.
- */
+let _epicData: unknown = null
+let _issuesData: unknown[] = []
 
-const mocks = vi.hoisted(() => ({
-  useEpic: vi.fn(),
-  useIssues: vi.fn(),
-  useAddEpicIssue: vi.fn(),
-  useRemoveEpicIssue: vi.fn(),
-  useStartIssue: vi.fn(),
-  useStartEpic: vi.fn(),
-  useMarkEpicDone: vi.fn(),
-  useCloseEpic: vi.fn(),
-  useUpdateEpic: vi.fn(),
-  usePauseEpic: vi.fn(),
-  useResumeEpic: vi.fn(),
-}))
-
-
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  useIssues: mocks.useIssues,
-}))
-
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
-  return {
-    ...actual,
-    useEpic: mocks.useEpic,
-    useAddEpicIssue: mocks.useAddEpicIssue,
-    useRemoveEpicIssue: mocks.useRemoveEpicIssue,
-    useStartIssue: mocks.useStartIssue,
-    useStartEpic: mocks.useStartEpic,
-    useMarkEpicDone: mocks.useMarkEpicDone,
-    useCloseEpic: mocks.useCloseEpic,
-    useUpdateEpic: mocks.useUpdateEpic,
-    usePauseEpic: mocks.usePauseEpic,
-    useResumeEpic: mocks.useResumeEpic,
-  }
-})
+useMswServer(
+  http.get('*/api/projects/:projectId/epics/:epicId', () =>
+    HttpResponse.json({ success: true, data: _epicData }),
+  ),
+  http.get('*/api/projects/:projectId/issues', () =>
+    HttpResponse.json({ success: true, data: _issuesData }),
+  ),
+  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+)
 
 describe('EpicDetailPage next issue reason display', () => {
-  const addMutate = vi.fn()
-  const removeMutate = vi.fn()
-  const startMutate = vi.fn()
-  const doneMutate = vi.fn()
-  const closeMutate = vi.fn()
-  const updateMutate = vi.fn()
-  const pauseMutate = vi.fn()
-  const resumeMutate = vi.fn()
-  const startEpicMutate = vi.fn()
-
   function makeEpic(overrides: Record<string, unknown> = {}) {
     return {
       id: 'epic-12345678',
@@ -88,97 +54,80 @@ describe('EpicDetailPage next issue reason display', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useIssues.mockReturnValue({ data: issues })
-    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
-    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
-    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
-    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
-    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
-    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
-    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
-    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+    _issuesData = issues
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('shows the advancement-state copy (waiting-for-in-progress with nav link) when nextIssue is null', () => {
-    mocks.useEpic.mockReturnValue({ data: makeEpic(), isLoading: false })
+  it('shows the advancement-state copy (waiting-for-in-progress with nav link) when nextIssue is null', async () => {
+    _epicData = makeEpic()
 
     renderPage()
 
-    const copy = screen.getByTestId('advancement-copy')
-    expect(copy.textContent).toContain('Waiting for #1 to finish')
+    expect(await screen.findByTestId('advancement-copy')).toHaveTextContent('Waiting for #1 to finish')
     const link = screen.getByTestId('advancement-link')
     expect(link.getAttribute('href')).toContain('/issues/1')
     expect(screen.queryByTestId('mark-epic-done')).toBeTruthy()
   })
 
-  it('shows the next issue link without a Start button when a next issue exists', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        progress: {
-          deliveredCount: 0,
-          totalIssueCount: 1,
-          blockedIssues: [],
-          activeIssues: [],
-          nextIssue: { id: 'issue-3', number: 3, title: 'Candidate issue' },
-          nextIssueReason: null,
-          readyToMarkDone: false,
-        },
-        linkedIssues: [linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' })],
-      }),
-      isLoading: false,
+  it('shows the next issue link without a Start button when a next issue exists', async () => {
+    _epicData = makeEpic({
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: 1,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: { id: 'issue-3', number: 3, title: 'Candidate issue' },
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' })],
     })
 
     renderPage()
 
-    expect(screen.getByRole('link', { name: '#3 Candidate issue' }).getAttribute('href')).toContain('/issues/3')
+    expect(await screen.findByRole('link', { name: '#3 Candidate issue' })).toHaveAttribute('href', expect.stringContaining('/issues/3'))
     expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
-    expect(startMutate).not.toHaveBeenCalled()
   })
 
-  it('does not show a Next Issue Start action for reason ready or empty states', () => {
-    mocks.useEpic.mockReturnValue({ data: makeEpic(), isLoading: false })
+  it('does not show a Next Issue Start action for reason ready or empty states', async () => {
+    _epicData = makeEpic()
     renderPage()
+    await screen.findByTestId('advancement-copy')
     expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
     cleanup()
 
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        progress: {
-          deliveredCount: 1,
-          totalIssueCount: 1,
-          blockedIssues: [],
-          activeIssues: [],
-          nextIssue: null,
-          nextIssueReason: null,
-          readyToMarkDone: true,
-        },
-      }),
-      isLoading: false,
+    _epicData = makeEpic({
+      progress: {
+        deliveredCount: 1,
+        totalIssueCount: 1,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: true,
+      },
     })
     renderPage()
+    await screen.findByTestId('mark-epic-done')
     expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
     cleanup()
 
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        progress: {
-          deliveredCount: 0,
-          totalIssueCount: 0,
-          blockedIssues: [],
-          activeIssues: [],
-          nextIssue: null,
-          nextIssueReason: null,
-          readyToMarkDone: false,
-        },
-      }),
-      isLoading: false,
+    _epicData = makeEpic({
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: 0,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
     })
     renderPage()
+    await screen.findByTestId('advancement-copy')
     expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
   })
 })
