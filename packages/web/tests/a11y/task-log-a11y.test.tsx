@@ -1,24 +1,16 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { axe } from 'vitest-axe'
 import { ProjectProvider } from '../../src/entities/project'
-import { getIssueWorkflowTaskLog } from '../../src/entities/issue'
-import { getWorkflowRunSessions } from '../../src/entities/coder-session/api/client'
 import { TaskLogPanel } from '../../src/widgets/issue-workflow/ui/TaskLogPanel'
+import { server } from '../support/msw'
 import type { TaskLogLine, TaskLogPage } from '../../src/entities/issue'
 import type { WorkflowRunSession } from '../../src/entities/coder-session/model/types'
-
-vi.mock('../../src/entities/issue/api/client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/entities/issue/api/client')>()
-  return {
-    ...actual,
-    getIssueWorkflowTaskLog: vi.fn(),
-  }
-})
 
 const sessionEventHandlers = new Map<string, ((detail: unknown) => void)[]>()
 
@@ -36,12 +28,28 @@ vi.mock('../../src/entities/agent/@x/events', () => ({
   }),
 }))
 
-vi.mock('../../src/entities/coder-session/api/client', () => ({
-  getWorkflowRunSessions: vi.fn(),
-}))
+let taskLogPage: TaskLogPage = { lines: [], nextCursor: null, truncated: false }
+let workflowRunSessions: WorkflowRunSession[] = []
 
-const mockedGetIssueWorkflowTaskLog = vi.mocked(getIssueWorkflowTaskLog)
-const mockedGetWorkflowRunSessions = vi.mocked(getWorkflowRunSessions)
+const HANDLERS = [
+  http.get('*/api/projects/:projectId/issues/:number/workflow/tasks/:taskId/logs', () =>
+    HttpResponse.json({ success: true, data: taskLogPage }),
+  ),
+  http.get('*/api/workflow-runs/:runId/sessions', () =>
+    HttpResponse.json({ success: true, data: workflowRunSessions }),
+  ),
+]
+
+beforeAll(() => {
+  server.listen({ onUnhandledRequest: 'error' })
+  server.use(...HANDLERS)
+})
+afterEach(() => {
+  cleanup()
+  server.resetHandlers()
+  server.use(...HANDLERS)
+})
+afterAll(() => server.close())
 
 function agentSessionFixture(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
   return {
@@ -103,10 +111,9 @@ const focusableSelector = [
 
 describe('TaskLogPanel accessibility structural baseline', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     sessionEventHandlers.clear()
-    mockedGetIssueWorkflowTaskLog.mockResolvedValue({ lines: [], nextCursor: null, truncated: false })
-    mockedGetWorkflowRunSessions.mockResolvedValue([])
+    taskLogPage = { lines: [], nextCursor: null, truncated: false }
+    workflowRunSessions = []
   })
 
   afterEach(() => {
@@ -114,8 +121,7 @@ describe('TaskLogPanel accessibility structural baseline', () => {
   })
 
   function renderWithPanel(lines: TaskLogLine[]) {
-    const page = makePage(lines)
-    mockedGetIssueWorkflowTaskLog.mockImplementation(async () => page)
+    taskLogPage = makePage(lines)
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     return render(
       <QueryClientProvider client={queryClient}>
@@ -249,10 +255,9 @@ describe('TaskLogPanel accessibility structural baseline', () => {
 
 describe('TaskLogPanel accessibility — milestone rows (Phase 3b)', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     sessionEventHandlers.clear()
-    mockedGetIssueWorkflowTaskLog.mockResolvedValue({ lines: [], nextCursor: null, truncated: false })
-    mockedGetWorkflowRunSessions.mockResolvedValue([])
+    taskLogPage = { lines: [], nextCursor: null, truncated: false }
+    workflowRunSessions = []
   })
 
   afterEach(() => {
@@ -260,9 +265,8 @@ describe('TaskLogPanel accessibility — milestone rows (Phase 3b)', () => {
   })
 
   function renderAgentPanelWithLines(lines: TaskLogLine[], sessions: WorkflowRunSession[]) {
-    const page = makePage(lines)
-    mockedGetIssueWorkflowTaskLog.mockImplementation(async () => page)
-    mockedGetWorkflowRunSessions.mockResolvedValue(sessions)
+    taskLogPage = makePage(lines)
+    workflowRunSessions = sessions
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     return render(
       <QueryClientProvider client={queryClient}>
