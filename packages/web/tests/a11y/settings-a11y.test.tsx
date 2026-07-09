@@ -88,12 +88,6 @@ const systemInfo = {
   paths: { db: '/tmp/mohist.db', config: '/tmp/config.json', opencode: '/tmp/opencode', logs: '/tmp/logs' },
 }
 
-const runtimeConsistency = {
-  status: 'consistent',
-  reason: null,
-  components: [{ name: 'server', status: 'ok', reason: null }],
-}
-
 const templates = [
   {
     key: 'plan',
@@ -131,7 +125,6 @@ const settingsQueries = {
   projectDefaultWorkflowProfile: { data: { defaultTemplateId: 'mohist/local' }, isLoading: false, isError: false, error: null },
   systemInfo: { data: systemInfo, isLoading: false, isError: false, error: null, refetch: vi.fn() },
   systemUpdateStatus: { data: { hasJob: false, job: null }, isLoading: false, error: null, refetch: vi.fn() },
-  runtimeConsistency: { data: runtimeConsistency, isLoading: false, error: null },
 }
 const mutation = { mutate: vi.fn(), mutateAsync: vi.fn().mockResolvedValue(agentRuntime), isPending: false }
 
@@ -168,7 +161,6 @@ vi.mock('../../src/entities/settings/api/queries', () => ({
   useSystemInfo: () => settingsQueries.systemInfo,
   useSystemUpdate: () => mutation,
   useSystemUpdateStatus: () => settingsQueries.systemUpdateStatus,
-  useRuntimeConsistency: () => settingsQueries.runtimeConsistency,
 }))
 
 vi.mock('../../src/entities/template', () => ({

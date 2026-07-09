@@ -42,13 +42,9 @@ vi.mock('../src/entities/issue/api/queries', async () => {
   return {
     ...actual,
     useIssue: () => ({ data: mocks.issue, isLoading: !mocks.issue, isError: false }),
-    useAgentStatus: () => ({ data: mocks.agentStatus }),
     useIssueDiff: () => ({ data: null }),
     useIssueCommits: () => ({ data: null }),
-    useIssueExecutions: () => ({ data: [] as any[] }),
     useWorkspaceStatus: () => ({ data: null }),
-    useIssueStageState: () => ({ data: null }),
-    useWorkflowRun: () => ({ data: null }),
     useIssueWorkflowProfileYaml: () => ({
       data: mocks.workflowProfile,
       isLoading: mocks.workflowProfileLoading,

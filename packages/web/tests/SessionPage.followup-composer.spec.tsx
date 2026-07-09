@@ -33,13 +33,6 @@ vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
   getAgentSessionTranscript: vi.fn(() => Promise.resolve(endpointMocks.transcript)),
 }))
 
-vi.mock('../src/entities/coder-session/model/useFollowupMutation', () => ({
-  useFollowupMutation: () => ({
-    mutate: vi.fn(),
-    isPending: false,
-  }),
-}))
-
 const originalScrollTo = Element.prototype.scrollTo
 const queryClients: QueryClient[] = []
 
