@@ -2,328 +2,296 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 
 import { EpicStatus } from '../../../entities/epic'
 import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue'
 
 import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
+import { useMswServer } from '../../../../tests/support/msw'
 
-/**
- * Page-level lifecycle orchestration tests for <EpicDetailPage/>: mark-done/close guards, pause/resume, and header lifecycle actions.
- */
+let _epicData: unknown = null
+let _issuesData: unknown[] = []
+const _startEpicHandler = vi.fn()
+const _markDoneHandler = vi.fn()
+const _closeEpicHandler = vi.fn()
+const _pauseEpicHandler = vi.fn()
+const _resumeEpicHandler = vi.fn()
+const _reopenEpicHandler = vi.fn()
+let _blockReopen = false
+let _blockStart = false
 
-const mocks = vi.hoisted(() => ({
-  useEpic: vi.fn(),
-  useIssues: vi.fn(),
-  useAddEpicIssue: vi.fn(),
-  useRemoveEpicIssue: vi.fn(),
-  useStartIssue: vi.fn(),
-  useStartEpic: vi.fn(),
-  useMarkEpicDone: vi.fn(),
-  useCloseEpic: vi.fn(),
-  useUpdateEpic: vi.fn(),
-  usePauseEpic: vi.fn(),
-  useResumeEpic: vi.fn(),
-  useReopenEpic: vi.fn(),
-}))
+useMswServer(
+  http.get('*/api/projects/:projectId/epics/:epicId', () =>
+    HttpResponse.json({ success: true, data: _epicData }),
+  ),
+  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/projects/:projectId/issues', () =>
+    HttpResponse.json({ success: true, data: _issuesData }),
+  ),
+  http.post('*/api/projects/:projectId/epics/:epicId/start', ({ params }) => {
+    _startEpicHandler(params.epicId)
+    if (_blockStart) return new Promise(() => {})
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/done', ({ params }) => {
+    _markDoneHandler(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/close', ({ params }) => {
+    _closeEpicHandler(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/pause', async ({ request, params }) => {
+    let reason: string | null = null
+    try { const body = await request.json() as any; reason = body.reason ?? null } catch { /* empty body */ }
+    _pauseEpicHandler({ id: params.epicId, reason })
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/resume', ({ params }) => {
+    _resumeEpicHandler(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/reopen', ({ params }) => {
+    _reopenEpicHandler(params.epicId)
+    if (_blockReopen) return new Promise(() => {})
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+)
 
-
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  useIssues: mocks.useIssues,
-}))
-
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
+function makeEpic(overrides: Record<string, unknown> = {}) {
   return {
-    ...actual,
-    useEpic: mocks.useEpic,
-    useAddEpicIssue: mocks.useAddEpicIssue,
-    useRemoveEpicIssue: mocks.useRemoveEpicIssue,
-    useStartIssue: mocks.useStartIssue,
-    useStartEpic: mocks.useStartEpic,
-    useMarkEpicDone: mocks.useMarkEpicDone,
-    useCloseEpic: mocks.useCloseEpic,
-    useUpdateEpic: mocks.useUpdateEpic,
-    usePauseEpic: mocks.usePauseEpic,
-    useResumeEpic: mocks.useResumeEpic,
-    useReopenEpic: mocks.useReopenEpic,
+    id: 'epic-12345678',
+    number: null,
+    title: 'Epic title',
+    description: 'Epic description',
+    priority: 'p1',
+    status: EpicStatus.Idle,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    progress: {
+      deliveredCount: 0,
+      totalIssueCount: 0,
+      blockedIssues: [],
+      activeIssues: [],
+      nextIssue: null,
+      nextIssueReason: null,
+      readyToMarkDone: false,
+    },
+    linkedIssues: [],
+    ...overrides,
   }
-})
+}
 
 describe('EpicDetailPage lifecycle guards', () => {
-  function makeEpic(overrides: Record<string, unknown> = {}) {
-    return {
-      id: 'epic-12345678',
-      number: null,
-      title: 'Epic title',
-      description: 'Epic description',
-      priority: 'p1',
-      status: EpicStatus.Idle,
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
-      progress: {
-        deliveredCount: 0,
-        totalIssueCount: 0,
-        blockedIssues: [],
-        activeIssues: [],
-        nextIssue: null,
-        nextIssueReason: null,
-        readyToMarkDone: false,
-      },
-      linkedIssues: [],
-      ...overrides,
-    }
-  }
-
-  const addMutate = vi.fn()
-  const removeMutate = vi.fn()
-  const startMutate = vi.fn()
-  const doneMutate = vi.fn()
-  const closeMutate = vi.fn()
-  const updateMutate = vi.fn()
-  const pauseMutate = vi.fn()
-  const resumeMutate = vi.fn()
-  const reopenMutate = vi.fn()
-  const startEpicMutate = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useIssues.mockReturnValue({ data: issues })
-    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
-    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
-    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
-    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
-    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
-    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
-    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
-    mocks.useReopenEpic.mockReturnValue({ mutate: reopenMutate, isPending: false })
-    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+    _issuesData = issues
+    _blockReopen = false
+    _blockStart = false
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('disables Mark Done while progress is not ready and explains unfinished issue count', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        progress: {
-          deliveredCount: 1,
-          totalIssueCount: 3,
-          blockedIssues: [],
-          activeIssues: [
-            { id: 'issue-2', number: 2, title: 'Active issue', health: 'active' },
-            { id: 'issue-3', number: 3, title: 'Backlog issue', health: 'active' },
-          ],
-          nextIssue: { id: 'issue-2', number: 2, title: 'Active issue' },
-          nextIssueReason: null,
-          readyToMarkDone: false,
-        },
-        linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-          linkedIssue({ id: 'issue-2', number: 2, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p3' }),
+  it('disables Mark Done while progress is not ready and explains unfinished issue count', async () => {
+    _epicData = makeEpic({
+      progress: {
+        deliveredCount: 1,
+        totalIssueCount: 3,
+        blockedIssues: [],
+        activeIssues: [
+          { id: 'issue-2', number: 2, title: 'Active issue', health: 'active' },
+          { id: 'issue-3', number: 3, title: 'Backlog issue', health: 'active' },
         ],
-      }),
-      isLoading: false,
+        nextIssue: { id: 'issue-2', number: 2, title: 'Active issue' },
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p3' }),
+      ],
     })
 
     renderPage()
 
-    const markDone = screen.getByTestId('mark-epic-done')
+    const markDone = await screen.findByTestId('mark-epic-done')
     expect(markDone).toBeDisabled()
     expect(markDone).not.toHaveAttribute('title')
     const reason = screen.getByTestId('mark-done-disabled-reason')
     expect(reason).toHaveTextContent('2 linked issues remain unfinished.')
     expect(screen.getByTestId('start-epic-trigger')).toBeTruthy()
-    expect(doneMutate).not.toHaveBeenCalled()
+    expect(_markDoneHandler).not.toHaveBeenCalled()
   })
 
-  it('explains singular unfinished count when exactly one linked issue remains', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        progress: {
-          deliveredCount: 1,
-          totalIssueCount: 2,
-          blockedIssues: [{ id: 'issue-2', number: 2, title: 'Blocked issue', health: 'blocked' }],
-          activeIssues: [],
-          nextIssue: { id: 'issue-2', number: 2, title: 'Blocked issue' },
-          nextIssueReason: null,
-          readyToMarkDone: false,
-        },
-        linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-          linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p1' }),
-        ],
-      }),
-      isLoading: false,
+  it('explains singular unfinished count when exactly one linked issue remains', async () => {
+    _epicData = makeEpic({
+      progress: {
+        deliveredCount: 1,
+        totalIssueCount: 2,
+        blockedIssues: [{ id: 'issue-2', number: 2, title: 'Blocked issue', health: 'blocked' }],
+        activeIssues: [],
+        nextIssue: { id: 'issue-2', number: 2, title: 'Blocked issue' },
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p1' }),
+      ],
     })
 
     renderPage()
 
-    const markDone = screen.getByTestId('mark-epic-done')
+    const markDone = await screen.findByTestId('mark-epic-done')
     expect(markDone).toBeDisabled()
     expect(markDone).not.toHaveAttribute('title')
     const reason = screen.getByTestId('mark-done-disabled-reason')
     expect(reason).toHaveTextContent('1 linked issue remains unfinished.')
   })
 
-  it('enables Mark Done and runs the mark-done mutation when progress is ready', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        progress: {
-          deliveredCount: 1,
-          totalIssueCount: 1,
-          blockedIssues: [],
-          activeIssues: [],
-          nextIssue: null,
-          nextIssueReason: null,
-          readyToMarkDone: true,
-        },
-        linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-        ],
-      }),
-      isLoading: false,
+  it('enables Mark Done and runs the mark-done mutation when progress is ready', async () => {
+    _epicData = makeEpic({
+      progress: {
+        deliveredCount: 1,
+        totalIssueCount: 1,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: true,
+      },
+      linkedIssues: [
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+      ],
     })
 
     renderPage()
 
-    const markDone = screen.getByTestId('mark-epic-done')
+    const markDone = await screen.findByTestId('mark-epic-done')
     expect(markDone).not.toBeDisabled()
     expect(markDone).not.toHaveAttribute('title')
 
     fireEvent.click(markDone)
 
-    expect(doneMutate).toHaveBeenCalledWith('epic-12345678')
+    await vi.waitFor(() => expect(_markDoneHandler).toHaveBeenCalledWith('epic-12345678'))
   })
 
-  it('opens a close confirmation dialog that lists the linked issue count before submitting', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-          linkedIssue({ id: 'issue-2', number: 2, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p3' }),
-        ],
-      }),
-      isLoading: false,
+  it('opens a close confirmation dialog that lists the linked issue count before submitting', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p3' }),
+      ],
     })
 
     renderPage()
 
+    await screen.findByTestId('close-epic-trigger')
     fireEvent.click(screen.getByTestId('close-epic-trigger'))
 
-    expect(closeMutate).not.toHaveBeenCalled()
+    expect(_closeEpicHandler).not.toHaveBeenCalled()
     expect(screen.getByText(/unlink 3 associated issues/i)).toBeTruthy()
     expect(screen.getByText(/issue workflow state will not change/i)).toBeTruthy()
 
     fireEvent.click(screen.getByTestId('close-epic-confirm'))
 
-    expect(closeMutate).toHaveBeenCalledWith('epic-12345678', expect.objectContaining({
-      onSettled: expect.any(Function),
-    }))
+    await vi.waitFor(() => expect(_closeEpicHandler).toHaveBeenCalledWith('epic-12345678'))
   })
 
-  it('shows a singular linked issue message when only one issue is associated', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-        ],
-      }),
-      isLoading: false,
+  it('shows a singular linked issue message when only one issue is associated', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+      ],
     })
 
     renderPage()
 
+    await screen.findByTestId('close-epic-trigger')
     fireEvent.click(screen.getByTestId('close-epic-trigger'))
 
     expect(screen.getByText(/unlink 1 associated issue\b/i)).toBeTruthy()
   })
 
-  it('explains that closing is safe when no issues are linked', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({ linkedIssues: [] }),
-      isLoading: false,
-    })
+  it('explains that closing is safe when no issues are linked', async () => {
+    _epicData = makeEpic({ linkedIssues: [] })
 
     renderPage()
 
+    await screen.findByTestId('close-epic-trigger')
     fireEvent.click(screen.getByTestId('close-epic-trigger'))
 
     expect(screen.getByText(/This Epic has no linked issues/i)).toBeTruthy()
   })
 
-  it('does not run the close mutation when the confirmation is cancelled', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-        ],
-      }),
-      isLoading: false,
+  it('does not run the close mutation when the confirmation is cancelled', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+      ],
     })
 
     renderPage()
 
+    await screen.findByTestId('close-epic-trigger')
     fireEvent.click(screen.getByTestId('close-epic-trigger'))
     fireEvent.click(screen.getByTestId('close-epic-cancel'))
 
-    expect(closeMutate).not.toHaveBeenCalled()
+    expect(_closeEpicHandler).not.toHaveBeenCalled()
   })
 
-  it('hides Mark Done and Close Epic for done epics and shows the terminal status', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        status: EpicStatus.Done,
-        progress: {
-          deliveredCount: 1,
-          totalIssueCount: 1,
-          blockedIssues: [],
-          activeIssues: [],
-          nextIssue: null,
-          nextIssueReason: null,
-          readyToMarkDone: true,
-        },
-        linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-        ],
-      }),
-      isLoading: false,
+  it('hides Mark Done and Close Epic for done epics and shows the terminal status', async () => {
+    _epicData = makeEpic({
+      status: EpicStatus.Done,
+      progress: {
+        deliveredCount: 1,
+        totalIssueCount: 1,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: true,
+      },
+      linkedIssues: [
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+      ],
     })
 
     renderPage()
 
+    await screen.findByTestId('epic-number')
     expect(screen.queryByTestId('mark-epic-done')).toBeNull()
     expect(screen.queryByTestId('close-epic-trigger')).toBeNull()
     expect(screen.getByTestId('epic-number').parentElement).toHaveTextContent('done')
   })
 
-  it('hides Mark Done and Close Epic for closed epics', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        status: EpicStatus.Closed,
-progress: {
-          deliveredCount: 1,
-          totalIssueCount: 1,
-          blockedIssues: [],
-          activeIssues: [],
-          nextIssue: null,
-          nextIssueReason: null,
-          readyToMarkDone: true,
-        },
-        linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
-        ],
-      }),
-      isLoading: false,
+  it('hides Mark Done and Close Epic for closed epics', async () => {
+    _epicData = makeEpic({
+      status: EpicStatus.Closed,
+      progress: {
+        deliveredCount: 1,
+        totalIssueCount: 1,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: true,
+      },
+      linkedIssues: [
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+      ],
     })
 
     renderPage()
 
+    await screen.findByTestId('epic-number')
     expect(screen.queryByTestId('mark-epic-done')).toBeNull()
     expect(screen.queryByTestId('close-epic-trigger')).toBeNull()
     expect(screen.getByText('closed')).toBeTruthy()
@@ -331,67 +299,23 @@ progress: {
 })
 
 describe('EpicDetailPage pause/resume actions', () => {
-  const addMutate = vi.fn()
-  const removeMutate = vi.fn()
-  const doneMutate = vi.fn()
-  const closeMutate = vi.fn()
-  const updateMutate = vi.fn()
-  const startEpicMutate = vi.fn()
-  const pauseMutate = vi.fn()
-  const resumeMutate = vi.fn()
-  const reopenMutate = vi.fn()
-
-  function makeEpic(overrides: Record<string, unknown> = {}) {
-    return {
-      id: 'epic-12345678',
-      number: null,
-      title: 'Epic title',
-      description: 'Epic description',
-      priority: 'p1',
-      status: EpicStatus.Idle,
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
-      progress: {
-        deliveredCount: 0,
-        totalIssueCount: 0,
-        blockedIssues: [],
-        activeIssues: [],
-        nextIssue: null,
-        nextIssueReason: null,
-        readyToMarkDone: false,
-      },
-      linkedIssues: [],
-      ...overrides,
-    }
-  }
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useIssues.mockReturnValue({ data: issues })
-    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
-    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
-    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
-    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
-    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
-    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
-    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
-    mocks.useReopenEpic.mockReturnValue({ mutate: reopenMutate, isPending: false })
-    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+    _issuesData = issues
+    _blockReopen = false
+    _blockStart = false
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('shows a Pause button on a running Epic that opens a confirm dialog with a reason input', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Running }),
-      isLoading: false,
-    })
+  it('shows a Pause button on a running Epic that opens a confirm dialog with a reason input', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Running })
 
     renderPage()
 
-    const pauseTrigger = screen.getByTestId('pause-epic-trigger')
+    const pauseTrigger = await screen.findByTestId('pause-epic-trigger')
     expect(pauseTrigger).toBeTruthy()
     expect(pauseTrigger).toHaveTextContent('Pause')
 
@@ -403,14 +327,12 @@ describe('EpicDetailPage pause/resume actions', () => {
     expect(screen.getByTestId('pause-epic-confirm')).toBeTruthy()
   })
 
-  it('submits the pause mutation with an optional reason', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Running }),
-      isLoading: false,
-    })
+  it('submits the pause mutation with an optional reason', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Running })
 
     renderPage()
 
+    await screen.findByTestId('pause-epic-trigger')
     fireEvent.click(screen.getByTestId('pause-epic-trigger'))
 
     const reasonInput = screen.getByTestId('pause-reason-input') as HTMLInputElement
@@ -418,280 +340,206 @@ describe('EpicDetailPage pause/resume actions', () => {
 
     fireEvent.click(screen.getByTestId('pause-epic-confirm'))
 
-    expect(pauseMutate).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(_pauseEpicHandler).toHaveBeenCalledWith(
       { id: 'epic-12345678', reason: 'Waiting for design review' },
-      expect.objectContaining({ onSettled: expect.any(Function) }),
-    )
+    ))
   })
 
-  it('submits the pause mutation with null reason when the input is left empty', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Running }),
-      isLoading: false,
-    })
+  it('submits the pause mutation with null reason when the input is left empty', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Running })
 
     renderPage()
 
+    await screen.findByTestId('pause-epic-trigger')
     fireEvent.click(screen.getByTestId('pause-epic-trigger'))
     fireEvent.click(screen.getByTestId('pause-epic-confirm'))
 
-    expect(pauseMutate).toHaveBeenCalledWith(
+    await vi.waitFor(() => expect(_pauseEpicHandler).toHaveBeenCalledWith(
       { id: 'epic-12345678', reason: null },
-      expect.objectContaining({ onSettled: expect.any(Function) }),
-    )
+    ))
   })
 
-  it('cancels the pause dialog without calling the mutation', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Running }),
-      isLoading: false,
-    })
+  it('cancels the pause dialog without calling the mutation', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Running })
 
     renderPage()
 
+    await screen.findByTestId('pause-epic-trigger')
     fireEvent.click(screen.getByTestId('pause-epic-trigger'))
     fireEvent.click(screen.getByTestId('pause-epic-cancel'))
 
-    expect(pauseMutate).not.toHaveBeenCalled()
+    expect(_pauseEpicHandler).not.toHaveBeenCalled()
     expect(screen.queryByText('Pause Epic?')).toBeNull()
   })
 
-  it('shows a Resume button on a paused Epic that calls the resume mutation', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Paused }),
-      isLoading: false,
-    })
+  it('shows a Resume button on a paused Epic that calls the resume mutation', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Paused })
 
     renderPage()
 
-    const resumeTrigger = screen.getByTestId('resume-epic-trigger')
+    const resumeTrigger = await screen.findByTestId('resume-epic-trigger')
     expect(resumeTrigger).toBeTruthy()
     expect(resumeTrigger).toHaveTextContent('Resume')
 
     fireEvent.click(resumeTrigger)
 
-    expect(resumeMutate).toHaveBeenCalledWith('epic-12345678')
+    await vi.waitFor(() => expect(_resumeEpicHandler).toHaveBeenCalledWith('epic-12345678'))
   })
 
-  it('disables Mark Done when the Epic is paused and shows the resume-first hint', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        status: EpicStatus.Paused,
-        progress: {
-          deliveredCount: 1,
-          totalIssueCount: 1,
-          blockedIssues: [],
-          activeIssues: [],
-          nextIssue: null,
-          nextIssueReason: null,
-          readyToMarkDone: true,
-        },
-        linkedIssues: [
-          { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
-        ],
-      }),
-      isLoading: false,
+  it('disables Mark Done when the Epic is paused and shows the resume-first hint', async () => {
+    _epicData = makeEpic({
+      status: EpicStatus.Paused,
+      progress: {
+        deliveredCount: 1,
+        totalIssueCount: 1,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: true,
+      },
+      linkedIssues: [
+        { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
+      ],
     })
 
     renderPage()
 
-    const markDone = screen.getByTestId('mark-epic-done')
+    const markDone = await screen.findByTestId('mark-epic-done')
     expect(markDone).toBeDisabled()
     expect(markDone).not.toHaveAttribute('title')
     const reason = screen.getByTestId('mark-done-disabled-reason')
     expect(reason).toHaveTextContent('Resume this Epic before marking it done.')
   })
 
-  it('displays the persisted pause reason near the status badge when present', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        status: EpicStatus.Paused,
-        pauseReason: 'Waiting for design review',
-      }),
-      isLoading: false,
+  it('displays the persisted pause reason near the status badge when present', async () => {
+    _epicData = makeEpic({
+      status: EpicStatus.Paused,
+      pauseReason: 'Waiting for design review',
     })
 
     renderPage()
 
-    const reasonBadge = screen.getByTestId('pause-reason')
+    const reasonBadge = await screen.findByTestId('pause-reason')
     expect(reasonBadge).toHaveTextContent('Waiting for design review')
   })
 
-  it('does not show a pause reason element when the epic has no reason', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Paused }),
-      isLoading: false,
-    })
+  it('does not show a pause reason element when the epic has no reason', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Paused })
 
     renderPage()
 
+    await screen.findByTestId('epic-number')
     expect(screen.queryByTestId('pause-reason')).toBeNull()
   })
 
-  it('hides the Pause button and shows Resume when epic is paused', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Paused }),
-      isLoading: false,
-    })
+  it('hides the Pause button and shows Resume when epic is paused', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Paused })
 
     renderPage()
 
+    await screen.findByTestId('resume-epic-trigger')
     expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
     expect(screen.getByTestId('resume-epic-trigger')).toBeTruthy()
   })
 
-  it('hides the Pause button for done epics', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Done }),
-      isLoading: false,
-    })
+  it('hides the Pause button for done epics', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Done })
 
     renderPage()
 
+    await screen.findByTestId('epic-number')
     expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
     expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
   })
 
-  it('hides the Pause button for closed epics', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Closed }),
-      isLoading: false,
-    })
+  it('hides the Pause button for closed epics', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Closed })
 
     renderPage()
 
+    await screen.findByTestId('epic-number')
     expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
     expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
   })
 
   describe('reopen control for terminal epics', () => {
-    it('shows a Reopen button on a done epic', () => {
-      mocks.useEpic.mockReturnValue({
-        data: makeEpic({ status: EpicStatus.Done }),
-        isLoading: false,
-      })
+    it('shows a Reopen button on a done epic', async () => {
+      _epicData = makeEpic({ status: EpicStatus.Done })
 
       renderPage()
 
-      expect(screen.getByTestId('reopen-epic-trigger')).toBeTruthy()
+      await screen.findByTestId('reopen-epic-trigger')
       expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
       expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
       expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
       expect(screen.queryByTestId('mark-epic-done')).toBeNull()
     })
 
-    it('shows a Reopen button on a closed epic', () => {
-      mocks.useEpic.mockReturnValue({
-        data: makeEpic({ status: EpicStatus.Closed }),
-        isLoading: false,
-      })
+    it('shows a Reopen button on a closed epic', async () => {
+      _epicData = makeEpic({ status: EpicStatus.Closed })
 
       renderPage()
 
-      expect(screen.getByTestId('reopen-epic-trigger')).toBeTruthy()
+      await screen.findByTestId('reopen-epic-trigger')
     })
 
-    it('does not show a Reopen button on a non-terminal epic', () => {
-      mocks.useEpic.mockReturnValue({
-        data: makeEpic({ status: EpicStatus.Idle }),
-        isLoading: false,
-      })
+    it('does not show a Reopen button on a non-terminal epic', async () => {
+      _epicData = makeEpic({ status: EpicStatus.Idle })
 
       renderPage()
 
+      await screen.findByTestId('epic-number')
       expect(screen.queryByTestId('reopen-epic-trigger')).toBeNull()
     })
 
-    it('invokes the reopen mutation with the epic id on click', () => {
-      mocks.useEpic.mockReturnValue({
-        data: makeEpic({ status: EpicStatus.Done }),
-        isLoading: false,
-      })
+    it('invokes the reopen mutation with the epic id on click', async () => {
+      _epicData = makeEpic({ status: EpicStatus.Done })
 
       renderPage()
+
+      await screen.findByTestId('reopen-epic-trigger')
+      fireEvent.click(screen.getByTestId('reopen-epic-trigger'))
+
+      await vi.waitFor(() => expect(_reopenEpicHandler).toHaveBeenCalledWith('epic-12345678'))
+    })
+
+    it('disables the Reopen button while the mutation is in flight', async () => {
+      _blockReopen = true
+      _epicData = makeEpic({ status: EpicStatus.Closed })
+
+      renderPage()
+      await screen.findByTestId('reopen-epic-trigger')
 
       fireEvent.click(screen.getByTestId('reopen-epic-trigger'))
 
-      expect(reopenMutate).toHaveBeenCalledWith('epic-12345678')
-    })
-
-    it('disables the Reopen button while the mutation is in flight', () => {
-      mocks.useReopenEpic.mockReturnValue({ mutate: reopenMutate, isPending: true })
-      mocks.useEpic.mockReturnValue({
-        data: makeEpic({ status: EpicStatus.Closed }),
-        isLoading: false,
+      await vi.waitFor(() => {
+        const reopenButton = screen.getByTestId('reopen-epic-trigger')
+        expect(reopenButton).toBeDisabled()
+        expect(reopenButton).toHaveTextContent(/Reopening/)
       })
-
-      renderPage()
-
-      const reopenButton = screen.getByTestId('reopen-epic-trigger')
-      expect(reopenButton).toBeDisabled()
-      expect(reopenButton).toHaveTextContent(/Reopening/)
     })
   })
 })
 
 describe('EpicDetailPage lifecycle header actions', () => {
-  const addMutate = vi.fn()
-  const removeMutate = vi.fn()
-  const startMutate = vi.fn()
-  const doneMutate = vi.fn()
-  const closeMutate = vi.fn()
-  const updateMutate = vi.fn()
-  const pauseMutate = vi.fn()
-  const resumeMutate = vi.fn()
-  const reopenMutate = vi.fn()
-  const startEpicMutate = vi.fn()
-
-  function makeEpic(overrides: Record<string, unknown> = {}) {
-    return {
-      id: 'epic-12345678',
-      number: null,
-      title: 'Epic title',
-      description: 'Epic description',
-      priority: 'p1',
-      status: EpicStatus.Idle,
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
-      progress: {
-        deliveredCount: 0,
-        totalIssueCount: 0,
-        blockedIssues: [],
-        activeIssues: [],
-        nextIssue: null,
-        nextIssueReason: null,
-        readyToMarkDone: false,
-      },
-      linkedIssues: [],
-      ...overrides,
-    }
-  }
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useIssues.mockReturnValue({ data: issues })
-    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
-    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
-    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
-    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
-    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
-    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
-    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
-    mocks.useReopenEpic.mockReturnValue({ mutate: reopenMutate, isPending: false })
-    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+    _issuesData = issues
+    _blockReopen = false
+    _blockStart = false
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('renders Start Epic as the only lifecycle action when the epic is idle', () => {
-    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Idle }), isLoading: false })
+  it('renders Start Epic as the only lifecycle action when the epic is idle', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Idle })
 
     renderPage()
 
-    const start = screen.getByTestId('start-epic-trigger')
+    const start = await screen.findByTestId('start-epic-trigger')
     expect(start).toBeTruthy()
     expect(start).toHaveTextContent('Start Epic')
 
@@ -699,23 +547,26 @@ describe('EpicDetailPage lifecycle header actions', () => {
     expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
   })
 
-  it('invokes the start mutation with the epic id when Start Epic is clicked', () => {
-    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Idle }), isLoading: false })
+  it('invokes the start mutation with the epic id when Start Epic is clicked', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Idle })
 
     renderPage()
 
+    await screen.findByTestId('start-epic-trigger')
     fireEvent.click(screen.getByTestId('start-epic-trigger'))
 
-    expect(startEpicMutate).toHaveBeenCalledTimes(1)
-    expect(startEpicMutate).toHaveBeenCalledWith('epic-12345678')
+    await vi.waitFor(() => {
+      expect(_startEpicHandler).toHaveBeenCalledTimes(1)
+      expect(_startEpicHandler).toHaveBeenCalledWith('epic-12345678')
+    })
   })
 
-  it('renders Pause as the only lifecycle action when the epic is running', () => {
-    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Running }), isLoading: false })
+  it('renders Pause as the only lifecycle action when the epic is running', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Running })
 
     renderPage()
 
-    const pause = screen.getByTestId('pause-epic-trigger')
+    const pause = await screen.findByTestId('pause-epic-trigger')
     expect(pause).toBeTruthy()
     expect(pause).toHaveTextContent('Pause')
 
@@ -723,12 +574,12 @@ describe('EpicDetailPage lifecycle header actions', () => {
     expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
   })
 
-  it('renders Resume as the only lifecycle action when the epic is paused', () => {
-    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Paused }), isLoading: false })
+  it('renders Resume as the only lifecycle action when the epic is paused', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Paused })
 
     renderPage()
 
-    const resume = screen.getByTestId('resume-epic-trigger')
+    const resume = await screen.findByTestId('resume-epic-trigger')
     expect(resume).toBeTruthy()
     expect(resume).toHaveTextContent('Resume')
 
@@ -736,25 +587,23 @@ describe('EpicDetailPage lifecycle header actions', () => {
     expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
   })
 
-  it('renders Reopen as the lifecycle action when the epic is done', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        status: EpicStatus.Done,
-        progress: {
-          deliveredCount: 1,
-          totalIssueCount: 1,
-          blockedIssues: [],
-          activeIssues: [],
-          nextIssue: null,
-          nextIssueReason: null,
-          readyToMarkDone: true,
-        },
-      }),
-      isLoading: false,
+  it('renders Reopen as the lifecycle action when the epic is done', async () => {
+    _epicData = makeEpic({
+      status: EpicStatus.Done,
+      progress: {
+        deliveredCount: 1,
+        totalIssueCount: 1,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: true,
+      },
     })
 
     renderPage()
 
+    await screen.findByTestId('reopen-epic-trigger')
     expect(screen.getByTestId('reopen-epic-trigger')).toHaveTextContent('Reopen')
     expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
     expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
@@ -763,11 +612,12 @@ describe('EpicDetailPage lifecycle header actions', () => {
     expect(screen.queryByTestId('close-epic-trigger')).toBeNull()
   })
 
-  it('renders Reopen as the lifecycle action when the epic is closed', () => {
-    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Closed }), isLoading: false })
+  it('renders Reopen as the lifecycle action when the epic is closed', async () => {
+    _epicData = makeEpic({ status: EpicStatus.Closed })
 
     renderPage()
 
+    await screen.findByTestId('reopen-epic-trigger')
     expect(screen.getByTestId('reopen-epic-trigger')).toHaveTextContent('Reopen')
     expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
     expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
@@ -776,14 +626,19 @@ describe('EpicDetailPage lifecycle header actions', () => {
     expect(screen.queryByTestId('close-epic-trigger')).toBeNull()
   })
 
-  it('shows the Start Epic label with Starting... and disables the trigger while pending', () => {
-    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: true })
-    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Idle }), isLoading: false })
+  it('shows the Start Epic label with Starting... and disables the trigger while pending', async () => {
+    _blockStart = true
+    _epicData = makeEpic({ status: EpicStatus.Idle })
 
     renderPage()
+    await screen.findByTestId('start-epic-trigger')
 
-    const start = screen.getByTestId('start-epic-trigger')
-    expect(start).toHaveTextContent('Starting...')
-    expect(start).toBeDisabled()
+    fireEvent.click(screen.getByTestId('start-epic-trigger'))
+
+    await vi.waitFor(() => {
+      const start = screen.getByTestId('start-epic-trigger')
+      expect(start).toHaveTextContent('Starting...')
+      expect(start).toBeDisabled()
+    })
   })
 })
