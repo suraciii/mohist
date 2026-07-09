@@ -1,43 +1,18 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
+import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { SidebarProvider } from '../../../shared/ui/components/sidebar'
 import type { SystemInfo } from '../../../entities/settings'
 import { SystemSettingsSection } from './SystemSettingsSection'
+import { server, useMswServer } from '../../../../tests/support/msw'
 
-const useLogLevelMock = vi.fn()
-const useSetLogLevelMock = vi.fn()
-const useSystemInfoMock = vi.fn()
-const useSystemUpdateMock = vi.fn()
-const useSystemUpdateStatusMock = vi.fn()
-
-vi.mock('../../../entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/settings')>()
-  return {
-    ...actual,
-    useLogLevel: (...args: unknown[]) => useLogLevelMock(...args),
-    useSetLogLevel: () => useSetLogLevelMock(),
-    useSystemInfo: (...args: unknown[]) => useSystemInfoMock(...args),
-    useSystemUpdate: () => useSystemUpdateMock(),
-    useSystemUpdateStatus: (...args: unknown[]) => useSystemUpdateStatusMock(...args),
-  }
-})
-
-function renderSection() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <SidebarProvider>
-          <SystemSettingsSection />
-        </SidebarProvider>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  )
-}
+const SYSTEM_INFO = '*/api/system/info'
+const CONFIG = '*/api/config'
+const SYSTEM_UPDATE_STATUS = '*/api/system/update/status'
 
 const baseSystemInfo: SystemInfo = {
   running: {
@@ -75,23 +50,39 @@ const baseSystemInfo: SystemInfo = {
   },
 }
 
-beforeEach(() => {
-  useLogLevelMock.mockReset()
-  useSetLogLevelMock.mockReset()
-  useSystemInfoMock.mockReset()
-  useSystemUpdateMock.mockReset()
-  useSystemUpdateStatusMock.mockReset()
+let systemInfoData: SystemInfo = baseSystemInfo
 
-  useLogLevelMock.mockReturnValue({ data: { level: 'INFO' }, isLoading: false, isError: false, error: null })
-  useSetLogLevelMock.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
-  useSystemInfoMock.mockReturnValue({ data: baseSystemInfo, isLoading: false, isError: false, error: null, refetch: vi.fn() })
-  useSystemUpdateMock.mockReturnValue({ mutateAsync: vi.fn(), isPending: false })
-  useSystemUpdateStatusMock.mockReturnValue({ data: { hasJob: false, job: null }, refetch: vi.fn() })
-})
+useMswServer(
+  http.get(SYSTEM_INFO, () => HttpResponse.json({ success: true, data: systemInfoData })),
+  http.get(CONFIG, () => HttpResponse.json({ success: true, data: { logLevel: 'INFO' } })),
+  http.get(SYSTEM_UPDATE_STATUS, () => HttpResponse.json({ success: true, data: { hasJob: false, job: null } })),
+)
+
+function mockSystemInfo(data: SystemInfo) {
+  systemInfoData = data
+  server.use(http.get(SYSTEM_INFO, () => HttpResponse.json({ success: true, data })))
+}
+
+function mockSystemInfoError() {
+  server.use(http.get(SYSTEM_INFO, () => HttpResponse.json({ success: false, error: 'boom' }, { status: 500 })))
+}
+
+function renderSection() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <SidebarProvider>
+          <SystemSettingsSection />
+        </SidebarProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
 
 afterEach(() => {
   cleanup()
-  vi.clearAllMocks()
+  mockSystemInfo(baseSystemInfo)
 })
 
 describe('SystemSettingsSection (T-005)', () => {
@@ -104,13 +95,7 @@ describe('SystemSettingsSection (T-005)', () => {
   })
 
   it('falls back to em-dash when systemInfo.paths.logs is null', async () => {
-    useSystemInfoMock.mockReturnValue({
-      data: { ...baseSystemInfo, paths: { ...baseSystemInfo.paths, logs: null } },
-      isLoading: false,
-      isError: false,
-      error: null,
-      refetch: vi.fn(),
-    })
+    mockSystemInfo({ ...baseSystemInfo, paths: { ...baseSystemInfo.paths, logs: null } })
 
     renderSection()
 
@@ -119,13 +104,7 @@ describe('SystemSettingsSection (T-005)', () => {
   })
 
   it('falls back to em-dash when systemInfo is unavailable', async () => {
-    useSystemInfoMock.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isError: true,
-      error: new Error('boom'),
-      refetch: vi.fn(),
-    })
+    mockSystemInfoError()
 
     renderSection()
 
