@@ -1,38 +1,48 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '../../../../tests/test-utils'
+import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useMswServer } from '../../../../tests/support/msw'
 import { LabelCatalogSection } from './LabelCatalogSection'
-import type { LabelDefinition } from '../../../entities/label-catalog'
+import type { LabelDefinition, LabelDefinitionInput, LabelDefinitionPatch } from '../../../entities/label-catalog'
 
-const useLabelCatalogMock = vi.fn()
-const useCreateLabelDefinitionMock = vi.fn()
-const useUpdateLabelDefinitionMock = vi.fn()
-const useDeleteLabelDefinitionMock = vi.fn()
+let _catalogData: LabelDefinition[] = []
+let _createError: string | null = null
+let _updateError: string | null = null
+const createCaptures: LabelDefinitionInput[] = []
+const updateCaptures: Array<{ key: string; patch: LabelDefinitionPatch }> = []
+const deleteCaptures: string[] = []
 
-const createMutateMock = vi.fn()
-const updateMutateMock = vi.fn()
-const removeMutateMock = vi.fn()
-
-vi.mock('../../../entities/label-catalog', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/label-catalog')>()
-  return {
-    ...actual,
-    useLabelCatalog: () => useLabelCatalogMock(),
-    useCreateLabelDefinition: () => useCreateLabelDefinitionMock(),
-    useUpdateLabelDefinition: () => useUpdateLabelDefinitionMock(),
-    useDeleteLabelDefinition: () => useDeleteLabelDefinitionMock(),
-  }
-})
+useMswServer(
+  http.get('/api/projects/:projectId/labels/catalog', () =>
+    HttpResponse.json({ success: true, data: _catalogData }),
+  ),
+  http.post('/api/projects/:projectId/labels/catalog', async ({ request }) => {
+    const body = await request.json() as LabelDefinitionInput
+    createCaptures.push(body)
+    if (_createError) {
+      return HttpResponse.json({ success: false, error: _createError }, { status: 400 })
+    }
+    return HttpResponse.json({ success: true, data: body })
+  }),
+  http.patch('/api/projects/:projectId/labels/catalog/:key', async ({ params, request }) => {
+    const key = params.key as string
+    const body = await request.json() as LabelDefinitionPatch
+    updateCaptures.push({ key, patch: body })
+    if (_updateError) {
+      return HttpResponse.json({ success: false, error: _updateError }, { status: 400 })
+    }
+    return HttpResponse.json({ success: true, data: { key, ...body } })
+  }),
+  http.delete('/api/projects/:projectId/labels/catalog/:key', ({ params }) => {
+    deleteCaptures.push(params.key as string)
+    return new HttpResponse(null, { status: 204 })
+  }),
+)
 
 function renderSection() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <LabelCatalogSection />
-    </QueryClientProvider>,
-  )
+  return render(<LabelCatalogSection />)
 }
 
 const refactorDef: LabelDefinition = {
@@ -48,52 +58,35 @@ const moduleDef: LabelDefinition = {
 
 describe('LabelCatalogSection', () => {
   beforeEach(() => {
-    useLabelCatalogMock.mockReset()
-    useCreateLabelDefinitionMock.mockReset()
-    useUpdateLabelDefinitionMock.mockReset()
-    useDeleteLabelDefinitionMock.mockReset()
-    createMutateMock.mockReset()
-    updateMutateMock.mockReset()
-    removeMutateMock.mockReset()
-
-    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
-    useCreateLabelDefinitionMock.mockReturnValue({
-      mutate: createMutateMock,
-      isPending: false,
-    })
-    useUpdateLabelDefinitionMock.mockReturnValue({
-      mutate: updateMutateMock,
-      isPending: false,
-    })
-    useDeleteLabelDefinitionMock.mockReturnValue({
-      mutate: removeMutateMock,
-      isPending: false,
-    })
+    _catalogData = []
+    _createError = null
+    _updateError = null
+    createCaptures.length = 0
+    updateCaptures.length = 0
+    deleteCaptures.length = 0
   })
 
   afterEach(() => {
-    cleanup()
     vi.clearAllMocks()
   })
 
-  it('renders the empty state when the catalog has no entries', () => {
-    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
-
+  it('renders the empty state when the catalog has no entries', async () => {
     renderSection()
 
-    expect(screen.getByText(/Define the labels your project suggests/i)).toBeInTheDocument()
-    expect(screen.getAllByText(/No label definitions yet/i).length).toBeGreaterThan(0)
+    expect(await screen.findByText(/Define the labels your project suggests/i)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getAllByText(/No label definitions yet/i).length).toBeGreaterThan(0)
+    })
   })
 
-  it('lists every catalog entry with key, description, and supportedValues', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [refactorDef, moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
+  it('lists every catalog entry with key, description, and supportedValues', async () => {
+    _catalogData = [refactorDef, moduleDef]
 
     renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-key-refactor')).toBeInTheDocument()
+    })
 
     expect(screen.getByTestId('label-catalog-key-refactor')).toHaveTextContent('refactor')
     expect(screen.getByTestId('label-catalog-description-refactor')).toHaveTextContent('A refactoring task')
@@ -104,24 +97,21 @@ describe('LabelCatalogSection', () => {
     expect(screen.getByTestId('label-catalog-value-module-ui')).toBeInTheDocument()
   })
 
-  it('shows edit and delete actions for entries', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
+  it('shows edit and delete actions for entries', async () => {
+    _catalogData = [moduleDef]
 
     renderSection()
 
-    expect(screen.getByTestId('label-catalog-edit-button-module')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-edit-button-module')).toBeInTheDocument()
+    })
     expect(screen.getByTestId('label-catalog-delete-button-module')).toBeInTheDocument()
   })
 
-  it('adds a definition via POST when the form is submitted', () => {
-    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
-
+  it('adds a definition via POST when the form is submitted', async () => {
     renderSection()
+
+    await screen.findByTestId('label-catalog-add-key')
 
     fireEvent.change(screen.getByTestId('label-catalog-add-key'), {
       target: { value: 'module' },
@@ -134,19 +124,18 @@ describe('LabelCatalogSection', () => {
     })
     fireEvent.click(screen.getByTestId('label-catalog-add-submit'))
 
-    expect(createMutateMock).toHaveBeenCalledTimes(1)
-    const call = createMutateMock.mock.calls[0][0]
-    expect(call).toEqual({
+    await waitFor(() => expect(createCaptures).toHaveLength(1))
+    expect(createCaptures[0]).toEqual({
       key: 'module',
       description: 'Classifies the subsystem',
       supportedValues: ['auth', 'ui'],
     })
   })
 
-  it('rejects an invalid key (uppercase) with an in-page validation error', () => {
-    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
-
+  it('rejects an invalid key (uppercase) with an in-page validation error', async () => {
     renderSection()
+
+    await screen.findByTestId('label-catalog-add-key')
 
     fireEvent.change(screen.getByTestId('label-catalog-add-key'), {
       target: { value: 'Module' },
@@ -157,13 +146,13 @@ describe('LabelCatalogSection', () => {
     fireEvent.click(screen.getByTestId('label-catalog-add-submit'))
 
     expect(screen.getByTestId('label-catalog-add-error')).toHaveTextContent(/lowercase alphanumerics/)
-    expect(createMutateMock).not.toHaveBeenCalled()
+    expect(createCaptures).toHaveLength(0)
   })
 
-  it('rejects a leading-dash key with an in-page validation error', () => {
-    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
-
+  it('rejects a leading-dash key with an in-page validation error', async () => {
     renderSection()
+
+    await screen.findByTestId('label-catalog-add-key')
 
     fireEvent.change(screen.getByTestId('label-catalog-add-key'), {
       target: { value: '-mod' },
@@ -174,13 +163,13 @@ describe('LabelCatalogSection', () => {
     fireEvent.click(screen.getByTestId('label-catalog-add-submit'))
 
     expect(screen.getByTestId('label-catalog-add-error')).toHaveTextContent(/lowercase alphanumerics/)
-    expect(createMutateMock).not.toHaveBeenCalled()
+    expect(createCaptures).toHaveLength(0)
   })
 
-  it('rejects a whitespace-only description with an in-page validation error', () => {
-    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
-
+  it('rejects a whitespace-only description with an in-page validation error', async () => {
     renderSection()
+
+    await screen.findByTestId('label-catalog-add-key')
 
     fireEvent.change(screen.getByTestId('label-catalog-add-key'), {
       target: { value: 'module' },
@@ -191,13 +180,13 @@ describe('LabelCatalogSection', () => {
     fireEvent.click(screen.getByTestId('label-catalog-add-submit'))
 
     expect(screen.getByTestId('label-catalog-add-error')).toHaveTextContent(/non-empty/)
-    expect(createMutateMock).not.toHaveBeenCalled()
+    expect(createCaptures).toHaveLength(0)
   })
 
-  it('rejects supportedValues containing only empty entries', () => {
-    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
-
+  it('rejects supportedValues containing only empty entries', async () => {
     renderSection()
+
+    await screen.findByTestId('label-catalog-add-key')
 
     fireEvent.change(screen.getByTestId('label-catalog-add-key'), {
       target: { value: 'module' },
@@ -211,13 +200,13 @@ describe('LabelCatalogSection', () => {
     fireEvent.click(screen.getByTestId('label-catalog-add-submit'))
 
     expect(screen.getByTestId('label-catalog-add-error')).toHaveTextContent(/at least one supported value/i)
-    expect(createMutateMock).not.toHaveBeenCalled()
+    expect(createCaptures).toHaveLength(0)
   })
 
-  it('rejects supportedValues with mixed empty comma entries before adding', () => {
-    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
-
+  it('rejects supportedValues with mixed empty comma entries before adding', async () => {
     renderSection()
+
+    await screen.findByTestId('label-catalog-add-key')
 
     fireEvent.change(screen.getByTestId('label-catalog-add-key'), {
       target: { value: 'module' },
@@ -231,19 +220,17 @@ describe('LabelCatalogSection', () => {
     fireEvent.click(screen.getByTestId('label-catalog-add-submit'))
 
     expect(screen.getByTestId('label-catalog-add-error')).toHaveTextContent(/empty entries/i)
-    expect(createMutateMock).not.toHaveBeenCalled()
+    expect(createCaptures).toHaveLength(0)
   })
 
-  it('opens the edit form with the key field read-only and pre-filled values', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
+  it('opens the edit form with the key field read-only and pre-filled values', async () => {
+    _catalogData = [moduleDef]
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-edit-button-module')).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByTestId('label-catalog-edit-button-module'))
 
     expect(screen.getByTestId('label-catalog-edit-module')).toBeInTheDocument()
@@ -259,16 +246,14 @@ describe('LabelCatalogSection', () => {
     )
   })
 
-  it('PATCHes the description and supportedValues on save', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
+  it('PATCHes the description and supportedValues on save', async () => {
+    _catalogData = [moduleDef]
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-edit-button-module')).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByTestId('label-catalog-edit-button-module'))
 
     fireEvent.change(screen.getByTestId('label-catalog-edit-description-module'), {
@@ -279,110 +264,100 @@ describe('LabelCatalogSection', () => {
     })
     fireEvent.click(screen.getByTestId('label-catalog-edit-save-module'))
 
-    expect(updateMutateMock).toHaveBeenCalledTimes(1)
-    const [payload, opts] = updateMutateMock.mock.calls[0]
-    expect(payload).toEqual({
+    await waitFor(() => expect(updateCaptures).toHaveLength(1))
+    expect(updateCaptures[0]).toEqual({
       key: 'module',
       patch: { description: 'updated description', supportedValues: ['core', 'infra'] },
     })
-    expect(typeof opts.onSuccess).toBe('function')
   })
 
-  it('rejects a whitespace-only description in edit form before sending PATCH', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
+  it('rejects a whitespace-only description in edit form before sending PATCH', async () => {
+    _catalogData = [moduleDef]
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-edit-button-module')).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByTestId('label-catalog-edit-button-module'))
+
     fireEvent.change(screen.getByTestId('label-catalog-edit-description-module'), {
       target: { value: '   ' },
     })
     fireEvent.click(screen.getByTestId('label-catalog-edit-save-module'))
 
     expect(screen.getByTestId('label-catalog-edit-error-module')).toHaveTextContent(/non-empty/)
-    expect(updateMutateMock).not.toHaveBeenCalled()
+    expect(updateCaptures).toHaveLength(0)
   })
 
-  it('rejects supportedValues with blank newline entries before editing', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
+  it('rejects supportedValues with blank newline entries before editing', async () => {
+    _catalogData = [moduleDef]
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-edit-button-module')).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByTestId('label-catalog-edit-button-module'))
+
     fireEvent.change(screen.getByTestId('label-catalog-edit-values-module'), {
       target: { value: 'auth\n\nui' },
     })
     fireEvent.click(screen.getByTestId('label-catalog-edit-save-module'))
 
     expect(screen.getByTestId('label-catalog-edit-error-module')).toHaveTextContent(/empty entries/i)
-    expect(updateMutateMock).not.toHaveBeenCalled()
+    expect(updateCaptures).toHaveLength(0)
   })
 
-  it('sends PATCH with supportedValues:[] to clear values when the textarea is emptied', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
+  it('sends PATCH with supportedValues:[] to clear values when the textarea is emptied', async () => {
+    _catalogData = [moduleDef]
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-edit-button-module')).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByTestId('label-catalog-edit-button-module'))
+
     fireEvent.change(screen.getByTestId('label-catalog-edit-values-module'), {
       target: { value: '' },
     })
     fireEvent.click(screen.getByTestId('label-catalog-edit-save-module'))
 
-    expect(updateMutateMock).toHaveBeenCalledTimes(1)
-    const [payload] = updateMutateMock.mock.calls[0]
-    expect(payload.patch).toEqual({ description: 'Classifies the subsystem', supportedValues: [] })
+    await waitFor(() => expect(updateCaptures).toHaveLength(1))
+    expect(updateCaptures[0].patch).toEqual({ description: 'Classifies the subsystem', supportedValues: [] })
   })
 
-  it('deletes an entry via DELETE only after the shared AlertDialog is confirmed (T-002)', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
+  it('deletes an entry via DELETE only after the shared AlertDialog is confirmed (T-002)', async () => {
+    _catalogData = [moduleDef]
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-delete-button-module')).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByTestId('label-catalog-delete-button-module'))
 
     const dialog = screen.getByTestId('label-catalog-delete-alert')
     expect(dialog).toBeInTheDocument()
     expect(dialog).toHaveAttribute('data-tone', 'destructive')
 
-    expect(removeMutateMock).not.toHaveBeenCalled()
+    expect(deleteCaptures).toHaveLength(0)
 
     fireEvent.click(screen.getByTestId('label-catalog-delete-alert-confirm'))
 
-    expect(removeMutateMock).toHaveBeenCalledTimes(1)
-    expect(removeMutateMock.mock.calls[0][0]).toBe('module')
+    await waitFor(() => expect(deleteCaptures).toHaveLength(1))
+    expect(deleteCaptures[0]).toBe('module')
   })
 
-  it('does not invoke the delete mutation when the AlertDialog is cancelled (T-002)', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
+  it('does not invoke the delete mutation when the AlertDialog is cancelled (T-002)', async () => {
+    _catalogData = [moduleDef]
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-delete-button-module')).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByTestId('label-catalog-delete-button-module'))
 
     const dialog = screen.getByTestId('label-catalog-delete-alert')
@@ -390,20 +365,19 @@ describe('LabelCatalogSection', () => {
 
     fireEvent.click(screen.getByTestId('label-catalog-delete-alert-cancel'))
 
-    expect(removeMutateMock).not.toHaveBeenCalled()
+    expect(deleteCaptures).toHaveLength(0)
   })
 
-  it('renders a single shared AlertDialog instance for the whole section, not per row (T-002)', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef, refactorDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
+  it('renders a single shared AlertDialog instance for the whole section, not per row (T-002)', async () => {
+    _catalogData = [moduleDef, refactorDef]
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-delete-button-module')).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByTestId('label-catalog-delete-button-module'))
+
     const dialog = screen.getByTestId('label-catalog-delete-alert')
     expect(dialog).toBeInTheDocument()
 
@@ -412,16 +386,11 @@ describe('LabelCatalogSection', () => {
   })
 
   it('surfaces server errors from create mutation as an in-page alert', async () => {
-    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
-    createMutateMock.mockImplementation((_input: unknown, opts: { onError?: (err: Error) => void }) => {
-      opts.onError?.(new Error("Key 'module' already exists in the project catalog."))
-    })
-    useCreateLabelDefinitionMock.mockReturnValue({
-      mutate: createMutateMock,
-      isPending: false,
-    })
+    _createError = "Key 'module' already exists in the project catalog."
 
     renderSection()
+
+    await screen.findByTestId('label-catalog-add-key')
 
     fireEvent.change(screen.getByTestId('label-catalog-add-key'), {
       target: { value: 'module' },
@@ -439,22 +408,14 @@ describe('LabelCatalogSection', () => {
   })
 
   it('surfaces server errors from update mutation inside the edit form', async () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
-    updateMutateMock.mockImplementation((_payload: unknown, opts: { onError?: (err: Error) => void }) => {
-      opts.onError?.(new Error("Key 'module' not found in the project catalog."))
-    })
-    useUpdateLabelDefinitionMock.mockReturnValue({
-      mutate: updateMutateMock,
-      isPending: false,
-    })
+    _catalogData = [moduleDef]
+    _updateError = "Key 'module' not found in the project catalog."
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-edit-button-module')).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByTestId('label-catalog-edit-button-module'))
     fireEvent.click(screen.getByTestId('label-catalog-edit-save-module'))
 
@@ -464,17 +425,15 @@ describe('LabelCatalogSection', () => {
   })
 
   it('shows the loading skeleton while catalog is loading', () => {
-    useLabelCatalogMock.mockReturnValue({ data: undefined, isLoading: true, isError: false, refetch: vi.fn() })
-
     renderSection()
 
     expect(screen.getByRole('status')).toBeInTheDocument()
   })
 
-  it('wires aria-invalid + aria-describedby only on the invalid add-form field (T-003)', () => {
-    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
-
+  it('wires aria-invalid + aria-describedby only on the invalid add-form field (T-003)', async () => {
     renderSection()
+
+    await screen.findByTestId('label-catalog-add-key')
 
     const keyInput = screen.getByTestId('label-catalog-add-key')
     const descriptionInput = screen.getByTestId('label-catalog-add-description')
@@ -499,16 +458,14 @@ describe('LabelCatalogSection', () => {
     expect(valuesInput).not.toHaveAttribute('aria-describedby')
   })
 
-  it('wires aria-invalid + aria-describedby only on the invalid edit-form field (T-003)', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
+  it('wires aria-invalid + aria-describedby only on the invalid edit-form field (T-003)', async () => {
+    _catalogData = [moduleDef]
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-edit-button-module')).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByTestId('label-catalog-edit-button-module'))
     fireEvent.change(screen.getByTestId('label-catalog-edit-description-module'), {
       target: { value: '   ' },
@@ -529,18 +486,14 @@ describe('LabelCatalogSection', () => {
   })
 
   it('shows edit server errors as form-level alerts without marking every edit field invalid (T-003)', async () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [moduleDef],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
-    updateMutateMock.mockImplementation((_payload: unknown, opts: { onError?: (err: Error) => void }) => {
-      opts.onError?.(new Error("Key 'module' not found in the project catalog."))
-    })
+    _catalogData = [moduleDef]
+    _updateError = "Key 'module' not found in the project catalog."
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByTestId('label-catalog-edit-button-module')).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByTestId('label-catalog-edit-button-module'))
     fireEvent.click(screen.getByTestId('label-catalog-edit-save-module'))
 
@@ -556,43 +509,33 @@ describe('LabelCatalogSection', () => {
     expect(valuesInput).not.toHaveAttribute('aria-describedby')
   })
 
-  it('renders an inline New definition CTA when the catalog is empty (T-006)', () => {
-    useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
-
+  it('renders an inline New definition CTA when the catalog is empty (T-006)', async () => {
     renderSection()
 
-    const newButton = screen.getByTestId('label-catalog-empty-new-button')
+    const newButton = await screen.findByTestId('label-catalog-empty-new-button')
     expect(newButton).toBeInTheDocument()
     expect(newButton).toHaveTextContent(/New definition/)
   })
 
   describe('Search input (T-007)', () => {
-    it('renders a search input with an accessible label when a project is selected', () => {
-      useLabelCatalogMock.mockReturnValue({
-        data: [moduleDef, refactorDef],
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
+    it('renders a search input with an accessible label when a project is selected', async () => {
+      _catalogData = [moduleDef, refactorDef]
 
       renderSection()
 
-      const search = screen.getByTestId('label-catalog-search')
+      const search = await screen.findByTestId('label-catalog-search')
       expect(search).toBeInTheDocument()
       expect(search.tagName).toBe('INPUT')
       expect(search.getAttribute('aria-label')).toMatch(/search/i)
       expect(search.getAttribute('placeholder')).not.toBeNull()
     })
 
-    it('filters the displayed list by key when a matching query is entered', () => {
-      useLabelCatalogMock.mockReturnValue({
-        data: [moduleDef, refactorDef],
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
+    it('filters the displayed list by key when a matching query is entered', async () => {
+      _catalogData = [moduleDef, refactorDef]
 
       renderSection()
+
+      await screen.findByTestId('label-catalog-search')
 
       fireEvent.change(screen.getByTestId('label-catalog-search'), {
         target: { value: 'module' },
@@ -602,15 +545,12 @@ describe('LabelCatalogSection', () => {
       expect(screen.queryByTestId('label-catalog-row-refactor')).not.toBeInTheDocument()
     })
 
-    it('filters the displayed list by description when a matching query is entered', () => {
-      useLabelCatalogMock.mockReturnValue({
-        data: [moduleDef, refactorDef],
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
+    it('filters the displayed list by description when a matching query is entered', async () => {
+      _catalogData = [moduleDef, refactorDef]
 
       renderSection()
+
+      await screen.findByTestId('label-catalog-search')
 
       fireEvent.change(screen.getByTestId('label-catalog-search'), {
         target: { value: 'subsystem' },
@@ -620,15 +560,12 @@ describe('LabelCatalogSection', () => {
       expect(screen.queryByTestId('label-catalog-row-refactor')).not.toBeInTheDocument()
     })
 
-    it('filters the displayed list by a supported value when a matching query is entered', () => {
-      useLabelCatalogMock.mockReturnValue({
-        data: [moduleDef, refactorDef],
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
+    it('filters the displayed list by a supported value when a matching query is entered', async () => {
+      _catalogData = [moduleDef, refactorDef]
 
       renderSection()
+
+      await screen.findByTestId('label-catalog-search')
 
       fireEvent.change(screen.getByTestId('label-catalog-search'), {
         target: { value: 'auth' },
@@ -638,15 +575,12 @@ describe('LabelCatalogSection', () => {
       expect(screen.queryByTestId('label-catalog-row-refactor')).not.toBeInTheDocument()
     })
 
-    it('restores the full list when the search query is cleared', () => {
-      useLabelCatalogMock.mockReturnValue({
-        data: [moduleDef, refactorDef],
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
+    it('restores the full list when the search query is cleared', async () => {
+      _catalogData = [moduleDef, refactorDef]
 
       renderSection()
+
+      await screen.findByTestId('label-catalog-search')
 
       fireEvent.change(screen.getByTestId('label-catalog-search'), {
         target: { value: 'module' },
@@ -660,15 +594,12 @@ describe('LabelCatalogSection', () => {
       expect(screen.getByTestId('label-catalog-row-refactor')).toBeInTheDocument()
     })
 
-    it('shows a "no matches" message without the inline New definition CTA when the search filter is the only reason the list is empty', () => {
-      useLabelCatalogMock.mockReturnValue({
-        data: [moduleDef, refactorDef],
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
+    it('shows a "no matches" message without the inline New definition CTA when the search filter is the only reason the list is empty', async () => {
+      _catalogData = [moduleDef, refactorDef]
 
       renderSection()
+
+      await screen.findByTestId('label-catalog-search')
 
       fireEvent.change(screen.getByTestId('label-catalog-search'), {
         target: { value: 'no-such-key' },

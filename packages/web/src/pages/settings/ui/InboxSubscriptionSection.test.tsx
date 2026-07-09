@@ -1,54 +1,48 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen } from '@testing-library/react'
+import { render, screen } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { afterEach, describe, expect, it } from 'vitest'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { InboxSubscriptionSection } from './InboxSubscriptionSection'
+import type { InboxSubscription } from '../../../entities/inbox'
 
-const useInboxSubscriptionMock = vi.fn()
-const useUpdateInboxSubscriptionMock = vi.fn()
-
-vi.mock('../../../entities/inbox', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/inbox')>()),
-  useInboxSubscription: (...args: unknown[]) => useInboxSubscriptionMock(...args),
-  useUpdateInboxSubscription: (...args: unknown[]) => useUpdateInboxSubscriptionMock(...args),
-}))
-
-function renderSection() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <InboxSubscriptionSection />
-    </QueryClientProvider>,
-  )
-}
-
-beforeEach(() => {
-  useInboxSubscriptionMock.mockReset()
-  useUpdateInboxSubscriptionMock.mockReset()
-})
-
-afterEach(() => {
-  cleanup()
-  vi.clearAllMocks()
-})
-
-const ALL_ENABLED = {
+const ALL_ENABLED: InboxSubscription = {
   workflow_failed: true,
   approval_requested: true,
   issue_started: true,
   issue_completed: true,
 }
 
+let _subscriptionData: InboxSubscription = { ...ALL_ENABLED }
+let _loading = false
+const updateCaptures: Array<Record<string, boolean>> = []
+
+useMswServer(
+  http.get('/api/projects/:projectId/inbox/subscription', () => {
+    if (_loading) return new Promise(() => {})
+    return HttpResponse.json({ success: true, data: _subscriptionData })
+  }),
+  http.put('/api/projects/:projectId/inbox/subscription', async ({ request }) => {
+    const body = await request.json() as Record<string, boolean>
+    updateCaptures.push(body)
+    _subscriptionData = body as unknown as InboxSubscription
+    return HttpResponse.json({ success: true, data: body })
+  }),
+)
+
+afterEach(() => {
+  _subscriptionData = { ...ALL_ENABLED }
+  _loading = false
+  updateCaptures.length = 0
+})
+
 describe('InboxSubscriptionSection', () => {
-  it('renders exactly four toggles with product-facing labels', () => {
-    useInboxSubscriptionMock.mockReturnValue({ data: ALL_ENABLED, isLoading: false })
-    useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: vi.fn() })
+  it('renders exactly four toggles with product-facing labels', async () => {
+    render(<InboxSubscriptionSection />)
 
-    renderSection()
-
-    expect(screen.getByText('Workflow failed')).toBeInTheDocument()
+    expect(await screen.findByText('Workflow failed')).toBeInTheDocument()
     expect(screen.getByText('Approval requested')).toBeInTheDocument()
     expect(screen.getByText('Issue started')).toBeInTheDocument()
     expect(screen.getByText('Issue completed')).toBeInTheDocument()
@@ -57,11 +51,10 @@ describe('InboxSubscriptionSection', () => {
     expect(toggles).toHaveLength(4)
   })
 
-  it('does not display raw event or CloudEvent type names', () => {
-    useInboxSubscriptionMock.mockReturnValue({ data: ALL_ENABLED, isLoading: false })
-    useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: vi.fn() })
+  it('does not display raw event or CloudEvent type names', async () => {
+    render(<InboxSubscriptionSection />)
 
-    renderSection()
+    await screen.findByText('Workflow failed')
 
     for (const forbidden of [
       /workflow_failed/,
@@ -80,11 +73,10 @@ describe('InboxSubscriptionSection', () => {
     }
   })
 
-  it('shows all toggles as checked when subscription data has all enabled (no stored preferences)', () => {
-    useInboxSubscriptionMock.mockReturnValue({ data: ALL_ENABLED, isLoading: false })
-    useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: vi.fn() })
+  it('shows all toggles as checked when subscription data has all enabled (no stored preferences)', async () => {
+    render(<InboxSubscriptionSection />)
 
-    renderSection()
+    await screen.findByText('Workflow failed')
 
     const toggles = screen.getAllByRole('switch')
     for (const toggle of toggles) {
@@ -92,19 +84,22 @@ describe('InboxSubscriptionSection', () => {
     }
   })
 
-  it('shows toggles reflecting persisted state when some are disabled', () => {
-    useInboxSubscriptionMock.mockReturnValue({
-      data: {
-        workflow_failed: false,
-        approval_requested: true,
-        issue_started: false,
-        issue_completed: true,
-      },
-      isLoading: false,
-    })
-    useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: vi.fn() })
+  it('shows toggles reflecting persisted state when some are disabled', async () => {
+    _subscriptionData = {
+      workflow_failed: false,
+      approval_requested: true,
+      issue_started: false,
+      issue_completed: true,
+    }
+    server.use(
+      http.get('/api/projects/:projectId/inbox/subscription', () =>
+        HttpResponse.json({ success: true, data: _subscriptionData }),
+      ),
+    )
 
-    renderSection()
+    render(<InboxSubscriptionSection />)
+
+    await screen.findByText('Workflow failed')
 
     const toggles = screen.getAllByRole('switch')
     expect(toggles[0]).not.toBeChecked()
@@ -114,18 +109,16 @@ describe('InboxSubscriptionSection', () => {
   })
 
   it('calls update mutation with the full subscription when a toggle is changed', async () => {
-    const mutateMock = vi.fn()
-    useInboxSubscriptionMock.mockReturnValue({ data: ALL_ENABLED, isLoading: false })
-    useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: mutateMock })
-
     const user = userEvent.setup()
-    renderSection()
+    render(<InboxSubscriptionSection />)
+
+    await screen.findByText('Workflow failed')
 
     const toggles = screen.getAllByRole('switch')
     await user.click(toggles[0])
 
-    expect(mutateMock).toHaveBeenCalledTimes(1)
-    expect(mutateMock).toHaveBeenCalledWith({
+    expect(updateCaptures).toHaveLength(1)
+    expect(updateCaptures[0]).toEqual({
       workflow_failed: false,
       approval_requested: true,
       issue_started: true,
@@ -134,19 +127,17 @@ describe('InboxSubscriptionSection', () => {
   })
 
   it('preserves earlier rapid toggle changes in later whole-object mutations', async () => {
-    const mutateMock = vi.fn()
-    useInboxSubscriptionMock.mockReturnValue({ data: ALL_ENABLED, isLoading: false })
-    useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: mutateMock })
-
     const user = userEvent.setup()
-    renderSection()
+    render(<InboxSubscriptionSection />)
+
+    await screen.findByText('Workflow failed')
 
     const toggles = screen.getAllByRole('switch')
     await user.click(toggles[0])
     await user.click(toggles[1])
 
-    expect(mutateMock).toHaveBeenCalledTimes(2)
-    expect(mutateMock).toHaveBeenLastCalledWith({
+    expect(updateCaptures).toHaveLength(2)
+    expect(updateCaptures[1]).toEqual({
       workflow_failed: false,
       approval_requested: false,
       issue_started: true,
@@ -155,26 +146,22 @@ describe('InboxSubscriptionSection', () => {
   })
 
   it('shows loading state when subscription is loading', () => {
-    useInboxSubscriptionMock.mockReturnValue({ data: undefined, isLoading: true })
-    useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: vi.fn() })
+    _loading = true
 
-    renderSection()
+    render(<InboxSubscriptionSection />)
 
     expect(screen.getByText('Loading subscription preferences...')).toBeInTheDocument()
     expect(screen.queryByRole('switch')).toBeNull()
   })
 
-  it('each toggle has an accessible name satisfying aria-toggle-field-name', () => {
-    useInboxSubscriptionMock.mockReturnValue({ data: ALL_ENABLED, isLoading: false })
-    useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: vi.fn() })
+  it('each toggle has an accessible name satisfying aria-toggle-field-name', async () => {
+    render(<InboxSubscriptionSection />)
 
-    renderSection()
+    await screen.findByText('Workflow failed')
 
     const toggles = screen.getAllByRole('switch')
     expect(toggles).toHaveLength(4)
 
-    // Each toggle is wrapped in a <Label> so its accessible name comes from
-    // the label text content. The labels render product-facing kind names.
     const labelTexts = toggles.map((t) => t.closest('label')?.textContent ?? '')
     expect(labelTexts).toContain('Workflow failed')
     expect(labelTexts).toContain('Approval requested')
@@ -182,13 +169,10 @@ describe('InboxSubscriptionSection', () => {
     expect(labelTexts).toContain('Issue completed')
   })
 
-  it('uses outcome-oriented settings copy', () => {
-    useInboxSubscriptionMock.mockReturnValue({ data: ALL_ENABLED, isLoading: false })
-    useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: vi.fn() })
+  it('uses outcome-oriented settings copy', async () => {
+    render(<InboxSubscriptionSection />)
 
-    renderSection()
-
-    expect(screen.getByText('Inbox')).toBeInTheDocument()
+    expect(await screen.findByText('Inbox')).toBeInTheDocument()
     expect(screen.getByText('Workflow updates')).toBeInTheDocument()
     expect(screen.getByText('Choose which workflow updates create future inbox items.')).toBeInTheDocument()
   })
