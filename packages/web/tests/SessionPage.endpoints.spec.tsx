@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { TEST_PROJECT, baseRender, screen, waitFor, fireEvent } from './test-utils'
 import { SessionPage } from '../src/pages/session/ui/SessionPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { useMswServer } from './support/msw'
 import React from 'react'
 import type {
   AgentSessionMetadata,
@@ -11,40 +13,47 @@ import type {
   SessionTurn,
 } from '../src/entities/coder-session'
 
-const endpointMocks = vi.hoisted(() => ({
-  sessions: [] as any[],
-  sessionsLoading: false,
-  issue: null as any,
-  metadata: null as AgentSessionMetadata | null,
-  transcript: { turns: [], partCount: 0, lastActivityAt: null } as AgentSessionTranscriptResponse,
-  params: { number: '51', sessionName: 'T-003.1' } as Record<string, string>,
-}))
+let _sessionsData: any[] = []
+let _sessionsLoading = false
+let _issueData: any = null
+let _metadataData: AgentSessionMetadata | null = null
+let _transcriptData: AgentSessionTranscriptResponse = { turns: [], partCount: 0, lastActivityAt: null }
+let _params: Record<string, string> = { number: '51', sessionName: 'T-003.1' }
 
-vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
-  useCoderSessions: () => ({ sessions: endpointMocks.sessions, isLoading: endpointMocks.sessionsLoading }),
-}))
+const _sessionsHandler = vi.fn()
+const _metadataHandler = vi.fn()
+const _transcriptHandler = vi.fn()
 
-vi.mock('../src/entities/issue/api/queries', () => ({
-  useIssue: () => ({ data: endpointMocks.issue }),
-}))
-
-vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/entities/coder-session/api/client')>()),
-  getAgentSessionMetadata: vi.fn(() => Promise.resolve(endpointMocks.metadata)),
-  getAgentSessionTranscript: vi.fn(() => Promise.resolve(endpointMocks.transcript)),
-}))
+useMswServer(
+  http.get('*/api/projects/:projectId/issues/:number/coder-sessions', ({ params }) => {
+    _sessionsHandler(Number(params.number), params.projectId)
+    if (_sessionsLoading) return new Promise(() => {})
+    return HttpResponse.json({ success: true, data: _sessionsData })
+  }),
+  http.get('*/api/projects/:projectId/issues/:number', () => {
+    return HttpResponse.json({ success: true, data: _issueData })
+  }),
+  http.get('*/api/projects/:projectId/issues/:number/sessions/:name', ({ params }) => {
+    _metadataHandler(Number(params.number), params.name, params.projectId)
+    return HttpResponse.json({ success: true, data: _metadataData })
+  }),
+  http.get('*/api/projects/:projectId/issues/:number/sessions/:name/transcript', ({ params }) => {
+    _transcriptHandler(Number(params.number), params.name, params.projectId)
+    return HttpResponse.json({ success: true, data: _transcriptData })
+  }),
+)
 
 const originalScrollTo = Element.prototype.scrollTo
 const queryClients: QueryClient[] = []
 
 beforeEach(() => {
   vi.clearAllMocks()
-  endpointMocks.sessions = []
-  endpointMocks.sessionsLoading = false
-  endpointMocks.issue = null
-  endpointMocks.metadata = null
-  endpointMocks.transcript = { turns: [], partCount: 0, lastActivityAt: null }
-  endpointMocks.params = { number: '51', sessionName: 'T-003.1' }
+  _sessionsData = []
+  _sessionsLoading = false
+  _issueData = null
+  _metadataData = null
+  _transcriptData = { turns: [], partCount: 0, lastActivityAt: null }
+  _params = { number: '51', sessionName: 'T-003.1' }
   Element.prototype.scrollTo = vi.fn()
 })
 
@@ -67,7 +76,7 @@ function createMockQueryClient() {
 function renderWithQueryClient(ui: React.ReactElement) {
   const queryClient = createMockQueryClient()
   queryClients.push(queryClient)
-  const { number, sessionName } = endpointMocks.params
+  const { number, sessionName } = _params
   const initialEntry = `/issues/${number}/workflow/sessions/${sessionName}`
   return baseRender(
     <QueryClientProvider client={queryClient}>
@@ -176,11 +185,11 @@ function setupEndpointMocks({
   issue?: any
   sessionsLoading?: boolean
 } = {}) {
-  endpointMocks.sessions = sessions
-  endpointMocks.metadata = metadata
-  endpointMocks.transcript = transcript
-  endpointMocks.issue = issue
-  endpointMocks.sessionsLoading = sessionsLoading
+  _sessionsData = sessions
+  _metadataData = metadata
+  _transcriptData = transcript
+  _issueData = issue
+  _sessionsLoading = sessionsLoading
 }
 
 function makeSessionsForLookup() {
@@ -207,11 +216,7 @@ function makeSessionsForLookup() {
 describe('T-009: SessionPage split endpoints', () => {
   describe('metadata and transcript endpoint usage', () => {
     it('loads metadata and transcript through project-scoped session key endpoints', async () => {
-      const api = await import('../src/entities/coder-session/api/client')
-      const metadataMock = api.getAgentSessionMetadata as unknown as ReturnType<typeof vi.fn>
-      const transcriptMock = api.getAgentSessionTranscript as unknown as ReturnType<typeof vi.fn>
-
-      endpointMocks.params = { number: '51', sessionName: 'T-003.1' }
+      _params = { number: '51', sessionName: 'T-003.1' }
       setupEndpointMocks({
         sessions: makeSessionsForLookup(),
         metadata: makeMetadata({ id: 'proj/wr/T-003.1', sessionName: 'T-003.1' }),
@@ -222,22 +227,19 @@ describe('T-009: SessionPage split endpoints', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(metadataMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
+        expect(_metadataHandler).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
       })
       await waitFor(() => {
-        expect(transcriptMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
+        expect(_transcriptHandler).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
       })
     })
 
     it('does not require turns or workflowLogs on the metadata response', async () => {
-      const api = await import('../src/entities/coder-session/api/client')
-      const metadataMock = api.getAgentSessionMetadata as unknown as ReturnType<typeof vi.fn>
-      const transcriptMock = api.getAgentSessionTranscript as unknown as ReturnType<typeof vi.fn>
       const metadata = makeMetadata({ id: 'proj/wr/T-003.1', sessionName: 'T-003.1' })
       expect((metadata as unknown as Record<string, unknown>).turns).toBeUndefined()
       expect((metadata as unknown as Record<string, unknown>).workflowLogs).toBeUndefined()
 
-      endpointMocks.params = { number: '51', sessionName: 'T-003.1' }
+      _params = { number: '51', sessionName: 'T-003.1' }
       setupEndpointMocks({
         sessions: makeSessionsForLookup(),
         metadata,
@@ -255,14 +257,14 @@ describe('T-009: SessionPage split endpoints', () => {
       expect(completedBadges.length).toBeGreaterThanOrEqual(1)
       expect(screen.getByText('Build')).toBeInTheDocument()
       expect(screen.getByText('claude-3-5-sonnet')).toBeInTheDocument()
-      expect(metadataMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
-      expect(transcriptMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
+      expect(_metadataHandler).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
+      expect(_transcriptHandler).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
     })
   })
 
   describe('header metadata without turns or workflowLogs', () => {
     it('uses sessionName as the session heading instead of the task title', async () => {
-      endpointMocks.params = { number: '51', sessionName: 'T-003.1' }
+      _params = { number: '51', sessionName: 'T-003.1' }
       setupEndpointMocks({
         sessions: makeSessionsForLookup(),
         metadata: makeMetadata({ id: 'proj/wr/T-003.1', sessionName: 'T-003.1' }),
@@ -280,7 +282,7 @@ describe('T-009: SessionPage split endpoints', () => {
     })
 
     it('renders plan session metadata without requiring pre-projected turn content', async () => {
-      endpointMocks.params = { number: '123', sessionName: 'plan' }
+      _params = { number: '123', sessionName: 'plan' }
       const metadata = makeMetadata({
         id: 'proj/wr/plan',
         sessionName: 'plan',
@@ -306,7 +308,7 @@ describe('T-009: SessionPage split endpoints', () => {
 
   describe('transcript rendering', () => {
     it('renders persisted transcript turns returned by the transcript endpoint', async () => {
-      endpointMocks.params = { number: '51', sessionName: 'T-003.1' }
+      _params = { number: '51', sessionName: 'T-003.1' }
       setupEndpointMocks({
         sessions: makeSessionsForLookup(),
         metadata: makeMetadata({ id: 'proj/wr/T-003.1', sessionName: 'T-003.1' }),
@@ -330,7 +332,7 @@ describe('T-009: SessionPage split endpoints', () => {
     })
 
     it('does not project transcript content from raw runtime event payloads in the browser', async () => {
-      endpointMocks.params = { number: '51', sessionName: 'T-003.1' }
+      _params = { number: '51', sessionName: 'T-003.1' }
       setupEndpointMocks({
         sessions: makeSessionsForLookup(),
         metadata: makeMetadata({ id: 'proj/wr/T-003.1', sessionName: 'T-003.1' }),

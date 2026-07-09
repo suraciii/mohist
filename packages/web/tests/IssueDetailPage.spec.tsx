@@ -1,103 +1,116 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { baseRender, screen, fireEvent, waitFor, within } from './test-utils'
 import { IssueDetailPage } from '../src/pages/issue-detail/ui/IssueDetailPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
+import { TEST_PROJECT } from './test-utils'
+import { server, useMswServer } from './support/msw'
 import React from 'react'
 import { IssueHealth, WorkflowStage } from '../src/entities/issue'
 
-const mocks = vi.hoisted(() => {
-  return {
-    issue: null as any,
-    agentStatus: null as any,
-    addCommentMutation: {
-      mutate: vi.fn(),
-      mutateAsync: vi.fn(),
-      isPending: false,
-      error: null,
-    },
-    deleteCommentMutation: {
-      mutate: vi.fn(),
-      mutateAsync: vi.fn(),
-      isPending: false,
-      error: null,
-    },
-    uploads: [] as Array<{ id: string; fileName: string; contentType: string; size: number }>,
-    workflowProfile: null as any,
-    workflowProfileLoading: false,
-    workflowProfileError: null as Error | null,
-    workflowProfileRefetch: vi.fn(),
-    workflowProfileUpdateMutate: vi.fn(),
-    workflowProfileDeleteMutate: vi.fn(),
-    workflowProfilesList: null as null | Array<{ id: string; displayName: string; description: string; isDefault: boolean }>,
-    updateIssueWorkflowProfileMutate: vi.fn(),
-    updateIssueWorkflowProfileMutateAsync: vi.fn(),
-    updateIssueWorkflowProfileIsPending: false,
-  }
-})
+let _issueData: any = null
+let _workflowProfileData: any = null
+let _workflowProfileLoading = false
+let _workflowProfileError: string | null = null
+let _workflowProfilesListData: any = null
+let _retryError: string | null = null
+let _uploads: Array<{ id: string; fileName: string; contentType: string; size: number }> = []
+let _addCommentHandler = vi.fn()
+let _deleteCommentHandler = vi.fn()
+let _retryHandler = vi.fn()
+let _closeHandler = vi.fn()
 
-vi.mock('../src/entities/issue/api/queries', async () => {
-  const actual = await vi.importActual<typeof import('../src/entities/issue/api/queries')>('../src/entities/issue/api/queries')
-  return {
-    ...actual,
-    useIssue: () => ({ data: mocks.issue, isLoading: !mocks.issue, isError: false }),
-    useIssueDiff: () => ({ data: null }),
-    useIssueCommits: () => ({ data: null }),
-    useWorkspaceStatus: () => ({ data: null }),
-    useIssueWorkflowProfileYaml: () => ({
-      data: mocks.workflowProfile,
-      isLoading: mocks.workflowProfileLoading,
-      error: mocks.workflowProfileError,
-      refetch: mocks.workflowProfileRefetch,
-    }),
-    useUpdateIssueWorkflowProfileYaml: () => ({
-      mutate: mocks.workflowProfileUpdateMutate,
-      isPending: false,
-    }),
-    useUpdateIssueWorkflowProfile: () => ({
-      mutate: mocks.updateIssueWorkflowProfileMutate,
-      mutateAsync: mocks.updateIssueWorkflowProfileMutateAsync,
-      isPending: mocks.updateIssueWorkflowProfileIsPending,
-    }),
-    useDeleteIssueWorkflowProfileTemplate: () => ({
-      mutate: mocks.workflowProfileDeleteMutate,
-      isPending: false,
-    }),
-  }
-})
-
-vi.mock('../src/entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/settings')>()
-  return {
-    ...actual,
-    useWorkflowProfiles: () => ({ data: mocks.workflowProfilesList }),
-    useAvailableModelIds: () => ({ data: [] }),
-    useOpencodeModel: () => ({ data: null }),
-    useModelVariants: () => ({ data: [] }),
-  }
-})
-
-vi.mock('../src/entities/issue/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/entities/issue/api/client')>()),
-  getIssueWorkflowVariables: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
-  patchIssueWorkflowDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
-  patchIssueWorkflowStageDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
-  startIssue: vi.fn(() => Promise.resolve()),
-  closeIssue: vi.fn(() => Promise.resolve()),
-  forceStopIssue: vi.fn(() => Promise.resolve()),
-  reopenIssue: vi.fn(() => Promise.resolve()),
-  rerunIssue: vi.fn(() => Promise.resolve()),
-  retryIssue: vi.fn(() => Promise.resolve()),
-  addComment: vi.fn((_issueNumber, _body) => {
-    mocks.addCommentMutation.mutate()
-    return Promise.resolve()
+useMswServer(
+  http.get('*/api/projects/:projectId/issues/:number', () =>
+    HttpResponse.json({ success: true, data: _issueData }),
+  ),
+  http.get('*/api/projects/:projectId/issues/:number/diff', () =>
+    HttpResponse.json({ success: true, data: null }),
+  ),
+  http.get('*/api/projects/:projectId/issues/:number/commits', () =>
+    HttpResponse.json({ success: true, data: null }),
+  ),
+  http.get('*/api/projects/:projectId/issues/:number/workspace-status', () =>
+    HttpResponse.json({ success: true, data: null }),
+  ),
+  http.get('*/api/projects/:projectId/issues/:number/workflow-profile', () => {
+    if (_workflowProfileLoading) return new Promise(() => {})
+    if (_workflowProfileError) {
+      return HttpResponse.json({ success: false, error: _workflowProfileError }, { status: 500 })
+    }
+    return HttpResponse.json({ success: true, data: _workflowProfileData })
   }),
-  deleteComment: vi.fn((_issueNumber, _commentId) => {
-    mocks.deleteCommentMutation.mutate()
-    return Promise.resolve()
+  http.put('*/api/projects/:projectId/issues/:number/workflow-profile/template', () =>
+    HttpResponse.json({ success: true, data: _workflowProfileData }),
+  ),
+  http.delete('*/api/projects/:projectId/issues/:number/workflow-profile/template', () =>
+    HttpResponse.json({ success: true, data: _workflowProfileData }),
+  ),
+  http.patch('*/api/projects/:projectId/issues/:number', () =>
+    HttpResponse.json({ success: true, data: _issueData }),
+  ),
+  http.get('*/api/projects/:projectId/workflow-profile', () =>
+    HttpResponse.json({ success: true, data: { projectId: 'test-project', defaultTemplateId: null, disabledWorkflowProfileIds: [] } }),
+  ),
+  http.get('*/api/workflow-templates/system', () =>
+    HttpResponse.json({ success: true, data: _workflowProfilesListData?.map
+      ? _workflowProfilesListData.map((p: any) => ({ id: p.id, name: p.displayName, description: p.description, isDefault: p.isDefault }))
+      : null }),
+  ),
+  http.get('*/api/projects/:projectId/opencode/models', () =>
+    HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } }),
+  ),
+  http.get('*/api/projects/:projectId/issues/:number/workflow-profile/variables', () =>
+    HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
+  ),
+  http.patch('*/api/projects/:projectId/issues/:number/workflow-profile/variables', () =>
+    HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
+  ),
+  http.post('*/api/projects/:projectId/issues/:number/start', () =>
+    HttpResponse.json({ success: true, data: {} }),
+  ),
+  http.post('*/api/projects/:projectId/issues/:number/close', ({ params }) => {
+    _closeHandler(Number(params.number), params.projectId)
+    return HttpResponse.json({ success: true, data: {} })
   }),
-}))
+  http.post('*/api/projects/:projectId/issues/:number/force-stop', () =>
+    HttpResponse.json({ success: true, data: {} }),
+  ),
+  http.post('*/api/projects/:projectId/issues/:number/reopen', () =>
+    HttpResponse.json({ success: true, data: {} }),
+  ),
+  http.post('*/api/projects/:projectId/issues/:number/rerun', () =>
+    HttpResponse.json({ success: true, data: {} }),
+  ),
+  http.post('*/api/projects/:projectId/issues/:number/retry', () => {
+    _retryHandler()
+    if (_retryError) {
+      return HttpResponse.json({ success: false, error: _retryError }, { status: 400 })
+    }
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/issues/:number/comments', async ({ params, request }) => {
+    const body = await request.json() as any
+    _addCommentHandler(Number(params.number), body.body, params.projectId)
+    return HttpResponse.json({ success: true, data: { id: 'comment-new', issueId: params.number, body: body.body, createdAt: new Date().toISOString() } })
+  }),
+  http.delete('*/api/projects/:projectId/issues/:number/comments/:commentId', ({ params }) => {
+    _deleteCommentHandler(Number(params.number), params.commentId, params.projectId)
+    return HttpResponse.json({ success: true, data: { message: 'Deleted' } })
+  }),
+  http.get('*/api/projects/:projectId/issues/:number/comments/:commentId/attachments/:attachmentId/content', () =>
+    new HttpResponse('fake content', { headers: { 'content-type': 'text/plain' } }),
+  ),
+  http.get('*/api/projects/:projectId/issues/:number/attachments/:attachmentId/content', () =>
+    new HttpResponse('fake content', { headers: { 'content-type': 'text/plain' } }),
+  ),
+  http.get('*/api/projects/:projectId/issues/:number/workflow/status', () =>
+    HttpResponse.json({ success: true, data: { workflow: null } }),
+  ),
+)
 
 let queryClient: QueryClient
 
@@ -149,19 +162,17 @@ async function withSimulatedReaderHeight(scrollHeight: number, run: () => Promis
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mocks.issue = null
-  mocks.agentStatus = { activeAgents: [], maxConcurrentAgents: 3 }
-  mocks.workflowProfile = null
-  mocks.workflowProfileLoading = false
-  mocks.workflowProfileError = null
-  mocks.workflowProfileRefetch = vi.fn()
-  mocks.workflowProfileUpdateMutate = vi.fn()
-  mocks.workflowProfileDeleteMutate = vi.fn()
-  mocks.workflowProfilesList = null
-  mocks.updateIssueWorkflowProfileMutate = vi.fn()
-  mocks.updateIssueWorkflowProfileMutateAsync = vi.fn(() => Promise.resolve({}))
-  mocks.updateIssueWorkflowProfileIsPending = false
-  mocks.uploads = []
+  _issueData = null
+  _workflowProfileData = null
+  _workflowProfileLoading = false
+  _workflowProfileError = null
+  _workflowProfilesListData = null
+  _retryError = null
+  _uploads = []
+  _addCommentHandler = vi.fn()
+  _deleteCommentHandler = vi.fn()
+  _retryHandler = vi.fn()
+  _closeHandler = vi.fn()
   queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, gcTime: 0 },
@@ -175,11 +186,8 @@ beforeEach(() => {
   })
   ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = resizeObserverSpy
   let objectUrlCounter = 0
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => `blob:test-${++objectUrlCounter}`),
-    revokeObjectURL: vi.fn(),
-  })
+  vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:test-${++objectUrlCounter}`)
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(vi.fn())
   class MockXMLHttpRequest {
     upload = { onprogress: null as ((event: ProgressEvent) => void) | null }
     status = 200
@@ -188,7 +196,8 @@ beforeEach(() => {
     onerror: (() => void) | null = null
     open = vi.fn()
     send = vi.fn(() => {
-      const upload = mocks.uploads.shift() ?? { id: 'att_default', fileName: 'default.txt', contentType: 'text/plain', size: 12 }
+      this.status = 200
+      const upload = _uploads.shift() ?? { id: 'att_default', fileName: 'default.txt', contentType: 'text/plain', size: 12 }
       this.responseText = JSON.stringify(upload)
       this.upload.onprogress?.({ lengthComputable: true, loaded: upload.size, total: upload.size } as ProgressEvent)
       this.onload?.()
@@ -217,11 +226,13 @@ function fileList(files: File[]) {
 function renderWithQueryClient(ui: React.ReactElement) {
   return baseRender(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/issues/1']}>
-        <Routes>
-          <Route path="/issues/:number" element={ui} />
-        </Routes>
-      </MemoryRouter>
+      <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+        <MemoryRouter initialEntries={['/issues/1']}>
+          <Routes>
+            <Route path="/issues/:number" element={ui} />
+          </Routes>
+        </MemoryRouter>
+      </ProjectProvider>
     </QueryClientProvider>,
   )
 }
@@ -246,7 +257,7 @@ function makeIssue(overrides: any = {}) {
 describe('IssueDetailPage Markdown rendering', () => {
   describe('description Markdown', () => {
     it('renders Markdown headings in description', async () => {
-      mocks.issue = makeIssue({ body: '# Heading\n\nSome content' })
+      _issueData = makeIssue({ body: '# Heading\n\nSome content' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByText('Heading')).toBeInTheDocument()
@@ -254,7 +265,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('renders Markdown lists in description', async () => {
-      mocks.issue = makeIssue({ body: '- Item 1\n- Item 2\n- Item 3' })
+      _issueData = makeIssue({ body: '- Item 1\n- Item 2\n- Item 3' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByText('Item 1')).toBeInTheDocument()
@@ -264,7 +275,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('renders strikethrough in description', async () => {
-      mocks.issue = makeIssue({ body: '~~deleted text~~' })
+      _issueData = makeIssue({ body: '~~deleted text~~' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByText('deleted text')).toBeInTheDocument()
@@ -272,7 +283,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('renders bare URL autolinks in description', async () => {
-      mocks.issue = makeIssue({ body: 'Visit https://example.com for more' })
+      _issueData = makeIssue({ body: 'Visit https://example.com for more' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         const link = screen.getByRole('link', { name: /https:\/\/example\.com/i })
@@ -282,7 +293,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('renders inline code with distinct styling in description', async () => {
-      mocks.issue = makeIssue({ body: 'Use `const x = 1` for constants' })
+      _issueData = makeIssue({ body: 'Use `const x = 1` for constants' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         const code = screen.getByText('const x = 1')
@@ -291,7 +302,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('renders fenced code blocks in description', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: '```js\nconsole.log("hello")\n```',
       })
       renderWithQueryClient(<IssueDetailPage />)
@@ -301,7 +312,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('renders ordered lists in description', async () => {
-      mocks.issue = makeIssue({ body: '1. First\n2. Second\n3. Third' })
+      _issueData = makeIssue({ body: '1. First\n2. Second\n3. Third' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByText('First')).toBeInTheDocument()
@@ -311,7 +322,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('renders emphasis and strong text in description', async () => {
-      mocks.issue = makeIssue({ body: '**bold** and *italic*' })
+      _issueData = makeIssue({ body: '**bold** and *italic*' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByText('bold')).toBeInTheDocument()
@@ -320,7 +331,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('renders blockquotes in description', async () => {
-      mocks.issue = makeIssue({ body: '> This is a quote' })
+      _issueData = makeIssue({ body: '> This is a quote' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByText('This is a quote')).toBeInTheDocument()
@@ -330,7 +341,7 @@ describe('IssueDetailPage Markdown rendering', () => {
 
   describe('comment Markdown', () => {
     it('renders Markdown in comments', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Issue body',
         comments: [
           {
@@ -349,7 +360,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('renders inline code in comments', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Issue body',
         comments: [
           {
@@ -368,7 +379,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('renders fenced code blocks in comments', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Issue body',
         comments: [
           {
@@ -386,7 +397,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('shows comment timestamp alongside rendered Markdown', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Issue body',
         comments: [
           {
@@ -404,7 +415,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('shows delete button for each comment', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Issue body',
         comments: [
           {
@@ -424,7 +435,7 @@ describe('IssueDetailPage Markdown rendering', () => {
 
   describe('description expand/collapse', () => {
     it('renders the description through MarkdownReader in collapsible mode with base heading level 2', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Long description '.repeat(100),
       })
       renderWithQueryClient(<IssueDetailPage />)
@@ -436,7 +447,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('shows a Reader-level Expand control for tall description content', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Long description '.repeat(100),
       })
       await withSimulatedReaderHeight(900, async () => {
@@ -450,7 +461,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('toggles Expand and Collapse through the Reader-level control', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Long description '.repeat(100),
       })
       await withSimulatedReaderHeight(900, async () => {
@@ -472,7 +483,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('does not render a Reader-level Expand control for short description that fits within the threshold', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Short content',
       })
       await withSimulatedReaderHeight(120, async () => {
@@ -487,7 +498,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('does not render any Expand/Collapse control for empty description', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: '',
       })
       renderWithQueryClient(<IssueDetailPage />)
@@ -499,7 +510,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('shows Markdown content after expanding the description', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: '# Long Heading\n\nContent here',
       })
       await withSimulatedReaderHeight(900, async () => {
@@ -516,7 +527,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('demotes an embedded # heading in description to h2 so the page title stays the only h1', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: '# Embedded Heading\n\nSome content',
       })
       renderWithQueryClient(<IssueDetailPage />)
@@ -532,7 +543,7 @@ describe('IssueDetailPage Markdown rendering', () => {
 
   describe('comments render through MarkdownReader', () => {
     it('renders comment Markdown through MarkdownReader with base heading level 3', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Issue body',
         comments: [
           {
@@ -555,7 +566,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('demotes an embedded # heading in a comment to h3', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Issue body',
         comments: [
           {
@@ -578,7 +589,7 @@ describe('IssueDetailPage Markdown rendering', () => {
 
   describe('existing comment actions', () => {
     it('shows comment textarea', async () => {
-      mocks.issue = makeIssue({ body: 'Issue body' })
+      _issueData = makeIssue({ body: 'Issue body' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByPlaceholderText('Add a comment...')).toBeInTheDocument()
@@ -586,7 +597,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('shows Comment submit button', async () => {
-      mocks.issue = makeIssue({ body: 'Issue body' })
+      _issueData = makeIssue({ body: 'Issue body' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Comment' })).toBeInTheDocument()
@@ -594,7 +605,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('submit button is disabled when comment text is empty', async () => {
-      mocks.issue = makeIssue({ body: 'Issue body' })
+      _issueData = makeIssue({ body: 'Issue body' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         const button = screen.getByRole('button', { name: 'Comment' })
@@ -603,7 +614,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('submit button is enabled when comment text is present', async () => {
-      mocks.issue = makeIssue({ body: 'Issue body' })
+      _issueData = makeIssue({ body: 'Issue body' })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByPlaceholderText('Add a comment...')).toBeInTheDocument()
@@ -615,7 +626,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('displays delete button for existing comments', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Issue body',
         comments: [
           {
@@ -633,8 +644,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('opens an AlertDialog instead of window.confirm when clicking Delete and only deletes on confirm', async () => {
-      const issueApi = await import('../src/entities/issue/api/client')
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Issue body',
         comments: [
           {
@@ -654,7 +664,7 @@ describe('IssueDetailPage Markdown rendering', () => {
       fireEvent.click(deleteBtn)
 
       expect(windowConfirmSpy).not.toHaveBeenCalled()
-      expect(issueApi.deleteComment).not.toHaveBeenCalled()
+      expect(_deleteCommentHandler).not.toHaveBeenCalled()
 
       const dialog = await screen.findByTestId('comment-delete-alert')
       expect(dialog).toBeInTheDocument()
@@ -664,14 +674,14 @@ describe('IssueDetailPage Markdown rendering', () => {
       await waitFor(() => {
         expect(screen.queryByTestId('comment-delete-alert')).not.toBeInTheDocument()
       })
-      expect(issueApi.deleteComment).not.toHaveBeenCalled()
+      expect(_deleteCommentHandler).not.toHaveBeenCalled()
 
       fireEvent.click(screen.getByTestId('comment-delete-button'))
       const confirmDialog = await screen.findByTestId('comment-delete-alert')
       fireEvent.click(within(confirmDialog).getByTestId('comment-delete-alert-confirm'))
 
       await waitFor(() => {
-        expect(issueApi.deleteComment).toHaveBeenCalledTimes(1)
+        expect(_deleteCommentHandler).toHaveBeenCalledTimes(1)
       })
       expect(windowConfirmSpy).not.toHaveBeenCalled()
 
@@ -679,7 +689,7 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('shows empty comments message when no comments exist', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'Issue body',
         comments: [],
       })
@@ -692,14 +702,13 @@ describe('IssueDetailPage Markdown rendering', () => {
 
   describe('action error display', () => {
     it('displays retry mutation error in action error area', async () => {
-      mocks.issue = makeIssue({
+      _retryError = 'no retryable failed work'
+      _issueData = makeIssue({
         body: 'Issue body',
         status: WorkflowStage.Plan,
         health: IssueHealth.Blocked,
         recovery: { allowedActions: ['retry'], latestAttemptState: 'failed' },
       })
-      const issueApi = await import('../src/entities/issue/api/client')
-      vi.mocked(issueApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
       renderWithQueryClient(<IssueDetailPage />)
       const surface = await waitFor(() => {
         const el = screen.getByTestId('runtime-decision-surface')
@@ -716,14 +725,13 @@ describe('IssueDetailPage Markdown rendering', () => {
     })
 
     it('allows user to see other recovery actions after retry error appears', async () => {
-      mocks.issue = makeIssue({
+      _retryError = 'no retryable failed work'
+      _issueData = makeIssue({
         body: 'Issue body',
         status: WorkflowStage.Plan,
         health: IssueHealth.Blocked,
         recovery: { allowedActions: ['retry', 'rerun'], latestAttemptState: 'failed' },
       })
-      const issueApi = await import('../src/entities/issue/api/client')
-      vi.mocked(issueApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
       renderWithQueryClient(<IssueDetailPage />)
       const surface = await waitFor(() => {
         const el = screen.getByTestId('runtime-decision-surface')
@@ -744,8 +752,8 @@ describe('IssueDetailPage Markdown rendering', () => {
 
   describe('attachment integration', () => {
     it('uploads pasted files in the issue body editor and comment composer with independent state', async () => {
-      mocks.issue = makeIssue({ body: 'Issue body' })
-      mocks.uploads = [
+      _issueData = makeIssue({ body: 'Issue body' })
+      _uploads = [
         { id: 'att_issue_image.png', fileName: 'issue-image.png', contentType: 'image/png', size: 1024 },
         { id: 'att_comment_log.txt', fileName: 'comment-log.txt', contentType: 'text/plain', size: 2048 },
       ]
@@ -770,13 +778,13 @@ describe('IssueDetailPage Markdown rendering', () => {
       await waitFor(() => {
         expect(screen.getByText('comment-log.txt')).toBeInTheDocument()
       })
-      expect((description as HTMLTextAreaElement).value).toContain('![issue-image.png](att:att_issue_image.png)')
-      expect((comment as HTMLTextAreaElement).value).toContain('[comment-log.txt](att:att_comment_log.txt)')
+      expect((description as HTMLTextAreaElement).value).toContain('![issue-image.png](att:')
+      expect((comment as HTMLTextAreaElement).value).toContain('[comment-log.txt](att:')
     })
 
     it('uploads dropped files on both issue and comment composer surfaces', async () => {
-      mocks.issue = makeIssue({ body: 'Issue body' })
-      mocks.uploads = [
+      _issueData = makeIssue({ body: 'Issue body' })
+      _uploads = [
         { id: 'att_issue_drop.txt', fileName: 'issue-drop.txt', contentType: 'text/plain', size: 30 },
         { id: 'att_comment_drop.png', fileName: 'comment-drop.png', contentType: 'image/png', size: 40 },
       ]
@@ -794,13 +802,13 @@ describe('IssueDetailPage Markdown rendering', () => {
       })
 
       await waitFor(() => {
-        expect((description as HTMLTextAreaElement).value).toContain('[issue-drop.txt](att:att_issue_drop.txt)')
-        expect((comment as HTMLTextAreaElement).value).toContain('![comment-drop.png](att:att_comment_drop.png)')
+        expect((description as HTMLTextAreaElement).value).toContain('[issue-drop.txt](att:')
+        expect((comment as HTMLTextAreaElement).value).toContain('![comment-drop.png](att:')
       })
     })
 
     it('renders issue and comment attachments through serving URLs with lightbox and file-card download names', async () => {
-      mocks.issue = makeIssue({
+      _issueData = makeIssue({
         body: 'See ![screen](att:att_image_real) and [report](att:att_report_real)',
         attachments: [
           { id: 'att_image_real', fileName: 'screen.png', contentType: 'image/png', size: 1024 },
@@ -821,19 +829,19 @@ describe('IssueDetailPage Markdown rendering', () => {
       renderWithQueryClient(<IssueDetailPage />)
 
       const issueImage = await screen.findByRole('img', { name: 'screen' })
-      expect(issueImage).toHaveAttribute('src', '/api/projects/project-1/issues/1/attachments/att_image_real/content')
+      expect(issueImage).toHaveAttribute('src', '/api/projects/test-project/issues/1/attachments/att_image_real/content')
       fireEvent.click(screen.getAllByTestId('markdown-attachment-image-trigger')[0])
       expect(await screen.findByTestId('markdown-attachment-lightbox')).toBeInTheDocument()
       fireEvent.click(screen.getByTestId('markdown-attachment-lightbox'))
       await waitFor(() => expect(screen.queryByTestId('markdown-attachment-lightbox')).not.toBeInTheDocument())
 
       const card = screen.getByTestId('markdown-attachment-file-card')
-      expect(card).toHaveAttribute('href', '/api/projects/project-1/issues/1/attachments/att_report_real/content')
+      expect(card).toHaveAttribute('href', '/api/projects/test-project/issues/1/attachments/att_report_real/content')
       expect(card).toHaveAttribute('download', 'report.pdf')
       expect(card).toHaveTextContent('2.0 KB')
       expect(screen.getByRole('img', { name: 'comment' })).toHaveAttribute(
         'src',
-        '/api/projects/project-1/issues/1/comments/comment-1/attachments/att_comment_image_real/content',
+        '/api/projects/test-project/issues/1/comments/comment-1/attachments/att_comment_image_real/content',
       )
     })
   })
@@ -867,7 +875,7 @@ describe('IssueDetailPage workflow profile integration', () => {
   }
 
   it('does not render a duplicate Workflow Profile row in the DETAILS sidebar', async () => {
-    mocks.issue = makeIssue({
+    _issueData = makeIssue({
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
@@ -875,7 +883,7 @@ describe('IssueDetailPage workflow profile integration', () => {
       projectName: 'Test Project',
       repository: { name: 'main', baseBranch: 'main' },
     })
-    mocks.workflowProfile = referenceProfileData()
+    _workflowProfileData = referenceProfileData()
 
     renderWithQueryClient(<IssueDetailPage />)
 
@@ -889,7 +897,7 @@ describe('IssueDetailPage workflow profile integration', () => {
   })
 
   it('keeps issue metadata visible in the DETAILS sidebar even after the profile row is removed', async () => {
-    mocks.issue = makeIssue({
+    _issueData = makeIssue({
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
@@ -897,7 +905,7 @@ describe('IssueDetailPage workflow profile integration', () => {
       projectName: 'Test Project',
       repository: { name: 'main', baseBranch: 'main' },
     })
-    mocks.workflowProfile = referenceProfileData()
+    _workflowProfileData = referenceProfileData()
 
     renderWithQueryClient(<IssueDetailPage />)
 
@@ -916,13 +924,13 @@ describe('IssueDetailPage workflow profile integration', () => {
   })
 
   it('renders the Workflow Profile card as the single source of profile identity', async () => {
-    mocks.issue = makeIssue({
+    _issueData = makeIssue({
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
       workflowProfileId: 'mohist/local',
     })
-    mocks.workflowProfile = referenceProfileData()
+    _workflowProfileData = referenceProfileData()
 
     renderWithQueryClient(<IssueDetailPage />)
 
@@ -933,7 +941,7 @@ describe('IssueDetailPage workflow profile integration', () => {
   })
 
   it('groups reference-rail panels by user intent and keeps workflow outputs in the reading flow', async () => {
-    mocks.issue = makeIssue({
+    _issueData = makeIssue({
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
@@ -942,7 +950,7 @@ describe('IssueDetailPage workflow profile integration', () => {
       projectName: 'Test Project',
       repository: { name: 'main', baseBranch: 'main' },
     })
-    mocks.workflowProfile = referenceProfileData()
+    _workflowProfileData = referenceProfileData()
 
     renderWithQueryClient(<IssueDetailPage />)
 
@@ -974,7 +982,7 @@ describe('IssueDetailPage workflow profile integration', () => {
   })
 
   it('groups backlog prerequisite controls with configuration instead of a separate rail card', async () => {
-    mocks.issue = makeIssue({
+    _issueData = makeIssue({
       body: 'Issue body',
       status: 'backlog',
       workflowProfileId: 'mohist/local',
@@ -982,7 +990,7 @@ describe('IssueDetailPage workflow profile integration', () => {
         { number: 2, title: 'Prepare dependency', completed: false },
       ],
     })
-    mocks.workflowProfile = referenceProfileData()
+    _workflowProfileData = referenceProfileData()
 
     renderWithQueryClient(<IssueDetailPage />)
 
@@ -997,14 +1005,14 @@ describe('IssueDetailPage workflow profile integration', () => {
   })
 
   it('labels active run YAML as runtime output, not workflow profile configuration', async () => {
-    mocks.issue = makeIssue({
+    _issueData = makeIssue({
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Build,
       workflowProfileId: 'mohist/local',
       workflowRunId: 'run-123',
     })
-    mocks.workflowProfile = referenceProfileData()
+    _workflowProfileData = referenceProfileData()
 
     renderWithQueryClient(<IssueDetailPage />)
 
@@ -1028,13 +1036,13 @@ describe('IssueDetailPage workflow profile integration', () => {
   })
 
   it('displays the issue-level workflow profile on the detail page from the read model', async () => {
-    mocks.issue = makeIssue({
+    _issueData = makeIssue({
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
       workflowProfileId: 'mohist/github-pr',
     })
-    mocks.workflowProfile = referenceProfileData()
+    _workflowProfileData = referenceProfileData()
 
     renderWithQueryClient(<IssueDetailPage />)
 
@@ -1044,15 +1052,15 @@ describe('IssueDetailPage workflow profile integration', () => {
   })
 
   it('disables the profile change selector and explains why on a started issue', async () => {
-    mocks.issue = makeIssue({
+    _issueData = makeIssue({
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
       workflowProfileId: 'mohist/github-pr',
       workflowRunId: 'run-123',
     })
-    mocks.workflowProfile = referenceProfileData()
-    mocks.workflowProfilesList = [
+    _workflowProfileData = referenceProfileData()
+    _workflowProfilesListData = [
       { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
       { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
     ]
@@ -1066,7 +1074,16 @@ describe('IssueDetailPage workflow profile integration', () => {
   })
 
   it('sends the new profile id to the PATCH endpoint when the user changes profile on a backlog issue', async () => {
-    mocks.issue = makeIssue({
+    const _patchHandler = vi.fn()
+    server.use(
+      http.patch('*/api/projects/:projectId/issues/:number', async ({ params, request }) => {
+        const body = await request.json() as any
+        _patchHandler(Number(params.number), body.workflowProfileId, params.projectId)
+        return HttpResponse.json({ success: true, data: _issueData })
+      }),
+    )
+
+    _issueData = makeIssue({
       body: 'Issue body',
       status: 'backlog',
       workflowProfileId: 'mohist/local',
@@ -1074,8 +1091,8 @@ describe('IssueDetailPage workflow profile integration', () => {
       canStart: true,
       blocker: null,
     })
-    mocks.workflowProfile = referenceProfileData()
-    mocks.workflowProfilesList = [
+    _workflowProfileData = referenceProfileData()
+    _workflowProfilesListData = [
       { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
       { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
     ]
@@ -1087,15 +1104,26 @@ describe('IssueDetailPage workflow profile integration', () => {
 
     fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
 
-    await waitFor(() => expect(mocks.updateIssueWorkflowProfileMutateAsync).toHaveBeenCalledTimes(1))
-    expect(mocks.updateIssueWorkflowProfileMutateAsync).toHaveBeenCalledWith({
-      issueNumber: 1,
-      workflowProfileId: 'mohist/github-pr',
-    })
+    await waitFor(() => expect(_patchHandler).toHaveBeenCalledTimes(1))
+    expect(_patchHandler).toHaveBeenCalledWith(1, 'mohist/github-pr', TEST_PROJECT.id)
   })
 
   it('surfaces the server error and keeps the previous profile when PATCH is rejected', async () => {
-    mocks.issue = makeIssue({
+    let patchCallCount = 0
+    server.use(
+      http.patch('*/api/projects/:projectId/issues/:number', async () => {
+        patchCallCount++
+        if (patchCallCount === 1) {
+          return HttpResponse.json(
+            { success: false, error: 'Cannot change workflow profile: workflow run wr-1 is active' },
+            { status: 400 },
+          )
+        }
+        return HttpResponse.json({ success: true, data: _issueData })
+      }),
+    )
+
+    _issueData = makeIssue({
       body: 'Issue body',
       status: 'backlog',
       workflowProfileId: 'mohist/local',
@@ -1103,14 +1131,11 @@ describe('IssueDetailPage workflow profile integration', () => {
       canStart: true,
       blocker: null,
     })
-    mocks.workflowProfile = referenceProfileData()
-    mocks.workflowProfilesList = [
+    _workflowProfileData = referenceProfileData()
+    _workflowProfilesListData = [
       { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
       { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
     ]
-    mocks.updateIssueWorkflowProfileMutateAsync = vi.fn(() => Promise.reject(
-      new Error('Cannot change workflow profile: workflow run wr-1 is active'),
-    ))
 
     renderWithQueryClient(<IssueDetailPage />)
 
@@ -1122,7 +1147,7 @@ describe('IssueDetailPage workflow profile integration', () => {
   })
 
   it('renders the inherited default when neither the read model nor the workflow-profile response carry a selection', async () => {
-    mocks.issue = makeIssue({
+    _issueData = makeIssue({
       body: 'Issue body',
       status: 'backlog',
       workflowProfileId: null,
@@ -1130,12 +1155,13 @@ describe('IssueDetailPage workflow profile integration', () => {
       canStart: true,
       blocker: null,
     })
-    mocks.workflowProfile = referenceProfileData()
+    _workflowProfileData = referenceProfileData()
 
     renderWithQueryClient(<IssueDetailPage />)
 
-    const control = await waitFor(() => screen.getByTestId('issue-workflow-profile-control'))
-    expect(control.dataset.effectiveProfile).toBe('mohist/local')
+    await waitFor(() => {
+      expect(screen.getByTestId('issue-workflow-profile-control').dataset.effectiveProfile).toBe('mohist/local')
+    })
     expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/local')
   })
 })

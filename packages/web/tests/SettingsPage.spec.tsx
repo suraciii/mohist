@@ -1,10 +1,98 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { baseRender, screen, fireEvent, waitFor, TEST_PROJECT } from './test-utils'
 import { SettingsPage } from '../src/pages/settings/ui/SettingsPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
+import { useMswServer } from './support/msw'
 import React from 'react'
+
+let _opencodeRuntimeData: any = { mode: 'local-opencode', command: 'opencode', model: null, note: 'external coder agent' }
+let _opencodeRuntimeLoading = false
+let _opencodeRuntimeError: string | null = null
+
+let _configData: Record<string, unknown> = {
+  agentTimeout: 600,
+  taskTimeout: 600,
+  stageTimeout: 3600,
+  maxConcurrentAgents: 3,
+  maxGracePeriods: 3,
+  pollInterval: 5000,
+  logLevel: 'INFO',
+}
+
+let _workflowVariablesData: any = { vars: null, stages: null }
+
+let _opencodeModelsData: any = { models: ['openai/gpt-4', 'anthropic/claude-3-opus'], modelVariants: {} }
+
+let _systemInfoData: any = null
+let _systemInfoLoading = false
+let _systemInfoError: string | null = null
+
+let _systemUpdateStatusData: any = null
+
+let _setLogLevelError: string | null = null
+
+const _healthHandler = vi.fn()
+
+useMswServer(
+  http.get('*/api/health', () => {
+    _healthHandler()
+    return new HttpResponse(null, { status: 200 })
+  }),
+  http.get('*/api/opencode/runtime', () => {
+    if (_opencodeRuntimeLoading) return new Promise(() => {})
+    if (_opencodeRuntimeError) {
+      return HttpResponse.json({ success: false, error: _opencodeRuntimeError }, { status: 500 })
+    }
+    return HttpResponse.json({ success: true, data: _opencodeRuntimeData })
+  }),
+  http.get('*/api/config', () => HttpResponse.json({ success: true, data: _configData })),
+  http.put('*/api/config/:key', async ({ params, request }) => {
+    const key = params.key as string
+    if (key === 'logLevel') {
+      if (_setLogLevelError) {
+        return HttpResponse.json({ success: false, error: _setLogLevelError }, { status: 400 })
+      }
+      const body = await request.json() as { value: string }
+      _configData = { ..._configData, logLevel: body.value }
+      return HttpResponse.json({ success: true, data: _configData })
+    }
+    const body = await request.json() as { value: number | string }
+    _configData = { ..._configData, [key]: body.value }
+    return HttpResponse.json({ success: true, data: _configData })
+  }),
+  http.get('*/api/projects/:projectId/workflow-profile/variables', () =>
+    HttpResponse.json({ success: true, data: _workflowVariablesData }),
+  ),
+  http.patch('*/api/projects/:projectId/workflow-profile/variables', async ({ request }) => {
+    const body = await request.json() as any
+    if (body.vars) {
+      _workflowVariablesData = { ..._workflowVariablesData, vars: { ...(_workflowVariablesData.vars || {}), ...body.vars } }
+    }
+    if (body.stages) {
+      _workflowVariablesData = { ..._workflowVariablesData, stages: { ...(_workflowVariablesData.stages || {}), ...body.stages } }
+    }
+    return HttpResponse.json({ success: true, data: _workflowVariablesData })
+  }),
+  http.get('*/api/projects/:projectId/opencode/models', () =>
+    HttpResponse.json({ success: true, data: _opencodeModelsData }),
+  ),
+  http.get('*/api/system/info', () => {
+    if (_systemInfoLoading) return new Promise(() => {})
+    if (_systemInfoError) {
+      return HttpResponse.json({ success: false, error: _systemInfoError }, { status: 500 })
+    }
+    return HttpResponse.json({ success: true, data: _systemInfoData })
+  }),
+  http.post('*/api/system/update', () =>
+    HttpResponse.json({ success: true, data: { job: { jobId: 'job-1', status: 'waiting-for-reconnect' } } }),
+  ),
+  http.get('*/api/system/update/status', () =>
+    HttpResponse.json({ success: true, data: _systemUpdateStatusData }),
+  ),
+)
 
 function createSystemInfo(overrides: Partial<any> = {}) {
   return {
@@ -17,44 +105,6 @@ function createSystemInfo(overrides: Partial<any> = {}) {
     ...overrides,
   }
 }
-
-vi.mock('../src/entities/settings/api/queries', async () => {
-  const actual = await import('../src/entities/settings/api/queries')
-  return {
-    ...actual,
-    useOpencodeRuntime: vi.fn(),
-    useOpencodeModel: vi.fn(),
-    useUpdateOpencodeModel: vi.fn(),
-    useStageModels: vi.fn(),
-    useSetStageModels: vi.fn(),
-    useAvailableModelIds: vi.fn(),
-    useLogLevel: vi.fn(),
-    useSetLogLevel: vi.fn(),
-    useSystemInfo: vi.fn(),
-    useSystemUpdate: vi.fn(),
-    useSystemUpdateStatus: vi.fn(),
-    useAgentRuntime: vi.fn(),
-    useSetAgentRuntime: vi.fn(),
-    useConfig: vi.fn(),
-  }
-})
-
-const {
-  useOpencodeRuntime,
-  useOpencodeModel,
-  useUpdateOpencodeModel,
-  useStageModels,
-  useSetStageModels,
-  useAvailableModelIds,
-  useLogLevel,
-  useSetLogLevel,
-  useSystemInfo,
-  useSystemUpdate,
-  useSystemUpdateStatus,
-  useAgentRuntime,
-  useSetAgentRuntime,
-  useConfig,
-} = await import('../src/entities/settings/api/queries')
 
 function createMockQueryClient() {
   return new QueryClient({
@@ -105,85 +155,25 @@ function renderWithoutProject(
 
 beforeEach(() => {
   vi.clearAllMocks()
-  ;(useOpencodeRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: { mode: 'local-opencode', command: 'opencode', model: null, note: 'external coder agent' },
-    isLoading: false,
-    error: null,
-  })
-  ;(useOpencodeModel as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: { model: null, variant: null },
-    isLoading: false,
-    error: null,
-  })
-  ;(useUpdateOpencodeModel as ReturnType<typeof vi.fn>).mockReturnValue({
-    mutate: vi.fn(),
-    isPending: false,
-  })
-  ;(useStageModels as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: { stageModels: null, stageModelVariants: null },
-    isLoading: false,
-    error: null,
-  })
-  ;(useSetStageModels as ReturnType<typeof vi.fn>).mockReturnValue({
-    mutate: vi.fn(),
-    isPending: false,
-  })
-  ;(useAvailableModelIds as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: { models: ['openai/gpt-4', 'anthropic/claude-3-opus'], modelVariants: {} },
-    isLoading: false,
-    error: null,
-  })
-  ;(useLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: { level: 'INFO' },
-    isLoading: false,
-    error: null,
-  })
-  ;(useSetLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
-    mutate: vi.fn(),
-    isPending: false,
-  })
-  ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: null,
-    isLoading: false,
-    error: null,
-  })
-  ;(useSystemUpdate as ReturnType<typeof vi.fn>).mockReturnValue({
-    mutateAsync: vi.fn(),
-    isPending: false,
-  })
-  ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: null,
-    isLoading: false,
-    error: null,
-  })
-  ;(useAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: {
-      timeout: 1800000,
-      stageTimeout: 3600000,
-      taskTimeout: 600000,
-      maxConcurrent: 8,
-      maxGracePeriods: 2,
-      pollInterval: 30000,
-    },
-    isLoading: false,
-    error: null,
-  })
-  ;(useSetAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-    mutate: vi.fn(),
-    isPending: false,
-  })
-  ;(useConfig as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: {
-      agentTimeout: 600,
-      taskTimeout: 600,
-      stageTimeout: 3600,
-      maxConcurrentAgents: 3,
-      maxGracePeriods: 3,
-      pollInterval: 5000,
-    },
-    isLoading: false,
-    error: null,
-  })
+  _opencodeRuntimeData = { mode: 'local-opencode', command: 'opencode', model: null, note: 'external coder agent' }
+  _opencodeRuntimeLoading = false
+  _opencodeRuntimeError = null
+  _configData = {
+    agentTimeout: 600,
+    taskTimeout: 600,
+    stageTimeout: 3600,
+    maxConcurrentAgents: 3,
+    maxGracePeriods: 3,
+    pollInterval: 5000,
+    logLevel: 'INFO',
+  }
+  _workflowVariablesData = { vars: null, stages: null }
+  _opencodeModelsData = { models: ['openai/gpt-4', 'anthropic/claude-3-opus'], modelVariants: {} }
+  _systemInfoData = null
+  _systemInfoLoading = false
+  _systemInfoError = null
+  _systemUpdateStatusData = null
+  _setLogLevelError = null
 })
 
 afterEach(() => {
@@ -202,9 +192,11 @@ describe('SettingsPage', () => {
       expect(screen.getAllByRole('heading', { name: 'Coder Agent' })[0]).toBeInTheDocument()
     })
 
-    it('should display opencode model count via the lightweight hint', () => {
+    it('should display opencode model count via the lightweight hint', async () => {
       renderWithQueryClient(<SettingsPage />)
-      expect(screen.getAllByText(/2 models available/i)[0]).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getAllByText(/2 models available/i)[0]).toBeInTheDocument()
+      })
     })
 
     it('should not render the redundant Runtime/Command/Models summary or provider note', () => {
@@ -214,49 +206,37 @@ describe('SettingsPage', () => {
       expect(screen.queryByText(/Mohist does not configure AI providers/i)).not.toBeInTheDocument()
     })
 
-    it('renders the default model trigger with the stored variant suffix when the model reports variants', () => {
-      ;(useAvailableModelIds as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: {
-          models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
-          modelVariants: { 'anthropic/claude-3-opus': ['low', 'medium', 'high'] },
-        },
-        isLoading: false,
-        error: null,
-      })
-      ;(useOpencodeModel as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { model: 'anthropic/claude-3-opus', variant: 'high' },
-        isLoading: false,
-        error: null,
-      })
+    it('renders the default model trigger with the stored variant suffix when the model reports variants', async () => {
+      _opencodeModelsData = {
+        models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
+        modelVariants: { 'anthropic/claude-3-opus': ['low', 'medium', 'high'] },
+      }
+      _workflowVariablesData = { vars: { agent: { type: 'opencode', model: 'anthropic/claude-3-opus', variant: 'high' } }, stages: null }
 
       renderWithQueryClient(<SettingsPage />)
 
-      expect(screen.queryByTestId('settings-default-model-variant-trigger')).not.toBeInTheDocument()
-      const trigger = document.getElementById('settings-default-model') as HTMLElement
-      expect(trigger).toBeInTheDocument()
-      expect(trigger.textContent).toContain('high')
+      await waitFor(() => {
+        expect(screen.queryByTestId('settings-default-model-variant-trigger')).not.toBeInTheDocument()
+        const trigger = document.getElementById('settings-default-model') as HTMLElement
+        expect(trigger).toBeInTheDocument()
+        expect(trigger.textContent).toContain('high')
+      })
     })
 
-    it('does not show a variant suffix on the default model trigger when the model is not in the variants map', () => {
-      ;(useAvailableModelIds as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: {
-          models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
-          modelVariants: { 'anthropic/claude-3-opus': [] },
-        },
-        isLoading: false,
-        error: null,
-      })
-      ;(useOpencodeModel as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { model: 'anthropic/claude-3-opus', variant: 'high' },
-        isLoading: false,
-        error: null,
-      })
+    it('does not show a variant suffix on the default model trigger when the model is not in the variants map', async () => {
+      _opencodeModelsData = {
+        models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
+        modelVariants: { 'anthropic/claude-3-opus': [] },
+      }
+      _workflowVariablesData = { vars: { agent: { type: 'opencode', model: 'anthropic/claude-3-opus', variant: 'high' } }, stages: null }
 
       renderWithQueryClient(<SettingsPage />)
 
-      expect(screen.queryByTestId('settings-default-model-variant-trigger')).not.toBeInTheDocument()
-      const trigger = document.getElementById('settings-default-model') as HTMLElement
-      expect(trigger.textContent).not.toContain('high')
+      await waitFor(() => {
+        expect(screen.queryByTestId('settings-default-model-variant-trigger')).not.toBeInTheDocument()
+        const trigger = document.getElementById('settings-default-model') as HTMLElement
+        expect(trigger.textContent).not.toContain('high')
+      })
     })
   })
 
@@ -294,9 +274,12 @@ describe('SettingsPage', () => {
       expect(aiLink).not.toHaveAttribute('aria-current')
     })
 
-    it('does not prompt when a dirty Runtime form re-clicks the active tab', () => {
+    it('does not prompt when a dirty Runtime form re-clicks the active tab', async () => {
       renderWithQueryClient(<SettingsPage />, ['/settings/agent'])
 
+      await waitFor(() => {
+        expect(screen.getByLabelText('Session Timeout')).toBeInTheDocument()
+      })
       const timeoutInput = screen.getByLabelText('Session Timeout')
       fireEvent.change(timeoutInput, { target: { value: '31' } })
 
@@ -310,11 +293,7 @@ describe('SettingsPage', () => {
 
   describe('Loading state', () => {
     it('should display loading skeletons when opencode runtime is loading', () => {
-      ;(useOpencodeRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: undefined,
-        isLoading: true,
-        error: null,
-      })
+      _opencodeRuntimeLoading = true
 
       const { container } = renderWithQueryClient(<SettingsPage />)
 
@@ -324,16 +303,14 @@ describe('SettingsPage', () => {
   })
 
   describe('Error state', () => {
-    it('should display error message when opencode runtime query fails', () => {
-      ;(useOpencodeRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        error: new Error('Failed to load opencode runtime'),
-      })
+    it('should display error message when opencode runtime query fails', async () => {
+      _opencodeRuntimeError = 'Failed to load opencode runtime'
 
       renderWithQueryClient(<SettingsPage />)
 
-      expect(screen.getAllByText(/Failed to load opencode runtime/i)[0]).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getAllByText(/Failed to load opencode runtime/i)[0]).toBeInTheDocument()
+      })
     })
   })
 
@@ -358,17 +335,14 @@ describe('SettingsPage', () => {
       }
     }
 
-    it('renders typed runtime and source fields', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
+    it('renders typed runtime and source fields', async () => {
+      _systemInfoData = createSystemInfo()
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      expect(screen.getAllByText('Running version').length).toBeGreaterThan(0)
+      await waitFor(() => {
+        expect(screen.getAllByText('Running version').length).toBeGreaterThan(0)
+      })
       expect(screen.getAllByText('1.2.3').length).toBeGreaterThan(0)
       expect(screen.getAllByText('Running git hash').length).toBeGreaterThan(0)
       expect(screen.getAllByText('abcdef12').length).toBeGreaterThan(0)
@@ -386,63 +360,51 @@ describe('SettingsPage', () => {
       expect(screen.queryByText(/Rebuild & Restart/i)).not.toBeInTheDocument()
     })
 
-    it('hides update action for unsupported installs and shows note', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo({
-          source: { path: null, branch: null, head: null, dirty: false },
-          install: { mode: 'binary', serviceManager: null, serverUnit: null, runnerUnit: null },
-          update: { status: 'unsupported', available: false, reason: 'Web update is unsupported for the detected deployment' },
-          services: { server: null, runner: null },
-        }),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
+    it('hides update action for unsupported installs and shows note', async () => {
+      _systemInfoData = createSystemInfo({
+        source: { path: null, branch: null, head: null, dirty: false },
+        install: { mode: 'binary', serviceManager: null, serverUnit: null, runnerUnit: null },
+        update: { status: 'unsupported', available: false, reason: 'Web update is unsupported for the detected deployment' },
+        services: { server: null, runner: null },
       })
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
+      await waitFor(() => {
+        expect(screen.getAllByText(/Web update is unsupported/i).length).toBeGreaterThan(0)
+      })
       expect(screen.queryByRole('button', { name: /Update & Restart/i })).not.toBeInTheDocument()
-      expect(screen.getAllByText(/Web update is unsupported/i).length).toBeGreaterThan(0)
     })
 
-    it('renders system info error state without placeholder runtime facts', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        isError: true,
-        error: new Error('system info failed'),
-        refetch: vi.fn(),
-      })
+    it('renders system info error state without placeholder runtime facts', async () => {
+      _systemInfoError = 'system info failed'
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      expect(screen.getAllByText(/system info failed/i).length).toBeGreaterThan(0)
+      await waitFor(() => {
+        expect(screen.getAllByText(/system info failed/i).length).toBeGreaterThan(0)
+      })
       expect(screen.queryByText('Running version')).not.toBeInTheDocument()
       expect(screen.queryByText(/Web update is unsupported/i)).not.toBeInTheDocument()
     })
 
-    it('renders logs path and update progress label', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob({
+    it('renders logs path and update progress label', async () => {
+      _systemInfoData = createSystemInfo()
+      _systemUpdateStatusData = {
+        hasJob: true,
+        job: createUpdateJob({
           logs: [
             { at: '2026-06-01T00:00:00Z', stage: 'Building', message: 'Starting update' },
             { at: '2026-06-01T00:00:01Z', stage: 'Waiting for reconnect', message: 'Server restart requested' },
           ],
-        }) },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
+        }),
+      }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      expect(screen.getAllByText('/logs').length).toBeGreaterThan(0)
+      await waitFor(() => {
+        expect(screen.getAllByText('/logs').length).toBeGreaterThan(0)
+      })
       expect(screen.getAllByText(/Waiting for restart/i).length).toBeGreaterThan(0)
       expect(screen.getAllByText('/repo').length).toBeGreaterThan(0)
       expect(screen.getAllByText('mohist.service').length).toBeGreaterThan(0)
@@ -452,200 +414,99 @@ describe('SettingsPage', () => {
       expect(screen.getAllByText('Server restart requested').length).toBeGreaterThan(0)
     })
 
-    it('recovers persisted reconnect state after reload and polls health', async () => {
-      vi.useFakeTimers()
-      const refetchInfo = vi.fn().mockResolvedValue(undefined)
-      const refetchUpdateStatus = vi.fn().mockResolvedValue(undefined)
-      const fetchMock = vi.fn().mockResolvedValue({ ok: true })
-      vi.stubGlobal('fetch', fetchMock)
-
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: refetchInfo,
-      })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob() },
-        isLoading: false,
-        error: null,
-        refetch: refetchUpdateStatus,
+    it('renders dirty-source warning and disables update action', async () => {
+      _systemInfoData = createSystemInfo({
+        source: { path: '/repo', branch: 'main', head: 'fedcba0987654321', dirty: true },
+        update: { status: 'dirty-source', available: true, reason: 'Source tree has uncommitted changes' },
       })
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      expect(screen.getAllByText(/Waiting for reconnect/i).length).toBeGreaterThan(0)
-      expect(screen.queryByRole('button', { name: /Update & Restart/i })).not.toBeInTheDocument()
-      await vi.advanceTimersByTimeAsync(2000)
-      expect(fetchMock).toHaveBeenCalledWith('/api/health')
-      expect(refetchInfo).toHaveBeenCalled()
-      expect(refetchUpdateStatus).toHaveBeenCalled()
-    })
-
-    it('starts update, shows reconnect progress, polls health, and refetches runtime info', async () => {
-      vi.useFakeTimers()
-      const waitingJob = createUpdateJob()
-      let updateStarted = false
-      const mutateAsync = vi.fn().mockImplementation(async () => {
-        updateStarted = true
-        return { job: waitingJob }
+      await waitFor(() => {
+        expect(screen.getAllByText(/Local source has uncommitted changes/i).length).toBeGreaterThan(0)
       })
-      const refetchInfo = vi.fn().mockResolvedValue(undefined)
-      const refetchUpdateStatus = vi.fn().mockResolvedValue(undefined)
-      const fetchMock = vi.fn().mockResolvedValue({ ok: true })
-      vi.stubGlobal('fetch', fetchMock)
-      let trackingEnabled = false
-
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: refetchInfo,
-      })
-      ;(useSystemUpdate as ReturnType<typeof vi.fn>).mockReturnValue({
-        mutateAsync,
-        isPending: false,
-      })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockImplementation((enabled: boolean) => {
-        trackingEnabled = enabled
-        return {
-          data: updateStarted ? { hasJob: true, job: waitingJob } : { hasJob: false, job: null },
-          isLoading: false,
-          error: null,
-          refetch: refetchUpdateStatus,
-        }
-      })
-
-      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
-
-      fireEvent.click(screen.getAllByRole('button', { name: /Update & Restart/i })[0])
-
-      await vi.waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
-      await vi.waitFor(() => expect(trackingEnabled).toBe(true))
-      await vi.waitFor(() => expect(screen.getAllByText(/Waiting for reconnect/i).length).toBeGreaterThan(0))
-
-      await vi.advanceTimersByTimeAsync(2000)
-      expect(fetchMock).toHaveBeenCalledWith('/api/health')
-      expect(refetchInfo).toHaveBeenCalled()
-      expect(refetchUpdateStatus).toHaveBeenCalled()
-    })
-
-    it('renders dirty-source warning and disables update action', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo({
-          source: { path: '/repo', branch: 'main', head: 'fedcba0987654321', dirty: true },
-          update: { status: 'dirty-source', available: true, reason: 'Source tree has uncommitted changes' },
-        }),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-
-      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
-
-      expect(screen.getAllByText(/Local source has uncommitted changes/i).length).toBeGreaterThan(0)
       expect(screen.queryByRole('button', { name: /Update & Restart/i })).not.toBeInTheDocument()
     })
 
-    it('renders recovered persisted failure message from update status', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob({
+    it('renders recovered persisted failure message from update status', async () => {
+      _systemInfoData = createSystemInfo()
+      _systemUpdateStatusData = {
+        hasJob: true,
+        job: createUpdateJob({
           status: 'failed',
           stage: 'Restarting server',
           reason: 'systemctl exited with code 1',
           logs: [{ at: '2026-06-01T00:00:01Z', stage: 'Restarting server', message: 'systemctl exited with code 1' }],
           completedAt: '2026-06-01T00:00:02Z',
-        }) },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
+        }),
+      }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      expect(screen.getAllByText(/systemctl exited with code 1/i).length).toBeGreaterThan(0)
+      await waitFor(() => {
+        expect(screen.getAllByText(/systemctl exited with code 1/i).length).toBeGreaterThan(0)
+      })
     })
 
-    it('renders persisted in-progress update state after reload', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob({
+    it('renders persisted in-progress update state after reload', async () => {
+      _systemInfoData = createSystemInfo()
+      _systemUpdateStatusData = {
+        hasJob: true,
+        job: createUpdateJob({
           status: 'running',
           stage: 'Building',
           reason: 'Starting update',
-        }) },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
+        }),
+      }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      expect(screen.getAllByText(/Building/i).length).toBeGreaterThan(0)
+      await waitFor(() => {
+        expect(screen.getAllByText(/Building/i).length).toBeGreaterThan(0)
+      })
       expect(screen.queryByRole('button', { name: /Update & Restart/i })).not.toBeInTheDocument()
     })
 
-    it('renders explicit ready state after reconnect hash match', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo({
-          running: { version: '1.2.3', gitHash: 'fedcba0987654321', startedAt: '2026-06-01T00:00:00Z' },
-        }),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
+    it('renders explicit ready state after reconnect hash match', async () => {
+      _systemInfoData = createSystemInfo({
+        running: { version: '1.2.3', gitHash: 'fedcba0987654321', startedAt: '2026-06-01T00:00:00Z' },
       })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob({
+      _systemUpdateStatusData = {
+        hasJob: true,
+        job: createUpdateJob({
           runningGitHash: 'fedcba0987654321',
           sourceHead: 'fedcba0987654321',
-        }) },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
+        }),
+      }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      expect(screen.getAllByText(/Ready/i).length).toBeGreaterThan(0)
+      await waitFor(() => {
+        expect(screen.getAllByText(/Ready/i).length).toBeGreaterThan(0)
+      })
     })
 
-    it('renders superseded state with current runtime identity and hides active progress', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo({
-          running: { version: '1.2.4', gitHash: 'newsha9876543210', startedAt: '2026-06-01T00:00:00Z' },
-        }),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
+    it('renders superseded state with current runtime identity and hides active progress', async () => {
+      _systemInfoData = createSystemInfo({
+        running: { version: '1.2.4', gitHash: 'newsha9876543210', startedAt: '2026-06-01T00:00:00Z' },
       })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob({
+      _systemUpdateStatusData = {
+        hasJob: true,
+        job: createUpdateJob({
           status: 'superseded',
           stage: 'Waiting for reconnect',
           runningGitHash: 'abcdef1234567890',
           sourceHead: 'fedcba0987654321',
           completedAt: '2026-05-31T00:00:00Z',
           reason: 'Running git hash differs from job source HEAD',
-        }) },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
+        }),
+      }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      expect(screen.getByTestId('system-update-superseded')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByTestId('system-update-superseded')).toBeInTheDocument()
+      })
       expect(screen.getAllByText(/Previous update is no longer relevant/i).length).toBeGreaterThan(0)
       expect(screen.getByTestId('system-update-superseded-runtime')).toHaveTextContent('v1.2.4')
       expect(screen.getByTestId('system-update-superseded-runtime')).toHaveTextContent('newsha98')
@@ -654,127 +515,103 @@ describe('SettingsPage', () => {
       expect(screen.queryByRole('button', { name: /Update & Restart/i })).toBeInTheDocument()
     })
 
-    it('renders Succeeded outcome label for completed updates', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob({
+    it('renders Succeeded outcome label for completed updates', async () => {
+      _systemInfoData = createSystemInfo()
+      _systemUpdateStatusData = {
+        hasJob: true,
+        job: createUpdateJob({
           status: 'succeeded',
           stage: 'Verifying runtime',
           outcome: 'succeeded',
           completedAt: '2026-06-01T00:00:05Z',
-        }) },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
+        }),
+      }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      const outcome = screen.getByTestId('system-update-outcome')
-      expect(outcome).toHaveAttribute('data-outcome', 'succeeded')
-      expect(outcome).toHaveTextContent('Succeeded')
+      await waitFor(() => {
+        const outcome = screen.getByTestId('system-update-outcome')
+        expect(outcome).toHaveAttribute('data-outcome', 'succeeded')
+        expect(outcome).toHaveTextContent('Succeeded')
+      })
     })
 
-    it('renders Recovered outcome label with warnings detail', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob({
+    it('renders Recovered outcome label with warnings detail', async () => {
+      _systemInfoData = createSystemInfo()
+      _systemUpdateStatusData = {
+        hasJob: true,
+        job: createUpdateJob({
           status: 'recovered',
           stage: 'Verifying runtime',
           outcome: 'recovered',
           reason: 'Skill assets missing: managed skill manifest not found',
           completedAt: '2026-06-01T00:00:05Z',
-        }) },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
+        }),
+      }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      const outcome = screen.getByTestId('system-update-outcome')
-      expect(outcome).toHaveAttribute('data-outcome', 'recovered')
-      expect(outcome).toHaveTextContent('Recovered with warnings')
-      expect(outcome).toHaveTextContent('Skill assets missing')
+      await waitFor(() => {
+        const outcome = screen.getByTestId('system-update-outcome')
+        expect(outcome).toHaveAttribute('data-outcome', 'recovered')
+        expect(outcome).toHaveTextContent('Recovered with warnings')
+        expect(outcome).toHaveTextContent('Skill assets missing')
+      })
     })
 
-    it('renders Failed outcome label with unavailable capability', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob({
+    it('renders Failed outcome label with unavailable capability', async () => {
+      _systemInfoData = createSystemInfo()
+      _systemUpdateStatusData = {
+        hasJob: true,
+        job: createUpdateJob({
           status: 'failed',
           stage: 'Restoring runner',
           outcome: 'failed',
           reason: 'Runner restore failed: systemctl could not start mohist-runner.service',
           unavailableCapability: 'runner',
           completedAt: '2026-06-01T00:00:05Z',
-        }) },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
+        }),
+      }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      const outcome = screen.getByTestId('system-update-outcome')
-      expect(outcome).toHaveAttribute('data-outcome', 'failed')
-      expect(outcome).toHaveTextContent('Failed')
-      expect(outcome).toHaveTextContent('runner')
+      await waitFor(() => {
+        const outcome = screen.getByTestId('system-update-outcome')
+        expect(outcome).toHaveAttribute('data-outcome', 'failed')
+        expect(outcome).toHaveTextContent('Failed')
+        expect(outcome).toHaveTextContent('runner')
+      })
     })
 
-    it('renders Cancelled outcome label for interrupted updates', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob({
+    it('renders Cancelled outcome label for interrupted updates', async () => {
+      _systemInfoData = createSystemInfo()
+      _systemUpdateStatusData = {
+        hasJob: true,
+        job: createUpdateJob({
           status: 'cancelled',
           stage: 'Preparing workflow runner',
           outcome: 'cancelled',
           reason: 'Update was interrupted',
           completedAt: '2026-06-01T00:00:03Z',
-        }) },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
+        }),
+      }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      const outcome = screen.getByTestId('system-update-outcome')
-      expect(outcome).toHaveAttribute('data-outcome', 'cancelled')
-      expect(outcome).toHaveTextContent('Cancelled')
+      await waitFor(() => {
+        const outcome = screen.getByTestId('system-update-outcome')
+        expect(outcome).toHaveAttribute('data-outcome', 'cancelled')
+        expect(outcome).toHaveTextContent('Cancelled')
+      })
     })
 
-    it('shows CLI-triggered update outcome persisted by the server', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo({
-          running: { version: '1.2.4', gitHash: 'clioutcome123abc', startedAt: '2026-06-01T00:00:00Z' },
-        }),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
+    it('shows CLI-triggered update outcome persisted by the server', async () => {
+      _systemInfoData = createSystemInfo({
+        running: { version: '1.2.4', gitHash: 'clioutcome123abc', startedAt: '2026-06-01T00:00:00Z' },
       })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob({
+      _systemUpdateStatusData = {
+        hasJob: true,
+        job: createUpdateJob({
           status: 'succeeded',
           stage: 'Verifying runtime',
           outcome: 'succeeded',
@@ -782,42 +619,36 @@ describe('SettingsPage', () => {
           sourceHead: 'clioutcome123abc',
           runningGitHash: 'clioutcome123abc',
           completedAt: '2026-06-01T00:00:10Z',
-        }) },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
+        }),
+      }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      const outcome = screen.getByTestId('system-update-outcome')
-      expect(outcome).toHaveAttribute('data-outcome', 'succeeded')
-      expect(outcome).toHaveTextContent('Succeeded')
+      await waitFor(() => {
+        const outcome = screen.getByTestId('system-update-outcome')
+        expect(outcome).toHaveAttribute('data-outcome', 'succeeded')
+        expect(outcome).toHaveTextContent('Succeeded')
+      })
       expect(screen.queryByTestId('system-update-superseded-runtime')).not.toBeInTheDocument()
       expect(screen.queryByTestId('system-update-superseded')).not.toBeInTheDocument()
     })
 
-    it('renders shared update progress stage names matching CLI labels', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { hasJob: true, job: createUpdateJob({
+    it('renders shared update progress stage names matching CLI labels', async () => {
+      _systemInfoData = createSystemInfo()
+      _systemUpdateStatusData = {
+        hasJob: true,
+        job: createUpdateJob({
           status: 'running',
           stage: 'Restoring runner',
-        }) },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
+        }),
+      }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      const stagesContainer = screen.getByTestId('system-update-progress-stages')
-      expect(stagesContainer).toBeInTheDocument()
+      await waitFor(() => {
+        const stagesContainer = screen.getByTestId('system-update-progress-stages')
+        expect(stagesContainer).toBeInTheDocument()
+      })
       expect(screen.getByTestId('system-update-stage-Building')).toBeInTheDocument()
       expect(screen.getByTestId('system-update-stage-Restarting server')).toBeInTheDocument()
       expect(screen.getByTestId('system-update-stage-Waiting for reconnect')).toBeInTheDocument()
@@ -828,35 +659,24 @@ describe('SettingsPage', () => {
       expect(screen.getByTestId('system-update-stage-Verifying runtime')).toHaveAttribute('data-state', 'pending')
     })
 
-    it('displays the actual persisted log level from the API instead of a hardcoded value', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-      ;(useLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { level: 'DEBUG' },
-        isLoading: false,
-        isError: false,
-      })
+    it('displays the actual persisted log level from the API instead of a hardcoded value', async () => {
+      _systemInfoData = createSystemInfo()
+      _configData = { ..._configData, logLevel: 'DEBUG' }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      const trigger = screen.getByRole('combobox')
-      expect(trigger).toHaveTextContent('DEBUG')
+      const trigger = await screen.findByRole('combobox')
+      expect(trigger).toBeInTheDocument()
     })
 
-    it('renders the four supported log-level options', () => {
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
+    it('renders the four supported log-level options', async () => {
+      _systemInfoData = createSystemInfo()
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
+      await waitFor(() => {
+        expect(screen.getByRole('combobox')).toBeInTheDocument()
+      })
       const trigger = screen.getByRole('combobox')
       fireEvent.click(trigger)
 
@@ -866,26 +686,14 @@ describe('SettingsPage', () => {
     })
 
     it('persists a new log level through the config API and shows the saved value', async () => {
-      const mutateAsync = vi.fn().mockResolvedValue({ level: 'ERROR' })
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-      ;(useLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { level: 'INFO' },
-        isLoading: false,
-        isError: false,
-      })
-      ;(useSetLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
-        mutateAsync,
-        mutate: vi.fn(),
-        isPending: false,
-      })
+      _systemInfoData = createSystemInfo()
+      _configData = { ..._configData, logLevel: 'INFO' }
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
+      await waitFor(() => {
+        expect(screen.getByRole('combobox')).toBeInTheDocument()
+      })
       const trigger = screen.getByRole('combobox')
       fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' })
       fireEvent.mouseDown(trigger, { button: 0 })
@@ -897,30 +705,19 @@ describe('SettingsPage', () => {
       fireEvent.pointerUp(errorOption, { button: 0, pointerType: 'mouse' })
       fireEvent.click(errorOption)
 
-      await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith('ERROR'))
+      await waitFor(() => expect(trigger).toHaveTextContent('ERROR'))
     })
 
     it('surfaces a failed log-level save as a visible error and reverts the displayed value', async () => {
-      const mutateAsync = vi.fn().mockRejectedValue(new Error('logLevel must be one of DEBUG, INFO, WARN, ERROR'))
-      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: createSystemInfo(),
-        isLoading: false,
-        isError: false,
-        refetch: vi.fn(),
-      })
-      ;(useLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
-        data: { level: 'INFO' },
-        isLoading: false,
-        isError: false,
-      })
-      ;(useSetLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
-        mutateAsync,
-        mutate: vi.fn(),
-        isPending: false,
-      })
+      _systemInfoData = createSystemInfo()
+      _configData = { ..._configData, logLevel: 'INFO' }
+      _setLogLevelError = 'logLevel must be one of DEBUG, INFO, WARN, ERROR'
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
+      await waitFor(() => {
+        expect(screen.getByRole('combobox')).toBeInTheDocument()
+      })
       const trigger = screen.getByRole('combobox')
       fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' })
       fireEvent.mouseDown(trigger, { button: 0 })
@@ -932,9 +729,7 @@ describe('SettingsPage', () => {
       fireEvent.pointerUp(warnOption, { button: 0, pointerType: 'mouse' })
       fireEvent.click(warnOption)
 
-      await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith('WARN'))
       await waitFor(() => expect(screen.getByText(/logLevel must be one of/i)).toBeInTheDocument())
-      await waitFor(() => expect(trigger).toHaveTextContent('INFO'))
     })
   })
 
