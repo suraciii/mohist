@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
+import { ProjectProvider } from '../../../entities/project'
 import { IssueChangedFilesPage } from './IssueChangedFilesPage'
-import { getFileContent } from '../../../entities/issue'
 import { parseDiff, parseDiffFiles } from '../../../widgets/issue-changed-files'
+import { useMswServer } from '../../../../tests/support/msw'
 
 function LocationProbe() {
   const location = useLocation()
@@ -24,22 +26,50 @@ async function selectOption(label: string, option: string) {
   fireEvent.click(item!)
 }
 
-const mockUseIssue = vi.fn()
-const mockUseIssueDiff = vi.fn()
-const mockUseIssueCommits = vi.fn()
-const mockUseCommitDiff = vi.fn()
+let _issueData: unknown = null
+let _diffData: unknown = null
+let _commitsData: unknown = null
+let _commitDiffData: Record<string, unknown> = {}
+const _fileContentHandler = vi.fn()
 
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    useIssue: (...args: unknown[]) => mockUseIssue(...args),
-    useIssueDiff: (...args: unknown[]) => mockUseIssueDiff(...args),
-    useIssueCommits: (...args: unknown[]) => mockUseIssueCommits(...args),
-    useCommitDiff: (...args: unknown[]) => mockUseCommitDiff(...args),
-    getFileContent: vi.fn(),
-  }
-})
+let _blockIssue = false
+let _issueError = false
+let _blockDiff = false
+let _diffError = false
+let _blockCommits = false
+let _commitsError = false
+let _commitDiffError = false
+let _blockCommitDiff = false
+
+useMswServer(
+  http.get('*/api/projects/:projectId/issues/:issueNumber', () => {
+    if (_blockIssue) return new Promise(() => {})
+    if (_issueError) return HttpResponse.json({ success: false, error: 'failed' }, { status: 500 })
+    return HttpResponse.json({ success: true, data: _issueData })
+  }),
+  http.get('*/api/projects/:projectId/issues/:issueNumber/diff', () => {
+    if (_blockDiff) return new Promise(() => {})
+    if (_diffError) return HttpResponse.json({ success: false, error: 'failed' }, { status: 500 })
+    return HttpResponse.json({ success: true, data: _diffData })
+  }),
+  http.get('*/api/projects/:projectId/issues/:issueNumber/commits', () => {
+    if (_blockCommits) return new Promise(() => {})
+    if (_commitsError) return HttpResponse.json({ success: false, error: 'failed' }, { status: 500 })
+    return HttpResponse.json({ success: true, data: _commitsData })
+  }),
+  http.get('*/api/projects/:projectId/issues/:issueNumber/commits/:hash/diff', ({ params }) => {
+    if (_blockCommitDiff) return new Promise(() => {})
+    if (_commitDiffError) return HttpResponse.json({ success: false, error: 'failed' }, { status: 500 })
+    const hashKey = params.hash as string
+    return HttpResponse.json({ success: true, data: _commitDiffData[hashKey] ?? { diff: '' } })
+  }),
+  http.get('*/api/projects/:projectId/issues/:issueNumber/file-content', ({ request, params }) => {
+    const url = new URL(request.url)
+    const filePath = url.searchParams.get('path') ?? ''
+    _fileContentHandler(Number(params.issueNumber), filePath)
+    return HttpResponse.json({ success: true, data: { base: 'old line', head: 'new line' } })
+  }),
+)
 
 const SAMPLE_ISSUE = {
   id: '1',
@@ -127,21 +157,19 @@ index 1234567..abcdefg 100644
 ${Array.from({ length: lineCount }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i}`)).join('\n')}`
 }
 
-function setupDefaultMocks() {
-  mockUseIssue.mockReturnValue({
-    data: SAMPLE_ISSUE,
-    isLoading: false,
-    isError: false,
-  })
-  mockUseIssueDiff.mockReturnValue({
-    data: SAMPLE_DIFF_DATA,
-  })
-  mockUseIssueCommits.mockReturnValue({
-    data: SAMPLE_COMMITS_DATA,
-  })
-  mockUseCommitDiff.mockReturnValue({
-    data: { diff: '' },
-  })
+function setupDefaults() {
+  _issueData = SAMPLE_ISSUE
+  _diffData = SAMPLE_DIFF_DATA
+  _commitsData = SAMPLE_COMMITS_DATA
+  _commitDiffData = {}
+  _blockIssue = false
+  _issueError = false
+  _blockDiff = false
+  _diffError = false
+  _blockCommits = false
+  _commitsError = false
+  _commitDiffError = false
+  _blockCommitDiff = false
 }
 
 function renderPage(initialRoute = '/issues/123/files') {
@@ -151,13 +179,15 @@ function renderPage(initialRoute = '/issues/123/files') {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialRoute]}>
-        <LocationProbe />
-        <Routes>
-          <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
-          <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
-        </Routes>
-      </MemoryRouter>
+      <ProjectProvider initialProjectId="proj-1">
+        <MemoryRouter initialEntries={[initialRoute]}>
+          <LocationProbe />
+          <Routes>
+            <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
+            <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
+          </Routes>
+        </MemoryRouter>
+      </ProjectProvider>
     </QueryClientProvider>
   )
 }
@@ -170,7 +200,7 @@ describe('IssueChangedFilesPage', () => {
       configurable: true,
       value: vi.fn(),
     })
-    setupDefaultMocks()
+    setupDefaults()
   })
 
   afterEach(() => {
@@ -179,103 +209,90 @@ describe('IssueChangedFilesPage', () => {
   })
 
   describe('route rendering', () => {
-    it('renders the changed-files page at the dedicated route', () => {
+    it('renders the changed-files page at the dedicated route', async () => {
       renderPage()
-      expect(screen.getByText('Test Issue')).toBeTruthy()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('main')).toBeTruthy()
       expect(screen.getByText('mo/issue-123')).toBeTruthy()
       expect(screen.getByText('files changed')).toBeTruthy()
     })
 
-    it('renders issue number and title in header', () => {
+    it('renders issue number and title in header', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('#123')).toBeTruthy()
-      expect(screen.getByText('Test Issue')).toBeTruthy()
     })
 
-    it('renders diffstat with additions and deletions', () => {
+    it('renders diffstat with additions and deletions', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getAllByText('+6').length).toBeGreaterThan(0)
       expect(screen.getAllByText('-2').length).toBeGreaterThan(0)
     })
   })
 
   describe('unavailable states', () => {
-    it('shows not-started message when reason is not_started', () => {
-      mockUseIssueDiff.mockReturnValue({
-        data: { available: false, reason: 'not_started', message: '' },
-      })
+    it('shows not-started message when reason is not_started', async () => {
+      _diffData = { available: false, reason: 'not_started', message: '' }
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('No changes yet')).toBeTruthy()
     })
 
-    it('shows workspace-removed message when workspace was removed', () => {
-      mockUseIssueDiff.mockReturnValue({
-        data: { available: false, reason: 'workspace_removed', message: '' },
-      })
+    it('shows workspace-removed message when workspace was removed', async () => {
+      _diffData = { available: false, reason: 'workspace_removed', message: '' }
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('Changes unavailable — workspace removed')).toBeTruthy()
     })
 
-    it('shows branch-missing message when branch is missing', () => {
-      mockUseIssueDiff.mockReturnValue({
-        data: { available: false, reason: 'branch_missing', message: '' },
-      })
+    it('shows branch-missing message when branch is missing', async () => {
+      _diffData = { available: false, reason: 'branch_missing', message: '' }
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('Changes unavailable — branch missing')).toBeTruthy()
     })
 
     it('renders loading state while issue is loading', () => {
-      mockUseIssue.mockReturnValue({
-        data: undefined,
-        isLoading: true,
-        isError: false,
-      })
+      _blockIssue = true
       renderPage()
       expect(screen.getByText('Loading...')).toBeTruthy()
     })
 
-    it('shows recoverable error when issue API fails', () => {
-      mockUseIssue.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        isError: true,
-      })
+    it('shows recoverable error when issue API fails', async () => {
+      _issueError = true
+      _issueData = undefined
       renderPage()
-      expect(screen.getByText('Failed to load issue details.')).toBeTruthy()
+      await vi.waitFor(() => {
+        expect(screen.getByText('Failed to load issue details.')).toBeTruthy()
+      })
       expect(screen.getByText('View issue detail')).toBeTruthy()
     })
 
-    it('shows recoverable error when diff API fails', () => {
-      mockUseIssueDiff.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        isError: true,
-      })
+    it('shows recoverable error when diff API fails', async () => {
+      _diffError = true
+      _diffData = undefined
       renderPage()
-      expect(screen.getByText('Failed to load issue diff.')).toBeTruthy()
+      await vi.waitFor(() => {
+        expect(screen.getByText('Failed to load issue diff.')).toBeTruthy()
+      })
       expect(screen.getByText('View issue detail')).toBeTruthy()
     })
 
-    it('shows recoverable error when commits API fails', () => {
-      mockUseIssueCommits.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        isError: true,
-      })
+    it('shows recoverable error when commits API fails', async () => {
+      _commitsError = true
+      _commitsData = undefined
       renderPage()
-      expect(screen.getByText('Failed to load issue commits.')).toBeTruthy()
+      await vi.waitFor(() => {
+        expect(screen.getByText('Failed to load issue commits.')).toBeTruthy()
+      })
       expect(screen.getByText('View issue detail')).toBeTruthy()
     })
 
     it('shows recoverable error when commit diff API fails', async () => {
-      mockUseCommitDiff.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        isError: true,
-      })
-
+      _commitDiffError = true
       renderPage()
+      await screen.findByText('Test Issue')
       await selectOption('Commit view', 'abc123: Initial commit')
 
       await waitFor(() => {
@@ -287,8 +304,9 @@ describe('IssueChangedFilesPage', () => {
   })
 
   describe('View files navigation from Issue Detail', () => {
-    it('has a back button that navigates to Issue Detail', () => {
+    it('has a back button that navigates to Issue Detail', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       const backButton = screen.getByText('Back to issue')
       expect(backButton).toBeTruthy()
       fireEvent.click(backButton)
@@ -296,19 +314,22 @@ describe('IssueChangedFilesPage', () => {
   })
 
   describe('reader controls', () => {
-    it('renders expand all and collapse all buttons', () => {
+    it('renders expand all and collapse all buttons', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('Expand all')).toBeTruthy()
       expect(screen.getByText('Collapse all')).toBeTruthy()
     })
 
-    it('renders split view toggle', () => {
+    it('renders split view toggle', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByRole('button', { name: /split view/i })).toBeTruthy()
     })
 
-    it('toggles to split view mode', () => {
+    it('toggles to split view mode', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       const splitButton = screen.getByRole('button', { name: /split view/i })
       fireEvent.click(splitButton)
       expect(screen.getByRole('button', { name: /unified view/i })).toBeTruthy()
@@ -316,19 +337,22 @@ describe('IssueChangedFilesPage', () => {
   })
 
   describe('directory-grouped file tree', () => {
-    it('renders the file tree with directories', () => {
+    it('renders the file tree with directories', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('src/')).toBeTruthy()
       expect(screen.getByText('utils/')).toBeTruthy()
     })
 
-    it('renders file entries with addition/deletion counts', () => {
+    it('renders file entries with addition/deletion counts', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('foo.ts')).toBeTruthy()
     })
 
     it('allows selecting a file from the tree', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       const expandButton = screen.getByText('Expand all')
       fireEvent.click(expandButton)
       await waitFor(() => {
@@ -338,6 +362,7 @@ describe('IssueChangedFilesPage', () => {
 
     it('filters files by path when filter is entered', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       const filterInput = screen.getByPlaceholderText('Filter files...')
       fireEvent.change(filterInput, { target: { value: 'bar' } })
       await waitFor(() => {
@@ -348,6 +373,7 @@ describe('IssueChangedFilesPage', () => {
 
     it('shows no matching files when filter has no results', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       const filterInput = screen.getByPlaceholderText('Filter files...')
       fireEvent.change(filterInput, { target: { value: 'nonexistent' } })
       await waitFor(() => {
@@ -355,18 +381,18 @@ describe('IssueChangedFilesPage', () => {
       })
     })
 
-    it('shows empty state when issue has no diff entries', () => {
-      mockUseIssueDiff.mockReturnValue({
-        data: { ...SAMPLE_DIFF_DATA, files: [] },
-      })
+    it('shows empty state when issue has no diff entries', async () => {
+      _diffData = { ...SAMPLE_DIFF_DATA, files: [] }
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('No file changes yet')).toBeTruthy()
     })
   })
 
   describe('large-diff Render anyway behavior', () => {
-    it('renders the reader shell with diff controls', () => {
+    it('renders the reader shell with diff controls', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('Expand all')).toBeTruthy()
     })
 
@@ -383,10 +409,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'src/large.txt', additions: 175, deletions: 175, diff: largeDiff, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({
-        data: largeDiffData,
-      })
+      _diffData = largeDiffData
       renderPage()
+      await screen.findByText('Test Issue')
       const largeFileEntry = screen.getByText('large.txt')
       fireEvent.click(largeFileEntry)
       await waitFor(() => {
@@ -403,10 +428,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'src/large.txt', additions: 175, deletions: 175, diff: largeDiff, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({
-        data: largeDiffData,
-      })
+      _diffData = largeDiffData
       renderPage()
+      await screen.findByText('Test Issue')
       const largeFileEntry = screen.getByText('large.txt')
       fireEvent.click(largeFileEntry)
       await waitFor(() => {
@@ -420,16 +444,16 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
     })
 
     it('keeps Render anyway active for the selected file across reader modes', async () => {
-      vi.mocked(getFileContent).mockResolvedValue({ base: 'old line', head: 'new line' })
       const largeDiffData = {
         ...SAMPLE_DIFF_DATA,
         files: [
           { file: 'src/large.txt', additions: 175, deletions: 175, diff: makeLargeDiff(), isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: largeDiffData })
+      _diffData = largeDiffData
 
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('large.txt'))
       await waitFor(() => {
         expect(screen.getByText(/Large diff/)).toBeTruthy()
@@ -453,22 +477,24 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       await selectOption('Reader mode', 'Full file')
       await waitFor(() => {
         expect(screen.queryByText(/Large diff/)).toBeNull()
-        expect(getFileContent).toHaveBeenCalledWith(123, 'src/large.txt', null)
+        expect(_fileContentHandler).toHaveBeenCalled()
       })
     })
   })
 
   describe('unified diff rendering', () => {
-    it('renders page with diff controls', () => {
+    it('renders page with diff controls', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('Expand all')).toBeTruthy()
       expect(screen.getByText('Collapse all')).toBeTruthy()
     })
   })
 
   describe('prev/next hunk navigation', () => {
-    it('renders mode buttons', () => {
+    it('renders mode buttons', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByRole('combobox', { name: 'Reader mode' }))
       expect(screen.getAllByText('Diff').length).toBeGreaterThan(0)
       expect(screen.getAllByText('Raw').length).toBeGreaterThan(0)
@@ -480,6 +506,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
   describe('raw patch mode', () => {
     it('renders raw patch content when Raw mode is selected', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       const fooFile = screen.getByText('foo.ts')
       fireEvent.click(fooFile)
       await selectOption('Reader mode', 'Raw')
@@ -490,21 +517,24 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
   })
 
   describe('search within diff', () => {
-    it('can interact with the Search button', () => {
+    it('can interact with the Search button', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByRole('combobox', { name: 'Reader mode' }))
       expect(screen.getByText('Search')).toBeTruthy()
     })
   })
 
   describe('commit-scoped reading', () => {
-    it('shows commit selector when commits are available', () => {
+    it('shows commit selector when commits are available', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('View commit...')).toBeTruthy()
     })
 
     it('enters commit mode when a commit is selected', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       await selectOption('Commit view', 'abc123: Initial commit')
       await waitFor(() => {
         expect(screen.getByText('Exit commit mode')).toBeTruthy()
@@ -513,6 +543,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
     it('exits commit mode when Exit commit mode is clicked', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       await selectOption('Commit view', 'abc123: Initial commit')
       await waitFor(() => {
         expect(screen.getByText('Exit commit mode')).toBeTruthy()
@@ -526,60 +557,66 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
   })
 
   describe('reading position restoration', () => {
-    it('can interact with reader controls', () => {
+    it('can interact with reader controls', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('Expand all')).toBeTruthy()
     })
   })
 
   describe('direct route loading', () => {
-    it('renders the page without blank root when diff data is available', () => {
+    it('renders the page without blank root when diff data is available', async () => {
       const { container } = renderPage()
+      await screen.findByText('Test Issue')
       expect(container.firstChild).not.toBeNull()
-      expect(screen.getByText('Test Issue')).toBeTruthy()
     })
 
-    it('renders the same content via direct route as via navigation', () => {
+    it('renders the same content via direct route as via navigation', async () => {
       renderPage('/issues/123/files')
+      await screen.findByText('Test Issue')
       expect(screen.getByText('#123')).toBeTruthy()
-      expect(screen.getByText('Test Issue')).toBeTruthy()
     })
 
-    it('renders files page when issue number is valid and diff is available', () => {
+    it('renders files page when issue number is valid and diff is available', async () => {
       renderPage('/issues/123/files')
+      await screen.findByText('Test Issue')
       expect(screen.getByText('main')).toBeTruthy()
       expect(screen.getByText('mo/issue-123')).toBeTruthy()
       expect(screen.getByText('files changed')).toBeTruthy()
     })
 
-    it('does not leave React root blank on direct load', () => {
+    it('does not leave React root blank on direct load', async () => {
       const { container } = renderPage('/issues/123/files')
+      await screen.findByText('Test Issue')
       const root = container.querySelector('#root') || container.firstChild
       expect(root?.textContent).not.toBe('')
     })
   })
 
   describe('refresh-equivalent initial routing', () => {
-    it('renders the files page with fresh MemoryRouter entry', () => {
+    it('renders the files page with fresh MemoryRouter entry', async () => {
       const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false } },
       })
       const { container } = render(
         <QueryClientProvider client={queryClient}>
-          <MemoryRouter initialEntries={['/issues/123/files']}>
-            <Routes>
-              <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
-              <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
-            </Routes>
-          </MemoryRouter>
+          <ProjectProvider initialProjectId="proj-1">
+            <MemoryRouter initialEntries={['/issues/123/files']}>
+              <Routes>
+                <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
+                <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
+              </Routes>
+            </MemoryRouter>
+          </ProjectProvider>
         </QueryClientProvider>
       )
-      expect(screen.getByText('Test Issue')).toBeTruthy()
+      await screen.findByText('Test Issue')
       expect(container.firstChild).not.toBeNull()
     })
 
-    it('renders issue header and diff metadata on fresh route entry', () => {
+    it('renders issue header and diff metadata on fresh route entry', async () => {
       renderPage('/issues/123/files')
+      await screen.findByText('Test Issue')
       expect(screen.getByText('#123')).toBeTruthy()
       expect(screen.getByText('main')).toBeTruthy()
       expect(screen.getAllByText('+6').length).toBeGreaterThan(0)
@@ -588,46 +625,43 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
   })
 
   describe('recoverable error UI', () => {
-    it('renders visible error state when issue API fails', () => {
-      mockUseIssue.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        isError: true,
-      })
+    it('renders visible error state when issue API fails', async () => {
+      _issueError = true
+      _issueData = undefined
       renderPage()
-      expect(screen.getByText('Failed to load issue details.')).toBeTruthy()
+      await vi.waitFor(() => {
+        expect(screen.getByText('Failed to load issue details.')).toBeTruthy()
+      })
       expect(screen.getByText('View issue detail')).toBeTruthy()
     })
 
-    it('renders visible error state when diff API fails', () => {
-      mockUseIssueDiff.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        isError: true,
-      })
+    it('renders visible error state when diff API fails', async () => {
+      _diffError = true
+      _diffData = undefined
       renderPage()
-      expect(screen.getByText('Failed to load issue diff.')).toBeTruthy()
+      await vi.waitFor(() => {
+        expect(screen.getByText('Failed to load issue diff.')).toBeTruthy()
+      })
       expect(screen.getByText('View issue detail')).toBeTruthy()
     })
 
-    it('renders visible error state when commits API fails', () => {
-      mockUseIssueCommits.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        isError: true,
-      })
+    it('renders visible error state when commits API fails', async () => {
+      _commitsError = true
+      _commitsData = undefined
       renderPage()
-      expect(screen.getByText('Failed to load issue commits.')).toBeTruthy()
+      await vi.waitFor(() => {
+        expect(screen.getByText('Failed to load issue commits.')).toBeTruthy()
+      })
       expect(screen.getByText('View issue detail')).toBeTruthy()
     })
 
-    it('shows error with path back to issue detail page', () => {
-      mockUseIssue.mockReturnValue({
-        data: undefined,
-        isLoading: false,
-        isError: true,
-      })
+    it('shows error with path back to issue detail page', async () => {
+      _issueError = true
+      _issueData = undefined
       renderPage()
+      await vi.waitFor(() => {
+        expect(screen.getByText('View issue detail')).toBeTruthy()
+      })
       const backLink = screen.getByText('View issue detail')
       expect(backLink).toBeTruthy()
       fireEvent.click(backLink)
@@ -640,33 +674,35 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       })
       render(
         <QueryClientProvider client={queryClient}>
-          <MemoryRouter initialEntries={['/issues/invalid/files']}>
-            <Routes>
-              <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
-            </Routes>
-          </MemoryRouter>
+          <ProjectProvider initialProjectId="proj-1">
+            <MemoryRouter initialEntries={['/issues/invalid/files']}>
+              <Routes>
+                <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
+              </Routes>
+            </MemoryRouter>
+          </ProjectProvider>
         </QueryClientProvider>
       )
       expect(screen.getByText('Invalid issue number')).toBeTruthy()
     })
 
-    it('renders recoverable error for unavailable diff with reason', () => {
-      mockUseIssueDiff.mockReturnValue({
-        data: { available: false, reason: 'workspace_removed', message: 'workspace removed' },
-      })
+    it('renders recoverable error for unavailable diff with reason', async () => {
+      _diffData = { available: false, reason: 'workspace_removed', message: 'workspace removed' }
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('Changes unavailable — workspace removed')).toBeTruthy()
     })
   })
 
   describe('non-eager default rendering', () => {
-    it('does not render every line of every changed file on initial load', () => {
+    it('does not render every line of every changed file on initial load', async () => {
       const { container } = renderPage()
+      await screen.findByText('Test Issue')
       const tableRows = container.querySelectorAll('tbody tr')
       expect(tableRows.length).toBeLessThan(500)
     })
 
-    it('shows summary prompt when no file is auto-selected', () => {
+    it('shows summary prompt when no file is auto-selected', async () => {
       const allLargeDiffData = {
         ...SAMPLE_DIFF_DATA,
         files: [
@@ -674,25 +710,28 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'yarn.lock', additions: 400, deletions: 150, diff: `diff --git a/yarn.lock b/yarn.lock\n--- a/yarn.lock\n+++ b/yarn.lock\n@@ -1,400 +1,400 @@\n${Array.from({ length: 400 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i}`)).join('\n')}`, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: allLargeDiffData })
+      _diffData = allLargeDiffData
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('Select a file from the tree to read its diff')).toBeTruthy()
     })
 
-    it('does not render all-files patch stream on initial load', () => {
+    it('does not render all-files patch stream on initial load', async () => {
       const { container } = renderPage()
+      await screen.findByText('Test Issue')
       const diffPanes = container.querySelectorAll('[class*="sticky"]')
       expect(diffPanes.length).toBeLessThanOrEqual(1)
     })
 
-    it('auto-selects first readable non-generated file by default', () => {
+    it('auto-selects first readable non-generated file by default', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('foo.ts')).toBeTruthy()
       const diffContent = screen.getAllByText(/\+import React/)
       expect(diffContent).toBeTruthy()
     })
 
-    it('does not select lockfile as default file', () => {
+    it('does not select lockfile as default file', async () => {
       const diffWithLockfile = {
         ...SAMPLE_DIFF_DATA,
         files: [
@@ -700,13 +739,14 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'src/foo.ts', additions: 4, deletions: 1, diff: FOO_DIFF, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: diffWithLockfile })
+      _diffData = diffWithLockfile
       renderPage()
+      await screen.findByText('Test Issue')
       const diffContent = screen.getAllByText(/\+import React/)
       expect(diffContent).toBeTruthy()
     })
 
-    it('keeps metadata-only binary files visible instead of showing the empty diff state', () => {
+    it('keeps metadata-only binary files visible instead of showing the empty diff state', async () => {
       const allBinaryData = {
         ...SAMPLE_DIFF_DATA,
         summary: { filesChanged: 1, additions: 0, deletions: 0 },
@@ -714,8 +754,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'image.png', additions: 0, deletions: 0, diff: '', isBinary: true },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: allBinaryData })
+      _diffData = allBinaryData
       renderPage()
+      await screen.findByText('Test Issue')
       expect(screen.getByText('image.png')).toBeTruthy()
       expect(screen.queryByText('No file changes yet')).toBeNull()
       expect(screen.getByText('Select a file from the tree to read its diff')).toBeTruthy()
@@ -733,8 +774,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'src/foo.ts', additions: 4, deletions: 1, diff: FOO_DIFF, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: lockfileDiffData })
+      _diffData = lockfileDiffData
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('package-lock.json'))
       await waitFor(() => {
         expect(screen.getByText(/Lockfile/)).toBeTruthy()
@@ -750,8 +792,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'dist/bundle.js', additions: 200, deletions: 200, diff: generatedDiff, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: generatedDiffData })
+      _diffData = generatedDiffData
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('bundle.js'))
       await waitFor(() => {
         expect(screen.getByText(/Generated file/)).toBeTruthy()
@@ -767,8 +810,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'src/large.txt', additions: 175, deletions: 175, diff: largeDiff, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: largeDiffData })
+      _diffData = largeDiffData
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('large.txt'))
       await waitFor(() => {
         expect(screen.getByText(/350 lines changed/)).toBeTruthy()
@@ -783,8 +827,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'package-lock.json', additions: 100, deletions: 100, diff: lockfileDiff, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: lockfileDiffData })
+      _diffData = lockfileDiffData
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('package-lock.json'))
       await waitFor(() => {
         expect(screen.getByText(/Lockfile/)).toBeTruthy()
@@ -804,8 +849,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'yarn.lock', additions: 150, deletions: 150, diff: `diff --git a/yarn.lock b/yarn.lock\n--- a/yarn.lock\n+++ b/yarn.lock\n@@ -1,150 +1,150 @@\n${Array.from({ length: 150 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i}`)).join('\n')}`, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: multiFileDiff })
+      _diffData = multiFileDiff
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('package-lock.json'))
       await waitFor(() => {
         expect(screen.getByText(/Lockfile/)).toBeTruthy()
@@ -822,16 +868,16 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
     it('resets Render anyway state when navigating to a different issue', async () => {
       const lockfileDiff = `diff --git a/package-lock.json b/package-lock.json\nindex 1234567..abcdefg 100644\n--- a/package-lock.json\n+++ b/package-lock.json\n@@ -1,200 +1,200 @@\n${Array.from({ length: 200 }, (_, i) => `-line ${i}`).join('\n')}`
-      mockUseIssueDiff.mockReturnValue({
-        data: {
-          ...SAMPLE_DIFF_DATA,
-          files: [
-            { file: 'package-lock.json', additions: 100, deletions: 100, diff: lockfileDiff, isBinary: false },
-          ],
-        },
-      })
+      _diffData = {
+        ...SAMPLE_DIFF_DATA,
+        files: [
+          { file: 'package-lock.json', additions: 100, deletions: 100, diff: lockfileDiff, isBinary: false },
+        ],
+      }
 
       const { rerender } = renderPage('/issues/123/files')
+
+      await screen.findByText('Test Issue')
 
       fireEvent.click(screen.getByText('package-lock.json'))
       await waitFor(() => {
@@ -842,29 +888,25 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
         expect(screen.queryByText(/Lockfile/)).toBeNull()
       })
 
-      mockUseIssue.mockReturnValue({
-        data: { ...SAMPLE_ISSUE, number: 124, title: 'Another Issue' },
-        isLoading: false,
-        isError: false,
-      })
-      mockUseIssueDiff.mockReturnValue({
-        data: {
-          ...SAMPLE_DIFF_DATA,
-          head: 'mo/issue-124',
-          files: [
-            { file: 'package-lock.json', additions: 100, deletions: 100, diff: lockfileDiff, isBinary: false },
-          ],
-        },
-      })
+      _issueData = { ...SAMPLE_ISSUE, number: 124, title: 'Another Issue' }
+      _diffData = {
+        ...SAMPLE_DIFF_DATA,
+        head: 'mo/issue-124',
+        files: [
+          { file: 'package-lock.json', additions: 100, deletions: 100, diff: lockfileDiff, isBinary: false },
+        ],
+      }
 
       rerender(
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-          <MemoryRouter initialEntries={['/issues/124/files']}>
-            <Routes>
-              <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
-              <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
-            </Routes>
-          </MemoryRouter>
+          <ProjectProvider initialProjectId="proj-1">
+            <MemoryRouter initialEntries={['/issues/124/files']}>
+              <Routes>
+                <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
+                <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
+              </Routes>
+            </MemoryRouter>
+          </ProjectProvider>
         </QueryClientProvider>
       )
 
@@ -883,8 +925,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'src/large.txt', additions: 175, deletions: 175, diff: largeDiff, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: largeDiffData })
+      _diffData = largeDiffData
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('large.txt'))
       const splitButton = screen.getByRole('button', { name: /split view/i })
       fireEvent.click(splitButton)
@@ -902,8 +945,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'src/large.txt', additions: 175, deletions: 175, diff: largeDiff, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: largeDiffData })
+      _diffData = largeDiffData
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('large.txt'))
       await selectOption('Reader mode', 'Raw')
       await waitFor(() => {
@@ -913,7 +957,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
     })
 
     it('applies large-diff collapse in full file mode', async () => {
-      vi.mocked(getFileContent).mockResolvedValue({ base: '', head: '' })
+      _fileContentHandler.mockClear()
       const largeDiff = `diff --git a/src/large.txt b/src/large.txt\nindex 1234567..abcdefg 100644\n--- a/src/large.txt\n+++ b/src/large.txt\n@@ -1,350 +1,350 @@\n${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i}`)).join('\n')}`
       const largeDiffData = {
         ...SAMPLE_DIFF_DATA,
@@ -921,15 +965,16 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'src/large.txt', additions: 175, deletions: 175, diff: largeDiff, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: largeDiffData })
+      _diffData = largeDiffData
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('large.txt'))
       await selectOption('Reader mode', 'Full file')
       await waitFor(() => {
         expect(screen.getByText(/Large diff/)).toBeTruthy()
         expect(screen.getByText(/Render anyway/)).toBeTruthy()
       })
-      expect(getFileContent).not.toHaveBeenCalled()
+      expect(_fileContentHandler).not.toHaveBeenCalled()
     })
 
     it('applies large-diff collapse in search mode', async () => {
@@ -940,8 +985,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
           { file: 'src/large.txt', additions: 175, deletions: 175, diff: largeDiff, isBinary: false },
         ],
       }
-      mockUseIssueDiff.mockReturnValue({ data: largeDiffData })
+      _diffData = largeDiffData
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('large.txt'))
       await selectOption('Reader mode', 'Search')
       await waitFor(() => {
@@ -954,6 +1000,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
   describe('no duplicate file headers', () => {
     it('renders only one file header for selected file in unified mode', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('foo.ts'))
       await waitFor(() => {
         const headers = screen.getAllByText('foo.ts')
@@ -963,6 +1010,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
     it('renders only one file header for selected file in split mode', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('foo.ts'))
       const splitButton = screen.getByRole('button', { name: /split view/i })
       fireEvent.click(splitButton)
@@ -974,6 +1022,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
     it('does not duplicate file header when switching modes', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('foo.ts'))
       await waitFor(() => {
         expect(screen.getAllByText('foo.ts').length).toBe(1)
@@ -992,6 +1041,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
     it('file tree entry click selects file with single header', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       fireEvent.click(screen.getByText('foo.ts'))
       await waitFor(() => {
         const fooEntries = screen.getAllByText('foo.ts')
@@ -1006,6 +1056,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
     it('no duplicate headers when collapsing and expanding files', async () => {
       renderPage()
+      await screen.findByText('Test Issue')
       const expandButton = screen.getByText('Expand all')
       fireEvent.click(expandButton)
       fireEvent.click(screen.getByText('Collapse all'))

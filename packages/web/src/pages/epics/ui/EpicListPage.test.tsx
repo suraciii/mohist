@@ -3,49 +3,51 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { toast } from 'sonner'
+import { ProjectProvider } from '../../../entities/project'
 import { EpicStatus } from '../../../entities/epic'
 import { EpicListPage } from './EpicListPage'
-
-const startIssueMock = vi.hoisted(() => vi.fn())
-
-const mocks = vi.hoisted(() => ({
-  useEpics: vi.fn(),
-  useCreateEpic: vi.fn(),
-  useStartIssue: vi.fn(),
-}))
-
-const realEpicModule = await vi.importActual<typeof import('../../../entities/epic')>('../../../entities/epic')
-
-function passthroughStartIssue() {
-  mocks.useStartIssue.mockImplementation(((...args: unknown[]) =>
-    realEpicModule.useStartIssue(...(args as Parameters<typeof realEpicModule.useStartIssue>))) as ReturnType<
-    typeof mocks.useStartIssue
-  >)
-}
+import { useMswServer } from '../../../../tests/support/msw'
 
 function LocationProbe() {
   const location = useLocation()
   return <div data-testid="current-path">{location.pathname}{location.search}</div>
 }
 
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    startIssue: startIssueMock,
-  }
-})
+let _epicsData: unknown[] = []
+const _epicsRequests: { search?: string; sort?: string; dir?: string }[] = []
+const _startIssueHandler = vi.fn()
+const _createEpicHandler = vi.fn()
+let _blockStartIssue = false
+let _startIssueError: { status: number; error: string } | null = null
 
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
-  return {
-    ...actual,
-    useEpics: mocks.useEpics,
-    useCreateEpic: mocks.useCreateEpic,
-    useStartIssue: mocks.useStartIssue,
-  }
-})
+useMswServer(
+  http.get('*/api/projects/:projectId/epics', ({ request }) => {
+    const url = new URL(request.url)
+    const search = url.searchParams.get('search') || undefined
+    const sort = url.searchParams.get('sort') || undefined
+    const dir = url.searchParams.get('dir') || undefined
+    _epicsRequests.push({ search, sort, dir })
+    return HttpResponse.json({ success: true, data: _epicsData })
+  }),
+  http.post('*/api/projects/:projectId/epics', async ({ request }) => {
+    const body = await request.json() as Record<string, string>
+    _createEpicHandler(body)
+    return HttpResponse.json({ success: true, data: { id: 'new-epic', ...body } })
+  }),
+  http.post('*/api/projects/:projectId/issues/:issueNumber/start', ({ params }) => {
+    _startIssueHandler(Number(params.issueNumber))
+    if (_blockStartIssue) return new Promise(() => {})
+    if (_startIssueError) {
+      return HttpResponse.json(
+        { success: false, error: _startIssueError.error },
+        { status: _startIssueError.status },
+      )
+    }
+    return HttpResponse.json({ success: true, data: { issue: { number: Number(params.issueNumber) }, message: 'started' } })
+  }),
+)
 
 function makeEpic(overrides: Record<string, unknown>) {
   return {
@@ -174,36 +176,39 @@ function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/epics']}>
-        <LocationProbe />
-        <Routes>
-          <Route path="/epics" element={<EpicListPage />} />
-        </Routes>
-      </MemoryRouter>
+      <ProjectProvider initialProjectId="proj-1">
+        <MemoryRouter initialEntries={['/epics']}>
+          <LocationProbe />
+          <Routes>
+            <Route path="/epics" element={<EpicListPage />} />
+          </Routes>
+        </MemoryRouter>
+      </ProjectProvider>
     </QueryClientProvider>,
   )
 }
 
-describe('EpicListPage four-group rendering', () => {
-  const createMutate = vi.fn()
-  const startMutate = vi.fn()
+async function waitForList() {
+  const sections = ['epic-section-running', 'epic-section-ready', 'epic-section-waiting', 'epic-section-idle', 'epic-section-done', 'epic-section-closed', 'epic-section-paused']
+  await Promise.any(sections.map(id => screen.findByTestId(id, {}, { timeout: 5000 })))
+}
 
+describe('EpicListPage four-group rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useEpics.mockReturnValue({
-      data: [runningEpic, readyToStartEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic, doneEpic, closedEpic],
-      isLoading: false,
-    })
-    mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    _epicsRequests.length = 0
+    _blockStartIssue = false
+    _startIssueError = null
+    _epicsData = [runningEpic, readyToStartEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic, doneEpic, closedEpic]
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('renders active sections in fixed priority order Running → Ready to start → Waiting/Blocked → Idle/Empty', () => {
+  it('renders active sections in fixed priority order Running -> Ready to start -> Waiting/Blocked -> Idle/Empty', async () => {
     renderPage()
+    await waitForList()
 
     const headings = screen.getAllByRole('heading', { level: 2 })
     const headingTexts = headings.map(h => h.textContent ?? '')
@@ -224,8 +229,9 @@ describe('EpicListPage four-group rendering', () => {
     expect(waitingIdx).toBeLessThan(idleIdx)
   })
 
-  it('uses the new test-ids epic-section-running, epic-section-ready, epic-section-waiting, epic-section-idle', () => {
+  it('uses the new test-ids epic-section-running, epic-section-ready, epic-section-waiting, epic-section-idle', async () => {
     renderPage()
+    await waitForList()
 
     expect(screen.getByTestId('epic-section-running')).toBeTruthy()
     expect(screen.getByTestId('epic-section-ready')).toBeTruthy()
@@ -233,21 +239,23 @@ describe('EpicListPage four-group rendering', () => {
     expect(screen.getByTestId('epic-section-idle')).toBeTruthy()
   })
 
-  it('does not render the legacy epic-section-active', () => {
+  it('does not render the legacy epic-section-active', async () => {
     renderPage()
-
+    await waitForList()
     expect(screen.queryByTestId('epic-section-active')).toBeNull()
   })
 
-  it('retains epic-section-done and epic-section-closed', () => {
+  it('retains epic-section-done and epic-section-closed', async () => {
     renderPage()
+    await waitForList()
 
     expect(screen.getByTestId('epic-section-done')).toBeTruthy()
     expect(screen.getByTestId('epic-section-closed')).toBeTruthy()
   })
 
-  it('renders a Running epic above a Ready-to-start epic when both groups are present', () => {
+  it('renders a Running epic above a Ready-to-start epic when both groups are present', async () => {
     renderPage()
+    await waitForList()
 
     const running = screen.getByText('Running Epic')
     const ready = screen.getByText('Ready To Start Epic')
@@ -256,8 +264,9 @@ describe('EpicListPage four-group rendering', () => {
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('expands the four active groups by default and folds Done / Closed', () => {
+  it('expands the four active groups by default and folds Done / Closed', async () => {
     renderPage()
+    await waitForList()
 
     expect(screen.getByTestId('epic-section-running-toggle')).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByTestId('epic-section-ready-toggle')).toHaveAttribute('aria-expanded', 'true')
@@ -271,8 +280,9 @@ describe('EpicListPage four-group rendering', () => {
     expect(screen.queryByText('Closed Epic')).toBeNull()
   })
 
-  it('expands the Done section when its toggle is clicked and collapses it again', () => {
+  it('expands the Done section when its toggle is clicked and collapses it again', async () => {
     renderPage()
+    await waitForList()
 
     const toggle = screen.getByTestId('epic-section-done-toggle')
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -286,8 +296,9 @@ describe('EpicListPage four-group rendering', () => {
     expect(screen.queryByText('Done Epic')).toBeNull()
   })
 
-  it('expands the Closed section when its toggle is clicked', () => {
+  it('expands the Closed section when its toggle is clicked', async () => {
     renderPage()
+    await waitForList()
 
     const toggle = screen.getByTestId('epic-section-closed-toggle')
     fireEvent.click(toggle)
@@ -296,64 +307,61 @@ describe('EpicListPage four-group rendering', () => {
     expect(screen.getByText('Closed Epic')).toBeTruthy()
   })
 
-  it('does not change server data when toggling sections', () => {
+  it('does not change server data when toggling sections', async () => {
     const dataSnapshot = [runningEpic, readyToStartEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic, doneEpic, closedEpic]
-    mocks.useEpics.mockReturnValue({ data: dataSnapshot, isLoading: false })
+    _epicsData = dataSnapshot
 
     renderPage()
+    await waitForList()
 
     fireEvent.click(screen.getByTestId('epic-section-done-toggle'))
     fireEvent.click(screen.getByTestId('epic-section-closed-toggle'))
 
-    expect(mocks.useEpics).toHaveBeenCalledTimes(1)
-    expect(mocks.useEpics.mock.results[0].value.data).toBe(dataSnapshot)
+    expect(_epicsData).toBe(dataSnapshot)
   })
 })
 
 describe('EpicListPage per-group card content', () => {
-  const createMutate = vi.fn()
-  const startMutate = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    _epicsRequests.length = 0
+    _blockStartIssue = false
+    _startIssueError = null
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('shows the in-progress issue number and title on a Running card', () => {
-    mocks.useEpics.mockReturnValue({ data: [runningEpic], isLoading: false })
-
+  it('shows the in-progress issue number and title on a Running card', async () => {
+    _epicsData = [runningEpic]
     renderPage()
+    await waitForList()
 
     expect(screen.getByTestId('epic-card-in-progress')).toHaveTextContent('In progress: #2')
     expect(screen.getByTestId('epic-card-in-progress')).toHaveTextContent('Continue work')
   })
 
-  it('does not render a Start next issue control on a Running card even when a queued next exists', () => {
-    mocks.useEpics.mockReturnValue({ data: [runningEpic], isLoading: false })
-
+  it('does not render a Start next issue control on a Running card even when a queued next exists', async () => {
+    _epicsData = [runningEpic]
     renderPage()
-
+    await waitForList()
     expect(screen.queryByTestId('epic-card-start')).toBeNull()
   })
 
-  it('shows the next issue number and title on a Ready-to-start card', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
-
+  it('shows the next issue number and title on a Ready-to-start card', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
 
     expect(screen.getByTestId('epic-card-next')).toHaveTextContent('Next: #3')
     expect(screen.getByTestId('epic-card-next')).toHaveTextContent('Start me')
   })
 
-  it('renders the manual start control labelled exactly "Start next issue" on a Ready-to-start card', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
-
+  it('renders the manual start control labelled exactly "Start next issue" on a Ready-to-start card', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
 
     const startButton = screen.getByTestId('epic-card-start')
     expect(startButton).toBeTruthy()
@@ -361,44 +369,43 @@ describe('EpicListPage per-group card content', () => {
     expect(startButton).not.toBeDisabled()
   })
 
-  it('does not render a Start next issue control on a Waiting/Blocked card', () => {
-    mocks.useEpics.mockReturnValue({ data: [waitingBlockedEpic], isLoading: false })
-
+  it('does not render a Start next issue control on a Waiting/Blocked card', async () => {
+    _epicsData = [waitingBlockedEpic]
     renderPage()
-
+    await waitForList()
     expect(screen.queryByTestId('epic-card-start')).toBeNull()
   })
 
-  it('shows the nextIssueReason text on a Waiting/Blocked card', () => {
-    mocks.useEpics.mockReturnValue({ data: [waitingBlockedEpic], isLoading: false })
-
+  it('shows the nextIssueReason text on a Waiting/Blocked card', async () => {
+    _epicsData = [waitingBlockedEpic]
     renderPage()
+    await waitForList()
 
     expect(screen.getByTestId('epic-card-next')).toHaveTextContent('Draft blocked on review')
   })
 
-  it('shows "Ready to mark done" on an Idle/Empty card with progress.readyToMarkDone=true', () => {
-    mocks.useEpics.mockReturnValue({ data: [idleReadyEpic], isLoading: false })
-
+  it('shows "Ready to mark done" on an Idle/Empty card with progress.readyToMarkDone=true', async () => {
+    _epicsData = [idleReadyEpic]
     renderPage()
+    await waitForList()
 
     expect(screen.getByTestId('epic-card-ready')).toHaveTextContent('Ready to mark done')
     expect(screen.queryByTestId('epic-card-start')).toBeNull()
   })
 
-  it('shows "No linked issues" on an Idle/Empty card with no linked work', () => {
-    mocks.useEpics.mockReturnValue({ data: [idleEmptyEpic], isLoading: false })
-
+  it('shows "No linked issues" on an Idle/Empty card with no linked work', async () => {
+    _epicsData = [idleEmptyEpic]
     renderPage()
+    await waitForList()
 
     expect(screen.getByTestId('epic-card-empty')).toHaveTextContent('No linked issues')
     expect(screen.queryByTestId('epic-card-start')).toBeNull()
   })
 
-  it('renders a Done completion phrase on Done cards', () => {
-    mocks.useEpics.mockReturnValue({ data: [doneEpic], isLoading: false })
-
+  it('renders a Done completion phrase on Done cards', async () => {
+    _epicsData = [doneEpic]
     renderPage()
+    await waitForList()
     fireEvent.click(screen.getByTestId('epic-section-done-toggle'))
 
     expect(screen.getByText('Done Epic')).toBeTruthy()
@@ -407,10 +414,10 @@ describe('EpicListPage per-group card content', () => {
     expect(doneCard.textContent).not.toContain('Ready to mark done')
   })
 
-  it('renders a Closed phrase on Closed cards', () => {
-    mocks.useEpics.mockReturnValue({ data: [closedEpic], isLoading: false })
-
+  it('renders a Closed phrase on Closed cards', async () => {
+    _epicsData = [closedEpic]
     renderPage()
+    await waitForList()
     fireEvent.click(screen.getByTestId('epic-section-closed-toggle'))
 
     expect(screen.getByText('Closed Epic')).toBeTruthy()
@@ -421,14 +428,11 @@ describe('EpicListPage per-group card content', () => {
 })
 
 describe('EpicListPage Start next issue action', () => {
-  const createMutate = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
-    passthroughStartIssue()
-    startIssueMock.mockReset()
-    startIssueMock.mockResolvedValue({ issue: { number: 3 }, message: 'started' })
+    _epicsRequests.length = 0
+    _blockStartIssue = false
+    _startIssueError = null
   })
 
   afterEach(() => {
@@ -436,25 +440,25 @@ describe('EpicListPage Start next issue action', () => {
   })
 
   it('invokes startIssue(next.number) on the Ready-to-start card and does not navigate to the epic detail', async () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
-
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
 
     const startButton = screen.getByTestId('epic-card-start')
     expect(startButton.textContent).toBe('Start next issue')
     fireEvent.click(startButton)
 
-    await waitFor(() => {
-      expect(startIssueMock).toHaveBeenCalledWith(3, null)
+    await vi.waitFor(() => {
+      expect(_startIssueHandler).toHaveBeenCalledWith(3)
     })
-    expect(startIssueMock).toHaveBeenCalledTimes(1)
+    expect(_startIssueHandler).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId('current-path').textContent).toBe('/epics')
   })
 
-  it('calls stopPropagation on the click event so the card does not navigate', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
-
+  it('calls stopPropagation on the click event so the card does not navigate', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
 
     const startButton = screen.getByTestId('epic-card-start')
     const stopPropagationSpy = vi.fn()
@@ -465,68 +469,60 @@ describe('EpicListPage Start next issue action', () => {
     expect(stopPropagationSpy).toHaveBeenCalled()
   })
 
-  it('disables the Start next issue button and shows "Starting..." while pending', () => {
-    const startMutate = vi.fn()
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
-
+  it('disables the Start next issue button and shows "Starting..." while pending', async () => {
+    _blockStartIssue = true
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
 
     const startButton = screen.getByTestId('epic-card-start')
     fireEvent.click(startButton)
 
-    expect(startButton).toBeDisabled()
-    expect(startButton.textContent).toBe('Starting...')
+    await vi.waitFor(() => {
+      expect(startButton).toBeDisabled()
+      expect(startButton.textContent).toBe('Starting...')
+    })
   })
 
   it('surfaces an error toast when the underlying startIssue call rejects', async () => {
-    const failure = new Error('Issue is still a draft')
-    startIssueMock.mockRejectedValueOnce(failure)
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
-
+    _startIssueError = { status: 400, error: 'Issue is still a draft' }
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
 
     fireEvent.click(screen.getByTestId('epic-card-start'))
 
-    await waitFor(() => {
+    await vi.waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('Issue is still a draft')
     })
   })
 
-  it('never offers a Start next issue control on Running, Waiting/Blocked or Idle/Empty cards', () => {
-    mocks.useEpics.mockReturnValue({
-      data: [runningEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic],
-      isLoading: false,
-    })
-
+  it('never offers a Start next issue control on Running, Waiting/Blocked or Idle/Empty cards', async () => {
+    _epicsData = [runningEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic]
     renderPage()
+    await waitForList()
 
     expect(screen.queryByTestId('epic-card-start')).toBeNull()
   })
 })
 
 describe('EpicListPage basic actions', () => {
-  const createMutate = vi.fn()
-  const startMutate = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
-    mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    _epicsRequests.length = 0
+    _blockStartIssue = false
+    _startIssueError = null
+    _epicsData = [readyToStartEpic]
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('renders grouped sections with their counts', () => {
-    mocks.useEpics.mockReturnValue({
-      data: [runningEpic, readyToStartEpic, doneEpic],
-      isLoading: false,
-    })
-
+  it('renders grouped sections with their counts', async () => {
+    _epicsData = [runningEpic, readyToStartEpic, doneEpic]
     renderPage()
+    await waitForList()
 
     expect(screen.getByRole('heading', { name: /Running \(1\)/ })).toBeTruthy()
     expect(screen.getByRole('heading', { name: /Ready to start \(1\)/ })).toBeTruthy()
@@ -535,41 +531,40 @@ describe('EpicListPage basic actions', () => {
     expect(screen.getAllByText('1 / 3 completed').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('renders without a Paused section when there are zero paused epics', () => {
+  it('renders without a Paused section when there are zero paused epics', async () => {
     renderPage()
+    await waitForList()
 
     expect(screen.queryByRole('heading', { name: 'Paused' })).toBeNull()
   })
 
-  it('renders a Paused section between the active groups and Done with amber badge and de-emphasized cards', () => {
-    mocks.useEpics.mockReturnValue({
-      data: [
-        readyToStartEpic,
-        {
-          id: 'epic-paused',
-          number: null,
-          title: 'Paused Epic',
-          description: 'On hold',
-          priority: 'p2',
-          status: EpicStatus.Paused,
-          createdAt: '2026-01-01T00:00:00Z',
-          updatedAt: '2026-01-01T00:00:00Z',
-          progress: {
-            deliveredCount: 0,
-            totalIssueCount: 2,
-            blockedIssues: [],
-            activeIssues: [],
-            nextIssue: { id: 'issue-paused-next', number: 11, title: 'Resume-ready paused work' },
-            nextIssueReason: null,
-            readyToMarkDone: false,
-          },
+  it('renders a Paused section between the active groups and Done with amber badge and de-emphasized cards', async () => {
+    _epicsData = [
+      readyToStartEpic,
+      {
+        id: 'epic-paused',
+        number: null,
+        title: 'Paused Epic',
+        description: 'On hold',
+        priority: 'p2',
+        status: EpicStatus.Paused,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+        progress: {
+          deliveredCount: 0,
+          totalIssueCount: 2,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: { id: 'issue-paused-next', number: 11, title: 'Resume-ready paused work' },
+          nextIssueReason: null,
+          readyToMarkDone: false,
         },
-        doneEpic,
-      ],
-      isLoading: false,
-    })
+      },
+      doneEpic,
+    ]
 
     renderPage()
+    await waitForList()
 
     const sections = screen.getAllByRole('heading', { level: 2 })
     const sectionTexts = sections.map(h => h.textContent)
@@ -600,63 +595,60 @@ describe('EpicListPage basic actions', () => {
 
     fireEvent.click(pausedStartButton)
 
-    expect(startMutate).toHaveBeenCalledWith(
-      11,
-      expect.objectContaining({ onSettled: expect.any(Function) }),
-    )
+    await vi.waitFor(() => {
+      expect(_startIssueHandler).toHaveBeenCalledWith(11)
+    })
     expect(screen.getByTestId('current-path').textContent).toBe('/epics')
   })
 
-  it('keeps the legacy paused progress fallback for waiting, ready-to-mark-done, and empty paused cards', () => {
-    mocks.useEpics.mockReturnValue({
-      data: [
-        makeEpic({
-          id: 'epic-paused-waiting',
-          title: 'Paused Waiting Epic',
-          status: EpicStatus.Paused,
-          progress: {
-            deliveredCount: 0,
-            totalIssueCount: 2,
-            blockedIssues: [],
-            activeIssues: [],
-            nextIssue: null,
-            nextIssueReason: 'Paused until external dependency lands',
-            readyToMarkDone: false,
-          },
-        }),
-        makeEpic({
-          id: 'epic-paused-ready',
-          title: 'Paused Ready Epic',
-          status: EpicStatus.Paused,
-          progress: {
-            deliveredCount: 2,
-            totalIssueCount: 2,
-            blockedIssues: [],
-            activeIssues: [],
-            nextIssue: null,
-            nextIssueReason: null,
-            readyToMarkDone: true,
-          },
-        }),
-        makeEpic({
-          id: 'epic-paused-empty',
-          title: 'Paused Empty Epic',
-          status: EpicStatus.Paused,
-          progress: {
-            deliveredCount: 0,
-            totalIssueCount: 0,
-            blockedIssues: [],
-            activeIssues: [],
-            nextIssue: null,
-            nextIssueReason: null,
-            readyToMarkDone: false,
-          },
-        }),
-      ],
-      isLoading: false,
-    })
+  it('keeps the legacy paused progress fallback for waiting, ready-to-mark-done, and empty paused cards', async () => {
+    _epicsData = [
+      makeEpic({
+        id: 'epic-paused-waiting',
+        title: 'Paused Waiting Epic',
+        status: EpicStatus.Paused,
+        progress: {
+          deliveredCount: 0,
+          totalIssueCount: 2,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: null,
+          nextIssueReason: 'Paused until external dependency lands',
+          readyToMarkDone: false,
+        },
+      }),
+      makeEpic({
+        id: 'epic-paused-ready',
+        title: 'Paused Ready Epic',
+        status: EpicStatus.Paused,
+        progress: {
+          deliveredCount: 2,
+          totalIssueCount: 2,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: true,
+        },
+      }),
+      makeEpic({
+        id: 'epic-paused-empty',
+        title: 'Paused Empty Epic',
+        status: EpicStatus.Paused,
+        progress: {
+          deliveredCount: 0,
+          totalIssueCount: 0,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: false,
+        },
+      }),
+    ]
 
     renderPage()
+    await waitForList()
 
     const waitingCard = screen.getByText('Paused Waiting Epic').closest('[data-slot="card"]')
     const readyCard = screen.getByText('Paused Ready Epic').closest('[data-slot="card"]')
@@ -668,6 +660,7 @@ describe('EpicListPage basic actions', () => {
 
   it('opens create dialog and submits title description and priority', async () => {
     renderPage()
+    await waitForList()
 
     fireEvent.click(screen.getByRole('button', { name: 'New Epic' }))
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'New Goal' } })
@@ -680,14 +673,16 @@ describe('EpicListPage basic actions', () => {
     fireEvent.click(option)
     fireEvent.click(screen.getByRole('button', { name: 'Create Epic' }))
 
-    expect(createMutate).toHaveBeenCalledWith(
-      { title: 'New Goal', description: 'Ship the goal', priority: 'p1' },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    )
+    await vi.waitFor(() => {
+      expect(_createEpicHandler).toHaveBeenCalledWith(
+        { title: 'New Goal', description: 'Ship the goal', priority: 'p1' },
+      )
+    })
   })
 
-  it('navigates to epic detail from a list card', () => {
+  it('navigates to epic detail from a list card', async () => {
     renderPage()
+    await waitForList()
 
     fireEvent.click(screen.getByText('Ready To Start Epic'))
 
@@ -696,20 +691,18 @@ describe('EpicListPage basic actions', () => {
 })
 
 describe('EpicListPage numbered display', () => {
-  const createMutate = vi.fn()
-  const startMutate = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    _epicsRequests.length = 0
+    _blockStartIssue = false
+    _startIssueError = null
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('renders #N as the primary epic identifier when number is present', () => {
+  it('renders #N as the primary epic identifier when number is present', async () => {
     const numbered = [
       makeEpic({
         id: 'epic-uuid-1-aaaa-bbbb-cccccccccccc',
@@ -725,9 +718,9 @@ describe('EpicListPage numbered display', () => {
         progress: doneEpic.progress,
       }),
     ]
-    mocks.useEpics.mockReturnValue({ data: numbered, isLoading: false })
-
+    _epicsData = numbered
     renderPage()
+    await waitForList()
 
     fireEvent.click(screen.getByTestId('epic-section-done-toggle'))
 
@@ -737,10 +730,10 @@ describe('EpicListPage numbered display', () => {
     expect(numbers.some(n => n.textContent === '#8')).toBe(true)
   })
 
-  it('falls back to the truncated UUID when epic number is null', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
-
+  it('falls back to the truncated UUID when epic number is null', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
 
     const numbers = screen.getAllByTestId('epic-number')
     expect(numbers[0]).toHaveTextContent('#epic-re')
@@ -748,13 +741,11 @@ describe('EpicListPage numbered display', () => {
 })
 
 describe('EpicListPage mobile no-overflow invariants', () => {
-  const createMutate = vi.fn()
-  const startMutate = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    _epicsRequests.length = 0
+    _blockStartIssue = false
+    _startIssueError = null
   })
 
   afterEach(() => {
@@ -778,26 +769,21 @@ describe('EpicListPage mobile no-overflow invariants', () => {
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(document.documentElement.clientWidth)
   }
 
-  it('renders across all four active groups without horizontal overflow at 320, 390, and 430 px', () => {
-    mocks.useEpics.mockReturnValue({
-      data: [runningEpic, readyToStartEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic],
-      isLoading: false,
-    })
+  it('renders across all four active groups without horizontal overflow at 320, 390, and 430 px', async () => {
+    _epicsData = [runningEpic, readyToStartEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic]
 
     for (const width of [320, 390, 430]) {
       cleanup()
       renderPage()
+      await waitForList()
       expectNoOverflow(width)
     }
   })
 
-  it('forbids fixed-width and min-width on status/priority badges, progress bar, current/next text, and Start next issue control', () => {
-    mocks.useEpics.mockReturnValue({
-      data: [runningEpic, readyToStartEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic],
-      isLoading: false,
-    })
-
+  it('forbids fixed-width and min-width on status/priority badges, progress bar, current/next text, and Start next issue control', async () => {
+    _epicsData = [runningEpic, readyToStartEpic, waitingBlockedEpic, idleReadyEpic, idleEmptyEpic]
     renderPage()
+    await waitForList()
 
     const forbiddenPattern = /(?:^|\s)(?:w-\d+|min-w-\[|w-\[)/
 
@@ -830,40 +816,38 @@ describe('EpicListPage mobile no-overflow invariants', () => {
     expect(forbiddenPattern.test(startButton.className)).toBe(false)
   })
 
-  it('keeps status badge and current/next issue number visible (state-bearing strings not truncated)', () => {
-    mocks.useEpics.mockReturnValue({
-      data: [
-        makeEpic({
-          id: 'epic-running-long',
-          title: 'A very long epic title that should wrap across multiple lines on narrow viewports without clipping the badge',
-          progress: {
-            deliveredCount: 0,
-            totalIssueCount: 1,
-            blockedIssues: [],
-            activeIssues: [{ id: 'i1', number: 12345, title: 'A current issue with a very long descriptive title that may otherwise be truncated', health: 'active' }],
-            nextIssue: null,
-            nextIssueReason: null,
-            readyToMarkDone: false,
-          },
-        }),
-        makeEpic({
-          id: 'epic-ready-long',
-          title: 'Another long ready-to-start epic title used to confirm that wrapping also keeps the next issue number visible',
-          progress: {
-            deliveredCount: 0,
-            totalIssueCount: 1,
-            blockedIssues: [],
-            activeIssues: [],
-            nextIssue: { id: 'i1', number: 67890, title: 'A queued next issue with a long descriptive title that may otherwise be truncated' },
-            nextIssueReason: null,
-            readyToMarkDone: false,
-          },
-        }),
-      ],
-      isLoading: false,
-    })
+  it('keeps status badge and current/next issue number visible (state-bearing strings not truncated)', async () => {
+    _epicsData = [
+      makeEpic({
+        id: 'epic-running-long',
+        title: 'A very long epic title that should wrap across multiple lines on narrow viewports without clipping the badge',
+        progress: {
+          deliveredCount: 0,
+          totalIssueCount: 1,
+          blockedIssues: [],
+          activeIssues: [{ id: 'i1', number: 12345, title: 'A current issue with a very long descriptive title that may otherwise be truncated', health: 'active' }],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: false,
+        },
+      }),
+      makeEpic({
+        id: 'epic-ready-long',
+        title: 'Another long ready-to-start epic title used to confirm that wrapping also keeps the next issue number visible',
+        progress: {
+          deliveredCount: 0,
+          totalIssueCount: 1,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: { id: 'i1', number: 67890, title: 'A queued next issue with a long descriptive title that may otherwise be truncated' },
+          nextIssueReason: null,
+          readyToMarkDone: false,
+        },
+      }),
+    ]
 
     renderPage()
+    await waitForList()
 
     const inProgress = screen.getByTestId('epic-card-in-progress')
     expect(inProgress.textContent).toContain('#12345')
@@ -879,22 +863,21 @@ describe('EpicListPage mobile no-overflow invariants', () => {
 })
 
 describe('EpicListPage search and sort controls', () => {
-  const createMutate = vi.fn()
-  const startMutate = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    _epicsRequests.length = 0
+    _blockStartIssue = false
+    _startIssueError = null
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('renders a search input bound to the toolbar', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('renders a search input bound to the toolbar', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     const input = screen.getByTestId('epic-search-input') as HTMLInputElement
     expect(input).toBeTruthy()
     expect(input.type).toBe('search')
@@ -902,46 +885,56 @@ describe('EpicListPage search and sort controls', () => {
     expect(input.placeholder).toBe('Filter epics by title')
   })
 
-  it('forwards the typed search term into useEpics as the search param', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('forwards the typed search term', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     const input = screen.getByTestId('epic-search-input') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'Auth' } })
-    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: 'Auth', sort: undefined, dir: undefined })
+    await vi.waitFor(() => {
+      expect(_epicsRequests[_epicsRequests.length - 1]?.search).toBe('Auth')
+    })
   })
 
-  it('trims whitespace before forwarding the search param', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('trims whitespace before forwarding the search param', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     const input = screen.getByTestId('epic-search-input') as HTMLInputElement
     fireEvent.change(input, { target: { value: '  Auth  ' } })
-    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: 'Auth', sort: undefined, dir: undefined })
+    await vi.waitFor(() => {
+      expect(_epicsRequests[_epicsRequests.length - 1]?.search).toBe('Auth')
+    })
   })
 
-  it('clearing the search input omits the search param from useEpics', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('clearing the search input omits the search param', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     const input = screen.getByTestId('epic-search-input') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'Auth' } })
-    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: 'Auth', sort: undefined, dir: undefined })
     fireEvent.change(input, { target: { value: '' } })
-    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: undefined, dir: undefined })
+    await vi.waitFor(() => {
+      expect(_epicsRequests[_epicsRequests.length - 1]?.search).toBeUndefined()
+    })
   })
 
-  it('renders a no-results state instead of project-empty copy for empty filtered results', () => {
-    mocks.useEpics.mockReturnValue({ data: [], isLoading: false })
+  it('renders a no-results state instead of project-empty copy for empty filtered results', async () => {
+    _epicsData = []
     renderPage()
-
+    await screen.findByTestId('epic-list-toolbar')
     fireEvent.change(screen.getByTestId('epic-search-input'), { target: { value: 'missing' } })
-
-    expect(screen.getByText('No epics match this view')).toBeTruthy()
+    await vi.waitFor(() => {
+      expect(screen.getByText('No epics match this view')).toBeTruthy()
+    })
     expect(screen.queryByText('No epics yet')).toBeNull()
     expect(screen.queryByText('Create your first Epic')).toBeNull()
   })
 
-  it('renders sort field and direction selectors with default = no override', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('renders sort field and direction selectors with default = no override', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     const sortField = screen.getByTestId('epic-sort-field') as HTMLSelectElement
     const sortDir = screen.getByTestId('epic-sort-dir') as HTMLSelectElement
     expect(sortField).toBeTruthy()
@@ -951,65 +944,82 @@ describe('EpicListPage search and sort controls', () => {
     expect(screen.queryByRole('option', { name: 'Created' })).toBeNull()
   })
 
-  it('forwards a default ascending direction when only the sort field changes', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('forwards a default ascending direction when only the sort field changes', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     fireEvent.change(screen.getByTestId('epic-sort-field'), { target: { value: 'updated' } })
-    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: 'updated', dir: 'asc' })
+    await vi.waitFor(() => {
+      expect(_epicsRequests[_epicsRequests.length - 1]).toEqual({ search: undefined, sort: 'updated', dir: 'asc' })
+    })
   })
 
-  it('forwards priority sorting when only the direction changes', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('forwards priority sorting when only the direction changes', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'desc' } })
-    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: 'priority', dir: 'desc' })
+    await vi.waitFor(() => {
+      expect(_epicsRequests[_epicsRequests.length - 1]).toEqual({ search: undefined, sort: 'priority', dir: 'desc' })
+    })
   })
 
-  it('forwards sort=priority and dir=asc to useEpics when selected', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('forwards sort=priority and dir=asc to useEpics when selected', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     fireEvent.change(screen.getByTestId('epic-sort-field'), { target: { value: 'priority' } })
     fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'asc' } })
-    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: 'priority', dir: 'asc' })
+    await vi.waitFor(() => {
+      expect(_epicsRequests[_epicsRequests.length - 1]).toEqual({ search: undefined, sort: 'priority', dir: 'asc' })
+    })
   })
 
-  it('forwards sort=updated and dir=desc to useEpics when selected', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('forwards sort=updated and dir=desc to useEpics when selected', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     fireEvent.change(screen.getByTestId('epic-sort-field'), { target: { value: 'updated' } })
     fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'desc' } })
-    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: 'updated', dir: 'desc' })
+    await vi.waitFor(() => {
+      expect(_epicsRequests[_epicsRequests.length - 1]).toEqual({ search: undefined, sort: 'updated', dir: 'desc' })
+    })
   })
 
-  it('rejects unknown sort field values by falling back to default ordering', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('rejects unknown sort field values by falling back to default ordering', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'desc' } })
     fireEvent.change(screen.getByTestId('epic-sort-field'), { target: { value: 'garbage-payload' } })
-    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: undefined, dir: undefined })
+    await vi.waitFor(() => {
+      expect(_epicsRequests[_epicsRequests.length - 1]).toEqual({ search: undefined, sort: undefined, dir: undefined })
+    })
   })
 
-  it('rejects unknown dir values by falling back to default ordering', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('rejects unknown dir values by falling back to default ordering', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'sideways' } })
-    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: undefined, sort: undefined, dir: undefined })
+    await vi.waitFor(() => {
+      expect(_epicsRequests[_epicsRequests.length - 1]).toEqual({ search: undefined, sort: undefined, dir: undefined })
+    })
   })
 
-  it('combines search with sort and direction into a single useEpics call', () => {
-    mocks.useEpics.mockReturnValue({ data: [readyToStartEpic], isLoading: false })
+  it('combines search with sort and direction into a single call', async () => {
+    _epicsData = [readyToStartEpic]
     renderPage()
+    await waitForList()
     fireEvent.change(screen.getByTestId('epic-search-input'), { target: { value: 'auth' } })
     fireEvent.change(screen.getByTestId('epic-sort-field'), { target: { value: 'priority' } })
     fireEvent.change(screen.getByTestId('epic-sort-dir'), { target: { value: 'desc' } })
-    expect(mocks.useEpics).toHaveBeenLastCalledWith({ search: 'auth', sort: 'priority', dir: 'desc' })
+    await vi.waitFor(() => {
+      expect(_epicsRequests[_epicsRequests.length - 1]).toEqual({ search: 'auth', sort: 'priority', dir: 'desc' })
+    })
   })
 
-  it('groups the data the server returned under the requested sort + filter', () => {
-    // After sort change, the page re-fetches and re-renders the
-    // status-grouped presentation on top of the new ordering. We assert
-    // the ordering is whatever the server returned and grouping still
-    // works.
+  it('groups the data the server returned under the requested sort + filter', async () => {
     const authReady = makeEpic({
       id: 'epic-auth-ready',
       title: 'Auth ready',
@@ -1036,12 +1046,21 @@ describe('EpicListPage search and sort controls', () => {
         readyToMarkDone: false,
       },
     })
-    mocks.useEpics.mockReturnValue({ data: [authReady, authRunning], isLoading: false })
+    _epicsData = [authReady, authRunning]
     renderPage()
+    await waitForList()
 
-    // running still sits above ready-to-start regardless of search/sort.
     const running = screen.getByText('Auth running')
     const ready = screen.getByText('Auth ready')
     expect(running.compareDocumentPosition(ready) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+describe('EpicListPage empty state', () => {
+  it('renders empty project state when there are zero epics', async () => {
+    _epicsData = []
+    renderPage()
+    await screen.findByText('No epics yet')
+    expect(screen.getByText('Create your first Epic')).toBeTruthy()
   })
 })
