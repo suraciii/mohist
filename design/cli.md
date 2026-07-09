@@ -1,136 +1,57 @@
-# CLI 命令面设计
+# CLI Design
 
-`mo` 是 Mohist 的命令行入口，面向脚本、自动化和远程 SSH 场景。命令面是稳定契约——它的形状会被脚本、外部 agent 和远程会话依赖，任何漂移都会直接破坏使用方。本规范定义命令面**该长什么样**，不枚举完整命令、动词或 flag（具体命令面见产品 spec [`docs/cli-reference.md`](../docs/cli-reference.md)）。
+`mo` is the CLI. Scripts, CI, agents, SSH depend on its shape. This spec defines the contract. Concrete commands, verbs, and flags live in `docs/cli-reference.md`.
 
-## 与其他规范的关系
+## Command shape
 
-命令面有三层分工，按顺序各管一段：
+`mo <noun> <verb>`. Noun first. Like `mo workflow approve`, not `approve workflow`.
 
-| 层 | 文档 | 回答的问题 |
-|----|------|-----------|
-| 该不该进 CLI | [`conventions.md`](conventions.md) Tier 节 | 一个能力是 Web-only / 必须有 CLI / 必须有 skill |
-| 进了之后形状 | 本规范 | 命令树、命名、唯一入口、全局约定 |
-| 用户面 spec | [`../docs/cli-reference.md`](../docs/cli-reference.md) | 命令面必须满足什么（spec 先于实现，实装由 issue 追赶） |
+- Root level: only nouns (resources). Never bare verbs.
+- One exception: cross-resource read-only diagnostics — must justify explicitly.
+- Command name must match behavior. No mismatch.
 
-本规范只管中间层。本规范不随现状漂移——当现状违背本规范时，收敛方向是改现状，不是改规范。
+## Resource naming
 
-## 设计目标
+- One noun per concept. Never two paths for the same thing.
+- Top-level `mo <noun>` = independent aggregate root.
+- Sub-resources nest under their parent noun.
+- Scope uses flag (`--project`), not path segment. Like kubectl `--namespace`.
+- One word = one domain meaning. No overloaded terms.
 
-- **一致性优先** —— 同一个心智操作，在任何资源上、由任何使用者发起，都应当长成可预测的形状。一致性比"为某个资源定制更顺手"更重要。
-- **命令面是稳定契约** —— 它被脚本、CI、外部 agent、远程 SSH 会话依赖。重命名、增删动词、改 flag 都是破坏性变更，需要被当作契约变更对待。
-- **可发现性** —— 命令树本身应当让使用者（人或 agent）仅凭 help 就能推断未知命令的形状，而不是靠记忆或文档。树的层级和命名要表达领域结构。
+`mo workflow` = WorkflowRun (aggregate root).
+`mo project workflow profile` = WorkflowProfile (project-owned config).
 
-## 命令形状
+## Verb consistency
 
-常态是两级：`资源 + 动词`。这是命令面的骨架。
+- Same action class = same verb across all resources.
+- Domain lifecycle actions (approve, retry, pause) use domain language, not CRUD.
+- Verb name reflects idempotency and destructiveness.
 
-Rules:
+## Single entry
 
-- **句法为"资源在前，动词在后"**：`mo <资源> <动词>`，资源是命令组，动词是它的子命令（如 `mo workflow get <runId>`、`mo issue start <num>`）。这与 kubectl 的"动词在前"（`kubectl get pod`）相反，选择资源在前的理由：Mohist 的命令面以**领域生命周期动词**（approve/retry/rerun/resume/pause/...）为主，这些动词依附于资源存在，挂在资源下比提到根上更自然（`mo workflow approve` 优于 `mo approve workflow`）。这一句法决策贯彻全命令面，不与"动词在前"混用。
-- 根命令层（`mo` 直接子命令）只接受**资源**或**资源组**，不接受裸动词。一个动词如果直接挂在根上，它要么应当属于某个资源下，要么是一个尚未被识别出来的跨资源全局操作。
-- 唯一受控例外是**跨资源全局只读诊断**——它不属于任何单一资源、且只读。引入这种根级动词必须在文档里显式说明理由，并划清它与资源下同名动词的语义边界；默认不放根上。
-- 命令名必须如实反映它执行的操作。命名与实际行为不符（例如命令名暗示删除、实现却是归档）是契约违背——要么改名、要么改实现。
+One capability = one command path. Never two.
 
-## 资源命名
+## Flag over command
 
-资源是命令面的第一维。它的命名一致性决定了使用者的心智负担。
+Variants use flags, not sibling commands. `mo workflow rerun --from-stage <stage>`, not `rerun-from-stage`.
 
-Rules:
+## Read output: three types
 
-- 一个资源概念只有一个命令名。不为同一资源维持两套并行命令路径（例如一个顶层、一个嵌套在父资源下）——选一个，删另一个。
-- 顶层 `mo <noun>` 优先归独立领域聚合根；属于父资源的配置或子资源挂在**拥有它的父资源**之下，所有权反映在嵌套里，而不是在顶层复制一份。子资源出现独立的顶层入口即契约违背。
-- **作用域用 flag 表达，不进命令路径**。资源所属的"作用域"（在 Mohist 里是 project）用 `--project` flag 限定，对标 kubectl 的 `--namespace`——作用域不占用命令路径的层级。作用域内的资源在顶层有自己的命令组（如 `mo issue`、`mo repo`），通过 `--project` 限定操作哪个项目下的实例。区分"作用域"与"父资源"：作用域是资源运行的边界（project 对 issue，如同 namespace 对 pod），用 flag；父资源是真正拥有子资源、子资源不能脱离它独立存在的关系（pod 拥有它的 events/logs），用嵌套。只有后者才进命令路径。
-- 一个词不承载多个领域含义。已被某个资源占用的词，再用于另一个领域概念时必须换名或显式消歧——同一个词在不同层级指代不同领域对象，会让使用者无法从命令名推断语义。
-
-### 命名归属裁定
-
-`mo workflow` 归 WorkflowRun。WorkflowRun 是 workflow 核心域的聚合根，`workflowRunId` 是 agent 订阅链路和脚本自动化拿到的自然资源标识。
-
-WorkflowProfile 是 project 拥有的配置，归 `mo project workflow profile`，与 `mo project workflow template` / `mo project workflow config` 同层。旧 `mo workflow list` 让 `workflow` 一词承载 WorkflowProfile，挤占了 WorkflowRun 的顶层入口；issue #381 将它下沉到 `mo project workflow profile list`。
-
-未来如果再有命名冲突，先问这个 noun 是否是独立聚合根；如果不是，继续找拥有它的父资源，不占顶层命令组。
-
-## 动词一致性
-
-动词是命令面的第二维。它的职责是表达"对这个资源做什么"。
-
-Rules:
-
-- 同一**动作类**（增、删、改、查单条、查列表）在所有资源上用同一个动词。跨资源的动词不一致（同一动作在不同资源上叫不同名字）是命令面最大的可发现性损耗，禁止。
-- 动词词表本身由产品 spec 定（见 [`docs/cli-reference.md`](../docs/cli-reference.md)）——本规范约束的是"跨资源一致"和"新增资源时与现有动词对齐"。新增资源的动作必须复用既有资源已建立的动词，不为新资源自创同义词。
-- **领域生命周期动作**（推进、审批、重试、暂停等）按领域语义命名，不强行套 CRUD。这些是领域动作，不是数据操作；它们的动词来自领域语言。
-- 动词名如实反映它是否破坏性、是否幂等。幂等动作与一次性动作若语义不同，不应共用同一动词。
-
-## 唯一入口
-
-同一能力只有一条命令路径。
-
-Rules:
-
-- 等价命令并存（两条路径做完全一样的事）即契约违背——选一个归属，删另一个。
-- 动词性能力（装机、升级等）需要选一个归属：要么集中在动词根下、要么分散到各资源子命令。**不允许两套并存**。两种归属各有取舍，但选定后必须贯彻全命令面，不混用。
-- 装机与升级这类"系统级动词"在心智上区别于"对某资源做 CRUD"——它们的存在不否定"根命令层只接受资源"的原则，但要求被显式归类并保持单一归属。
-
-## 复合与分拆
-
-同一动作的变体优先用 flag 表达，不新增平级命令。
-
-Rules:
-
-- 一个动作的变体（例如"从某中间点重做"、"带某个参数的新建"）默认用 flag 承载，作为同一动词的不同调用形态。
-- 只有当变体的参数集或语义差异大到 flag 无法承载、或 flag 组合会严重损害可发现性时，才拆成独立命令。拆分必须给出理由，且不与既有同级命令的拆分风格冲突。
-- "少一个命令、多一个 flag"优于"多一个命令"——命令树的宽度比 flag 列表更昂贵。
-
-`mo workflow rerun --from-stage <stage>` 是这一规则的实例；`rerun-from-stage` 不单独造命令，而是 `rerun` 的一个 flag。
-
-## 读命令数据归属
-
-读命令返回的数据有三种归属，必须严格区分。
-
-| 类型 | 定义 | 形态 |
+| Type | Means | Example |
 |---|---|---|
-| 输出格式 | 同一资源的不同渲染 | `-o yaml` / `-o json` / `-o table` / `-o compact` |
-| 子资源 | 有独立资源路径、独立寻址的资源 | `mo <noun> <subresource>` 或明确的 subresource flag |
-| 关联资源 | 一对多子集合，如事件流、sessions、评论 | `mo <noun> <collection>` |
+| output format | same resource, different render | `-o yaml` |
+| sub-resource | independent path, addressable | `mo workflow variables <runId>` |
+| collection | one-to-many child items | `mo workflow events <runId>` |
 
-Rules:
+Output formats are never commands. Sub-resources are never output formats. Collections are never either.
 
-- **输出格式不创造命令**。同一资源的不同渲染一律走 `-o <format>`，不为 yaml/json/table 单造平级命令。
-- **子资源不能伪装成输出格式**。子资源有独立资源路径与寻址语义，需要自己的命令或明确的 subresource flag。
-- **关联资源不能伪装成输出格式或子资源**。关联资源是一对多集合，需要自己的集合命令。
-- 三种类型不交叉。`-o sessions`、`-o variables` 这类把资源类别塞进输出格式的设计不成立。
+## Global flags
 
-`mo workflow show <runId> -o yaml` 是输出格式规则的典型例子：它仍是在看同一个 WorkflowRun，只是以 YAML 渲染。`mo workflow variables <runId>` 是子资源；`mo workflow events <runId>` 和 `mo workflow list-sessions <runId>` 是关联资源。
+- All applicable commands accept global flags consistently.
+- Project reference accepts all canonical forms.
+- Shared flags: factory-built, declared once. New commands reuse the factory.
+- Same meaning = same flag name. Never synonyms.
 
-## 全局约定
+## Aliases
 
-全局 flag 是命令面一致性的横向约束。
-
-Rules:
-
-- 全局 flag（输出格式、资源作用域、预演等）必须在所有适用命令上一致贯彻。某个适用命令漏接全局 flag 即约定破口。
-- 资源作用域类命令必须接受项目引用的**全部规范形式**，不能只接其中一种、漏掉另一种。
-- 共享 flag 通过工厂构造、约定只在一处表达。新增适用命令时复用工厂而非自行声明——这是把"约定"做进代码的强制机制，新命令不得绕过工厂自造同义 flag。
-- 同一含义的 flag 在全命令面只有一个名字。不为单个命令引入与全局 flag 同义但不同名的开关（例如已有全局输出格式开关时，不为单个命令再加一个同义的布尔开关）。
-
-## 别名
-
-别名是规范命令的同义补充，不是第二条命令面。
-
-Rules:
-
-- 高频命令可提供短别名以降低输入成本。
-- 别名与正名**必须同行为**。别名不是承载语义差异的地方——同一操作的两个名字做不同的事，是契约违背。
-- 别名是可选的便利层。任何使用者或脚本只用正名都必须能完成全部操作；别名失效不应影响可用性。
-
-## 任务注入延后裁定
-
-任务注入（`AddTask` / `AddTasks`，对应 `POST /api/workflow-runs/{id}/tasks[/batch]`）按 [`conventions.md`](conventions.md) Tier 节裁定属于 state-changing 能力，名义上需要 CLI 入口。
-
-issue #381 不交付 `mo workflow add-task` / `add-tasks`，延后到后续 issue 处理，理由是：
-
-- 当前端点没有与 workflow 控制动作同级的入场守卫；为无守卫的 state-changing 端点造 CLI 会放大既有守卫缺口。
-- add-task 是 stage 内部 work 协议，不是 run 生命周期上的状态裁判动作；把它塞进本次控制组会让控制语义膨胀。
-- agent 订阅的前置依赖是按 `workflowRunId` 拉取 run 详情并执行 run 级控制动作，不依赖任务注入。
-
-后续 issue 处理 add-task 时，需在同一单元里决定守卫模型并补上 CLI 命令。
+Short aliases for frequent commands. Same behavior as canonical name. Optional convenience layer.
