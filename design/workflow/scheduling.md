@@ -1,319 +1,144 @@
 # Workflow Scheduling
 
-Level-triggered reconciliation. The scheduler keeps no memory of its own:
-every decision — dispatch, re-dispatch, fairness, closeout — is a stateless
-query over persisted state, reconciled by the next poll.
+Level-triggered reconciliation. Scheduler keeps no memory: every decision is a stateless query over persisted state, reconciled by the next poll.
 
 ## Model
 
-```text
-WorkflowGrain / WorkflowRun          ★ the single dispatch ledger
-  owns Assignment + work lifecycle (Pending / Running / terminal)
-  ClaimNext: one atomic write Pending→Running (acquires stage lock)
-  consumes reports; idempotent (terminal work re-report answers stale)
-  no timer, no runner concept — never queries runner state
+```
+WorkflowGrain / WorkflowRun          ★ single dispatch ledger
+  owns Assignment + work lifecycle (Pending/Running/terminal)
+  ClaimNext: atomic Pending→Running + stage lock
+  consumes reports; idempotent (terminal work re-report → Stale)
+  no timer, no runner concept
 
 AgentJobGrain
-  owns its work state + DispatchSnapshot (no run to re-render from,
-  so the snapshot lives on the owner)
+  owns work state + DispatchSnapshot (no run to rerender from)
 
 RunnerGrain
-  presence: lastSeen — poll IS the heartbeat → online/offline
-  slots: capacity configuration (control-plane owned)
-  closeout: on presence loss, synthesize FAILED for the runner's
-            Running works via the normal report channel
+  presence: lastSeen — poll is heartbeat → online/offline
+  slots: capacity config (control-plane owned)
+  closeout: presence loss → synthesize FAILED for Running works
   holds NO work records
 
 DispatchService (stateless, not a grain)
-  per poll computes desired − reported and renders dispatches
-  from persisted state; keeps no cursor, no cache, no ledger
+  per poll: desired − reported → dispatches
+  from persisted state; no cursor, no cache, no ledger
 
 runner process (physical)
-  executes works concurrently; owns execution timeout (progress-aware)
-  reports its full level state on every poll: inFlight + awaitingAck
+  executes works concurrently; progress-aware timeout
+  reports full state each poll: inFlight + awaitingAck
   retries reports with backoff until acked
 ```
 
-Every scheduling fact has exactly one persistent owner:
+Every fact has one owner:
 
-```text
-who was dispatched what, and how far   → WorkflowRun / AgentJob (store-queryable)
-what is actually executing right now   → runner process memory (fully reported each poll)
-is the runner alive                    → RunnerGrain.lastSeen
+```
+who was dispatched what             → WorkflowRun / AgentJob (store-queryable)
+what is executing right now         → runner process memory (reported each poll)
+is the runner alive                 → RunnerGrain.lastSeen
 ```
 
-There is no third copy in the middle. A dispatch is always re-renderable
-from the persisted run (`WorkItem` and its envelope are pure functions of
-the run), so no dispatch snapshot exists for workflow work.
+No third copy. Dispatch is always re-renderable from the persisted run.
 
-Core invariants:
+Invariants:
 
-```text
+```
 the workflow run IS the dispatch ledger
-Running ⟹ reconciled within one poll period:
-  reported by its runner  ∨  re-dispatched  ∨  closed out on presence loss
-|Running works assigned to a runner| ≤ slots   (enforced at claim)
+Running ⟹ reconciled within one poll: reported ∨ re-dispatched ∨ closed out
+|Running works assigned to runner| ≤ slots  (enforced at claim)
 ```
 
-## Interfaces
+## Poll reconciliation
 
-```text
-IWorkflowGrain
-  AssignWorkerAsync(workerId) -> Assigned | Rejected   # idempotent arbiter; sets Assignment
-  ClaimNextAsync(workerId)    -> WorkItem | null       # single write: pick NextWork,
-                                                       # acquire stage lock, mark Running, persist
-  ReceiveTaskReportAsync(workerId, workId, report)  -> Accepted | Stale
-  ReceiveCheckReportAsync(workerId, workId, report) -> Accepted | Stale
-
-IRunnerGrain
-  RegisterAsync(info)          # first contact / info refresh
-  slots get/update             # capacity config
-  presence: touched by poll; persistent-reminder expiry -> offline + closeout
+```
+runner process                  DispatchService                      store/grains
+    | POST poll {inFlight, awaitingAck}                                  |
+    |------------------------------>|                                    |
+    |                               | ① TouchPresence (poll=heartbeat)   |
+    |                               | ② desired ← Running WHERE assigned=me
+    |                               | ③ redelivery = desired − reported  |
+    |                               |    render each from persisted run  |
+    |                               | ④ spare = slots − |desired|        |
+    |                               |    while spare > 0:                |
+    |                               |      Ready runs assigned to me     |
+    |                               |      ORDER BY ReadySince ASC       |
+    |                               |      ClaimNextAsync ---------------->| Pending→Running
+    |                               |        ok → render, spare--        |   + stage lock
+    |                               |        null → next candidate       |
+    |                               |    still spare: claimable Pending  |
+    |                               |      → AssignWorker → ClaimNext    |
+    | { dispatches[] }              |                                    |
+    |<------------------------------|                                    |
+    | inFlight.add(dispatches)      |                                    |
+    | execute concurrently           |                                    |
 ```
 
-```text
-POST poll
-  request  { inFlight:    [workKey...],     # executing now
-             awaitingAck: [workKey...] }    # finished, result not yet acked
-  response { dispatches:  [WorkDispatch...] }
+Order: redelivery first (debts owed) → assigned Ready runs → claim new. Held work before expansion.
 
-workKey = ownerKind:ownerId:workId
-```
+`reported − desired` (run stopped past the work): no action. Process runs to completion. Report answers `Stale` = ack, result discarded.
 
-`workKey` is split on the first and last `:` so that `workId` may itself
-contain `:` (e.g. `recover:rebase.1`). `ownerId` is the workflow run id
-(workflow) or agent job id (agent-job).
+Race freedom: process adds work to inFlight synchronously between receiving dispatch and next poll. A freshly delivered dispatch can never be mistaken for loss.
 
-Delivery is pull. Discovery is store queries, not grain calls. There is no
-push from WorkflowGrain to runner, and no relay grain between the process
-and the owner of a work.
-
-## Poll Reconciliation
-
-One poll = one reconciliation round. First dispatch, process-restart
-redelivery, and lost-response redelivery are all the same path: `desired − reported`.
-
-```text
-runner process               DispatchService                     store / grains
-    |                             |                                   |
-    | POST poll                   |                                   |
-    | { inFlight, awaitingAck }   |                                   |
-    |---------------------------->|                                   |
-    |                             | ① touch presence (poll is heartbeat)
-    |                             |                                   |
-    |                             | ② desired ← Running works of runs |
-    |                             |    WHERE assigned = me            |
-    |                             |    (+ agent-job works assigned=me)|
-    |                             |                                   |
-    |                             | ③ redelivery = desired − reported |
-    |                             |    render each from persisted run |
-    |                             |    (agent-job: owner snapshot)    |
-    |                             |                                   |
-    |                             | ④ spare = slots − |desired|       |
-    |                             |    while spare > 0:               |
-    |                             |      Ready runs assigned to me    |
-    |                             |      ORDER BY ReadySince ASC      |  ← fairness
-    |                             |      ClaimNextAsync(me) ------------>| Pending→Running
-    |                             |        ok   -> render, spare--    |   + stage lock
-    |                             |        null -> next candidate     |
-    |                             |    still spare:                   |
-    |                             |      claimable Pending runs       |
-    |                             |      → AssignWorker → ClaimNext   |
-    |                             |                                   |
-    | { dispatches[] }            |                                   |
-    |<----------------------------|                                   |
-    | inFlight.set(key) per dispatch (synchronously, before next poll)|
-    | execute concurrently        |                                   |
-```
-
-Ordering within a poll: redelivery first (debts already owed), then serve
-already-assigned Ready runs, then claim new workflows — held work always
-precedes expansion.
-
-`reported − desired` (the run was stopped or advanced past the work while
-the process executes it) triggers **no action**: the system does not cancel
-in-flight work. The process runs it to completion; the eventual report is
-answered `Stale` — which is an ack — and the result is discarded
-idempotently.
-
-Race-freedom of `desired − reported`: the process adds a work to its
-in-flight map synchronously between receiving a dispatch and its next poll,
-so a freshly delivered dispatch can never be mistaken for a loss. The only
-way a Running work is absent from the report is that the process never had
-it or lost it — both want redelivery.
-
-**Implementation constraint — the reported set is process-lifetime state.**
-The process's reported set (`inFlight ∪ awaitingAck`) must survive poll
-exceptions and connection resets. A poll that throws must not discard works
-still executing or awaiting ack. If the reported set were scoped to the poll
-loop (e.g. a method-local map abandoned when the poll call rejects), then
-any transient poll failure would make every held work vanish from the
-report and be re-dispatched — a rollback storm that duplicates execution
-and eventually fails works as `runner-lost`. The reported set belongs to
-the process, not to a single poll attempt.
+Reported set (`inFlight ∪ awaitingAck`) is process-lifetime state. Must survive poll exceptions and connection resets. Otherwise transient poll failure = every held work vanishes from report = re-dispatch storm.
 
 ## Claim
 
-`ClaimNextAsync` is the only write that starts work: it picks the run's
-next pending work, acquires the sequential stage lock, marks the work
-Running with the runner identity, and persists — one atomic transition on
-the single-writer grain. There is no offer phase and no runner-side
-pre-registration, because there is no runner-side record whose existence
-would need guaranteeing.
+`ClaimNextAsync`: picks next pending work, acquires stage lock, marks Running with runner identity, persists. One atomic write. No offer phase. No runner-side pre-registration.
 
-```text
-PENDING --ClaimNext--> RUNNING --report(success|fail)--> COMPLETED | FAILED
+```
+PENDING --ClaimNext--> RUNNING --report(success|fail)--> COMPLETED|FAILED
 ```
 
-A claim that fails (stage lock contended, state moved on) returns null;
-the DispatchService tries the next candidate this poll and the run is
-retried on later polls. A claim that succeeds but whose dispatch never
-reaches the process needs no handling: the work is Running and unreported,
-so the next poll redelivers it.
+Failed claim (stage lock contention, state moved) → null → next candidate this poll.
+Successful claim with lost dispatch → work is Running and unreported → next poll redelivers.
 
-## Fairness — round-robin from ReadySince
+## Fairness
 
-A run records when it (re-)entered Ready (`ReadySince`, a persisted status
-transition timestamp). Serving Ready runs in `ReadySince ASC` order yields
-round-robin with zero scheduler state:
+`ReadySince` timestamp on (re-)entry to Ready. Serve `ORDER BY ReadySince ASC` = round-robin with zero scheduler state.
 
-```text
-work completes → run advances → next work pending → run back to Ready
-                                                    ReadySince := now
-just-served runs re-queue at the tail; the longest-waiting run is at the head
+```
+work completes → run advances → next work pending → ReadySince := now
+just-served runs re-queue at tail; longest-waiting at head
 ```
 
-Example — 2 slots, runs A, B, C all with work, D gated:
-
-```text
-t0  desired={}          queue=[A,B,C]  spare=2  → claim A.w1, B.w1
-t1  A.w1 done, A ready  queue=[C,A]    spare=1  → claim C.w1
-t2  B.w1 done, B ready  queue=[A,B]    spare=1  → claim A.w2
-t3  C.w1 done, C ready  queue=[B,C]    spare=1  → claim B.w2      … stable rotation
-```
-
-Properties: fairness is a property of persisted data (survives server
-restart, needs no cursor); rotation granularity is one work (a run has at
-most one dispatchable work at a time); gated/idle runs are not Ready and
-cost nothing. The ordering clause is the pluggable policy point (e.g.
-`Priority DESC, ReadySince ASC`); default is pure FIFO. Claimable
-discovery keeps `CreatedAt ASC` with jitter against thundering herds.
+Pluggable policy point: default pure FIFO, can extend to `Priority DESC, ReadySince ASC`.
 
 ## Capacity
 
-`slots` bounds **concurrently executing workflow works**, not held
-assignments. A runner may hold many idle/gated assigned workflows while
-executing up to `slots` works. The gate is evaluated at claim time from the
-store (`|Running assigned to me| < slots`); the process enforces nothing
-and executes whatever it is handed.
-
-## Assignment
-
-Unchanged in substance. One workflow, one worker, sticky through idle,
-gates, and work boundaries. Claimable is a data property, not a queue:
-
-```text
-WorkflowRuns WHERE Assignment IS NULL AND Status = Pending   [AND ProjectId = @p]
-```
-
-`AssignWorkerAsync` is the idempotent arbiter (unassigned+runnable → set;
-same worker → Assigned; other worker → Rejected; not runnable → Rejected).
-Optimistic claiming: concurrent runners may race a candidate; the arbiter
-admits one.
-
-Release is not automatic. A workflow assigned to a permanently lost worker
-is unblocked by an explicit operator reassign (tracked separately); on
-release its Running works are closed out and the run returns to claimable.
+`slots` bounds concurrently executing workflow works, not held assignments. Gate evaluated at claim time from store (`|Running assigned to me| < slots`). Process enforces nothing.
 
 ## Report
 
-Reports flow directly to the owning grain; translation is a stateless
-service; no relay, no runner-side bookkeeping.
+Reports flow directly to owning grain. Stateless translation service. No relay.
 
-```text
-runner process            api route               owner grain
-    | report result           |                       |
-    |------------------------>| translate (stateless) |
-    |                         | ReportOutcome -------->| idempotent by workId
-    |      Accepted | Stale   |<-----------------------|
-    |<------------------------|   both are acks
-    | awaitingAck.remove(key) |
+```
+runner → api route → translate (stateless) → owner grain → Accepted | Stale (both ack)
 ```
 
-At-least-once: a transport failure never rewrites a result. The process
-moves a finished work to `awaitingAck`, retries the original result with
-backoff, and keeps the work in its poll report meanwhile — so it is never
-mistaken for lost and re-dispatched. `Accepted` and `Stale` both terminate
-the retry.
+At-least-once: finished work → `awaitingAck` → retry original result with backoff → still in poll report → never mistaken for lost. `Accepted` and `Stale` both terminate retry.
 
-Report producers are indistinguishable to the owner: the executing process
-(normal completion or its own timeout failure) or RunnerGrain closeout.
-WorkflowGrain never learns why a work failed — only that it did.
+Report producers are indistinguishable to the owner: executing process (normal or timeout failure) or RunnerGrain closeout.
 
 ## Supervision
 
-Two levels, one rule each. No server-side work-completion wall clock.
+| What | Who | How |
+|---|---|---|
+| work wedged/runaway | runner process | progress-aware timeout → kill, report FAILED |
+| runner gone | RunnerGrain | poll-freshness expiry → offline → closeout: synthesize FAILED("runner-lost") for Running works |
+| work timeout | none | work reported in-flight is alive; only process judges slow |
 
-```text
-work wedged / runaway    runner process   progress-aware timeout: kill, report FAILED
-runner gone              RunnerGrain      poll-freshness expiry (persistent reminder)
-                                          → offline → closeout: query the runner's
-                                          Running works, synthesize FAILED("runner-lost")
-(work timeout)           server           none — a work reported in-flight is alive;
-                                          only the process judges slow
-```
+HTTP heartbeat = info-refresh channel only. Poll freshness = presence signal. Registry written only on state/info change, never per poll.
 
-The HTTP heartbeat endpoint degrades to an info-refresh channel
-(capabilities, models, buildGitHash); poll freshness is the presence
-signal. The registry is written only on state or info change, never per
-poll. SignalR liveness probing serves the push transport only and takes no
-part in presence.
+## Failure handling
 
-## Redelivery And Closeout
-
-Two paths, no per-failure rules:
-
-```text
-every lost message        → redelivered by the next poll's diff
-runner permanently gone   → presence expiry → closeout
-```
-
-| failure | handling |
+| Failure | Handling |
 |---|---|
 | dispatch response lost | next poll: desired − reported → re-dispatch |
-| process restart (memory gone) | same — empty report → full re-dispatch |
-| render fails after claim | same — retried every poll |
+| process restart | empty report → full re-dispatch |
+| render fails after claim | retried every poll |
 | report transport fails | awaitingAck retry; still reported, never re-dispatched |
-| duplicate / late report | owner idempotent → Stale (an ack) |
+| duplicate/late report | owner idempotent → Stale |
 | work wedged | process timeout → FAILED |
 | runner lost | closeout synthesizes FAILED |
-| runner returns after closeout | its reports answer Stale; its works are no longer desired and simply drain |
-| run stopped while work executes | no cancellation; work drains, report answers Stale |
-
-Old clients that poll without a body report nothing; reconciliation is
-skipped for them and presence-loss closeout remains the only safety net.
-
-## 实装差距
-
-正文描述目标设计（对账模型）。对账模型已由 epic #44「调度链路设计收敛」分两批落地，正文即现状。
-
-**已落地（Batch 1 — runner 进程状态层）**：
-
-- runner 进程的 reported set（`inFlight ∪ awaitingAck`）已提升为进程生命期状态（`RunnerHost` 实例字段），跨 poll 异常与连接重置存活——这是 rollback-storm 根因的修复（见上「Implementation constraint — the reported set is process-lifetime state」）。
-- poll 已携带 body `{ inFlight: [workKey...], awaitingAck: [workKey...] }`。
-- awaitingAck at-least-once：执行完成的结果进入 awaitingAck，report 传输失败时按重试循环周期重试，`Accepted` 与 `Stale` 都终止重试。不再把传输失败降级为 `failed` 业务结果。
-- 公平性查询列已就位：`WorkflowRun.ReadySince` + `WorkflowRunRow.ReadySince` 计算列 + `IX_WorkflowRuns_Status_ReadySince` 索引 + `FindAssignedToAsync` 已改为 `ORDER BY ReadySince ASC`。
-
-**已落地（Batch 2 — 服务端对账主体）**：
-
-- `PollWorkAsync` + `ClaimAsync` 两阶段合并为 `IWorkflowGrain.ClaimNextAsync` 单次写（Pending→Running + stage lock + persist 原子化）；runner 侧 offer/claim 预登记与回滚一并删除。
-- RunnerGrain workflow 双台账（grain persisted `_worksState` + `RunnerWorkStore` ledger）与 `WorkItemSnapshot`/dispatch 快照、Hydrate/Reconfirm/orphan-drop 恢复分支全部删除——run 即台账，dispatch 从 run 重渲染（当前为 redelivery 路径）。
-- 服务端 `/poll` 消费 reported set 做 `desired − reported` diff：新建 stateless `DispatchService` 统一补派 + 新 claim，按四步（touch presence → desired → redelivery → spare claim），runner 侧不再走 offer/claim。
-- report 直达属主：新建 `WorkflowReportService`，`/report` 对 workflow 直走属主 grain，不经 RunnerGrain 中继；RunnerGrain 仅保留 agent-job push 台账。
-- 服务端 `WorkCompletionTimeout`（30 分钟墙钟 reminder）删除；work 级 liveness 即 poll 汇报，兜底只剩 presence 关账。
-- presence 由 HTTP heartbeat + 每次 poll 空写 registry 的双通道，收敛为 poll 即心跳（`TouchPresenceAsync` 仅刷 `lastSeen`，registry 仅在 register/unregister/heartbeat-repair 时写）。
-- 一次 poll 可携带补派 + 新 claim 多个 dispatch：runner 侧 `poll` 返回 `RenderedWorkItem[]`，服务端响应为 `{ dispatches: [...] }`。
-
-**保持不变、无差距**：pull-only 交付、Assignment 唯一真相与 sticky 语义、claimable 的数据性质、stage lock 在 claim 时获取、WorkflowGrain 无 timer 不感知 runner、监督分层（进程管进度、控制平面只管存亡）。
-
-**相邻文档**：`design/runner.md` 的聚合描述已随本 spec 落地修订（RunnerGrain 不再持有 workflow 台账）；显式 reassign 出口由 issue #395 单独跟踪。
+| runner returns after closeout | reports answer Stale; works no longer desired, drain |
+| run stopped while work executing | no cancellation; report answers Stale |

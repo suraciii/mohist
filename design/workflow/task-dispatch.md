@@ -1,24 +1,32 @@
-# Workflow Task Dispatch
+# Task Dispatch
 
-## task.with 展开
+## task.with expansion
 
-模板 YAML 的 `tasks[*].with` 中包含 `${{ }}` 模板表达式。dispatch 时 WorkflowGrain 将其展开为 resolved 变量中的实际值。
+`tasks[*].with` has `${{ }}` template expressions. WorkflowGrain expands them at dispatch.
 
 ```
-task.with (模板)                    resolved vars                  dispatched.with
-────────────────                    ─────────────                  ───────────────
-
-agent:   "${{ vars.agent }}"  ──→  vars.agent = { type, model } → agent: { type, model }
-prompt:  "${{ prompts.x }}"   ──→  prompts.x = "Write a..."     → prompt: "Write a..."
-timeout: 600000                                                   → timeout: 600000
-
-规则:
-  "${{ path }}" → 从 resolved 变量取值替换
-  非模板值      → 原样保留
+${{ path }}  →  resolved variable value
+non-template  →  kept as-is
 ```
 
-展开后的值如果是 JSON 对象，与 resolved 中的同名 key 进行 deep merge（vars 覆盖，task 级定制保留）。
+Expanded JSON objects deep-merge with resolved vars (vars win, task-level stays).
 
-## 其余 TBD
+## Dispatch context
 
-Dispatch 流程、runner 交互（offer/claim 两阶段、dispatch 快照、恢复）见 [`scheduling.md`](scheduling.md)。check dispatch、ResolveTaskConfig 位置待补。
+Available in `with` expressions:
+
+| Variable | Source |
+|---|---|
+| `workflow.runId` | dispatch |
+| `stage.name` | dispatch |
+| `work.id` | dispatch |
+| `issue.number` | dispatch |
+| `repository.*` | dispatch |
+| `workspace.*` | dispatch |
+| `vars.*` | WorkflowStageEffectiveVariables |
+| `tasks.<id>.outputs.*` | previous task output |
+| `prompts.<key>` | Project Space prompt (runner resolves at execution time) |
+
+Dispatch context is not profile variables. It exists only in the dispatch payload.
+
+Full dispatch/report flow: see `scheduling.md`.
