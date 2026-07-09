@@ -2,62 +2,62 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { getIssueWorkflowTaskLog } from '../../../entities/issue'
-import { getWorkflowRunSessions } from '../../../entities/coder-session/api/client'
+import { http, HttpResponse } from 'msw'
+import type { TaskLogPage } from '../../../entities/issue/model/task-log'
 import type { WorkflowRunSession } from '../../../entities/coder-session/model/types'
 import { TaskLogPanel } from './TaskLogPanel'
 import {
-  buildHarness,
   fakeConnections,
   installDownloadSpy,
   makeLine,
   makePage,
   mockConnectionBuilder,
+  newQueryClient,
   readBlobText,
   recordedInvokes,
   renderWithHarness,
   sessionFixture,
+  type TestHarness,
 } from './_taskLogPanelTestUtils'
+import { server, useMswServer } from '../../../../tests/support/msw'
 
-vi.mock('../../../entities/issue/api/client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue/api/client')>()
+useMswServer()
+
+const _taskLogPageRef: { current: TaskLogPage | undefined } = { current: undefined }
+const _workflowRunSessionsRef: { current: WorkflowRunSession[] } = { current: [] }
+const _workflowRunSessionCalls: string[] = []
+
+function buildMswHarness(initialPage: TaskLogPage | undefined): TestHarness {
+  const queryClient = newQueryClient()
+  _taskLogPageRef.current = initialPage
   return {
-    ...actual,
-    getIssueWorkflowTaskLog: vi.fn(),
+    queryClient,
+    page: _taskLogPageRef,
+    setPage(next) {
+      _taskLogPageRef.current = next
+    },
   }
-})
-
-const mockedGetIssueWorkflowTaskLog = vi.mocked(getIssueWorkflowTaskLog)
-
-const sessionEventHandlers = new Map<string, ((detail: unknown) => void)[]>()
-
-vi.mock('../../../entities/agent/@x/events', () => ({
-  onAgentEvent: vi.fn((name: string, handler: (detail: unknown) => void) => {
-    if (!sessionEventHandlers.has(name)) sessionEventHandlers.set(name, [])
-    sessionEventHandlers.get(name)!.push(handler)
-    return () => {
-      const handlers = sessionEventHandlers.get(name)
-      if (handlers) {
-        const idx = handlers.indexOf(handler)
-        if (idx !== -1) handlers.splice(idx, 1)
-      }
-    }
-  }),
-}))
-
-vi.mock('../../../entities/coder-session/api/client', () => ({
-  getWorkflowRunSessions: vi.fn(),
-}))
-
-const mockedGetWorkflowRunSessions = vi.mocked(getWorkflowRunSessions)
+}
 
 describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     fakeConnections.length = 0
     recordedInvokes.length = 0
-    sessionEventHandlers.clear()
+    _taskLogPageRef.current = undefined
+    _workflowRunSessionsRef.current = []
+    _workflowRunSessionCalls.length = 0
     mockConnectionBuilder()
+    server.use(
+      http.get('*/api/projects/:projectId/issues/:issueNumber/workflow/tasks/:taskId/logs', () => {
+        const data = _taskLogPageRef.current ?? { lines: [], nextCursor: null, truncated: false }
+        return HttpResponse.json({ success: true, data })
+      }),
+      http.get('*/api/workflow-runs/:workflowRunId/sessions', ({ params }) => {
+        _workflowRunSessionCalls.push(params.workflowRunId as string)
+        return HttpResponse.json({ success: true, data: _workflowRunSessionsRef.current })
+      }),
+    )
   })
 
   afterEach(() => {
@@ -68,7 +68,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   const agentOrigin = { uses: 'mohist/acp-agent' }
 
   it('renders milestone rows interleaved by ISO timestamp alongside ops lines for an agent task', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
@@ -77,11 +77,11 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         status: 'completed',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
-    ])
-    const harness = buildHarness(makePage([
+    ]
+    const harness = buildMswHarness(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:00:01.000Z', source: 'workspace-prep', text: 'ops-08:00:01' }),
       makeLine({ seq: 2, timestamp: '2026-07-03T08:05:00.000Z', source: 'cleanup', text: 'ops-08:05:00' }),
-    ]), mockedGetIssueWorkflowTaskLog)
+    ]))
 
     renderWithHarness(
       <TaskLogPanel
@@ -114,7 +114,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('renders milestones as the timeline content (suppresses the empty state) when there are no ops lines', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
@@ -123,8 +123,8 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         status: 'completed',
         eventSummary: { resolvedModel: 'mohist/coder-agent' },
       }),
-    ])
-    const harness = buildHarness(makePage([]), mockedGetIssueWorkflowTaskLog)
+    ]
+    const harness = buildMswHarness(makePage([]))
 
     renderWithHarness(
       <TaskLogPanel
@@ -145,8 +145,13 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('keeps showing a loading state instead of the true-empty copy while agent session summaries load', async () => {
-    mockedGetWorkflowRunSessions.mockImplementation(() => new Promise<WorkflowRunSession[]>(() => {}))
-    const harness = buildHarness(makePage([]), mockedGetIssueWorkflowTaskLog)
+    server.use(
+      http.get('*/api/workflow-runs/:workflowRunId/sessions', ({ params }) => {
+        _workflowRunSessionCalls.push(params.workflowRunId as string)
+        return new Promise<Response>(() => {})
+      }),
+    )
+    const harness = buildMswHarness(makePage([]))
 
     renderWithHarness(
       <TaskLogPanel
@@ -162,14 +167,14 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     )
 
     await waitFor(() => {
-      expect(mockedGetWorkflowRunSessions).toHaveBeenCalledWith('wr-1')
+      expect(_workflowRunSessionCalls).toContain('wr-1')
     })
     expect(screen.getByText('Loading execution log…')).toBeInTheDocument()
     expect(screen.queryByTestId('task-log-empty')).not.toBeInTheDocument()
   })
 
   it('renders terminal-state milestones from the persisted summary without any real-time event for a finished agent task', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
@@ -178,8 +183,8 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         status: 'completed',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
-    ])
-    const harness = buildHarness(makePage([]), mockedGetIssueWorkflowTaskLog)
+    ]
+    const harness = buildMswHarness(makePage([]))
 
     renderWithHarness(
       <TaskLogPanel
@@ -201,7 +206,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('renders failure milestones with the failureReason and applies the failed styling', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
@@ -210,8 +215,8 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         failureReason: 'agent stream blew up',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
-    ])
-    const harness = buildHarness(makePage([]), mockedGetIssueWorkflowTaskLog)
+    ]
+    const harness = buildMswHarness(makePage([]))
 
     renderWithHarness(
       <TaskLogPanel
@@ -232,12 +237,12 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('renders NO milestone rows for a pure ops task even when sessionName is present', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({ id: 'session-1', sessionName: 'rebase-1' }),
-    ])
-    const harness = buildHarness(makePage([
+    ]
+    const harness = buildMswHarness(makePage([
       makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' }),
-    ]), mockedGetIssueWorkflowTaskLog)
+    ]))
 
     renderWithHarness(
       <TaskLogPanel
@@ -258,12 +263,12 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('renders NO milestone rows when origin.uses is the agent action but sessionName is empty', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({ id: 'session-1', sessionName: '' }),
-    ])
-    const harness = buildHarness(makePage([
+    ]
+    const harness = buildMswHarness(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'prep' }),
-    ]), mockedGetIssueWorkflowTaskLog)
+    ]))
 
     renderWithHarness(
       <TaskLogPanel
@@ -284,12 +289,12 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('renders milestone rows when origin.uses and sessionName are present even if classification is missing', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({ id: 'session-1', sessionName: 'plan-issue-339' }),
-    ])
-    const harness = buildHarness(makePage([
+    ]
+    const harness = buildMswHarness(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'prep-without-classification' }),
-    ]), mockedGetIssueWorkflowTaskLog)
+    ]))
 
     renderWithHarness(
       <TaskLogPanel
@@ -309,10 +314,10 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('renders NO milestone rows when the workflow-run sessions data is empty (graceful degradation)', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([])
-    const harness = buildHarness(makePage([
+    _workflowRunSessionsRef.current = []
+    const harness = buildMswHarness(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'ops-line' }),
-    ]), mockedGetIssueWorkflowTaskLog)
+    ]))
 
     renderWithHarness(
       <TaskLogPanel
@@ -333,7 +338,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('sorts the mixed timeline by timestamp when ops timestamps disagree and uses the same order for export', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
@@ -342,11 +347,11 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         status: 'completed',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
-    ])
-    const harness = buildHarness(makePage([
+    ]
+    const harness = buildMswHarness(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'workspace-prep', text: 'seq-one-late-clock' }),
       makeLine({ seq: 2, timestamp: '2026-07-03T08:00:00.000Z', source: 'cleanup', text: 'seq-two-early-clock' }),
-    ]), mockedGetIssueWorkflowTaskLog)
+    ]))
 
     const user = userEvent.setup()
     renderWithHarness(
@@ -388,7 +393,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('keyword search hides non-matching milestones and keeps matching ones', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
@@ -397,10 +402,10 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         completedAt: '2026-07-03T08:01:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
-    ])
-    const harness = buildHarness(makePage([
+    ]
+    const harness = buildMswHarness(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'cleanup', text: 'final cleanup' }),
-    ]), mockedGetIssueWorkflowTaskLog)
+    ]))
 
     const user = userEvent.setup()
     renderWithHarness(
@@ -436,7 +441,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('source-chip filtering never hides milestone rows even when the chip would hide ops lines', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
@@ -445,10 +450,10 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         completedAt: '2026-07-03T08:01:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
-    ])
-    const harness = buildHarness(makePage([
+    ]
+    const harness = buildMswHarness(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'workspace-prep', text: 'prep-line' }),
-    ]), mockedGetIssueWorkflowTaskLog)
+    ]))
 
     const user = userEvent.setup()
     renderWithHarness(
@@ -476,7 +481,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('source-chip set is ops-only — no chip is derived from a milestone row', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
@@ -485,10 +490,10 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         completedAt: '2026-07-03T08:01:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
-    ])
-    const harness = buildHarness(makePage([
+    ]
+    const harness = buildMswHarness(makePage([
       makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' }),
-    ]), mockedGetIssueWorkflowTaskLog)
+    ]))
 
     renderWithHarness(
       <TaskLogPanel
@@ -509,7 +514,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('exports the filtered merged view with milestone rows serialized as "<timestamp> [session] <label>: <detail>"', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
@@ -518,11 +523,11 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         completedAt: '2026-07-03T08:01:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
-    ])
-    const harness = buildHarness(makePage([
+    ]
+    const harness = buildMswHarness(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', source: 'workspace-prep', text: 'before' }),
       makeLine({ seq: 2, timestamp: '2026-07-03T08:02:00.000Z', source: 'cleanup', text: 'after' }),
-    ]), mockedGetIssueWorkflowTaskLog)
+    ]))
 
     const user = userEvent.setup()
     renderWithHarness(
@@ -556,7 +561,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('download applies a keyword filter to milestones (only filtered rows go in the export)', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
@@ -566,10 +571,10 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         failureReason: 'agent stream blew up',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
-    ])
-    const harness = buildHarness(makePage([
+    ]
+    const harness = buildMswHarness(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:02:00.000Z', source: 'cleanup', text: 'unrelated' }),
-    ]), mockedGetIssueWorkflowTaskLog)
+    ]))
 
     const user = userEvent.setup()
     renderWithHarness(
@@ -607,7 +612,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
   })
 
   it('uses the marker with a non-color-only accessible name and a human label prefix', async () => {
-    mockedGetWorkflowRunSessions.mockResolvedValue([
+    _workflowRunSessionsRef.current = [
       sessionFixture({
         id: 'session-1',
         sessionName: 'plan-issue-339',
@@ -616,8 +621,8 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         completedAt: '2026-07-03T08:01:00.000Z',
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
-    ])
-    const harness = buildHarness(makePage([]), mockedGetIssueWorkflowTaskLog)
+    ]
+    const harness = buildMswHarness(makePage([]))
 
     renderWithHarness(
       <TaskLogPanel
