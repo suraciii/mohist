@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { TEST_PROJECT, baseRender, screen, waitFor } from './test-utils'
 import { SessionPage } from '../src/pages/session/ui/SessionPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import { server } from '../tests/support/msw'
+import { useMswServer } from '../tests/support/msw'
 import React from 'react'
 import type {
   AgentSessionMetadata,
@@ -38,15 +38,7 @@ function sessionHandlers() {
   ]
 }
 
-beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
-  server.use(...sessionHandlers())
-})
-afterEach(() => {
-  server.resetHandlers()
-  server.use(...sessionHandlers())
-})
-afterAll(() => server.close())
+useMswServer(...sessionHandlers())
 
 const originalScrollTo = Element.prototype.scrollTo
 const queryClients: QueryClient[] = []

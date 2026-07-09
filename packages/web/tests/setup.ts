@@ -3,6 +3,19 @@ import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 import { resetSonnerFake } from './support/sonner-fake'
 import { resetSignalrFake } from './support/signalr-fake'
+import { absolutizeRelativeFetchUrls, server } from './support/msw'
+
+let _msWlistening = false
+if (!_msWlistening) {
+  _msWlistening = true
+  try {
+    server.listen({ onUnhandledRequest: 'warn' })
+  } catch (e) {
+    // MSW may already be listening (e.g. isolate:false re-evaluation)
+    // swallow 'already enabled' errors
+  }
+  absolutizeRelativeFetchUrls()
+}
 
 let _reducedMotionOverride: boolean | undefined
 

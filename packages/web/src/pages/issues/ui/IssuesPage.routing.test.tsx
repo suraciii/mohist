@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
-import { server } from '../../../../tests/support/msw'
+import { useMswServer } from '../../../../tests/support/msw'
 
 const mocks = vi.hoisted(() => ({
   detailRenderCount: 0,
@@ -47,16 +47,7 @@ const HANDLERS = [
   ),
 ]
 
-beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
-  server.use(...HANDLERS)
-})
-afterEach(() => {
-  cleanup()
-  server.resetHandlers()
-  server.use(...HANDLERS)
-})
-afterAll(() => server.close())
+useMswServer(...HANDLERS)
 
 function renderRoute(path: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
