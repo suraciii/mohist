@@ -3,21 +3,44 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import { SessionPage } from './SessionPage'
 import type { AgentSessionMetadata } from '../../../entities/coder-session'
+import { useMswServer } from '../../../../tests/support/msw'
+
+let _issueData: unknown = null
+let _coderSessionsData: unknown[] = []
+let _metadataData: unknown = null
+let _transcriptData: { turns: unknown[]; partCount: number; lastActivityAt: string } = {
+  turns: [
+    { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' }, parts: [] },
+    { id: 'turn-2', index: 1, kind: 'response', role: 'assistant', content: { text: 'Done' }, parts: [] },
+  ],
+  partCount: 2,
+  lastActivityAt: '2026-06-15T10:29:55.000Z',
+}
+let _workflowRunSessionsData: unknown[] = []
+
+useMswServer(
+  http.get('/api/projects/:projectId/issues/:number', () =>
+    HttpResponse.json({ success: true, data: _issueData }),
+  ),
+  http.get('/api/projects/:projectId/issues/:number/coder-sessions', () =>
+    HttpResponse.json({ success: true, data: _coderSessionsData }),
+  ),
+  http.get('/api/projects/:projectId/issues/:number/sessions/:name', () =>
+    HttpResponse.json({ success: true, data: _metadataData }),
+  ),
+  http.get('/api/projects/:projectId/issues/:number/sessions/:name/transcript', () =>
+    HttpResponse.json({ success: true, data: _transcriptData }),
+  ),
+  http.get('/api/workflow-runs/:workflowRunId/sessions', () =>
+    HttpResponse.json({ success: true, data: _workflowRunSessionsData }),
+  ),
+)
 
 const mocks = vi.hoisted(() => ({
-  useIssueData: undefined as any,
-  useCoderSessionsReturn: {
-    sessions: [] as any[],
-    isLoading: false,
-  },
-  siblingReturn: {
-    previous: null,
-    next: null,
-    sessions: [] as any[],
-  },
   transcriptReturn: {
     turns: [] as any[],
     transcriptVersion: 0,
@@ -28,41 +51,7 @@ const mocks = vi.hoisted(() => ({
     isThinking: false,
     isStreaming: false,
   },
-  metadataOverride: null as AgentSessionMetadata | null,
 }))
-
-
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    useIssue: () => ({ data: mocks.useIssueData }),
-  }
-})
-
-vi.mock('../../../entities/coder-session', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/coder-session')>()
-  return {
-    ...actual,
-    useCoderSessions: () => mocks.useCoderSessionsReturn,
-    getAgentSessionMetadata: vi.fn().mockImplementation(async () => mocks.metadataOverride),
-    getAgentSessionTranscript: vi.fn().mockResolvedValue({
-      turns: [
-        { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' }, parts: [] },
-        { id: 'turn-2', index: 1, kind: 'response', role: 'assistant', content: { text: 'Done' }, parts: [] },
-      ],
-      lastActivityAt: '2026-06-15T10:29:55.000Z',
-    }),
-  }
-})
-
-vi.mock('../../../widgets/issue-workflow', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../widgets/issue-workflow')>()
-  return {
-    ...actual,
-    useSiblingSessions: () => mocks.siblingReturn,
-  }
-})
 
 vi.mock('../../../widgets/session-transcript', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../widgets/session-transcript')>()
@@ -155,7 +144,7 @@ async function renderPage(options: RenderPageOptions = {}) {
 }
 
 function setupDefaultMocks() {
-  mocks.useIssueData = {
+  _issueData = {
     id: '123',
     number: 123,
     title: 'Test issue',
@@ -168,32 +157,29 @@ function setupDefaultMocks() {
     projectId: 'proj-1',
     workflowRunId: 'wr-1',
   }
-  mocks.useCoderSessionsReturn = {
-    sessions: [
-      {
-        id: 'session-1',
-        sessionName: 'session-1',
-        workflowRunId: 'wr-1',
-        acpSessionId: 'rt-latest',
-        projectId: 'proj-1',
-        issueNumber: 123,
-        runnerId: 'runner-1',
-        status: 'completed',
-        stage: 'build',
-        model: 'minimax/MiniMax-M3',
-        workDir: null,
-        processPid: null,
-        createdAt: '2026-06-15T10:00:00.000Z',
-        startedAt: '2026-06-15T10:00:05.000Z',
-        completedAt: '2026-06-15T10:30:00.000Z',
-        lastDataAt: '2026-06-15T10:29:55.000Z',
-        failureReason: null,
-        exitCode: 0,
-      },
-    ],
-    isLoading: false,
-  }
-  mocks.siblingReturn = { previous: null, next: null, sessions: [] }
+  _coderSessionsData = [
+    {
+      id: 'session-1',
+      sessionName: 'session-1',
+      workflowRunId: 'wr-1',
+      acpSessionId: 'rt-latest',
+      projectId: 'proj-1',
+      issueNumber: 123,
+      runnerId: 'runner-1',
+      status: 'completed',
+      stage: 'build',
+      model: 'minimax/MiniMax-M3',
+      workDir: null,
+      processPid: null,
+      createdAt: '2026-06-15T10:00:00.000Z',
+      startedAt: '2026-06-15T10:00:05.000Z',
+      completedAt: '2026-06-15T10:30:00.000Z',
+      lastDataAt: '2026-06-15T10:29:55.000Z',
+      failureReason: null,
+      exitCode: 0,
+    },
+  ]
+  _workflowRunSessionsData = []
   mocks.transcriptReturn = {
     turns: [
       { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' } },
@@ -255,7 +241,7 @@ describe('SessionPage lineage link wiring (issue-245 T-006)', () => {
   })
 
   it('renders no lineage link when the metadata carries no runtimeSessionLineage (historical session)', async () => {
-    mocks.metadataOverride = baseMetadata()
+    _metadataData = baseMetadata()
 
     const { container } = await renderPage()
     const recoveryBar = container.querySelector('[data-testid="session-transcript-scroll-container"] [data-testid="session-recovery-bar"]')
@@ -264,7 +250,7 @@ describe('SessionPage lineage link wiring (issue-245 T-006)', () => {
   })
 
   it('renders no lineage link when the lineage is a single entry (no compaction relationship)', async () => {
-    mocks.metadataOverride = baseMetadata({
+    _metadataData = baseMetadata({
       runtimeSessionLineage: [
         { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
       ],
@@ -277,7 +263,7 @@ describe('SessionPage lineage link wiring (issue-245 T-006)', () => {
   })
 
   it('renders a predecessor link inside the recovery region when the lineage has 2 entries (common case, page shows latest)', async () => {
-    mocks.metadataOverride = baseMetadata({
+    _metadataData = baseMetadata({
       runtimeSessionLineage: [
         { agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
         { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
@@ -293,12 +279,11 @@ describe('SessionPage lineage link wiring (issue-245 T-006)', () => {
     const predecessor = recoveryBar!.querySelector('[data-testid="compaction-lineage-link-predecessor"]')
     expect(predecessor).not.toBeNull()
     expect(predecessor!.getAttribute('data-target-runtime-session-id')).toBe('rt-prev')
-    // The page default is the latest runtime session; no successor link expected.
     expect(recoveryBar!.querySelector('[data-testid="compaction-lineage-link-successor"]')).toBeNull()
   })
 
   it('uses the ?rt=<runtimeSessionId> anchor scheme within the existing session route', async () => {
-    mocks.metadataOverride = baseMetadata({
+    _metadataData = baseMetadata({
       runtimeSessionLineage: [
         { agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
         { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
@@ -316,7 +301,7 @@ describe('SessionPage lineage link wiring (issue-245 T-006)', () => {
   })
 
   it('renders both predecessor and successor links when the user is viewing a non-latest runtime session (?rt= param)', async () => {
-    mocks.metadataOverride = baseMetadata({
+    _metadataData = baseMetadata({
       runtimeSessionLineage: [
         { agentRuntimeSessionId: 'rt-1', boundAt: '2026-06-15T08:00:00.000Z' },
         { agentRuntimeSessionId: 'rt-2', boundAt: '2026-06-15T09:00:00.000Z' },
@@ -340,7 +325,7 @@ describe('SessionPage lineage link wiring (issue-245 T-006)', () => {
   })
 
   it('places the lineage link inside the sticky recovery region of the transcript scroll container', async () => {
-    mocks.metadataOverride = baseMetadata({
+    _metadataData = baseMetadata({
       runtimeSessionLineage: [
         { agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
         { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
@@ -354,20 +339,15 @@ describe('SessionPage lineage link wiring (issue-245 T-006)', () => {
     expect(recoveryBar).not.toBeNull()
     expect(recoveryBar!.getAttribute('data-sticky')).toBe('true')
 
-    // The lineage link must be a descendant of the sticky recovery bar so
-    // it scrolls with the sticky region.
     const lineageLinkInsideRecovery = recoveryBar!.querySelector('[data-testid="compaction-lineage-link"]')
     expect(lineageLinkInsideRecovery).not.toBeNull()
 
-    // The recovery bar contains both the lineage link and the existing
-    // context-health bar / compact/reset actions — confirming the lineage
-    // lives within the recovery region rather than alongside it.
     expect(recoveryBar!.querySelector('[data-testid="context-health-bar"]')).not.toBeNull()
     expect(recoveryBar!.querySelector('[data-testid="session-recovery-actions"]')).not.toBeNull()
   })
 
   it('falls back to the latest runtime session when the URL ?rt= does not match any chain entry', async () => {
-    mocks.metadataOverride = baseMetadata({
+    _metadataData = baseMetadata({
       runtimeSessionLineage: [
         { agentRuntimeSessionId: 'rt-prev', boundAt: '2026-06-15T09:00:00.000Z' },
         { agentRuntimeSessionId: 'rt-latest', boundAt: '2026-06-15T10:00:00.000Z' },
@@ -380,7 +360,6 @@ describe('SessionPage lineage link wiring (issue-245 T-006)', () => {
 
     const lineageLink = container.querySelector('[data-testid="compaction-lineage-link"]')
     expect(lineageLink).not.toBeNull()
-    // Falls back to the latest entry (index 1).
     expect(lineageLink!.getAttribute('data-viewed-index')).toBe('1')
 
     const predecessor = container.querySelector('[data-testid="compaction-lineage-link-predecessor"]')

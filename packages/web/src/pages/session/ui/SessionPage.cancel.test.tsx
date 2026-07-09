@@ -3,21 +3,44 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import { SessionPage } from './SessionPage'
 import type { AgentSessionMetadata } from '../../../entities/coder-session'
+import { useMswServer } from '../../../../tests/support/msw'
+
+let _issueData: unknown = null
+let _coderSessionsData: unknown[] = []
+let _metadataData: unknown = null
+let _transcriptData: { turns: unknown[]; partCount: number; lastActivityAt: string } = {
+  turns: [
+    { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' }, parts: [] },
+    { id: 'turn-2', index: 1, kind: 'response', role: 'assistant', content: { text: 'Done' }, parts: [] },
+  ],
+  partCount: 2,
+  lastActivityAt: '2026-06-15T10:29:55.000Z',
+}
+let _workflowRunSessionsData: unknown[] = []
+
+useMswServer(
+  http.get('/api/projects/:projectId/issues/:number', () =>
+    HttpResponse.json({ success: true, data: _issueData }),
+  ),
+  http.get('/api/projects/:projectId/issues/:number/coder-sessions', () =>
+    HttpResponse.json({ success: true, data: _coderSessionsData }),
+  ),
+  http.get('/api/projects/:projectId/issues/:number/sessions/:name', () =>
+    HttpResponse.json({ success: true, data: _metadataData }),
+  ),
+  http.get('/api/projects/:projectId/issues/:number/sessions/:name/transcript', () =>
+    HttpResponse.json({ success: true, data: _transcriptData }),
+  ),
+  http.get('/api/workflow-runs/:workflowRunId/sessions', () =>
+    HttpResponse.json({ success: true, data: _workflowRunSessionsData }),
+  ),
+)
 
 const mocks = vi.hoisted(() => ({
-  useIssueData: undefined as any,
-  useCoderSessionsReturn: {
-    sessions: [] as any[],
-    isLoading: false,
-  },
-  siblingReturn: {
-    previous: null,
-    next: null,
-    sessions: [] as any[],
-  },
   transcriptReturn: {
     turns: [] as any[],
     transcriptVersion: 0,
@@ -28,41 +51,7 @@ const mocks = vi.hoisted(() => ({
     isThinking: false,
     isStreaming: false,
   },
-  metadataOverride: null as AgentSessionMetadata | null,
 }))
-
-
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    useIssue: () => ({ data: mocks.useIssueData }),
-  }
-})
-
-vi.mock('../../../entities/coder-session', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/coder-session')>()
-  return {
-    ...actual,
-    useCoderSessions: () => mocks.useCoderSessionsReturn,
-    getAgentSessionMetadata: vi.fn().mockImplementation(async () => mocks.metadataOverride),
-    getAgentSessionTranscript: vi.fn().mockResolvedValue({
-      turns: [
-        { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' }, parts: [] },
-        { id: 'turn-2', index: 1, kind: 'response', role: 'assistant', content: { text: 'Done' }, parts: [] },
-      ],
-      lastActivityAt: '2026-06-15T10:29:55.000Z',
-    }),
-  }
-})
-
-vi.mock('../../../widgets/issue-workflow', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../widgets/issue-workflow')>()
-  return {
-    ...actual,
-    useSiblingSessions: () => mocks.siblingReturn,
-  }
-})
 
 vi.mock('../../../widgets/session-transcript', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../widgets/session-transcript')>()
@@ -104,7 +93,7 @@ function createQueryClient() {
 }
 
 function setupRunningIssueMocks() {
-  mocks.useIssueData = {
+  _issueData = {
     id: '123',
     number: 123,
     title: 'Test issue',
@@ -117,32 +106,29 @@ function setupRunningIssueMocks() {
     projectId: 'proj-1',
     workflowRunId: 'wr-1',
   }
-  mocks.useCoderSessionsReturn = {
-    sessions: [
-      {
-        id: 'session-1',
-        sessionName: 'session-1',
-        workflowRunId: 'wr-1',
-        acpSessionId: 'acp-1',
-        projectId: 'proj-1',
-        issueNumber: 123,
-        runnerId: 'runner-1',
-        status: 'active',
-        stage: 'build',
-        model: 'minimax/MiniMax-M3',
-        workDir: null,
-        processPid: null,
-        createdAt: '2026-06-15T10:00:00.000Z',
-        startedAt: '2026-06-15T10:00:05.000Z',
-        completedAt: null,
-        lastDataAt: '2026-06-15T10:00:30.000Z',
-        failureReason: null,
-        exitCode: 0,
-      },
-    ],
-    isLoading: false,
-  }
-  mocks.siblingReturn = { previous: null, next: null, sessions: [] }
+  _coderSessionsData = [
+    {
+      id: 'session-1',
+      sessionName: 'session-1',
+      workflowRunId: 'wr-1',
+      acpSessionId: 'acp-1',
+      projectId: 'proj-1',
+      issueNumber: 123,
+      runnerId: 'runner-1',
+      status: 'active',
+      stage: 'build',
+      model: 'minimax/MiniMax-M3',
+      workDir: null,
+      processPid: null,
+      createdAt: '2026-06-15T10:00:00.000Z',
+      startedAt: '2026-06-15T10:00:05.000Z',
+      completedAt: null,
+      lastDataAt: '2026-06-15T10:00:30.000Z',
+      failureReason: null,
+      exitCode: 0,
+    },
+  ]
+  _workflowRunSessionsData = []
   mocks.transcriptReturn = {
     turns: [
       { id: 'turn-1', index: 0, kind: 'prompt', role: 'user', content: { text: 'Build it' } },
@@ -227,7 +213,7 @@ describe('SessionPage cancel control absence (issue-349 T-002 regression)', () =
   beforeEach(() => {
     vi.clearAllMocks()
     setupRunningIssueMocks()
-    mocks.metadataOverride = baseRunningMetadata()
+    _metadataData = baseRunningMetadata()
   })
 
   afterEach(() => {

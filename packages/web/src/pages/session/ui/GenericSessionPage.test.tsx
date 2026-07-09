@@ -1,36 +1,54 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
+import { useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import { GenericSessionPage } from './GenericSessionPage'
 
 const mocks = vi.hoisted(() => ({
-  summaryData: null as any,
-  summaryLoading: false,
-  summaryError: false,
-  transcriptData: null as any,
   transcriptTurns: [] as any[],
-  transcriptIsRunning: false,
-  followupMutation: { mutate: vi.fn(), isPending: false },
-  cancelMutation: { mutate: vi.fn(), isPending: false },
 }))
 
+let _summaryData: unknown = null
+let _summaryLoading = false
+let _summaryError = false
+let _transcriptData: unknown = null
+const _followupHandler = vi.fn()
+const _cancelHandler = vi.fn()
 
-vi.mock('../../../entities/agent', () => ({
-  useGenericSessionSummary: () => ({
-    data: mocks.summaryData,
-    isLoading: mocks.summaryLoading,
-    isError: mocks.summaryError,
+let _blockCancel = false
+let _cancelResolve: (() => void) | null = null
+
+useMswServer(
+  http.get('*/api/projects/:projectId/agent-sessions/:sessionId', () => {
+    if (_summaryLoading) return new Promise(() => {})
+    if (_summaryError) return HttpResponse.json({ success: false, error: 'Not found' }, { status: 500 })
+    return HttpResponse.json({ success: true, data: _summaryData })
   }),
-  useGenericSessionTranscript: () => ({
-    data: mocks.transcriptData,
+  http.get('*/api/projects/:projectId/agent-sessions/:sessionId/transcript', () =>
+    HttpResponse.json({ success: true, data: _transcriptData }),
+  ),
+  http.post('*/api/projects/:projectId/agent-sessions/:sessionId/followup', async ({ request }) => {
+    const body = await request.json()
+    _followupHandler(body)
+    return HttpResponse.json({ success: true, data: { status: 'sent' } })
   }),
-  useGenericFollowup: () => mocks.followupMutation,
-  useCancelGenericSession: () => mocks.cancelMutation,
-  useAgentSessions: () => ({ data: [], isLoading: false }),
-}))
+  http.post('*/api/projects/:projectId/agent-sessions/:sessionId/cancel', ({ params }) => {
+    _cancelHandler(params.sessionId)
+    if (_blockCancel) {
+      return new Promise((resolve) => {
+        _cancelResolve = () => resolve(HttpResponse.json({ success: true, data: { state: 'cancelled' } }))
+      })
+    }
+    return HttpResponse.json({ success: true, data: { state: 'cancelled' } })
+  }),
+  http.get('*/api/projects/:projectId/agents/:agentRef/sessions', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+)
 
 vi.mock('../../../widgets/session-transcript', () => ({
   useSessionTranscript: () => ({
@@ -118,13 +136,15 @@ async function renderPage() {
 
 describe('GenericSessionPage', () => {
   beforeEach(() => {
-    mocks.summaryData = null
-    mocks.summaryLoading = false
-    mocks.summaryError = false
-    mocks.transcriptData = null
+    _summaryData = null
+    _summaryLoading = false
+    _summaryError = false
+    _transcriptData = null
     mocks.transcriptTurns = []
-    mocks.followupMutation = { mutate: vi.fn(), isPending: false }
-    mocks.cancelMutation = { mutate: vi.fn(), isPending: false }
+    _followupHandler.mockClear()
+    _cancelHandler.mockClear()
+    _blockCancel = false
+    _cancelResolve = null
   })
 
   afterEach(() => {
@@ -134,13 +154,13 @@ describe('GenericSessionPage', () => {
 
   describe('loading and error states', () => {
     it('shows loading state while summary is loading', () => {
-      mocks.summaryLoading = true
+      _summaryLoading = true
       renderPage()
       expect(screen.getByText(/loading session/i)).toBeInTheDocument()
     })
 
     it('shows error state when summary fetch fails', async () => {
-      mocks.summaryError = true
+      _summaryError = true
       renderPage()
       await waitFor(() => {
         expect(screen.getByText(/failed to load session/i)).toBeInTheDocument()
@@ -150,19 +170,18 @@ describe('GenericSessionPage', () => {
 
   describe('header and back-link', () => {
     it('renders session header with agent name, status badge, and model', async () => {
-      mocks.summaryData = baseSummary()
+      _summaryData = baseSummary()
       renderPage()
       await waitFor(() => {
         expect(screen.getByText('Completed')).toBeInTheDocument()
       })
       expect(screen.getByText('gpt-4')).toBeInTheDocument()
-      // Agent name appears as both the session title and the back-label link text
       const agentNameElements = screen.getAllByText('Test Agent')
       expect(agentNameElements.length).toBeGreaterThanOrEqual(1)
     })
 
     it('links back to agent profile (/agents/{agentId}) when no issue context ref', async () => {
-      mocks.summaryData = baseSummary({ contextRefs: null })
+      _summaryData = baseSummary({ contextRefs: null })
       renderPage()
       await waitFor(() => {
         const backLink = screen.getByRole('link', { name: /Test Agent/i })
@@ -172,7 +191,7 @@ describe('GenericSessionPage', () => {
     })
 
     it('links back to referenced issue when context ref has issueNumber', async () => {
-      mocks.summaryData = baseSummary({
+      _summaryData = baseSummary({
         contextRefs: { issueNumber: 42, epicNumber: null, repository: null, workspacePath: null },
       })
       renderPage()
@@ -184,7 +203,7 @@ describe('GenericSessionPage', () => {
     })
 
     it('omits workflow-stage badge (Session label shown instead)', async () => {
-      mocks.summaryData = baseSummary()
+      _summaryData = baseSummary()
       renderPage()
       await waitFor(() => {
         const labels = screen.getAllByText(/Session/i)
@@ -192,18 +211,20 @@ describe('GenericSessionPage', () => {
       })
     })
 
-    it('displays turn count', () => {
-      mocks.summaryData = baseSummary()
+    it('displays turn count', async () => {
+      _summaryData = baseSummary()
       const turn = makeTurn()
       mocks.transcriptTurns = [turn]
       renderPage()
-      expect(screen.getAllByText('0 turns').length).toBeGreaterThanOrEqual(1)
+      await waitFor(() => {
+        expect(screen.getAllByText('0 turns').length).toBeGreaterThanOrEqual(1)
+      })
     })
   })
 
   describe('follow-up enable/disable', () => {
     it('enables followup composer for non-terminal (running) sessions with turns', async () => {
-      mocks.summaryData = baseSummary({ status: 'running' })
+      _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -214,7 +235,7 @@ describe('GenericSessionPage', () => {
     })
 
     it('disables followup composer for terminal (completed) sessions with turns', async () => {
-      mocks.summaryData = baseSummary({ status: 'completed' })
+      _summaryData = baseSummary({ status: 'completed' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -224,7 +245,7 @@ describe('GenericSessionPage', () => {
     })
 
     it('disables followup composer for failed sessions with turns', async () => {
-      mocks.summaryData = baseSummary({ status: 'failed' })
+      _summaryData = baseSummary({ status: 'failed' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -236,7 +257,7 @@ describe('GenericSessionPage', () => {
 
   describe('recovery region', () => {
     it('renders ContextHealthBar when usage data is present and turns exist', async () => {
-      mocks.summaryData = baseSummary({
+      _summaryData = baseSummary({
         usage: { contextWindowUsed: 12000, contextWindowSize: 32000, contextUsagePercent: 37.5, healthStatus: 'green' },
       })
       mocks.transcriptTurns = [makeTurn()]
@@ -248,7 +269,7 @@ describe('GenericSessionPage', () => {
     })
 
     it('omits ContextHealthBar when no usage data', async () => {
-      mocks.summaryData = baseSummary({ usage: null })
+      _summaryData = baseSummary({ usage: null })
       renderPage()
       await waitFor(() => {
         expect(screen.queryByTestId('context-health-bar')).not.toBeInTheDocument()
@@ -256,7 +277,7 @@ describe('GenericSessionPage', () => {
     })
 
     it('omits Compact/Reset recovery actions', async () => {
-      mocks.summaryData = baseSummary()
+      _summaryData = baseSummary()
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -265,7 +286,7 @@ describe('GenericSessionPage', () => {
     })
 
     it('renders no sibling sidebar for generic sessions', async () => {
-      mocks.summaryData = baseSummary()
+      _summaryData = baseSummary()
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -276,7 +297,7 @@ describe('GenericSessionPage', () => {
 
   describe('transcript rendering', () => {
     it('passes session transcript to SessionTranscriptLayout', async () => {
-      mocks.summaryData = baseSummary()
+      _summaryData = baseSummary()
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -289,7 +310,7 @@ describe('GenericSessionPage', () => {
     it.each(['active', 'running', 'probing'])(
       'renders the cancel trigger in the header when the generic session is non-terminal (%s)',
       async (status) => {
-        mocks.summaryData = baseSummary({ status })
+        _summaryData = baseSummary({ status })
         mocks.transcriptTurns = [makeTurn()]
         renderPage()
         await waitFor(() => {
@@ -301,7 +322,7 @@ describe('GenericSessionPage', () => {
     it.each(['completed', 'failed', 'cancelled', 'stopped'])(
       'does not render the cancel trigger when the session is terminal (%s)',
       async (status) => {
-        mocks.summaryData = baseSummary({ status })
+        _summaryData = baseSummary({ status })
         mocks.transcriptTurns = [makeTurn()]
         renderPage()
         await waitFor(() => {
@@ -312,7 +333,7 @@ describe('GenericSessionPage', () => {
     )
 
     it('does not render the cancel trigger inside the followup composer (issue-242 composer constraint)', async () => {
-      mocks.summaryData = baseSummary({ status: 'running' })
+      _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -324,7 +345,7 @@ describe('GenericSessionPage', () => {
     })
 
     it('opens a destructive-toned AlertDialog without sending the cancel request', async () => {
-      mocks.summaryData = baseSummary({ status: 'running' })
+      _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -332,7 +353,7 @@ describe('GenericSessionPage', () => {
       })
 
       expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
-      expect(mocks.cancelMutation.mutate).not.toHaveBeenCalled()
+      expect(_cancelHandler).not.toHaveBeenCalled()
 
       fireEvent.click(screen.getByTestId('session-cancel-trigger'))
 
@@ -340,12 +361,11 @@ describe('GenericSessionPage', () => {
       expect(dialog).toBeInTheDocument()
       expect(dialog).toHaveAttribute('data-tone', 'destructive')
 
-      // Mutate must not fire before explicit confirmation
-      expect(mocks.cancelMutation.mutate).not.toHaveBeenCalled()
+      expect(_cancelHandler).not.toHaveBeenCalled()
     })
 
     it('dismissing the dialog sends no cancel request and leaves the session running', async () => {
-      mocks.summaryData = baseSummary({ status: 'running' })
+      _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -360,14 +380,13 @@ describe('GenericSessionPage', () => {
       await waitFor(() => {
         expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
       })
-      expect(mocks.cancelMutation.mutate).not.toHaveBeenCalled()
+      expect(_cancelHandler).not.toHaveBeenCalled()
 
-      // Session is still running — cancel control is still present
       expect(screen.getByTestId('session-cancel-trigger')).toBeInTheDocument()
     })
 
-    it('confirming the dialog calls cancel.mutate() with the owning agent reference', async () => {
-      mocks.summaryData = baseSummary({ status: 'running' })
+    it('confirming the dialog calls the cancel endpoint with the session id', async () => {
+      _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -377,15 +396,13 @@ describe('GenericSessionPage', () => {
       fireEvent.click(screen.getByTestId('session-cancel-trigger'))
       fireEvent.click(screen.getByTestId('session-cancel-alert-confirm'))
 
-      expect(mocks.cancelMutation.mutate).toHaveBeenCalledTimes(1)
-      expect(mocks.cancelMutation.mutate).toHaveBeenCalledWith(
-        { sessionId: 'sess-abc', agentRef: 'agent-1' },
-        expect.objectContaining({ onSettled: expect.any(Function) }),
-      )
+      await vi.waitFor(() => {
+        expect(_cancelHandler).toHaveBeenCalledWith('sess-abc')
+      })
     })
 
     it('closes the confirmation dialog after the cancel mutation settles while the session remains non-terminal', async () => {
-      mocks.summaryData = baseSummary({ status: 'running' })
+      _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -394,11 +411,6 @@ describe('GenericSessionPage', () => {
 
       fireEvent.click(screen.getByTestId('session-cancel-trigger'))
       fireEvent.click(screen.getByTestId('session-cancel-alert-confirm'))
-
-      const mutationOptions = mocks.cancelMutation.mutate.mock.calls[0][1]
-      act(() => {
-        mutationOptions.onSettled()
-      })
 
       await waitFor(() => {
         expect(screen.queryByTestId('session-cancel-alert')).not.toBeInTheDocument()
@@ -407,8 +419,9 @@ describe('GenericSessionPage', () => {
     })
 
     it('AlertDialog confirm button reflects cancel.isPending (dismissing disabled while in flight)', async () => {
-      mocks.cancelMutation = { mutate: vi.fn(), isPending: true }
-      mocks.summaryData = baseSummary({ status: 'running' })
+      _blockCancel = true
+
+      _summaryData = baseSummary({ status: 'running' })
       mocks.transcriptTurns = [makeTurn()]
       renderPage()
       await waitFor(() => {
@@ -416,12 +429,15 @@ describe('GenericSessionPage', () => {
       })
 
       fireEvent.click(screen.getByTestId('session-cancel-trigger'))
+      fireEvent.click(screen.getByTestId('session-cancel-alert-confirm'))
 
-      const confirmButton = screen.getByTestId('session-cancel-alert-confirm') as HTMLButtonElement
-      const cancelButton = screen.getByTestId('session-cancel-alert-cancel') as HTMLButtonElement
-      expect(confirmButton).toBeDisabled()
-      expect(cancelButton).toBeDisabled()
-      expect(confirmButton.textContent).toContain('Working')
+      await waitFor(() => {
+        expect(screen.getByTestId('session-cancel-alert-confirm')).toBeDisabled()
+        expect(screen.getByTestId('session-cancel-alert-cancel')).toBeDisabled()
+        expect(screen.getByTestId('session-cancel-alert-confirm').textContent).toContain('Working')
+      })
+
+      _cancelResolve?.()
     })
   })
 })
