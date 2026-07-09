@@ -1,36 +1,39 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import { SidebarProvider } from '@/shared/ui/components/sidebar'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { Header } from './Header'
 
-const epicMocks = vi.hoisted(() => ({
-  useEpic: vi.fn(),
-}))
+const TEST_PROJECT = {
+  id: 'test-project',
+  name: 'test',
+  createdAt: '2025-01-01T00:00:00.000Z',
+  updatedAt: '2025-01-01T00:00:00.000Z',
+  repositories: [],
+}
 
-vi.mock('../../../entities/agent', () => ({
-  useAgentStatus: () => ({ data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } } }),
-  useAgent: () => ({ data: null, isLoading: false }),
-}))
+const AGENT_STATUS_PATH = `*/api/projects/${TEST_PROJECT.id}/agent/status`
 
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
-  return {
-    ...actual,
-    useEpic: epicMocks.useEpic,
-  }
-})
+useMswServer(
+  http.get(AGENT_STATUS_PATH, () =>
+    HttpResponse.json({
+      success: true,
+      data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } },
+    }),
+  ),
+)
 
 function renderHeader(initialRoute: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider>
+      <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={[initialRoute]}>
           <SidebarProvider>
             <Header onCreateIssue={vi.fn()} />
@@ -43,10 +46,9 @@ function renderHeader(initialRoute: string) {
 
 function renderHeaderWithRoute(initialRoute: string, routePath: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider>
+      <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter initialEntries={[initialRoute]}>
           <SidebarProvider>
             <Routes>
@@ -59,11 +61,15 @@ function renderHeaderWithRoute(initialRoute: string, routePath: string) {
   )
 }
 
-describe('Header', () => {
-  beforeEach(() => {
-    epicMocks.useEpic.mockReturnValue({ data: undefined, isLoading: false })
-  })
+function mockEpic(epic: { id: string; number: number | null; title: string; description: string; priority: string; status: string; createdAt: string; updatedAt: string } | null) {
+  server.use(
+    http.get(`*/api/projects/${TEST_PROJECT.id}/epics/*`, () =>
+      HttpResponse.json({ success: true, data: epic }),
+    ),
+  )
+}
 
+describe('Header', () => {
   afterEach(() => {
     cleanup()
   })
@@ -121,40 +127,27 @@ describe('Header', () => {
     expect(screen.getByTestId('header-new-issue')).toBeInTheDocument()
   })
 
-  it('shows Epic #<number> on epic detail route (first-segment branch)', () => {
-    epicMocks.useEpic.mockReturnValue({
-      data: { id: 'epic-99', number: 7, title: 'Test', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
-      isLoading: false,
-    })
+  it('shows Epic #<number> on epic detail route (first-segment branch)', async () => {
+    mockEpic({ id: 'epic-99', number: 7, title: 'Test', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
     renderHeaderWithRoute('/epics/epic-99', '/epics/:id')
-    expect(screen.getByRole('heading', { level: 1, name: 'Epic #7' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Epic #7' })).toBeInTheDocument()
   })
 
-  it('shows Epic #<number> on epic detail route with project prefix (section branch)', () => {
-    epicMocks.useEpic.mockReturnValue({
-      data: { id: 'epic-42', number: 3, title: 'My Epic', description: '', priority: 'p2', status: 'active', createdAt: '', updatedAt: '' },
-      isLoading: false,
-    })
+  it('shows Epic #<number> on epic detail route with project prefix (section branch)', async () => {
+    mockEpic({ id: 'epic-42', number: 3, title: 'My Epic', description: '', priority: 'p2', status: 'active', createdAt: '', updatedAt: '' })
     renderHeaderWithRoute('/demo/epics/epic-42', '/:projectName/epics/:id')
-    expect(screen.getByRole('heading', { level: 1, name: 'Epic #3' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Epic #3' })).toBeInTheDocument()
   })
 
   it('shows Epic #… while epic number is loading', () => {
-    epicMocks.useEpic.mockReturnValue({
-      data: undefined,
-      isLoading: true,
-    })
     renderHeaderWithRoute('/epics/epic-loading', '/epics/:id')
     expect(screen.getByRole('heading', { level: 1, name: 'Epic #\u2026' })).toBeInTheDocument()
   })
 
-  it('resolves Epic #<number> when path segment is the epic number itself', () => {
-    epicMocks.useEpic.mockReturnValue({
-      data: { id: 'epic-something', number: 12, title: 'By Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
-      isLoading: false,
-    })
+  it('resolves Epic #<number> when path segment is the epic number itself', async () => {
+    mockEpic({ id: 'epic-something', number: 12, title: 'By Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
     renderHeaderWithRoute('/demo/epics/12', '/:projectName/epics/:id')
-    expect(screen.getByRole('heading', { level: 1, name: 'Epic #12' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Epic #12' })).toBeInTheDocument()
   })
 
   it('shows Epics as title on epics route (unchanged)', () => {
@@ -167,56 +160,36 @@ describe('Header', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Issue #42' })).toBeInTheDocument()
   })
 
-  it('shows Epic #<number> on project-prefixed route with production mount (outside <Routes>)', () => {
-    epicMocks.useEpic.mockReturnValue({
-      data: { id: 'epic-99', number: 3, title: 'Production Mount', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
-      isLoading: false,
-    })
+  it('shows Epic #<number> on project-prefixed route with production mount (outside <Routes>)', async () => {
+    mockEpic({ id: 'epic-99', number: 3, title: 'Production Mount', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
     renderHeader('/demo/epics/3')
-    expect(screen.getByRole('heading', { level: 1, name: 'Epic #3' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Epic #3' })).toBeInTheDocument()
   })
 
-  it('shows Epic #<number> on legacy /epics/<id> route with production mount (outside <Routes>)', () => {
-    epicMocks.useEpic.mockReturnValue({
-      data: { id: 'epic-99', number: 7, title: 'Legacy Mount', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
-      isLoading: false,
-    })
+  it('shows Epic #<number> on legacy /epics/<id> route with production mount (outside <Routes>)', async () => {
+    mockEpic({ id: 'epic-99', number: 7, title: 'Legacy Mount', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
     renderHeader('/epics/epic-99')
-    expect(screen.getByRole('heading', { level: 1, name: 'Epic #7' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Epic #7' })).toBeInTheDocument()
   })
 
   it('shows Epic #… while loading on production mount (outside <Routes>)', () => {
-    epicMocks.useEpic.mockReturnValue({
-      data: undefined,
-      isLoading: true,
-    })
     renderHeader('/demo/epics/epic-loading')
     expect(screen.getByRole('heading', { level: 1, name: 'Epic #\u2026' })).toBeInTheDocument()
   })
 
-  it('falls back to a short id prefix when an epic has loaded without a number on production mount', () => {
-    epicMocks.useEpic.mockReturnValue({
-      data: { id: 'epic-fallback-001', number: null, title: 'No Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
-      isLoading: false,
-    })
+  it('falls back to a short id prefix when an epic has loaded without a number on production mount', async () => {
+    mockEpic({ id: 'epic-fallback-001', number: null, title: 'No Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
     renderHeader('/demo/epics/epic-fallback-001')
-    expect(screen.getByRole('heading', { level: 1, name: 'Epic #epic-fal' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Epic #epic-fal' })).toBeInTheDocument()
   })
 
-  it('falls back to a short id prefix when an epic has loaded without a number on legacy route', () => {
-    epicMocks.useEpic.mockReturnValue({
-      data: { id: 'epic-fallback-002', number: null, title: 'No Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
-      isLoading: false,
-    })
+  it('falls back to a short id prefix when an epic has loaded without a number on legacy route', async () => {
+    mockEpic({ id: 'epic-fallback-002', number: null, title: 'No Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' })
     renderHeaderWithRoute('/epics/epic-fallback-002', '/epics/:id')
-    expect(screen.getByRole('heading', { level: 1, name: 'Epic #epic-fal' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Epic #epic-fal' })).toBeInTheDocument()
   })
 
   it('never displays a bare "Epic #" when the epic has loaded with no number and no path segment fallback', () => {
-    epicMocks.useEpic.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-    })
     renderHeader('/epics')
     expect(screen.queryByRole('heading', { level: 1, name: /^Epic #$/ })).not.toBeInTheDocument()
   })

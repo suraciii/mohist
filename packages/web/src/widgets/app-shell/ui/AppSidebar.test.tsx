@@ -1,27 +1,15 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import { SidebarProvider } from '@/shared/ui/components/sidebar'
+import { useMswServer } from '../../../../tests/support/msw'
 import { AppSidebar } from './AppSidebar'
 import type { InboxItem } from '../../../entities/inbox'
-
-vi.mock('../../../entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project')>()
-  return {
-    ...actual,
-    useDeleteProject: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
-  }
-})
-
-vi.mock('../../../entities/agent', () => ({
-  useAgentStatus: () => ({
-    data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } },
-  }),
-}))
 
 const TEST_PROJECT = {
   id: 'test-project',
@@ -30,6 +18,17 @@ const TEST_PROJECT = {
   updatedAt: '2024-01-01T00:00:00.000Z',
   repositories: [],
 }
+
+const AGENT_STATUS_PATH = `*/api/projects/${TEST_PROJECT.id}/agent/status`
+
+useMswServer(
+  http.get(AGENT_STATUS_PATH, () =>
+    HttpResponse.json({
+      success: true,
+      data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } },
+    }),
+  ),
+)
 
 function renderSidebar(initialRoute: string, initialProjectId: string | null = TEST_PROJECT.id) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -64,13 +63,8 @@ function getNavLabelsInOrder(): string[] {
 }
 
 describe('AppSidebar primary navigation', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   afterEach(() => {
     cleanup()
-    window.localStorage.clear()
   })
 
   it('contains Dashboard and Issues entries with Dashboard preceding Issues', () => {
