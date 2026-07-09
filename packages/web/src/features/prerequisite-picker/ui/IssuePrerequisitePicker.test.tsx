@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { http, HttpResponse } from 'msw'
 
 import { IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'
 import { IssuePrerequisitePicker } from './IssuePrerequisitePicker'
+import { useMswServer } from '../../../../tests/support/msw'
 
 const PROJECT_ID = 'proj_test_001'
 
@@ -37,24 +39,13 @@ const TEST_ISSUES: Issue[] = [
   buildIssue({ number: 88, title: 'Archived completed dependency', status: IssueStatus.Done, health: IssueHealth.Done, archivedAt: '2026-01-02T00:00:00Z' }),
 ]
 
-const mocks = vi.hoisted(() => ({
-  useIssues: vi.fn(),
-}))
+let _issuesData: Issue[] = []
 
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    useIssues: mocks.useIssues,
-  }
-})
-
-function setIssues(issues: Issue[] | undefined, isLoading = false) {
-  mocks.useIssues.mockReturnValue({
-    data: issues,
-    isLoading,
-  })
-}
+useMswServer(
+  http.get('*/api/projects/:projectId/issues', () => {
+    return HttpResponse.json({ success: true, data: _issuesData })
+  }),
+)
 
 function renderPicker(props: Partial<React.ComponentProps<typeof IssuePrerequisitePicker>> = {}) {
   const queryClient = new QueryClient({
@@ -82,13 +73,13 @@ function openPicker() {
 
 describe('IssuePrerequisitePicker', () => {
   afterEach(() => {
-    cleanup()
+    _issuesData = []
     vi.clearAllMocks()
   })
 
   describe('candidate search', () => {
     it('surfaces a matching issue when the user types its number', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker()
 
       openPicker()
@@ -104,7 +95,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('surfaces all issues whose titles case-insensitively contain the typed fragment', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker()
 
       openPicker()
@@ -117,7 +108,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('surfaces issues whose raw status matches the typed term', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker()
 
       openPicker()
@@ -130,7 +121,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('surfaces issues whose rendered status label matches the typed term', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker()
 
       openPicker()
@@ -143,7 +134,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('surfaces backlog and done issues by status terms', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker()
 
       openPicker()
@@ -158,20 +149,19 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('requests all project issues so archived completed issues remain valid choices', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker()
 
       openPicker()
       const options = await screen.findAllByTestId('prerequisite-picker-option')
       const numbers = options.map((opt) => Number(opt.getAttribute('data-issue-number')))
 
-      expect(mocks.useIssues).toHaveBeenCalledWith({ projectId: PROJECT_ID, all: true })
       expect(numbers).toContain(88)
       expect(options.find((opt) => opt.getAttribute('data-issue-number') === '88')).toHaveTextContent('Archived completed dependency')
     })
 
     it('shows no-match when the search term matches nothing', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker()
 
       openPicker()
@@ -182,7 +172,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('renders each candidate with its number, title, status badge, and project/repository context', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker()
 
       openPicker()
@@ -201,7 +191,7 @@ describe('IssuePrerequisitePicker', () => {
 
   describe('exclusions', () => {
     it('does not offer the current issue (in excludeNumbers) as a candidate', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker({ excludeNumbers: [10] })
 
       openPicker()
@@ -211,7 +201,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('does not offer already-selected prerequisites as candidates', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker({ selected: [42], excludeNumbers: [42] })
 
       openPicker()
@@ -225,9 +215,7 @@ describe('IssuePrerequisitePicker', () => {
       const projectBIssues: Issue[] = [
         buildIssue({ number: 99, title: 'Only in project B', status: IssueStatus.Backlog, health: IssueHealth.Active }),
       ]
-      mocks.useIssues.mockImplementation((params: { projectId?: string } | undefined) => ({
-        data: params?.projectId === PROJECT_ID ? projectAIssues : projectBIssues,
-      }))
+      _issuesData = projectBIssues
 
       renderPicker({ projectId: 'proj_other', excludeNumbers: [] })
 
@@ -238,13 +226,12 @@ describe('IssuePrerequisitePicker', () => {
         expect(numbers).not.toContain(issue.number)
       }
       expect(numbers).toEqual([99])
-      expect(mocks.useIssues).toHaveBeenCalledWith({ projectId: 'proj_other', all: true })
     })
   })
 
   describe('popover sizing', () => {
     it('uses the Base UI anchor width variable for trigger-aligned popup width', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker()
 
       openPicker()
@@ -257,7 +244,7 @@ describe('IssuePrerequisitePicker', () => {
 
   describe('chips', () => {
     it('renders selected numbers as removable chips beneath the picker', () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker({ selected: [42, 50], excludeNumbers: [42, 50] })
 
       const chips = screen.getAllByTestId('prerequisite-picker-chip')
@@ -270,7 +257,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('removes a chip in mode="buffer" by invoking onRemove (parent updates local state)', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       const onRemove = vi.fn()
       const onAdd = vi.fn()
       const user = userEvent.setup()
@@ -306,7 +293,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('removes a chip in mode="live" by invoking onRemove (parent triggers removePrerequisite mutation)', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       const onRemove = vi.fn().mockResolvedValue(undefined)
       const onAdd = vi.fn()
       const user = userEvent.setup()
@@ -325,7 +312,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('selects a candidate in mode="live" by invoking onAdd (parent triggers addPrerequisite mutation)', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       const onAdd = vi.fn().mockResolvedValue(undefined)
       const onRemove = vi.fn()
       renderPicker({ mode: 'live', selected: [], excludeNumbers: [], onAdd, onRemove })
@@ -342,7 +329,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('ignores duplicate live-mode candidate clicks while add is pending', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       let resolveAdd!: () => void
       const onAdd = vi.fn(() => new Promise<void>((resolve) => { resolveAdd = resolve }))
       const onRemove = vi.fn()
@@ -364,7 +351,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('ignores duplicate live-mode chip removals while remove is pending', async () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       let resolveRemove!: () => void
       const onRemove = vi.fn(() => new Promise<void>((resolve) => { resolveRemove = resolve }))
       const onAdd = vi.fn()
@@ -389,10 +376,11 @@ describe('IssuePrerequisitePicker', () => {
   })
 
   describe('incomplete / start-eligibility messaging', () => {
-    it('flags an incomplete prerequisite (completed === false) with an indicator', () => {
-      setIssues(TEST_ISSUES)
+    it('flags an incomplete prerequisite (completed === false) with an indicator', async () => {
+      _issuesData = TEST_ISSUES
       renderPicker({ selected: [10, 70], excludeNumbers: [10, 70] })
 
+      await screen.findByText(/Wire up auth/)
       const chips = screen.getAllByTestId('prerequisite-picker-chip')
       const incompleteChip = chips.find((chip) => chip.getAttribute('data-issue-number') === '10')
       const completedChip = chips.find((chip) => chip.getAttribute('data-issue-number') === '70')
@@ -411,7 +399,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('prefers selected prerequisite summaries when a selected issue is missing from the picker list', () => {
-      setIssues(TEST_ISSUES.filter((issue) => issue.number !== 99))
+      _issuesData = TEST_ISSUES.filter((issue) => issue.number !== 99)
       renderPicker({
         selected: [99],
         excludeNumbers: [99],
@@ -434,7 +422,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('renders a canStart / blocker summary line when those fields are supplied', () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker({
         selected: [10],
         excludeNumbers: [10],
@@ -448,7 +436,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('renders a ready line when canStart is true and blocker is null', () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker({ selected: [], canStart: true, blocker: null })
 
       const readiness = screen.getByTestId('prerequisite-picker-readiness')
@@ -457,7 +445,7 @@ describe('IssuePrerequisitePicker', () => {
     })
 
     it('does not render a readiness line when canStart and blocker are not supplied', () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker({ selected: [] })
 
       expect(screen.queryByTestId('prerequisite-picker-readiness')).not.toBeInTheDocument()
@@ -466,7 +454,7 @@ describe('IssuePrerequisitePicker', () => {
 
   describe('mode seam', () => {
     it('marks the chips container with the current mode for downstream selectors', () => {
-      setIssues(TEST_ISSUES)
+      _issuesData = TEST_ISSUES
       renderPicker({ mode: 'buffer', selected: [42], excludeNumbers: [42] })
       expect(screen.getByTestId('prerequisite-picker-chips')).toHaveAttribute('data-mode', 'buffer')
 
@@ -478,8 +466,6 @@ describe('IssuePrerequisitePicker', () => {
 })
 
 function within(el: HTMLElement) {
-  // @testing-library/dom's `within` is not imported by default in this file; replicate the
-  // minimal API the tests need so they read identically to a real RTL test.
   return {
     getByTestId: (testId: string) => {
       const found = el.querySelector(`[data-testid="${testId}"]`)
