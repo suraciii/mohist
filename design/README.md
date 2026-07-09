@@ -1,8 +1,3 @@
----
-purpose: "Design 文档索引：按全局原则、Workflow 核心域、支撑主题组织。"
-style: ["短索引，只说明入口。"]
----
-
 # Design
 
 `design/` 面向开发者和 agent，记录架构边界、领域划分、workflow 机制和跨模块设计约定。面向使用者的文档在 [`../docs/`](../docs/)。

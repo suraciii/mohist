@@ -1,8 +1,3 @@
----
-purpose: "Action 设计：action 接口、input/output schema、失败恢复编排边界。"
-style: ["极简，只给目标态。"]
----
-
 # Action Design
 
 Action 是 workflow task 的执行接口。Workflow profile 通过 `uses` 选择 action，通过 `with` 传入 input；runner 执行 action 后上报 result 和 output。

@@ -1,8 +1,3 @@
----
-purpose: "Mohist 内置 workflow 索引。"
-style: ["短索引，只说明入口。"]
----
-
 # Built-in Workflows
 
 Mohist 内置 workflow：

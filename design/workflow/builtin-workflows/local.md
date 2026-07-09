@@ -1,8 +1,3 @@
----
-purpose: "mohist/local：本地 squash 后直推 base branch。"
-style: ["极简，只给目标态。"]
----
-
 # mohist/local
 
 目标：最短路径把已验证改动落到 base branch。

@@ -1,8 +1,3 @@
----
-purpose: "How task.with template expressions (${{ }}) are expanded at dispatch."
-style: "Short, diagram-driven."
----
-
 # Workflow Task Dispatch
 
 ## task.with 展开

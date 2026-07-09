@@ -1,13 +1,3 @@
----
-purpose: "Cross-aggregate interactions between Issue, WorkflowRun, Runner, and Session."
-style:
-  - "ASCII text diagrams."
-  - "Synchronous command: solid arrow (------>)."
-  - "Asynchronous event: floating `[EventName]` label emitted by an aggregate."
-  - "When an event triggers a command, the command arrow branches from the event label."
-  - "Commands named without the Async suffix or parameter list."
----
-
 # Aggregate Coordination
 
 ## Conventions
