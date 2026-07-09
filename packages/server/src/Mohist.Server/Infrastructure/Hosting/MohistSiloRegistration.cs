@@ -51,6 +51,7 @@ public static class MohistSiloRegistration
         // Handlers are registered there too, since grains need them.
         silo.Services.AddCloudEventBus();
         silo.Services.AddSingleton<IEventStore, EventStore>();
+        silo.Services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>();
         silo.Services.AddScoped<InboxStore>();
         silo.Services.AddScoped<IStateStore<DomainIssue>>(sp => sp.GetRequiredService<IIssueStore>());
         silo.Services.AddScoped<IIssueStore, IssueStore>();
