@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
+import { useMswServer } from '../../../../tests/support/msw'
 
 /**
  * Tests for the `LinkedIssueRow` Remove confirmation flow rendered inside
@@ -10,43 +12,27 @@ import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
  * assertions to the `linked-issue-remove-*` testids.
  */
 
-// --- per-file hoisted mocks (Vitest hoists vi.mock per-file; cannot be shared) ---
-const mocks = vi.hoisted(() => ({
-  useEpic: vi.fn(),
-  useIssues: vi.fn(),
-  useAddEpicIssue: vi.fn(),
-  useRemoveEpicIssue: vi.fn(),
-  useStartIssue: vi.fn(),
-  useStartEpic: vi.fn(),
-  useMarkEpicDone: vi.fn(),
-  useCloseEpic: vi.fn(),
-  useUpdateEpic: vi.fn(),
-  usePauseEpic: vi.fn(),
-  useResumeEpic: vi.fn(),
-}))
+let _epicData: unknown = null
+let _issuesData: unknown[] = []
+const _removeIssueHandler = vi.fn()
+let _blockRemove = false
 
-
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  useIssues: mocks.useIssues,
-}))
-
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
-  return {
-    ...actual,
-    useEpic: mocks.useEpic,
-    useAddEpicIssue: mocks.useAddEpicIssue,
-    useRemoveEpicIssue: mocks.useRemoveEpicIssue,
-    useStartIssue: mocks.useStartIssue,
-    useStartEpic: mocks.useStartEpic,
-    useMarkEpicDone: mocks.useMarkEpicDone,
-    useCloseEpic: mocks.useCloseEpic,
-    useUpdateEpic: mocks.useUpdateEpic,
-    usePauseEpic: mocks.usePauseEpic,
-    useResumeEpic: mocks.useResumeEpic,
-  }
-})
+useMswServer(
+  http.get('*/api/projects/:projectId/epics/:epicId', () =>
+    HttpResponse.json({ success: true, data: _epicData }),
+  ),
+  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/projects/:projectId/issues', () =>
+    HttpResponse.json({ success: true, data: _issuesData }),
+  ),
+  http.delete('*/api/projects/:projectId/epics/:epicId/issues/:issueId', ({ params }) => {
+    _removeIssueHandler(params.issueId)
+    if (_blockRemove) return new Promise(() => {})
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+)
 
 function makeEpic(overrides: Record<string, unknown> = {}) {
   return {
@@ -73,45 +59,26 @@ function makeEpic(overrides: Record<string, unknown> = {}) {
 }
 
 describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () => {
-  const addMutate = vi.fn()
-  const removeMutate = vi.fn()
-  const startMutate = vi.fn()
-  const doneMutate = vi.fn()
-  const closeMutate = vi.fn()
-  const updateMutate = vi.fn()
-  const pauseMutate = vi.fn()
-  const resumeMutate = vi.fn()
-  const startEpicMutate = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useIssues.mockReturnValue({ data: issues })
-    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
-    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
-    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
-    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
-    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
-    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
-    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
-    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+    _epicData = makeEpic()
+    _issuesData = issues
+    _blockRemove = false
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('places the Remove button in the actions row, not the primary reading row', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('places the Remove button in the actions row, not the primary reading row', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findByTestId('linked-issue-row')
 
     const readingRow = screen.getByTestId('linked-issue-reading-row')
     const actionsRow = screen.getByTestId('linked-issue-actions-row')
@@ -121,52 +88,46 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () =>
     expect(actionsRow.contains(removeButton)).toBe(true)
   })
 
-  it('renders the Remove button with the ghost variant for a secondary de-emphasized affordance', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('renders the Remove button with the ghost variant for a secondary de-emphasized affordance', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findByTestId('linked-issue-remove')
 
     const removeButton = screen.getByTestId('linked-issue-remove')
     expect(removeButton.className).toContain('hover:bg-muted')
     expect(removeButton.className).not.toContain('border-border')
   })
 
-  it('a single click on Remove does NOT call removeEpicIssue.mutate', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('a single click on Remove does NOT call removeEpicIssue.mutate', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findByTestId('linked-issue-remove')
 
     fireEvent.click(screen.getByTestId('linked-issue-remove'))
 
-    expect(removeMutate).not.toHaveBeenCalled()
+    expect(_removeIssueHandler).not.toHaveBeenCalled()
   })
 
-  it('clicking Remove opens a confirmation Dialog that shows the issue number and an explanation', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-          linkedIssue({ id: 'issue-7', number: 7, title: 'Other issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('clicking Remove opens a confirmation Dialog that shows the issue number and an explanation', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        linkedIssue({ id: 'issue-7', number: 7, title: 'Other issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findAllByTestId('linked-issue-remove')
 
     const removeButtons = screen.getAllByTestId('linked-issue-remove')
     fireEvent.click(removeButtons[0])
@@ -177,72 +138,64 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () =>
     expect(dialog.textContent).toMatch(/workflow state/i)
   })
 
-  it('does not render the remove confirm dialog in the DOM before Remove is clicked', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('does not render the remove confirm dialog in the DOM before Remove is clicked', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findByTestId('linked-issue-row')
 
     expect(screen.queryByTestId('linked-issue-remove-confirm-dialog')).toBeNull()
     expect(screen.queryByTestId('linked-issue-remove-confirm')).toBeNull()
     expect(screen.queryByTestId('linked-issue-remove-cancel')).toBeNull()
   })
 
-  it('clicking Cancel keeps the link intact and closes the dialog without calling mutate', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('clicking Cancel keeps the link intact and closes the dialog without calling mutate', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findByTestId('linked-issue-remove')
 
     fireEvent.click(screen.getByTestId('linked-issue-remove'))
     fireEvent.click(screen.getByTestId('linked-issue-remove-cancel'))
 
-    expect(removeMutate).not.toHaveBeenCalled()
+    expect(_removeIssueHandler).not.toHaveBeenCalled()
     expect(screen.queryByTestId('linked-issue-remove-confirm-dialog')).toBeNull()
   })
 
-  it('clicking Confirm (destructive) calls removeEpicIssue.mutate with the correct epicId and issueId', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('clicking Confirm (destructive) calls removeEpicIssue.mutate with the correct epicId and issueId', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findByTestId('linked-issue-remove')
 
     fireEvent.click(screen.getByTestId('linked-issue-remove'))
     fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
 
-    expect(removeMutate).toHaveBeenCalledTimes(1)
-    expect(removeMutate).toHaveBeenCalledWith({ epicId: 'epic-12345678', issueId: 'issue-3' })
+    await vi.waitFor(() => expect(_removeIssueHandler).toHaveBeenCalledWith('issue-3'))
+    expect(_removeIssueHandler).toHaveBeenCalledTimes(1)
   })
 
-  it('the Confirm button uses the destructive variant', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('the Confirm button uses the destructive variant', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findByTestId('linked-issue-remove')
 
     fireEvent.click(screen.getByTestId('linked-issue-remove'))
 
@@ -250,17 +203,15 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () =>
     expect(confirm.className).toContain('text-destructive')
   })
 
-  it('the Cancel button uses the outline variant', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('the Cancel button uses the outline variant', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findByTestId('linked-issue-remove')
 
     fireEvent.click(screen.getByTestId('linked-issue-remove'))
 
@@ -268,18 +219,15 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () =>
     expect(cancel.className).toContain('border-border')
   })
 
-  it('Cancel and Confirm are not disabled while removeEpicIssue is not pending', () => {
-    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('Cancel and Confirm are not disabled while removeEpicIssue is not pending', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findByTestId('linked-issue-remove')
 
     fireEvent.click(screen.getByTestId('linked-issue-remove'))
 
@@ -289,39 +237,42 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () =>
     expect(cancel).not.toBeDisabled()
   })
 
-  it('gates the Remove affordance on removeEpicIssue.isPending so the dialog cannot be opened mid-mutation', () => {
-    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: true, isError: false })
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('gates the Remove affordance on removeEpicIssue.isPending so the dialog cannot be opened mid-mutation', async () => {
+    _blockRemove = true
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findByTestId('linked-issue-remove')
 
+    // Trigger remove to enter pending state
+    fireEvent.click(screen.getByTestId('linked-issue-remove'))
+    fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
+
+    await vi.waitFor(() => expect(_removeIssueHandler).toHaveBeenCalledTimes(1))
+
+    // Now removeEpicIssue.isPending is true, button should be disabled
     const removeButton = screen.getByTestId('linked-issue-remove')
     expect(removeButton).toBeDisabled()
 
     fireEvent.click(removeButton)
     expect(screen.queryByTestId('linked-issue-remove-confirm-dialog')).toBeNull()
-    expect(removeMutate).not.toHaveBeenCalled()
+    expect(_removeIssueHandler).toHaveBeenCalledTimes(1)
   })
 
-  it('each row owns its own remove-confirm open state — clicking one row does not open another row dialog', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpic({
-        linkedIssues: [
-          linkedIssue({ id: 'issue-3', number: 3, title: 'First issue' }),
-          linkedIssue({ id: 'issue-7', number: 7, title: 'Second issue' }),
-        ],
-      }),
-      isLoading: false,
+  it('each row owns its own remove-confirm open state — clicking one row does not open another row dialog', async () => {
+    _epicData = makeEpic({
+      linkedIssues: [
+        linkedIssue({ id: 'issue-3', number: 3, title: 'First issue' }),
+        linkedIssue({ id: 'issue-7', number: 7, title: 'Second issue' }),
+      ],
     })
 
     renderPage()
+    await screen.findAllByTestId('linked-issue-remove')
 
     const removeButtons = screen.getAllByTestId('linked-issue-remove')
     fireEvent.click(removeButtons[0])
