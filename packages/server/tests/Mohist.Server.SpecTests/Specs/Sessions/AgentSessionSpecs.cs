@@ -23,7 +23,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
-[Collection("MohistIntegration")]
+[Collection("MohistIntegration2")]
 public class AgentSessionSpecs
 {
     private readonly HttpClient _client;

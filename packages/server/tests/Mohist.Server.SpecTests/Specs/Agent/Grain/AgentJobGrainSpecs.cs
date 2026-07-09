@@ -63,7 +63,7 @@ public class AgentJobGrainSpecs
         int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
     {
         // Every agent-job spec shares the in-memory backlog directory and
-        // global runner registry with the rest of the [Collection("WorkflowGrain")]
+        // global runner registry with the rest of the [Collection("RunnerGrain")]
         // cluster. Without a reset here, a stale runner from a prior spec
         // assigns this job before the new runner can, which makes the
         // assertions on snapshot.RunnerId non-deterministic. Clear both
@@ -632,7 +632,7 @@ public class AgentJobGrainSpecs
     }
 }
 
-[Collection("WorkflowGrain")]
+[Collection("RunnerGrain")]
 public class AgentJobOptionsBindingSpecs
 {
     private readonly WorkflowGrainFixture _fixture;

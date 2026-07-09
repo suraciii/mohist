@@ -5,6 +5,7 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 
+[Collection("RunnerGrain")]
 public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
 {
     public RunnerBuildIdentitySpecs(WorkflowGrainFixture fixture) : base(fixture) { }

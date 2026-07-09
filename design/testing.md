@@ -59,6 +59,16 @@ Any order, any parallelism, 1000 reruns = same result.
 
 Extract shared setup. One product ability = one test file. Migration splits: delete old file once equivalent coverage exists.
 
+## Spec parallelism (server)
+
+xUnit collection = scheduling unit; classes inside a collection run serially, so wall time = the longest class chain.
+
+- Parallel by default. `DisableParallelization` only for true process-global state (today only OtelTracing: shared `Microsoft.AspNetCore` ActivitySource). Cluster-scoped state (`RunnerRegistryKeys.Global`, `ForceActivationCollection`, fixture `FakeTimeProvider`) is per-fixture, never a reason to serialize.
+- Ports: WebApplicationFactory fixtures must allocate via TestClusterPortAllocator. InProcessTestCluster is in-memory transport — no ports, safe anywhere.
+- Sharding: big collections split into numbered partitions (`Name` / `Name2` / …, same fixture type, same semantics). A chain longer than ~10 classes gets split.
+- Scheduling: CostDescendingCollectionOrderer runs named (fixture-backed) collections first; `xunit.runner.json` sets `maxParallelThreads: 8` (wait-heavy load, oversubscribe cores).
+- Schema: tests never run `Migrate()` / `EnsureCreated()` from empty — clone via `MigratedSqliteTemplate.CopyTo` / `CopyTo(target)` / `CopyModelSchemaTo`. Sole exception: DatabaseInitializationSpecs (its subject is the chain itself).
+
 ## Guards (automated)
 
 Existing:

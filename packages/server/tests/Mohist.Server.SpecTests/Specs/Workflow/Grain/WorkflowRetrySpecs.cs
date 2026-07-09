@@ -11,6 +11,7 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
+[Collection("WorkflowGrain3")]
 public class WorkflowRetrySpecs : WorkflowGrainSpecs
 {
     public WorkflowRetrySpecs(WorkflowGrainFixture fixture) : base(fixture) { }

@@ -7,6 +7,7 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
+[Collection("WorkflowGrain2")]
 public class PausingWorkSpecs : WorkflowGrainSpecs
 {
     public PausingWorkSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

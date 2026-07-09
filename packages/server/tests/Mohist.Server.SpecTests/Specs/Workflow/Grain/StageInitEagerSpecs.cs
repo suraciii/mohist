@@ -21,6 +21,7 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 /// runtime guarantee behind design D3 (stage-init eager, no
 /// <c>WorkflowWork.StageInit</c> variant surfaced).
 /// </summary>
+[Collection("WorkflowGrain2")]
 public class StageInitEagerSpecs : WorkflowGrainSpecs
 {
     public StageInitEagerSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

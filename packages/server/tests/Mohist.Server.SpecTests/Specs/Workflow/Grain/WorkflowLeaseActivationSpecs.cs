@@ -7,6 +7,7 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
+[Collection("WorkflowGrain3")]
 public class WorkflowLeaseActivationSpecs : WorkflowGrainSpecs
 {
     public WorkflowLeaseActivationSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

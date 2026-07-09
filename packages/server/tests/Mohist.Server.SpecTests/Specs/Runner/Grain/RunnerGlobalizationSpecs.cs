@@ -16,6 +16,7 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 /// project-scoped registry path is removed entirely; every consumer goes
 /// through the global path.
 /// </summary>
+[Collection("RunnerGrain")]
 public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
 {
     public RunnerGlobalizationSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

@@ -12,7 +12,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 
-[Collection("WorkflowGrain")]
+[Collection("RunnerGrain")]
 public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainSpecs
 {
     public DispatchServiceReconciliationSpecs(Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainFixture fixture) : base(fixture) { }

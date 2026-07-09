@@ -11,21 +11,36 @@ namespace Mohist.Server.SpecTests.Support;
 /// files declare only their membership with
 /// <c>[Collection("Name")]</c>; the corresponding definition is here.
 /// </summary>
-[CollectionDefinition("MohistIntegration", DisableParallelization = true)]
-public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
-
 // Parallel integration collections. Each shares one MohistIntegrationFixture
 // (one silo + one web host) whose silo/gateway ports are allocated via
 // TestClusterPortAllocator, so the collections run concurrently without
 // colliding on the well-known 11111 / 30000 ports. Within a collection the
 // classes still run serially (xUnit semantics), so max parallelism equals the
-// number of these collections. Classes that mutate process-global state
+// number of these collections. Cluster-scoped state that looks global
 // (RunnerRegistryKeys.Global, IManagementGrain.ForceActivationCollection,
-// cross-class FakeTimeProvider.Advance) stay in the serial MohistIntegration
-// collection above. See design/testing.md "并行与端口预算".
+// cross-class FakeTimeProvider.Advance) lives inside each collection's own
+// cluster/fixture, so it never crosses collection boundaries and does not
+// require DisableParallelization. See design/testing.md "Spec parallelism".
+
+// Numbered variants of a collection are load-balancing partitions: same
+// fixture type, same semantics. xUnit runs classes inside one collection
+// serially, so a partition's size bounds how long its serial class chain
+// can get; splitting keeps any single chain from dominating the run's tail.
+
+[CollectionDefinition("MohistIntegration")]
+public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("MohistIntegration2")]
+public class MohistIntegration2Collection : ICollectionFixture<MohistIntegrationFixture>;
 
 [CollectionDefinition("IntegrationIssue")]
 public class IntegrationIssueCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("IntegrationIssue2")]
+public class IntegrationIssue2Collection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("IntegrationIssue3")]
+public class IntegrationIssue3Collection : ICollectionFixture<MohistIntegrationFixture>;
 
 [CollectionDefinition("IntegrationApi")]
 public class IntegrationApiCollection : ICollectionFixture<MohistIntegrationFixture>;
@@ -52,25 +67,29 @@ public class IntegrationTelemetryCollection : ICollectionFixture<Specs.Telemetry
 [CollectionDefinition("MohistDb")]
 public class MohistDbCollection : ICollectionFixture<MohistDbFixture>;
 
-[CollectionDefinition("WorkflowGrain", DisableParallelization = true)]
+// Grain-fixture collections host an InProcessTestCluster, which uses
+// in-memory transport (InProcessMembershipTable / InMemoryTransport) —
+// no TCP ports — so they can run in parallel with everything else.
+
+[CollectionDefinition("WorkflowGrain")]
 public class WorkflowGrainCollection : ICollectionFixture<WorkflowGrainFixture>;
 
-[CollectionDefinition("AgentJobGrain", DisableParallelization = true)]
+[CollectionDefinition("WorkflowGrain2")]
+public class WorkflowGrain2Collection : ICollectionFixture<WorkflowGrainFixture>;
+
+[CollectionDefinition("WorkflowGrain3")]
+public class WorkflowGrain3Collection : ICollectionFixture<WorkflowGrainFixture>;
+
+[CollectionDefinition("RunnerGrain")]
+public class RunnerGrainCollection : ICollectionFixture<WorkflowGrainFixture>;
+
+[CollectionDefinition("AgentJobGrain")]
 public class AgentJobGrainCollection : ICollectionFixture<AgentJobGrainFixture>;
 
-[CollectionDefinition("Backlog", DisableParallelization = true)]
+[CollectionDefinition("Backlog")]
 public class BacklogCollection : ICollectionFixture<BacklogFixture>;
 
-[CollectionDefinition("WorkflowEvents", DisableParallelization = true)]
-public class WorkflowEventsCollection;
-
-[CollectionDefinition("SkillsCli", DisableParallelization = true)]
-public sealed class SkillsCliCollection;
-
-[CollectionDefinition("WorkflowCli", DisableParallelization = true)]
-public sealed class WorkflowCliCollection;
-
-[CollectionDefinition("EventPublishing", DisableParallelization = true)]
+[CollectionDefinition("EventPublishing")]
 public class EventPublishingCollection : ICollectionFixture<EventPublishingIntegrationFixture>;
 
 /// <summary>

@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 
-[Collection("WorkflowGrain")]
+[Collection("RunnerGrain")]
 public class RunnerGrainTimeProviderSpecs : WorkflowGrainSpecs
 {
     public RunnerGrainTimeProviderSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

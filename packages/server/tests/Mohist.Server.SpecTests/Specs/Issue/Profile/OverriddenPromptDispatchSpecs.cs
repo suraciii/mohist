@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 
-[Collection("IntegrationIssue")]
+[Collection("IntegrationIssue3")]
 public class OverriddenPromptDispatchSpecs : IAsyncLifetime
 {
     private const string OverrideProposalBody = "# Overridden proposal body for project A\nUse ${{ openspecChangeDir }}/proposal.md";

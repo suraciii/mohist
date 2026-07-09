@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
+[Collection("WorkflowGrain3")]
 public class StatusSpecs : WorkflowGrainSpecs
 {
     public StatusSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
