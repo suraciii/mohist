@@ -3,12 +3,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { createElement, type ReactNode } from 'react'
+import { http, HttpResponse } from 'msw'
 import { dispatchAgentEvent } from '../../../entities/agent'
 import { deriveToolCallTitle, reconstructRoundsFromEvents, useSessionTimeline } from './useSessionTimeline'
+import { useMswServer } from '../../../../tests/support/msw'
 
-vi.mock('../../../entities/agent/api/client', () => ({
-  getAgentStatus: vi.fn().mockResolvedValue({ running: true, issueNumber: 123 }),
-}))
+useMswServer(
+  http.get('*/agent/status', () =>
+    HttpResponse.json({ success: true, data: { running: true, issueNumber: 123 } }),
+  ),
+)
 
 const queryClients: QueryClient[] = []
 
