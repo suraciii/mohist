@@ -3,18 +3,13 @@ import '@testing-library/jest-dom'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, cleanup, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import React from 'react'
 import type { Project } from '../../../entities/project'
 import { ProjectProvider } from '../../../entities/project'
 import type { RunnerStatusRow, RunnerStatusSummary } from '../../../entities/runner/model/types'
 import { RunnerSummary } from './RunnerSummary'
 import { RunnerList, RunnerListCard } from './RunnerList'
-
-vi.mock('../../../entities/runner', () => ({
-  useRunners: vi.fn(),
-}))
-
-const { useRunners } = await import('../../../entities/runner')
 
 const TEST_PROJECT: Project = {
   id: 'proj-1',
@@ -80,10 +75,6 @@ function renderInProjectRoutes(ui: React.ReactNode) {
 
 beforeEach(() => {
   cleanup()
-  ;(useRunners as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: [],
-    isLoading: false,
-  })
 })
 
 afterEach(() => {
@@ -261,7 +252,13 @@ describe('RunnerList UI', () => {
     })
 
     it('does not render a misleading settings manage action on the card', () => {
-      renderInRouter(<RunnerListCard />)
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter>
+            <RunnerListCard />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
 
       expect(screen.getByText('Runners')).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Manage' })).not.toBeInTheDocument()
