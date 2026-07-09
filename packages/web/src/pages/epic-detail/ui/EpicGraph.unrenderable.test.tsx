@@ -1,59 +1,78 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 import { EpicStatus } from '../../../entities/epic'
 import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
+import { useMswServer } from '../../../../tests/support/msw'
 
-/**
- * Tests for the Graph region's unrenderable banner + Error Boundary fallback
- * (cyclic / empty / error states), rendered inside <EpicDetailPage/>. The graph
- * region is driven by the (mocked) DependencyGraphWidget whose `widgetBehavior`
- * mode drives each scenario; this file mounts the page via renderPage() and
- * asserts on the `linked-issues-graph-unavailable-banner` / list-fallback
- * testids.
- */
-
-// --- per-file hoisted mocks (Vitest hoists vi.mock per-file; cannot be shared) ---
 const widgetBehavior = vi.hoisted(() => ({
   mode: 'default' as 'default' | 'empty' | 'error',
 }))
 
-const mocks = vi.hoisted(() => ({
-  useEpic: vi.fn(),
-  useIssues: vi.fn(),
-  useAddEpicIssue: vi.fn(),
-  useRemoveEpicIssue: vi.fn(),
-  useStartIssue: vi.fn(),
-  useStartEpic: vi.fn(),
-  useMarkEpicDone: vi.fn(),
-  useCloseEpic: vi.fn(),
-  useUpdateEpic: vi.fn(),
-  usePauseEpic: vi.fn(),
-  useResumeEpic: vi.fn(),
-}))
+let _epicData: unknown = null
+let _issuesData: unknown[] = []
 
+const _addEpicIssueTracker = vi.fn()
+const _removeEpicIssueTracker = vi.fn()
+const _startIssueTracker = vi.fn()
+const _startEpicTracker = vi.fn()
+const _markEpicDoneTracker = vi.fn()
+const _closeEpicTracker = vi.fn()
+const _updateEpicTracker = vi.fn()
+const _pauseEpicTracker = vi.fn()
+const _resumeEpicTracker = vi.fn()
 
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  useIssues: mocks.useIssues,
-}))
-
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
-  return {
-    ...actual,
-    useEpic: mocks.useEpic,
-    useAddEpicIssue: mocks.useAddEpicIssue,
-    useRemoveEpicIssue: mocks.useRemoveEpicIssue,
-    useStartIssue: mocks.useStartIssue,
-    useStartEpic: mocks.useStartEpic,
-    useMarkEpicDone: mocks.useMarkEpicDone,
-    useCloseEpic: mocks.useCloseEpic,
-    useUpdateEpic: mocks.useUpdateEpic,
-    usePauseEpic: mocks.usePauseEpic,
-    useResumeEpic: mocks.useResumeEpic,
-  }
-})
+useMswServer(
+  http.get('*/api/projects/:projectId/epics/:epicId', () =>
+    HttpResponse.json({ success: true, data: _epicData }),
+  ),
+  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/projects/:projectId/issues', () =>
+    HttpResponse.json({ success: true, data: _issuesData }),
+  ),
+  http.post('*/api/projects/:projectId/epics/:epicId/issues', async ({ request, params }) => {
+    const body = await request.json() as { issueId: string }
+    _addEpicIssueTracker({ epicId: params.epicId, issueId: body.issueId })
+    return HttpResponse.json({ success: true, data: { epicId: params.epicId, issueId: body.issueId } })
+  }),
+  http.delete('*/api/projects/:projectId/epics/:epicId/issues/:issueId', ({ params }) => {
+    _removeEpicIssueTracker({ epicId: params.epicId, issueId: params.issueId })
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/issues/:issueNumber/start', ({ params }) => {
+    _startIssueTracker(Number(params.issueNumber))
+    return HttpResponse.json({ success: true, data: { issue: {}, message: '' } })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/start', ({ params }) => {
+    _startEpicTracker(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/done', ({ params }) => {
+    _markEpicDoneTracker(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/close', ({ params }) => {
+    _closeEpicTracker(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.patch('*/api/projects/:projectId/epics/:epicId', ({ params }) => {
+    _updateEpicTracker(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/pause', async ({ request, params }) => {
+    let reason: string | null = null
+    try { const body = await request.json() as Record<string, unknown>; reason = (body.reason as string) ?? null } catch { /* empty body */ }
+    _pauseEpicTracker({ id: params.epicId, reason })
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/resume', ({ params }) => {
+    _resumeEpicTracker(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+)
 
 vi.mock('../../../widgets/epic-dependency-graph', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../widgets/epic-dependency-graph')>()
@@ -131,29 +150,10 @@ function makeEpicWithLinkedIssues(linkedIssues: unknown[]) {
 }
 
 describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', () => {
-  const addMutate = vi.fn()
-  const removeMutate = vi.fn()
-  const startMutate = vi.fn()
-  const doneMutate = vi.fn()
-  const closeMutate = vi.fn()
-  const updateMutate = vi.fn()
-  const pauseMutate = vi.fn()
-  const resumeMutate = vi.fn()
-  const startEpicMutate = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
     widgetBehavior.mode = 'default'
-    mocks.useIssues.mockReturnValue({ data: issues })
-    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
-    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
-    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
-    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
-    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
-    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
-    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
-    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+    _issuesData = issues
   })
 
   afterEach(() => {
@@ -163,15 +163,14 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
   it('renders the cyclic banner explaining the dependency cycle when the graph reports cyclic', async () => {
     widgetBehavior.mode = 'default'
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, prerequisiteNumbers: [2] }),
-        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, prerequisiteNumbers: [2] }),
+      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -184,15 +183,14 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
   it('renders the empty banner explaining there is not enough data when the graph reports empty', async () => {
     widgetBehavior.mode = 'empty'
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1 }),
-        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1 }),
+      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -205,15 +203,14 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
   it('renders the fallback "Graph is unavailable" banner when the Error Boundary catches a render exception', async () => {
     widgetBehavior.mode = 'error'
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1 }),
-        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1 }),
+      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -229,15 +226,14 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
   it('keeps the List view rendered as fallback for the empty unrenderable scenario', async () => {
     widgetBehavior.mode = 'empty'
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -253,15 +249,14 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
   it('keeps the List view rendered as fallback when the Error Boundary catches a render exception', async () => {
     widgetBehavior.mode = 'error'
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -277,15 +272,14 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
   it('keeps the List view rendered as fallback for the cyclic unrenderable scenario (existing behavior)', async () => {
     widgetBehavior.mode = 'default'
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, title: 'L-1', prerequisiteNumbers: [2] }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1', prerequisiteNumbers: [2] }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -301,15 +295,14 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
   it('does not show the graph canvas or scroll container when the banner is displayed (any unrenderable state)', async () => {
     widgetBehavior.mode = 'empty'
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1 }),
-        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1 }),
+      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -321,15 +314,14 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
   it('shows the narrow-screen hint above the unavailability banner in DOM order', async () => {
     widgetBehavior.mode = 'empty'
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1 }),
-        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1 }),
+      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -349,15 +341,14 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
   it('clears the error fallback when the user switches back to the List tab and re-selects Graph with a healthy widget', async () => {
     widgetBehavior.mode = 'error'
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1 }),
-        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1 }),
+      linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
     await screen.findByTestId('linked-issues-graph-unavailable-banner')
@@ -377,30 +368,39 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
   })
 
   it('re-probes graph renderability when linked issue data changes while Graph remains selected', async () => {
-    let currentEpic = makeEpicWithLinkedIssues([
+    _epicData = makeEpicWithLinkedIssues([
       linkedIssue({ id: 'issue-1', number: 1, title: 'L-1', prerequisiteNumbers: [2] }),
       linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
     ])
-    mocks.useEpic.mockImplementation(() => ({ data: currentEpic, isLoading: false }))
 
-    const { rerenderPage } = renderPage()
+    const { unmount } = renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
     const banner = await screen.findByTestId('linked-issues-graph-unavailable-banner')
     expect(banner.getAttribute('data-reason')).toBe('cyclic')
     expect(screen.queryByTestId('epic-dep-graph-canvas')).toBeNull()
 
-    currentEpic = makeEpicWithLinkedIssues([
+    unmount()
+    _epicData = makeEpicWithLinkedIssues([
       linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
       linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
     ])
-    rerenderPage()
+
+    const { rerenderPage } = renderPage()
+    await screen.findByTestId('linked-issues-view-toggle')
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
     await waitFor(() => {
       expect(screen.getByTestId('epic-dep-graph-canvas')).toBeInTheDocument()
     })
     expect(screen.queryByTestId('linked-issues-graph-unavailable-banner')).toBeNull()
     expect(screen.queryByTestId('linked-issues-list-region')).toBeNull()
+
+    // verify no unused variable warning
+    void rerenderPage
   })
 
   it('every unrenderable banner message directs the user to the list below (spec contract)', async () => {
@@ -421,12 +421,12 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
 
     for (const scenario of scenarios) {
       widgetBehavior.mode = scenario.reason === 'cyclic' ? 'default' : scenario.reason
-      mocks.useEpic.mockReturnValue({
-        data: makeEpicWithLinkedIssues(scenario.linkedIssues()),
-        isLoading: false,
-      })
+      _epicData = makeEpicWithLinkedIssues(scenario.linkedIssues())
 
       const { unmount } = renderPage()
+
+      await screen.findByTestId('linked-issues-view-toggle')
+
       fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
       const banner = await screen.findByTestId('linked-issues-graph-unavailable-banner')

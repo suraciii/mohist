@@ -1,58 +1,78 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 import { EpicStatus } from '../../../entities/epic'
 import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
+import { useMswServer } from '../../../../tests/support/msw'
 
-/**
- * Tests for the Linked Issues List/Graph view toggle and the Graph region's
- * mobile-degradation contract, rendered inside <EpicDetailPage/>. The graph
- * region is driven by the (mocked) DependencyGraphWidget, so this file mounts
- * the page via renderPage() and exercises the `linked-issues-view-*` /
- * `linked-issues-graph-*` testids.
- */
-
-// --- per-file hoisted mocks (Vitest hoists vi.mock per-file; cannot be shared) ---
 const widgetBehavior = vi.hoisted(() => ({
   mode: 'default' as 'default' | 'empty' | 'error',
 }))
 
-const mocks = vi.hoisted(() => ({
-  useEpic: vi.fn(),
-  useIssues: vi.fn(),
-  useAddEpicIssue: vi.fn(),
-  useRemoveEpicIssue: vi.fn(),
-  useStartIssue: vi.fn(),
-  useStartEpic: vi.fn(),
-  useMarkEpicDone: vi.fn(),
-  useCloseEpic: vi.fn(),
-  useUpdateEpic: vi.fn(),
-  usePauseEpic: vi.fn(),
-  useResumeEpic: vi.fn(),
-}))
+let _epicData: unknown = null
+let _issuesData: unknown[] = []
 
+const _addEpicIssueTracker = vi.fn()
+const _removeEpicIssueTracker = vi.fn()
+const _startIssueTracker = vi.fn()
+const _startEpicTracker = vi.fn()
+const _markEpicDoneTracker = vi.fn()
+const _closeEpicTracker = vi.fn()
+const _updateEpicTracker = vi.fn()
+const _pauseEpicTracker = vi.fn()
+const _resumeEpicTracker = vi.fn()
 
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  useIssues: mocks.useIssues,
-}))
-
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
-  return {
-    ...actual,
-    useEpic: mocks.useEpic,
-    useAddEpicIssue: mocks.useAddEpicIssue,
-    useRemoveEpicIssue: mocks.useRemoveEpicIssue,
-    useStartIssue: mocks.useStartIssue,
-    useStartEpic: mocks.useStartEpic,
-    useMarkEpicDone: mocks.useMarkEpicDone,
-    useCloseEpic: mocks.useCloseEpic,
-    useUpdateEpic: mocks.useUpdateEpic,
-    usePauseEpic: mocks.usePauseEpic,
-    useResumeEpic: mocks.useResumeEpic,
-  }
-})
+useMswServer(
+  http.get('*/api/projects/:projectId/epics/:epicId', () =>
+    HttpResponse.json({ success: true, data: _epicData }),
+  ),
+  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/projects/:projectId/issues', () =>
+    HttpResponse.json({ success: true, data: _issuesData }),
+  ),
+  http.post('*/api/projects/:projectId/epics/:epicId/issues', async ({ request, params }) => {
+    const body = await request.json() as { issueId: string }
+    _addEpicIssueTracker({ epicId: params.epicId, issueId: body.issueId })
+    return HttpResponse.json({ success: true, data: { epicId: params.epicId, issueId: body.issueId } })
+  }),
+  http.delete('*/api/projects/:projectId/epics/:epicId/issues/:issueId', ({ params }) => {
+    _removeEpicIssueTracker({ epicId: params.epicId, issueId: params.issueId })
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/issues/:issueNumber/start', ({ params }) => {
+    _startIssueTracker(Number(params.issueNumber))
+    return HttpResponse.json({ success: true, data: { issue: {}, message: '' } })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/start', ({ params }) => {
+    _startEpicTracker(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/done', ({ params }) => {
+    _markEpicDoneTracker(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/close', ({ params }) => {
+    _closeEpicTracker(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.patch('*/api/projects/:projectId/epics/:epicId', ({ params }) => {
+    _updateEpicTracker(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/pause', async ({ request, params }) => {
+    let reason: string | null = null
+    try { const body = await request.json() as Record<string, unknown>; reason = (body.reason as string) ?? null } catch { /* empty body */ }
+    _pauseEpicTracker({ id: params.epicId, reason })
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+  http.post('*/api/projects/:projectId/epics/:epicId/resume', ({ params }) => {
+    _resumeEpicTracker(params.epicId)
+    return HttpResponse.json({ success: true, data: {} })
+  }),
+)
 
 vi.mock('../../../widgets/epic-dependency-graph', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../widgets/epic-dependency-graph')>()
@@ -130,47 +150,26 @@ function makeEpicWithLinkedIssues(linkedIssues: unknown[]) {
 }
 
 describe('EpicDetailPage linked issues view toggle', () => {
-  const addMutate = vi.fn()
-  const removeMutate = vi.fn()
-  const startMutate = vi.fn()
-  const doneMutate = vi.fn()
-  const closeMutate = vi.fn()
-  const updateMutate = vi.fn()
-  const pauseMutate = vi.fn()
-  const resumeMutate = vi.fn()
-  const startEpicMutate = vi.fn()
-
   const makeLinkedIssue = linkedIssue
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useIssues.mockReturnValue({ data: issues })
-    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
-    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
-    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
-    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
-    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
-    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
-    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
-    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+    _issuesData = issues
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('defaults to the list view and shows the toggle when the epic has 2+ linked issues', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        makeLinkedIssue({ id: 'issue-1', number: 1 }),
-        makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+  it('defaults to the list view and shows the toggle when the epic has 2+ linked issues', async () => {
+    _epicData = makeEpicWithLinkedIssues([
+      makeLinkedIssue({ id: 'issue-1', number: 1 }),
+      makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
 
+    await screen.findByTestId('linked-issues-list-region')
     expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
     expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
     const toggle = screen.getByTestId('linked-issues-view-toggle')
@@ -180,15 +179,14 @@ describe('EpicDetailPage linked issues view toggle', () => {
   })
 
   it('switches to the graph view when the Graph tab is clicked and does not mutate data', async () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        makeLinkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-        makeLinkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      makeLinkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+      makeLinkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -203,21 +201,20 @@ describe('EpicDetailPage linked issues view toggle', () => {
     })
     expect(screen.queryByTestId('linked-issues-list-region')).toBeNull()
 
-    expect(addMutate).not.toHaveBeenCalled()
-    expect(removeMutate).not.toHaveBeenCalled()
-    expect(updateMutate).not.toHaveBeenCalled()
+    expect(_addEpicIssueTracker).not.toHaveBeenCalled()
+    expect(_removeEpicIssueTracker).not.toHaveBeenCalled()
+    expect(_updateEpicTracker).not.toHaveBeenCalled()
   })
 
   it('returns to the list view when the List tab is clicked after the graph is shown', async () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        makeLinkedIssue({ id: 'issue-1', number: 1 }),
-        makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      makeLinkedIssue({ id: 'issue-1', number: 1 }),
+      makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
     await waitFor(() => {
@@ -232,14 +229,12 @@ describe('EpicDetailPage linked issues view toggle', () => {
     expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
   })
 
-  it('keeps the Graph tab reachable with an empty-data explanation when the epic has zero linked issues', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([]),
-      isLoading: false,
-    })
+  it('keeps the Graph tab reachable with an empty-data explanation when the epic has zero linked issues', async () => {
+    _epicData = makeEpicWithLinkedIssues([])
 
     renderPage()
 
+    await screen.findByTestId('linked-issues-list-region')
     expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
     expect(screen.getByTestId('linked-issues-view-toggle')).toBeInTheDocument()
     expect(screen.getByTestId('linked-issues-view-list')).toHaveAttribute('aria-selected', 'true')
@@ -257,16 +252,14 @@ describe('EpicDetailPage linked issues view toggle', () => {
     expect(screen.getByText('No linked issues yet.')).toBeInTheDocument()
   })
 
-  it('keeps the Graph tab reachable with an empty-data explanation when the epic has exactly one linked issue', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        makeLinkedIssue({ id: 'issue-1', number: 1, title: 'Lone issue' }),
-      ]),
-      isLoading: false,
-    })
+  it('keeps the Graph tab reachable with an empty-data explanation when the epic has exactly one linked issue', async () => {
+    _epicData = makeEpicWithLinkedIssues([
+      makeLinkedIssue({ id: 'issue-1', number: 1, title: 'Lone issue' }),
+    ])
 
     renderPage()
 
+    await screen.findByTestId('linked-issues-list-region')
     expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
     expect(screen.getByTestId('linked-issues-view-toggle')).toBeInTheDocument()
     expect(screen.getByTestId('linked-issues-view-list')).toHaveAttribute('aria-selected', 'true')
@@ -286,15 +279,14 @@ describe('EpicDetailPage linked issues view toggle', () => {
   })
 
   it('falls back to the list view when the graph reports a cycle', async () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        makeLinkedIssue({ id: 'issue-1', number: 1, prerequisiteNumbers: [2] }),
-        makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      makeLinkedIssue({ id: 'issue-1', number: 1, prerequisiteNumbers: [2] }),
+      makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -315,85 +307,63 @@ describe('EpicDetailPage linked issues view toggle', () => {
     expect(screen.queryByTestId('epic-dep-graph-canvas')).toBeNull()
   })
 
-  it('keeps the Linked Issues list and add-issue selector fully functional when the graph is the default tab', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        makeLinkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
-        makeLinkedIssue({ id: 'issue-2', number: 2, title: 'L-2' }),
-      ]),
-      isLoading: false,
-    })
+  it('keeps the Linked Issues list and add-issue selector fully functional when the graph is the default tab', async () => {
+    _epicData = makeEpicWithLinkedIssues([
+      makeLinkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
+      makeLinkedIssue({ id: 'issue-2', number: 2, title: 'L-2' }),
+    ])
 
     renderPage()
 
+    await screen.findByTestId('linked-issues-list-region')
     expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
     expect(screen.getByTestId('epic-issue-selector-trigger')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(2)
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0])
-    expect(removeMutate).not.toHaveBeenCalled()
+    expect(_removeEpicIssueTracker).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
-    expect(removeMutate).toHaveBeenCalledWith({ epicId: 'epic-12345678', issueId: 'issue-1' })
+    await vi.waitFor(() =>
+      expect(_removeEpicIssueTracker).toHaveBeenCalledWith({ epicId: 'epic-12345678', issueId: 'issue-1' }),
+    )
   })
 })
 
 describe('EpicDetailPage Graph mobile degradation (T-003)', () => {
-  const addMutate = vi.fn()
-  const removeMutate = vi.fn()
-  const startMutate = vi.fn()
-  const doneMutate = vi.fn()
-  const closeMutate = vi.fn()
-  const updateMutate = vi.fn()
-  const pauseMutate = vi.fn()
-  const resumeMutate = vi.fn()
-  const startEpicMutate = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useIssues.mockReturnValue({ data: issues })
-    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
-    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
-    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
-    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
-    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
-    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
-    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
-    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+    _issuesData = issues
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('defaults to the List view when 2+ linked issues are present (List is always the initial state)', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+  it('defaults to the List view when 2+ linked issues are present (List is always the initial state)', async () => {
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
 
+    await screen.findByTestId('linked-issues-view-list')
     expect(screen.getByTestId('linked-issues-view-list')).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByTestId('linked-issues-view-graph')).toHaveAttribute('aria-selected', 'false')
     expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
     expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
   })
 
-  it('keeps both List and Graph tabs visible and clickable when graphAvailable is true (data-testids unchanged)', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+  it('keeps both List and Graph tabs visible and clickable when graphAvailable is true (data-testids unchanged)', async () => {
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-list')
 
     const listTab = screen.getByTestId('linked-issues-view-list')
     const graphTab = screen.getByTestId('linked-issues-view-graph')
@@ -407,21 +377,20 @@ describe('EpicDetailPage Graph mobile degradation (T-003)', () => {
 
     fireEvent.click(graphTab)
     fireEvent.click(listTab)
-    expect(addMutate).not.toHaveBeenCalled()
-    expect(removeMutate).not.toHaveBeenCalled()
-    expect(updateMutate).not.toHaveBeenCalled()
+    expect(_addEpicIssueTracker).not.toHaveBeenCalled()
+    expect(_removeEpicIssueTracker).not.toHaveBeenCalled()
+    expect(_updateEpicTracker).not.toHaveBeenCalled()
   })
 
   it('wraps the graph canvas in an overflow-x-auto container with md:overflow-visible (no scrollbar on desktop)', async () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -438,15 +407,14 @@ describe('EpicDetailPage Graph mobile degradation (T-003)', () => {
   })
 
   it('gives the inner graph canvas a min-width class so it horizontally scrolls on narrow viewports', async () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -461,15 +429,14 @@ describe('EpicDetailPage Graph mobile degradation (T-003)', () => {
   })
 
   it('renders a narrow-screen hint with md:hidden above the graph canvas', async () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -485,15 +452,14 @@ describe('EpicDetailPage Graph mobile degradation (T-003)', () => {
   })
 
   it('places the narrow-screen hint above the scroll container in DOM order', async () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
 
@@ -512,17 +478,15 @@ describe('EpicDetailPage Graph mobile degradation (T-003)', () => {
     expect(hintIndex).toBeLessThan(scrollIndex)
   })
 
-  it('keeps the narrow-screen hint hidden when the list view is the default (only renders inside the graph region)', () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+  it('keeps the narrow-screen hint hidden when the list view is the default (only renders inside the graph region)', async () => {
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
 
+    await screen.findByTestId('linked-issues-list-region')
     expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
     expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
     expect(screen.queryByTestId('linked-issues-graph-narrow-hint')).toBeNull()
@@ -530,15 +494,14 @@ describe('EpicDetailPage Graph mobile degradation (T-003)', () => {
   })
 
   it('switches between List and Graph tabs without error and keeps the overflow-x-auto wrapper on every Graph render', async () => {
-    mocks.useEpic.mockReturnValue({
-      data: makeEpicWithLinkedIssues([
-        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
-        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
-      ]),
-      isLoading: false,
-    })
+    _epicData = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+    ])
 
     renderPage()
+
+    await screen.findByTestId('linked-issues-view-toggle')
 
     fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
     await waitFor(() => {
