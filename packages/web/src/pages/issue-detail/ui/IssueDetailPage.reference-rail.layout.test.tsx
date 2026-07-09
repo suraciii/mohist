@@ -11,41 +11,7 @@ import {
   READING_FLOW_LAST_TESTIDS,
   renderPage,
 } from './_issueDetailReferenceRailTestUtils'
-
-const mockUseIssueDiff = vi.fn()
-const mockUseIssueCommits = vi.fn()
-const mockUseWorkflowTimeline = vi.fn()
-const mockUseWorkflowYaml = vi.fn()
-const mockUseAgentStatus = vi.fn()
-const mockUseIssue = vi.fn()
-const mockUseWorkspaceStatus = vi.fn()
-
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    useIssue: (...args: unknown[]) => mockUseIssue(...args),
-    useIssueDiff: (...args: unknown[]) => mockUseIssueDiff(...args),
-    useIssueCommits: (...args: unknown[]) => mockUseIssueCommits(...args),
-    useWorkflowTimeline: (...args: unknown[]) => mockUseWorkflowTimeline(...args),
-    useWorkflowYaml: (...args: unknown[]) => mockUseWorkflowYaml(...args),
-    useWorkspaceStatus: (...args: unknown[]) => mockUseWorkspaceStatus(...args),
-    useIssueEvents: () => ({ data: undefined, isLoading: false }),
-    getIssueWorkflowVariables: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
-  }
-})
-
-vi.mock('../../../entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/settings')>()
-  return {
-    ...actual,
-    useWorkflowProfiles: () => ({ data: [] }),
-    useAvailableModelIds: () => ({ data: [] }),
-    useOpencodeModel: () => ({ data: null }),
-    useModelVariants: () => ({ data: [] }),
-    useEffectiveDefaultWorkflowProfile: () => ({ data: null }),
-  }
-})
+import { mockIssue, mountIssueDetail } from './_issueDetailMsw'
 
 vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
   EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null; enabled?: boolean }) => (
@@ -59,37 +25,20 @@ vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
   )),
 }))
 
-vi.mock('../../../entities/agent', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/agent')>()
-  return {
-    ...actual,
-    useAgentStatus: (...args: unknown[]) => mockUseAgentStatus(...args),
-  }
+mountIssueDetail({ issue: makeIssue() })
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
 })
 
 describe('IssueDetailPage reference-rail — desktop right column', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     mockMatchMedia(false)
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
   })
 
   it('marks the rail as desktop mode and lays it out as a right column narrower than the reading flow', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({ recovery: DEFAULT_RECOVERY }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({ recovery: DEFAULT_RECOVERY }))
 
     renderPage()
 
@@ -114,35 +63,19 @@ describe('IssueDetailPage reference-rail — desktop right column', () => {
 
 describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     mockMatchMedia(true)
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
   })
 
   it('marks the rail as narrow mode and does not occupy a right column beside the reading flow', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        model: 'sonnet',
-        repository: {
-          name: 'master',
-          baseBranch: 'master',
-          gitUrl: 'https://github.com/suraciii/mohist.git',
-        },
-        recovery: DEFAULT_RECOVERY,
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      model: 'sonnet',
+      repository: {
+        name: 'master',
+        baseBranch: 'master',
+        gitUrl: 'https://github.com/suraciii/mohist.git',
+      },
+      recovery: DEFAULT_RECOVERY,
+    }))
 
     renderPage()
 
@@ -158,32 +91,28 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
   })
 
   it('renders all rail items as collapsed sections on a narrow viewport', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        model: 'sonnet',
-        repository: {
-          name: 'master',
-          baseBranch: 'master',
-          gitUrl: 'https://github.com/suraciii/mohist.git',
-        },
-        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-        convergence: {
-          blockingItemCount: 1,
-          directlyRepairedCount: 0,
-          reactionAttempts: 0,
-          attemptedItemIds: [],
-          resolvedItemIds: [],
-          unresolvedItemIds: ['cb-1'],
-          newBlockingItemIds: [],
-          nonBlockingItemIds: [],
-          blockedReason: 'A blocking check failed.',
-        },
-        prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
-        recovery: DEFAULT_RECOVERY,
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      model: 'sonnet',
+      repository: {
+        name: 'master',
+        baseBranch: 'master',
+        gitUrl: 'https://github.com/suraciii/mohist.git',
+      },
+      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+      convergence: {
+        blockingItemCount: 1,
+        directlyRepairedCount: 0,
+        reactionAttempts: 0,
+        attemptedItemIds: [],
+        resolvedItemIds: [],
+        unresolvedItemIds: ['cb-1'],
+        newBlockingItemIds: [],
+        nonBlockingItemIds: [],
+        blockedReason: 'A blocking check failed.',
+      },
+      prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+      recovery: DEFAULT_RECOVERY,
+    }))
 
     renderPage()
 
@@ -208,32 +137,28 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
 
   it('collapses expanded rail cards when the viewport changes from desktop to narrow', async () => {
     const viewport = mockMatchMedia(false)
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        model: 'sonnet',
-        repository: {
-          name: 'master',
-          baseBranch: 'master',
-          gitUrl: 'https://github.com/suraciii/mohist.git',
-        },
-        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-        convergence: {
-          blockingItemCount: 1,
-          directlyRepairedCount: 0,
-          reactionAttempts: 0,
-          attemptedItemIds: [],
-          resolvedItemIds: [],
-          unresolvedItemIds: ['cb-1'],
-          newBlockingItemIds: [],
-          nonBlockingItemIds: [],
-          blockedReason: 'A blocking check failed.',
-        },
-        prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
-        recovery: DEFAULT_RECOVERY,
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      model: 'sonnet',
+      repository: {
+        name: 'master',
+        baseBranch: 'master',
+        gitUrl: 'https://github.com/suraciii/mohist.git',
+      },
+      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+      convergence: {
+        blockingItemCount: 1,
+        directlyRepairedCount: 0,
+        reactionAttempts: 0,
+        attemptedItemIds: [],
+        resolvedItemIds: [],
+        unresolvedItemIds: ['cb-1'],
+        newBlockingItemIds: [],
+        nonBlockingItemIds: [],
+        blockedReason: 'A blocking check failed.',
+      },
+      prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+      recovery: DEFAULT_RECOVERY,
+    }))
 
     renderPage()
 
@@ -264,11 +189,7 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
   })
 
   it('stacks rail items beneath the reading flow on a narrow viewport', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({ recovery: DEFAULT_RECOVERY }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({ recovery: DEFAULT_RECOVERY }))
 
     renderPage()
 
@@ -281,48 +202,32 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
 
 describe('IssueDetailPage reference-rail — document-order audit (narrow)', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     mockMatchMedia(true)
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
   })
 
   it('places every rail card after every last reading-flow item in document order on a narrow viewport', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        model: 'sonnet',
-        repository: {
-          name: 'master',
-          baseBranch: 'master',
-          gitUrl: 'https://github.com/suraciii/mohist.git',
-        },
-        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-        convergence: {
-          blockingItemCount: 1,
-          directlyRepairedCount: 0,
-          reactionAttempts: 0,
-          attemptedItemIds: [],
-          resolvedItemIds: [],
-          unresolvedItemIds: ['cb-1'],
-          newBlockingItemIds: [],
-          nonBlockingItemIds: [],
-          blockedReason: 'A blocking check failed.',
-        },
-        prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
-        recovery: DEFAULT_RECOVERY,
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      model: 'sonnet',
+      repository: {
+        name: 'master',
+        baseBranch: 'master',
+        gitUrl: 'https://github.com/suraciii/mohist.git',
+      },
+      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+      convergence: {
+        blockingItemCount: 1,
+        directlyRepairedCount: 0,
+        reactionAttempts: 0,
+        attemptedItemIds: [],
+        resolvedItemIds: [],
+        unresolvedItemIds: ['cb-1'],
+        newBlockingItemIds: [],
+        nonBlockingItemIds: [],
+        blockedReason: 'A blocking check failed.',
+      },
+      prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+      recovery: DEFAULT_RECOVERY,
+    }))
 
     renderPage()
 
@@ -354,11 +259,7 @@ describe('IssueDetailPage reference-rail — document-order audit (narrow)', () 
   })
 
   it('places the rail container after the reading-flow container on narrow, not interleaved', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({ recovery: DEFAULT_RECOVERY }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({ recovery: DEFAULT_RECOVERY }))
 
     renderPage()
 
@@ -371,27 +272,11 @@ describe('IssueDetailPage reference-rail — document-order audit (narrow)', () 
 
 describe('IssueDetailPage reference-rail — desktop restoration excludes mobile-only chrome', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     mockMatchMedia(false)
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
   })
 
   it('does not render MobileActionBar or ConfirmationDrawer in the DOM at desktop', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({ recovery: DEFAULT_RECOVERY }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({ recovery: DEFAULT_RECOVERY }))
 
     const { container } = renderPage()
 
@@ -402,22 +287,18 @@ describe('IssueDetailPage reference-rail — desktop restoration excludes mobile
   })
 
   it('does not render MobileActionBar or ConfirmationDrawer on desktop even with a primary action', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-        recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+      recovery: {
+        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop'],
+      },
+    }))
 
     const { container } = renderPage()
 
@@ -429,21 +310,6 @@ describe('IssueDetailPage reference-rail — desktop restoration excludes mobile
 })
 
 describe('IssueDetailPage reference-rail — convergence panel collapsed on every viewport', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-  })
-
   function issueWithConvergence() {
     return makeIssue({
       health: 'blocked',
@@ -464,7 +330,7 @@ describe('IssueDetailPage reference-rail — convergence panel collapsed on ever
 
   it('keeps convergence collapsed by default on desktop', async () => {
     mockMatchMedia(false)
-    mockUseIssue.mockReturnValue({ data: issueWithConvergence(), isLoading: false, isError: false })
+    mockIssue(issueWithConvergence())
 
     renderPage()
 
@@ -475,7 +341,7 @@ describe('IssueDetailPage reference-rail — convergence panel collapsed on ever
 
   it('keeps convergence collapsed by default on narrow', async () => {
     mockMatchMedia(true)
-    mockUseIssue.mockReturnValue({ data: issueWithConvergence(), isLoading: false, isError: false })
+    mockIssue(issueWithConvergence())
 
     renderPage()
 

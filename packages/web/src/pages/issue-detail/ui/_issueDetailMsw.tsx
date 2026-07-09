@@ -1,0 +1,140 @@
+import { HttpResponse, http } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
+
+const ISSUES = '*/api/projects/:projectId/issues/:number'
+const AGENT_STATUS = '*/api/projects/:projectId/agent/status'
+const OPENCODE_MODELS = '*/api/projects/:projectId/opencode/models'
+const WORKFLOW_VARIABLES = '*/api/projects/:projectId/workflow-profile/variables'
+const PROJECT_DEFAULT = '*/api/projects/:projectId/workflow-profile'
+const SYSTEM_PROFILES = '*/api/workflow-templates/system*'
+const RUN_YAML = '*/api/workflow-runs/:runId/yaml'
+
+export interface IssueDetailFixture {
+  issue: Record<string, unknown>
+}
+
+function issueDetailHandlers({ issue }: IssueDetailFixture) {
+  return [
+    http.get(ISSUES, () => HttpResponse.json({ success: true, data: issue })),
+    http.get('*/api/projects/:projectId/issues', () =>
+      HttpResponse.json({ success: true, data: [] }),
+    ),
+    http.get(`${ISSUES}/diff`, () =>
+      HttpResponse.json({
+        success: true,
+        data: { available: false, reason: 'not_started', message: 'no workspace' },
+      }),
+    ),
+    http.get(`${ISSUES}/commits`, () =>
+      HttpResponse.json({
+        success: true,
+        data: { available: false, reason: 'not_started', message: 'no workspace' },
+      }),
+    ),
+    http.get(`${ISSUES}/workflow/status`, () =>
+      HttpResponse.json({ success: true, data: { workflow: null } }),
+    ),
+    http.get(`${ISSUES}/workspace-status`, () =>
+      HttpResponse.json({ success: true, data: { exists: false, reason: 'not_started' } }),
+    ),
+    http.get(`${ISSUES}/events`, () => HttpResponse.json({ success: true, data: [] })),
+    http.get(`${ISSUES}/workflow/artifacts`, () => HttpResponse.json({ success: true, data: [] })),
+    http.get(`${ISSUES}/workflow-profile/variables`, () =>
+      HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
+    ),
+    http.get(`${ISSUES}/workflow-profile`, () =>
+      HttpResponse.json({
+        success: true,
+        data: {
+          issueNumber: 14,
+          projectId: 'proj-1',
+          issueKey: '14',
+          hasCustomTemplate: false,
+          yaml: null,
+          workflowRunId: null,
+          profileId: '',
+        },
+      }),
+    ),
+    http.get(AGENT_STATUS, () =>
+      HttpResponse.json({
+        success: true,
+        data: {
+          running: false,
+          issueId: null,
+          issueNumber: null,
+          activeAgents: [],
+          runnerAvailable: true,
+          capacity: { active: 0, max: 1 },
+        },
+      }),
+    ),
+    http.get(OPENCODE_MODELS, () =>
+      HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } }),
+    ),
+    http.get(WORKFLOW_VARIABLES, () =>
+      HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
+    ),
+    http.get(PROJECT_DEFAULT, () =>
+      HttpResponse.json({
+        success: true,
+        data: {
+          projectId: 'proj-1',
+          defaultTemplateId: null,
+          disabledWorkflowProfileIds: [],
+        },
+      }),
+    ),
+    http.get(SYSTEM_PROFILES, () => HttpResponse.json({ success: true, data: [] })),
+    http.get(RUN_YAML, () =>
+      HttpResponse.json({ success: true, data: { workflowRunId: 'unused', yaml: '' } }),
+    ),
+    http.get('*/api/workflow-runs/:runId/sessions', () =>
+      HttpResponse.json({ success: true, data: [] }),
+    ),
+  ]
+}
+
+export function mountIssueDetail(fixture: IssueDetailFixture) {
+  useMswServer(...issueDetailHandlers(fixture))
+}
+
+export function mockIssue(issue: Record<string, unknown>) {
+  server.use(http.get(ISSUES, () => HttpResponse.json({ success: true, data: issue })))
+}
+
+export function mockIssueDiff(diff: Record<string, unknown> | null) {
+  server.use(
+    http.get(`${ISSUES}/diff`, () =>
+      HttpResponse.json({ success: true, data: diff ?? { available: false } }),
+    ),
+  )
+}
+
+export function mockIssueCommits(commits: Record<string, unknown> | null) {
+  server.use(
+    http.get(`${ISSUES}/commits`, () =>
+      HttpResponse.json({ success: true, data: commits ?? { available: false } }),
+    ),
+  )
+}
+
+export function mockWorkflowTimeline(timeline: Record<string, unknown> | null) {
+  server.use(
+    http.get(`${ISSUES}/workflow/status`, () =>
+      HttpResponse.json({ success: true, data: { workflow: timeline } }),
+    ),
+  )
+}
+
+export function mockWorkspaceStatus(status: Record<string, unknown> | null) {
+  server.use(
+    http.get(`${ISSUES}/workspace-status`, () =>
+      HttpResponse.json({ success: true, data: status ?? { exists: false } }),
+    ),
+  )
+}
+
+export function mockAgentStatus(status: Record<string, unknown>) {
+  server.use(http.get(AGENT_STATUS, () => HttpResponse.json({ success: true, data: status })))
+}
