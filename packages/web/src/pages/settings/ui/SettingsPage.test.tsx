@@ -1,42 +1,48 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
+import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Project } from '../../../entities/project'
+import type { Project, Repository } from '../../../entities/project'
 import { ProjectProvider } from '../../../entities/project'
 import { SidebarProvider } from '@/shared/ui/components/sidebar'
-import type { AgentRuntimeConfig, GeneralConfig } from '../../../entities/settings'
+import type { GeneralConfig } from '../../../entities/settings'
 import { SettingsPage } from './SettingsPage'
+import { useMswServer } from '../../../../tests/support/msw'
 
-const useRepositoriesMock = vi.fn()
+const DEFAULT_CONFIG: GeneralConfig = {
+  agentTimeout: 600,
+  taskTimeout: 600,
+  stageTimeout: 3600,
+  maxConcurrentAgents: 3,
+  maxGracePeriods: 3,
+  pollInterval: 5000,
+  logLevel: 'INFO',
+}
 
-vi.mock('../../../entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project')>()
-  return {
-    ...actual,
-    useRepositories: (projectId: string | undefined) => useRepositoriesMock(projectId),
-    useAddRepository: () => ({ mutate: vi.fn(), isPending: false }),
-    useRemoveRepository: () => ({ mutate: vi.fn(), isPending: false }),
-    useSetDefaultRepository: () => ({ mutate: vi.fn(), isPending: false }),
-  }
-})
+let _repositories: Repository[] = []
+let _configData: GeneralConfig = { ...DEFAULT_CONFIG }
+const reposUrlCaptures: string[] = []
 
-const settingsClient = vi.hoisted(() => ({
-  getAgentRuntime: vi.fn(),
-  getConfig: vi.fn(),
-  updateAgentRuntime: vi.fn(),
-}))
+useMswServer(
+  http.get('/api/projects/:projectId/repositories', ({ request }) => {
+    reposUrlCaptures.push(request.url)
+    return HttpResponse.json({ success: true, data: _repositories })
+  }),
+  http.get('/api/config', () => {
+    return HttpResponse.json({ success: true, data: _configData })
+  }),
+  http.put('/api/config/:key', () => {
+    return HttpResponse.json({ success: true, data: _configData })
+  }),
+)
 
-vi.mock('../../../entities/settings/api/client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/settings/api/client')>()
-  return {
-    ...actual,
-    getAgentRuntime: settingsClient.getAgentRuntime,
-    getConfig: settingsClient.getConfig,
-    updateAgentRuntime: settingsClient.updateAgentRuntime,
-  }
+beforeEach(() => {
+  _repositories = []
+  _configData = { ...DEFAULT_CONFIG }
+  reposUrlCaptures.length = 0
 })
 
 const projects: Project[] = [
@@ -79,25 +85,20 @@ function renderSettings(initialEntry = '/settings/repositories') {
 }
 
 describe('SettingsPage sub-navigation', () => {
-  beforeEach(() => {
-    useRepositoriesMock.mockReturnValue({ data: [], isLoading: false })
-  })
-
   afterEach(() => {
     cleanup()
     window.localStorage.clear()
     vi.clearAllMocks()
   })
 
-  it('loads repositories for the selected project instead of the first project', () => {
-    useRepositoriesMock.mockImplementation((projectId: string | undefined) => ({
-      data: projectId === 'proj-selected' ? projects[1].repositories : projects[0].repositories,
-      isLoading: false,
-    }))
+  it('loads repositories for the selected project instead of the first project', async () => {
+    _repositories = projects[1].repositories
 
     renderSettings()
 
-    expect(useRepositoriesMock).toHaveBeenCalledWith('proj-selected')
+    await waitFor(() => {
+      expect(reposUrlCaptures.some((u) => u.includes('/projects/proj-selected/repositories'))).toBe(true)
+    })
     expect(screen.getAllByText('selected').length).toBeGreaterThan(0)
     expect(screen.queryByText('first')).not.toBeInTheDocument()
   })
@@ -212,12 +213,14 @@ describe('SettingsPage sub-navigation', () => {
     expect(screen.getByTestId('settings-subnav-preferences')).toHaveAttribute('aria-current', 'page')
   })
 
-  it('clicking a project item navigates to its /:projectName/settings/<section> route', () => {
+  it('clicking a project item navigates to its /:projectName/settings/<section> route', async () => {
     renderSettings('/settings/ai')
 
     fireEvent.click(screen.getByTestId('settings-subnav-repositories'))
 
-    expect(useRepositoriesMock).toHaveBeenCalledWith('proj-selected')
+    await waitFor(() => {
+      expect(reposUrlCaptures.some((u) => u.includes('/projects/proj-selected/repositories'))).toBe(true)
+    })
     expect(screen.getByTestId('settings-subnav-repositories')).toHaveAttribute(
       'aria-current',
       'page',
@@ -440,25 +443,6 @@ describe('SettingsSubNav overflow affordance', () => {
   })
 })
 
-const DEFAULT_RUNTIME: AgentRuntimeConfig = {
-  timeout: 1800000,
-  stageTimeout: 3600000,
-  taskTimeout: 600000,
-  maxConcurrent: 8,
-  maxGracePeriods: 2,
-  pollInterval: 30000,
-}
-
-const DEFAULT_CONFIG: GeneralConfig = {
-  agentTimeout: 600,
-  taskTimeout: 600,
-  stageTimeout: 3600,
-  maxConcurrentAgents: 3,
-  maxGracePeriods: 3,
-  pollInterval: 5000,
-  logLevel: 'INFO',
-}
-
 function getInputByLabel(label: string): HTMLInputElement {
   const labelEl = screen.getByText(label).closest('label')
   if (!labelEl) throw new Error(`No label for ${label}`)
@@ -471,10 +455,9 @@ function getInputByLabel(label: string): HTMLInputElement {
 
 describe('SettingsSubNav dirty-guard (T-004)', () => {
   beforeEach(() => {
-    settingsClient.getAgentRuntime.mockResolvedValue(DEFAULT_RUNTIME)
-    settingsClient.getConfig.mockResolvedValue(DEFAULT_CONFIG)
-    settingsClient.updateAgentRuntime.mockResolvedValue(DEFAULT_RUNTIME)
-    useRepositoriesMock.mockReturnValue({ data: [], isLoading: false })
+    _configData = { ...DEFAULT_CONFIG }
+    _repositories = []
+    reposUrlCaptures.length = 0
   })
 
   afterEach(() => {
