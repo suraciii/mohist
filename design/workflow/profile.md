@@ -1,8 +1,3 @@
----
-purpose: "Workflow profile：目标架构、合并与加载。"
-style: ["极简，只给目标态。"]
----
-
 # Workflow Profile
 
 > profile = **template**（选哪个 `WorkflowDefinition`）+ **variables**（`VariableBundle`）。

@@ -1,21 +1,3 @@
----
-purpose: "Describe workflow scheduling at the grain-interface level."
-include:
-  - "Ownership model: which party holds which scheduling fact."
-  - "Poll reconciliation: desired − reported diff dispatch."
-  - "Claim as a single write; fairness via ReadySince round-robin."
-  - "Report ack semantics (at-least-once), supervision, redelivery."
-exclude:
-  - "WorkflowRun/domain model internals; keep them in the Domain Model chapter only."
-  - "Database schemas, persistence implementation, migrations, and storage tables."
-  - "HTTP API payloads, Web UI behavior, and user-facing copy."
-  - "Cancelling in-flight work — the system does not provide it."
-style:
-  - "Prefer diagrams over prose."
-  - "Keep text short and human-readable."
-  - "Use workflowRunId for identifiers in interaction diagrams."
----
-
 # Workflow Scheduling
 
 Level-triggered reconciliation. The scheduler keeps no memory of its own:

@@ -1,20 +1,3 @@
----
-purpose: "命令面设计契约：CLI 命令的形状、命名、唯一入口、读命令数据归属与全局约定。"
-include:
-  - "命令树形状与根命令层约束。"
-  - "资源命名、命名归属与动词一致性原则。"
-  - "输出格式 / 子资源 / 关联资源三类边界。"
-  - "唯一入口、复合与分拆、全局 flag 约定。"
-  - "任务注入（add-task）经 Tier 裁定后延后的结论与理由。"
-exclude:
-  - "具体命令名、动词词表、flag 参数名（以代码与 docs/cli-reference.md 为准）。"
-  - "现状偏差与整改项（落 issue）。"
-  - "HTTP 资源面与 grain 实现细节（见 architecture.md / conventions.md）。"
-style:
-  - "原则与约束，少量规范性示例。"
-  - "抽象概念表达，命令/动词/flag 名见产品 spec（docs/cli-reference.md）。"
----
-
 # CLI 命令面设计
 
 `mo` 是 Mohist 的命令行入口，面向脚本、自动化和远程 SSH 场景。命令面是稳定契约——它的形状会被脚本、外部 agent 和远程会话依赖，任何漂移都会直接破坏使用方。本规范定义命令面**该长什么样**，不枚举完整命令、动词或 flag（具体命令面见产品 spec [`docs/cli-reference.md`](../docs/cli-reference.md)）。

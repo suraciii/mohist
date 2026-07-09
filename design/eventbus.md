@@ -1,14 +1,5 @@
 ---
-purpose: "事件总线的目标设计：把已落盘的领域事件可靠地（持久化 at-least-once）通知给订阅者。不引入 broker / 流式 SDK / per-stream grain，只加一个自驱动的分发器。"
-include:
-  - "领域事件范围与判定标准。"
-  - "订阅契约：发布 API、handler shape、[Subscription] type 语法。"
-  - "持久性：复用事件表 + 逐行 DispatchedAt。"
-  - "分发模型：单分发器、自唤醒、单查询、per-stream FIFO。"
-exclude:
-  - "实现细节（grain 内部循环、EF mapping、SQL、DI 扫描）——代码即权威。"
-  - "各 handler 的具体反应逻辑；见 workflow/issue-coordination.md。"
-status: "设计已收敛；运行时仍是 InMemoryEventBus（best-effort 同步分发），落地跟踪 epic #36，差距见末节。开放项标（开放）。"
+status: converged
 ---
 
 # Event Bus

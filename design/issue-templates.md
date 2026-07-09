@@ -1,19 +1,6 @@
----
-purpose: "三类 issue 模板（Feature / Bug / Refactor）的设计依据：边界判据、骨架对称性、业界实践映射、Mohist 特化点。资产文件是 per-section 指令的内容真源；本文只讲「为什么这么设计」。"
-include:
-  - "三类 issue 的边界判据与共享骨架的设计理由。"
-  - "业界实践映射、Mohist 特化点（planner-actionable 铁律）。"
-  - "加载模型与改进路线记录。"
-exclude:
-  - "每个 section 的 What/What NOT/How 逐字内容——那是资产文件（templates/*.md）的职责，本文不再复制。"
-  - "加载器的 C# 实现细节（落到代码时再定）。"
-style:
-  - "正文讲设计依据；资产文件（templates/*.md）是内容真源，本文不逐字复制 per-section 指令。"
----
-
 # Issue Templates
 
-issue template 定义"一个 issue 的 body 长什么样"，与 issue workflow profile（"怎么执行"）正交——前者是写什么，后者是怎么跑。本文是**设计依据**；三类模板的 per-section 写作指令（写什么 / 禁什么 / 可选段删除条件）的内容真源是资产文件 `packages/server/src/Mohist.Server/Issue/Services/IssueTemplates/templates/{feature,bug,refactor}.md`。
+issue template 定义"一个 issue 的 body 长什么样"，与 issue workflow profile（"怎么执行"）正交——前者是写什么，后者是怎么跑。per-section 写作指令（写什么 / 禁什么 / 可选段删除条件）的内容真源是资产文件 `packages/server/src/Mohist.Server/Issue/Services/IssueTemplates/templates/{feature,bug,refactor}.md`；本文只讲设计依据，不复制其内容。
 
 ## Metadata：只有 name 与 description
 
@@ -30,31 +17,27 @@ issue template 定义"一个 issue 的 body 长什么样"，与 issue workflow p
 
 ## 使用场景：两段、按需、判断在 agent 侧
 
-模板有两个消费者，都是同一种三段式：
+模板服务两个消费者——Web 人流与 AI 流（`mohist-create-issue` skill），走同一种三段式：
 
 | 步骤 | 人（Web 创建对话框） | AI（mohist-create-issue skill） |
 |---|---|---|
 | ① 拉目录 | `GET /issue-templates`（只 metadata） | `mo issue template list`（只 metadata） |
 | ② 判断选哪个 | 人看下拉框 | AI 读 description 判断（**非程序匹配**） |
-| ③ 拿完整 | `GET /issue-templates/{id}` → body | `mo issue template get <id>` → body |
+| ③ 拿完整 | `GET /issue-templates/{id}` → body | `mo issue template get <id>` → body，按 body 内注释指令填充各 section |
 
-核心：**② 发生在 agent/人脑里，喂给它的是 metadata；body 只在选定后才加载。** 因此加载分两段：
+核心：**② 发生在 agent/人脑里，喂给它的是 metadata；body 只在选定后才加载。** 因此加载分两段，发现层绝不读 body（仿 skill 发现机制）：
 
 | 阶段 | 触发 | 读取 | 产出 |
 |---|---|---|---|
 | 发现 | list / 选模板 | **只 frontmatter** | name + description |
 | 详情 | get / compose body | frontmatter + **完整 raw body** | body 字符串（原样，含 HTML 注释指令） |
 
-仿 skill 发现机制（`SkillAssetService.TryReadFrontmatter`）：发现层绝不读 body。
-
-> **AI 流已接入模板系统**：`mohist-create-issue` skill 通过 `mo issue template list` 选模板、`mo issue template get` 取 body，按 body 里的 HTML 注释指令填充各 section。模板系统同时服务 Web 人流和 AI 流。
-
 ## Body 的处理：原样存取，不解析
 
 server 把 body 当**不透明原始字符串**——不解析 section、不提取 guidance、不 strip HTML 注释。这仿 GitHub classic markdown issue template（整个文件正文原样灌进 issue body，含 `<!-- comments -->`）。
 
-- `composeIssueTemplateBody`（Web）直接用 `template.body` 预填编辑框；`mo issue template get`（CLI）原样展示 body。两者都不 strip 注释——注释在渲染 markdown 时隐藏，对人和 AI 都不构成干扰。
-- per-section 的写作指令作为 HTML 注释写在 body 里，随 body 原样到达消费者。注释是给填作者（人或 AI）看的内联指引。
+- Web 直接用 body 预填编辑框，CLI 原样展示 body，都不 strip 注释——注释在渲染 markdown 时隐藏，对人和 AI 都不构成干扰。
+- per-section 写作指令作为 HTML 注释写在 body 里，随 body 原样到达消费者，是给填写者（人或 AI）的内联指引。
 
 ## 三类 issue 与边界判据
 
@@ -74,7 +57,7 @@ Mohist 的 issue 全部要产出代码并 integrate 进仓库（plan→build→c
 
 这是 Mohist 模板与通用 GitHub issue 模板的根本差异。人在读到"有点慢""代码有点乱"时会追问；plan 阶段的 AI agent 不会，它会把含糊直接吃下去、产出含糊的计划。
 
-因此三类模板共享一条铁律：**每一段都必须是 planner-actionable 的——可复现、可观测、可量化。** 这条铁律是通用原则，由 create-issue skill 讲一次；具体的禁止项（如 Bug 症状段禁"有点慢"、Refactor 完成段禁"代码更清爽"）作为 per-section 指令写进各模板的 HTML 注释。
+因此三类模板共享一条铁律：**每一段都必须是 planner-actionable 的——可复现、可观测、可量化。** 这条铁律是通用原则，由 create-issue skill 讲一次；具体的禁止项（如 Bug 症状段禁"有点慢"、Refactor 完成段禁"代码更清爽"）作为 per-section 指令写在各模板的 HTML 注释里。
 
 ## 业界实践映射
 
@@ -96,21 +79,13 @@ Mohist 的 issue 全部要产出代码并 integrate 进仓库（plan→build→c
 | ④ 验收 | **Acceptance Criteria** | **Acceptance Criteria** | **Done When** |
 | ⑤ 边界 | **Non-Goals** | **Non-Goals** | **Non-Goals**（抗镀金） |
 
-**对称性的价值**：人和 AI 都只用记一种结构；模板选择只决定"中段讲什么"。每个 section 的详细写作指令（What / What NOT / 可选段删除条件）在资产文件的 HTML 注释里。
+**对称性的价值**：人和 AI 都只用记一种结构；模板选择只决定"中段讲什么"。
 
 > Severity / Priority / Risk 不在 body 里重复——它们是 issue 的 frontmatter 字段。body 只放 planner 需要的语义。
 
-## 改进路线（状态记录）
+## 差距脚注
 
-### 已完成
+正文是 spec，以下是现状差距，收敛后删：
 
-- **三类模板资产化**：`templates/*.md`（frontmatter + body），两段按需加载，metadata 收敛为 name + description。`mohist/default` 被 `feature` 取代。
-- **per-section 指令进模板**：每个 section 的写作指引（写什么 / 禁什么 / 可选段删除条件）从 design 文档搬进模板 body 的 HTML 注释，成为运行时真源。
-- **server 不解析多余字段**：删 `IssueTemplateBodyParser` 和 `IssueTemplateSection`，template get 返回 raw body（含注释，不 strip）。仿 GitHub markdown template。
-- **AI 流接入模板系统**：`mohist-create-issue` skill 通过 `mo issue template list/get` 选型与取 body，删除私有静态副本。
-- **explore 不产出模板内容**：`mohist-explore` 改为思考透镜（三声部 + gate + scope 决策），不定义 section、不带 body 模板。section 怎么写由模板负责。
-
-### 待办（不在本次范围）
-
-- **custom template CRUD**：`ProjectIssueTemplates` 表是预留的半成品（有读侧、无写入通路）。将来建 CRUD 时，把存储 JSON 从 legacy `{sections:[...]}` 统一成 `{body:"..."}`，并删掉 `IssueTemplateDto.Sections` 兼容层。
-- Web 下拉透出 description（可选后续）。
+- custom template CRUD 未建：`ProjectIssueTemplates` 表只有读侧、无写入通路；建 CRUD 时把存储 JSON 从 legacy `{sections:[...]}` 统一为 `{body:"..."}` 并删兼容层。
+- Web 下拉尚未透出 description。

@@ -1,8 +1,3 @@
----
-purpose: "mohist/github-pr：GitHub draft PR -> ready PR -> squash merge。"
-style: ["极简，只给目标态。"]
----
-
 # mohist/github-pr
 
 目标：通过 GitHub PR 交付；PR merge 成功才表示集成完成。

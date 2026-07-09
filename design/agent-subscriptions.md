@@ -1,19 +1,5 @@
 ---
-purpose: "Agent 事件订阅：Agent 从「手动启动」升级为「监听 CloudEvent、按订阅响应提示词自动启动」。Agent 是 owner 的代理人，走与人相同的动作通道。订阅 = 过滤表达式 + 响应提示词 + 响应方式；互斥场景按优先级仲裁，非互斥场景允许 fan-out；Agent 自拉上下文。本文是技术方案；产品需求见 docs/agent-subscriptions.md。"
-style:
-  - "只记录已收敛的决策与理由；开放问题单列，标「(开放)」，不作决策。"
-  - "中文为主，表格 + 少量代码/ASCII。"
-include:
-  - "领域边界：订阅归属 Agent 上下文，消费 CloudEvent PL，不构成反向模型依赖。"
-  - "上下文获取：handler 只读信封自带字段，Agent 用 mo workflow get 自拉关联 issue；零反查、零盖印。"
-  - "订阅模型：Filter 表达式（基于 CloudEvent 属性）+ 响应提示词 + 响应方式。"
-  - "响应协调：互斥场景按优先级选一个 Agent 响应（兜底/接管）；非互斥场景允许 fan-out；可见性而非强制配置校验。"
-  - "动作边界：Agent 是代理人，能做的动作也必须能由人做；Agent 不获得专属审批通道。"
-  - "组件清单与落地顺序。"
-exclude:
-  - "grain 内部实现、EF mapping、SQL 细节。"
-  - "响应提示词的内容设计（用户自配，见产品文档）。"
-status: "WIP——技术方案。核心边界已收敛：①订阅归属 Agent 上下文、消费 CloudEvent PL；②订阅 = 过滤表达式 + 响应提示词 + 响应方式；③互斥响应按 Agent 优先级仲裁，非互斥响应允许 fan-out，可见性而非强制配置校验；④handler 只读信封、Agent 用 mo workflow get 自拉上下文；⑤前置依赖 mo workflow 命令套件已交付（issue #381）。开放项见末尾。"
+status: wip
 ---
 
 # Agent 事件订阅（技术方案）

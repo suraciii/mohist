@@ -1,8 +1,3 @@
----
-purpose: "Task recovery：runner 侧 action 驱动的恢复机制，取代 engine 侧 onFailure 编排。"
-style: ["极简，只给目标态。"]
----
-
 # Task Recovery
 
 Task 执行完成后，runner executor 用 `when` 表达式匹配 action output 字段，匹配 task 顶级 `recovery.handlers`，构造 recovery tasks，server 机械插入。
