@@ -3,14 +3,14 @@
 // when they are null. The page must tolerate their absence (undefined, not null) without
 // crashing, and still identify the startable next issue. All fixture data below is
 // synthetic and unrelated to any real epic/issue.
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { EpicDetailPage } from './EpicDetailPage'
-import { server } from '../../../../tests/support/msw'
+import { useMswServer } from '../../../../tests/support/msw'
 
 vi.mock('../../../widgets/epic-dependency-graph', () => ({
   DependencyGraphWidget: () => null,
@@ -47,15 +47,7 @@ const HANDLERS = [
   http.get('*/api/projects/:projectId/issues', () => HttpResponse.json({ success: true, data: [] })),
 ]
 
-beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
-  server.use(...HANDLERS)
-})
-afterEach(() => {
-  server.resetHandlers()
-  server.use(...HANDLERS)
-})
-afterAll(() => server.close())
+useMswServer(...HANDLERS)
 
 describe('EpicDetailPage when the API omits nullable fields', () => {
   it('renders without crashing and identifies the startable next issue', async () => {
