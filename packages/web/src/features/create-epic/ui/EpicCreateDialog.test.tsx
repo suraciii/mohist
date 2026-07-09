@@ -1,30 +1,50 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ProjectProvider } from '../../../entities/project'
 import { EpicCreateDialog } from './EpicCreateDialog'
 import { EPIC_DESCRIPTION_TEMPLATE, hasEpicDescriptionStructure } from '@/shared/lib/epic-description-template'
+import { useMswServer } from '../../../../tests/support/msw'
+import type { Epic, EpicStatus } from '../../../entities/epic'
 
-const mocks = vi.hoisted(() => ({
-  useCreateEpic: vi.fn(),
-}))
+let _createResponse: Epic | null = null
+
+function makeEpic(overrides: Partial<Epic> = {}): Epic {
+  return {
+    id: 'epic-new-id',
+    number: 42,
+    title: 'Created Epic',
+    description: '',
+    priority: 'p2',
+    status: 'idle' as EpicStatus,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+const createHandler = vi.fn(async (info: { request: Request }) => {
+  const body = await info.request.clone().json()
+  void body
+  if (_createResponse) {
+    return HttpResponse.json({ success: true, data: _createResponse })
+  }
+  return HttpResponse.json({ success: true, data: makeEpic() })
+})
+
+useMswServer(
+  http.post('*/api/projects/:projectId/epics', createHandler),
+)
 
 function LocationProbe() {
   const location = useLocation()
   return <div data-testid="current-path">{location.pathname}{location.search}</div>
 }
-
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
-  return {
-    ...actual,
-    useCreateEpic: mocks.useCreateEpic,
-  }
-})
 
 const project = {
   id: 'proj-create',
@@ -38,6 +58,7 @@ const project = {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  _createResponse = null
 })
 
 function renderDialog(props: { open?: boolean; onClose?: () => void } = {}) {
@@ -59,51 +80,6 @@ function renderDialog(props: { open?: boolean; onClose?: () => void } = {}) {
   return { queryClient, onClose, ...view }
 }
 
-interface CreatedEpic {
-  id: string
-  number: number
-  title: string
-}
-
-/**
- * Returns a mock `mutate` that triggers `useMutation`-style `onSuccess`
- * synchronously with a stubbed Epic. Calling code (EpicCreateDialog.handleSubmit)
- * passes `{ title, description, priority }` plus an options bag; the mock invokes
- * `onSuccess(stubEpic)` so the dialog transitions to its success state inside
- * React Testing Library's event-act boundary.
- */
-function makeAutoSuccessMutate(opts: { stubCreated?: CreatedEpic; failOnSuccessWith?: Error } = {}) {
-  return (variables: unknown, options?: { onSuccess?: (data: CreatedEpic) => void; onError?: (err: Error) => void }) => {
-    if (opts.failOnSuccessWith) {
-      options?.onError?.(opts.failOnSuccessWith)
-      return
-    }
-    const stub: CreatedEpic = opts.stubCreated ?? { id: 'epic-new-id', number: 42, title: 'Created Epic' }
-    options?.onSuccess?.(stub)
-    // Reference variables to silence "unused" lints; the stub echoes the user's title for assertions.
-    void variables
-  }
-}
-
-function mockUseCreateEpic({
-  mutate,
-  isPending = false,
-  isError = false,
-  error,
-}: {
-  mutate: ((...args: unknown[]) => void) | ((...args: never[]) => void)
-  isPending?: boolean
-  isError?: boolean
-  error?: Error | null
-}) {
-  mocks.useCreateEpic.mockReturnValue({
-    mutate: mutate as unknown as (...args: unknown[]) => void,
-    isPending,
-    isError,
-    error: error ?? null,
-  })
-}
-
 function stubWidth(width: number) {
   Object.defineProperty(document.documentElement, 'scrollWidth', {
     configurable: true,
@@ -117,8 +93,6 @@ function stubWidth(width: number) {
 
 describe('EpicCreateDialog guided template prefill', () => {
   it('prefills the description with the Goal / Background / Non-goals / Scope template when opened empty', () => {
-    mockUseCreateEpic({ mutate: vi.fn() })
-
     renderDialog()
 
     const description = screen.getByLabelText('Description') as HTMLTextAreaElement
@@ -131,16 +105,12 @@ describe('EpicCreateDialog guided template prefill', () => {
   })
 
   it('does not render the Insert-template action when the description already carries the full structure', () => {
-    mockUseCreateEpic({ mutate: vi.fn() })
-
     renderDialog()
 
     expect(screen.queryByRole('button', { name: 'Insert template' })).toBeNull()
   })
 
   it('exposes the Insert-template action when the user clears the description', () => {
-    mockUseCreateEpic({ mutate: vi.fn() })
-
     renderDialog()
 
     const description = screen.getByLabelText('Description') as HTMLTextAreaElement
@@ -152,8 +122,6 @@ describe('EpicCreateDialog guided template prefill', () => {
   })
 
   it('does not destroy existing simple text when Insert template is clicked', () => {
-    mockUseCreateEpic({ mutate: vi.fn() })
-
     renderDialog()
 
     const description = screen.getByLabelText('Description') as HTMLTextAreaElement
@@ -170,9 +138,6 @@ describe('EpicCreateDialog guided template prefill', () => {
 
 describe('EpicCreateDialog submit flow', () => {
   it('drops the required constraint on description and submits a quick create with no description', async () => {
-    const mutate = vi.fn()
-    mockUseCreateEpic({ mutate })
-
     renderDialog()
 
     const description = screen.getByLabelText('Description') as HTMLTextAreaElement
@@ -181,37 +146,33 @@ describe('EpicCreateDialog submit flow', () => {
 
     fireEvent.click(screen.getByTestId('epic-create-submit'))
 
-    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1))
-    const [payload] = mutate.mock.calls[0] as [{ title: string; description: string; priority: string }]
-    expect(payload.title).toBe('Quick milestone')
-    expect(payload.description).toBe('')
-    // Only the markdown string is sent — no separate goal/background/non-goals/scope fields.
-    expect(payload).not.toHaveProperty('goal')
-    expect(payload).not.toHaveProperty('background')
-    expect(payload).not.toHaveProperty('nonGoals')
-    expect(payload).not.toHaveProperty('scope')
+    await waitFor(() => expect(createHandler).toHaveBeenCalledTimes(1))
+    const call = createHandler.mock.calls[0]![0]
+    const url = new URL(call.request.url)
+    expect(url.pathname).toContain('/epics')
+    const body = await call.request.clone().json()
+    expect(body.title).toBe('Quick milestone')
+    expect(body.description).toBe('')
+    expect(body).not.toHaveProperty('goal')
+    expect(body).not.toHaveProperty('background')
+    expect(body).not.toHaveProperty('nonGoals')
+    expect(body).not.toHaveProperty('scope')
   })
 
   it('submits empty sections as-is so the stored description equals exactly what the user authored', async () => {
-    const mutate = vi.fn()
-    mockUseCreateEpic({ mutate })
-
     renderDialog()
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Drafted milestone' } })
 
-    // Leave description untouched so the pre-filled placeholder template is sent verbatim.
     fireEvent.click(screen.getByTestId('epic-create-submit'))
 
-    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1))
-    const [payload] = mutate.mock.calls[0] as [{ description: string }]
-    expect(payload.description).toBe(EPIC_DESCRIPTION_TEMPLATE)
+    await waitFor(() => expect(createHandler).toHaveBeenCalledTimes(1))
+    const call = createHandler.mock.calls[0]![0]
+    const body = await call.request.clone().json()
+    expect(body.description).toBe(EPIC_DESCRIPTION_TEMPLATE)
   })
 
   it('submits a plain non-templated description verbatim and does not inject template content', async () => {
-    const mutate = vi.fn()
-    mockUseCreateEpic({ mutate })
-
     renderDialog()
 
     const description = screen.getByLabelText('Description') as HTMLTextAreaElement
@@ -220,19 +181,19 @@ describe('EpicCreateDialog submit flow', () => {
 
     fireEvent.click(screen.getByTestId('epic-create-submit'))
 
-    await waitFor(() => expect(mutate).toHaveBeenCalledTimes(1))
-    const [payload] = mutate.mock.calls[0] as [{ description: string; title: string }]
-    expect(payload.description).toBe('Ship the entry point and unblock the planning flow.')
-    expect(payload.description).not.toContain('## Goal')
-    expect(payload.title).toBe('Plain milestone')
+    await waitFor(() => expect(createHandler).toHaveBeenCalledTimes(1))
+    const call = createHandler.mock.calls[0]![0]
+    const body = await call.request.clone().json()
+    expect(body.description).toBe('Ship the entry point and unblock the planning flow.')
+    expect(body.description).not.toContain('## Goal')
+    expect(body.title).toBe('Plain milestone')
   })
 })
 
 describe('EpicCreateDialog success state', () => {
   it('transitions to a success state on mutate success and does not auto-close the dialog', async () => {
     const onClose = vi.fn()
-    const mutate = vi.fn(makeAutoSuccessMutate({ stubCreated: { id: 'epic-new-id', number: 42, title: 'Created Epic' } }))
-    mockUseCreateEpic({ mutate })
+    _createResponse = makeEpic({ id: 'epic-new-id', number: 42, title: 'Created Epic' })
 
     renderDialog({ onClose })
 
@@ -244,8 +205,7 @@ describe('EpicCreateDialog success state', () => {
   })
 
   it('renders the idle-aware success message and never uses started/running wording', async () => {
-    const mutate = vi.fn(makeAutoSuccessMutate({ stubCreated: { id: 'epic-idle', number: 7, title: 'Idle wording' } }))
-    mockUseCreateEpic({ mutate })
+    _createResponse = makeEpic({ id: 'epic-idle', number: 7, title: 'Idle wording' })
 
     renderDialog()
 
@@ -263,8 +223,7 @@ describe('EpicCreateDialog success state', () => {
 
   it('navigates to /epics/<id> via useProjectPath when Open Epic is chosen', async () => {
     const onClose = vi.fn()
-    const mutate = vi.fn(makeAutoSuccessMutate({ stubCreated: { id: 'epic-open-target', number: 9, title: 'Open flow' } }))
-    mockUseCreateEpic({ mutate })
+    _createResponse = makeEpic({ id: 'epic-open-target', number: 9, title: 'Open flow' })
 
     renderDialog({ onClose })
 
@@ -282,8 +241,7 @@ describe('EpicCreateDialog success state', () => {
   })
 
   it('shows both Stay and Open Epic choices and never hides or disables either', async () => {
-    const mutate = vi.fn(makeAutoSuccessMutate({ stubCreated: { id: 'epic-both', number: 3, title: 'Both choices' } }))
-    mockUseCreateEpic({ mutate })
+    _createResponse = makeEpic({ id: 'epic-both', number: 3, title: 'Both choices' })
 
     renderDialog()
 
@@ -300,8 +258,7 @@ describe('EpicCreateDialog success state', () => {
 
   it('treating Stay as the dialog close keeps the user on the current page and does not navigate', async () => {
     const onClose = vi.fn()
-    const mutate = vi.fn(makeAutoSuccessMutate({ stubCreated: { id: 'epic-stay', number: 11, title: 'Stay flow' } }))
-    mockUseCreateEpic({ mutate })
+    _createResponse = makeEpic({ id: 'epic-stay', number: 11, title: 'Stay flow' })
 
     renderDialog({ onClose })
 
@@ -316,12 +273,9 @@ describe('EpicCreateDialog success state', () => {
 
   it('treats Cancel as Stay (closes without navigation) and the success state never fires a toast', async () => {
     const onClose = vi.fn()
-    const mutate = vi.fn()
-    mockUseCreateEpic({ mutate })
 
     renderDialog({ onClose })
 
-    // Cancel path uses the same handler as overlay / X close (treated as Stay).
     fireEvent.click(screen.getByTestId('epic-create-cancel'))
 
     expect(onClose).toHaveBeenCalledTimes(1)
@@ -329,8 +283,7 @@ describe('EpicCreateDialog success state', () => {
   })
 
   it('does not fire any create-success toast (useCreateEpic slimmed) and the dialog owns all success UX', async () => {
-    const mutate = vi.fn(makeAutoSuccessMutate({ stubCreated: { id: 'epic-no-toast', number: 1, title: 'No toast' } }))
-    mockUseCreateEpic({ mutate })
+    _createResponse = makeEpic({ id: 'epic-no-toast', number: 1, title: 'No toast' })
 
     renderDialog()
 
@@ -343,15 +296,13 @@ describe('EpicCreateDialog success state', () => {
 
   it('still closes cleanly when an X-style cancel happens from the success state (treat as Stay)', async () => {
     const onClose = vi.fn()
-    const mutate = vi.fn(makeAutoSuccessMutate({ stubCreated: { id: 'epic-cancel-success', number: 2, title: 'Cancel after success' } }))
-    mockUseCreateEpic({ mutate })
+    _createResponse = makeEpic({ id: 'epic-cancel-success', number: 2, title: 'Cancel after success' })
 
     renderDialog({ onClose })
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Cancel after success' } })
     fireEvent.click(screen.getByTestId('epic-create-submit'))
 
-    // After success, only Open Epic / Stay buttons render; verify they include Stay which always closes.
     const stay = await screen.findByTestId('epic-create-stay')
     fireEvent.click(stay)
 
@@ -362,19 +313,15 @@ describe('EpicCreateDialog success state', () => {
 
 describe('EpicCreateDialog error handling', () => {
   it('does not transition to the success state when the mutation handler reports a failure', async () => {
-    const failure = new Error('Server unavailable')
-    const mutate = makeAutoSuccessMutate({ failOnSuccessWith: failure })
-    mockUseCreateEpic({ mutate })
+    createHandler.mockImplementationOnce(async () =>
+      HttpResponse.json({ success: false, error: 'Server unavailable' }, { status: 500 }),
+    )
 
     renderDialog()
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Will fail' } })
+    fireEvent.click(screen.getByTestId('epic-create-submit'))
 
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('epic-create-submit'))
-    })
-
-    // No success transition should occur; the form remains reachable.
     await waitFor(() => expect(screen.queryByTestId('epic-create-success')).toBeNull())
     expect(screen.queryByTestId('epic-create-cancel')).toBeInTheDocument()
     expect(screen.queryByTestId('epic-create-submit')).toBeInTheDocument()
@@ -383,8 +330,6 @@ describe('EpicCreateDialog error handling', () => {
 
 describe('EpicCreateDialog mobile-safe layout', () => {
   it('renders without horizontal overflow at 320, 390, and 430 px', () => {
-    mockUseCreateEpic({ mutate: vi.fn() })
-
     for (const width of [320, 390, 430]) {
       cleanup()
       stubWidth(width)
@@ -395,8 +340,6 @@ describe('EpicCreateDialog mobile-safe layout', () => {
   })
 
   it('keeps the submit action reachable through a sticky footer (footer is outside the scroll region)', () => {
-    mockUseCreateEpic({ mutate: vi.fn() })
-
     renderDialog()
 
     const footer = screen.getByTestId('epic-create-footer')
@@ -407,13 +350,11 @@ describe('EpicCreateDialog mobile-safe layout', () => {
 
     const scrollRegion = screen.getByTestId('epic-create-scroll-region')
     expect(scrollRegion).toBeInTheDocument()
-    // The footer must NOT live inside the scroll region.
     expect(scrollRegion.contains(footer)).toBe(false)
   })
 
   it('keeps both success actions reachable through the same footer after a successful create', async () => {
-    const mutate = vi.fn(makeAutoSuccessMutate({ stubCreated: { id: 'epic-reach', number: 4, title: 'Reachability' } }))
-    mockUseCreateEpic({ mutate })
+    _createResponse = makeEpic({ id: 'epic-reach', number: 4, title: 'Reachability' })
 
     renderDialog()
 
