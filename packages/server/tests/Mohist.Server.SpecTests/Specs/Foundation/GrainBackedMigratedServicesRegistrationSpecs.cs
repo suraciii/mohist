@@ -13,7 +13,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Foundation;
 
-[Collection("WorkflowGrain")]
+[Collection("RunnerGrain")]
 public sealed class GrainBackedMigratedServicesRegistrationSpecs
 {
     private readonly WorkflowGrainFixture _fixture;

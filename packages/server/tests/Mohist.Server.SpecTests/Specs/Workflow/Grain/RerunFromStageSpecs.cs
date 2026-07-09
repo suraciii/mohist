@@ -15,6 +15,7 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
+[Collection("WorkflowGrain2")]
 public class RerunFromStageSpecs : WorkflowGrainSpecs
 {
     public RerunFromStageSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

@@ -13,7 +13,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 
-[Collection("WorkflowGrain")]
+[Collection("RunnerGrain")]
 public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
 {
     public RunnerWorkLedgerSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

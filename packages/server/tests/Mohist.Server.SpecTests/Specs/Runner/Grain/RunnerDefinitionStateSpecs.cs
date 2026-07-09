@@ -8,6 +8,7 @@ using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 
+[Collection("RunnerGrain")]
 public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
 {
     public RunnerDefinitionStateSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

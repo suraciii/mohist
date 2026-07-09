@@ -29,7 +29,7 @@ namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
 /// <c>MaxWorkflowSlots</c>.</item>
 /// </list>
 /// </summary>
-[Collection("WorkflowGrain")]
+[Collection("RunnerGrain")]
 public class RunnerPollSchedulingSpecs : Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainSpecs
 {
     public RunnerPollSchedulingSpecs(Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainFixture fixture) : base(fixture) { }

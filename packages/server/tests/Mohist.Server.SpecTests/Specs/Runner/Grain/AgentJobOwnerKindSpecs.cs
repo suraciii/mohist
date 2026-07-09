@@ -332,7 +332,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
     }
 }
 
-[Collection("WorkflowGrain")]
+[Collection("RunnerGrain")]
 [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
 [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
 public class WorkDispatchSerializationSpecs

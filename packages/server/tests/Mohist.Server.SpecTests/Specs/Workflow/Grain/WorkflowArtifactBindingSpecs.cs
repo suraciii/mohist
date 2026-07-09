@@ -14,6 +14,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
+[Collection("WorkflowGrain3")]
 public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
 {
     public WorkflowArtifactBindingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

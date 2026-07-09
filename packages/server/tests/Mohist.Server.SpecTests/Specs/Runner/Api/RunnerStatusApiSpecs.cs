@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
-[Collection("MohistIntegration")]
+[Collection("MohistIntegration2")]
 public class RunnerStatusApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("IntegrationIssue")]
+[Collection("IntegrationIssue2")]
 public class IssueSessionApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
