@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render as baseRender, screen, fireEvent, waitFor } from './test-utils'
+import { http, HttpResponse } from 'msw'
 import { CreateIssueDialog } from '../src/features/create-issue'
+import { server, useMswServer } from './support/msw'
 
 vi.mock('../src/entities/issue', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/entities/issue')>()
@@ -10,42 +12,52 @@ vi.mock('../src/entities/issue', async (importOriginal) => {
   }
 })
 
-vi.mock('../src/entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/settings')>()
-  return {
-    ...actual,
-    useWorkflowProfiles: vi.fn(),
-    useEffectiveDefaultWorkflowProfile: vi.fn(),
-    useAvailableModelIds: vi.fn(),
-  }
-})
-
-vi.mock('../src/entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/project')>()
-  return {
-    ...actual,
-    useRepositories: vi.fn(),
-  }
-})
-
 const { createIssue } = await import('../src/entities/issue')
-const { useWorkflowProfiles, useEffectiveDefaultWorkflowProfile, useAvailableModelIds } = await import('../src/entities/settings')
-const { useRepositories } = await import('../src/entities/project')
 
 const PROFILES = [
-  { id: 'mohist/local', displayName: 'Default', description: 'Default profile', isDefault: true },
-  { id: 'feature-flow', displayName: 'Feature Flow', description: 'Feature work', isDefault: false },
+  { id: 'mohist/local', name: 'Default', description: 'Default profile', isDefault: true },
+  { id: 'feature-flow', name: 'Feature Flow', description: 'Feature work', isDefault: false },
 ]
 
+const PROFILES_PATH = '*/api/workflow-templates/system*'
+const PROJECT_PROFILE_PATH = '*/api/projects/:projectId/workflow-profile'
+const MODELS_PATH = '*/api/projects/:projectId/opencode/models'
+const REPOS_PATH = '*/api/projects/:projectId/repositories'
+const ISSUE_TEMPLATES_PATH = '*/api/issue-templates*'
+const ISSUES_PATH = '*/api/projects/:projectId/issues*'
+
+const defaultHandlers = [
+  http.get(PROFILES_PATH, () => HttpResponse.json({ success: true, data: PROFILES })),
+  http.get(PROJECT_PROFILE_PATH, () =>
+    HttpResponse.json({
+      success: true,
+      data: { projectId: 'test-project', defaultTemplateId: null, disabledWorkflowProfileIds: [] },
+    }),
+  ),
+  http.get(MODELS_PATH, () => HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } })),
+  http.get(REPOS_PATH, () => HttpResponse.json({ success: true, data: [] })),
+  http.get(ISSUE_TEMPLATES_PATH, () => HttpResponse.json({ success: true, data: [] })),
+  http.get(ISSUES_PATH, () => HttpResponse.json({ success: true, data: [] })),
+] as const
+
+useMswServer(...defaultHandlers)
+
+function mockProfiles(profiles: { id: string; name: string; description: string; isDefault: boolean }[]) {
+  server.use(http.get(PROFILES_PATH, () => HttpResponse.json({ success: true, data: profiles })))
+}
+
+function mockProjectDefault(templateId: string) {
+  server.use(
+    http.get(PROJECT_PROFILE_PATH, () =>
+      HttpResponse.json({
+        success: true,
+        data: { projectId: 'test-project', defaultTemplateId: templateId, disabledWorkflowProfileIds: [] },
+      }),
+    ),
+  )
+}
+
 function mockHooks() {
-  ;(useRepositories as ReturnType<typeof vi.fn>).mockReturnValue({ data: [] })
-  ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({ data: PROFILES })
-  ;(useEffectiveDefaultWorkflowProfile as ReturnType<typeof vi.fn>).mockReturnValue({
-    effectiveTemplateId: 'mohist/local',
-    source: 'system',
-    configuredTemplateId: null,
-  })
-  ;(useAvailableModelIds as ReturnType<typeof vi.fn>).mockReturnValue({ data: [], isLoading: false })
   ;(createIssue as ReturnType<typeof vi.fn>).mockResolvedValue({
     id: 'issue_1',
     number: 1,
@@ -54,8 +66,8 @@ function mockHooks() {
     health: 'active',
     projectId: 'test-project',
     labels: {},
-    createdAt: '2026-06-16T00:00:00.000Z',
-    updatedAt: '2026-06-16T00:00:00.000Z',
+    createdAt: '2026-06-16T00:00:00Z',
+    updatedAt: '2026-06-16T00:00:00Z',
   })
 }
 
@@ -152,6 +164,11 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
 
     await screen.findByTestId('workflow-recommendation')
 
+    const workflowSelect = await screen.findByRole('combobox', { name: 'Workflow' }) as HTMLSelectElement
+    await waitFor(() => {
+      expect(workflowSelect.value).toBe('feature-flow')
+    })
+
     fireEvent.click(screen.getByText('Create'))
 
     await waitFor(() => {
@@ -199,23 +216,19 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
   })
 
   it('shows the project-configured default workflowProfileId but does not serialize it unless manually changed', async () => {
-    ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: [
-        { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
-      ],
-    })
-    ;(useEffectiveDefaultWorkflowProfile as ReturnType<typeof vi.fn>).mockReturnValue({
-      effectiveTemplateId: 'mohist/github-pr',
-      source: 'project',
-      configuredTemplateId: 'mohist/github-pr',
-    })
+    mockProfiles([
+      { id: 'mohist/local', name: 'Default', description: '', isDefault: true },
+      { id: 'mohist/github-pr', name: 'PR', description: '', isDefault: false },
+    ])
+    mockProjectDefault('mohist/github-pr')
 
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Project default' } })
     const workflowSelect = await screen.findByRole('combobox', { name: 'Workflow' }) as HTMLSelectElement
-    expect(workflowSelect.value).toBe('mohist/github-pr')
+    await waitFor(() => {
+      expect(workflowSelect.value).toBe('mohist/github-pr')
+    })
 
     fireEvent.click(screen.getByText('Create'))
 
@@ -227,18 +240,19 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
   })
 
   it('sends workflowProfileId=mohist/github-pr when the user explicitly selects it', async () => {
-    ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: [
-        { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
-      ],
-    })
+    mockProfiles([
+      { id: 'mohist/local', name: 'Default', description: '', isDefault: true },
+      { id: 'mohist/github-pr', name: 'PR', description: '', isDefault: false },
+    ])
 
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'PR work' } })
 
     const workflowSelect = await screen.findByRole('combobox', { name: 'Workflow' }) as HTMLSelectElement
+    await waitFor(() => {
+      expect(workflowSelect.querySelector('option[value="mohist/github-pr"]')).toBeTruthy()
+    })
     fireEvent.change(workflowSelect, { target: { value: 'mohist/github-pr' } })
 
     fireEvent.click(screen.getByText('Create'))
@@ -275,17 +289,18 @@ describe('CreateIssueDialog -> issue detail workflow profile display round-trip'
       workflowProfileId: 'mohist/github-pr',
     }
     ;(createIssue as ReturnType<typeof vi.fn>).mockResolvedValue(createdIssue)
-    ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: [
-        { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
-      ],
-    })
+    mockProfiles([
+      { id: 'mohist/local', name: 'Default', description: '', isDefault: true },
+      { id: 'mohist/github-pr', name: 'PR', description: '', isDefault: false },
+    ])
 
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'PR work' } })
     const workflowSelect = await screen.findByRole('combobox', { name: 'Workflow' }) as HTMLSelectElement
+    await waitFor(() => {
+      expect(workflowSelect.querySelector('option[value="mohist/github-pr"]')).toBeTruthy()
+    })
     fireEvent.change(workflowSelect, { target: { value: 'mohist/github-pr' } })
     fireEvent.click(screen.getByText('Create'))
 

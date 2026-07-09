@@ -3,17 +3,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import type { AgentInfo } from '../../../entities/agent'
 import { AgentProfileEditor } from './AgentProfileEditor'
+import { useMswServer } from '../../../../tests/support/msw'
 
 const mocks = vi.hoisted(() => ({
   createMutation: { mutate: vi.fn(), isPending: false },
   updateMutation: { mutate: vi.fn(), isPending: false },
   archiveMutation: { mutate: vi.fn(), isPending: false },
-  availableModels: { models: ['gpt-4', 'gpt-4o', 'claude-3'] },
-  modelVariants: {},
 }))
+
+useMswServer(
+  http.get('*/api/projects/:projectId/opencode/models', () =>
+    HttpResponse.json({
+      success: true,
+      data: { models: ['gpt-4', 'gpt-4o', 'claude-3'], modelVariants: {} },
+    }),
+  ),
+)
 
 vi.mock('../../../entities/agent', () => ({
   useCreateAgent: () => mocks.createMutation,
@@ -33,11 +42,6 @@ vi.mock('../../../entities/agent', () => ({
     if (Object.keys(base).length === 0) return null
     return base
   },
-}))
-
-vi.mock('../../../entities/settings', () => ({
-  useAvailableModelIds: () => ({ data: mocks.availableModels, isLoading: false }),
-  useModelVariants: () => mocks.modelVariants,
 }))
 
 
