@@ -12,14 +12,6 @@ const epicMocks = vi.hoisted(() => ({
   useEpic: vi.fn(),
 }))
 
-vi.mock('../../../entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project')>()
-  return {
-    ...actual,
-    useDeleteProject: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
-  }
-})
-
 vi.mock('../../../entities/agent', () => ({
   useAgentStatus: () => ({ data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } } }),
   useAgent: () => ({ data: null, isLoading: false }),
