@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
-import { setupServer } from 'msw/node'
+import { useMswServer } from '../../../../tests/support/msw'
 import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { useWorkflowProfile } from './queries'
@@ -45,28 +45,17 @@ function renderUseWorkflowProfile(id: string | null) {
 
 let requests: CapturedRequest[] = []
 
-const server = setupServer(
+useMswServer(
   http.get('/api/workflow-templates/system/mohist/local', ({ request }) => {
     requests.push({ method: request.method, url: request.url })
     return HttpResponse.json({ success: true, data: PROFILE_DETAIL })
   }),
 )
 
-beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
-  requests = []
-})
-
 afterEach(() => {
-  server.resetHandlers()
   for (const qc of queryClients) qc.clear()
   queryClients.length = 0
   requests = []
-})
-
-afterAll(() => {
-  server.close()
-  vi.restoreAllMocks()
 })
 
 describe('getWorkflowProfile (workflow profile detail URL)', () => {

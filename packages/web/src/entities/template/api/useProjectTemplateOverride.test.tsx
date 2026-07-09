@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
-import { setupServer } from 'msw/node'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import type { ReactNode } from 'react'
 import { useProjectTemplateOverride } from '..'
 
@@ -26,8 +26,6 @@ const defaultHandlers = [
     HttpResponse.json({ success: true, data: OVERRIDE_ROW }),
   ),
 ]
-
-const server = setupServer(...defaultHandlers)
 
 const queryClients: QueryClient[] = []
 
@@ -54,19 +52,11 @@ function renderUseProjectTemplateOverride(
   })
 }
 
-beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
-})
+useMswServer(...defaultHandlers)
 
 afterEach(() => {
-  server.resetHandlers(...defaultHandlers)
   for (const qc of queryClients) qc.clear()
   queryClients.length = 0
-})
-
-afterAll(() => {
-  server.close()
-  vi.restoreAllMocks()
 })
 
 describe('useProjectTemplateOverride hook', () => {

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import { http, HttpResponse } from 'msw'
-import { setupServer } from 'msw/node'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { RepositoriesSection } from './RepositoriesSection'
 
 const addRepositoryRequests: { method: string; url: string; body: unknown }[] = []
@@ -67,15 +67,7 @@ const handlers = [
   }),
 ]
 
-const server = setupServer(...handlers)
-
-beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
-})
-
-afterAll(() => {
-  server.close()
-})
+useMswServer(...handlers)
 
 beforeEach(() => {
   addRepositoryRequests.length = 0
@@ -95,11 +87,6 @@ beforeEach(() => {
       isDefault: false,
     },
   ]
-  server.resetHandlers(...handlers)
-})
-
-afterEach(() => {
-  server.resetHandlers(...handlers)
 })
 
 describe('RepositoriesSection (git-url only)', () => {

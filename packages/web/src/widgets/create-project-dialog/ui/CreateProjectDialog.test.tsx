@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 import {
-  afterAll,
   afterEach,
-  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -11,7 +9,7 @@ import {
 import { useState } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import { http, HttpResponse } from 'msw'
-import { setupServer } from 'msw/node'
+import { useMswServer } from '../../../../tests/support/msw'
 import { CreateProjectDialog } from '..'
 import { useProject } from '../../../entities/project'
 
@@ -44,7 +42,7 @@ const handlers = [
   }),
 ]
 
-const server = setupServer(...handlers)
+useMswServer(...handlers)
 
 function ActiveProjectProbe() {
   const { projectId } = useProject()
@@ -61,21 +59,11 @@ function HostDialog() {
   )
 }
 
-beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
-})
-
-afterAll(() => {
-  server.close()
-})
-
 beforeEach(() => {
   createRequests.length = 0
-  server.resetHandlers(...handlers)
 })
 
 afterEach(() => {
-  server.resetHandlers(...handlers)
   window.localStorage.clear()
 })
 

@@ -1,8 +1,5 @@
 // @vitest-environment jsdom
 import {
-  afterAll,
-  afterEach,
-  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -16,7 +13,7 @@ import {
 } from './TemplateEditor'
 import type { ProjectTemplate } from '../../../entities/template'
 import { http, HttpResponse } from 'msw'
-import { setupServer } from 'msw/node'
+import { server, useMswServer } from '../../../../tests/support/msw'
 
 const PROJECT_ID = 'test-project'
 
@@ -94,22 +91,9 @@ const handlers = [
   }),
 ]
 
-const server = setupServer(...handlers)
-
-beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
-})
-
-afterAll(() => {
-  server.close()
-})
+useMswServer(...handlers)
 
 beforeEach(() => {
-  server.resetHandlers(...handlers)
-})
-
-afterEach(() => {
-  server.resetHandlers(...handlers)
   vi.restoreAllMocks()
 })
 
