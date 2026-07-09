@@ -7,46 +7,12 @@ import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
 import { RuntimeToastHost, useRuntimeToast } from '../../../shared/ui/toast'
+import { mockIssue, mockIssueCommits, mockIssueDiff, mockWorkflowTimeline, mockWorkspaceStatus, mountIssueDetail } from './_issueDetailMsw'
 
 function LocationProbe() {
   const location = useLocation()
   return <div data-testid="current-path">{location.pathname}{location.search}</div>
 }
-
-const mockUseIssueDiff = vi.fn()
-const mockUseIssueCommits = vi.fn()
-const mockUseWorkflowTimeline = vi.fn()
-const mockUseWorkflowYaml = vi.fn()
-const mockUseAgentStatus = vi.fn()
-const mockUseIssue = vi.fn()
-const mockUseWorkspaceStatus = vi.fn()
-
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    useIssue: (...args: unknown[]) => mockUseIssue(...args),
-    useIssueDiff: (...args: unknown[]) => mockUseIssueDiff(...args),
-    useIssueCommits: (...args: unknown[]) => mockUseIssueCommits(...args),
-    useWorkflowTimeline: (...args: unknown[]) => mockUseWorkflowTimeline(...args),
-    useWorkflowYaml: (...args: unknown[]) => mockUseWorkflowYaml(...args),
-    useWorkspaceStatus: (...args: unknown[]) => mockUseWorkspaceStatus(...args),
-    useIssueEvents: () => ({ data: undefined, isLoading: false }),
-    getIssueWorkflowVariables: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
-  }
-})
-
-vi.mock('../../../entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/settings')>()
-  return {
-    ...actual,
-    useWorkflowProfiles: () => ({ data: [] }),
-    useAvailableModelIds: () => ({ data: [] }),
-    useOpencodeModel: () => ({ data: null }),
-    useModelVariants: () => ({ data: [] }),
-    useEffectiveDefaultWorkflowProfile: () => ({ data: null }),
-  }
-})
 
 vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
   EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null; enabled?: boolean }) => (
@@ -59,14 +25,6 @@ vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
     />
   )),
 }))
-
-vi.mock('../../../entities/agent', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/agent')>()
-  return {
-    ...actual,
-    useAgentStatus: (...args: unknown[]) => mockUseAgentStatus(...args),
-  }
-})
 
 const projects: Project[] = [
   {
@@ -95,6 +53,8 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
   }
 }
 
+mountIssueDetail({ issue: makeIssue() })
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -111,35 +71,21 @@ function renderPage() {
   )
 }
 
+afterEach(() => {
+  cleanup()
+})
+
 describe('IssueDetailPage primaryEpic numbered display', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-  })
-
-  afterEach(() => {
-    cleanup()
-  })
-
   it('renders #N as the primary epic identifier on the issue detail page when number is present', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        primaryEpic: {
-          id: 'epic-uuid-aaaa-bbbb-cccccccccccc',
-          number: 7,
-          title: 'Numbered epic',
-          status: 'active',
-          priority: 'p1',
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      primaryEpic: {
+        id: 'epic-uuid-aaaa-bbbb-cccccccccccc',
+        number: 7,
+        title: 'Numbered epic',
+        status: 'active',
+        priority: 'p1',
+      },
+    }))
 
     renderPage()
 
@@ -149,19 +95,15 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
   })
 
   it('does not display a truncated UUID as the primary epic identifier on the issue detail page when number is present', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        primaryEpic: {
-          id: 'epic-uuid-aaaa-bbbb-cccccccccccc',
-          number: 7,
-          title: 'Numbered epic',
-          status: 'active',
-          priority: 'p1',
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      primaryEpic: {
+        id: 'epic-uuid-aaaa-bbbb-cccccccccccc',
+        number: 7,
+        title: 'Numbered epic',
+        status: 'active',
+        priority: 'p1',
+      },
+    }))
 
     renderPage()
 
@@ -174,19 +116,15 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
   })
 
   it('falls back to the truncated UUID for the primary epic label when number is null', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        primaryEpic: {
-          id: 'epic-legacy-1234567890',
-          number: null,
-          title: 'Legacy epic',
-          status: 'active',
-          priority: 'p1',
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      primaryEpic: {
+        id: 'epic-legacy-1234567890',
+        number: null,
+        title: 'Legacy epic',
+        status: 'active',
+        priority: 'p1',
+      },
+    }))
 
     renderPage()
 
@@ -196,21 +134,15 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
   })
 
   it('renders the activity dialog entry in the header without rendering the inline timeline panel', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        id: 'issue-14',
-        number: 14,
-        workflowStatus: 'running',
-      }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseIssueDiff.mockReturnValue({
-      data: {
-        available: true,
-        files: [],
-        summary: { filesChanged: 0, commits: 0, additions: 0, deletions: 0 },
-      },
+    mockIssue(makeIssue({
+      id: 'issue-14',
+      number: 14,
+      workflowStatus: 'running',
+    }))
+    mockIssueDiff({
+      available: true,
+      files: [],
+      summary: { filesChanged: 0, commits: 0, additions: 0, deletions: 0 },
     })
 
     const { container } = renderPage()
@@ -221,37 +153,19 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
 })
 
 describe('IssueDetailPage runtime decision surface', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-  })
-
-  afterEach(() => {
-    cleanup()
-  })
-
   it('mounts the runtime decision surface above the workflow stage bar', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-        recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop', 'inspect'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+      recovery: {
+        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop', 'inspect'],
+      },
+    }))
 
     const { container } = renderPage()
 
@@ -267,26 +181,22 @@ describe('IssueDetailPage runtime decision surface', () => {
   })
 
   it('exposes a single approval-required primary summary with approve/send-back inside the surface', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        status: 'in_progress',
-        workflowStage: 'check',
-        health: 'paused',
-        approvalState: {
-          status: 'awaiting',
-          stage: 'check',
-          requestedAt: '2026-01-01T00:00:00.000Z',
-        },
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: null,
-          workflowSummaryState: 'awaiting-approval',
-          allowedActions: ['approve', 'reject'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      status: 'in_progress',
+      workflowStage: 'check',
+      health: 'paused',
+      approvalState: {
+        status: 'awaiting',
+        stage: 'check',
+        requestedAt: '2026-01-01T00:00:00.000Z',
+      },
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: null,
+        workflowSummaryState: 'awaiting-approval',
+        allowedActions: ['approve', 'reject'],
+      },
+    }))
 
     renderPage()
 
@@ -301,31 +211,25 @@ describe('IssueDetailPage runtime decision surface', () => {
   })
 
   it('renders one Stop control on the page and it belongs to the runtime decision surface', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-        recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Build' },
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseWorkflowTimeline.mockReturnValue({
-      data: {
-        workflowRunId: 'wr-1',
-        status: 'running',
-        currentStage: 'build',
-        pendingWork: null,
-        stages: [],
-        availableActions: [{ name: 'stop', label: 'Stop', target: null }],
+    mockIssue(makeIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+      recovery: {
+        currentWorkItem: { type: 'task', id: 't1', title: 'Build' },
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop'],
       },
+    }))
+    mockWorkflowTimeline({
+      workflowRunId: 'wr-1',
+      status: 'running',
+      currentStage: 'build',
+      pendingWork: null,
+      stages: [],
+      availableActions: [{ name: 'stop', label: 'Stop', target: null }],
     })
 
     renderPage()
@@ -338,22 +242,18 @@ describe('IssueDetailPage runtime decision surface', () => {
   })
 
   it('keeps the sessions panel reachable as supporting evidence beneath the surface', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowRunId: 'wr-1',
-        health: 'active',
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowRunId: 'wr-1',
+      health: 'active',
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop'],
+      },
+    }))
 
     const { container } = renderPage()
 
@@ -371,34 +271,20 @@ describe('IssueDetailPage runtime decision surface', () => {
 
 describe('IssueDetailPage repository metadata containment', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     window.innerWidth = 1280
     window.dispatchEvent(new Event('resize'))
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-  })
-
-  afterEach(() => {
-    cleanup()
   })
 
   it('bounds long repository metadata within the details column at desktop width', async () => {
     const gitUrl = 'https://github.com/suraciii/mohist.git'
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        projectName: 'mohist-local',
-        repository: {
-          name: 'master',
-          baseBranch: 'master',
-          gitUrl,
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      projectName: 'mohist-local',
+      repository: {
+        name: 'master',
+        baseBranch: 'master',
+        gitUrl,
+      },
+    }))
 
     renderPage()
 
@@ -422,33 +308,27 @@ describe('IssueDetailPage repository metadata containment', () => {
   it('contains long diff branch names without page-level hidden overflow', async () => {
     const head = 'feature/super-long-branch-name-that-would-otherwise-force-horizontal-page-scroll-at-desktop-width'
     const base = 'release/equally-long-target-branch-name-that-needs-local-wrapping-not-page-clipping'
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        repository: {
-          name: 'master',
-          baseBranch: 'master',
-          gitUrl: 'https://github.com/suraciii/mohist.git',
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseIssueDiff.mockReturnValue({
-      data: {
-        available: true,
-        reason: null,
-        base,
-        head,
-        mergeBase: 'abc123',
-        ahead: 2,
-        behind: 1,
-        canFastForward: false,
-        comparison: 'merge-base',
-        summary: { filesChanged: 3, commits: 2, additions: 10, deletions: 4 },
-        files: [],
+    mockIssue(makeIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      repository: {
+        name: 'master',
+        baseBranch: 'master',
+        gitUrl: 'https://github.com/suraciii/mohist.git',
       },
+    }))
+    mockIssueDiff({
+      available: true,
+      reason: null,
+      base,
+      head,
+      mergeBase: 'abc123',
+      ahead: 2,
+      behind: 1,
+      canFastForward: false,
+      comparison: 'merge-base',
+      summary: { filesChanged: 3, commits: 2, additions: 10, deletions: 4 },
+      files: [],
     })
 
     renderPage()
@@ -464,25 +344,8 @@ describe('IssueDetailPage repository metadata containment', () => {
 })
 
 describe('IssueDetailPage icon-only controls', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-  })
-
-  afterEach(() => {
-    cleanup()
-  })
-
   it('exposes an accessible name and baseline icon-button sizing for the edit issue control', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue(),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue())
 
     renderPage()
 
@@ -536,43 +399,26 @@ function renderPageWithToastHost() {
 }
 
 describe('IssueDetailPage disconnected-runtime-notice routing', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-  })
-
-  afterEach(() => {
-    cleanup()
-  })
-
   it('does not render transport-disconnect text inline between Description, Commits, or Comments when a runtime notice is dispatched', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        body: 'Issue description content for the test fixture.',
-        comments: [
-          {
-            id: 'c1',
-            author: 'tester',
-            body: 'A reviewer comment that should remain free of connection state messaging.',
-            createdAt: '2026-01-01T00:00:00Z',
-          },
-        ],
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
+    mockIssue(makeIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      body: 'Issue description content for the test fixture.',
+      comments: [
+        {
+          id: 'c1',
+          author: 'tester',
+          body: 'A reviewer comment that should remain free of connection state messaging.',
+          createdAt: '2026-01-01T00:00:00Z',
         },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+      ],
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop'],
+      },
+    }))
 
     const { container } = renderPageWithToastHost()
 
@@ -619,25 +465,8 @@ describe('IssueDetailPage disconnected-runtime-notice routing', () => {
 })
 
 describe('IssueDetailPage activity dialog', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-  })
-
-  afterEach(() => {
-    cleanup()
-  })
-
   it('renders the activity entry in the header with aria-label and a min hit-target baseline', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue(),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue())
 
     renderPage()
 
@@ -649,15 +478,11 @@ describe('IssueDetailPage activity dialog', () => {
   })
 
   it('does not render the inline activity panel in the main content column', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        id: 'issue-14',
-        number: 14,
-        workflowStatus: 'running',
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      id: 'issue-14',
+      number: 14,
+      workflowStatus: 'running',
+    }))
 
     const { container } = renderPage()
 
@@ -666,15 +491,11 @@ describe('IssueDetailPage activity dialog', () => {
   })
 
   it('does not mount the timeline panel (and so does not enable the events fetch) before the dialog opens', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        id: 'issue-14',
-        number: 14,
-        workflowStatus: 'running',
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      id: 'issue-14',
+      number: 14,
+      workflowStatus: 'running',
+    }))
 
     const { container } = renderPage()
 
@@ -684,15 +505,11 @@ describe('IssueDetailPage activity dialog', () => {
   })
 
   it('mounts the timeline panel only after the entry opens the dialog and the dialog is unmounted on close', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        id: 'issue-14',
-        number: 14,
-        workflowStatus: 'running',
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      id: 'issue-14',
+      number: 14,
+      workflowStatus: 'running',
+    }))
 
     const { container } = renderPage()
 
@@ -718,15 +535,11 @@ describe('IssueDetailPage activity dialog', () => {
   })
 
   it('does not display a precise event count or fetch events before the dialog is first opened', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        id: 'issue-14',
-        number: 14,
-        workflowStatus: 'running',
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      id: 'issue-14',
+      number: 14,
+      workflowStatus: 'running',
+    }))
 
     renderPage()
 
@@ -736,15 +549,11 @@ describe('IssueDetailPage activity dialog', () => {
   })
 
   it('renders the dialog as a near-fullscreen sheet on mobile width', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        id: 'issue-14',
-        number: 14,
-        workflowStatus: 'running',
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      id: 'issue-14',
+      number: 14,
+      workflowStatus: 'running',
+    }))
 
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 })
     window.dispatchEvent(new Event('resize'))
@@ -762,15 +571,11 @@ describe('IssueDetailPage activity dialog', () => {
   })
 
   it('passes enabled=true to the timeline panel only after the dialog opens, and unmounts the panel on close', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        id: 'issue-14',
-        number: 14,
-        workflowStatus: 'running',
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      id: 'issue-14',
+      number: 14,
+      workflowStatus: 'running',
+    }))
 
     const { container } = renderPage()
 
@@ -796,18 +601,8 @@ describe('IssueDetailPage activity dialog', () => {
 
 describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
     window.dispatchEvent(new Event('resize'))
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-  })
-
-  afterEach(() => {
-    cleanup()
   })
 
   function expectUsesUnifiedSpacingScale(element: HTMLElement) {
@@ -826,11 +621,7 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
   }
 
   it('separates the main content column with a single group-level gap (no ad-hoc 5/7/9 values)', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({ id: 'issue-14', number: 14 }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({ id: 'issue-14', number: 14 }))
 
     renderPage()
 
@@ -853,11 +644,7 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
   })
 
   it('separates right-rail cards with a group-level gap and no ad-hoc 5/7/9 values', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({ id: 'issue-14', number: 14 }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({ id: 'issue-14', number: 14 }))
 
     renderPage()
 
@@ -869,18 +656,14 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
   })
 
   it('gives the first-screen runtime decision surface breathing room rather than sitting flush against neighbors', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        id: 'issue-14',
-        number: 14,
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({
+      id: 'issue-14',
+      number: 14,
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+    }))
 
     renderPage()
 
@@ -893,11 +676,7 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
   })
 
   it('lets the header sit inside the spaced status-header tier so the next region is not flush', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({ id: 'issue-14', number: 14 }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({ id: 'issue-14', number: 14 }))
 
     renderPage()
 
@@ -908,11 +687,7 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
   })
 
   it('keeps the data-testid of every major section stable for downstream density regression checks', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({ id: 'issue-14', number: 14, body: 'Issue body content.' }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({ id: 'issue-14', number: 14, body: 'Issue body content.' }))
 
     const { container } = renderPage()
 
@@ -933,37 +708,30 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
   })
 
   it('places the branch rebase status above the workflow view instead of burying it below long runtime details', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        id: 'issue-14',
-        number: 14,
-        body: 'Issue body content.',
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-      }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseWorkspaceStatus.mockReturnValue({
-      data: {
-        exists: true,
-        branch: 'mohist/run-test',
-        baseBranch: 'master',
-        ahead: 1,
-        behind: 2,
-        rebaseInProgress: false,
-        conflictingFiles: [],
-      },
-      isLoading: false,
+    mockIssue(makeIssue({
+      id: 'issue-14',
+      number: 14,
+      body: 'Issue body content.',
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+    }))
+    mockWorkspaceStatus({
+      exists: true,
+      branch: 'mohist/run-test',
+      baseBranch: 'master',
+      ahead: 1,
+      behind: 2,
+      rebaseInProgress: false,
+      conflictingFiles: [],
     })
 
     const { container } = renderPage()
 
     const branchFrame = await waitFor(() => screen.getByTestId('branch-bar-frame'))
     expect(within(branchFrame).getByTestId('branch-bar')).toBeTruthy()
-    expect(within(branchFrame).getByText('Rebase onto master')).toBeTruthy()
+    await waitFor(() => expect(within(branchFrame).getByText('Rebase onto master')).toBeTruthy())
 
     const workflowFrame = screen.getByTestId('workflow-view-frame')
     const readingFlow = screen.getByTestId('reading-flow')
@@ -976,23 +744,17 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
   })
 
   it('does not render an empty PR delivery summary frame when the workflow has no PR delivery metadata', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        id: 'issue-14',
-        number: 14,
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-      }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseWorkflowTimeline.mockReturnValue({
-      data: {
-        stages: [{ id: 'build', tasks: [], checks: [] }],
-        availableActions: [],
-      },
+    mockIssue(makeIssue({
+      id: 'issue-14',
+      number: 14,
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+    }))
+    mockWorkflowTimeline({
+      stages: [{ id: 'build', tasks: [], checks: [] }],
+      availableActions: [],
     })
 
     const { container } = renderPage()
@@ -1002,47 +764,40 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
   })
 
   it('removes decorative borders from plain section cards (Description, Comments, Commits) in favor of whitespace grouping', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        id: 'issue-14',
-        number: 14,
-        body: 'Issue body content for the description test.',
-        comments: [
-          {
-            id: 'c1',
-            author: 'tester',
-            body: 'A reviewer comment for the comments test.',
-            createdAt: '2026-01-01T00:00:00Z',
-          },
-        ],
-      }),
-      isLoading: false,
-      isError: false,
-    })
-
-    mockUseIssueCommits.mockReturnValue({
-      data: {
-        available: true,
-        reason: null,
-        head: 'feature/head',
-        base: 'main',
-        mergeBase: 'abc',
-        ahead: 1,
-        behind: 0,
-        canFastForward: true,
-        comparison: 'merge-base',
-        summary: { filesChanged: 1, commits: 1, additions: 1, deletions: 0 },
-        files: [],
-        commits: [
-          {
-            hash: 'abcdef1234567890',
-            shortHash: 'abcdef1',
-            message: 'Test commit',
-            author: 'tester',
-            date: '2026-01-01T00:00:00Z',
-          },
-        ],
-      },
+    mockIssue(makeIssue({
+      id: 'issue-14',
+      number: 14,
+      body: 'Issue body content for the description test.',
+      comments: [
+        {
+          id: 'c1',
+          author: 'tester',
+          body: 'A reviewer comment for the comments test.',
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+    }))
+    mockIssueCommits({
+      available: true,
+      reason: null,
+      head: 'feature/head',
+      base: 'main',
+      mergeBase: 'abc',
+      ahead: 1,
+      behind: 0,
+      canFastForward: true,
+      comparison: 'merge-base',
+      summary: { filesChanged: 1, commits: 1, additions: 1, deletions: 0 },
+      files: [],
+      commits: [
+        {
+          hash: 'abcdef1234567890',
+          shortHash: 'abcdef1',
+          message: 'Test commit',
+          author: 'tester',
+          date: '2026-01-01T00:00:00Z',
+        },
+      ],
     })
 
     renderPage()
@@ -1059,26 +814,8 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
 })
 
 describe('IssueDetailPage Ask Agent entry (T-005)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-  })
-
-  afterEach(() => {
-    cleanup()
-  })
-
   it('renders an Ask Agent button in the Actions card section', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue(),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue())
 
     renderPage()
 
@@ -1088,11 +825,7 @@ describe('IssueDetailPage Ask Agent entry (T-005)', () => {
   })
 
   it('navigates to the composer with ?issue=<number> on click', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({ number: 14 }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({ number: 14 }))
 
     renderPage()
 
@@ -1103,11 +836,7 @@ describe('IssueDetailPage Ask Agent entry (T-005)', () => {
   })
 
   it('uses encodeURIComponent for the issue number in the navigation URL', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({ number: 14 }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(makeIssue({ number: 14 }))
 
     renderPage()
 
@@ -1119,47 +848,28 @@ describe('IssueDetailPage Ask Agent entry (T-005)', () => {
 })
 
 describe('IssueDetailPage runtime status badges', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-  })
-
-  afterEach(() => {
-    cleanup()
-  })
-
   it('groups identity metadata separately from one runtime summary badge', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-        priority: 'p1',
-        isDraft: true,
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseWorkflowTimeline.mockReturnValue({
-      data: {
-        workflowRunId: 'wr-1',
-        status: 'running',
-        currentStage: 'build',
-        pendingWork: null,
-        stages: [],
-        availableActions: [{ name: 'stop', label: 'Stop', target: null }],
+    mockIssue(makeIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+      priority: 'p1',
+      isDraft: true,
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop'],
       },
+    }))
+    mockWorkflowTimeline({
+      workflowRunId: 'wr-1',
+      status: 'running',
+      currentStage: 'build',
+      pendingWork: null,
+      stages: [],
+      availableActions: [{ name: 'stop', label: 'Stop', target: null }],
     })
 
     renderPage()
@@ -1175,19 +885,14 @@ describe('IssueDetailPage runtime status badges', () => {
   })
 
   it('renders the queued runtime badge for backlog issues waiting on a prerequisite', async () => {
-    mockUseIssue.mockReturnValue({
-      data: makeIssue({
-        status: 'backlog',
-        workflowStage: null,
-        workflowStatus: null,
-        workflowRunId: null,
-        health: 'active',
-        blocker: { kind: 'waiting-for', issue: { number: 9, title: 'Prerequisite' } },
-      }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+    mockIssue(makeIssue({
+      status: 'backlog',
+      workflowStage: null,
+      workflowStatus: null,
+      workflowRunId: null,
+      health: 'active',
+      blocker: { kind: 'waiting-for', issue: { number: 9, title: 'Prerequisite' } },
+    }))
 
     renderPage()
 

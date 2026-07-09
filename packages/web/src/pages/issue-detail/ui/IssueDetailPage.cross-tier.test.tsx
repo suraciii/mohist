@@ -6,41 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
-
-const mockUseIssueDiff = vi.fn()
-const mockUseIssueCommits = vi.fn()
-const mockUseWorkflowTimeline = vi.fn()
-const mockUseWorkflowYaml = vi.fn()
-const mockUseAgentStatus = vi.fn()
-const mockUseIssue = vi.fn()
-const mockUseWorkspaceStatus = vi.fn()
-
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    useIssue: (...args: unknown[]) => mockUseIssue(...args),
-    useIssueDiff: (...args: unknown[]) => mockUseIssueDiff(...args),
-    useIssueCommits: (...args: unknown[]) => mockUseIssueCommits(...args),
-    useWorkflowTimeline: (...args: unknown[]) => mockUseWorkflowTimeline(...args),
-    useWorkflowYaml: (...args: unknown[]) => mockUseWorkflowYaml(...args),
-    useWorkspaceStatus: (...args: unknown[]) => mockUseWorkspaceStatus(...args),
-    useIssueEvents: () => ({ data: undefined, isLoading: false }),
-    getIssueWorkflowVariables: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
-  }
-})
-
-vi.mock('../../../entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/settings')>()
-  return {
-    ...actual,
-    useWorkflowProfiles: () => ({ data: [] }),
-    useAvailableModelIds: () => ({ data: [] }),
-    useOpencodeModel: () => ({ data: null }),
-    useModelVariants: () => ({ data: [] }),
-    useEffectiveDefaultWorkflowProfile: () => ({ data: null }),
-  }
-})
+import { mockAgentStatus, mockIssue, mockIssueCommits, mockIssueDiff, mockWorkflowTimeline, mountIssueDetail } from './_issueDetailMsw'
 
 vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
   EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null; enabled?: boolean }) => (
@@ -53,14 +19,6 @@ vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
     />
   )),
 }))
-
-vi.mock('../../../entities/agent', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/agent')>()
-  return {
-    ...actual,
-    useAgentStatus: (...args: unknown[]) => mockUseAgentStatus(...args),
-  }
-})
 
 const projects: Project[] = [
   {
@@ -172,18 +130,22 @@ function basePrMetadataTimeline(workflowRunId: string) {
   }
 }
 
-const baseBeforeEach = () => {
-  vi.clearAllMocks()
+mountIssueDetail({ issue: baseIssue() })
+
+function resetViewport() {
   mockMatchMedia(false)
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
   window.dispatchEvent(new Event('resize'))
-  mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-  mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-  mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-  mockUseIssueDiff.mockReturnValue({ data: undefined })
-  mockUseIssueCommits.mockReturnValue({ data: undefined })
-  mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
 }
+
+beforeEach(() => {
+  resetViewport()
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 function expectAssigned(testId: string, anchor: string) {
   const node = screen.getByTestId(testId)
@@ -192,39 +154,24 @@ function expectAssigned(testId: string, anchor: string) {
 }
 
 describe('T-004: cross-tier verification — archived path', () => {
-  beforeEach(() => {
-    baseBeforeEach()
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-  })
-
   it('assigns headline, identity row, action surface, and archived pill/banner to status-header tier; reading flow and reference rail populated', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'done',
-        workflowStage: 'done',
-        workflowStatus: 'completed',
-        archivedAt: '2026-06-25T10:00:00Z',
-        health: 'done',
-        workflowRunId: 'wr_archived_1',
-      }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseWorkflowTimeline.mockReturnValue({
-      data: {
-        workflowRunId: 'wr_archived_1',
-        status: 'completed',
-        currentStage: 'done',
-        pendingWork: null,
-        stages: [
-          { stage: 'plan' as const, status: 'completed' as const, order: 0, startedAt: '2026-01-01T00:30:00Z', completedAt: '2026-01-01T01:00:00Z', durationMs: 30 * 60 * 1000, tasks: [], checks: [], approval: null },
-        ],
-        availableActions: [],
-      },
+    mockIssue(baseIssue({
+      status: 'done',
+      workflowStage: 'done',
+      workflowStatus: 'completed',
+      archivedAt: '2026-06-25T10:00:00Z',
+      health: 'done',
+      workflowRunId: 'wr_archived_1',
+    }))
+    mockWorkflowTimeline({
+      workflowRunId: 'wr_archived_1',
+      status: 'completed',
+      currentStage: 'done',
+      pendingWork: null,
+      stages: [
+        { stage: 'plan' as const, status: 'completed' as const, order: 0, startedAt: '2026-01-01T00:30:00Z', completedAt: '2026-01-01T01:00:00Z', durationMs: 30 * 60 * 1000, tasks: [], checks: [], approval: null },
+      ],
+      availableActions: [],
     })
 
     renderPage()
@@ -252,29 +199,16 @@ describe('T-004: cross-tier verification — archived path', () => {
 })
 
 describe('T-004: cross-tier verification — backlog/readiness path', () => {
-  beforeEach(() => {
-    baseBeforeEach()
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-  })
-
   it('keeps draft pill in identity row, Start action in header tier, Readiness card in rail, headline shows backlog situation without fabricated stage/progress', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'backlog',
-        workflowStage: null,
-        workflowStatus: null,
-        workflowRunId: null,
-        isDraft: true,
-        canStart: false,
-        blocker: { kind: 'draft' },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'backlog',
+      workflowStage: null,
+      workflowStatus: null,
+      workflowRunId: null,
+      isDraft: true,
+      canStart: false,
+      blocker: { kind: 'draft' },
+    }))
 
     renderPage()
 
@@ -299,11 +233,7 @@ describe('T-004: cross-tier verification — backlog/readiness path', () => {
   })
 
   it('keeps the readiness card absent on a non-backlog, non-draft issue', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue(),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue())
 
     renderPage()
 
@@ -313,24 +243,11 @@ describe('T-004: cross-tier verification — backlog/readiness path', () => {
 })
 
 describe('T-004: cross-tier verification — drift path', () => {
-  beforeEach(() => {
-    baseBeforeEach()
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-  })
-
   it('places the drift panel in the reference rail, default-collapsed, expandable on click', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-        recovery: baseRecovery(),
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+      recovery: baseRecovery(),
+    }))
 
     renderPage()
 
@@ -346,35 +263,22 @@ describe('T-004: cross-tier verification — drift path', () => {
 })
 
 describe('T-004: cross-tier verification — convergence path', () => {
-  beforeEach(() => {
-    baseBeforeEach()
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-  })
-
   it('places the convergence panel in the reference rail when health=blocked or convergence exists; default-collapsed on desktop', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        health: 'blocked',
-        convergence: {
-          blockingItemCount: 1,
-          directlyRepairedCount: 0,
-          reactionAttempts: 0,
-          attemptedItemIds: [],
-          resolvedItemIds: [],
-          unresolvedItemIds: ['cb-1'],
-          newBlockingItemIds: [],
-          nonBlockingItemIds: [],
-          blockedReason: 'A blocking check failed.',
-        },
-        recovery: baseRecovery(),
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      health: 'blocked',
+      convergence: {
+        blockingItemCount: 1,
+        directlyRepairedCount: 0,
+        reactionAttempts: 0,
+        attemptedItemIds: [],
+        resolvedItemIds: [],
+        unresolvedItemIds: ['cb-1'],
+        newBlockingItemIds: [],
+        nonBlockingItemIds: [],
+        blockedReason: 'A blocking check failed.',
+      },
+      recovery: baseRecovery(),
+    }))
 
     renderPage()
 
@@ -390,26 +294,13 @@ describe('T-004: cross-tier verification — convergence path', () => {
 })
 
 describe('T-004: cross-tier verification — interrupted health path', () => {
-  beforeEach(() => {
-    baseBeforeEach()
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-  })
-
   it('reports an interrupted-health projection as blocked via the header without a standalone card', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        workflowStatus: 'interrupted',
-        health: 'interrupted',
-        recovery: null,
-        convergence: null,
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      workflowStatus: 'interrupted',
+      health: 'interrupted',
+      recovery: null,
+      convergence: null,
+    }))
 
     renderPage()
 
@@ -427,24 +318,9 @@ describe('T-004: cross-tier verification — interrupted health path', () => {
 })
 
 describe('T-004: cross-tier verification — PR delivery path', () => {
-  beforeEach(() => {
-    baseBeforeEach()
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-  })
-
   it('places PrDeliverySummary inside the reading flow beside the workflow frame', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({ workflowRunId: 'wr_pr_1', recovery: baseRecovery() }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseWorkflowTimeline.mockReturnValue({
-      data: basePrMetadataTimeline('wr_pr_1'),
-    })
+    mockIssue(baseIssue({ workflowRunId: 'wr_pr_1', recovery: baseRecovery() }))
+    mockWorkflowTimeline(basePrMetadataTimeline('wr_pr_1'))
 
     renderPage()
 
@@ -465,27 +341,12 @@ describe('T-004: cross-tier verification — PR delivery path', () => {
 })
 
 describe('T-004: cross-tier verification — capacity gating path', () => {
-  beforeEach(() => {
-    baseBeforeEach()
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-  })
-
   it('keeps the Start action inside the status-header tier under full capacity (gating happens in surface, not rail)', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({ status: 'backlog', workflowStage: null, workflowStatus: null, workflowRunId: null }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseAgentStatus.mockReturnValue({
-      data: {
-        activeAgents: [],
-        capacity: { active: 2, max: 2 },
-        runnerAvailable: true,
-      },
+    mockIssue(baseIssue({ status: 'backlog', workflowStage: null, workflowStatus: null, workflowRunId: null }))
+    mockAgentStatus({
+      activeAgents: [],
+      capacity: { active: 2, max: 2 },
+      runnerAvailable: true,
     })
 
     renderPage()
@@ -503,17 +364,11 @@ describe('T-004: cross-tier verification — capacity gating path', () => {
   })
 
   it('enables the Start action in the header tier when capacity is not full', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({ status: 'backlog', workflowStage: null, workflowStatus: null, workflowRunId: null }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseAgentStatus.mockReturnValue({
-      data: {
-        activeAgents: [],
-        capacity: { active: 0, max: 2 },
-        runnerAvailable: true,
-      },
+    mockIssue(baseIssue({ status: 'backlog', workflowStage: null, workflowStatus: null, workflowRunId: null }))
+    mockAgentStatus({
+      activeAgents: [],
+      capacity: { active: 0, max: 2 },
+      runnerAvailable: true,
     })
 
     renderPage()
@@ -527,81 +382,51 @@ describe('T-004: cross-tier verification — capacity gating path', () => {
 })
 
 describe('T-004: cross-tier verification — no duplication / no orphan', () => {
-  beforeEach(() => {
-    baseBeforeEach()
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-  })
-
   it('renders every D2 block in exactly one tier, none repeated across tiers, none orphaned', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        workflowRunId: 'wr_overlap_1',
-        model: 'sonnet',
-        repository: {
-          name: 'master',
-          baseBranch: 'master',
-          gitUrl: 'https://github.com/suraciii/mohist.git',
-        },
-        prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: true }],
-        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-        health: 'blocked',
-        convergence: {
-          blockingItemCount: 1,
-          directlyRepairedCount: 0,
-          reactionAttempts: 0,
-          attemptedItemIds: [],
-          resolvedItemIds: [],
-          unresolvedItemIds: ['cb-1'],
-          newBlockingItemIds: [],
-          nonBlockingItemIds: [],
-          blockedReason: 'A blocking check failed.',
-        },
-        body: 'Body for description.',
-        comments: [
-          { id: 'c1', author: 'tester', body: 'A reviewer comment.', createdAt: '2026-01-04T00:00:00Z' },
-        ],
-        recovery: baseRecovery(),
-      }),
-      isLoading: false,
-      isError: false,
-    })
-    mockUseWorkflowTimeline.mockReturnValue({
-      data: basePrMetadataTimeline('wr_overlap_1'),
-    })
-    mockUseIssueDiff.mockReturnValue({
-      data: {
-        available: true as const,
-        reason: null,
-        head: 'feature/issue-14',
-        base: 'master',
-        mergeBase: 'abc',
-        ahead: 1,
-        behind: 0,
-        canFastForward: true,
-        comparison: 'merge-base' as const,
-        summary: { filesChanged: 1, commits: 1, additions: 4, deletions: 1 },
-        files: [],
+    mockIssue(baseIssue({
+      workflowRunId: 'wr_overlap_1',
+      model: 'sonnet',
+      repository: {
+        name: 'master',
+        baseBranch: 'master',
+        gitUrl: 'https://github.com/suraciii/mohist.git',
       },
-    })
-    mockUseIssueCommits.mockReturnValue({
-      data: {
-        available: true as const,
-        reason: null,
-        head: 'feature/issue-14',
-        base: 'master',
-        mergeBase: 'abc',
-        ahead: 1,
-        behind: 0,
-        canFastForward: true,
-        comparison: 'merge-base' as const,
-        summary: { filesChanged: 1, commits: 1, additions: 4, deletions: 1 },
-        commits: [],
+      prerequisites: [{ number: 9, title: 'Prerequisite issue', completed: true }],
+      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+      health: 'blocked',
+      convergence: {
+        blockingItemCount: 1,
+        directlyRepairedCount: 0,
+        reactionAttempts: 0,
+        attemptedItemIds: [],
+        resolvedItemIds: [],
+        unresolvedItemIds: ['cb-1'],
+        newBlockingItemIds: [],
+        nonBlockingItemIds: [],
+        blockedReason: 'A blocking check failed.',
       },
-    })
+      body: 'Body for description.',
+      comments: [
+        { id: 'c1', author: 'tester', body: 'A reviewer comment.', createdAt: '2026-01-04T00:00:00Z' },
+      ],
+      recovery: baseRecovery(),
+    }))
+    mockWorkflowTimeline(basePrMetadataTimeline('wr_overlap_1'))
+    const diffData = {
+      available: true as const,
+      reason: null,
+      head: 'feature/issue-14',
+      base: 'master',
+      mergeBase: 'abc',
+      ahead: 1,
+      behind: 0,
+      canFastForward: true,
+      comparison: 'merge-base' as const,
+      summary: { filesChanged: 1, commits: 1, additions: 4, deletions: 1 },
+      files: [],
+    }
+    mockIssueDiff(diffData)
+    mockIssueCommits({ ...diffData, commits: [] })
 
     renderPage()
 
@@ -763,23 +588,15 @@ describe('T-004: cross-tier verification — three-tier weight hierarchy holds o
 
   for (const pathCase of paths) {
     it(`preserves the three-tier weight hierarchy on the "${pathCase.name}" path`, async () => {
-      baseBeforeEach()
-      mockUseIssue.mockReturnValue({
-        data: baseIssue(pathCase.overrides),
-        isLoading: false,
-        isError: false,
-      })
+      resetViewport()
+      mockIssue(baseIssue(pathCase.overrides))
 
       if (pathCase.name === 'PR delivery (workflow timeline with publish)') {
-        mockUseWorkflowTimeline.mockReturnValue({
-          data: basePrMetadataTimeline('wr_pr_path'),
-        })
+        mockWorkflowTimeline(basePrMetadataTimeline('wr_pr_path'))
       }
 
       if (pathCase.name === 'capacity-full backlog') {
-        mockUseAgentStatus.mockReturnValue({
-          data: { activeAgents: [], capacity: { active: 2, max: 2 }, runnerAvailable: true },
-        })
+        mockAgentStatus({ activeAgents: [], capacity: { active: 2, max: 2 }, runnerAvailable: true })
       }
 
       renderPage()

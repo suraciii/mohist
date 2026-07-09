@@ -6,41 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
-
-const mockUseIssueDiff = vi.fn()
-const mockUseIssueCommits = vi.fn()
-const mockUseWorkflowTimeline = vi.fn()
-const mockUseWorkflowYaml = vi.fn()
-const mockUseAgentStatus = vi.fn()
-const mockUseIssue = vi.fn()
-const mockUseWorkspaceStatus = vi.fn()
-
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    useIssue: (...args: unknown[]) => mockUseIssue(...args),
-    useIssueDiff: (...args: unknown[]) => mockUseIssueDiff(...args),
-    useIssueCommits: (...args: unknown[]) => mockUseIssueCommits(...args),
-    useWorkflowTimeline: (...args: unknown[]) => mockUseWorkflowTimeline(...args),
-    useWorkflowYaml: (...args: unknown[]) => mockUseWorkflowYaml(...args),
-    useWorkspaceStatus: (...args: unknown[]) => mockUseWorkspaceStatus(...args),
-    useIssueEvents: () => ({ data: undefined, isLoading: false }),
-    getIssueWorkflowVariables: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
-  }
-})
-
-vi.mock('../../../entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/settings')>()
-  return {
-    ...actual,
-    useWorkflowProfiles: () => ({ data: [] }),
-    useAvailableModelIds: () => ({ data: [] }),
-    useOpencodeModel: () => ({ data: null }),
-    useModelVariants: () => ({ data: [] }),
-    useEffectiveDefaultWorkflowProfile: () => ({ data: null }),
-  }
-})
+import { mockAgentStatus, mockIssue, mountIssueDetail } from './_issueDetailMsw'
 
 vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
   EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null; enabled?: boolean }) => (
@@ -53,14 +19,6 @@ vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
     />
   )),
 }))
-
-vi.mock('../../../entities/agent', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/agent')>()
-  return {
-    ...actual,
-    useAgentStatus: (...args: unknown[]) => mockUseAgentStatus(...args),
-  }
-})
 
 const projects: Project[] = [
   {
@@ -124,40 +82,31 @@ function baseIssue(overrides: Record<string, unknown> = {}) {
   }
 }
 
+mountIssueDetail({ issue: baseIssue() })
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
 describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     mockMatchMedia(true)
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
   })
 
   it('running surfaces Stop in the bottom bar and strips RuntimeDecisionSurface from the header tier', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-        recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+      recovery: {
+        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop'],
+      },
+    }))
 
     renderPage()
 
@@ -175,26 +124,22 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('approval-required surfaces Approve in the bottom bar', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'in_progress',
-        workflowStage: 'check',
-        health: 'paused',
-        approvalState: {
-          status: 'awaiting',
-          stage: 'check',
-          requestedAt: '2026-01-01T00:00:00.000Z',
-        },
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: null,
-          workflowSummaryState: 'awaiting-approval',
-          allowedActions: ['approve', 'reject'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'in_progress',
+      workflowStage: 'check',
+      health: 'paused',
+      approvalState: {
+        status: 'awaiting',
+        stage: 'check',
+        requestedAt: '2026-01-01T00:00:00.000Z',
+      },
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: null,
+        workflowSummaryState: 'awaiting-approval',
+        allowedActions: ['approve', 'reject'],
+      },
+    }))
 
     renderPage()
 
@@ -209,22 +154,18 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('failed surfaces a primary action (Retry) in the bottom bar', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'failed',
-        health: 'active',
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: 'failed',
-          workflowSummaryState: 'failed',
-          allowedActions: ['retry', 'resume', 'rerun', 'start', 'stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'failed',
+      health: 'active',
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'failed',
+        workflowSummaryState: 'failed',
+        allowedActions: ['retry', 'resume', 'rerun', 'start', 'stop'],
+      },
+    }))
 
     renderPage()
 
@@ -240,23 +181,19 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('blocked surfaces a primary action (Retry) in the bottom bar', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'interrupted',
-        health: 'interrupted',
-        blockedReason: 'Workflow was interrupted.',
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: 'interrupted',
-          workflowSummaryState: 'interrupted',
-          allowedActions: ['retry', 'resume', 'rerun', 'stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'interrupted',
+      health: 'interrupted',
+      blockedReason: 'Workflow was interrupted.',
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'interrupted',
+        workflowSummaryState: 'interrupted',
+        allowedActions: ['retry', 'resume', 'rerun', 'stop'],
+      },
+    }))
 
     renderPage()
 
@@ -269,18 +206,14 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('queued backlog (ready to start) surfaces Start in the bottom bar', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'backlog',
-        workflowStage: null,
-        workflowStatus: null,
-        workflowRunId: null,
-        health: 'active',
-        canStart: true,
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'backlog',
+      workflowStage: null,
+      workflowStatus: null,
+      workflowRunId: null,
+      health: 'active',
+      canStart: true,
+    }))
 
     renderPage()
 
@@ -292,20 +225,16 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('draft backlog surfaces disabled Start with the draft blocker reason', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'backlog',
-        workflowStage: null,
-        workflowStatus: null,
-        workflowRunId: null,
-        health: 'active',
-        isDraft: true,
-        canStart: true,
-        blocker: { kind: 'draft' },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'backlog',
+      workflowStage: null,
+      workflowStatus: null,
+      workflowRunId: null,
+      health: 'active',
+      isDraft: true,
+      canStart: true,
+      blocker: { kind: 'draft' },
+    }))
 
     renderPage()
 
@@ -318,22 +247,18 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('prerequisite-blocked backlog surfaces disabled Start with the prerequisite reason', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'backlog',
-        workflowStage: null,
-        workflowStatus: null,
-        workflowRunId: null,
-        health: 'active',
-        canStart: true,
-        blocker: {
-          kind: 'waiting-for',
-          issue: { number: 9, title: 'Prepare spec' },
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'backlog',
+      workflowStage: null,
+      workflowStatus: null,
+      workflowRunId: null,
+      health: 'active',
+      canStart: true,
+      blocker: {
+        kind: 'waiting-for',
+        issue: { number: 9, title: 'Prepare spec' },
+      },
+    }))
 
     renderPage()
 
@@ -345,26 +270,20 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('runner-blocked backlog surfaces disabled Start with the runner reason', async () => {
-    mockUseAgentStatus.mockReturnValue({
-      data: {
-        activeAgents: [],
-        capacity: { max: 1 },
-        runnerAvailable: false,
-        runnerMessage: 'No runner is connected. Start a runner before this issue can run.',
-      },
+    mockAgentStatus({
+      activeAgents: [],
+      capacity: { max: 1 },
+      runnerAvailable: false,
+      runnerMessage: 'No runner is connected. Start a runner before this issue can run.',
     })
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'backlog',
-        workflowStage: null,
-        workflowStatus: null,
-        workflowRunId: null,
-        health: 'active',
-        canStart: true,
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'backlog',
+      workflowStage: null,
+      workflowStatus: null,
+      workflowRunId: null,
+      health: 'active',
+      canStart: true,
+    }))
 
     renderPage()
 
@@ -376,22 +295,18 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('failed state preserves the Start new workflow primary label', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'failed',
-        health: 'active',
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: 'failed',
-          workflowSummaryState: 'failed',
-          allowedActions: ['start'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'failed',
+      health: 'active',
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'failed',
+        workflowSummaryState: 'failed',
+        allowedActions: ['start'],
+      },
+    }))
 
     renderPage()
 
@@ -404,22 +319,18 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('done state renders no bottom bar and strips RuntimeDecisionSurface from the header tier', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'done',
-        workflowStage: 'done',
-        workflowStatus: 'done',
-        health: 'done',
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: 'completed',
-          workflowSummaryState: 'completed',
-          allowedActions: [],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'done',
+      workflowStage: 'done',
+      workflowStatus: 'done',
+      health: 'done',
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'completed',
+        workflowSummaryState: 'completed',
+        allowedActions: [],
+      },
+    }))
 
     renderPage()
 
@@ -431,23 +342,19 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('archived state renders no bottom bar and strips RuntimeDecisionSurface from the header tier', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'done',
-        workflowStage: 'done',
-        workflowStatus: 'done',
-        health: 'done',
-        archivedAt: '2026-01-02T00:00:00Z',
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: 'completed',
-          workflowSummaryState: 'completed',
-          allowedActions: [],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'done',
+      workflowStage: 'done',
+      workflowStatus: 'done',
+      health: 'done',
+      archivedAt: '2026-01-02T00:00:00Z',
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'completed',
+        workflowSummaryState: 'completed',
+        allowedActions: [],
+      },
+    }))
 
     renderPage()
 
@@ -459,22 +366,18 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('narrow viewport reserves bottom padding only when a primary action exists (no-padding when no bar)', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'done',
-        workflowStage: 'done',
-        workflowStatus: 'done',
-        health: 'done',
-        recovery: {
-          currentWorkItem: null,
-          latestAttemptState: 'completed',
-          workflowSummaryState: 'completed',
-          allowedActions: [],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'done',
+      workflowStage: 'done',
+      workflowStatus: 'done',
+      health: 'done',
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: 'completed',
+        workflowSummaryState: 'completed',
+        allowedActions: [],
+      },
+    }))
 
     renderPage()
 
@@ -487,22 +390,18 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('narrow viewport reserves extra bottom padding when a primary action bar is present', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-        recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Build' },
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+      recovery: {
+        currentWorkItem: { type: 'task', id: 't1', title: 'Build' },
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop'],
+      },
+    }))
 
     renderPage()
 
@@ -514,22 +413,18 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
   })
 
   it('stop on narrow opens the bottom-sliding drawer and the sticky StatusHeadline remains visible', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-        recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop', 'force-stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+      recovery: {
+        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop', 'force-stop'],
+      },
+    }))
 
     renderPage()
 
@@ -555,40 +450,20 @@ describe('IssueDetailPage narrow-viewport MobileActionBar matrix', () => {
 })
 
 describe('IssueDetailPage narrow-viewport 768-1024px band (flush-bottom bar)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
-  })
-
   it('at ~900px (narrow page, no global nav) the bar anchors flush to the bottom with no nav-offset', async () => {
     mockMatchMedia(true, 900)
-
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-        recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+      recovery: {
+        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop'],
+      },
+    }))
 
     renderPage()
 
@@ -611,23 +486,18 @@ describe('IssueDetailPage narrow-viewport 768-1024px band (flush-bottom bar)', (
 
   it('does not reserve padding for the global nav on the content column when the bar is present', async () => {
     mockMatchMedia(true, 900)
-
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-        recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+      recovery: {
+        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop'],
+      },
+    }))
 
     renderPage()
 
@@ -641,38 +511,22 @@ describe('IssueDetailPage narrow-viewport 768-1024px band (flush-bottom bar)', (
 
 describe('IssueDetailPage desktop viewport restores RuntimeDecisionSurface and no mobile-only elements', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
     mockMatchMedia(false)
-    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
-    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
-    mockUseIssueDiff.mockReturnValue({ data: undefined })
-    mockUseIssueCommits.mockReturnValue({ data: undefined })
-    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
-  })
-
-  afterEach(() => {
-    cleanup()
-    vi.unstubAllGlobals()
   })
 
   it('desktop renders RuntimeDecisionSurface in the header tier and neither MobileActionBar nor ConfirmationDrawer in the DOM', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-        recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+      recovery: {
+        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop'],
+      },
+    }))
 
     renderPage()
 
@@ -692,22 +546,18 @@ describe('IssueDetailPage desktop viewport restores RuntimeDecisionSurface and n
   })
 
   it('desktop does not reserve extra bottom padding for the bar', async () => {
-    mockUseIssue.mockReturnValue({
-      data: baseIssue({
-        status: 'in_progress',
-        workflowStage: 'build',
-        workflowStatus: 'running',
-        health: 'active',
-        recovery: {
-          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-          latestAttemptState: 'running',
-          workflowSummaryState: 'running',
-          allowedActions: ['stop'],
-        },
-      }),
-      isLoading: false,
-      isError: false,
-    })
+    mockIssue(baseIssue({
+      status: 'in_progress',
+      workflowStage: 'build',
+      workflowStatus: 'running',
+      health: 'active',
+      recovery: {
+        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+        latestAttemptState: 'running',
+        workflowSummaryState: 'running',
+        allowedActions: ['stop'],
+      },
+    }))
 
     renderPage()
 
