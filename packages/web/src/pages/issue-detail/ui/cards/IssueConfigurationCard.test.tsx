@@ -2,14 +2,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { IssueHealth, IssueStatus, type Issue, type IssuePrerequisiteSummary } from '../../../../entities/issue'
 import { IssueConfigurationCard } from './IssueConfigurationCard'
 import type { IssueDetailMutations } from '../../model/useIssueDetailMutations'
+import { server, useMswServer } from '../../../../../tests/support/msw'
 
 const PROJECT_ID = 'proj_live_001'
 const ISSUE_NUMBER = 10
+const ISSUES_PATH = '*/api/projects/:projectId/issues'
 
 function buildIssue(overrides: Partial<Issue> & Pick<Issue, 'number' | 'title'>): Issue {
   return {
@@ -35,23 +38,15 @@ const CANDIDATE_ISSUES: Issue[] = [
   buildIssue({ number: 12, title: 'Unrelated fix', status: IssueStatus.Backlog, health: IssueHealth.Active }),
 ]
 
-const mocks = vi.hoisted(() => ({
-  useIssues: vi.fn(),
-}))
+let currentIssues: Issue[] = CANDIDATE_ISSUES
 
-vi.mock('../../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../../entities/issue')>()
-  return {
-    ...actual,
-    useIssues: mocks.useIssues,
-  }
-})
+useMswServer(
+  http.get(ISSUES_PATH, () => HttpResponse.json({ success: true, data: currentIssues })),
+)
 
-function setIssues(issues: Issue[] | undefined, isLoading = false) {
-  mocks.useIssues.mockReturnValue({
-    data: issues,
-    isLoading,
-  })
+function setIssues(issues: Issue[]) {
+  currentIssues = issues
+  server.use(http.get(ISSUES_PATH, () => HttpResponse.json({ success: true, data: issues })))
 }
 
 interface MutationStubs {
@@ -127,7 +122,7 @@ function openPicker() {
 describe('IssueConfigurationCard', () => {
   afterEach(() => {
     cleanup()
-    vi.clearAllMocks()
+    setIssues(CANDIDATE_ISSUES)
   })
 
   describe('picker swap (numeric editor retired)', () => {
