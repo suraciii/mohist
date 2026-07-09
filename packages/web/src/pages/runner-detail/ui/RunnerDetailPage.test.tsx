@@ -4,25 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { toast } from 'sonner'
+import { server } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import type { RunnerStatusRow } from '../../../entities/runner'
 import { RunnerDetailPage } from './RunnerDetailPage'
-
-const mocks = vi.hoisted(() => ({
-  useRunner: vi.fn(),
-  useUpdateRunnerSlots: vi.fn(),
-}))
-
-vi.mock('../../../entities/runner', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/runner')>()
-  return {
-    ...actual,
-    useRunner: mocks.useRunner,
-    useUpdateRunnerSlots: mocks.useUpdateRunnerSlots,
-  }
-})
 
 const TEST_PROJECT: Project = {
   id: 'proj-1',
@@ -52,8 +40,11 @@ function makeRunner(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
   }
 }
 
+let _runnerData: RunnerStatusRow | null = null
+let slotsHandler: ReturnType<typeof vi.fn>
+
 function renderPage() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjects={[TEST_PROJECT]} initialProjectId={TEST_PROJECT.id}>
@@ -71,17 +62,40 @@ function renderPage() {
 
 describe('RunnerDetailPage', () => {
   beforeEach(() => {
+    _runnerData = null
     vi.clearAllMocks()
-    mocks.useUpdateRunnerSlots.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    slotsHandler = vi.fn(async ({ request }) => {
+      const body = await request.clone().json() as Record<string, unknown>
+      return HttpResponse.json({ success: true, data: { runnerId: 'runner-7', slots: body.slots } })
+    })
+    server.use(
+      http.get('*/api/projects/:projectId/runners/:runnerId', () => {
+        if (!_runnerData) {
+          return HttpResponse.json(
+            { success: false, error: 'not found' },
+            { status: 404 },
+          )
+        }
+        return HttpResponse.json({ success: true, data: { runner: _runnerData } })
+      }),
+      http.patch('*/api/runner/:runnerId', slotsHandler as any),
+    )
   })
 
   afterEach(() => {
     cleanup()
+    server.resetHandlers()
+  })
+
+  afterAll(() => {
+    _runnerData = null
   })
 
   describe('loading state', () => {
     it('shows a loading state while the runner is being fetched', () => {
-      mocks.useRunner.mockReturnValue({ data: undefined, isLoading: true, error: null })
+      server.use(
+        http.get('*/api/projects/:projectId/runners/:runnerId', () => new Promise(() => {})),
+      )
       renderPage()
       expect(screen.getByTestId('runner-detail-loading')).toBeInTheDocument()
     })
@@ -89,8 +103,14 @@ describe('RunnerDetailPage', () => {
 
   describe('not-found state', () => {
     it('surfaces a clear not-found state when the runner id 404s', async () => {
-      const error = Object.assign(new Error('Runner \'runner-7\' not found'), { status: 404 })
-      mocks.useRunner.mockReturnValue({ data: undefined, isLoading: false, error })
+      server.use(
+        http.get('*/api/projects/:projectId/runners/:runnerId', () =>
+          HttpResponse.json(
+            { success: false, error: "Runner 'runner-7' not found" },
+            { status: 404 },
+          ),
+        ),
+      )
       renderPage()
       await waitFor(() => {
         expect(screen.getByTestId('runner-not-found')).toBeInTheDocument()
@@ -99,18 +119,23 @@ describe('RunnerDetailPage', () => {
       expect(screen.queryByTestId('runner-detail-active-works-list')).not.toBeInTheDocument()
     })
 
-    it('shows a generic error card for non-404 failures', () => {
-      const error = Object.assign(new Error('boom'), { status: 500 })
-      mocks.useRunner.mockReturnValue({ data: undefined, isLoading: false, error })
+    it('shows a generic error card for non-404 failures', async () => {
+      server.use(
+        http.get('*/api/projects/:projectId/runners/:runnerId', () =>
+          HttpResponse.json({ success: false, error: 'boom' }, { status: 500 }),
+        ),
+      )
       renderPage()
-      expect(screen.getByTestId('runner-detail-error')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByTestId('runner-detail-error')).toBeInTheDocument()
+      })
       expect(screen.getByText('boom')).toBeInTheDocument()
     })
   })
 
   describe('full detail rendering', () => {
-    it('renders identity, capabilities, active works, and health metrics', () => {
-      const runner = makeRunner({
+    it('renders identity, capabilities, active works, and health metrics', async () => {
+      _runnerData = makeRunner({
         status: 'busy',
         capacity: { usedSlots: 1, totalSlots: 2 },
         activeWorks: [
@@ -125,10 +150,12 @@ describe('RunnerDetailPage', () => {
           },
         ],
       })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
       renderPage()
 
-      expect(screen.getByTestId('runner-detail-id')).toHaveTextContent('runner-7')
+      await waitFor(() => {
+        expect(screen.getByTestId('runner-detail-id')).toHaveTextContent('runner-7')
+      })
+
       expect(screen.getByTestId('runner-detail-id-cell')).toHaveTextContent('runner-7')
       expect(screen.getByTestId('runner-detail-kind')).toHaveTextContent('external')
       expect(screen.getByTestId('runner-detail-hostname')).toHaveTextContent('host-7')
@@ -148,8 +175,8 @@ describe('RunnerDetailPage', () => {
       expect(screen.getByTestId('runner-detail-capacity')).toHaveTextContent('1/2 slots')
     })
 
-    it('renders every active work as an independent row (3 works → 3 rows)', () => {
-      const runner = makeRunner({
+    it('renders every active work as an independent row (3 works → 3 rows)', async () => {
+      _runnerData = makeRunner({
         status: 'busy',
         activeWorks: [
           {
@@ -180,11 +207,14 @@ describe('RunnerDetailPage', () => {
           },
         ],
       })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
       renderPage()
 
+      await waitFor(() => {
+        const list = screen.getByTestId('runner-detail-active-works-list')
+        expect(list).toHaveAttribute('data-count', '3')
+      })
+
       const list = screen.getByTestId('runner-detail-active-works-list')
-      expect(list).toHaveAttribute('data-count', '3')
       const rows = within(list).getAllByTestId('active-work-detail-row')
       expect(rows).toHaveLength(3)
       expect(within(rows[0]).getByText('Work A')).toBeInTheDocument()
@@ -192,8 +222,8 @@ describe('RunnerDetailPage', () => {
       expect(within(rows[2]).getByText('Work C')).toBeInTheDocument()
     })
 
-    it('renders a navigable issue link when an active work carries an issue ref', () => {
-      const runner = makeRunner({
+    it('renders a navigable issue link when an active work carries an issue ref', async () => {
+      _runnerData = makeRunner({
         status: 'busy',
         activeWorks: [
           {
@@ -206,16 +236,19 @@ describe('RunnerDetailPage', () => {
           },
         ],
       })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
       renderPage()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('active-work-issue-link')).toBeInTheDocument()
+      })
 
       const link = screen.getByTestId('active-work-issue-link')
       expect(link).toHaveAttribute('href', '/mohist-local/issues/42')
       expect(link).toHaveTextContent('issue #42')
     })
 
-    it('renders stage and title without a broken or placeholder link when issue is absent', () => {
-      const runner = makeRunner({
+    it('renders stage and title without a broken or placeholder link when issue is absent', async () => {
+      _runnerData = makeRunner({
         status: 'busy',
         activeWorks: [
           {
@@ -228,8 +261,11 @@ describe('RunnerDetailPage', () => {
           },
         ],
       })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
       renderPage()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('active-work-detail-row')).toBeInTheDocument()
+      })
 
       const row = screen.getByTestId('active-work-detail-row')
       expect(within(row).getByText('No-issue work')).toBeInTheDocument()
@@ -237,106 +273,150 @@ describe('RunnerDetailPage', () => {
       expect(within(row).queryByTestId('active-work-issue-link')).not.toBeInTheDocument()
     })
 
-    it('shows an explicit "no active works" message when activeWorks is empty', () => {
-      const runner = makeRunner({ status: 'idle', activeWorks: [] })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+    it('shows an explicit "no active works" message when activeWorks is empty', async () => {
+      _runnerData = makeRunner({ status: 'idle', activeWorks: [] })
       renderPage()
-      expect(screen.getByTestId('runner-detail-no-active-works')).toBeInTheDocument()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('runner-detail-no-active-works')).toBeInTheDocument()
+      })
     })
   })
 
   describe('slots editor', () => {
-    it('renders the input with the maxSlots value', () => {
-      const runner = makeRunner({ maxWorkflowSlots: 2 })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+    it('renders the input with the maxSlots value', async () => {
+      _runnerData = makeRunner({ maxWorkflowSlots: 2 })
       renderPage()
-      const input = screen.getByTestId('slots-editor-input') as HTMLInputElement
-      expect(input.value).toBe('2')
+
+      await waitFor(() => {
+        const input = screen.getByTestId('slots-editor-input') as HTMLInputElement
+        expect(input.value).toBe('2')
+      })
     })
 
-    it('renders "—" when maxSlots is null', () => {
-      const runner = makeRunner({ maxWorkflowSlots: undefined, capacity: undefined })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+    it('renders "—" when maxSlots is null', async () => {
+      _runnerData = makeRunner({ maxWorkflowSlots: undefined, capacity: undefined })
       renderPage()
-      expect(screen.getByTestId('runner-detail-max-slots')).toHaveTextContent('—')
+
+      await waitFor(() => {
+        expect(screen.getByTestId('runner-detail-max-slots')).toHaveTextContent('—')
+      })
       expect(screen.queryByTestId('slots-editor')).not.toBeInTheDocument()
     })
 
-    it('calls mutate on increase button click', () => {
-      const mutate = vi.fn()
-      mocks.useUpdateRunnerSlots.mockReturnValue({ mutate, isPending: false })
-      const runner = makeRunner({ maxWorkflowSlots: 2 })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+    it('calls mutate on increase button click', async () => {
+      _runnerData = makeRunner({ maxWorkflowSlots: 2 })
       renderPage()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slots-editor-input')).toBeInTheDocument()
+      })
 
       fireEvent.click(screen.getByTestId('slots-editor-increase'))
-      expect(mutate).toHaveBeenCalledWith(
-        { runnerId: 'runner-7', slots: 3 },
-        expect.any(Object),
-      )
+
+      await waitFor(() => {
+        expect(slotsHandler).toHaveBeenCalled()
+      })
+
+      const call = slotsHandler.mock.calls[0][0] as { request: Request }
+      const body = await call.request.clone().json()
+      expect(body).toEqual({ slots: 3 })
+      expect(new URL(call.request.url).pathname).toContain('/runner/runner-7')
     })
 
-    it('calls mutate on decrease button click', () => {
-      const mutate = vi.fn()
-      mocks.useUpdateRunnerSlots.mockReturnValue({ mutate, isPending: false })
-      const runner = makeRunner({ maxWorkflowSlots: 2 })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+    it('calls mutate on decrease button click', async () => {
+      _runnerData = makeRunner({ maxWorkflowSlots: 2 })
       renderPage()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slots-editor-input')).toBeInTheDocument()
+      })
 
       fireEvent.click(screen.getByTestId('slots-editor-decrease'))
-      expect(mutate).toHaveBeenCalledWith(
-        { runnerId: 'runner-7', slots: 1 },
-        expect.any(Object),
-      )
+
+      await waitFor(() => {
+        expect(slotsHandler).toHaveBeenCalled()
+      })
+
+      const call = slotsHandler.mock.calls[0][0] as { request: Request }
+      const body = await call.request.clone().json()
+      expect(body).toEqual({ slots: 1 })
+      expect(new URL(call.request.url).pathname).toContain('/runner/runner-7')
     })
 
-    it('disables decrease button at value 1', () => {
-      mocks.useUpdateRunnerSlots.mockReturnValue({ mutate: vi.fn(), isPending: false })
-      const runner = makeRunner({ maxWorkflowSlots: 1 })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+    it('disables decrease button at value 1', async () => {
+      _runnerData = makeRunner({ maxWorkflowSlots: 1 })
       renderPage()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slots-editor-decrease')).toBeInTheDocument()
+      })
 
       expect(screen.getByTestId('slots-editor-decrease')).toBeDisabled()
     })
 
-    it('shows saving indicator when mutation is pending', () => {
-      mocks.useUpdateRunnerSlots.mockReturnValue({ mutate: vi.fn(), isPending: true })
-      const runner = makeRunner({ maxWorkflowSlots: 2 })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+    it('shows saving indicator when mutation is pending', async () => {
+      _runnerData = makeRunner({ maxWorkflowSlots: 2 })
+      slotsHandler.mockImplementation(() => new Promise(() => {}))
       renderPage()
 
-      expect(screen.getByTestId('slots-editor-saving')).toBeInTheDocument()
-    })
-
-    it('shows toast on mutation error', () => {
-      vi.mocked(toast.error).mockClear()
-      const mutate = vi.fn().mockImplementation((_vars, { onError }: { onError: (err: Error) => void }) => {
-        onError(new Error('boom'))
+      await waitFor(() => {
+        expect(screen.getByTestId('slots-editor-increase')).toBeInTheDocument()
       })
-      mocks.useUpdateRunnerSlots.mockReturnValue({ mutate, isPending: false })
-      const runner = makeRunner({ maxWorkflowSlots: 2 })
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
-      renderPage()
 
       fireEvent.click(screen.getByTestId('slots-editor-increase'))
-      expect(toast.error).toHaveBeenCalledWith('Failed to update slots: boom')
+      await waitFor(() => {
+        expect(screen.getByTestId('slots-editor-saving')).toBeInTheDocument()
+      })
+    })
+
+    it('shows toast on mutation error', async () => {
+      _runnerData = makeRunner({ maxWorkflowSlots: 2 })
+      renderPage()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('slots-editor-increase')).toBeInTheDocument()
+      })
+
+      slotsHandler.mockImplementationOnce(() =>
+        HttpResponse.json({ success: false, error: 'boom' }, { status: 500 }),
+      )
+
+      fireEvent.click(screen.getByTestId('slots-editor-increase'))
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Failed to update slots: boom')
+      })
     })
   })
 
   describe('navigation', () => {
-    it('navigates back to the activity page via the back button', () => {
-      const runner = makeRunner()
-      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+    it('navigates back to the activity page via the back button', async () => {
+      _runnerData = makeRunner()
       renderPage()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('runner-detail-back')).toBeInTheDocument()
+      })
+
       fireEvent.click(screen.getByTestId('runner-detail-back'))
       expect(screen.getByText('Activity')).toBeInTheDocument()
     })
 
-    it('404 not-found state offers a back-to-activity action', () => {
-      const error = Object.assign(new Error('Runner \'runner-7\' not found'), { status: 404 })
-      mocks.useRunner.mockReturnValue({ data: undefined, isLoading: false, error })
+    it('404 not-found state offers a back-to-activity action', async () => {
+      server.use(
+        http.get('*/api/projects/:projectId/runners/:runnerId', () =>
+          HttpResponse.json(
+            { success: false, error: "Runner 'runner-7' not found" },
+            { status: 404 },
+          ),
+        ),
+      )
       renderPage()
-      expect(screen.getByTestId('runner-not-found-back')).toBeInTheDocument()
+
+      await waitFor(() => {
+        expect(screen.getByTestId('runner-not-found-back')).toBeInTheDocument()
+      })
     })
   })
 })
