@@ -2,50 +2,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
 
 import { epic, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
+import { useMswServer } from '../../../../tests/support/msw'
 
-/**
- * Tests for the `EpicIssueSelector` (searchable Add Issue combobox) rendered inside <EpicDetailPage/>.
- */
+let _epicData: unknown = null
+let _issuesData: unknown[] = []
+const _addIssueHandler = vi.fn()
 
-const mocks = vi.hoisted(() => ({
-  useEpic: vi.fn(),
-  useIssues: vi.fn(),
-  useAddEpicIssue: vi.fn(),
-  useRemoveEpicIssue: vi.fn(),
-  useStartIssue: vi.fn(),
-  useStartEpic: vi.fn(),
-  useMarkEpicDone: vi.fn(),
-  useCloseEpic: vi.fn(),
-  useUpdateEpic: vi.fn(),
-  usePauseEpic: vi.fn(),
-  useResumeEpic: vi.fn(),
-}))
-
-
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  useIssues: mocks.useIssues,
-}))
-
-vi.mock('../../../entities/epic', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic')>()
-  return {
-    ...actual,
-    useEpic: mocks.useEpic,
-    useAddEpicIssue: mocks.useAddEpicIssue,
-    useRemoveEpicIssue: mocks.useRemoveEpicIssue,
-    useStartIssue: mocks.useStartIssue,
-    useStartEpic: mocks.useStartEpic,
-    useMarkEpicDone: mocks.useMarkEpicDone,
-    useCloseEpic: mocks.useCloseEpic,
-    useUpdateEpic: mocks.useUpdateEpic,
-    usePauseEpic: mocks.usePauseEpic,
-    useResumeEpic: mocks.useResumeEpic,
-  }
-})
+useMswServer(
+  http.get('*/api/projects/:projectId/epics/:epicId', () =>
+    HttpResponse.json({ success: true, data: _epicData }),
+  ),
+  http.get('*/api/projects/:projectId/epics/:epicId/events', () =>
+    HttpResponse.json({ success: true, data: [] }),
+  ),
+  http.get('*/api/projects/:projectId/issues', () =>
+    HttpResponse.json({ success: true, data: _issuesData }),
+  ),
+  http.post('*/api/projects/:projectId/epics/:epicId/issues', async ({ request }) => {
+    const body = (await request.json()) as { issueId: string }
+    _addIssueHandler(body)
+    return HttpResponse.json({ success: true, data: { epicId: 'epic-12345678', issueId: body.issueId } })
+  }),
+)
 
 const searchEpic = {
   ...epic,
@@ -83,29 +65,10 @@ const searchIssues = [
 ]
 
 describe('EpicDetailPage searchable Add Issue', () => {
-  const addMutate = vi.fn()
-  const removeMutate = vi.fn()
-  const startMutate = vi.fn()
-  const doneMutate = vi.fn()
-  const closeMutate = vi.fn()
-  const updateMutate = vi.fn()
-  const pauseMutate = vi.fn()
-  const resumeMutate = vi.fn()
-  const startEpicMutate = vi.fn()
-
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useEpic.mockReturnValue({ data: searchEpic, isLoading: false })
-    mocks.useIssues.mockReturnValue({ data: searchIssues })
-    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
-    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
-    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
-    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
-    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
-    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
-    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
-    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
-    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+    _epicData = searchEpic
+    _issuesData = searchIssues
   })
 
   afterEach(() => {
@@ -115,6 +78,7 @@ describe('EpicDetailPage searchable Add Issue', () => {
   it('filters candidates by issue number or title when search text is typed', async () => {
     renderPage()
 
+    await screen.findByTestId('epic-issue-selector-trigger')
     fireEvent.click(screen.getByTestId('epic-issue-selector-trigger'))
     const search = await screen.findByTestId('epic-issue-search')
     expect(screen.getAllByTestId('epic-issue-option').map(node => node.getAttribute('data-issue-id')))
@@ -139,6 +103,7 @@ describe('EpicDetailPage searchable Add Issue', () => {
   it('disables closed, archived, and non-startable candidates with inline reasons', async () => {
     renderPage()
 
+    await screen.findByTestId('epic-issue-selector-trigger')
     fireEvent.click(screen.getByTestId('epic-issue-selector-trigger'))
     await screen.findByTestId('epic-issue-search')
 
@@ -164,32 +129,30 @@ describe('EpicDetailPage searchable Add Issue', () => {
 
     fireEvent.click(archived)
     fireEvent.click(blocked)
-    expect(addMutate).not.toHaveBeenCalled()
+    expect(_addIssueHandler).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Add Issue' })).toBeDisabled()
   })
 
-  it('disables the submit button when no candidate is selected', () => {
+  it('disables the submit button when no candidate is selected', async () => {
     renderPage()
 
+    await screen.findByTestId('epic-issue-selector-trigger')
     expect(screen.getByRole('button', { name: 'Add Issue' })).toBeDisabled()
   })
 
-  it('disables the trigger and submit when no selectable candidate exists', () => {
-    const blockedEpic = {
+  it('disables the trigger and submit when no selectable candidate exists', async () => {
+    _epicData = {
       ...searchEpic,
       linkedIssues: [],
     }
-    mocks.useEpic.mockReturnValue({ data: blockedEpic, isLoading: false })
-    mocks.useIssues.mockReturnValue({
-      data: [
-        { id: 'issue-archived', number: 4, title: 'Archived candidate', status: 'backlog' as const, archivedAt: '2026-01-15T00:00:00Z' },
-        { id: 'issue-closed', number: 5, title: 'Closed candidate', status: 'done' as const },
-      ],
-    })
+    _issuesData = [
+      { id: 'issue-archived', number: 4, title: 'Archived candidate', status: 'backlog' as const, archivedAt: '2026-01-15T00:00:00Z' },
+      { id: 'issue-closed', number: 5, title: 'Closed candidate', status: 'done' as const },
+    ]
 
     renderPage()
 
-    const trigger = screen.getByTestId('epic-issue-selector-trigger')
+    const trigger = await screen.findByTestId('epic-issue-selector-trigger')
     expect(trigger).toBeDisabled()
     expect(trigger).toHaveTextContent('No selectable issues')
     expect(screen.getByRole('button', { name: 'Add Issue' })).toBeDisabled()
