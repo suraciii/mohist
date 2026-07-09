@@ -1,15 +1,9 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { IssueStatus, IssueHealth } from '../../../entities/issue'
-import { makeIssue, makeIssues, mockAgentStatus } from './_kanbanBoardQueryTestUtils'
-
-vi.mock('../../../entities/runner/api/queries', () => ({
-  useRunnerSummary: vi.fn().mockReturnValue({ hasConnectedCapacity: true, connectedIdleCount: 1, connectedBusyCount: 0, rows: [] }),
-}))
+import { makeIssue, makeIssues, mockAgentStatus, renderBoard } from './_kanbanBoardQueryTestUtils'
 
 import { KanbanBoard } from './KanbanBoard'
 
@@ -34,15 +28,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         makeIssue({ number: 3, status: IssueStatus.InProgress }),
         makeIssue({ number: 4, status: IssueStatus.InProgress }),
       ]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const desktopBoard = document.querySelector('.hidden.md\\:flex.flex-row')
       expect(desktopBoard).not.toBeNull()
@@ -55,15 +41,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         makeIssue({ number: 2, status: IssueStatus.Backlog }),
         makeIssue({ number: 3, health: IssueHealth.Done }),
       ]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const desktopBoard = document.querySelector('.hidden.md\\:flex.flex-row')
       expect(desktopBoard).not.toBeNull()
@@ -76,15 +54,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         makeIssue({ number: 1, title: 'Active work', status: IssueStatus.InProgress, health: IssueHealth.Active }),
         makeIssue({ number: 2, title: 'Cancelled work', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
       ]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const cancelledColumn = screen.getByTestId('stage-column-cancelled')
       const toggle = within(cancelledColumn).getByTestId('cancelled-toggle')
@@ -130,15 +100,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
           health: IssueHealth.Cancelled,
         }),
       )
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const cancelledTab = screen.getByTestId('mobile-stage-tab-cancelled')
       expect(within(cancelledTab).getByText('8')).toBeInTheDocument()
@@ -172,15 +134,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         makeIssue({ number: 2, status: IssueStatus.InProgress }),
         makeIssue({ number: 3, status: IssueStatus.Done }),
       ]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const columns = document.querySelectorAll('[data-testid^="stage-column-"]')
       expect(columns.length).toBeGreaterThan(0)
@@ -196,15 +150,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         makeIssue({ number: 1, status: IssueStatus.Backlog }),
         makeIssue({ number: 2, status: IssueStatus.Done }),
       ]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       // The abbreviated per-column labels must not appear anywhere in the
       // board — only the global SortToggle's "Priority" / "#" / "Updated"
@@ -219,15 +165,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         makeIssue({ number: 1, status: IssueStatus.Backlog }),
         makeIssue({ number: 2, status: IssueStatus.InProgress }),
       ]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       // The desktop global SortToggle is the only sort entry rendered by
       // default (mobile SortToggle lives behind the disclosure).
@@ -243,15 +181,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
     it('exposes the global SortToggle inside the mobile filter panel as well', () => {
       const issues = [makeIssue({ number: 1, status: IssueStatus.Backlog })]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       // Default state: the mobile SortToggle is hidden behind the disclosure,
       // so only the desktop SortToggle renders.
@@ -275,15 +205,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         makeIssue({ number: 3, status: IssueStatus.InProgress, priority: 'p1', updatedAt: '2026-01-03T00:00:00Z' }),
         makeIssue({ number: 4, status: IssueStatus.InProgress, priority: 'p3', updatedAt: '2026-01-02T00:00:00Z' }),
       ]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       // Default sort: priority — Backlog column should render p0 (#2) first.
       const backlogColumn = screen.getByTestId('stage-column-backlog')
@@ -320,15 +242,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
   describe('Mobile compact filters', () => {
     it('keeps secondary filters behind the mobile disclosure by default', () => {
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={makeIssues(2)} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={makeIssues(2)} agentStatus={mockAgentStatus} />)
 
       expect(screen.getByTestId('mobile-filter-toggle')).toBeInTheDocument()
       expect(screen.queryByTestId('mobile-filter-panel')).not.toBeInTheDocument()
@@ -350,15 +264,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         writable: true,
       })
 
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={[makeIssue({ title: 'Current issue' })]} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={[makeIssue({ title: 'Current issue' })]} agentStatus={mockAgentStatus} />)
 
       const searchInputs = screen.getAllByPlaceholderText('Search titles...') as HTMLInputElement[]
       expect(searchInputs.map((input) => input.value)).toEqual(['current', 'current'])
@@ -383,15 +289,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         makeIssue({ number: 2, labels: { stream: 'session' } }),
         makeIssue({ number: 3, labels: { stream: 'agent' } }),
       ]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const labelButton = screen.getByText(/Labels:/i)
       fireEvent.click(labelButton)
@@ -419,15 +317,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         makeIssue({ number: 3, status: IssueStatus.Backlog, labels: { stream: 'session' } }),
         makeIssue({ number: 4, status: IssueStatus.InProgress, labels: { stream: 'agent' } }),
       ]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const labelButton = screen.getByText(/Labels:/i)
       fireEvent.click(labelButton)
@@ -459,15 +349,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         makeIssue({ number: 3, labels: { stream: 'session' } }),
         makeIssue({ number: 4, labels: { stream: 'agent' } }),
       ]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const labelButton = screen.getByText(/Labels:/i)
       fireEvent.click(labelButton)
@@ -498,15 +380,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         makeIssue({ number: 2, status: IssueStatus.Backlog, labels: { stream: 'backend' } }),
         makeIssue({ number: 3, status: IssueStatus.Backlog, labels: { module: 'auth' } }),
       ]
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const labelButton = screen.getByText(/Labels:/i)
       fireEvent.click(labelButton)
@@ -557,15 +431,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
           updatedAt: new Date(baseDate + i * 24 * 60 * 60 * 1000).toISOString(),
         }),
       )
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const doneColumn = screen.getByTestId('stage-column-done')
       const collapsedCards = within(doneColumn).getAllByTestId('issue-card')
@@ -592,15 +458,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
           updatedAt: new Date(baseDate + i * 24 * 60 * 60 * 1000).toISOString(),
         }),
       )
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const doneColumn = screen.getByTestId('stage-column-done')
       fireEvent.click(within(doneColumn).getByText('2 more'))
@@ -622,15 +480,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
           health: IssueHealth.Done,
         }),
       )
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} />)
 
       const doneColumn = screen.getByTestId('stage-column-done')
       const cards = within(doneColumn).getAllByTestId('issue-card')
@@ -648,15 +498,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
           health: IssueHealth.Done,
         }),
       )
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} archivedCount={5} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
+      renderBoard(<KanbanBoard issues={issues} agentStatus={mockAgentStatus} archivedCount={5} />)
 
       const doneColumn = screen.getByTestId('stage-column-done')
       expect(within(doneColumn).getByText('Archive all done')).toBeInTheDocument()

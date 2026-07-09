@@ -16,9 +16,37 @@ import type { ReactNode } from 'react'
 import { render } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
+import { ProjectProvider } from '../../../entities/project'
+import { useMswServer } from '../../../../tests/support/msw'
 import { KanbanBoard } from './KanbanBoard'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, IssueHealth, type Issue } from '../../../entities/issue'
+
+export const RUNNERS_PATH = '*/api/projects/:projectId/runners'
+
+function defaultRunnersHandler() {
+  return http.get(RUNNERS_PATH, () => HttpResponse.json({ success: true, data: { runners: [] } }))
+}
+
+useMswServer(defaultRunnersHandler())
+
+export function runnerRowsHandler(rows: Array<Record<string, unknown>>) {
+  return http.get(RUNNERS_PATH, () => HttpResponse.json({ success: true, data: { runners: rows } }))
+}
+
+export function renderBoard(ui: ReactNode): ReturnType<typeof render> {
+  const queryClient = new QueryClient()
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider initialProjectId="proj-1" initialProjects={[]}>
+        <MemoryRouter>
+          {ui}
+        </MemoryRouter>
+      </ProjectProvider>
+    </QueryClientProvider>,
+  )
+}
 
 export function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -55,17 +83,6 @@ export const mockAgentStatus: AgentStatus = {
   issueNumber: null,
   activeAgents: [],
   capacity: { active: 0, max: 2 },
-}
-
-export function renderBoard(ui: ReactNode): ReturnType<typeof render> {
-  const queryClient = new QueryClient()
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        {ui}
-      </MemoryRouter>
-    </QueryClientProvider>,
-  )
 }
 
 export { KanbanBoard }
