@@ -51,11 +51,6 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
   }
 })
 
-vi.mock('../../../widgets/epic-dependency-graph', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../widgets/epic-dependency-graph')>()
-  return { ...actual }
-})
-
 function makeEpic(overrides: Record<string, unknown> = {}) {
   return {
     id: 'epic-12345678',
