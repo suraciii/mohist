@@ -11,7 +11,6 @@ import { ProjectProvider } from '../../../entities/project'
 import { EpicDetailPage } from './EpicDetailPage'
 
 const mocks = vi.hoisted(() => ({
-  useProject: vi.fn(),
   useEpic: vi.fn(),
   useIssues: vi.fn(),
   useAddEpicIssue: vi.fn(),
@@ -25,10 +24,6 @@ const mocks = vi.hoisted(() => ({
   useResumeEpic: vi.fn(),
 }))
 
-vi.mock('../../../entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project')>()
-  return { ...actual, useProject: mocks.useProject }
-})
 vi.mock('../../../entities/issue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../entities/issue')>()),
   useIssues: mocks.useIssues,
@@ -82,7 +77,6 @@ describe('EpicDetailPage when the API omits nullable fields', () => {
       ],
     }
 
-    mocks.useProject.mockReturnValue({ projectId: 'proj-fixture' })
     mocks.useEpic.mockReturnValue({ data: epic, isLoading: false })
     mocks.useIssues.mockReturnValue({ data: [] })
     const mut = () => ({ mutate: vi.fn(), isPending: false, isError: false })
@@ -99,7 +93,7 @@ describe('EpicDetailPage when the API omits nullable fields', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { getByText } = render(
       <QueryClientProvider client={qc}>
-        <ProjectProvider>
+        <ProjectProvider initialProjectId="proj-fixture">
           <MemoryRouter initialEntries={['/epic/epic-fixture-1']}>
             <Routes>
               <Route path="/epic/:id" element={<EpicDetailPage />} />

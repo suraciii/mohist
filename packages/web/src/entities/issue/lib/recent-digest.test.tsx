@@ -3,19 +3,15 @@ import { describe, expect, it, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
+import { ProjectProvider } from '../../project'
 import { IssueStatus, IssueHealth, type Issue } from '../model/types'
 
 const useIssuesMock = vi.fn()
 const useArchivedIssuesMock = vi.fn()
-const useProjectMock = vi.fn()
 
 vi.mock('../api/queries', () => ({
   useIssues: (...args: unknown[]) => useIssuesMock(...args),
   useArchivedIssues: (...args: unknown[]) => useArchivedIssuesMock(...args),
-}))
-
-vi.mock('../../project/@x/project-context', () => ({
-  useProject: () => useProjectMock(),
 }))
 
 import { DIGEST_TOP_N, deriveRecentDigest, useRecentDigest } from './recent-digest'
@@ -48,10 +44,17 @@ function makeIssue(overrides: {
   }
 }
 
-function makeWrapper() {
+function makeWrapper(projectId: string | null = 'proj-1') {
   const queryClient = new QueryClient()
+  const projects = projectId
+    ? [{ id: projectId, name: projectId, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]
+    : []
   return ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider initialProjectId={projectId} initialProjects={projects}>
+        {children}
+      </ProjectProvider>
+    </QueryClientProvider>
   )
 }
 
@@ -331,7 +334,6 @@ describe('deriveRecentDigest', () => {
 
 describe('useRecentDigest', () => {
   it('returns { completed, failed, archived, isLoading } shape derived from useIssues and useArchivedIssues', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
     useIssuesMock.mockReturnValue({
       data: [
         makeIssue({ status: 'done', createdAt: daysAgo(2), updatedAt: daysAgo(1), number: 1 }),
@@ -366,7 +368,6 @@ describe('useRecentDigest', () => {
   })
 
   it('reports isLoading=true while either query is loading (and project is set)', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
     useIssuesMock.mockReturnValue({ data: undefined, isLoading: true })
     useArchivedIssuesMock.mockReturnValue({ data: [], isLoading: false })
 
@@ -379,7 +380,6 @@ describe('useRecentDigest', () => {
   })
 
   it('returns empty arrays and isLoading=false when both queries have undefined data', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-1' })
     useIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
     useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
 
@@ -394,33 +394,30 @@ describe('useRecentDigest', () => {
   })
 
   it('calls useIssues and useArchivedIssues with explicit { projectId } from useProject', () => {
-    useProjectMock.mockReturnValue({ projectId: 'proj-42' })
     useIssuesMock.mockReturnValue({ data: [], isLoading: false })
     useArchivedIssuesMock.mockReturnValue({ data: [], isLoading: false })
 
-    renderHook(() => useRecentDigest(), { wrapper: makeWrapper() })
+    renderHook(() => useRecentDigest(), { wrapper: makeWrapper('proj-42') })
 
     expect(useIssuesMock).toHaveBeenLastCalledWith({ projectId: 'proj-42' })
     expect(useArchivedIssuesMock).toHaveBeenLastCalledWith({ projectId: 'proj-42' })
   })
 
   it('does not call the queries with a projectId when no project is selected', () => {
-    useProjectMock.mockReturnValue({ projectId: null })
     useIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
     useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
 
-    renderHook(() => useRecentDigest(), { wrapper: makeWrapper() })
+    renderHook(() => useRecentDigest(), { wrapper: makeWrapper(null) })
 
     expect(useIssuesMock).toHaveBeenLastCalledWith(undefined)
     expect(useArchivedIssuesMock).toHaveBeenLastCalledWith(undefined)
   })
 
   it('reports isLoading=false when no project is selected even if a query says isLoading', () => {
-    useProjectMock.mockReturnValue({ projectId: null })
     useIssuesMock.mockReturnValue({ data: undefined, isLoading: true })
     useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: true })
 
-    const { result } = renderHook(() => useRecentDigest(), { wrapper: makeWrapper() })
+    const { result } = renderHook(() => useRecentDigest(), { wrapper: makeWrapper(null) })
 
     expect(result.current.isLoading).toBe(false)
   })

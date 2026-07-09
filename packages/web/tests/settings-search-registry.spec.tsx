@@ -9,6 +9,7 @@ import { AiSettingsSection } from '../src/pages/settings/ui/AiSettingsSection'
 import { AgentSettingsSection } from '../src/pages/settings/ui/AgentSettingsSection'
 import { PreferencesSection } from '../src/pages/settings/ui/PreferencesSection'
 import { RepositoriesSection } from '../src/pages/settings/ui/RepositoriesSection'
+import { ProjectProvider } from '../src/entities/project'
 import { SystemSettingsSection } from '../src/pages/settings/ui/SystemSettingsSection'
 import { TemplatesSection } from '../src/pages/settings/ui/TemplatesSection'
 import {
@@ -125,7 +126,6 @@ vi.mock('../src/entities/settings', async (importOriginal) => {
 })
 
 const projectClient = vi.hoisted(() => ({
-  useProject: vi.fn(),
   useRepositories: vi.fn(),
   useAddRepository: vi.fn(),
   useRemoveRepository: vi.fn(),
@@ -136,7 +136,6 @@ vi.mock('../src/entities/project', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/entities/project')>()
   return {
     ...actual,
-    useProject: projectClient.useProject,
     useRepositories: projectClient.useRepositories,
     useAddRepository: projectClient.useAddRepository,
     useRemoveRepository: projectClient.useRemoveRepository,
@@ -178,8 +177,7 @@ function arrangeAiLoaded() {
   })
 }
 
-function arrangeProjectLoaded(projectId = 'proj-1') {
-  projectClient.useProject.mockReturnValue({ currentProject: { id: projectId } })
+function arrangeProjectLoaded() {
   projectClient.useRepositories.mockReturnValue({
     data: [
       {
@@ -218,9 +216,11 @@ function renderSection(node: React.ReactNode) {
   const queryClient = makeQueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <SidebarProvider>{node}</SidebarProvider>
-      </MemoryRouter>
+      <ProjectProvider initialProjectId="proj-1" initialProjects={[{ id: 'proj-1', name: 'proj-1', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [{ name: 'frontend', gitUrl: 'https://github.com/example/frontend.git', baseBranch: 'main', isDefault: true }] }]}>
+        <MemoryRouter>
+          <SidebarProvider>{node}</SidebarProvider>
+        </MemoryRouter>
+      </ProjectProvider>
     </QueryClientProvider>,
   )
 }
