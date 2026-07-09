@@ -1,90 +1,29 @@
 # Aggregate Coordination
 
-## Conventions
+Aggregates: `Issue`, `WorkflowRun`, `Runner`, `Session`.
 
-- Aggregates: `Issue` / `WorkflowRun` / `Runner` / `Session`
-- Solid arrow `------>`: command (synchronous cross-aggregate call)
-- Floating `[EventName]`: event emitted without a specific aggregate target
-- Command arrow branching down from an event label: the command is triggered by that event
-- Single-aggregate transitions are listed in prose, not drawn
+Conventions: solid arrow `→` = synchronous command. `[Event]` = async event. Command branching from event = event-triggered.
 
-## 跨聚合事件→命令
+## Event → Command
 
-| 事件 | 发送方 | 命令 | 接收方 |
+| Event | From | Command | To |
 |---|---|---|---|
-| `WorkflowRunCompleted` | WorkflowRun | `CompleteIssue` | Issue |
-| `WorkflowRunFailed` | WorkflowRun | `AbortWork` | Issue |
-| `RunnerDisconnected` | Runner | (无 — Session 自决) | Session |
+| WorkflowRunCompleted | WorkflowRun | CompleteIssue | Issue |
+| WorkflowRunFailed | WorkflowRun | AbortWork | Issue |
+| RunnerDisconnected | Runner | — | Session self-decides |
 
-## Start
+## Interactions
 
-```text
-Issue       WorkflowRun
- |             |
- |  StartWork  |
- |------------>|
- |             |
 ```
+Issue → StartWork → WorkflowRun
 
-## Report (成功)
+Runner → Report → WorkflowRun ──[WorkflowRunCompleted]──→ Issue.CompleteIssue
+Runner → Report → WorkflowRun ──[WorkflowRunFailed]─────→ Issue.AbortWork
 
-```text
-Runner      WorkflowRun            Issue
- |             |                    |
- |   Report    |                    |
- |------------>|                    |
- |             |                    |
- |       [WorkflowRunCompleted]     |
- |             |      |             |
- |             |      | CompleteIssue
- |             |      v             |
- |             |------------------->|
- |             |                    |
-```
+Issue → Cancel → WorkflowRun
+Runner ──[RunnerDisconnected]──→ Session (fails affected sessions)
 
-## Report (失败)
-
-```text
-Runner      WorkflowRun            Issue
- |             |                    |
- |   Report    |                    |
- |------------>|                    |
- |             |                    |
- |       [WorkflowRunFailed]        |
- |             |      |             |
- |             |      |  AbortWork  |
- |             |      v             |
- |             |------------------->|
- |             |                    |
-```
-
-## Stop (issue 在跑 workflow)
-
-```text
-Issue       WorkflowRun
- |             |
- |   Cancel    |
- |------------>|
- |             |
-```
-
-## Runner Disconnect
-
-```text
-Runner                    Session
- |                          |
- |   [RunnerDisconnected]   |
- |~~~~~~~~~~~~~~~~~~~~~~~~~>|
- |                          |
- |      (Session fails      |
- |       affected sessions) |
- |                          |
-```
-
-## 单一聚合 transition
-
-```text
-WorkflowRun 内部: Pause / Resume / Approve / Reject / Retry / Rerun
-Issue 内部:      Archive / Unarchive / Reopen / Close
-Runner 内部:     Register / Unregister / Heartbeat
+WorkflowRun: Pause, Resume, Approve, Reject, Retry, Rerun
+Issue: Archive, Unarchive, Reopen, Close
+Runner: Register, Unregister, Heartbeat
 ```
