@@ -13,7 +13,6 @@ import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
  */
 
 const mocks = vi.hoisted(() => ({
-  useProject: vi.fn(),
   useEpic: vi.fn(),
   useIssues: vi.fn(),
   useAddEpicIssue: vi.fn(),
@@ -28,13 +27,7 @@ const mocks = vi.hoisted(() => ({
   useReopenEpic: vi.fn(),
 }))
 
-vi.mock('../../../entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project')>()
-  return {
-    ...actual,
-    useProject: mocks.useProject,
-  }
-})
+
 vi.mock('../../../entities/issue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../entities/issue')>()),
   useIssues: mocks.useIssues,
@@ -96,7 +89,6 @@ describe('EpicDetailPage lifecycle guards', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
@@ -375,7 +367,6 @@ describe('EpicDetailPage pause/resume actions', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
@@ -678,7 +669,6 @@ describe('EpicDetailPage lifecycle header actions', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })

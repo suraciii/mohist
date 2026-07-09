@@ -11,7 +11,6 @@ import type { RunnerStatusRow } from '../../../entities/runner'
 import { RunnerDetailPage } from './RunnerDetailPage'
 
 const mocks = vi.hoisted(() => ({
-  useProject: vi.fn(),
   useRunner: vi.fn(),
   useUpdateRunnerSlots: vi.fn(),
 }))
@@ -22,14 +21,6 @@ vi.mock('../../../entities/runner', async (importOriginal) => {
     ...actual,
     useRunner: mocks.useRunner,
     useUpdateRunnerSlots: mocks.useUpdateRunnerSlots,
-  }
-})
-
-vi.mock('../../../entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project')>()
-  return {
-    ...actual,
-    useProject: mocks.useProject,
   }
 })
 
@@ -81,7 +72,6 @@ function renderPage() {
 describe('RunnerDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProject.mockReturnValue({ projectId: TEST_PROJECT.id, currentProject: TEST_PROJECT })
     mocks.useUpdateRunnerSlots.mockReturnValue({ mutate: vi.fn(), isPending: false })
   })
 

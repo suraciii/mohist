@@ -87,7 +87,7 @@ export function renderPage(): RenderResult & { rerenderPage: () => void } {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const ui = (): ReactElement => (
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider>
+      <ProjectProvider initialProjectId="proj-1">
         <MemoryRouter initialEntries={['/epic/epic-12345678']}>
           <LocationProbe />
           <Routes>

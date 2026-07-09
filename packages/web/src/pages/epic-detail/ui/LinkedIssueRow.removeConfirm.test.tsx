@@ -12,7 +12,6 @@ import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
 
 // --- per-file hoisted mocks (Vitest hoists vi.mock per-file; cannot be shared) ---
 const mocks = vi.hoisted(() => ({
-  useProject: vi.fn(),
   useEpic: vi.fn(),
   useIssues: vi.fn(),
   useAddEpicIssue: vi.fn(),
@@ -26,13 +25,7 @@ const mocks = vi.hoisted(() => ({
   useResumeEpic: vi.fn(),
 }))
 
-vi.mock('../../../entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project')>()
-  return {
-    ...actual,
-    useProject: mocks.useProject,
-  }
-})
+
 vi.mock('../../../entities/issue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../entities/issue')>()),
   useIssues: mocks.useIssues,
@@ -97,7 +90,6 @@ describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () =>
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })

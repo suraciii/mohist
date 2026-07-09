@@ -3,13 +3,13 @@ import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ProjectProvider } from '../../../entities/project'
 import { IssueModelSelector } from './IssueModelSelector'
 
 const mocks = vi.hoisted(() => ({
   useAvailableModelIds: vi.fn(),
   useOpencodeModel: vi.fn(),
   useModelVariants: vi.fn(() => ({})),
-  useProject: vi.fn(() => ({ projectId: 'proj_test' })),
   getIssueWorkflowVariables: vi.fn(),
   patchIssueWorkflowDefinitionVar: vi.fn(),
   patchIssueWorkflowStageDefinitionVar: vi.fn(),
@@ -36,10 +36,6 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
   }
 })
 
-vi.mock('../../../entities/project', () => ({
-  useProject: mocks.useProject,
-}))
-
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
   useQueryClient: () => mocks.useQueryClient(),
@@ -65,7 +61,9 @@ function renderSelector(props: { currentModel?: string | null; currentStageModel
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <IssueModelSelector issueNumber={42} currentModel={props.currentModel ?? null} currentStageModels={props.currentStageModels ?? null} />
+      <ProjectProvider initialProjectId="proj_test" initialProjects={[{ id: 'proj_test', name: 'Test', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+        <IssueModelSelector issueNumber={42} currentModel={props.currentModel ?? null} currentStageModels={props.currentStageModels ?? null} />
+      </ProjectProvider>
     </QueryClientProvider>,
   )
 }

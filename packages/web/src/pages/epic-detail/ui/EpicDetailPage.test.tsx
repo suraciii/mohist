@@ -38,7 +38,6 @@ function issue(overrides: Record<string, unknown>) {
 }
 
 const mocks = vi.hoisted(() => ({
-  useProject: vi.fn(),
   useEpic: vi.fn(),
   useIssues: vi.fn(),
   useAddEpicIssue: vi.fn(),
@@ -56,13 +55,6 @@ const widgetBehavior = vi.hoisted(() => ({
   mode: 'default' as 'default' | 'empty' | 'error',
 }))
 
-vi.mock('../../../entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project')>()
-  return {
-    ...actual,
-    useProject: mocks.useProject,
-  }
-})
 vi.mock('../../../entities/issue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../entities/issue')>()),
   useIssues: mocks.useIssues,
@@ -169,7 +161,7 @@ function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const ui = () => (
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider>
+      <ProjectProvider initialProjectId="proj-1">
         <MemoryRouter initialEntries={['/epic/epic-12345678']}>
           <LocationProbe />
           <Routes>
@@ -198,7 +190,6 @@ describe('EpicDetailPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
     mocks.useEpic.mockReturnValue({ data: epic, isLoading: false })
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
@@ -308,7 +299,6 @@ describe('EpicDetailPage numbered display', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
     mocks.useEpic.mockReturnValue({ data: numberedEpic, isLoading: false })
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
@@ -390,7 +380,6 @@ progress: {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
     mocks.useEpic.mockReturnValue({ data: defaultEpic(), isLoading: false })
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
@@ -570,7 +559,6 @@ describe('EpicDetailPage markdown description', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
@@ -652,7 +640,6 @@ describe('EpicDetailPage Ask Agent entry (T-005)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: vi.fn(), isPending: false, isError: false })

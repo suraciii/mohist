@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'
+import { ProjectProvider } from '../../../entities/project'
 import { CreateIssueDialog } from './CreateIssueDialog'
 
 const TEMPLATE_FIXTURES = {
@@ -53,7 +54,6 @@ const TEMPLATE_FIXTURES = {
 
 const mocks = vi.hoisted(() => ({
   createIssue: vi.fn(),
-  useProject: vi.fn(() => ({ projectId: 'proj_create', projects: [{ id: 'proj_create', name: 'Project' }] })),
   useRepositories: vi.fn(() => ({ data: [{ name: 'main', isDefault: true }] })),
   useAvailableModelIds: vi.fn<() => { data: { models: string[]; modelVariants: Record<string, string[]> } | undefined; isLoading: boolean; error: unknown }>(() => ({ data: { models: [], modelVariants: {} }, isLoading: false, error: null })),
   useWorkflowProfiles: vi.fn<() => { data: unknown[] }>(() => ({ data: [] })),
@@ -73,8 +73,8 @@ vi.mock('../../../entities/issue', async (importOriginal) => ({
   useIssues: mocks.useIssues,
 }))
 
-vi.mock('../../../entities/project', () => ({
-  useProject: mocks.useProject,
+vi.mock('../../../entities/project', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../entities/project')>()),
   useRepositories: mocks.useRepositories,
 }))
 
@@ -104,7 +104,9 @@ function renderDialog() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <CreateIssueDialog open onClose={vi.fn()} />
+      <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+        <CreateIssueDialog open onClose={vi.fn()} />
+      </ProjectProvider>
     </QueryClientProvider>,
   )
   return { queryClient, ...view }
@@ -779,7 +781,9 @@ describe('CreateIssueDialog prerequisites', () => {
 
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
-        <CreateIssueDialog open onClose={onClose} />
+        <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+          <CreateIssueDialog open onClose={onClose} />
+        </ProjectProvider>
       </QueryClientProvider>,
     )
 
@@ -802,12 +806,16 @@ describe('CreateIssueDialog prerequisites', () => {
 
     rerender(
       <QueryClientProvider client={queryClient}>
-        <CreateIssueDialog open={false} onClose={onClose} />
+        <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+          <CreateIssueDialog open={false} onClose={onClose} />
+        </ProjectProvider>
       </QueryClientProvider>,
     )
     rerender(
       <QueryClientProvider client={queryClient}>
-        <CreateIssueDialog open onClose={onClose} />
+        <ProjectProvider initialProjectId="proj_create" initialProjects={[{ id: 'proj_create', name: 'Project', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', repositories: [] }]}>
+          <CreateIssueDialog open onClose={onClose} />
+        </ProjectProvider>
       </QueryClientProvider>,
     )
 
