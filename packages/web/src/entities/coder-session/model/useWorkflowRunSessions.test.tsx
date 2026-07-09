@@ -2,36 +2,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { getWorkflowRunSessions } from '../api/client'
 import type { WorkflowRunSession } from './types'
 import { useWorkflowRunSessions } from './useWorkflowRunSessions'
+import { useMswServer } from '../../../../tests/support/msw'
+import { http, HttpResponse } from 'msw'
+import { dispatchAgentEvent } from '../../agent/model/events'
 
-vi.mock('../api/client', () => ({
-  getWorkflowRunSessions: vi.fn(),
-}))
+let _sessionsData: WorkflowRunSession[] = []
+let _sessionsResponses: Array<WorkflowRunSession[] | 'never'> = []
 
-const eventHandlers = new Map<string, ((detail: unknown) => void)[]>()
+const WorkflowSessionsPath = '/api/workflow-runs/:workflowRunId/sessions'
 
-vi.mock('../../agent/@x/events', () => ({
-  onAgentEvent: vi.fn((name: string, handler: (detail: unknown) => void) => {
-    if (!eventHandlers.has(name)) eventHandlers.set(name, [])
-    eventHandlers.get(name)!.push(handler)
-    return () => {
-      const handlers = eventHandlers.get(name)
-      if (handlers) {
-        const idx = handlers.indexOf(handler)
-        if (idx !== -1) handlers.splice(idx, 1)
-      }
-    }
-  }),
-}))
+const coderSessionsHandler = vi.fn(() => {
+  const response = _sessionsResponses.length > 0
+    ? _sessionsResponses.shift()!
+    : _sessionsData
+  if (response === 'never') return new Promise<never>(() => {})
+  return HttpResponse.json({ success: true, data: response })
+})
 
-const mockedGetWorkflowRunSessions = vi.mocked(getWorkflowRunSessions)
-
-function dispatchAgentEvent(name: string, detail: unknown) {
-  const handlers = eventHandlers.get(name) ?? []
-  for (const handler of handlers) handler(detail)
-}
+useMswServer(http.get(WorkflowSessionsPath, coderSessionsHandler))
 
 function session(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
   return {
@@ -64,13 +54,11 @@ function createQueryClient() {
   })
 }
 
-function never<T>(): Promise<T> {
-  return new Promise(() => {})
-}
-
 describe('useWorkflowRunSessions', () => {
   beforeEach(() => {
-    eventHandlers.clear()
+    vi.clearAllMocks()
+    _sessionsData = []
+    _sessionsResponses = []
   })
 
   afterEach(() => {
@@ -78,17 +66,10 @@ describe('useWorkflowRunSessions', () => {
   })
 
   it('does not expose previous workflow run sessions while a new workflow run is loading', async () => {
-    mockedGetWorkflowRunSessions.mockImplementation((workflowRunId: string) => {
-      if (workflowRunId === 'wr-1') {
-        return Promise.resolve([
-          session({ id: 's-wr-1', workflowRunId: 'wr-1', sessionName: 'old-run-session' }),
-        ])
-      }
-      if (workflowRunId === 'wr-2') {
-        return never<WorkflowRunSession[]>()
-      }
-      return Promise.resolve([])
-    })
+    _sessionsResponses = [
+      [session({ id: 's-wr-1', workflowRunId: 'wr-1', sessionName: 'old-run-session' })],
+      'never',
+    ]
 
     const queryClient = createQueryClient()
     const wrapper = ({ children }: { children: ReactNode }) => (
@@ -112,9 +93,7 @@ describe('useWorkflowRunSessions', () => {
 
   describe('event handlers', () => {
     it('usage.updated applies contextUsagePercent and healthStatus to matched session', async () => {
-      mockedGetWorkflowRunSessions.mockResolvedValue([
-        session({ id: 'sess-1', acpSessionId: 'acp-1', status: 'running' }),
-      ])
+      _sessionsData = [session({ id: 'sess-1', acpSessionId: 'acp-1', status: 'running' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -130,7 +109,7 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      dispatchAgentEvent('usage.updated', {
+      ;(dispatchAgentEvent as any)('usage.updated', {
         coderSessionId: 'sess-1',
         acpSessionId: 'acp-1',
         contextUsagePercent: 72,
@@ -138,16 +117,14 @@ describe('useWorkflowRunSessions', () => {
       })
 
       await waitFor(() => {
-        const session = result.current.sessions[0]
-        expect(session.usage?.contextUsagePercent).toBe(72)
-        expect(session.usage?.healthStatus).toBe('yellow')
+        const s = result.current.sessions[0]
+        expect(s.usage?.contextUsagePercent).toBe(72)
+        expect(s.usage?.healthStatus).toBe('yellow')
       })
     })
 
     it('usage.updated does not trigger a refetch', async () => {
-      mockedGetWorkflowRunSessions.mockResolvedValue([
-        session({ id: 'sess-1', status: 'running' }),
-      ])
+      _sessionsData = [session({ id: 'sess-1', status: 'running' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -163,9 +140,9 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      const fetchCountBefore = mockedGetWorkflowRunSessions.mock.calls.length
+      const fetchCountBefore = coderSessionsHandler.mock.calls.length
 
-      dispatchAgentEvent('usage.updated', {
+      ;(dispatchAgentEvent as any)('usage.updated', {
         coderSessionId: 'sess-1',
         contextUsagePercent: 72,
         healthStatus: 'yellow',
@@ -175,13 +152,11 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions[0].usage?.contextUsagePercent).toBe(72)
       })
 
-      expect(mockedGetWorkflowRunSessions.mock.calls.length).toBe(fetchCountBefore)
+      expect(coderSessionsHandler.mock.calls.length).toBe(fetchCountBefore)
     })
 
     it('context_health_update updates matched session fields', async () => {
-      mockedGetWorkflowRunSessions.mockResolvedValue([
-        session({ id: 'sess-1', acpSessionId: 'acp-1', status: 'running' }),
-      ])
+      _sessionsData = [session({ id: 'sess-1', acpSessionId: 'acp-1', status: 'running' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -197,7 +172,7 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      dispatchAgentEvent('context_health_update', {
+      ;(dispatchAgentEvent as any)('context_health_update', {
         coderSessionId: 'sess-1',
         acpSessionId: 'acp-1',
         healthStatus: 'red',
@@ -207,18 +182,16 @@ describe('useWorkflowRunSessions', () => {
       })
 
       await waitFor(() => {
-        const session = result.current.sessions[0]
-        expect(session.usage?.healthStatus).toBe('red')
-        expect(session.usage?.contextUsagePercent).toBe(91)
-        expect(session.usage?.contextWindowUsed).toBe(182000)
-        expect(session.usage?.contextWindowSize).toBe(200000)
+        const s = result.current.sessions[0]
+        expect(s.usage?.healthStatus).toBe('red')
+        expect(s.usage?.contextUsagePercent).toBe(91)
+        expect(s.usage?.contextWindowUsed).toBe(182000)
+        expect(s.usage?.contextWindowSize).toBe(200000)
       })
     })
 
     it('context_health_update updates session matched by acpSessionId', async () => {
-      mockedGetWorkflowRunSessions.mockResolvedValue([
-        session({ id: 'sess-1', acpSessionId: 'acp-1', status: 'running' }),
-      ])
+      _sessionsData = [session({ id: 'sess-1', acpSessionId: 'acp-1', status: 'running' })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -234,7 +207,7 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      dispatchAgentEvent('context_health_update', {
+      ;(dispatchAgentEvent as any)('context_health_update', {
         coderSessionId: undefined,
         acpSessionId: 'acp-1',
         healthStatus: 'yellow',
@@ -244,16 +217,19 @@ describe('useWorkflowRunSessions', () => {
       })
 
       await waitFor(() => {
-        const session = result.current.sessions[0]
-        expect(session.usage?.healthStatus).toBe('yellow')
-        expect(session.usage?.contextUsagePercent).toBe(65)
+        const s = result.current.sessions[0]
+        expect(s.usage?.healthStatus).toBe('yellow')
+        expect(s.usage?.contextUsagePercent).toBe(65)
       })
     })
 
     it('context_health_update ignores sessions whose identifiers do not match', async () => {
-      mockedGetWorkflowRunSessions.mockResolvedValue([
-        session({ id: 'sess-1', acpSessionId: 'acp-1', usage: { healthStatus: 'green', contextUsagePercent: 30 }, status: 'running' }),
-      ])
+      _sessionsData = [session({
+        id: 'sess-1',
+        acpSessionId: 'acp-1',
+        usage: { healthStatus: 'green', contextUsagePercent: 30 },
+        status: 'running',
+      })]
 
       const queryClient = createQueryClient()
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -269,7 +245,7 @@ describe('useWorkflowRunSessions', () => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      dispatchAgentEvent('context_health_update', {
+      ;(dispatchAgentEvent as any)('context_health_update', {
         coderSessionId: 'sess-unknown',
         acpSessionId: 'acp-unknown',
         healthStatus: 'red',
@@ -279,9 +255,9 @@ describe('useWorkflowRunSessions', () => {
       })
 
       await waitFor(() => {
-        const session = result.current.sessions[0]
-        expect(session.usage?.healthStatus).toBe('green')
-        expect(session.usage?.contextUsagePercent).toBe(30)
+        const s = result.current.sessions[0]
+        expect(s.usage?.healthStatus).toBe('green')
+        expect(s.usage?.contextUsagePercent).toBe(30)
       })
     })
   })
