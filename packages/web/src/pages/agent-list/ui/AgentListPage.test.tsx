@@ -1,30 +1,30 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
 import type { AgentInfo } from '../../../entities/agent'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { AgentListPage } from './AgentListPage'
 
-const mocks = vi.hoisted(() => ({
-  agents: [] as AgentInfo[],
-  agentsLoading: false,
-}))
+const AGENTS_PATH = '*/api/projects/:projectId/agents'
+const STATUS_PATH = '*/api/projects/:projectId/agent/status'
 
-vi.mock('../../../entities/agent', () => ({
-  useAgents: () => ({
-    data: mocks.agents,
-    isLoading: mocks.agentsLoading,
-  }),
-  readAgentModelAndVariant: (agent: any) => {
-    if (!agent?.agentConfig) return { model: null, variant: null }
-    const cfg = agent.agentConfig as Record<string, unknown>
-    return { model: cfg.model as string ?? null, variant: cfg.variant as string ?? null }
-  },
-  useAgentStatus: () => ({ data: { running: false, capacity: { active: 0, max: 8 } } }),
-}))
+function mockAgents(agents: AgentInfo[]) {
+  server.use(http.get(AGENTS_PATH, () => HttpResponse.json({ success: true, data: agents })))
+}
+function mockAgentsPending() {
+  server.use(http.get(AGENTS_PATH, () => new Promise(() => {})))
+}
 
+useMswServer(
+  http.get(AGENTS_PATH, () => HttpResponse.json({ success: true, data: [] })),
+  http.get(STATUS_PATH, () =>
+    HttpResponse.json({ success: true, data: { running: false, capacity: { active: 0, max: 8 } } }),
+  ),
+)
 
 vi.mock('../../../widgets/agent-profile-editor/ui/AgentProfileEditor', () => ({
   AgentProfileEditor: ({ agent, open }: { agent?: AgentInfo | null; open: boolean }) =>
@@ -76,11 +76,6 @@ function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
 }
 
 describe('AgentListPage', () => {
-  beforeEach(() => {
-    mocks.agents = []
-    mocks.agentsLoading = false
-  })
-
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
@@ -88,57 +83,56 @@ describe('AgentListPage', () => {
 
   describe('list rendering', () => {
     it('shows loading state while agents are loading', () => {
-      mocks.agentsLoading = true
+      mockAgentsPending()
       renderPage()
       expect(screen.getByText(/loading agents/i)).toBeInTheDocument()
     })
 
-    it('renders empty state when no profiles exist', () => {
+    it('renders empty state when no profiles exist', async () => {
       renderPage()
-      expect(screen.getByTestId('agents-empty-state')).toBeInTheDocument()
+      expect(await screen.findByTestId('agents-empty-state')).toBeInTheDocument()
       expect(screen.getByText(/no agents defined/i)).toBeInTheDocument()
       expect(screen.getByTestId('agents-empty-create')).toBeInTheDocument()
     })
 
-    it('renders active agents in the list', () => {
-      mocks.agents = [makeAgent({ name: 'Alpha', id: 'a1' })]
+    it('renders active agents in the list', async () => {
+      mockAgents([makeAgent({ name: 'Alpha', id: 'a1' })])
       renderPage()
-      expect(screen.getByTestId('agent-list')).toBeInTheDocument()
-      expect(screen.getByTestId('agent-row-a1')).toBeInTheDocument()
+      expect(await screen.findByTestId('agent-row-a1')).toBeInTheDocument()
       expect(screen.getByText('Alpha')).toBeInTheDocument()
     })
 
-    it('renders agent type, model, and variant for each row', () => {
-      mocks.agents = [makeAgent({
+    it('renders agent type, model, and variant for each row', async () => {
+      mockAgents([makeAgent({
         name: 'Beta',
         id: 'b1',
         agentConfig: { model: 'gpt-4', variant: 'high' },
-      })]
+      })])
       renderPage()
-      expect(screen.getByText('gpt-4')).toBeInTheDocument()
+      expect(await screen.findByText('gpt-4')).toBeInTheDocument()
       expect(screen.getByText('high')).toBeInTheDocument()
     })
 
-    it('distinguishes archived agents with opacity and badge', () => {
-      mocks.agents = [
+    it('distinguishes archived agents with opacity and badge', async () => {
+      mockAgents([
         makeAgent({ name: 'Active One', id: 'a1', status: 'active' }),
         makeAgent({ name: 'Archived One', id: 'a2', status: 'archived' }),
-      ]
+      ])
       renderPage()
-      const archivedRow = screen.getByTestId('agent-row-a2')
+      const archivedRow = await screen.findByTestId('agent-row-a2')
       expect(archivedRow).toBeInTheDocument()
       expect(archivedRow.getAttribute('data-status')).toBe('archived')
       const archivedLabels = screen.getAllByText('Archived')
       expect(archivedLabels.length).toBeGreaterThanOrEqual(1)
     })
 
-    it('displays availability status (Active / Archived)', () => {
-      mocks.agents = [
+    it('displays availability status (Active / Archived)', async () => {
+      mockAgents([
         makeAgent({ id: 'a1', name: 'Active A', status: 'active' }),
         makeAgent({ id: 'a2', name: 'Archived B', status: 'archived' }),
-      ]
+      ])
       renderPage()
-      // Both "Active" (for active status) and "Archived" should be present
+      await screen.findByTestId('agent-row-a2')
       const activeStatuses = screen.getAllByText('Active')
       const archivedStatuses = screen.getAllByText('Archived')
       expect(activeStatuses.length).toBeGreaterThanOrEqual(1)
@@ -147,22 +141,25 @@ describe('AgentListPage', () => {
   })
 
   describe('create entry points', () => {
-    it('does not render the editor before any entry point is clicked', () => {
-      mocks.agents = [makeAgent({ id: 'a1', name: 'Alpha' })]
+    it('does not render the editor before any entry point is clicked', async () => {
+      mockAgents([makeAgent({ id: 'a1', name: 'Alpha' })])
       renderPage()
+      await screen.findByTestId('agent-row-a1')
       expect(screen.queryByTestId('agent-profile-editor')).not.toBeInTheDocument()
     })
 
-    it('opens the profile editor in create mode when the header "New Agent" button is clicked (no route change)', () => {
-      mocks.agents = [makeAgent({ id: 'a1', name: 'Alpha' })]
+    it('opens the profile editor in create mode when the header "New Agent" button is clicked (no route change)', async () => {
+      mockAgents([makeAgent({ id: 'a1', name: 'Alpha' })])
       renderPage()
+      await screen.findByTestId('agent-row-a1')
       fireEvent.click(screen.getByTestId('agent-list-create'))
       expect(screen.getByTestId('agent-profile-editor')).toHaveAttribute('data-mode', 'create')
       expect(screen.getByTestId('current-path')).toHaveTextContent('/agents')
     })
 
-    it('opens the profile editor in create mode when the empty-state "Create Agent" button is clicked (no route change)', () => {
+    it('opens the profile editor in create mode when the empty-state "Create Agent" button is clicked (no route change)', async () => {
       renderPage()
+      await screen.findByTestId('agents-empty-state')
       fireEvent.click(screen.getByTestId('agents-empty-create'))
       expect(screen.getByTestId('agent-profile-editor')).toHaveAttribute('data-mode', 'create')
       expect(screen.getByTestId('current-path')).toHaveTextContent('/agents')
@@ -170,27 +167,27 @@ describe('AgentListPage', () => {
   })
 
   describe('Archived section (agent-archive spec)', () => {
-    it('lists archived agents under an "Archived (n)" section whose count matches', () => {
-      mocks.agents = [
+    it('lists archived agents under an "Archived (n)" section whose count matches', async () => {
+      mockAgents([
         makeAgent({ id: 'a-active', name: 'Active One', status: 'active' }),
         makeAgent({ id: 'a-archived', name: 'Archived One', status: 'archived' }),
         makeAgent({ id: 'b-archived', name: 'Archived Two', status: 'archived' }),
-      ]
+      ])
       renderPage()
-      const section = screen.getByTestId('archived-section')
+      const section = await screen.findByTestId('archived-section')
       expect(section).toBeInTheDocument()
       expect(section).toHaveTextContent('Archived (2)')
       expect(within(section).getByTestId('agent-row-a-archived')).toBeInTheDocument()
       expect(within(section).getByTestId('agent-row-b-archived')).toBeInTheDocument()
     })
 
-    it('renders archived rows with reduced opacity (visually distinct) and an Archived badge', () => {
-      mocks.agents = [
+    it('renders archived rows with reduced opacity (visually distinct) and an Archived badge', async () => {
+      mockAgents([
         makeAgent({ id: 'a-active', name: 'Active One', status: 'active' }),
         makeAgent({ id: 'a-archived', name: 'Archived One', status: 'archived' }),
-      ]
+      ])
       renderPage()
-      const archivedRow = screen.getByTestId('agent-row-a-archived')
+      const archivedRow = await screen.findByTestId('agent-row-a-archived')
       const activeRow = screen.getByTestId('agent-row-a-active')
       expect(archivedRow.className).toMatch(/opacity-60/)
       expect(activeRow.className).not.toMatch(/opacity-60/)
@@ -198,22 +195,24 @@ describe('AgentListPage', () => {
       expect(archivedLabels.length).toBeGreaterThanOrEqual(1)
     })
 
-    it('archived rows navigate into the detail page like active rows', () => {
-      mocks.agents = [
+    it('archived rows navigate into the detail page like active rows', async () => {
+      mockAgents([
         makeAgent({ id: 'a-active', name: 'Active One', status: 'active' }),
         makeAgent({ id: 'a-archived', name: 'Archived One', status: 'archived' }),
-      ]
+      ])
       renderPage()
+      await screen.findByTestId('agent-row-a-archived')
       fireEvent.click(screen.getByTestId('agent-row-a-archived'))
       expect(screen.getByTestId('current-path')).toHaveTextContent('/agents/a-archived')
     })
 
-    it('omits the Archived section when no archived agents exist', () => {
-      mocks.agents = [
+    it('omits the Archived section when no archived agents exist', async () => {
+      mockAgents([
         makeAgent({ id: 'a1', name: 'Active One', status: 'active' }),
         makeAgent({ id: 'a2', name: 'Active Two', status: 'active' }),
-      ]
+      ])
       renderPage()
+      await screen.findByTestId('agent-row-a1')
       expect(screen.queryByTestId('archived-section')).not.toBeInTheDocument()
     })
   })
