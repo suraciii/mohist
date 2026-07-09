@@ -1,6 +1,6 @@
 # 边界：Workflow ↔ Issue（Profile 归属与依赖方向）
 
-本文是 [`context-map.md`](../../context-map.md) 关系 #1（Workflow↔Issue）的具体展开，聚焦：**依赖怎么走、哪些东西真的放错了**。profile 的内容/合并/加载见 [`profile.md`](../profile.md)。
+本文是 [`domain-analysis.md`](../../domain-analysis.md) 上下文关系 #1（Workflow↔Issue）的具体展开，聚焦：**依赖怎么走、哪些东西真的放错了**。profile 的内容/合并/加载见 [`profile.md`](../profile.md)。
 
 > 相关但不重叠：调度见 [`scheduling.md`](../scheduling.md)、任务派发见 [`task-dispatch.md`](../task-dispatch.md)、协调见 [`issue-coordination.md`](../issue-coordination.md)。
 

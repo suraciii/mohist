@@ -25,7 +25,7 @@ status: "WIP——技术方案。核心边界已收敛：①订阅归属 Agent �
 产品要 Agent 能监听系统事件、按订阅自动响应。代理审批只是其中一个场景。技术上要同时满足三条硬约束：
 
 - **Agent 是叶子域**（[`domain-analysis.md`](domain-analysis.md):98,105）：Agent 不反向依赖 Workflow / Issue 的领域模型。
-- **CloudEvent 是 Published Language**（[`eventbus-v2.md`](eventbus-v2.md):110,166）：`[Subscription]` + `ICloudEventHandler` 是基础设施投递落点，不是业务域间的模型依赖。
+- **CloudEvent 是 Published Language**（[`eventbus.md`](eventbus.md)）：`[Subscription]` + `ICloudEventHandler` 是基础设施投递落点，不是业务域间的模型依赖。
 - **Agent 是代理人**：Agent 能做的动作也必须能由人做。Agent 审批走 `mo workflow approve` / `mo issue approve`，不引入专属裁判通道。
 
 ## 领域边界（镜头 3）
@@ -57,7 +57,7 @@ Agent 启动，按提示词执行：
   mo workflow approve/reject <runId>
 ```
 
-**为什么合规**：handler 零业务域 `using`，纯 PL 消费，Agent 保持真叶子。workflow 事件、issue 事件零改动；eventbus-v2 的 identity 盖印与本功能解耦（盖印仍是 eventbus-v2 自己的优化项，不再是本功能前置）。
+**为什么合规**：handler 零业务域 `using`，纯 PL 消费，Agent 保持真叶子。workflow 事件、issue 事件零改动；事件总线的 identity 盖印与本功能解耦（盖印仍是 [`eventbus.md`](eventbus.md) 自己的优化项，不再是本功能前置）。
 
 **前置依赖**：`mo workflow get` 返回关联 issue —— 已由 issue #381 交付（`WorkflowRunDetailDto.IssueRef`，server 端 `IssueQuerier.GetIssueRefForWorkflowRunAsync` 反向组装；CLI `mo workflow get`/别名 `show` 透传）。该反向组装发生在 API 读侧，不构成 workflow 域对 issue 域的模型依赖，与 `IssueWorkflowCompletionHandler` 同属合法的读侧组装。
 
@@ -210,4 +210,4 @@ handler 零业务域 `using`，纯 PL 消费。骨架照搬 `InboxProjectionHand
 - 现有 Filter 匹配语义：`Infrastructure/Events/InMemoryEventBus.cs:95-109`（`\|`/`*`/`.*`）
 - session metadata label 机制（可见性落点）：`Sessions/Services/GenericAgentSessionMetadata.cs:36-65`
 - 事件订阅范式：`Events/Subscriptions/InboxProjectionHandler.cs`、`Inbox/InboxSubscriptionStore.cs`
-- 边界依据：[`architecture.md`](architecture.md):49,99-108,254、[`domain-analysis.md`](domain-analysis.md):98,105,154、[`eventbus-v2.md`](eventbus-v2.md):110,166
+- 边界依据：[`architecture.md`](architecture.md)（放置规则、核心原则）、[`domain-analysis.md`](domain-analysis.md)（依赖方向与不变量）、[`eventbus.md`](eventbus.md)（订阅契约）
