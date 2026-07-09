@@ -3,27 +3,40 @@ import '@testing-library/jest-dom'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
-import { ApiError } from '../../../shared/api/client'
 import { SessionRecoveryActions } from './SessionRecoveryActions'
+import { useMswServer } from '../../../../tests/support/msw'
+import type { SessionRecoveryResult } from '../../../entities/coder-session'
 
-const apiMocks = vi.hoisted(() => ({
-  compactSession: vi.fn(),
-  resetSession: vi.fn(),
-}))
+let _compactData: SessionRecoveryResult | null = null
+let _compactError: { status: number; message: string } | null = null
+let _resetData: SessionRecoveryResult | null = null
+let _resetError: { status: number; message: string } | null = null
 
-vi.mock('../../../entities/coder-session/api/client', () => ({
-  compactSession: (...args: unknown[]) => apiMocks.compactSession(...args),
-  resetSession: (...args: unknown[]) => apiMocks.resetSession(...args),
-}))
+const compactHandler = vi.fn(({ request }: { request: Request }) => {
+  void request
+  if (_compactError) {
+    return HttpResponse.json({ success: false, error: _compactError.message }, { status: _compactError.status })
+  }
+  return HttpResponse.json({ success: true, data: _compactData ?? { id: '', status: 'completed', wasCompacted: false } })
+})
+
+const resetHandler = vi.fn(({ request }: { request: Request }) => {
+  void request
+  if (_resetError) {
+    return HttpResponse.json({ success: false, error: _resetError.message }, { status: _resetError.status })
+  }
+  return HttpResponse.json({ success: true, data: _resetData ?? { id: '', status: 'completed', wasCompacted: false } })
+})
+
+useMswServer(
+  http.post('*/api/projects/:projectId/issues/:number/sessions/:name/compact', compactHandler),
+  http.post('*/api/projects/:projectId/issues/:number/sessions/:name/reset', resetHandler),
+)
 
 function createQueryClient() {
-  return new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
+  return new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
 }
 
 function renderActions(props: Partial<React.ComponentProps<typeof SessionRecoveryActions>> = {}) {
@@ -48,9 +61,22 @@ function renderActions(props: Partial<React.ComponentProps<typeof SessionRecover
   )
 }
 
+function makeCompactResult(overrides?: Partial<SessionRecoveryResult>): SessionRecoveryResult {
+  return {
+    id: '',
+    status: 'completed',
+    wasCompacted: false,
+    ...overrides,
+  }
+}
+
 beforeEach(() => {
-  apiMocks.compactSession.mockReset()
-  apiMocks.resetSession.mockReset()
+  compactHandler.mockClear()
+  resetHandler.mockClear()
+  _compactData = null
+  _compactError = null
+  _resetData = null
+  _resetError = null
 })
 
 describe('SessionRecoveryActions — visibility and enabled/disabled states', () => {
@@ -115,7 +141,7 @@ describe('SessionRecoveryActions — visibility and enabled/disabled states', ()
 
 describe('SessionRecoveryActions — compact action', () => {
   it('calls compactSession with issue number and session name', async () => {
-    apiMocks.compactSession.mockResolvedValue({
+    _compactData = makeCompactResult({
       id: 'session-abc',
       status: 'completed',
       contextWindowUsed: 10_000,
@@ -129,20 +155,17 @@ describe('SessionRecoveryActions — compact action', () => {
     fireEvent.click(screen.getByTestId('session-recovery-compact'))
 
     await waitFor(() => {
-      expect(apiMocks.compactSession).toHaveBeenCalledTimes(1)
+      expect(compactHandler).toHaveBeenCalledTimes(1)
     })
-    expect(apiMocks.compactSession).toHaveBeenCalledWith(110, 'session-abc', 'proj-1')
+    const url = new URL(compactHandler.mock.calls[0]![0].request.url)
+    expect(url.pathname).toContain('/issues/110/sessions/session-abc/compact')
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalledTimes(1)
     })
   })
 
   it('invokes the onSuccess callback after a successful compact so the page can refresh', async () => {
-    apiMocks.compactSession.mockResolvedValue({
-      id: 'session-abc',
-      status: 'completed',
-      wasCompacted: true,
-    })
+    _compactData = makeCompactResult({ id: 'session-abc', status: 'completed', wasCompacted: true })
     const onSuccess = vi.fn()
     renderActions({ status: 'failed', onSuccess })
 
@@ -151,13 +174,11 @@ describe('SessionRecoveryActions — compact action', () => {
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalledTimes(1)
     })
-    expect(apiMocks.compactSession).toHaveBeenCalledWith(110, 'session-abc', 'proj-1')
+    expect(compactHandler).toHaveBeenCalledTimes(1)
   })
 
   it('shows an inline error when the server returns 409 (session active)', async () => {
-    apiMocks.compactSession.mockRejectedValue(
-      new ApiError('Cannot compact while session is active', 409),
-    )
+    _compactError = { status: 409, message: 'Cannot compact while session is active' }
     renderActions({ status: 'completed' })
 
     fireEvent.click(screen.getByTestId('session-recovery-compact'))
@@ -165,15 +186,11 @@ describe('SessionRecoveryActions — compact action', () => {
     await waitFor(() => {
       expect(screen.getByTestId('session-recovery-error')).toBeInTheDocument()
     })
-    expect(screen.getByTestId('session-recovery-error')).toHaveTextContent(
-      /cannot compact while session is active/i,
-    )
+    expect(screen.getByTestId('session-recovery-error')).toHaveTextContent(/cannot compact while session is active/i)
   })
 
   it('shows an inline error when the server returns 404 (session not found)', async () => {
-    apiMocks.compactSession.mockRejectedValue(
-      new ApiError('Session not found', 404),
-    )
+    _compactError = { status: 404, message: 'Session not found' }
     renderActions({ status: 'completed' })
 
     fireEvent.click(screen.getByTestId('session-recovery-compact'))
@@ -191,7 +208,7 @@ describe('SessionRecoveryActions — compact action', () => {
     expect(compact).toBeDisabled()
     fireEvent.click(compact)
 
-    expect(apiMocks.compactSession).not.toHaveBeenCalled()
+    expect(compactHandler).not.toHaveBeenCalled()
   })
 })
 
@@ -203,9 +220,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
 
     const dialog = screen.getByTestId('session-recovery-reset-dialog')
     expect(dialog).toBeInTheDocument()
-    expect(dialog).toHaveTextContent(
-      'This will clear all session context. The agent will lose all conversation history.',
-    )
+    expect(dialog).toHaveTextContent('This will clear all session context. The agent will lose all conversation history.')
   })
 
   it('renders Cancel and "Reset Session" buttons inside the dialog', () => {
@@ -220,7 +235,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
   it('does not call resetSession while the dialog is open', () => {
     renderActions({ status: 'completed' })
     fireEvent.click(screen.getByTestId('session-recovery-reset'))
-    expect(apiMocks.resetSession).not.toHaveBeenCalled()
+    expect(resetHandler).not.toHaveBeenCalled()
   })
 
   it('closes the dialog and does not call the API when Cancel is clicked', async () => {
@@ -232,7 +247,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
     await waitFor(() => {
       expect(screen.queryByTestId('session-recovery-reset-dialog')).not.toBeInTheDocument()
     })
-    expect(apiMocks.resetSession).not.toHaveBeenCalled()
+    expect(resetHandler).not.toHaveBeenCalled()
   })
 
   it('does not open the dialog when the session is running', () => {
@@ -244,11 +259,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
   })
 
   it('calls resetSession with the correct parameters when confirmed', async () => {
-    apiMocks.resetSession.mockResolvedValue({
-      id: 'session-abc',
-      status: 'completed',
-      wasCompacted: false,
-    })
+    _resetData = makeCompactResult({ id: 'session-abc', status: 'completed', wasCompacted: false })
     const onSuccess = vi.fn()
     renderActions({ status: 'failed', onSuccess })
 
@@ -256,9 +267,10 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
     fireEvent.click(screen.getByTestId('session-recovery-reset-confirm'))
 
     await waitFor(() => {
-      expect(apiMocks.resetSession).toHaveBeenCalledTimes(1)
+      expect(resetHandler).toHaveBeenCalledTimes(1)
     })
-    expect(apiMocks.resetSession).toHaveBeenCalledWith(110, 'session-abc', 'proj-1')
+    const url = new URL(resetHandler.mock.calls[0]![0].request.url)
+    expect(url.pathname).toContain('/issues/110/sessions/session-abc/reset')
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalledTimes(1)
     })
@@ -268,9 +280,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
   })
 
   it('shows an inline error and keeps the dialog open when resetSession returns 409', async () => {
-    apiMocks.resetSession.mockRejectedValue(
-      new ApiError('Cannot reset while session is active', 409),
-    )
+    _resetError = { status: 409, message: 'Cannot reset while session is active' }
     renderActions({ status: 'completed' })
 
     fireEvent.click(screen.getByTestId('session-recovery-reset'))
@@ -279,15 +289,12 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
     await waitFor(() => {
       expect(screen.getByTestId('session-recovery-error')).toBeInTheDocument()
     })
-    expect(screen.getByTestId('session-recovery-error')).toHaveTextContent(
-      /cannot reset while session is active/i,
-    )
-    // The dialog stays open so the user can retry or close it.
+    expect(screen.getByTestId('session-recovery-error')).toHaveTextContent(/cannot reset while session is active/i)
     expect(screen.getByTestId('session-recovery-reset-dialog')).toBeInTheDocument()
   })
 
   it('shows a "Session not found" error when resetSession returns 404', async () => {
-    apiMocks.resetSession.mockRejectedValue(new ApiError('Session not found', 404))
+    _resetError = { status: 404, message: 'Session not found' }
     renderActions({ status: 'completed' })
 
     fireEvent.click(screen.getByTestId('session-recovery-reset'))
@@ -317,7 +324,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
         </ProjectProvider>
       </QueryClientProvider>,
     )
-    apiMocks.compactSession.mockRejectedValueOnce(new ApiError('Cannot compact while session is active', 409))
+    _compactError = { status: 409, message: 'Cannot compact while session is active' }
     fireEvent.click(screen.getByTestId('session-recovery-compact'))
 
     await waitFor(() => {
