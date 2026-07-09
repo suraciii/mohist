@@ -1,28 +1,30 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { http, HttpResponse } from 'msw'
 
 import { EditIssueDialog } from './EditIssueDialog'
 import { IssueHealth, IssueStatus, type Issue } from '@/entities/issue'
+import { useMswServer } from '../../../../tests/support/msw'
 
-const mocks = vi.hoisted(() => ({
-  updateIssue: vi.fn(),
-}))
+let _updateResponse: Issue | null = null
 
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  updateIssue: mocks.updateIssue,
-}))
+const updateHandler = vi.fn(async (info: { request: Request }) => {
+  const body = await info.request.clone().json()
+  void body
+  const data = _updateResponse ?? makeIssue()
+  return HttpResponse.json({ success: true, data })
+})
+
+useMswServer(
+  http.patch('*/api/projects/:projectId/issues/:issueId', updateHandler),
+)
 
 describe('EditIssueDialog', () => {
-  afterEach(() => {
-    cleanup()
-    vi.clearAllMocks()
-  })
-
   it('saves issue edits through the issue project scope', async () => {
-    mocks.updateIssue.mockResolvedValue(makeIssue())
+    const response = makeIssue()
+    _updateResponse = response
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
 
     render(
@@ -34,12 +36,12 @@ describe('EditIssueDialog', () => {
     fireEvent.change(screen.getByDisplayValue('Original title'), { target: { value: 'Updated title' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    await waitFor(() => expect(mocks.updateIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.updateIssue).toHaveBeenCalledWith(
-      7,
-      expect.objectContaining({ title: 'Updated title' }),
-      'proj_scoped',
-    )
+    await waitFor(() => expect(updateHandler).toHaveBeenCalledTimes(1))
+    const call = updateHandler.mock.calls[0]![0]
+    const url = new URL(call.request.url)
+    expect(url.pathname).toContain('/issues/7')
+    const callBody = await call.request.clone().json()
+    expect(callBody).toEqual(expect.objectContaining({ title: 'Updated title' }))
 
     queryClient.clear()
   })
