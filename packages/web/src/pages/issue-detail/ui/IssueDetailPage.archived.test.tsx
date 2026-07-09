@@ -27,8 +27,6 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     useWorkspaceStatus: (...args: unknown[]) => mockUseWorkspaceStatus(...args),
     useIssueEvents: () => ({ data: undefined, isLoading: false }),
     getIssueWorkflowVariables: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
-    patchIssueWorkflowDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
-    patchIssueWorkflowStageDefinitionVar: vi.fn(() => Promise.resolve({ vars: {}, stages: {} })),
   }
 })
 
