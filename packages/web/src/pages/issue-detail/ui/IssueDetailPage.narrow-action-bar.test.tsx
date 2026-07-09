@@ -8,17 +8,6 @@ import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
 import { mockAgentStatus, mockIssue, mountIssueDetail } from './_issueDetailMsw'
 
-vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
-  EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null; enabled?: boolean }) => (
-    <div
-      data-testid="event-timeline-panel-mock"
-      data-issue-number={props.issueNumber}
-      data-issue-id={props.issueId ?? ''}
-      data-workflow-status={props.workflowStatus ?? ''}
-      data-enabled={props.enabled === undefined ? '' : String(props.enabled)}
-    />
-  )),
-}))
 
 const projects: Project[] = [
   {

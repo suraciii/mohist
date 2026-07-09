@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -7,18 +7,6 @@ import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
 import { mockIssue, mockWorkflowTimeline, mountIssueDetail } from './_issueDetailMsw'
-
-vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
-  EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null; enabled?: boolean }) => (
-    <div
-      data-testid="event-timeline-panel-mock"
-      data-issue-number={props.issueNumber}
-      data-issue-id={props.issueId ?? ''}
-      data-workflow-status={props.workflowStatus ?? ''}
-      data-enabled={props.enabled === undefined ? '' : String(props.enabled)}
-    />
-  )),
-}))
 
 const projects: Project[] = [
   {

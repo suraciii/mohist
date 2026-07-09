@@ -72,10 +72,6 @@ export const DEFAULT_RECOVERY = {
   allowedActions: ['stop'],
 }
 
-export function enabledString(enabled: boolean | undefined): string {
-  return enabled === undefined ? '' : String(enabled)
-}
-
 export function describeEl(el: Element): string {
   const testId = el.getAttribute('data-testid')
   return testId ? `[data-testid="${testId}"]` : el.tagName.toLowerCase()
