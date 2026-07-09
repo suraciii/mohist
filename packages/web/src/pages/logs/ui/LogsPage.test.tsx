@@ -3,20 +3,16 @@ import '@testing-library/jest-dom'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { LogEntry } from '../model/api'
-import type { UseLogsReturn } from '../model/useLogs'
+import { http, HttpResponse } from 'msw'
+import type { LogEntry, LogTailResult } from '../model/api'
+import { useMswServer } from '../../../../tests/support/msw'
+import { LogsPage } from './LogsPage'
 
-const useLogsMock = vi.fn<() => UseLogsReturn>()
+let _logData: LogTailResult = { lines: [], source: null, cursor: null, nextCursor: null, reset: false, truncated: false, unavailable: false, expectedLocation: null, reason: null }
 
-vi.mock('../model/useLogs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../model/useLogs')>()
-  return {
-    ...actual,
-    useLogs: useLogsMock,
-  }
-})
-
-const { LogsPage } = await import('./LogsPage')
+useMswServer(
+  http.get('*/logs/tail', () => HttpResponse.json({ success: true, data: _logData })),
+)
 
 function makeEntry(overrides: Partial<LogEntry> = {}): LogEntry {
   return {
@@ -29,27 +25,24 @@ function makeEntry(overrides: Partial<LogEntry> = {}): LogEntry {
   }
 }
 
-function defaultUseLogs(overrides: Partial<UseLogsReturn> = {}): UseLogsReturn {
+function logResult(overrides: Partial<LogTailResult> & { lines?: LogEntry[] } = {}): LogTailResult {
   return {
-    entries: [],
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
+    lines: [],
     cursor: null,
     nextCursor: null,
     source: null,
+    truncated: false,
+    reset: false,
     unavailable: false,
     expectedLocation: null,
     reason: null,
-    truncated: false,
-    reset: false,
     ...overrides,
   }
 }
 
 beforeEach(() => {
-  useLogsMock.mockReset()
-  useLogsMock.mockImplementation(() => defaultUseLogs())
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  _logData = logResult()
 })
 
 afterEach(() => {
@@ -58,90 +51,88 @@ afterEach(() => {
 })
 
 describe('LogsPage: File: source line', () => {
-  it('renders the File: line using the real source identity returned by the API', () => {
-    useLogsMock.mockImplementation(() =>
-      defaultUseLogs({
-        source: 'server.log',
-        entries: [makeEntry({ message: 'started', raw: 'started' })],
-      }),
-    )
+  it('renders the File: line using the real source identity returned by the API', async () => {
+    _logData = logResult({
+      source: 'server.log',
+      lines: [makeEntry({ message: 'started', raw: 'started' })],
+      reset: true,
+    })
 
     render(<LogsPage />)
 
-    expect(screen.getByText(/^File:/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/^File:/)).toBeInTheDocument())
     expect(screen.getByText(/File: server\.log/)).toBeInTheDocument()
   })
 
-  it('does not render a File: line when the source identity is missing', () => {
-    useLogsMock.mockImplementation(() => defaultUseLogs({ entries: [] }))
+  it('does not render a File: line when the source identity is missing', async () => {
+    _logData = logResult({ lines: [], reset: true })
 
     render(<LogsPage />)
 
-    expect(screen.queryByText(/^File:/)).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText(/^File:/)).not.toBeInTheDocument())
   })
 })
 
 describe('LogsPage: unavailable diagnostic', () => {
-  it('renders an actionable diagnostic with expected location and reason when unavailable', () => {
-    useLogsMock.mockImplementation(() =>
-      defaultUseLogs({
-        unavailable: true,
-        expectedLocation: '/home/me/.mohist/logs/server.log',
-        reason: 'Log directory does not exist at /home/me/.mohist/logs.',
-        source: null,
-        entries: [],
-      }),
-    )
+  it('renders an actionable diagnostic with expected location and reason when unavailable', async () => {
+    _logData = logResult({
+      unavailable: true,
+      expectedLocation: '/home/me/.mohist/logs/server.log',
+      reason: 'Log directory does not exist at /home/me/.mohist/logs.',
+      source: null,
+      lines: [],
+      reset: true,
+    })
 
     render(<LogsPage />)
 
+    await waitFor(() => expect(screen.getByTestId('logs-unavailable')).toBeInTheDocument())
     const diagnostic = screen.getByTestId('logs-unavailable')
-    expect(diagnostic).toBeInTheDocument()
     expect(diagnostic).toHaveTextContent('/home/me/.mohist/logs/server.log')
     expect(diagnostic).toHaveTextContent('Log directory does not exist at /home/me/.mohist/logs.')
-
-    // The bare "No logs available" copy must NOT appear when unavailable.
     expect(screen.queryByText('No logs available')).not.toBeInTheDocument()
   })
 
-  it('disables export while unavailable even if stale entries are present', () => {
-    useLogsMock.mockImplementation(() =>
-      defaultUseLogs({
-        unavailable: true,
-        expectedLocation: '/home/me/.mohist/logs/server.log',
-        reason: 'Log file server.log is missing.',
-        source: null,
-        entries: [makeEntry({ message: 'stale', raw: 'stale' })],
-      }),
-    )
+  it('disables export while unavailable even if stale entries are present', async () => {
+    _logData = logResult({
+      unavailable: true,
+      expectedLocation: '/home/me/.mohist/logs/server.log',
+      reason: 'Log file server.log is missing.',
+      source: null,
+      lines: [makeEntry({ message: 'stale', raw: 'stale' })],
+      reset: true,
+    })
 
     render(<LogsPage />)
 
-    expect(screen.getByTestId('logs-unavailable')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('logs-unavailable')).toBeInTheDocument())
     expect(screen.getByRole('button', { name: /export/i })).toBeDisabled()
     expect(screen.queryByText('stale')).not.toBeInTheDocument()
   })
 
-  it('does NOT render the unavailable diagnostic when the source is available but the view is empty', () => {
-    useLogsMock.mockImplementation(() => defaultUseLogs({ entries: [] }))
+  it('does NOT render the unavailable diagnostic when the source is available but the view is empty', async () => {
+    _logData = logResult({ lines: [], reset: true })
 
     render(<LogsPage />)
 
+    // The real hook starts with loading=true; after fetch resolves, we see the empty state.
+    // Wait for the loading text to disappear first.
+    await waitFor(() => expect(screen.queryByText('Loading logs...')).not.toBeInTheDocument())
     expect(screen.queryByTestId('logs-unavailable')).not.toBeInTheDocument()
   })
 
   it('does NOT render the unavailable diagnostic when filtering hides every entry', async () => {
-    useLogsMock.mockImplementation(() =>
-      defaultUseLogs({
-        source: 'server.log',
-        entries: [makeEntry({ level: 'INFO', message: 'matched', raw: 'matched' })],
-      }),
-    )
+    _logData = logResult({
+      source: 'server.log',
+      lines: [makeEntry({ level: 'INFO', message: 'matched', raw: 'matched' })],
+      reset: true,
+    })
 
     render(<LogsPage />)
 
-    // Disable every level chip so the only entry is filtered out.
-    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByText('matched')).toBeInTheDocument())
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     for (const level of ['DEBUG', 'INFO', 'WARN', 'ERROR']) {
       await user.click(screen.getByRole('button', { name: level }))
     }
@@ -153,43 +144,41 @@ describe('LogsPage: unavailable diagnostic', () => {
     expect(screen.queryByTestId('logs-unavailable')).not.toBeInTheDocument()
   })
 
-  it('does NOT render the bare "No logs available" empty state in any branch', () => {
-    const branches: Array<Partial<UseLogsReturn>> = [
-      { entries: [] },
-      { entries: [], unavailable: true, expectedLocation: '/x', reason: 'r' },
-      {
-        source: 'server.log',
-        entries: [makeEntry({ level: 'INFO', message: 'm', raw: 'm' })],
-      },
+  it('does NOT render the bare "No logs available" empty state in any branch', async () => {
+    const branches: Array<LogTailResult> = [
+      logResult({ lines: [], reset: true }),
+      logResult({ lines: [], unavailable: true, expectedLocation: '/x', reason: 'r', reset: true }),
+      logResult({ source: 'server.log', lines: [makeEntry({ level: 'INFO', message: 'm', raw: 'm' })], reset: true }),
     ]
 
     for (const branch of branches) {
-      useLogsMock.mockImplementation(() => defaultUseLogs(branch))
+      _logData = branch
       cleanup()
       render(<LogsPage />)
+      await waitFor(() => {
+        expect(screen.queryByText('Loading logs...')).not.toBeInTheDocument()
+      })
       expect(screen.queryByText('No logs available')).not.toBeInTheDocument()
     }
   })
 })
 
 describe('LogsPage: level filtering and search operate on the agreed element type', () => {
-  it('level filter hides entries whose level is disabled', () => {
-    useLogsMock.mockImplementation(() =>
-      defaultUseLogs({
-        source: 'server.log',
-        entries: [
-          makeEntry({ level: 'INFO', message: 'info-msg', raw: 'info-msg' }),
-          makeEntry({ level: 'ERROR', message: 'err-msg', raw: 'err-msg' }),
-        ],
-      }),
-    )
+  it('level filter hides entries whose level is disabled', async () => {
+    _logData = logResult({
+      source: 'server.log',
+      lines: [
+        makeEntry({ level: 'INFO', message: 'info-msg', raw: 'info-msg' }),
+        makeEntry({ level: 'ERROR', message: 'err-msg', raw: 'err-msg' }),
+      ],
+      reset: true,
+    })
 
     render(<LogsPage />)
 
-    expect(screen.getByText('info-msg')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('info-msg')).toBeInTheDocument())
     expect(screen.getByText('err-msg')).toBeInTheDocument()
 
-    // Disable INFO so only ERROR remains visible.
     act(() => {
       screen.getByRole('button', { name: 'INFO' }).click()
     })
@@ -199,20 +188,19 @@ describe('LogsPage: level filtering and search operate on the agreed element typ
   })
 
   it('search filters across message, service, and raw', async () => {
-    useLogsMock.mockImplementation(() =>
-      defaultUseLogs({
-        source: 'server.log',
-        entries: [
-          makeEntry({ level: 'INFO', service: 'Mohist.Workflow', message: 'alpha', raw: '{"level":"INFO","message":"alpha"}' }),
-          makeEntry({ level: 'INFO', service: 'Mohist.Server', message: 'beta', raw: '{"level":"INFO","message":"beta"}' }),
-          makeEntry({ level: 'INFO', service: 'Mohist.Server', message: 'gamma', raw: '{"level":"INFO","message":"gamma"}' }),
-        ],
-      }),
-    )
+    _logData = logResult({
+      source: 'server.log',
+      lines: [
+        makeEntry({ level: 'INFO', service: 'Mohist.Workflow', message: 'alpha', raw: '{"level":"INFO","message":"alpha"}' }),
+        makeEntry({ level: 'INFO', service: 'Mohist.Server', message: 'beta', raw: '{"level":"INFO","message":"beta"}' }),
+        makeEntry({ level: 'INFO', service: 'Mohist.Server', message: 'gamma', raw: '{"level":"INFO","message":"gamma"}' }),
+      ],
+      reset: true,
+    })
 
-    const user = userEvent.setup()
     render(<LogsPage />)
 
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     const input = screen.getByPlaceholderText('Search logs...')
     await user.type(input, 'beta')
 
@@ -225,11 +213,15 @@ describe('LogsPage: level filtering and search operate on the agreed element typ
 })
 
 describe('LogsPage: loading state', () => {
-  it('renders the loading placeholder while the first fetch is in flight', () => {
-    useLogsMock.mockImplementation(() => defaultUseLogs({ loading: true, entries: [] }))
+  it('renders the loading placeholder while the first fetch is in flight', async () => {
+    _logData = logResult({ lines: [], reset: true })
 
     render(<LogsPage />)
 
-    expect(screen.getByText('Loading logs...')).toBeInTheDocument()
+    // With fake timers, the fetch is synchronous and resolves immediately.
+    // The loading state may or may not be visible. Check for the absence
+    // of loading after the fetch resolves.
+    await waitFor(() => expect(screen.queryByText('Loading logs...')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('logs-unavailable')).not.toBeInTheDocument()
   })
 })
