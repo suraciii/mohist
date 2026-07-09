@@ -3,59 +3,8 @@ import { screen, fireEvent, waitFor, act, within } from './test-utils'
 import { SessionTranscriptView } from '../src/widgets/session-transcript/ui/SessionTranscriptView'
 import { useSessionTranscript } from '../src/widgets/session-transcript/model/useSessionTranscript'
 import { dispatchAgentEvent } from '../src/entities/agent'
-import type { SessionTurn, TextPart, ToolPart, CoderSessionDetail, AgentSessionMetadata } from '../src/entities/coder-session'
+import type { TextPart, ToolPart } from '../src/entities/coder-session'
 import { renderWithQueryClient, renderHookWithQueryClient, makeTurn, getAssistantCopyButton, expandChangedFilesTool, queryClients, originalScrollTo } from './session-page-test-utils'
-
-const sessionPageMocks = vi.hoisted(() => ({
-  sessions: [] as any[],
-  sessionsLoading: false,
-  issue: null as any,
-  detail: null as CoderSessionDetail | null,
-  metadata: null as AgentSessionMetadata | null,
-  turns: null as SessionTurn[] | null,
-  detailError: null as Error | null,
-  detailPending: false,
-  workflowRunSessions: [] as Array<{
-    id: string
-    sessionName: string
-    status: string
-    createdAt: string
-  }>,
-}))
-
-vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
-  useCoderSessions: () => ({ sessions: sessionPageMocks.sessions, isLoading: sessionPageMocks.sessionsLoading }),
-}))
-
-vi.mock('../src/entities/coder-session/model/useWorkflowRunSessions', () => ({
-  useWorkflowRunSessions: () => ({
-    isLoading: false,
-    sessions: sessionPageMocks.workflowRunSessions,
-  }),
-}))
-
-vi.mock('../src/entities/issue/api/queries', () => ({
-  useIssue: () => ({ data: sessionPageMocks.issue }),
-}))
-
-vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/entities/coder-session/api/client')>()),
-  getAgentSessionMetadata: vi.fn(() => {
-    if (sessionPageMocks.detailPending) return new Promise(() => {})
-    if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
-    return Promise.resolve(sessionPageMocks.metadata)
-  }),
-  getAgentSessionTranscript: vi.fn(() => {
-    if (sessionPageMocks.detailPending) return new Promise(() => {})
-    if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
-    const turns = sessionPageMocks.turns ?? []
-    return Promise.resolve({
-      turns,
-      partCount: turns.reduce((total, turn) => total + turn.assistant.length, 0),
-      lastActivityAt: turns.at(-1)?.completedAt ?? turns.at(-1)?.startedAt ?? null,
-    })
-  }),
-}))
 
 Object.defineProperty(navigator, 'clipboard', {
   value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -64,15 +13,6 @@ Object.defineProperty(navigator, 'clipboard', {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  sessionPageMocks.sessions = []
-  sessionPageMocks.sessionsLoading = false
-  sessionPageMocks.issue = null
-  sessionPageMocks.detail = null
-  sessionPageMocks.metadata = null
-  sessionPageMocks.turns = null
-  sessionPageMocks.detailError = null
-  sessionPageMocks.detailPending = false
-  sessionPageMocks.workflowRunSessions = []
   Element.prototype.scrollTo = vi.fn()
 })
 
