@@ -6,28 +6,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import React from 'react'
 import type { SessionTurn, TextPart, ToolPart, ErrorPart } from '../src/entities/coder-session'
 
-const sessionPageMocks = vi.hoisted(() => ({
-  sessions: [] as any[],
-  sessionsLoading: false,
-  issue: null as any,
-}))
-
-vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
-  useCoderSessions: () => ({ sessions: sessionPageMocks.sessions, isLoading: sessionPageMocks.sessionsLoading }),
-}))
-
-vi.mock('../src/entities/issue/api/queries', () => ({
-  useIssue: () => ({ data: sessionPageMocks.issue }),
-}))
-
 const originalScrollTo = Element.prototype.scrollTo
 const queryClients: QueryClient[] = []
 
 beforeEach(() => {
   vi.clearAllMocks()
-  sessionPageMocks.sessions = []
-  sessionPageMocks.sessionsLoading = false
-  sessionPageMocks.issue = null
   Element.prototype.scrollTo = vi.fn()
 })
 
