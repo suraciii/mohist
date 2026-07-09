@@ -10,6 +10,7 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.SpecTests.Support;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Grain;
@@ -19,9 +20,8 @@ public class AgentGrainSpecs
     [Fact]
     public async Task Create_show_update_and_archive_persist_agent_lifecycle()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using var context = database.CreateDbContext();
-        await context.Database.EnsureCreatedAsync();
         var factory = database.Factory;
         var grain = CreateGrain(factory, "project_1", "agent_1");
 
@@ -75,9 +75,8 @@ public class AgentGrainSpecs
     [Fact]
     public async Task Create_rejects_duplicate_names_including_archived_agents()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using var context = database.CreateDbContext();
-        await context.Database.EnsureCreatedAsync();
         var factory = database.Factory;
 
         var first = CreateGrain(factory, "project_1", "agent_1");
@@ -94,9 +93,8 @@ public class AgentGrainSpecs
     [Fact]
     public async Task Rename_rejects_project_name_conflict_without_changing_existing_name()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using var context = database.CreateDbContext();
-        await context.Database.EnsureCreatedAsync();
         var factory = database.Factory;
 
         var first = CreateGrain(factory, "project_1", "agent_1");
@@ -114,9 +112,8 @@ public class AgentGrainSpecs
     [Fact]
     public async Task Same_agent_id_in_different_projects_uses_distinct_grain_keys()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using var context = database.CreateDbContext();
-        await context.Database.EnsureCreatedAsync();
         var factory = database.Factory;
 
         var first = CreateGrain(factory, "project_1", "agent_same");
@@ -133,11 +130,10 @@ public class AgentGrainSpecs
     [Fact]
     public async Task AddAgentsTable_migration_applies_and_rolls_back_cleanly()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260616062153_AddIssueRiskColumn");
         await using var context = database.CreateDbContext();
         var migrator = context.GetService<IMigrator>();
 
-        await migrator.MigrateAsync("20260616062153_AddIssueRiskColumn");
         Assert.False(await TableExistsAsync(context, "Agents"));
         Assert.True(await TableExistsAsync(context, "Issues"));
 
@@ -153,11 +149,10 @@ public class AgentGrainSpecs
     [Fact]
     public async Task Archive_then_unarchive_round_trips_agent_to_active_and_advances_updated_at()
     {
-        var database = CreateDatabase();
+        var database = CreateModelSchemaDatabase();
         await using (database)
         {
             await using var context = database.CreateDbContext();
-            await context.Database.EnsureCreatedAsync();
             var factory = database.Factory;
             var timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
             var grain = CreateGrain(factory, timeProvider, "project_1", "agent_1");
@@ -188,11 +183,10 @@ public class AgentGrainSpecs
     [Fact]
     public async Task Unarchive_of_already_active_agent_is_a_no_op_without_advancing_updated_at_or_persisting()
     {
-        var database = CreateDatabase();
+        var database = CreateModelSchemaDatabase();
         await using (database)
         {
             await using var context = database.CreateDbContext();
-            await context.Database.EnsureCreatedAsync();
             var factory = database.Factory;
             var timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
             var grain = CreateGrain(factory, timeProvider, "project_1", "agent_1");
@@ -218,11 +212,10 @@ public class AgentGrainSpecs
     [Fact]
     public async Task Unarchive_of_unknown_agent_returns_null_and_creates_no_row()
     {
-        var database = CreateDatabase();
+        var database = CreateModelSchemaDatabase();
         await using (database)
         {
             await using var context = database.CreateDbContext();
-            await context.Database.EnsureCreatedAsync();
             var factory = database.Factory;
             var timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
             var grain = CreateGrain(factory, timeProvider, "project_1", "agent_missing");
@@ -293,10 +286,25 @@ public class AgentGrainSpecs
         return count;
     }
 
-    private static TestDatabase CreateDatabase()
+    private static TestDatabase CreateDatabase(string? migratedTo = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        if (migratedTo is not null)
+        {
+            MigratedSqliteTemplate.CopyTo(connection, migratedTo);
+        }
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        return new TestDatabase(connection, new TestDbContextFactory(options));
+    }
+
+    private static TestDatabase CreateModelSchemaDatabase()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        MigratedSqliteTemplate.CopyModelSchemaTo(connection);
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;

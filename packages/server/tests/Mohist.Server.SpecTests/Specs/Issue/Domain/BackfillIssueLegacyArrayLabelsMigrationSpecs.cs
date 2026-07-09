@@ -18,10 +18,9 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
     [Fact]
     public async Task Up_NonEmptyArrayLabels_RewrittenToEmptyObject()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_a",
                 """{"id":"issue_a","number":1,"labels":["a","b"],"status":"backlog"}""");
         }
@@ -39,10 +38,9 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
     [Fact]
     public async Task Up_EmptyArrayLabels_RewrittenToEmptyObject()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_b",
                 """{"id":"issue_b","number":2,"labels":[],"status":"backlog"}""");
         }
@@ -59,10 +57,9 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
     [Fact]
     public async Task Up_DictLabels_LeftUnchanged()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             // Post-#149 shape: a real key-value map. Must survive the backfill
             // byte-for-byte — the rewrite is scoped to arrays only.
             await SeedIssueAsync(setup, "issue_c",
@@ -82,10 +79,9 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
     [Fact]
     public async Task Up_MixedBatch_RewritesArraysOnly_LeavesDictsAlone()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_arr_empty",
                 """{"id":"issue_arr_empty","number":10,"labels":[],"status":"done"}""");
             await SeedIssueAsync(setup, "issue_arr_full",
@@ -110,12 +106,11 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         // The json_set rewrite touches only $.labels; every other State field
         // — id, number, status, risk, completedAt, nested workflow refs — must
         // survive byte-for-byte. Guards against an over-broad rewrite.
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         const string state =
             """{"id":"issue_d","projectId":"proj_x","number":42,"title":"Keep me","status":"cancelled","priority":"p1","risk":"medium","labels":["bug","design"],"createdAt":"2026-06-01T00:00:00Z","updatedAt":"2026-06-02T00:00:00Z","completedAt":"2026-06-02T00:00:00Z","workflowRunId":"wr_abc","workflowStage":"plan"}""";
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_d", state);
         }
 
@@ -137,10 +132,9 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
     [Fact]
     public async Task Up_SecondRun_IsIdempotent()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_e",
                 """{"id":"issue_e","number":5,"labels":["a"],"status":"backlog"}""");
         }
@@ -161,11 +155,7 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
     [Fact]
     public async Task Up_OnEmptyIssuesTable_IsNoOp()
     {
-        await using var database = CreateDatabase();
-        await using (var setup = database.CreateDbContext())
-        {
-            await setup.Database.EnsureCreatedAsync();
-        }
+        await using var database = CreateModelSchemaDatabase();
 
         await RunMigrationUpAsync(database);
 
@@ -197,13 +187,8 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         // the migration's own SQL — including the json('{}') payload — is not
         // subject to ExecuteSqlRaw-style '{' interpolation when the migrator
         // applies it, which is the path Program.cs Migrate() takes at startup.
-        await using var database = CreateDatabase();
-
         // 1. Bring the schema up to just before this migration.
-        var pre = database.CreateDbContext();
-        var migrator = pre.GetService<IMigrator>();
-        await migrator.MigrateAsync("20260702120000_BackfillIssueEventsTerminalTypeRename");
-        await pre.DisposeAsync();
+        await using var database = CreateDatabase("20260702120000_BackfillIssueEventsTerminalTypeRename");
 
         // 2. Seed legacy array-form labels the way the pre-#149 era persisted them.
         await using (var seed = database.CreateDbContext())
@@ -325,10 +310,26 @@ public class BackfillIssueLegacyArrayLabelsMigrationSpecs
         return Convert.ToInt64(result);
     }
 
-    private static TestDatabase CreateDatabase()
+    private static TestDatabase CreateDatabase(string? migratedTo = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        if (migratedTo is not null)
+        {
+            MigratedSqliteTemplate.CopyTo(connection, migratedTo);
+        }
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        var factory = new TestDbContextFactory(options);
+        return new TestDatabase(connection, factory);
+    }
+
+    private static TestDatabase CreateModelSchemaDatabase()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        MigratedSqliteTemplate.CopyModelSchemaTo(connection);
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;

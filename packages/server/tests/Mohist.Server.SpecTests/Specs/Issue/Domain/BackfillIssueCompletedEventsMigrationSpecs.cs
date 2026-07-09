@@ -22,10 +22,9 @@ public class BackfillIssueCompletedEventsMigrationSpecs
     [Fact]
     public async Task Up_DoneIssueWithCompletedAt_InsertsCompletedEventUsingCompletedAt()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_done_ca", """
                 {"id":"issue_done_ca","projectId":"proj_a","number":7,"title":"Done with completedAt","status":"done","completedAt":"2026-06-28T12:00:00Z","createdAt":"2026-06-28T10:00:00Z","updatedAt":"2026-06-28T12:00:00Z","workflowRunId":"wr_done_ca"}
                 """);
@@ -50,10 +49,9 @@ public class BackfillIssueCompletedEventsMigrationSpecs
     [Fact]
     public async Task Up_DoneIssueWithoutCompletedAt_FallsBackToUpdatedAt()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_done_noca", """
                 {"id":"issue_done_noca","projectId":"proj_a","number":8,"title":"Legacy done no completedAt","status":"done","createdAt":"2026-05-31T10:00:00Z","updatedAt":"2026-05-31T13:30:13.257Z"}
                 """);
@@ -78,10 +76,9 @@ public class BackfillIssueCompletedEventsMigrationSpecs
     {
         // Legacy snapshots serialize status as PascalCase ('Done') from the
         // pre-camelCase serializer era; the match must be case-insensitive.
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_done_caps", """
                 {"id":"issue_done_caps","projectId":"proj_a","number":9,"title":"Capital Done","status":"Done","createdAt":"2026-05-31T10:00:00Z","updatedAt":"2026-05-31T13:30:13Z"}
                 """);
@@ -102,10 +99,9 @@ public class BackfillIssueCompletedEventsMigrationSpecs
     {
         // Throughput measures delivery, not failure cadence — cancelled is
         // intentionally out of scope.
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_cancelled", """
                 {"id":"issue_cancelled","projectId":"proj_a","number":10,"title":"Cancelled","status":"cancelled","completedAt":"2026-06-27T14:00:00Z","createdAt":"2026-06-27T10:00:00Z","updatedAt":"2026-06-27T14:00:00Z"}
                 """);
@@ -123,10 +119,9 @@ public class BackfillIssueCompletedEventsMigrationSpecs
     [Fact]
     public async Task Up_NonTerminalIssue_NotBackfilled()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_backlog", """
                 {"id":"issue_backlog","projectId":"proj_a","number":11,"title":"Backlog","status":"backlog","createdAt":"2026-06-28T10:00:00Z","updatedAt":"2026-06-28T10:00:00Z"}
                 """);
@@ -146,10 +141,9 @@ public class BackfillIssueCompletedEventsMigrationSpecs
     {
         // Idempotency: an issue that already has a completed event (e.g. live-
         // written after the SaveIssueAsync fix) must not get a duplicate.
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_existing", """
                 {"id":"issue_existing","projectId":"proj_a","number":12,"title":"Existing","status":"done","completedAt":"2026-06-29T08:00:00Z","createdAt":"2026-06-29T06:00:00Z","updatedAt":"2026-06-29T08:00:00Z"}
                 """);
@@ -173,10 +167,9 @@ public class BackfillIssueCompletedEventsMigrationSpecs
         // path IssueMetricsQuerier uses. We confirm the Type string matches
         // the catalog constant the querier filters on, so throughput picks
         // the backfilled population up.
-        await using var database = CreateDatabase();
+        await using var database = CreateModelSchemaDatabase();
         await using (var setup = database.CreateDbContext())
         {
-            await setup.Database.EnsureCreatedAsync();
             await SeedIssueAsync(setup, "issue_metric", """
                 {"id":"issue_metric","projectId":"proj_a","number":13,"title":"Metric","status":"done","completedAt":"2026-06-30T04:15:26Z","createdAt":"2026-06-29T06:00:00Z","updatedAt":"2026-06-30T04:15:26Z"}
                 """);
@@ -326,6 +319,18 @@ public class BackfillIssueCompletedEventsMigrationSpecs
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        var factory = new TestDbContextFactory(options);
+        return new TestDatabase(connection, factory);
+    }
+
+    private static TestDatabase CreateModelSchemaDatabase()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        MigratedSqliteTemplate.CopyModelSchemaTo(connection);
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;

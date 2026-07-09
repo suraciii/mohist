@@ -1,8 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.SpecTests.Support;
@@ -67,15 +65,8 @@ public class WorkflowRunStatusSchemaMigrationSpecs
     [Fact]
     public async Task Migrator_AppliesWorkflowRunStatusMigration()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260702060000_WorkflowRunStatus");
         await using var context = database.CreateDbContext();
-
-        // Migrate up to and including the WorkflowRunStatus migration
-        // (the model-side pre-T-004 fixtures stop at
-        // 20260629120000_BackfillIssueCompletedAt; this is the first
-        // test to land at our migration explicitly).
-        var migrator = context.GetService<IMigrator>();
-        await migrator.MigrateAsync("20260702060000_WorkflowRunStatus");
 
         var applied = await context.Database.GetAppliedMigrationsAsync();
         Assert.Contains(applied, m => m == "20260702060000_WorkflowRunStatus");
@@ -129,10 +120,14 @@ public class WorkflowRunStatusSchemaMigrationSpecs
         Assert.Equal("pending", row.Status);
     }
 
-    private static TestDatabase CreateDatabase()
+    private static TestDatabase CreateDatabase(string? migratedTo = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        if (migratedTo is not null)
+        {
+            MigratedSqliteTemplate.CopyTo(connection, migratedTo);
+        }
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .ConfigureWarnings(w => w.Ignore(

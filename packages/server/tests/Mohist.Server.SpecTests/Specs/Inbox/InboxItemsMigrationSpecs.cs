@@ -16,11 +16,8 @@ public class InboxItemsMigrationSpecs
     [Fact]
     public async Task Up_CreatesInboxItemsTableWithExpectedColumns()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260629003151_AddInboxItemsTable");
         await using var context = database.CreateDbContext();
-        var migrator = context.GetService<IMigrator>();
-
-        await migrator.MigrateAsync("20260629003151_AddInboxItemsTable");
 
         var columnTypes = await ReadColumnTypesAsync(context, "InboxItems");
         Assert.Equal("TEXT", columnTypes["Id"]);
@@ -41,11 +38,8 @@ public class InboxItemsMigrationSpecs
     [Fact]
     public async Task Up_CreatesThreeNamedIndexes()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260629003151_AddInboxItemsTable");
         await using var context = database.CreateDbContext();
-        var migrator = context.GetService<IMigrator>();
-
-        await migrator.MigrateAsync("20260629003151_AddInboxItemsTable");
 
         var indexes = await ReadIndexesAsync(context, "InboxItems");
 
@@ -59,11 +53,8 @@ public class InboxItemsMigrationSpecs
     [Fact]
     public async Task Up_ProjectIdCreatedAtIndex_IsDescending()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260629003151_AddInboxItemsTable");
         await using var context = database.CreateDbContext();
-        var migrator = context.GetService<IMigrator>();
-
-        await migrator.MigrateAsync("20260629003151_AddInboxItemsTable");
 
         var desc = await ReadIndexColumnsAsync(context, "InboxItems", "IX_InboxItems_ProjectId_CreatedAt");
         Assert.Equal(new[] { "ProjectId", "CreatedAt" }, desc.Columns);
@@ -76,11 +67,8 @@ public class InboxItemsMigrationSpecs
     [Fact]
     public async Task Up_SourceEventIndex_IsUniqueOnSourceAndId()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260629003151_AddInboxItemsTable");
         await using var context = database.CreateDbContext();
-        var migrator = context.GetService<IMigrator>();
-
-        await migrator.MigrateAsync("20260629003151_AddInboxItemsTable");
 
         var columns = await ReadIndexColumnsAsync(context, "InboxItems", "UQ_InboxItems_SourceEvent");
         Assert.Equal(new[] { "SourceEventSource", "SourceEventId" }, columns.Columns);
@@ -94,11 +82,8 @@ public class InboxItemsMigrationSpecs
     [Fact]
     public async Task Up_NotificationKindCheckConstraint_RejectsUnsupportedKind()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260629003151_AddInboxItemsTable");
         await using var context = database.CreateDbContext();
-        var migrator = context.GetService<IMigrator>();
-
-        await migrator.MigrateAsync("20260629003151_AddInboxItemsTable");
 
         context.InboxItems.Add(new InboxItemRow
         {
@@ -136,13 +121,7 @@ public class InboxItemsMigrationSpecs
     [Fact]
     public async Task Down_DropsInboxItemsTable()
     {
-        await using var database = CreateDatabase();
-        await using (var setup = database.CreateDbContext())
-        {
-            var migrator = setup.GetService<IMigrator>();
-            await migrator.MigrateAsync("20260629003151_AddInboxItemsTable");
-        }
-
+        await using var database = CreateDatabase("20260629003151_AddInboxItemsTable");
         await using (var apply = database.CreateDbContext())
         {
             var migrator = apply.GetService<IMigrator>();
@@ -285,10 +264,14 @@ public class InboxItemsMigrationSpecs
         return Convert.ToInt32(await command.ExecuteScalarAsync()) == 1;
     }
 
-    private static TestDatabase CreateDatabase()
+    private static TestDatabase CreateDatabase(string? migratedTo = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        if (migratedTo is not null)
+        {
+            MigratedSqliteTemplate.CopyTo(connection, migratedTo);
+        }
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;

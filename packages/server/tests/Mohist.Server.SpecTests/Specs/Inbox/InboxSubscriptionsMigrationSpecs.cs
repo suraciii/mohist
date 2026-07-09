@@ -17,11 +17,8 @@ public class InboxSubscriptionsMigrationSpecs
     [Fact]
     public async Task Up_CreatesInboxSubscriptionsTableWithExpectedColumns()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260629003200_AddInboxSubscriptionsTable");
         await using var context = database.CreateDbContext();
-        var migrator = context.GetService<IMigrator>();
-
-        await migrator.MigrateAsync("20260629003200_AddInboxSubscriptionsTable");
 
         var columnTypes = await ReadColumnTypesAsync(context, "InboxSubscriptions");
         Assert.Equal("TEXT", columnTypes["ProjectId"]);
@@ -37,11 +34,8 @@ public class InboxSubscriptionsMigrationSpecs
     [Fact]
     public async Task Up_HasPrimaryKeyOnProjectId()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260629003200_AddInboxSubscriptionsTable");
         await using var context = database.CreateDbContext();
-        var migrator = context.GetService<IMigrator>();
-
-        await migrator.MigrateAsync("20260629003200_AddInboxSubscriptionsTable");
 
         var pks = await ReadPrimaryKeyColumnsAsync(context, "InboxSubscriptions");
         Assert.Equal(new[] { "ProjectId" }, pks);
@@ -52,11 +46,8 @@ public class InboxSubscriptionsMigrationSpecs
     [Fact]
     public async Task Up_HasForeignKeyToProjectsOnProjectId()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260629003200_AddInboxSubscriptionsTable");
         await using var context = database.CreateDbContext();
-        var migrator = context.GetService<IMigrator>();
-
-        await migrator.MigrateAsync("20260629003200_AddInboxSubscriptionsTable");
 
         var foreignKeys = await ReadForeignKeysAsync(context, "InboxSubscriptions");
         var fk = Assert.Single(foreignKeys);
@@ -71,11 +62,8 @@ public class InboxSubscriptionsMigrationSpecs
     [Fact]
     public async Task Up_StoresAndReadsSubscriptionRow()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260629003200_AddInboxSubscriptionsTable");
         await using var context = database.CreateDbContext();
-        var migrator = context.GetService<IMigrator>();
-
-        await migrator.MigrateAsync("20260629003200_AddInboxSubscriptionsTable");
 
         context.Projects.Add(new ProjectRow
         {
@@ -125,13 +113,7 @@ public class InboxSubscriptionsMigrationSpecs
     [Fact]
     public async Task Down_DropsInboxSubscriptionsTable()
     {
-        await using var database = CreateDatabase();
-        await using (var setup = database.CreateDbContext())
-        {
-            var migrator = setup.GetService<IMigrator>();
-            await migrator.MigrateAsync("20260629003200_AddInboxSubscriptionsTable");
-        }
-
+        await using var database = CreateDatabase("20260629003200_AddInboxSubscriptionsTable");
         await using (var tearDown = database.CreateDbContext())
         {
             var migrator = tearDown.GetService<IMigrator>();
@@ -225,10 +207,14 @@ public class InboxSubscriptionsMigrationSpecs
         return Convert.ToInt32(await command.ExecuteScalarAsync()) == 1;
     }
 
-    private static TestDatabase CreateDatabase()
+    private static TestDatabase CreateDatabase(string? migratedTo = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        if (migratedTo is not null)
+        {
+            MigratedSqliteTemplate.CopyTo(connection, migratedTo);
+        }
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;
