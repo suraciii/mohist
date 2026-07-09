@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { setupServer } from 'msw/node'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project/model/ProjectContext'
 import { WorkflowProfilesSection } from './WorkflowProfilesSection'
@@ -109,25 +109,12 @@ const handlers = [
   }),
 ]
 
-const server = setupServer(...handlers)
-
-beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
-})
-
-afterAll(() => {
-  server.close()
-})
+useMswServer(...handlers)
 
 beforeEach(() => {
   currentDefault = null
   currentDisabledIds = []
   requests.length = 0
-  server.resetHandlers(...handlers)
-})
-
-afterEach(() => {
-  server.resetHandlers(...handlers)
 })
 
 function renderSection() {

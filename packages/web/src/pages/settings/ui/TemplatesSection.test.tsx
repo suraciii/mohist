@@ -1,9 +1,5 @@
 // @vitest-environment jsdom
 import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
   describe,
   expect,
   it,
@@ -11,7 +7,7 @@ import {
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import { TemplatesSection } from './TemplatesSection'
 import { http, HttpResponse } from 'msw'
-import { setupServer } from 'msw/node'
+import { server, useMswServer } from '../../../../tests/support/msw'
 
 interface ProjectTemplate {
   key: string
@@ -100,23 +96,7 @@ const handlers = [
   ),
 ]
 
-const server = setupServer(...handlers)
-
-beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' })
-})
-
-afterAll(() => {
-  server.close()
-})
-
-beforeEach(() => {
-  server.resetHandlers(...handlers)
-})
-
-afterEach(() => {
-  server.resetHandlers(...handlers)
-})
+useMswServer(...handlers)
 
 describe('TemplatesSection', () => {
   describe('List view with mixed sources', () => {
