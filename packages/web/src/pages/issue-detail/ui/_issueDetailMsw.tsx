@@ -92,6 +92,12 @@ function issueDetailHandlers({ issue }: IssueDetailFixture) {
     http.get('*/api/workflow-runs/:runId/sessions', () =>
       HttpResponse.json({ success: true, data: [] }),
     ),
+    http.patch(ISSUES, () =>
+      HttpResponse.json({ success: true, data: { isDraft: false } }),
+    ),
+    http.post(`${ISSUES}/start`, () =>
+      HttpResponse.json({ success: true, data: { issue: {}, message: '' } }),
+    ),
   ]
 }
 
@@ -137,4 +143,8 @@ export function mockWorkspaceStatus(status: Record<string, unknown> | null) {
 
 export function mockAgentStatus(status: Record<string, unknown>) {
   server.use(http.get(AGENT_STATUS, () => HttpResponse.json({ success: true, data: status })))
+}
+
+export function mockUpdateIssue(handler: (info: { request: Request }) => Promise<Response> | Response) {
+  server.use(http.patch(ISSUES, handler as any))
 }

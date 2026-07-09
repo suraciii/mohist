@@ -1,26 +1,17 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
-import { mockIssue, mountIssueDetail } from './_issueDetailMsw'
+import { mockIssue, mockUpdateIssue, mountIssueDetail } from './_issueDetailMsw'
 
-const { mockStartIssue, mockUpdateIssue } = vi.hoisted(() => ({
-  mockStartIssue: vi.fn(() => Promise.resolve({})),
-  mockUpdateIssue: vi.fn(() => Promise.resolve({})),
-}))
-
-vi.mock('../../../entities/issue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue')>()
-  return {
-    ...actual,
-    startIssue: mockStartIssue,
-    updateIssue: mockUpdateIssue,
-  }
+const updateIssueHandler = vi.fn(({ request }: { request: Request }) => {
+  void request
+  return Response.json({ success: true, data: { isDraft: false } })
 })
 
 const projects: Project[] = [
@@ -55,6 +46,15 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
 
 mountIssueDetail({ issue: makeIssue() })
 
+beforeEach(() => {
+  mockUpdateIssue(updateIssueHandler)
+})
+
+afterEach(() => {
+  cleanup()
+  updateIssueHandler.mockClear()
+})
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -69,12 +69,6 @@ function renderPage() {
     </QueryClientProvider>,
   )
 }
-
-afterEach(() => {
-  cleanup()
-  mockUpdateIssue.mockClear()
-  mockStartIssue.mockClear()
-})
 
 describe('IssueDetailPage - draft indicator and Start control', () => {
   it('renders a Draft pill on the Issue Detail header for a draft issue', async () => {
@@ -144,7 +138,10 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
 
     await waitFor(() => expect(screen.getByTestId('mark-ready-button')).toBeInTheDocument())
     screen.getByTestId('mark-ready-button').click()
-    await waitFor(() => expect(mockUpdateIssue).toHaveBeenCalledWith(201, { isDraft: false }, 'proj-1'))
+    await waitFor(() => expect(updateIssueHandler).toHaveBeenCalledTimes(1))
+    const callUrl = new URL(updateIssueHandler.mock.calls[0]![0].request.url)
+    expect(callUrl.pathname).toContain('/issues/201')
+    expect(await updateIssueHandler.mock.calls[0]![0].request.clone().json()).toEqual({ isDraft: false })
   })
 })
 
