@@ -6,30 +6,25 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../project/model/ProjectContext'
 import type { ReactNode } from 'react'
 import type { CoderSessionItem } from '..'
+import { useMswServer } from '../../../../tests/support/msw'
+import { http, HttpResponse } from 'msw'
+import { dispatchAgentEvent } from '../../agent/model/events'
 
-const apiMocks = vi.hoisted(() => ({
-  getCoderSessions: vi.fn(),
-}))
+let _coderSessionsData: CoderSessionItem[] = []
+let _coderSessionsResponses: CoderSessionItem[][] = []
+let _neverResolve = false
 
-vi.mock('../api/client', () => ({
-  getCoderSessions: (...args: any[]) => apiMocks.getCoderSessions(...args),
-}))
+const SessionsPath = `/api/projects/${TEST_PROJECT.id}/issues/:issueNumber/coder-sessions`
 
-const eventHandlers = new Map<string, ((detail: unknown) => void)[]>()
+const coderSessionsHandler = vi.fn(() => {
+  if (_neverResolve) return new Promise<never>(() => {})
+  const data = _coderSessionsResponses.length > 0
+    ? _coderSessionsResponses.shift()!
+    : _coderSessionsData
+  return HttpResponse.json({ success: true, data })
+})
 
-vi.mock('../../agent/@x/events', () => ({
-  onAgentEvent: vi.fn((name: string, handler: (detail: unknown) => void) => {
-    if (!eventHandlers.has(name)) eventHandlers.set(name, [])
-    eventHandlers.get(name)!.push(handler)
-    return () => {
-      const handlers = eventHandlers.get(name)
-      if (handlers) {
-        const idx = handlers.indexOf(handler)
-        if (idx !== -1) handlers.splice(idx, 1)
-      }
-    }
-  }),
-}))
+useMswServer(http.get(SessionsPath, coderSessionsHandler))
 
 const queryClients: QueryClient[] = []
 
@@ -98,15 +93,10 @@ function makeSession(overrides: SessionOverrides = {}): CoderSessionItem {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  eventHandlers.clear()
-  apiMocks.getCoderSessions.mockReset()
-  apiMocks.getCoderSessions.mockResolvedValue([])
+  _coderSessionsData = []
+  _coderSessionsResponses = []
+  _neverResolve = false
 })
-
-function dispatchAgentEvent(name: string, detail: unknown) {
-  const handlers = eventHandlers.get(name) ?? []
-  for (const handler of handlers) handler(detail)
-}
 
 afterEach(() => {
   for (const qc of queryClients) qc.clear()
@@ -116,8 +106,7 @@ afterEach(() => {
 describe('useCoderSessions', () => {
   describe('staleTime configuration', () => {
     it('uses 30 second staleTime for caching', async () => {
-      const sessions = [makeSession({ id: 's1' }), makeSession({ id: 's2' })]
-      apiMocks.getCoderSessions.mockResolvedValue(sessions)
+      _coderSessionsData = [makeSession({ id: 's1' }), makeSession({ id: 's2' })]
 
       const { result } = renderHookWithProviders(() => useCoderSessions(123))
 
@@ -125,12 +114,11 @@ describe('useCoderSessions', () => {
         expect(result.current.sessions.length).toBe(2)
       })
 
-      expect(apiMocks.getCoderSessions).toHaveBeenCalledTimes(1)
+      expect(coderSessionsHandler).toHaveBeenCalledTimes(1)
     })
 
     it('returns cached data when re-rendering within stale window', async () => {
-      const sessions = [makeSession({ id: 's1' })]
-      apiMocks.getCoderSessions.mockResolvedValue(sessions)
+      _coderSessionsData = [makeSession({ id: 's1' })]
 
       const { result } = renderHookWithProviders(() => useCoderSessions(123))
 
@@ -138,13 +126,13 @@ describe('useCoderSessions', () => {
         expect(result.current.sessions.length).toBe(1)
       })
 
-      expect(apiMocks.getCoderSessions).toHaveBeenCalledTimes(1)
+      expect(coderSessionsHandler).toHaveBeenCalledTimes(1)
     })
   })
 
   describe('cache key scoping', () => {
     it('uses issue-specific cache key', async () => {
-      apiMocks.getCoderSessions.mockResolvedValue([makeSession({ id: 's1' })])
+      _coderSessionsData = [makeSession({ id: 's1' })]
 
       const { result: result1 } = renderHookWithProviders(() => useCoderSessions(123))
 
@@ -158,16 +146,14 @@ describe('useCoderSessions', () => {
         expect(result2.current.sessions.length).toBe(1)
       })
 
-      expect(apiMocks.getCoderSessions).toHaveBeenCalledTimes(2)
+      expect(coderSessionsHandler).toHaveBeenCalledTimes(2)
     })
 
     it('does not share cache between different issues', async () => {
       const sessions123 = [makeSession({ id: 's1', title: 'Issue 123 Session' })]
       const sessions456 = [makeSession({ id: 's2', title: 'Issue 456 Session' })]
 
-      apiMocks.getCoderSessions
-        .mockResolvedValueOnce(sessions123)
-        .mockResolvedValueOnce(sessions456)
+      _coderSessionsResponses = [sessions123, sessions456]
 
       const { result: result1 } = renderHookWithProviders(() => useCoderSessions(123))
       await waitFor(() => {
@@ -183,7 +169,7 @@ describe('useCoderSessions', () => {
 
   describe('query behavior', () => {
     it('returns empty sessions array while loading', async () => {
-      apiMocks.getCoderSessions.mockImplementation(() => new Promise(() => {}))
+      _neverResolve = true
 
       const { result } = renderHookWithProviders(() => useCoderSessions(123))
 
@@ -192,7 +178,7 @@ describe('useCoderSessions', () => {
     })
 
     it('returns sessions with isLoading false when loaded', async () => {
-      apiMocks.getCoderSessions.mockResolvedValue([makeSession({ id: 's1' })])
+      _coderSessionsData = [makeSession({ id: 's1' })]
 
       const { result } = renderHookWithProviders(() => useCoderSessions(123))
 
@@ -207,14 +193,14 @@ describe('useCoderSessions', () => {
       const { result } = renderHookWithProviders(() => useCoderSessions(0))
 
       expect(result.current.sessions).toEqual([])
-      expect(apiMocks.getCoderSessions).not.toHaveBeenCalled()
+      expect(coderSessionsHandler).not.toHaveBeenCalled()
     })
 
     it('does not fetch when issueNumber is negative', async () => {
       const { result } = renderHookWithProviders(() => useCoderSessions(-1))
 
       expect(result.current.sessions).toEqual([])
-      expect(apiMocks.getCoderSessions).not.toHaveBeenCalled()
+      expect(coderSessionsHandler).not.toHaveBeenCalled()
     })
   })
 })
@@ -259,9 +245,8 @@ describe('CoderSessionItem type contract', () => {
 })
 
 describe('useCoderSessions live event handling', () => {
-it('applies usage update to matching session', async () => {
-    const sessions = [makeSession({ id: 'session-1', status: 'running' })]
-    apiMocks.getCoderSessions.mockResolvedValue(sessions)
+  it('applies usage update to matching session', async () => {
+    _coderSessionsData = [makeSession({ id: 'session-1', status: 'running' })]
 
     const { result } = renderHookWithProviders(() => useCoderSessions(1))
 
@@ -270,8 +255,6 @@ it('applies usage update to matching session', async () => {
     })
 
     dispatchAgentEvent('usage.updated', {
-      issueId: '1',
-      projectId: TEST_PROJECT.id,
       coderSessionId: 'session-1',
       inputTokens: 100,
       outputTokens: 50,
@@ -282,7 +265,7 @@ it('applies usage update to matching session', async () => {
       costCurrency: 'USD',
       contextWindowSize: 200000,
       contextWindowUsed: 150,
-    })
+    } as any)
 
     await waitFor(() => {
       const session = result.current.sessions[0]
@@ -298,9 +281,8 @@ it('applies usage update to matching session', async () => {
     })
   })
 
-it('ignores usage update for unknown session', async () => {
-    const sessions = [makeSession({ id: 'session-1', status: 'running' })]
-    apiMocks.getCoderSessions.mockResolvedValue(sessions)
+  it('ignores usage update for unknown session', async () => {
+    _coderSessionsData = [makeSession({ id: 'session-1', status: 'running' })]
 
     const { result } = renderHookWithProviders(() => useCoderSessions(1))
 
@@ -309,11 +291,9 @@ it('ignores usage update for unknown session', async () => {
     })
 
     dispatchAgentEvent('usage.updated', {
-      issueId: '1',
-      projectId: TEST_PROJECT.id,
       coderSessionId: 'session-unknown',
       inputTokens: 100,
-    })
+    } as any)
 
     await waitFor(() => {
       expect(result.current.sessions[0].usage?.inputTokens).toBeUndefined()
@@ -321,14 +301,13 @@ it('ignores usage update for unknown session', async () => {
   })
 
   it('preserves existing fields when usage update is partial', async () => {
-    const sessions = [makeSession({
+    _coderSessionsData = [makeSession({
       id: 'session-1',
       status: 'running',
       inputTokens: 50,
       costAmount: 0.005,
       costCurrency: 'USD',
     })]
-    apiMocks.getCoderSessions.mockResolvedValue(sessions)
 
     const { result } = renderHookWithProviders(() => useCoderSessions(1))
 
@@ -337,11 +316,9 @@ it('ignores usage update for unknown session', async () => {
     })
 
     dispatchAgentEvent('usage.updated', {
-      issueId: '1',
-      projectId: TEST_PROJECT.id,
       coderSessionId: 'session-1',
       outputTokens: 25,
-    })
+    } as any)
 
     await waitFor(() => {
       const session = result.current.sessions[0]

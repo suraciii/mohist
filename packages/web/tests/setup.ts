@@ -6,39 +6,49 @@ import { resetSignalrFake } from './support/signalr-fake'
 
 let _reducedMotionOverride: boolean | undefined
 
-// isolate:false 终局下，同 worker 的文件共享 jsdom 与模块图；每测试的
-// 环境复位必须集中在这里机械执行，不依赖各文件自觉
-// （openspec/changes/web-test-boundary-mocks）。
+function _defaultMatchMediaFn() {
+  return vi.fn().mockImplementation((query: string) => ({
+    matches: _reducedMotionOverride === true
+      ? query === '(prefers-reduced-motion: reduce)'
+      : false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }))
+}
+
+const _matchMediaMock = _defaultMatchMediaFn()
+
 afterEach(() => {
   cleanup()
   _reducedMotionOverride = undefined
   resetSonnerFake()
   resetSignalrFake()
   vi.useRealTimers()
+  vi.unstubAllGlobals()
   if (typeof window !== 'undefined') {
     window.localStorage.clear()
     window.sessionStorage.clear()
     document.title = ''
     document.documentElement.className = ''
+    window.matchMedia = _matchMediaMock
+    try {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1280 })
+    } catch (_) { /* ignore non-configurable */ }
   }
 })
 
-if (typeof window !== 'undefined' && !window.matchMedia) {
-  Object.defineProperty(window, 'matchMedia', {
-    writable: true,
-    value: vi.fn().mockImplementation((query: string) => ({
-      matches: _reducedMotionOverride === true
-        ? query === '(prefers-reduced-motion: reduce)'
-        : false,
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
-  })
+if (typeof window !== 'undefined') {
+  if (!window.matchMedia) {
+    window.matchMedia = _matchMediaMock
+  }
+  if (!window.innerWidth) {
+    Object.defineProperty(window, 'innerWidth', { writable: true, value: 1280 })
+  }
 }
 
 /**
@@ -47,10 +57,6 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
  */
 export function setPrefersReducedMotion(reduce: boolean) {
   _reducedMotionOverride = reduce
-}
-
-if (typeof window !== 'undefined' && !window.innerWidth) {
-  Object.defineProperty(window, 'innerWidth', { writable: true, value: 1280 })
 }
 
 if (typeof window !== 'undefined' && !window.ResizeObserver) {
