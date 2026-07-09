@@ -1,26 +1,16 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import { ProjectProvider } from '../../../entities/project'
 import { RunnersPage } from './RunnersPage'
 import type { RunnerStatusRow } from '../../../entities/runner/model/types'
 
-const mocks = vi.hoisted(() => ({
-  rows: [] as RunnerStatusRow[],
-  isLoading: false,
-  queryFnCalls: 0,
-}))
-
-vi.mock('../../../entities/runner', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/runner')>()
-  return {
-    ...actual,
-    useRunners: () => ({ data: mocks.rows, isLoading: mocks.isLoading }),
-  }
-})
+useMswServer()
 
 function makeRow(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
   return {
@@ -48,6 +38,14 @@ const TEST_PROJECT = {
   repositories: [],
 }
 
+const RUNNERS_PATH = '*/api/projects/:projectId/runners'
+
+function mockRunners(rows: RunnerStatusRow[]) {
+  server.use(
+    http.get(RUNNERS_PATH, () => HttpResponse.json({ success: true, data: { runners: rows } })),
+  )
+}
+
 function renderWith({
   initialProjectId = TEST_PROJECT.id,
   initialProjects = [TEST_PROJECT],
@@ -69,23 +67,18 @@ function renderWith({
   )
 }
 
-beforeEach(() => {
-  vi.clearAllMocks()
-  mocks.rows = []
-  mocks.isLoading = false
-  mocks.queryFnCalls = 0
-})
-
 afterEach(() => {
   cleanup()
 })
 
 describe('RunnersPage', () => {
   describe('routing and nav', () => {
-    it('renders the page with a stable test id', () => {
-      mocks.rows = [makeRow({ id: 'r1' })]
+    it('renders the page with a stable test id', async () => {
+      mockRunners([makeRow({ id: 'r1' })])
       renderWith()
-      expect(screen.getByTestId('runners-page')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByTestId('runners-page')).toBeInTheDocument()
+      })
     })
   })
 
@@ -104,52 +97,61 @@ describe('RunnersPage', () => {
 
     it('does not issue the project-scoped runner query when no project is selected', () => {
       renderWith({ initialProjectId: null, initialProjects: [] })
-      expect(mocks.rows).toHaveLength(0)
+      expect(screen.queryByText('runner-test')).not.toBeInTheDocument()
     })
   })
 
   describe('empty state', () => {
-    it('shows the start-command empty state when there are no eligible runners', () => {
-      mocks.rows = []
+    it('shows the start-command empty state when there are no eligible runners', async () => {
+      mockRunners([])
       renderWith()
-      expect(screen.getByTestId('runners-empty-state')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByTestId('runners-empty-state')).toBeInTheDocument()
+      })
       expect(screen.getByText('No runners connected')).toBeInTheDocument()
       expect(screen.getByText('npx mohist runner')).toBeInTheDocument()
     })
 
-    it('does not show the empty state when runners exist', () => {
-      mocks.rows = [makeRow({ id: 'r1' })]
+    it('does not show the empty state when runners exist', async () => {
+      mockRunners([makeRow({ id: 'r1' })])
       renderWith()
-      expect(screen.queryByTestId('runners-empty-state')).not.toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.queryByTestId('runners-empty-state')).not.toBeInTheDocument()
+      })
     })
   })
 
   describe('scope filter', () => {
-    it('defaults to "all" so global and project-scoped runners are both listed', () => {
-      mocks.rows = [
+    it('defaults to "all" so global and project-scoped runners are both listed', async () => {
+      mockRunners([
         makeRow({ id: 'global-1', scope: { type: 'global' } }),
         makeRow({
           id: 'project-1',
           scope: { type: 'project', projectId: TEST_PROJECT.id, projectName: TEST_PROJECT.name },
         }),
-      ]
+      ])
       renderWith()
 
+      await waitFor(() => {
+        expect(screen.getByText('global-1')).toBeInTheDocument()
+        expect(screen.getByText('project-1')).toBeInTheDocument()
+      })
       const page = screen.getByTestId('runners-page')
       expect(page).toHaveAttribute('data-scope-filter', 'all')
-      expect(screen.getByText('global-1')).toBeInTheDocument()
-      expect(screen.getByText('project-1')).toBeInTheDocument()
     })
 
-    it('global filter shows only global runners', () => {
-      mocks.rows = [
+    it('global filter shows only global runners', async () => {
+      mockRunners([
         makeRow({ id: 'global-1', scope: { type: 'global' } }),
         makeRow({
           id: 'project-1',
           scope: { type: 'project', projectId: TEST_PROJECT.id, projectName: TEST_PROJECT.name },
         }),
-      ]
+      ])
       renderWith()
+      await waitFor(() => {
+        expect(screen.getByText('global-1')).toBeInTheDocument()
+      })
       act(() => {
         fireEvent.click(screen.getByTestId('runners-scope-global'))
       })
@@ -157,15 +159,18 @@ describe('RunnersPage', () => {
       expect(screen.queryByText('project-1')).not.toBeInTheDocument()
     })
 
-    it('project filter shows only project-scoped runners', () => {
-      mocks.rows = [
+    it('project filter shows only project-scoped runners', async () => {
+      mockRunners([
         makeRow({ id: 'global-1', scope: { type: 'global' } }),
         makeRow({
           id: 'project-1',
           scope: { type: 'project', projectId: TEST_PROJECT.id, projectName: TEST_PROJECT.name },
         }),
-      ]
+      ])
       renderWith()
+      await waitFor(() => {
+        expect(screen.getByText('project-1')).toBeInTheDocument()
+      })
       act(() => {
         fireEvent.click(screen.getByTestId('runners-scope-project'))
       })
@@ -175,35 +180,42 @@ describe('RunnersPage', () => {
   })
 
   describe('summary bar', () => {
-    it('shows a count for each of idle, busy, stale, and offline', () => {
-      mocks.rows = [
+    it('shows a count for each of idle, busy, stale, and offline', async () => {
+      mockRunners([
         makeRow({ id: 'r1', status: 'idle' }),
         makeRow({ id: 'r2', status: 'busy' }),
         makeRow({ id: 'r3', status: 'stale', connectionState: 'disconnected' }),
         makeRow({ id: 'r4', status: 'offline', connectionState: 'disconnected' }),
-      ]
+      ])
       renderWith()
 
-      const bar = screen.getByTestId('runners-summary-bar')
-      expect(within(bar).getByTestId('runners-summary-idle-count')).toHaveTextContent('1')
-      expect(within(bar).getByTestId('runners-summary-busy-count')).toHaveTextContent('1')
-      expect(within(bar).getByTestId('runners-summary-stale-count')).toHaveTextContent('1')
-      expect(within(bar).getByTestId('runners-summary-offline-count')).toHaveTextContent('1')
+      const bar = await waitFor(() => screen.getByTestId('runners-summary-bar'))
+      await waitFor(() => {
+        expect(within(bar).getByTestId('runners-summary-idle-count')).toHaveTextContent('1')
+        expect(within(bar).getByTestId('runners-summary-busy-count')).toHaveTextContent('1')
+        expect(within(bar).getByTestId('runners-summary-stale-count')).toHaveTextContent('1')
+        expect(within(bar).getByTestId('runners-summary-offline-count')).toHaveTextContent('1')
+      })
     })
 
-    it('shows zero explicitly for empty status categories (never omits)', () => {
-      mocks.rows = [makeRow({ id: 'r1', status: 'idle' })]
+    it('shows zero explicitly for empty status categories (never omits)', async () => {
+      mockRunners([makeRow({ id: 'r1', status: 'idle' })])
       renderWith()
 
+      await waitFor(() => {
+        expect(screen.getByTestId('runners-summary-bar')).toBeInTheDocument()
+      })
       const bar = screen.getByTestId('runners-summary-bar')
-      expect(within(bar).getByTestId('runners-summary-idle-count')).toHaveTextContent('1')
-      expect(within(bar).getByTestId('runners-summary-busy-count')).toHaveTextContent('0')
-      expect(within(bar).getByTestId('runners-summary-stale-count')).toHaveTextContent('0')
-      expect(within(bar).getByTestId('runners-summary-offline-count')).toHaveTextContent('0')
+      await waitFor(() => {
+        expect(within(bar).getByTestId('runners-summary-idle-count')).toHaveTextContent('1')
+        expect(within(bar).getByTestId('runners-summary-busy-count')).toHaveTextContent('0')
+        expect(within(bar).getByTestId('runners-summary-stale-count')).toHaveTextContent('0')
+        expect(within(bar).getByTestId('runners-summary-offline-count')).toHaveTextContent('0')
+      })
     })
 
-    it('updates counts to match the active scope filter', () => {
-      mocks.rows = [
+    it('updates counts to match the active scope filter', async () => {
+      mockRunners([
         makeRow({ id: 'g1', status: 'idle', scope: { type: 'global' } }),
         makeRow({ id: 'g2', status: 'busy', scope: { type: 'global' } }),
         makeRow({
@@ -212,13 +224,18 @@ describe('RunnersPage', () => {
           scope: { type: 'project', projectId: TEST_PROJECT.id, projectName: TEST_PROJECT.name },
           connectionState: 'disconnected',
         }),
-      ]
+      ])
       renderWith()
 
+      await waitFor(() => {
+        expect(screen.getByTestId('runners-summary-bar')).toBeInTheDocument()
+      })
       const bar = screen.getByTestId('runners-summary-bar')
-      expect(within(bar).getByTestId('runners-summary-idle-count')).toHaveTextContent('1')
-      expect(within(bar).getByTestId('runners-summary-busy-count')).toHaveTextContent('1')
-      expect(within(bar).getByTestId('runners-summary-stale-count')).toHaveTextContent('1')
+      await waitFor(() => {
+        expect(within(bar).getByTestId('runners-summary-idle-count')).toHaveTextContent('1')
+        expect(within(bar).getByTestId('runners-summary-busy-count')).toHaveTextContent('1')
+        expect(within(bar).getByTestId('runners-summary-stale-count')).toHaveTextContent('1')
+      })
 
       act(() => {
         fireEvent.click(screen.getByTestId('runners-scope-global'))
@@ -239,63 +256,74 @@ describe('RunnersPage', () => {
   })
 
   describe('row rendering', () => {
-    it('lists offline and stale runners (not hidden)', () => {
-      mocks.rows = [
+    it('lists offline and stale runners (not hidden)', async () => {
+      mockRunners([
         makeRow({ id: 'r-offline', status: 'offline', connectionState: 'disconnected' }),
         makeRow({ id: 'r-stale', status: 'stale', connectionState: 'disconnected' }),
-      ]
+      ])
       renderWith()
 
-      expect(screen.getByText('r-offline')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByText('r-offline')).toBeInTheDocument()
+      })
       expect(screen.getByText('r-stale')).toBeInTheDocument()
       expect(screen.getAllByText('offline').length).toBeGreaterThan(0)
       expect(screen.getAllByText('stale').length).toBeGreaterThan(0)
     })
 
-    it('renders a runner with missing capacity without crashing and shows unavailable', () => {
-      mocks.rows = [
+    it('renders a runner with missing capacity without crashing and shows unavailable', async () => {
+      mockRunners([
         makeRow({
           id: 'r-offline-no-capacity',
           status: 'offline',
           connectionState: 'disconnected',
           capacity: null,
         }),
-      ]
+      ])
       renderWith()
 
-      expect(screen.getByText('r-offline-no-capacity')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByText('r-offline-no-capacity')).toBeInTheDocument()
+      })
       expect(screen.queryByText('0/0 slots')).not.toBeInTheDocument()
     })
 
-    it('shows hostname on each row', () => {
-      mocks.rows = [makeRow({ id: 'r1', hostname: 'box-1' })]
+    it('shows hostname on each row', async () => {
+      mockRunners([makeRow({ id: 'r1', hostname: 'box-1' })])
       renderWith()
-      expect(screen.getByText('box-1')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByText('box-1')).toBeInTheDocument()
+      })
     })
 
-    it('shows kind on each row', () => {
-      mocks.rows = [makeRow({ id: 'r1', kind: 'external' })]
+    it('shows kind on each row', async () => {
+      mockRunners([makeRow({ id: 'r1', kind: 'external' })])
       renderWith()
-      expect(screen.getByText('external')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByText('external')).toBeInTheDocument()
+      })
     })
 
-    it('shows scope badge', () => {
-      mocks.rows = [makeRow({ id: 'r1', scope: { type: 'global' } })]
+    it('shows scope badge', async () => {
+      mockRunners([makeRow({ id: 'r1', scope: { type: 'global' } })])
       renderWith()
-      const badges = screen.getAllByText('global')
-      expect(badges.length).toBeGreaterThan(0)
+      await waitFor(() => {
+        expect(screen.getAllByText('global').length).toBeGreaterThan(0)
+      })
     })
 
-    it('shows capacity as used/total when present', () => {
-      mocks.rows = [
+    it('shows capacity as used/total when present', async () => {
+      mockRunners([
         makeRow({
           id: 'r1',
           status: 'busy',
           capacity: { usedSlots: 2, totalSlots: 4 },
         }),
-      ]
+      ])
       renderWith()
-      expect(screen.getByTestId('runner-capacity')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByTestId('runner-capacity')).toBeInTheDocument()
+      })
       expect(screen.getByText('2/4')).toBeInTheDocument()
     })
   })
