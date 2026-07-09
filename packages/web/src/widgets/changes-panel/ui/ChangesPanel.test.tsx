@@ -1,20 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { render, screen } from '../../../../tests/test-utils'
 import type { IssueDiffResponse, IssueCommitsResponse } from '../../../entities/issue'
-
-vi.mock('../../../entities/issue/api/queries', async () => {
-  return {
-    useCommitDiff: vi.fn(() => ({
-      data: undefined,
-      isLoading: false,
-      isError: false,
-    })),
-  }
-})
-
-vi.mock('../../../shared/lib/format-time', async () => ({
-  formatTimeAgo: vi.fn((date: Date) => date.toISOString()),
-}))
 
 import { ChangesPanel } from './ChangesPanel'
 
@@ -43,10 +29,6 @@ function makeCommitsResponse(overrides: Partial<IssueCommitsResponse> = {}): Iss
 }
 
 describe('ChangesPanel', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   describe('Files tab as default', () => {
     it('renders Files button as the first tab', () => {
       const diffData = makeDiffResponse({ available: true, files: [{ file: 'a.txt', additions: 1, deletions: 0, diff: '', isBinary: false }] })

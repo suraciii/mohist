@@ -1,9 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { TEST_PROJECT, baseRender, screen, waitFor } from './test-utils'
 import { SessionPage } from '../src/pages/session/ui/SessionPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { server } from '../tests/support/msw'
 import React from 'react'
 import type {
   AgentSessionMetadata,
@@ -11,38 +13,50 @@ import type {
   SessionTurn,
 } from '../src/entities/coder-session'
 
-const endpointMocks = vi.hoisted(() => ({
-  sessions: [] as any[],
-  sessionsLoading: false,
-  issue: null as any,
-  metadata: null as AgentSessionMetadata | null,
-  transcript: { turns: [], partCount: 0, lastActivityAt: null } as AgentSessionTranscriptResponse,
-}))
+const ISSUE = 42
+const SESSION = 'T-003.1'
+const ISSUES = `*/api/projects/:projectId/issues/${ISSUE}`
+const SESSION_META = `*/api/projects/:projectId/issues/${ISSUE}/sessions/${SESSION}`
+const SESSION_TRANSCRIPT = `*/api/projects/:projectId/issues/${ISSUE}/sessions/${SESSION}/transcript`
+const CODER_SESSIONS = `*/api/projects/:projectId/issues/${ISSUE}/coder-sessions`
 
-vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
-  useCoderSessions: () => ({ sessions: endpointMocks.sessions, isLoading: endpointMocks.sessionsLoading }),
-}))
+let issueData: unknown = null
+let sessionsData: unknown[] = []
+let sessionsLoading = false
+let metadata: AgentSessionMetadata | null = null
+let transcript: AgentSessionTranscriptResponse = { turns: [], partCount: 0, lastActivityAt: null }
 
-vi.mock('../src/entities/issue/api/queries', () => ({
-  useIssue: () => ({ data: endpointMocks.issue }),
-}))
+function sessionHandlers() {
+  return [
+    http.get(ISSUES, () => HttpResponse.json({ success: true, data: issueData })),
+    http.get(CODER_SESSIONS, () => {
+      if (sessionsLoading) return new Promise(() => {})
+      return HttpResponse.json({ success: true, data: sessionsData })
+    }),
+    http.get(SESSION_META, () => HttpResponse.json({ success: true, data: metadata })),
+    http.get(SESSION_TRANSCRIPT, () => HttpResponse.json({ success: true, data: transcript })),
+  ]
+}
 
-vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/entities/coder-session/api/client')>()),
-  getAgentSessionMetadata: vi.fn(() => Promise.resolve(endpointMocks.metadata)),
-  getAgentSessionTranscript: vi.fn(() => Promise.resolve(endpointMocks.transcript)),
-}))
+beforeAll(() => {
+  server.listen({ onUnhandledRequest: 'error' })
+  server.use(...sessionHandlers())
+})
+afterEach(() => {
+  server.resetHandlers()
+  server.use(...sessionHandlers())
+})
+afterAll(() => server.close())
 
 const originalScrollTo = Element.prototype.scrollTo
 const queryClients: QueryClient[] = []
 
 beforeEach(() => {
-  vi.clearAllMocks()
-  endpointMocks.sessions = []
-  endpointMocks.sessionsLoading = false
-  endpointMocks.issue = null
-  endpointMocks.metadata = null
-  endpointMocks.transcript = { turns: [], partCount: 0, lastActivityAt: null }
+  issueData = null
+  sessionsData = []
+  sessionsLoading = false
+  metadata = null
+  transcript = { turns: [], partCount: 0, lastActivityAt: null }
   Element.prototype.scrollTo = vi.fn()
 })
 
@@ -68,7 +82,7 @@ function renderWithQueryClient(ui: React.ReactElement) {
   return baseRender(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
-        <MemoryRouter initialEntries={['/issues/42/workflow/sessions/T-003.1']}>
+        <MemoryRouter initialEntries={[`/issues/${ISSUE}/workflow/sessions/${SESSION}`]}>
           <Routes>
             <Route path="/issues/:number/workflow/sessions/:sessionName" element={ui} />
           </Routes>
@@ -146,13 +160,13 @@ function makeSessionsForLookup() {
 
 describe('T-003: SessionPage followup composer integration', () => {
   it('renders an interactive composer below the transcript when the session is active', async () => {
-    endpointMocks.sessions = makeSessionsForLookup()
-    endpointMocks.metadata = makeMetadata({
+    sessionsData = makeSessionsForLookup()
+    metadata = makeMetadata({
       status: 'active',
       statusKind: 'live',
       completedAt: null,
     })
-    endpointMocks.transcript = {
+    transcript = {
       turns: [makeTurn()],
       partCount: 1,
       lastActivityAt: '2024-01-01T10:00:01.000Z',
@@ -169,13 +183,13 @@ describe('T-003: SessionPage followup composer integration', () => {
   })
 
   it('hides the composer input when the session is completed', async () => {
-    endpointMocks.sessions = makeSessionsForLookup()
-    endpointMocks.metadata = makeMetadata({
+    sessionsData = makeSessionsForLookup()
+    metadata = makeMetadata({
       status: 'completed',
       statusKind: 'completed',
       completedAt: '2024-01-01T11:00:00.000Z',
     })
-    endpointMocks.transcript = {
+    transcript = {
       turns: [makeTurn()],
       partCount: 1,
       lastActivityAt: '2024-01-01T11:00:00.000Z',
@@ -193,13 +207,13 @@ describe('T-003: SessionPage followup composer integration', () => {
   })
 
   it('hides the composer input when the session is failed', async () => {
-    endpointMocks.sessions = makeSessionsForLookup()
-    endpointMocks.metadata = makeMetadata({
+    sessionsData = makeSessionsForLookup()
+    metadata = makeMetadata({
       status: 'failed',
       statusKind: 'failed',
       failureReason: 'agent crashed',
     })
-    endpointMocks.transcript = {
+    transcript = {
       turns: [makeTurn()],
       partCount: 1,
       lastActivityAt: '2024-01-01T11:00:00.000Z',
@@ -216,17 +230,17 @@ describe('T-003: SessionPage followup composer integration', () => {
   })
 
   it('shows the composer even while waiting for activity on a running session with no turns', async () => {
-    endpointMocks.sessions = [{
+    sessionsData = [{
       ...makeSessionsForLookup()[0],
       status: 'running',
       completedAt: null,
     }]
-    endpointMocks.metadata = makeMetadata({
+    metadata = makeMetadata({
       status: 'active',
       statusKind: 'live',
       completedAt: null,
     })
-    endpointMocks.transcript = { turns: [], partCount: 0, lastActivityAt: null }
+    transcript = { turns: [], partCount: 0, lastActivityAt: null }
 
     renderWithQueryClient(<SessionPage />)
 

@@ -1,26 +1,15 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
+import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
+import { server } from '../../../../tests/support/msw'
 
 const mocks = vi.hoisted(() => ({
-  issues: [] as any[],
-  issuesLoading: false,
-  archivedIssues: [] as any[],
-  agentStatus: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } } as any,
   detailRenderCount: 0,
   boardRenderCount: 0,
-}))
-
-vi.mock('../../../entities/issue/api/queries', () => ({
-  useIssues: () => ({ data: mocks.issues, isLoading: mocks.issuesLoading }),
-  useArchivedIssues: () => ({ data: mocks.archivedIssues }),
-}))
-
-vi.mock('../../../entities/agent', () => ({
-  useAgentStatus: () => ({ data: mocks.agentStatus }),
 }))
 
 vi.mock('../../../widgets/kanban-board/ui/KanbanBoard', () => ({
@@ -48,6 +37,27 @@ const TEST_PROJECT = {
   repositories: [],
 }
 
+const HANDLERS = [
+  http.get('*/api/projects/:projectId/issues', () => HttpResponse.json({ success: true, data: [] })),
+  http.get('*/api/projects/:projectId/agent/status', () =>
+    HttpResponse.json({
+      success: true,
+      data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } },
+    }),
+  ),
+]
+
+beforeAll(() => {
+  server.listen({ onUnhandledRequest: 'error' })
+  server.use(...HANDLERS)
+})
+afterEach(() => {
+  cleanup()
+  server.resetHandlers()
+  server.use(...HANDLERS)
+})
+afterAll(() => server.close())
+
 function renderRoute(path: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -67,29 +77,18 @@ function renderRoute(path: string) {
 }
 
 describe('routing: issues index vs issues/:number', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.issues = []
-    mocks.issuesLoading = false
-    mocks.archivedIssues = []
-  })
-
-  afterEach(() => {
-    cleanup()
-  })
-
-  it('renders the Kanban board on /issues (issues index)', () => {
+  it('renders the Kanban board on /issues (issues index)', async () => {
     renderRoute('/demo/issues')
 
-    expect(screen.getByTestId('kanban-board-stub')).toBeInTheDocument()
+    expect(await screen.findByTestId('kanban-board-stub')).toBeInTheDocument()
     expect(mocks.boardRenderCount).toBe(1)
     expect(screen.queryByTestId('issue-detail-stub')).not.toBeInTheDocument()
   })
 
-  it('renders the Issue Detail page on /issues/:number (does not shadow the detail route)', () => {
+  it('renders the Issue Detail page on /issues/:number (does not shadow the detail route)', async () => {
     renderRoute('/demo/issues/42')
 
-    expect(screen.getByTestId('issue-detail-stub')).toBeInTheDocument()
+    expect(await screen.findByTestId('issue-detail-stub')).toBeInTheDocument()
     expect(mocks.detailRenderCount).toBe(1)
     expect(screen.queryByTestId('kanban-board-stub')).not.toBeInTheDocument()
   })
