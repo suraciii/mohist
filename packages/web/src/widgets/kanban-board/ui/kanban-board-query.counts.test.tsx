@@ -1,24 +1,45 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, IssueHealth, WorkflowStage, type ApprovalState } from '../../../entities/issue'
-import { useRunnerSummary } from '../../../entities/runner/api/queries'
+import { ProjectProvider } from '../../../entities/project'
+import { server } from '../../../../tests/support/msw'
 import { makeIssue, makeIssues, mockAgentStatus } from './_kanbanBoardQueryTestUtils'
 
-vi.mock('../../../entities/runner/api/queries', () => ({
-  useRunnerSummary: vi.fn().mockReturnValue({ hasConnectedCapacity: true, connectedIdleCount: 1, connectedBusyCount: 0, rows: [] }),
-}))
+const TEST_PROJECT = { id: 'test-project', name: 'test', createdAt: '2025-01-01T00:00:00Z', updatedAt: '2025-01-01T00:00:00Z', repositories: [] }
+
+let _runners: unknown[] = []
 
 import { KanbanBoard } from './KanbanBoard'
 
+function renderBoard(issues: unknown[], agentStatus: unknown) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+        <MemoryRouter>
+          <KanbanBoard issues={issues as any} agentStatus={agentStatus as any} />
+        </MemoryRouter>
+      </ProjectProvider>
+    </QueryClientProvider>,
+  )
+}
+
 describe('KanbanBoard Component - Filtered Stage Counts', () => {
   beforeEach(() => {
+    _runners = [{ id: 'r-default', kind: 'external', hostname: 'h', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }]
+    server.use(
+      http.get('/api/projects/:projectId/runners', () =>
+        HttpResponse.json({ success: true, data: { runners: _runners } }),
+      ),
+    )
     Object.defineProperty(window, 'location', {
-      value: { search: '', pathname: '/' },
+      value: { search: '', pathname: '/', href: 'http://localhost/', origin: 'http://localhost' },
       writable: true,
     })
   })
@@ -35,24 +56,16 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
       makeIssue({ number: 3, status: IssueStatus.Backlog }),
       makeIssue({ number: 4, status: IssueStatus.InProgress }),
     ]
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard(issues, mockAgentStatus)
 
     expect(screen.getAllByText('Backlog').length).toBeGreaterThan(0)
     expect(screen.getAllByText('In Progress').length).toBeGreaterThan(0)
   })
 
   it('shows runner unavailable banner when no runner is connected', () => {
-    vi.mocked(useRunnerSummary).mockReturnValueOnce({ hasConnectedCapacity: false, connectedIdleCount: 0, connectedBusyCount: 0, rows: [] })
+    _runners = []
 
-    const queryClient = new QueryClient()
     const agentStatus: AgentStatus = {
       ...mockAgentStatus,
       runnerAvailable: false,
@@ -61,84 +74,42 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
       runners: [],
     }
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={makeIssues(1)} agentStatus={agentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard(makeIssues(1), agentStatus)
 
     expect(screen.getByText(/No runner is connected/i)).toBeInTheDocument()
   })
 
-  it('does not show runner unavailable banner when connected idle runner exists', () => {
-    vi.mocked(useRunnerSummary).mockReturnValueOnce({
-      hasConnectedCapacity: true,
-      connectedIdleCount: 1,
-      connectedBusyCount: 0,
-      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }],
+  it('does not show runner unavailable banner when connected idle runner exists', async () => {
+    _runners = [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }]
+
+    renderBoard(makeIssues(1), mockAgentStatus)
+
+    await waitFor(() => {
+      expect(screen.queryByText(/No runner is connected/i)).not.toBeInTheDocument()
     })
-
-    const queryClient = new QueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={makeIssues(1)} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
-
-    expect(screen.queryByText(/No runner is connected/i)).not.toBeInTheDocument()
   })
 
-  it('does not show runner unavailable banner when connected busy runner exists', () => {
-    vi.mocked(useRunnerSummary).mockReturnValueOnce({
-      hasConnectedCapacity: true,
-      connectedIdleCount: 0,
-      connectedBusyCount: 1,
-      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'busy', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }] }],
+  it('does not show runner unavailable banner when connected busy runner exists', async () => {
+    _runners = [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'busy', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }] }]
+
+    renderBoard(makeIssues(1), mockAgentStatus)
+
+    await waitFor(() => {
+      expect(screen.queryByText(/No runner is connected/i)).not.toBeInTheDocument()
     })
-
-    const queryClient = new QueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={makeIssues(1)} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
-
-    expect(screen.queryByText(/No runner is connected/i)).not.toBeInTheDocument()
   })
 
   it('shows runner unavailable banner when only stale or offline runners exist', () => {
-    vi.mocked(useRunnerSummary).mockReturnValueOnce({
-      hasConnectedCapacity: false,
-      connectedIdleCount: 0,
-      connectedBusyCount: 0,
-      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'stale', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: null, activeWorks: [] }],
-    })
+    _runners = [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'stale', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: null, activeWorks: [] }]
 
-    const queryClient = new QueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={makeIssues(1)} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard(makeIssues(1), mockAgentStatus)
 
     expect(screen.getByText(/No runner is connected/i)).toBeInTheDocument()
   })
 
   it('shows link to runner status in the banner', () => {
-    vi.mocked(useRunnerSummary).mockReturnValueOnce({ hasConnectedCapacity: false, connectedIdleCount: 0, connectedBusyCount: 0, rows: [] })
+    _runners = []
 
-    const queryClient = new QueryClient()
     const agentStatus: AgentStatus = {
       ...mockAgentStatus,
       runnerAvailable: false,
@@ -147,13 +118,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
       runners: [],
     }
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={makeIssues(1)} agentStatus={agentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard(makeIssues(1), agentStatus)
 
     expect(screen.getByText('View runner status')).toBeInTheDocument()
   })
@@ -167,19 +132,11 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     ]
 
     Object.defineProperty(window, 'location', {
-      value: { search: 'priorities=p0', pathname: '/' },
+      value: { search: 'priorities=p0', pathname: '/', href: 'http://localhost/', origin: 'http://localhost' },
       writable: true,
     })
 
-    const queryClient = new QueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard(issues, mockAgentStatus)
 
     const backlogElements = screen.getAllByText('Backlog')
     const backlogCol = backlogElements[0].closest('[class*="flex-col"]')
@@ -190,8 +147,14 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
 
 describe('Needs attention summary - user-action wording', () => {
   beforeEach(() => {
+    _runners = [{ id: 'r-default', kind: 'external', hostname: 'h', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }]
+    server.use(
+      http.get('/api/projects/:projectId/runners', () =>
+        HttpResponse.json({ success: true, data: { runners: _runners } }),
+      ),
+    )
     Object.defineProperty(window, 'location', {
-      value: { search: '', pathname: '/' },
+      value: { search: '', pathname: '/', href: 'http://localhost/', origin: 'http://localhost' },
       writable: true,
     })
   })
@@ -209,15 +172,8 @@ describe('Needs attention summary - user-action wording', () => {
       health: IssueHealth.Active,
       approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' } as ApprovalState,
     })
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[approvalAwaitingIssue]} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([approvalAwaitingIssue], mockAgentStatus)
 
     const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
@@ -239,15 +195,8 @@ describe('Needs attention summary - user-action wording', () => {
       runnerAvailable: false,
       runnerMessage: 'No runner is connected.',
     }
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[approvalAwaitingIssue]} agentStatus={agentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([approvalAwaitingIssue], agentStatus)
 
     const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toHaveAttribute('data-family', 'warning')
@@ -262,15 +211,8 @@ describe('Needs attention summary - user-action wording', () => {
       status: IssueStatus.InProgress,
       health: IssueHealth.Interrupted,
     })
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[interruptedIssue]} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([interruptedIssue], mockAgentStatus)
 
     const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
@@ -288,15 +230,8 @@ describe('Needs attention summary - user-action wording', () => {
       health: IssueHealth.Blocked,
       blockedReason: 'integration task failed',
     })
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[failedIssue]} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([failedIssue], mockAgentStatus)
 
     const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
@@ -314,15 +249,8 @@ describe('Needs attention summary - user-action wording', () => {
       health: IssueHealth.Blocked,
       blockedReason: 'merge conflict',
     })
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[failedIssue]} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([failedIssue], mockAgentStatus)
 
     const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
@@ -340,15 +268,8 @@ describe('Needs attention summary - user-action wording', () => {
       workflowStage: WorkflowStage.Integrate,
       health: IssueHealth.Interrupted,
     })
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[failedIssue]} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([failedIssue], mockAgentStatus)
 
     const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
@@ -364,15 +285,8 @@ describe('Needs attention summary - user-action wording', () => {
       status: IssueStatus.Done,
       health: IssueHealth.Done,
     })
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[doneUnmergedIssue]} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([doneUnmergedIssue], mockAgentStatus)
 
     const summary = screen.queryByTestId('needs-attention-summary')
     expect(summary).toBeNull()
@@ -386,15 +300,8 @@ describe('Needs attention summary - user-action wording', () => {
       health: IssueHealth.Done,
       workflowStage: WorkflowStage.Integrate,
     })
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[doneIntegratedIssue]} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([doneIntegratedIssue], mockAgentStatus)
 
     expect(screen.getAllByText('Completed integrated issue').length).toBeGreaterThan(0)
     expect(screen.queryByTestId('integration-badge')).not.toBeInTheDocument()
@@ -412,15 +319,8 @@ describe('Needs attention summary - user-action wording', () => {
       health: IssueHealth.Active,
       workflowStage: WorkflowStage.Build,
     })
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[buildIssue]} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([buildIssue], mockAgentStatus)
 
     expect(screen.getAllByText('Build stage issue').length).toBeGreaterThan(0)
     expect(screen.getAllByTestId('workflow-stage-badge').map((el) => el.textContent)).toContain('Build')
@@ -434,15 +334,8 @@ describe('Needs attention summary - user-action wording', () => {
       health: IssueHealth.Blocked,
       blockedReason: 'Manual intervention required',
     })
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[doneUnmergedIssue]} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([doneUnmergedIssue], mockAgentStatus)
 
     expect(screen.getAllByText(/Needs Action/i).length).toBeGreaterThan(0)
     expect(screen.queryByText(/Not merged/i)).not.toBeInTheDocument()
@@ -456,15 +349,8 @@ describe('Needs attention summary - user-action wording', () => {
       health: IssueHealth.Blocked,
       blockedReason: 'waiting on #88',
     })
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[blockedIssue]} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([blockedIssue], mockAgentStatus)
 
     const summary = screen.getByTestId('needs-attention-summary')
     expect(summary).toBeTruthy()
@@ -480,15 +366,8 @@ describe('Needs attention summary - user-action wording', () => {
       status: IssueStatus.Backlog,
       health: IssueHealth.Active,
     })
-    const queryClient = new QueryClient()
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <KanbanBoard issues={[normalIssue]} agentStatus={mockAgentStatus} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderBoard([normalIssue], mockAgentStatus)
 
     expect(screen.queryByText(/Needs attention/i)).not.toBeInTheDocument()
   })
