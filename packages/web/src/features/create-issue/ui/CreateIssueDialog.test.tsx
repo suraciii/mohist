@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { http, HttpResponse } from 'msw'
 import { toast } from 'sonner'
 
 import { IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'
 import { ProjectProvider } from '../../../entities/project'
 import { CreateIssueDialog } from './CreateIssueDialog'
+import { useMswServer } from '../../../../tests/support/msw'
 
 const TEMPLATE_FIXTURES = {
   default: {
@@ -52,52 +54,73 @@ const TEMPLATE_FIXTURES = {
   },
 }
 
-const mocks = vi.hoisted(() => ({
-  createIssue: vi.fn(),
-  useRepositories: vi.fn(() => ({ data: [{ name: 'main', isDefault: true }] })),
-  useAvailableModelIds: vi.fn<() => { data: { models: string[]; modelVariants: Record<string, string[]> } | undefined; isLoading: boolean; error: unknown }>(() => ({ data: { models: [], modelVariants: {} }, isLoading: false, error: null })),
-  useWorkflowProfiles: vi.fn<() => { data: unknown[] }>(() => ({ data: [] })),
-  useEffectiveDefaultWorkflowProfile: vi.fn<() => { effectiveTemplateId: string; source: 'project' | 'system' | 'none'; configuredTemplateId: string | null }>(() => ({
-    effectiveTemplateId: 'mohist/local',
-    source: 'system',
-    configuredTemplateId: null,
-  })),
-  useIssueTemplates: vi.fn<() => { data: unknown[]; isLoading: boolean }>(() => ({ data: [], isLoading: false })),
-  useIssueTemplate: vi.fn<(id: string | null) => { data: unknown }>(() => ({ data: undefined })),
-  useIssues: vi.fn((_params?: { stage?: string; label?: string; projectId?: string }) => ({ data: [] as Issue[] | undefined, isLoading: false })),
-}))
+let _issuesData: Issue[] = []
+let _createIssueResponse: Issue = { id: 'issue_new', number: 42 } as Issue
+const _repositoriesData = [{ name: 'main', isDefault: true }]
+const _modelsData = { models: [] as string[], modelVariants: {} as Record<string, string[]> }
+const _workflowProfilesData: { id: string; displayName: string; description: string; isDefault: boolean }[] = []
+const _projectWorkflowProfile: { projectId: string; defaultTemplateId: string | null; disabledWorkflowProfileIds: string[] } = { projectId: 'proj_create', defaultTemplateId: null, disabledWorkflowProfileIds: [] }
+const _issueTemplatesData: { id: string; name: string; description: string; body: string; source: string }[] = []
 
-vi.mock('../../../entities/issue', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  createIssue: mocks.createIssue,
-  useIssues: mocks.useIssues,
-}))
+const createIssueHandler = vi.fn(async (info: { request: Request }) => {
+  const body = await info.request.clone().json()
+  void body
+  return HttpResponse.json({ success: true, data: _createIssueResponse })
+})
 
-vi.mock('../../../entities/project', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/project')>()),
-  useRepositories: mocks.useRepositories,
-}))
+const issuesHandler = vi.fn((info: { request: Request }) => {
+  void info.request.url
+  return HttpResponse.json({ success: true, data: _issuesData })
+})
 
-vi.mock('../../../entities/settings', () => ({
-  useAvailableModelIds: mocks.useAvailableModelIds,
-  useEffectiveDefaultWorkflowProfile: mocks.useEffectiveDefaultWorkflowProfile,
-  useWorkflowProfiles: mocks.useWorkflowProfiles,
-}))
+const repositoriesHandler = vi.fn(() =>
+  HttpResponse.json({ success: true, data: _repositoriesData }),
+)
 
-vi.mock('../../../entities/issue-templates', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/issue-templates')>()),
-  useIssueTemplates: mocks.useIssueTemplates,
-  useIssueTemplate: mocks.useIssueTemplate,
-}))
+const modelsHandler = vi.fn(() =>
+  HttpResponse.json({ success: true, data: _modelsData }),
+)
+
+const workflowProfilesHandler = vi.fn(() =>
+  HttpResponse.json({
+    success: true,
+    data: _workflowProfilesData.map((t) => ({
+      id: t.id,
+      name: t.displayName,
+      description: t.description,
+      isDefault: t.isDefault,
+    })),
+  }),
+)
+
+const projectWorkflowProfileHandler = vi.fn(() =>
+  HttpResponse.json({ success: true, data: _projectWorkflowProfile }),
+)
+
+const issueTemplatesHandler = vi.fn((info: { request: Request }) => {
+  const url = new URL(info.request.url)
+  const namePath = url.pathname.match(/\/api\/issue-templates\/(.+)/)?.[1]
+  if (namePath) {
+    const found = _issueTemplatesData.find((t) => t.id === decodeURIComponent(namePath))
+    return HttpResponse.json({ success: true, data: found ?? null })
+  }
+  return HttpResponse.json({ success: true, data: _issueTemplatesData })
+})
+
+useMswServer(
+  http.post('*/api/projects/:projectId/issues', createIssueHandler),
+  http.get('*/api/projects/:projectId/issues', issuesHandler),
+  http.get('*/api/projects/:projectId/repositories', repositoriesHandler),
+  http.get('*/api/projects/:projectId/opencode/models', modelsHandler),
+  http.get('*/api/workflow-templates/system', workflowProfilesHandler),
+  http.get('*/api/projects/:projectId/workflow-profile', projectWorkflowProfileHandler),
+  http.get('*/api/issue-templates*', issueTemplatesHandler),
+)
 
 function setupTemplates(defaultTemplate: typeof TEMPLATE_FIXTURES.default = TEMPLATE_FIXTURES.default, customTemplate: typeof TEMPLATE_FIXTURES.custom | null = TEMPLATE_FIXTURES.custom) {
-  const list = [defaultTemplate, ...(customTemplate ? [customTemplate] : [])]
-  mocks.useIssueTemplates.mockReturnValue({ data: list, isLoading: false })
-  mocks.useIssueTemplate.mockImplementation((id: string | null) => {
-    if (!id) return { data: undefined }
-    const found = list.find((t) => t.id === id)
-    return { data: found }
-  })
+  _issueTemplatesData.length = 0
+  _issueTemplatesData.push(defaultTemplate)
+  if (customTemplate) _issueTemplatesData.push(customTemplate)
 }
 
 function renderDialog() {
@@ -116,50 +139,48 @@ describe('CreateIssueDialog', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    _issuesData = []
+    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _modelsData.models = []
+    _modelsData.modelVariants = {}
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+    _projectWorkflowProfile.disabledWorkflowProfileIds = []
+    _issueTemplatesData.length = 0
   })
 
   it('creates issue with attachment ids from the composer body', async () => {
-    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
     const { queryClient } = renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'New issue' } })
     fireEvent.change(screen.getByPlaceholderText('Optional description'), { target: { value: 'See ![screen](att:att_created)' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).toEqual(expect.objectContaining({
       title: 'New issue',
       body: 'See ![screen](att:att_created)',
       attachmentIds: ['att_created'],
-      projectId: 'proj_create',
     }))
 
     queryClient.clear()
   })
 
   it('does not serialize inherited default workflow as an explicit create selection', async () => {
-    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({
-      effectiveTemplateId: 'mohist/github-pr',
-      source: 'system',
-      configuredTemplateId: 'mohist/local',
-    })
-    mocks.useWorkflowProfiles.mockReturnValue({
-      data: [{ id: 'mohist/github-pr', displayName: 'GitHub PR', description: '', isDefault: false }],
-    })
-    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+    _projectWorkflowProfile.defaultTemplateId = 'mohist/local'
+    _workflowProfilesData.push({ id: 'mohist/github-pr', displayName: 'GitHub PR', description: '', isDefault: false })
+    _workflowProfilesData.push({ id: 'mohist/local', displayName: 'Default', description: '', isDefault: true })
 
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Disabled default fallback' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
-      workflowProfileId: 'mohist/local',
-    }))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
-      workflowProfileId: 'mohist/github-pr',
-    }))
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).not.toHaveProperty('workflowProfileId')
   })
 })
 
@@ -167,16 +188,24 @@ describe('CreateIssueDialog toast feedback', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    _issuesData = []
+    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _modelsData.models = []
+    _modelsData.modelVariants = {}
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+    _projectWorkflowProfile.disabledWorkflowProfileIds = []
+    _issueTemplatesData.length = 0
   })
 
   it('shows a success toast with the new issue number on successful create', async () => {
-    mocks.createIssue.mockResolvedValue({ id: 'issue_223', number: 223 } as never)
+    _createIssueResponse = { id: 'issue_223', number: 223 } as Issue
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Toast test' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Issue #223 created'))
     expect(vi.mocked(toast.success).mock.calls[0][0]).toBe('Issue #223 created')
     expect(vi.mocked(toast.success).mock.calls[0][0]).not.toMatch(/undefined/)
@@ -184,10 +213,7 @@ describe('CreateIssueDialog toast feedback', () => {
   })
 
   it('never reads the number from a { issue } wrapper (success path uses data.number)', async () => {
-    // Bare Issue response (matches `createIssue` shape in entities/issue/api/client.ts).
-    // If the dialog ever regressed to reading `data.issue.number`, this would render
-    // `Issue #undefined created` because `data.issue` does not exist on the bare response.
-    mocks.createIssue.mockResolvedValue({ id: 'issue_9', number: 9 } as never)
+    _createIssueResponse = { id: 'issue_9', number: 9 } as Issue
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'No wrapper' } })
@@ -200,7 +226,9 @@ describe('CreateIssueDialog toast feedback', () => {
   })
 
   it('shows an error toast without any issue number when the create fails', async () => {
-    mocks.createIssue.mockRejectedValue(new Error('Server unavailable'))
+    createIssueHandler.mockImplementationOnce(async () =>
+      HttpResponse.json({ success: false, error: 'Server unavailable' }, { status: 500 }),
+    )
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Boom' } })
@@ -215,7 +243,9 @@ describe('CreateIssueDialog toast feedback', () => {
   })
 
   it('falls back to a generic error toast without a number when the failure has no message', async () => {
-    mocks.createIssue.mockRejectedValue(new Error(''))
+    createIssueHandler.mockImplementationOnce(async () =>
+      HttpResponse.json({ success: false, error: '' }, { status: 500 }),
+    )
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Empty err' } })
@@ -233,6 +263,14 @@ describe('CreateIssueDialog template selector', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    _issuesData = []
+    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _modelsData.models = []
+    _modelsData.modelVariants = {}
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+    _projectWorkflowProfile.disabledWorkflowProfileIds = []
+    _issueTemplatesData.length = 0
   })
 
   it('populates the selector with available templates (non-disabled default + customs)', async () => {
@@ -241,6 +279,9 @@ describe('CreateIssueDialog template selector', () => {
     renderDialog()
 
     const selector = await screen.findByTestId('issue-template-selector')
+    await waitFor(() => {
+      expect(selector.querySelector('option[value="feature"]')).toBeInTheDocument()
+    })
     const options = Array.from(selector.querySelectorAll('option'))
 
     const labels = options.map((opt) => opt.textContent)
@@ -250,9 +291,7 @@ describe('CreateIssueDialog template selector', () => {
     expect(options.find((opt) => opt.getAttribute('value') === 'team/bug-report')).toBeDefined()
   })
 
-  it('shows a loading option and disabled selector while templates are loading', () => {
-    mocks.useIssueTemplates.mockReturnValue({ data: [], isLoading: true })
-
+  it('shows a loading option and disabled selector while templates are loading', async () => {
     renderDialog()
 
     const selector = screen.getByTestId('issue-template-selector') as HTMLSelectElement
@@ -267,6 +306,9 @@ describe('CreateIssueDialog template selector', () => {
     renderDialog()
 
     const selector = await screen.findByTestId('issue-template-selector')
+    await waitFor(() => {
+      expect(selector.querySelector('option[value="feature"]')).toBeInTheDocument()
+    })
     fireEvent.change(selector, { target: { value: 'feature' } })
 
     const description = await screen.findByPlaceholderText('Optional description') as HTMLTextAreaElement
@@ -294,6 +336,9 @@ describe('CreateIssueDialog template selector', () => {
     renderDialog()
 
     const selector = await screen.findByTestId('issue-template-selector')
+    await waitFor(() => {
+      expect(selector.querySelector('option[value="team/bug-report"]')).toBeInTheDocument()
+    })
     fireEvent.change(selector, { target: { value: 'team/bug-report' } })
 
     const description = await screen.findByPlaceholderText('Optional description') as HTMLTextAreaElement
@@ -305,11 +350,13 @@ describe('CreateIssueDialog template selector', () => {
 
   it('does not apply advisory defaults from the selected template', async () => {
     setupTemplates()
-    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
 
     renderDialog()
 
     const selector = await screen.findByTestId('issue-template-selector')
+    await waitFor(() => {
+      expect(selector.querySelector('option[value="feature"]')).toBeInTheDocument()
+    })
     fireEvent.change(selector, { target: { value: 'feature' } })
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated issue' } })
 
@@ -317,12 +364,11 @@ describe('CreateIssueDialog template selector', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
-      risk: expect.anything(),
-      workflowProfileId: 'mohist/local',
-      labels: expect.anything(),
-    }))
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).not.toHaveProperty('risk')
+    expect(callBody).not.toHaveProperty('workflowProfileId')
+    expect(callBody).not.toHaveProperty('labels')
   })
 })
 
@@ -330,6 +376,14 @@ describe('CreateIssueDialog model + variant chips', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    _issuesData = []
+    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _modelsData.models = []
+    _modelsData.modelVariants = {}
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+    _projectWorkflowProfile.disabledWorkflowProfileIds = []
+    _issueTemplatesData.length = 0
   })
 
   function modelTrigger() {
@@ -339,24 +393,15 @@ describe('CreateIssueDialog model + variant chips', () => {
   }
 
   it('does not render a standalone variant picker anywhere', () => {
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: { models: ['anthropic/claude'], modelVariants: { 'anthropic/claude': ['low', 'high'] } },
-      isLoading: false,
-      error: null,
-    })
+    _modelsData.models = ['anthropic/claude']
+    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
     renderDialog()
     expect(screen.queryByTestId('create-issue-model-variant-variant-trigger')).not.toBeInTheDocument()
   })
 
   it('renders inline variant chips on a variant-capable model row', async () => {
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: {
-        models: ['anthropic/claude', 'openai/gpt-4'],
-        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
-      },
-      isLoading: false,
-      error: null,
-    })
+    _modelsData.models = ['anthropic/claude', 'openai/gpt-4']
+    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'medium', 'high'] }
     const user = userEvent.setup()
     renderDialog()
 
@@ -374,15 +419,8 @@ describe('CreateIssueDialog model + variant chips', () => {
   })
 
   it('sends modelVariant alongside model on create when a chip is clicked', async () => {
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: {
-        models: ['anthropic/claude'],
-        modelVariants: { 'anthropic/claude': ['low', 'high'] },
-      },
-      isLoading: false,
-      error: null,
-    })
-    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+    _modelsData.models = ['anthropic/claude']
+    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
     const user = userEvent.setup()
     renderDialog()
 
@@ -397,23 +435,17 @@ describe('CreateIssueDialog model + variant chips', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).toEqual(expect.objectContaining({
       model: 'anthropic/claude',
       modelVariant: 'high',
     }))
   })
 
   it('does not transiently clear the variant when a chip is clicked', async () => {
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: {
-        models: ['anthropic/claude'],
-        modelVariants: { 'anthropic/claude': ['low', 'high'] },
-      },
-      isLoading: false,
-      error: null,
-    })
-    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+    _modelsData.models = ['anthropic/claude']
+    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
     const user = userEvent.setup()
     renderDialog()
 
@@ -422,23 +454,17 @@ describe('CreateIssueDialog model + variant chips', () => {
     await user.click(await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-high'))
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue.mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).toMatchObject({
       model: 'anthropic/claude',
       modelVariant: 'high',
     })
   })
 
   it('does not include modelVariant when a model body click selects the default variant', async () => {
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: {
-        models: ['anthropic/claude'],
-        modelVariants: { 'anthropic/claude': ['low', 'high'] },
-      },
-      isLoading: false,
-      error: null,
-    })
-    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+    _modelsData.models = ['anthropic/claude']
+    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
     const user = userEvent.setup()
     renderDialog()
 
@@ -453,22 +479,17 @@ describe('CreateIssueDialog model + variant chips', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).toEqual(expect.objectContaining({
       model: 'anthropic/claude',
     }))
-    expect(mocks.createIssue.mock.calls[0][0]).not.toHaveProperty('modelVariant')
+    expect(callBody).not.toHaveProperty('modelVariant')
   })
 
   it('highlights the active variant chip on the selected row', async () => {
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: {
-        models: ['anthropic/claude'],
-        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
-      },
-      isLoading: false,
-      error: null,
-    })
+    _modelsData.models = ['anthropic/claude']
+    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'medium', 'high'] }
     const user = userEvent.setup()
     renderDialog()
 
@@ -493,15 +514,8 @@ describe('CreateIssueDialog model + variant chips', () => {
   })
 
   it('uses shared keyboard navigation to select a variant chip', async () => {
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: {
-        models: ['anthropic/claude'],
-        modelVariants: { 'anthropic/claude': ['low', 'high'] },
-      },
-      isLoading: false,
-      error: null,
-    })
-    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+    _modelsData.models = ['anthropic/claude']
+    _modelsData.modelVariants = { 'anthropic/claude': ['low', 'high'] }
     const user = userEvent.setup()
     renderDialog()
 
@@ -518,10 +532,12 @@ describe('CreateIssueDialog model + variant chips', () => {
     fireEvent.keyDown(highChip, { key: 'Enter' })
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).toEqual(expect.objectContaining({
       model: 'anthropic/claude',
       modelVariant: 'high',
-    })))
+    }))
   })
 })
 
@@ -529,64 +545,53 @@ describe('CreateIssueDialog workflow profile default', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    _issuesData = []
+    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _modelsData.models = []
+    _modelsData.modelVariants = {}
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+    _projectWorkflowProfile.disabledWorkflowProfileIds = []
+    _issueTemplatesData.length = 0
   })
 
   function setupProfiles() {
-    mocks.useWorkflowProfiles.mockReturnValue({
-      data: [
-        { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
-      ],
-    })
+    _workflowProfilesData.length = 0
+    _workflowProfilesData.push(
+      { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
+      { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
+    )
   }
 
   it('shows the project-configured default workflow profile but does not send it as an explicit selection', async () => {
     setupProfiles()
-    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
-    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({
-      effectiveTemplateId: 'mohist/github-pr',
-      source: 'project',
-      configuredTemplateId: 'mohist/github-pr',
-    })
+    _projectWorkflowProfile.defaultTemplateId = 'mohist/github-pr'
 
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Project default issue' } })
     const select = await screen.findByLabelText('Workflow') as HTMLSelectElement
-    expect(select.value).toBe('mohist/github-pr')
+    await waitFor(() => expect(select.value).toBe('mohist/github-pr'))
 
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
-      workflowProfileId: 'mohist/github-pr',
-    }))
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).not.toHaveProperty('workflowProfileId')
   })
 
   it('falls back to the system default workflow profile when the project default is unset', async () => {
     setupProfiles()
-    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({
-      effectiveTemplateId: 'mohist/local',
-      source: 'system',
-      configuredTemplateId: null,
-    })
 
     renderDialog()
 
     const select = await screen.findByLabelText('Workflow') as HTMLSelectElement
-    expect(select.value).toBe('mohist/local')
+    await waitFor(() => expect(select.value).toBe('mohist/local'))
   })
 
   it('does not prefill or submit a frontmatter recommendation that is not enabled', async () => {
-    mocks.useWorkflowProfiles.mockReturnValue({
-      data: [{ id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false }],
-    })
-    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({
-      effectiveTemplateId: 'mohist/github-pr',
-      source: 'system',
-      configuredTemplateId: null,
-    })
-    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+    _workflowProfilesData.push({ id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false })
+    _projectWorkflowProfile.defaultTemplateId = null
 
     renderDialog()
 
@@ -606,18 +611,14 @@ describe('CreateIssueDialog workflow profile default', () => {
     expect(await screen.findByTestId('recommended-workflow')).toHaveTextContent('mohist/local')
     expect(screen.getByTestId('workflow-recommendation-unavailable')).toHaveTextContent('not enabled')
     const select = screen.getByLabelText('Workflow') as HTMLSelectElement
-    expect(select.value).toBe('mohist/github-pr')
+    await waitFor(() => expect(select.value).toBe('mohist/github-pr'))
     expect([...select.options].map((option) => option.value)).toEqual(['mohist/github-pr'])
 
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
-      workflowProfileId: 'mohist/local',
-    }))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
-      workflowProfileId: 'mohist/github-pr',
-    }))
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).not.toHaveProperty('workflowProfileId')
   })
 })
 
@@ -668,20 +669,25 @@ describe('CreateIssueDialog prerequisites', () => {
   ]
 
   function setupPickerIssues(issues: Issue[] = PICKER_PROJECT_ISSUES) {
-    mocks.useIssues.mockImplementation((params: { projectId?: string } | undefined) => ({
-      data: params?.projectId === 'proj_create' ? issues : [],
-      isLoading: false,
-    }))
+    _issuesData = issues
   }
 
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    _issuesData = []
+    _createIssueResponse = { id: 'issue_1', number: 1 } as Issue
+    _modelsData.models = []
+    _modelsData.modelVariants = {}
+    _workflowProfilesData.length = 0
+    _projectWorkflowProfile.defaultTemplateId = null
+    _projectWorkflowProfile.disabledWorkflowProfileIds = []
+    _issueTemplatesData.length = 0
   })
 
   it('renders the Prerequisites picker in buffer mode and sends the selected numbers on submit', async () => {
     setupPickerIssues()
-    mocks.createIssue.mockResolvedValue({ id: 'issue_new', number: 42 } as never)
+    _createIssueResponse = { id: 'issue_new', number: 42 } as Issue
     const user = userEvent.setup()
     renderDialog()
 
@@ -706,8 +712,9 @@ describe('CreateIssueDialog prerequisites', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).toEqual(expect.objectContaining({
       title: 'Plan with deps',
       prerequisiteNumbers: [5, 7],
     }))
@@ -715,16 +722,16 @@ describe('CreateIssueDialog prerequisites', () => {
 
   it('removes a buffered chip from the local selection without sending the removed number', async () => {
     setupPickerIssues()
-    mocks.createIssue.mockResolvedValue({ id: 'issue_new', number: 42 } as never)
+    _createIssueResponse = { id: 'issue_new', number: 42 } as Issue
     const user = userEvent.setup()
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Trim deps' } })
 
     await user.click(screen.getByTestId('prerequisite-picker-trigger'))
-    let options = await screen.findAllByTestId('prerequisite-picker-option')
-    let opt5 = options.find((opt) => opt.getAttribute('data-issue-number') === '5')
-    let opt7 = options.find((opt) => opt.getAttribute('data-issue-number') === '7')
+    const options = await screen.findAllByTestId('prerequisite-picker-option')
+    const opt5 = options.find((opt) => opt.getAttribute('data-issue-number') === '5')
+    const opt7 = options.find((opt) => opt.getAttribute('data-issue-number') === '7')
     await user.click(opt5!)
     await user.click(opt7!)
 
@@ -740,15 +747,15 @@ describe('CreateIssueDialog prerequisites', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).toEqual(expect.objectContaining({
       prerequisiteNumbers: [7],
     }))
 
     // after submit, the picker re-opened from scratch (dialog was reset); confirm chip state was cleared.
     cleanup()
-    mocks.createIssue.mockClear()
-    mocks.useIssues.mockClear()
+    vi.clearAllMocks()
     setupPickerIssues()
     renderDialog()
     expect(screen.queryByTestId('prerequisite-picker-chip')).not.toBeInTheDocument()
@@ -756,7 +763,7 @@ describe('CreateIssueDialog prerequisites', () => {
 
   it('omits prerequisiteNumbers from the create body when no prerequisites are selected', async () => {
     setupPickerIssues()
-    mocks.createIssue.mockResolvedValue({ id: 'issue_new', number: 42 } as never)
+    _createIssueResponse = { id: 'issue_new', number: 42 } as Issue
     const user = userEvent.setup()
     renderDialog()
 
@@ -766,15 +773,15 @@ describe('CreateIssueDialog prerequisites', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    const payload = mocks.createIssue.mock.calls[0][0] as Record<string, unknown>
-    expect(payload).not.toHaveProperty('prerequisiteNumbers')
-    expect(payload.title).toBe('No deps')
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).not.toHaveProperty('prerequisiteNumbers')
+    expect(callBody.title).toBe('No deps')
   })
 
   it('clears the prerequisite buffer after a successful create so reopening starts empty', async () => {
     setupPickerIssues()
-    mocks.createIssue.mockResolvedValue({ id: 'issue_new', number: 42 } as never)
+    _createIssueResponse = { id: 'issue_new', number: 42 } as Issue
     const onClose = vi.fn()
     const user = userEvent.setup()
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -798,8 +805,9 @@ describe('CreateIssueDialog prerequisites', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
-    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
+    const callBody = await createIssueHandler.mock.calls[0][0].request.clone().json()
+    expect(callBody).toEqual(expect.objectContaining({
       prerequisiteNumbers: [5],
     }))
     expect(onClose).toHaveBeenCalledTimes(1)
@@ -826,7 +834,7 @@ describe('CreateIssueDialog prerequisites', () => {
 
   it('create-issue mutation onSuccess still reads data.number off the bare Issue shape', async () => {
     setupPickerIssues()
-    mocks.createIssue.mockResolvedValue({ id: 'issue_201', number: 201 } as never)
+    _createIssueResponse = { id: 'issue_201', number: 201 } as Issue
     const user = userEvent.setup()
     renderDialog()
 
@@ -839,7 +847,7 @@ describe('CreateIssueDialog prerequisites', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
-    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(createIssueHandler).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Issue #201 created'))
     expect(vi.mocked(toast.success).mock.calls[0][0]).toBe('Issue #201 created')
   })
