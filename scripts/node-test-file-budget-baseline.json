@@ -41,7 +41,6 @@
   "packages/web/src/pages/insights/panels/StageDurationChart.test.tsx": 515,
   "packages/web/src/pages/insights/panels/ThroughputChart.test.tsx": 540,
   "packages/web/src/pages/insights/ui/InsightsCharts.test.tsx": 544,
-  "packages/web/src/pages/issue-changed-files/ui/IssueChangedFilesPage.test.tsx": 1102,
   "packages/web/src/pages/issue-detail/model/useIssueDetailMutations.dom.test.ts": 348,
   "packages/web/src/pages/issue-detail/ui/cards/IssueConfigurationCard.test.tsx": 363,
   "packages/web/src/pages/issue-detail/ui/IssueDetailPage.archived.test.tsx": 396,
