@@ -149,6 +149,14 @@ export function mockWorkspaceStatus(status: Record<string, unknown> | null) {
   )
 }
 
+export function mockArtifacts(artifacts: Array<Record<string, unknown>>) {
+  server.use(
+    http.get(`${ISSUES}/workflow/artifacts`, () =>
+      HttpResponse.json({ success: true, data: artifacts }),
+    ),
+  )
+}
+
 export function mockAgentStatus(status: Record<string, unknown>) {
   server.use(http.get(AGENT_STATUS, () => HttpResponse.json({ success: true, data: status })))
 }

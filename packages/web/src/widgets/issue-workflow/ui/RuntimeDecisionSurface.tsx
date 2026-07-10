@@ -9,6 +9,11 @@ import {
   type RuntimeSummary,
 } from '../model/derive-runtime-decision'
 import { getStopConsequenceCopy, invokeAction } from '../runtime-action-handlers'
+import { ArtifactOpener } from './ArtifactOpener'
+import type {
+  ArtifactContentHook,
+  ArtifactOpenerArtifactsHook,
+} from './ArtifactOpener'
 
 interface RuntimeActionMutation<TVariables = void> {
   mutate: UseMutationResult<unknown, Error, TVariables, unknown>['mutate']
@@ -27,9 +32,18 @@ export interface RuntimeDecisionSurfaceMutations {
   startMutation: RuntimeActionMutation
 }
 
+export interface DecisionEvidence {
+  issueNumber: number
+  workflowRunId?: string | null
+  artifactsHook?: ArtifactOpenerArtifactsHook
+  contentHook?: ArtifactContentHook
+  compactLimit?: number
+}
+
 export interface RuntimeDecisionSurfaceProps {
   decision: RuntimeDecision
   mutations: RuntimeDecisionSurfaceMutations
+  evidence?: DecisionEvidence
 }
 
 interface SummaryPresentation {
@@ -124,6 +138,7 @@ function SurfaceActionButton({
 export function RuntimeDecisionSurface({
   decision,
   mutations,
+  evidence,
 }: RuntimeDecisionSurfaceProps) {
   const [stopConfirming, setStopConfirming] = useState(false)
   const [sendBackOpen, setSendBackOpen] = useState(false)
@@ -140,6 +155,11 @@ export function RuntimeDecisionSurface({
   } = mutations
 
   const presentation = SUMMARY_PRESENTATION[decision.summary]
+  const showEvidence = (
+    decision.summary === 'approval-required'
+    || decision.summary === 'blocked'
+    || decision.summary === 'failed'
+  ) && !!evidence?.workflowRunId
   const pendingKind: RuntimeAvailableAction['kind'] | null =
     approveMutation.isPending ? 'approve'
     : sendBackMutation.isPending ? 'send-back'
@@ -237,6 +257,18 @@ export function RuntimeDecisionSurface({
         >
           Drift: {decision.driftNote}
         </p>
+      )}
+
+      {showEvidence && evidence && (
+        <ArtifactOpener
+          issueNumber={evidence.issueNumber}
+          workflowRunId={evidence.workflowRunId}
+          mode="compact"
+          compactLimit={evidence.compactLimit ?? 3}
+          artifactsHook={evidence.artifactsHook}
+          contentHook={evidence.contentHook}
+          evidenceSummary={decision.summary}
+        />
       )}
 
       {visibleActions.length > 0 && (

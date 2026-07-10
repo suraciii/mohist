@@ -294,6 +294,10 @@ export function IssueDetailPage({
               <div data-testid="runtime-decision-surface-frame">
                 <RuntimeDecisionSurface
                   decision={decision}
+                  evidence={{
+                    issueNumber,
+                    workflowRunId: issue.workflowRunId ?? null,
+                  }}
                   mutations={{
                     approveMutation,
                     sendBackMutation,

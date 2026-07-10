@@ -1,0 +1,36 @@
+# Progress Notes — Issue 401
+
+## T-001 (Decision-adjacent evidence)
+
+### Codebase patterns discovered
+- `useIssueWorkflowArtifacts` in `entities/issue/api/queries.ts:53` uses query key `['issues', issueNumber, projectId, 'workflow-artifacts', params]`. Same params (default `{}`) on both call sites means TanStack Query dedupes — no double-fetch even with two ArtifactOpener instances mounted (full panel + compact in surface).
+- `ArtifactContentViewer` already takes `contentHook` injection. The shared ArtifactOpener preserves that hook for both modes so unit tests can stub content.
+- `LatestArtifactsPanel` had `data-testid="latest-artifacts-list"` on the list container and `data-testid="latest-artifact-item"` on each row button. The compact mode in the surface uses `data-testid="runtime-evidence-list"` on the wrapper container but keeps the same `latest-artifact-item` on each row so existing content-viewer tests apply to both call sites.
+
+### Component design
+- `ArtifactOpener` extracted from `LatestArtifactsPanel` is the new reusable primitive (`packages/web/src/widgets/issue-workflow/ui/ArtifactOpener.tsx`). Two modes: `full` (card chrome + "Latest Artifacts" title, identical to the original panel) and `compact` (inline list with "Plan / check evidence" caption, hosted inside the surface). Each instance owns its own `selectedArtifactId` so only one viewer opens at a time.
+- `LatestArtifactsPanel` now composes `ArtifactOpener` with `mode="full"` — renders byte-for-byte unchanged (10 existing `WorkflowArtifacts.test.tsx` tests still pass, including card chrome, error state, loading state, empty state, directory rendering).
+- Compact mode returns null (no wrapper, no DOM) when `workflowRunId` is absent, the query is still loading, the query errored, or no artifacts exist — so the surface never shows an empty "Plan / check evidence" caption.
+
+### Surface slot wiring
+- New `DecisionEvidence` type on `RuntimeDecisionSurface`: `{ issueNumber, workflowRunId, artifactsHook?, contentHook?, compactLimit? }`. Surface accepts an optional `evidence` prop and renders the compact ArtifactOpener only when `decision.summary` is `approval-required | blocked | failed` AND `evidence.workflowRunId` is truthy.
+- Non-applicable summaries (`running`, `queued`, `done`) render identically to before — `runtime-evidence` is absent in those paths and every pre-existing `data-summary`, `data-tone`, `data-testid` is preserved.
+- The compact ArtifactOpener also surfaces `data-summary={decision.summary}` on its `runtime-evidence` wrapper so spec tests can assert the summary that gated the evidence.
+
+### IssueDetailPage wiring
+- `IssueDetailPage` now passes `evidence={{ issueNumber, workflowRunId: issue.workflowRunId ?? null }}` into `RuntimeDecisionSurface`. No new network call beyond the deduped artifact query — the surface's `ArtifactOpener` and the reading-flow `LatestArtifactsPanel` share the same TanStack Query cache entry.
+- `compactLimit` defaults to 3 inside `ArtifactOpener`; the page does not pass a custom limit, so the surface shows up to 3 most recent artifacts.
+
+### Test coverage
+- Added 10 new `RuntimeDecisionSurface` tests covering: in-surface evidence for approval-required, blocked, and failed; clicking a compact item opens the modal (same modal as the full panel); evidence is omitted for running, queued, done; `compactLimit` truncation; absent-`workflowRunId` omission; empty-artifacts omission.
+- Added 11 new `IssueDetailPage.decision-adjacent-evidence` tests covering: end-to-end placement inside the status-header tier (not reading-flow/rail) for approval-required/blocked/failed, full LatestArtifactsPanel still renders unchanged in reading-flow when the surface evidence is present, content-viewer opens from a compact item, deduped query between surface and reading-flow.
+- All 4548 web tests pass; typecheck clean.
+
+### Decisions made
+- The compact ArtifactOpener renders its own wrapper element with `data-testid="runtime-evidence"` instead of the surface wrapping it. This means the wrapper correctly disappears when there are no artifacts (avoids a stray empty caption) and keeps the test anchor single-sourced.
+- `evidenceSummary` is the `decision.summary` value passed through the ArtifactOpener so the wrapper carries `data-summary` for spec assertions without coupling the ArtifactOpener to RuntimeDecision knowledge.
+- `LatestArtifactsPanel` is kept as a thin shell composing ArtifactOpener (mode="full") to preserve its public API and ensure every existing call site continues to work without change.
+
+### Gotchas
+- When clicking a compact evidence item, the test must mock the artifact content endpoint (`/workflow/artifacts/:artifactId/content`) or MSW will reject the unhandled request. Added this in the spec.
+- The `ArtifactOpener` early-returns null when no artifacts exist, so the surface-level evidence wrapper is no longer needed (the ArtifactOpener now owns its own wrapper in compact mode).
