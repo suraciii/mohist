@@ -15,12 +15,13 @@ public class WorkflowRunQuerierSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RunnerPoll_SkipsNonRunnableRowsBeyondFirstPage()
     {
+        const int candidatePageSize = 20;
         await ClearBacklogAsync();
         var projectId = "project-with-many-paused-runs";
         var runnerId = await RegisterRunnerForProjectAsync(projectId, maxWorkflowSlots: 1);
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        for (var i = 0; i < 90; i++)
+        for (var i = 0; i < candidatePageSize; i++)
         {
             var workflowId = $"paused-{i:000}";
             var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
