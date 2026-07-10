@@ -564,7 +564,7 @@ public class CliNotifySetupCommandSpecs : IDisposable
         // Per D1 (no aliases retained) the legacy `mo notify` root path is
         // removed outright — System.CommandLine surfaces a parse error and
         // the runner returns non-zero. No HTTP request must be issued.
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["notify"], output, error, fs, executor);

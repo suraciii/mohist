@@ -19,13 +19,13 @@ import {
   mockConnectionBuilder,
   projects,
   recordedInvokes,
-  renderWithHarness,
+  renderWithTaskLogProviders,
   newQueryClient,
-  type TestHarness,
+  type TaskLogTestState,
 } from './_taskLogPanelTestUtils'
 
 const _taskLogPageRef: { current: TaskLogPage | undefined } = { current: undefined }
-const queryClients = new Set<TestHarness['queryClient']>()
+const queryClients = new Set<TaskLogTestState['queryClient']>()
 
 const taskLogHook: TaskLogDataHook = ({ issueNumber, taskId, projectId, workflowRunId }) =>
   useQuery({
@@ -44,7 +44,7 @@ function TaskLogPanel(props: Omit<TaskLogPanelProps, 'taskLogHook'>) {
   return <DefaultTaskLogPanel {...props} taskLogHook={taskLogHook} />
 }
 
-function buildTaskLogHarness(initialPage: TaskLogPage | undefined): TestHarness {
+function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTestState {
   const queryClient = newQueryClient()
   queryClients.add(queryClient)
   _taskLogPageRef.current = initialPage
@@ -73,14 +73,14 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('renders Phase 1 line-by-line output (non-regression)', async () => {
-    const harness = buildTaskLogHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, text: 'Cloning repo' }),
       makeLine({ seq: 2, text: 'CONFLICT' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     expect(await screen.findByText('Cloning repo')).toBeInTheDocument()
@@ -88,11 +88,11 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('calls SubscribeTaskLogAsync when the task is running, the panel is rendered, and the connection is ready', async () => {
-    const harness = buildTaskLogHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
-      harness,
+      testState,
     )
 
     await flushAndGetLastConnection()
@@ -105,11 +105,11 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('does not subscribe the task-log panel connection to domain or transcript event types', async () => {
-    const harness = buildTaskLogHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
-      harness,
+      testState,
     )
 
     await flushAndGetLastConnection()
@@ -121,11 +121,11 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('does not subscribe when the task is in a terminal state', async () => {
-    const harness = buildTaskLogHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     await flushAndGetLastConnection()
@@ -138,11 +138,11 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('does not subscribe when workflowRunId is missing', async () => {
-    const harness = buildTaskLogHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId={null} taskStatus="running" />,
-      harness,
+      testState,
     )
 
     await flushAndGetLastConnection()
@@ -155,13 +155,13 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('live-appends incoming OnTaskLogDelta lines for this task during execution', async () => {
-    const harness = buildTaskLogHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', text: 'before' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
-      harness,
+      testState,
     )
 
     await screen.findByText('before')
@@ -185,14 +185,14 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('deduplicates incoming deltas by seq — already cached and out-of-order low seqs are dropped', async () => {
-    const harness = buildTaskLogHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 5, text: 'cached-5' }),
       makeLine({ seq: 6, text: 'cached-6' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
-      harness,
+      testState,
     )
 
     await screen.findByText('cached-5')
@@ -217,11 +217,11 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('ignores deltas from a different workflowRunId even when taskId matches', async () => {
-    const harness = buildTaskLogHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-2" taskStatus="running" />,
-      harness,
+      testState,
     )
 
     const conn = await flushAndGetLastConnection()
@@ -240,11 +240,11 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('ignores deltas scoped to a different taskId', async () => {
-    const harness = buildTaskLogHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
-      harness,
+      testState,
     )
 
     const conn = await flushAndGetLastConnection()
@@ -297,11 +297,11 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('calls UnsubscribeTaskLogAsync when the panel unmounts while subscribed', async () => {
-    const harness = buildTaskLogHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    const { unmount } = renderWithHarness(
+    const { unmount } = renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
-      harness,
+      testState,
     )
 
     await flushAndGetLastConnection()
@@ -320,11 +320,11 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('re-subscribes the active task-log scope after SignalR reconnect', async () => {
-    const harness = buildTaskLogHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="running" />,
-      harness,
+      testState,
     )
 
     const conn = await flushAndGetLastConnection()
@@ -342,10 +342,10 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('does not subscribe for pending or missing task status', async () => {
-    const pendingHarness = buildTaskLogHarness(makePage([]))
-    const { unmount } = renderWithHarness(
+    const pendingState = createTaskLogTestState(makePage([]))
+    const { unmount } = renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="pending" />,
-      pendingHarness,
+      pendingState,
     )
 
     await flushAndGetLastConnection()
@@ -358,10 +358,10 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
     fakeConnections.length = 0
     recordedInvokes.length = 0
 
-    const missingHarness = buildTaskLogHarness(makePage([]))
-    renderWithHarness(
+    const missingState = createTaskLogTestState(makePage([]))
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" />,
-      missingHarness,
+      missingState,
     )
 
     await flushAndGetLastConnection()
@@ -372,39 +372,39 @@ describe('TaskLogPanel — live append (Phase 2 T-004)', () => {
   })
 
   it('preserves the truncation indicator from cached data (Phase 1 rendering non-regression)', async () => {
-    const harness = buildTaskLogHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 4999, text: 'CONFLICT' }),
       makeLine({ seq: 5000, text: 'Patch failed' }),
     ], true))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     expect(await screen.findByTestId('task-log-truncation-indicator')).toBeInTheDocument()
   })
 
   it('preserves the empty-state message when no lines are cached (Phase 1 rendering non-regression)', async () => {
-    const harness = buildTaskLogHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     expect(await screen.findByTestId('task-log-empty')).toBeInTheDocument()
   })
 
   it('shows the full authoritative log when there were no live subscribers during execution (Phase 1 non-regression)', async () => {
-    const harness = buildTaskLogHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', text: 'authoritative-line-1' }),
       makeLine({ seq: 2, timestamp: '2026-07-03T08:00:00.050Z', text: 'authoritative-line-2' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel issueNumber={161} taskId="build-task-1" workflowRunId="wr-1" taskStatus="failed" />,
-      harness,
+      testState,
     )
 
     expect(await screen.findByText('authoritative-line-1')).toBeInTheDocument()

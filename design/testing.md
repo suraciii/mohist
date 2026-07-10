@@ -21,6 +21,20 @@ Track expressed by naming + directory (not runtime trait):
 
 One file = one subject under test.
 
+### Test support naming
+
+Name active test support by its responsibility:
+
+| Name | Responsibility |
+|---|---|
+| `Fixture` | provides reusable test data or owns setup lifetime and cleanup |
+| `TestHost` | hosts an application or runtime boundary |
+| `Probe` | exposes render or hook state for assertions |
+| `TestFactory` | constructs collaborators and their fakes |
+| `TestSupport` / `TestUtils` | groups shared test support and helper functions |
+
+Do not use `Harness` in active test filenames, identifiers, or descriptions.
+
 ## Hard rules
 
 ### 1. No real external environment

@@ -21,9 +21,9 @@ import {
   newQueryClient,
   readBlobText,
   recordedInvokes,
-  renderWithHarness,
+  renderWithTaskLogProviders,
   sessionFixture,
-  type TestHarness,
+  type TaskLogTestState,
 } from './_taskLogPanelTestUtils'
 
 const _taskLogPageRef: { current: TaskLogPage | undefined } = { current: undefined }
@@ -64,7 +64,7 @@ function TaskLogPanel(
   )
 }
 
-function buildMswHarness(initialPage: TaskLogPage | undefined): TestHarness {
+function createTaskLogTestState(initialPage: TaskLogPage | undefined): TaskLogTestState {
   const queryClient = newQueryClient()
   _taskLogPageRef.current = initialPage
   return {
@@ -106,12 +106,12 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:00:01.000Z', source: 'workspace-prep', text: 'ops-08:00:01' }),
       makeLine({ seq: 2, timestamp: '2026-07-03T08:05:00.000Z', source: 'cleanup', text: 'ops-08:05:00' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -121,7 +121,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -152,9 +152,9 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         eventSummary: { resolvedModel: 'mohist/coder-agent' },
       }),
     ]
-    const harness = buildMswHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -164,7 +164,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     expect(screen.queryByTestId('task-log-empty')).not.toBeInTheDocument()
@@ -174,9 +174,9 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
 
   it('keeps showing a loading state instead of the true-empty copy while agent session summaries load', async () => {
     _workflowRunSessionsLoading = true
-    const harness = buildMswHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -186,7 +186,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     await waitFor(() => {
@@ -207,9 +207,9 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const harness = buildMswHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -219,7 +219,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     expect(await screen.findByTestId('task-log-milestone-model-bound')).toBeInTheDocument()
@@ -239,9 +239,9 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const harness = buildMswHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -251,7 +251,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     expect(await screen.findByTestId('task-log-milestone-session-ended')).toBeInTheDocument()
@@ -263,11 +263,11 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     _workflowRunSessionsRef.current = [
       sessionFixture({ id: 'session-1', sessionName: 'rebase-1' }),
     ]
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -277,7 +277,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={{ uses: 'mohist/rebase' }}
         classification="Orchestration"
       />,
-      harness,
+      testState,
     )
 
     await screen.findByText('rebasing')
@@ -289,11 +289,11 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     _workflowRunSessionsRef.current = [
       sessionFixture({ id: 'session-1', sessionName: '' }),
     ]
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'prep' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -303,7 +303,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     await screen.findByText('prep')
@@ -315,11 +315,11 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
     _workflowRunSessionsRef.current = [
       sessionFixture({ id: 'session-1', sessionName: 'plan-issue-339' }),
     ]
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'prep-without-classification' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -328,7 +328,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         sessionName="plan-issue-339"
         origin={agentOrigin}
       />,
-      harness,
+      testState,
     )
 
     await screen.findByText('prep-without-classification')
@@ -338,11 +338,11 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
 
   it('renders NO milestone rows when the workflow-run sessions data is empty (graceful degradation)', async () => {
     _workflowRunSessionsRef.current = []
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'workspace-prep', text: 'ops-line' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -352,7 +352,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     await screen.findByText('ops-line')
@@ -371,13 +371,13 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'workspace-prep', text: 'seq-one-late-clock' }),
       makeLine({ seq: 2, timestamp: '2026-07-03T08:00:00.000Z', source: 'cleanup', text: 'seq-two-early-clock' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -387,7 +387,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     await screen.findByText('seq-two-early-clock')
@@ -426,12 +426,12 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'cleanup', text: 'final cleanup' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -441,7 +441,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -474,12 +474,12 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:05:00.000Z', source: 'workspace-prep', text: 'prep-line' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -489,7 +489,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -514,11 +514,11 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, source: 'action:rebase', text: 'rebasing' }),
     ]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -528,7 +528,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     const chipBar = await screen.findByTestId('task-log-source-chips')
@@ -547,13 +547,13 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', source: 'workspace-prep', text: 'before' }),
       makeLine({ seq: 2, timestamp: '2026-07-03T08:02:00.000Z', source: 'cleanup', text: 'after' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -563,7 +563,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -595,12 +595,12 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const harness = buildMswHarness(makePage([
+    const testState = createTaskLogTestState(makePage([
       makeLine({ seq: 1, timestamp: '2026-07-03T08:02:00.000Z', source: 'cleanup', text: 'unrelated' }),
     ]))
 
     const user = userEvent.setup()
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -610,7 +610,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     await screen.findByTestId('task-log-panel')
@@ -645,9 +645,9 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         eventSummary: { resolvedModel: 'minimax/MiniMax-M3' },
       }),
     ]
-    const harness = buildMswHarness(makePage([]))
+    const testState = createTaskLogTestState(makePage([]))
 
-    renderWithHarness(
+    renderWithTaskLogProviders(
       <TaskLogPanel
         issueNumber={339}
         taskId="build-task-1"
@@ -657,7 +657,7 @@ describe('TaskLogPanel — agent-task milestone rows (Phase 3b T-001)', () => {
         origin={agentOrigin}
         classification="UserFacing"
       />,
-      harness,
+      testState,
     )
 
     const markers = await screen.findAllByTestId('task-log-milestone-marker')

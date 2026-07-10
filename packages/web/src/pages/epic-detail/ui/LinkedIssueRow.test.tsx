@@ -4,7 +4,7 @@ import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
 import type { LinkedIssue } from '../../../entities/epic'
-import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
+import { issues, linkedIssue, renderPage } from './_epicDetailPageTestUtils'
 import { useMswServer } from '../../../../tests/support/msw'
 
 /**

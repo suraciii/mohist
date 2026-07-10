@@ -11,7 +11,7 @@ public class CliSystemInfoCommandSpecs
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder,
         string? activeProjectId = null)
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(responder, activeProjectId);
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(responder, activeProjectId);
         var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
         return (http, handler, output, error, fs, executor, env);
     }

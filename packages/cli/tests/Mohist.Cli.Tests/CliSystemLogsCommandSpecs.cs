@@ -25,7 +25,7 @@ public class CliSystemLogsCommandSpecs
     [Fact]
     public async Task System_Help_ListsLogsSubcommand()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["system", "--help"], output, error, fs, executor);
@@ -40,7 +40,7 @@ public class CliSystemLogsCommandSpecs
     [Fact]
     public async Task System_Help_DescriptionIdentifiesApplicationLogsAndDistinguishesFromServerLogs()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["system", "--help"], output, error, fs, executor);
@@ -58,7 +58,7 @@ public class CliSystemLogsCommandSpecs
     [Fact]
     public async Task System_Help_DescriptionStillDisambiguatesFromMoInfo()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["system", "--help"], output, error, fs, executor);
@@ -74,7 +74,7 @@ public class CliSystemLogsCommandSpecs
     [Fact]
     public async Task SystemLogs_HitsLogsEndpointAndRendersResponse()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
@@ -99,7 +99,7 @@ public class CliSystemLogsCommandSpecs
     [Fact]
     public async Task SystemLogs_CommandDescriptionDistinguishesFromServerLogs()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["system", "logs", "--help"], output, error, fs, executor);
@@ -116,7 +116,7 @@ public class CliSystemLogsCommandSpecs
     [Fact]
     public async Task SystemLogs_ServerUnreachable_EmitsLegacyGuidanceAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (_, _) => throw new HttpRequestException("connection refused"),
             activeProjectId: null);
 
@@ -141,7 +141,7 @@ public class CliSystemLogsCommandSpecs
     [Fact]
     public async Task LegacyRootLogs_NoLongerResolvesAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["logs"], output, error, fs, executor);

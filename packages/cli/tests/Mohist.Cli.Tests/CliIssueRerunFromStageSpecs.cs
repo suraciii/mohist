@@ -10,7 +10,7 @@ public class CliIssueRerunFromStageSpecs
     [Fact]
     public async Task IssueRerunFromStage_SuccessPath_SendsPostWithStageBody()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -38,7 +38,7 @@ public class CliIssueRerunFromStageSpecs
     [Fact]
     public async Task IssueRerunFromStage_MissingStage_PrintsUsageErrorAndMakesNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "rerun-from-stage", "42"], output, error, fs, executor);
@@ -52,7 +52,7 @@ public class CliIssueRerunFromStageSpecs
     [Fact]
     public async Task IssueRerunFromStage_AcceptsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -78,7 +78,7 @@ public class CliIssueRerunFromStageSpecs
     [Fact]
     public async Task IssueRerunFromStage_ServerError_SurfacesCodeAndMessage()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -103,7 +103,7 @@ public class CliIssueRerunFromStageSpecs
     [Fact]
     public async Task IssueRerun_NoFromStage_PostsEmptyBodyToRerunEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/rerun")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -124,7 +124,7 @@ public class CliIssueRerunFromStageSpecs
     [Fact]
     public async Task IssueRerun_WithFromStage_PostsStageBodyToRerunFromStageEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/rerun-from-stage")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -144,7 +144,7 @@ public class CliIssueRerunFromStageSpecs
     [Fact]
     public async Task IssueRerun_EmptyFromStage_FailsLocallyWithoutHttp()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "rerun", "42", "--from-stage", ""], output, error, fs, executor);
@@ -158,7 +158,7 @@ public class CliIssueRerunFromStageSpecs
     [Fact]
     public async Task IssueRerun_BlankFromStage_FailsLocallyWithoutHttp()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "rerun", "42", "--from-stage", "   "], output, error, fs, executor);
@@ -172,7 +172,7 @@ public class CliIssueRerunFromStageSpecs
     [Fact]
     public async Task IssueRerun_NoFromStage_HonorsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_xyz/issues/42/rerun")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -192,7 +192,7 @@ public class CliIssueRerunFromStageSpecs
     [Fact]
     public async Task IssueRerun_WithFromStage_HonorsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post && req.RequestUri?.PathAndQuery == "/api/projects/proj_xyz/issues/42/rerun-from-stage")
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
@@ -212,7 +212,7 @@ public class CliIssueRerunFromStageSpecs
     [Fact]
     public async Task IssueRerun_FromStageAlias_PostsSameRequestAsRerunFromStagePeer()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post
                 && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/issues/42/rerun-from-stage")

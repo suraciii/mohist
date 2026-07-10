@@ -11,7 +11,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueCreate_WithWorkflowProfileFlag_SendsWorkflowProfileIdInPostBody()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -45,7 +45,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueCreate_WithoutWorkflowProfileFlag_OmitsWorkflowProfileIdFromPostBody()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -72,7 +72,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueShow_RendersEffectiveWorkflowProfile()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get)
             {
@@ -108,7 +108,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueShow_RendersInheritedDefaultWhenNoSelection()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Get)
             {
@@ -142,7 +142,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueShow_RoundTripsCreateThenShow()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -196,7 +196,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueUpdate_WithWorkflowProfileFlag_SendsWorkflowProfileIdInPatchBody()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -213,7 +213,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueUpdate_WithoutWorkflowProfileFlag_OmitsWorkflowProfileIdFromPatchBody()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -230,7 +230,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueUpdate_NoFlags_SendsPatchWithNoOptionalFieldKeys()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "42"], output, error, fs, executor);
@@ -248,7 +248,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueUpdate_WorkflowProfileWithOtherFlags_PatchBodyOnlyContainsProvidedFields()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -339,7 +339,7 @@ public class CliIssueWorkflowProfileSpecs
     [Fact]
     public async Task IssueUpdate_WorkflowProfileOnStartedIssue_PrintsServerErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Patch)
             {

@@ -9,9 +9,9 @@ namespace Mohist.Cli.Tests;
 public class CliIssueLabelSpecs
 {
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateHarness(string? activeProjectId = "proj_abc", string? projectResponseBody = null)
+        CreateIssueLabelSetup(string? activeProjectId = "proj_abc", string? projectResponseBody = null)
     {
-        return CliTestHarness.Create(async (req, _) =>
+        return CliTestFactory.Create(async (req, _) =>
         {
             var path = req.RequestUri?.AbsolutePath ?? "";
             if (path.EndsWith("/labels", StringComparison.Ordinal))
@@ -181,7 +181,7 @@ public class CliIssueLabelSpecs
     [Fact]
     public async Task IssueCreate_KeyValueLabel_SendsLabelsObject()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "My new issue", "-b", "Body", "-l", "stream=frontend"], output, error, fs, executor);
 
@@ -198,7 +198,7 @@ public class CliIssueLabelSpecs
     [Fact]
     public async Task IssueCreate_MultipleLabels_AllSentInObject()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
         var exitCode = await MohistCliCommands.RunAsync(
             http,
             ["issue", "create", "Multi", "-b", "Body", "-l", "stream=frontend", "-l", "module=auth"],
@@ -215,7 +215,7 @@ public class CliIssueLabelSpecs
     [Fact]
     public async Task IssueCreate_MalformedLabel_ReturnsExitOneWithError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "Bad", "-l", "=x"], output, error, fs, executor);
 
@@ -227,7 +227,7 @@ public class CliIssueLabelSpecs
     [Fact]
     public async Task IssueCreate_InvalidKey_ExitsWithError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "Bad", "-l", "Bad-Key=foo"], output, error, fs, executor);
 
@@ -239,7 +239,7 @@ public class CliIssueLabelSpecs
     [Fact]
     public async Task IssueCreate_EmptyValue_ExitsWithError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "create", "Bad", "-l", "stream="], output, error, fs, executor);
 
@@ -256,7 +256,7 @@ public class CliIssueLabelSpecs
             ["stream"] = "frontend",
             ["module"] = "auth",
         });
-        var (handler, http, output, error, fs, executor) = CreateHarness(projectResponseBody: currentJson);
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "-l", "stream=backend"], output, error, fs, executor);
@@ -284,7 +284,7 @@ public class CliIssueLabelSpecs
             ["stream"] = "frontend",
             ["module"] = "auth",
         });
-        var (handler, http, output, error, fs, executor) = CreateHarness(projectResponseBody: currentJson);
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "-l", "-stream"], output, error, fs, executor);
@@ -305,7 +305,7 @@ public class CliIssueLabelSpecs
         {
             ["module"] = "auth",
         });
-        var (handler, http, output, error, fs, executor) = CreateHarness(projectResponseBody: currentJson);
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup(projectResponseBody: currentJson);
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "-l", "-stream"], output, error, fs, executor);
@@ -322,7 +322,7 @@ public class CliIssueLabelSpecs
     [Fact]
     public async Task IssueUpdate_MalformedLabel_ExitsWithErrorAndNoPatch()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "update", "1", "-l", "=x"], output, error, fs, executor);
@@ -335,7 +335,7 @@ public class CliIssueLabelSpecs
     [Fact]
     public async Task IssueList_LabelFilter_AppendsKeyValueQueryString()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "list", "-l", "stream=frontend"], output, error, fs, executor);
@@ -351,7 +351,7 @@ public class CliIssueLabelSpecs
     [Fact]
     public async Task IssueList_MultipleLabelFilters_AppendsRepeatedQueryStringKeys()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -370,7 +370,7 @@ public class CliIssueLabelSpecs
     [Fact]
     public async Task IssueList_MalformedFilter_ExitsWithError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "list", "-l", "frontend"], output, error, fs, executor);
@@ -384,7 +384,7 @@ public class CliIssueLabelSpecs
     [Fact]
     public async Task LabelList_Table_RendersDefinitions()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateIssueLabelSetup();
         handler.SetResponder(async (_, _) => RecordingHttpHandler.Json(new
         {
             success = true,

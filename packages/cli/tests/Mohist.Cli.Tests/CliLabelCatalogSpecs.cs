@@ -7,9 +7,9 @@ namespace Mohist.Cli.Tests;
 public class CliLabelCatalogSpecs
 {
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem Fs, FakeCommandExecutor Executor)
-        CreateHarness(string? activeProjectId = "proj_abc")
+        CreateLabelCatalogSetup(string? activeProjectId = "proj_abc")
     {
-        return CliTestHarness.Create(activeProjectId: activeProjectId);
+        return CliTestFactory.Create(activeProjectId: activeProjectId);
     }
 
     private static void SetCatalogListResponse(RecordingHttpHandler handler, params object[] definitions)
@@ -26,7 +26,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelList_HitsCatalogEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         SetCatalogListResponse(handler,
             new { key = "refactor", description = "Technical refactoring", origin = "System" });
 
@@ -42,7 +42,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelList_Table_ShowsKeyDescriptionOrigin()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         SetCatalogListResponse(handler,
             new { key = "refactor", description = "Technical refactoring that reduces complexity", origin = "System" },
             new { key = "module", description = "Classifies the subsystem", origin = "User", supportedValues = new[] { "auth", "ui" } });
@@ -65,7 +65,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelList_Json_ContainsFullData()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         SetCatalogListResponse(handler,
             new { key = "refactor", description = "Technical refactoring", origin = "System" },
             new { key = "module", description = "Classifies subsystem", origin = "User", supportedValues = new[] { "auth", "ui" } });
@@ -88,7 +88,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelList_OnlySystemDefinitions_StillShowsRefactor()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         SetCatalogListResponse(handler,
             new { key = "refactor", description = "Technical refactoring that does not change observable behavior", origin = "System" });
 
@@ -104,7 +104,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelAdd_CreatesDefinition()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Post && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog", StringComparison.Ordinal))
@@ -132,7 +132,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelAdd_WithSupportedValues()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Post && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog", StringComparison.Ordinal))
@@ -158,7 +158,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelAdd_WithEmptySupportedValue_ExitsWithError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["label", "add", "module", "--description", "Classifies", "--supported-values", "auth,,ui"], output, error, fs, executor);
@@ -171,7 +171,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelAdd_InvalidKey_ExitsWithError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["label", "add", "Module", "--description", "Classifies"], output, error, fs, executor);
@@ -184,7 +184,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelAdd_MissingDescription_ExitsWithError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["label", "add", "module", "--description", "   "], output, error, fs, executor);
@@ -197,7 +197,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelAdd_SystemKey_ReturnsError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Post && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog", StringComparison.Ordinal))
@@ -220,7 +220,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelRemove_RemovesDefinition()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
@@ -242,7 +242,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelRemove_MissingKey_Succeeds()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
@@ -262,7 +262,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelRemove_SystemKey_Fails()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
@@ -285,7 +285,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelRemove_Alias_Rm_Works()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
@@ -307,7 +307,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelUpdate_DescriptionOnly_SendsPartialPatch()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Patch && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog/module", StringComparison.Ordinal))
@@ -337,7 +337,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelUpdate_SupportedValuesOnly_SendsPartialPatch()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Patch && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog/module", StringComparison.Ordinal))
@@ -368,7 +368,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelUpdate_BothFields_SendsBothInBody()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Patch && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog/module", StringComparison.Ordinal))
@@ -399,7 +399,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelUpdate_InvalidKey_ExitsWithErrorAndNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["label", "update", "Module", "--description", "Whatever"], output, error, fs, executor);
@@ -412,7 +412,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelUpdate_EmptyDescription_ExitsWithErrorAndNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["label", "update", "module", "--description", "   "], output, error, fs, executor);
@@ -425,7 +425,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelUpdate_NoFieldsProvided_ExitsWithErrorAndNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["label", "update", "module"], output, error, fs, executor);
@@ -439,7 +439,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelUpdate_EmptySupportedValueEntry_ExitsWithErrorAndNoRequest()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["label", "update", "module", "--supported-values", "auth,,ui"], output, error, fs, executor);
@@ -452,7 +452,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelUpdate_UnknownKey_404_SurfacesAsError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Patch && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog/unknown", StringComparison.Ordinal))
@@ -475,7 +475,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelUpdate_SystemKey_409_SurfacesAsError()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Patch && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog/refactor", StringComparison.Ordinal))
@@ -498,7 +498,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelDelete_DeletesDefinition()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
@@ -520,7 +520,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelDelete_ProjectIdFlag_RoutesCorrectly()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
@@ -542,7 +542,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelDelete_RemoveAlias_ProducesIdenticalRequestAndOutput()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
@@ -581,7 +581,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelDelete_RmAlias_ProducesIdenticalRequestAndOutput()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
@@ -620,7 +620,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelDelete_ProjectFlag_RoutesCorrectly()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
@@ -642,7 +642,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task LabelDelete_RemoveAlias_ExitsWithErrorOnSystemKey()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
         handler.SetResponder(async (req, _) =>
         {
             if (req.Method == HttpMethod.Delete && (req.RequestUri?.AbsolutePath ?? "").Contains("/labels/catalog/"))
@@ -665,7 +665,7 @@ public class CliLabelCatalogSpecs
     [Fact]
     public async Task Label_HelpAdvertisesDeleteWithRemoveAndRmAliases()
     {
-        var (handler, http, output, error, fs, executor) = CreateHarness();
+        var (handler, http, output, error, fs, executor) = CreateLabelCatalogSetup();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["label", "--help"], output, error, fs, executor);

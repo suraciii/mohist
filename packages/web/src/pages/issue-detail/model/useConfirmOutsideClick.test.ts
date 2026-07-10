@@ -8,12 +8,12 @@ const FIVE_SECONDS_MS = 5000
 
 let externalSetConfirming: ((value: boolean) => void) | null = null
 
-interface HarnessProps {
+interface ConfirmingPanelProps {
   timeoutMs?: number
   initialConfirming?: boolean
 }
 
-function Harness({ timeoutMs, initialConfirming = false }: HarnessProps) {
+function ConfirmingPanel({ timeoutMs, initialConfirming = false }: ConfirmingPanelProps) {
   const [confirming, setConfirming] = useState(initialConfirming)
   externalSetConfirming = setConfirming
   const ref = useConfirmOutsideClick({
@@ -43,8 +43,8 @@ function Harness({ timeoutMs, initialConfirming = false }: HarnessProps) {
   )
 }
 
-function setHarnessConfirming(value: boolean) {
-  if (externalSetConfirming === null) throw new Error('Harness setConfirming not registered')
+function setConfirmingExternally(value: boolean) {
+  if (externalSetConfirming === null) throw new Error('setConfirming callback not registered')
   const set = externalSetConfirming
   act(() => { set(value) })
 }
@@ -60,13 +60,13 @@ afterEach(() => {
 
 describe('useConfirmOutsideClick', () => {
   it('exposes a ref pointing at an HTMLDivElement', () => {
-    const { getByTestId } = render(createElement(Harness, { initialConfirming: true }))
+    const { getByTestId } = render(createElement(ConfirmingPanel, { initialConfirming: true }))
     const panel = getByTestId('panel')
     expect(panel).toBeInstanceOf(HTMLDivElement)
   })
 
   it('does not register a listener or timer while confirming is false', () => {
-    const { queryByTestId } = render(createElement(Harness, { initialConfirming: false }))
+    const { queryByTestId } = render(createElement(ConfirmingPanel, { initialConfirming: false }))
     expect(queryByTestId('panel')).toBeNull()
     expect(queryByTestId('outside-button')).not.toBeNull()
 
@@ -75,7 +75,7 @@ describe('useConfirmOutsideClick', () => {
   })
 
   it('dismisses the panel when an outside mousedown fires while confirming is true', () => {
-    const { getByTestId, queryByTestId } = render(createElement(Harness, { initialConfirming: true }))
+    const { getByTestId, queryByTestId } = render(createElement(ConfirmingPanel, { initialConfirming: true }))
     expect(getByTestId('panel')).toBeInTheDocument()
 
     act(() => {
@@ -86,7 +86,7 @@ describe('useConfirmOutsideClick', () => {
   })
 
   it('does not dismiss when the mousedown lands inside the panel', () => {
-    const { getByTestId } = render(createElement(Harness, { initialConfirming: true }))
+    const { getByTestId } = render(createElement(ConfirmingPanel, { initialConfirming: true }))
 
     act(() => {
       getByTestId('inside-button').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
@@ -96,10 +96,10 @@ describe('useConfirmOutsideClick', () => {
   })
 
   it('auto-dismisses exactly 5000ms after confirming flips to true (fake timers, no wall clock)', () => {
-    const { getByTestId, queryByTestId } = render(createElement(Harness, { initialConfirming: false }))
+    const { getByTestId, queryByTestId } = render(createElement(ConfirmingPanel, { initialConfirming: false }))
     expect(queryByTestId('panel')).toBeNull()
 
-    act(() => { setHarnessConfirming(true) })
+    act(() => { setConfirmingExternally(true) })
     expect(getByTestId('panel')).toBeInTheDocument()
 
     vi.advanceTimersByTime(FIVE_SECONDS_MS - 1)
@@ -111,7 +111,7 @@ describe('useConfirmOutsideClick', () => {
 
   it('respects a custom timeoutMs when provided', () => {
     const { getByTestId, queryByTestId } = render(
-      createElement(Harness, { initialConfirming: true, timeoutMs: 1234 }),
+      createElement(ConfirmingPanel, { initialConfirming: true, timeoutMs: 1234 }),
     )
     expect(getByTestId('panel')).toBeInTheDocument()
 
@@ -123,16 +123,16 @@ describe('useConfirmOutsideClick', () => {
   })
 
   it('clears the prior timer when confirming flips true → false → true (resets 5000ms each time)', () => {
-    const { getByTestId, queryByTestId } = render(createElement(Harness, { initialConfirming: true }))
+    const { getByTestId, queryByTestId } = render(createElement(ConfirmingPanel, { initialConfirming: true }))
 
     vi.advanceTimersByTime(3000)
     expect(getByTestId('panel')).toBeInTheDocument()
 
-    act(() => { setHarnessConfirming(false) })
+    act(() => { setConfirmingExternally(false) })
     vi.advanceTimersByTime(FIVE_SECONDS_MS)
     expect(queryByTestId('panel')).toBeNull()
 
-    act(() => { setHarnessConfirming(true) })
+    act(() => { setConfirmingExternally(true) })
     expect(getByTestId('panel')).toBeInTheDocument()
 
     vi.advanceTimersByTime(FIVE_SECONDS_MS - 1)
@@ -146,12 +146,12 @@ describe('useConfirmOutsideClick', () => {
     const addSpy = vi.spyOn(document, 'addEventListener')
     const removeSpy = vi.spyOn(document, 'removeEventListener')
 
-    render(createElement(Harness, { initialConfirming: true }))
+    render(createElement(ConfirmingPanel, { initialConfirming: true }))
     const addedWhileOpen = addSpy.mock.calls.filter(([type]) => type === 'mousedown').length
     expect(addedWhileOpen).toBeGreaterThan(0)
     expect(removeSpy.mock.calls.filter(([type]) => type === 'mousedown').length).toBe(0)
 
-    act(() => { setHarnessConfirming(false) })
+    act(() => { setConfirmingExternally(false) })
     expect(
       removeSpy.mock.calls.filter(([type]) => type === 'mousedown').length,
     ).toBeGreaterThanOrEqual(addedWhileOpen)

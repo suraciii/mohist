@@ -6,19 +6,19 @@ import userEvent from '@testing-library/user-event'
 
 import { AlertDialog } from './alert-dialog'
 
-interface HarnessProps {
+interface ControlledAlertDialogProps {
   initialOpen?: boolean
   onConfirm?: () => void
   loading?: boolean
   tone?: 'destructive' | 'default'
 }
 
-function Harness({
+function ControlledAlertDialog({
   initialOpen = false,
   onConfirm = vi.fn(),
   loading = false,
   tone = 'destructive',
-}: HarnessProps) {
+}: ControlledAlertDialogProps) {
   const [open, setOpen] = useState(initialOpen)
   const handleConfirm = () => {
     onConfirm()
@@ -64,7 +64,7 @@ function withinDialog(dialog: HTMLElement) {
 describe('shared/ui AlertDialog', () => {
   it('moves keyboard focus into the dialog when it opens', async () => {
     const user = userEvent.setup()
-    render(<Harness />)
+    render(<ControlledAlertDialog />)
 
     const trigger = screen.getByTestId('open')
     await user.click(trigger)
@@ -83,7 +83,7 @@ describe('shared/ui AlertDialog', () => {
 
   it('keeps keyboard focus within the dialog by trapping it via the base-ui focus guards', async () => {
     const user = userEvent.setup()
-    render(<Harness />)
+    render(<ControlledAlertDialog />)
     await user.click(screen.getByTestId('open'))
 
     const dialog = await screen.findByTestId('alert-dialog')
@@ -107,7 +107,7 @@ describe('shared/ui AlertDialog', () => {
 
   it('returns keyboard focus to the invoking element when the dialog closes', async () => {
     const user = userEvent.setup()
-    render(<Harness />)
+    render(<ControlledAlertDialog />)
 
     const trigger = screen.getByTestId('open')
     await user.click(trigger)
@@ -130,7 +130,7 @@ describe('shared/ui AlertDialog', () => {
 
   it('returns keyboard focus to the invoking element after confirm', async () => {
     const user = userEvent.setup()
-    render(<Harness />)
+    render(<ControlledAlertDialog />)
 
     const trigger = screen.getByTestId('open')
     await user.click(trigger)
@@ -152,7 +152,7 @@ describe('shared/ui AlertDialog', () => {
 
   it('returns keyboard focus to the invoking element after Escape', async () => {
     const user = userEvent.setup()
-    render(<Harness />)
+    render(<ControlledAlertDialog />)
 
     const trigger = screen.getByTestId('open')
     await user.click(trigger)
@@ -175,7 +175,7 @@ describe('shared/ui AlertDialog', () => {
   it('dismisses on Escape without invoking onConfirm (acts as cancellation)', async () => {
     const user = userEvent.setup()
     const onConfirm = vi.fn()
-    render(<Harness onConfirm={onConfirm} />)
+    render(<ControlledAlertDialog onConfirm={onConfirm} />)
 
     await user.click(screen.getByTestId('open'))
     await screen.findByTestId('alert-dialog')
@@ -192,7 +192,7 @@ describe('shared/ui AlertDialog', () => {
   it('invokes onConfirm only when the explicit confirm button is clicked', async () => {
     const user = userEvent.setup()
     const onConfirm = vi.fn()
-    render(<Harness onConfirm={onConfirm} />)
+    render(<ControlledAlertDialog onConfirm={onConfirm} />)
 
     await user.click(screen.getByTestId('open'))
 
@@ -208,7 +208,7 @@ describe('shared/ui AlertDialog', () => {
 
   it('renders a destructive-tone confirm button and removes the close X by default', async () => {
     const user = userEvent.setup()
-    render(<Harness />)
+    render(<ControlledAlertDialog />)
     await user.click(screen.getByTestId('open'))
     const dialog = await screen.findByTestId('alert-dialog')
 
@@ -222,7 +222,7 @@ describe('shared/ui AlertDialog', () => {
 
   it('falls back to a non-destructive confirm tone when tone is "default"', async () => {
     const user = userEvent.setup()
-    render(<Harness tone="default" />)
+    render(<ControlledAlertDialog tone="default" />)
     await user.click(screen.getByTestId('open'))
     const dialog = await screen.findByTestId('alert-dialog')
 
@@ -233,7 +233,7 @@ describe('shared/ui AlertDialog', () => {
 
   it('does not close while loading and reflects the loading state on both buttons', async () => {
     const onConfirm = vi.fn()
-    render(<Harness onConfirm={onConfirm} loading />)
+    render(<ControlledAlertDialog onConfirm={onConfirm} loading />)
     const user = userEvent.setup()
     await user.click(screen.getByTestId('open'))
     const dialog = await screen.findByTestId('alert-dialog')

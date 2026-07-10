@@ -10,7 +10,7 @@ public class CliIssuePrereqSpecs
     [Fact]
     public async Task IssuePrereqAdd_SuccessPath_SendsPostWithPrerequisiteNumber()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -42,7 +42,7 @@ public class CliIssuePrereqSpecs
     [Fact]
     public async Task IssuePrereqAdd_CircularDependency_SurfacesServerErrorAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -65,7 +65,7 @@ public class CliIssuePrereqSpecs
     [Fact]
     public async Task IssuePrereqAdd_NonexistentPrerequisiteIssue_SurfacesServerError()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -87,7 +87,7 @@ public class CliIssuePrereqSpecs
     [Fact]
     public async Task IssuePrereqAdd_NonexistentPrerequisiteIssue_DoesNotReportSilentSuccess()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -110,7 +110,7 @@ public class CliIssuePrereqSpecs
     [Fact]
     public async Task IssuePrereqRemove_SuccessPath_SendsDeleteToPrereqEndpoint()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Delete)
             {
@@ -140,7 +140,7 @@ public class CliIssuePrereqSpecs
     [Fact]
     public async Task IssuePrereq_HelpListsAddAndRemoveSubcommands()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["issue", "prereq", "--help"], output, error, fs, executor);
@@ -154,7 +154,7 @@ public class CliIssuePrereqSpecs
     [Fact]
     public async Task IssuePrereqAdd_AcceptsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
             {
@@ -180,7 +180,7 @@ public class CliIssuePrereqSpecs
     [Fact]
     public async Task IssuePrereqRemove_AcceptsProjectIdFlag()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.CreateSync(req =>
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Delete)
             {

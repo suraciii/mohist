@@ -13,7 +13,7 @@ afterEach(() => {
   cleanup()
 })
 
-function RovingHarness({
+function RovingList({
   count,
   activeIndex: controlledActive,
   onActivate,
@@ -101,7 +101,7 @@ describe('computeNextIndex (pure logic)', () => {
 
 describe('useRovingTabindex hook', () => {
   it('marks only the active item tabIndex=0 and the rest -1', () => {
-    render(<RovingHarness count={4} activeIndex={2} />)
+    render(<RovingList count={4} activeIndex={2} />)
 
     const items = [0, 1, 2, 3].map((i) => screen.getByTestId(`item-${i}`))
 
@@ -115,12 +115,12 @@ describe('useRovingTabindex hook', () => {
   })
 
   it('updates roving tabIndex when the active item changes', () => {
-    const { rerender } = render(<RovingHarness count={3} activeIndex={0} />)
+    const { rerender } = render(<RovingList count={3} activeIndex={0} />)
 
     expect(screen.getByTestId('item-0').tabIndex).toBe(0)
     expect(screen.getByTestId('item-1').tabIndex).toBe(-1)
 
-    rerender(<RovingHarness count={3} activeIndex={2} />)
+    rerender(<RovingList count={3} activeIndex={2} />)
 
     expect(screen.getByTestId('item-0').tabIndex).toBe(-1)
     expect(screen.getByTestId('item-1').tabIndex).toBe(-1)
@@ -129,7 +129,7 @@ describe('useRovingTabindex hook', () => {
 
   it('ArrowDown moves focus to the next item and roving tabIndex follows', () => {
     const onActivate = vi.fn()
-    render(<RovingHarness count={4} activeIndex={1} onActivate={onActivate} />)
+    render(<RovingList count={4} activeIndex={1} onActivate={onActivate} />)
     const start = screen.getByTestId('item-1')
     start.focus()
 
@@ -142,7 +142,7 @@ describe('useRovingTabindex hook', () => {
 
   it('ArrowUp moves focus to the previous item', () => {
     const onActivate = vi.fn()
-    render(<RovingHarness count={4} activeIndex={2} onActivate={onActivate} />)
+    render(<RovingList count={4} activeIndex={2} onActivate={onActivate} />)
     const start = screen.getByTestId('item-2')
     start.focus()
 
@@ -153,7 +153,7 @@ describe('useRovingTabindex hook', () => {
   })
 
   it('ArrowLeft / ArrowRight behave like Up / Down', () => {
-    render(<RovingHarness count={3} activeIndex={1} />)
+    render(<RovingList count={3} activeIndex={1} />)
     const start = screen.getByTestId('item-1')
     start.focus()
 
@@ -166,7 +166,7 @@ describe('useRovingTabindex hook', () => {
 
   it('wraps from the last item to the first on ArrowDown', () => {
     const onActivate = vi.fn()
-    render(<RovingHarness count={3} activeIndex={2} onActivate={onActivate} />)
+    render(<RovingList count={3} activeIndex={2} onActivate={onActivate} />)
     const last = screen.getByTestId('item-2')
     last.focus()
 
@@ -178,7 +178,7 @@ describe('useRovingTabindex hook', () => {
 
   it('wraps from the first item to the last on ArrowUp', () => {
     const onActivate = vi.fn()
-    render(<RovingHarness count={3} activeIndex={0} onActivate={onActivate} />)
+    render(<RovingList count={3} activeIndex={0} onActivate={onActivate} />)
     const first = screen.getByTestId('item-0')
     first.focus()
 
@@ -190,7 +190,7 @@ describe('useRovingTabindex hook', () => {
 
   it('does not react to keys outside the arrow set', () => {
     const onActivate = vi.fn()
-    render(<RovingHarness count={3} activeIndex={1} onActivate={onActivate} />)
+    render(<RovingList count={3} activeIndex={1} onActivate={onActivate} />)
     const start = screen.getByTestId('item-1')
     start.focus()
 
@@ -209,7 +209,7 @@ describe('useRovingTabindex hook', () => {
         <button data-testid="external-button" type="button">
           External
         </button>
-        <RovingHarness count={3} activeIndex={1} onActivate={onActivate} />
+        <RovingList count={3} activeIndex={1} onActivate={onActivate} />
       </div>,
     )
 

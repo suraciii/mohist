@@ -23,15 +23,15 @@ public sealed class HermesIssueNotificationTests
     [Fact]
     public async Task ApprovalRequested_SendsPayloadWithStageBodyAndIssueScopedAction()
     {
-        var harness = CreateHarness();
+        var fixture = CreateFixture();
 
-        await harness.Handler.HandleAsync(WorkflowEvent(
+        await fixture.Handler.HandleAsync(WorkflowEvent(
             EventCatalog.ReverseDns.StageApprovalRequested,
             "run_1",
             new StageApprovalRequested("plan")), CancellationToken.None);
-        await harness.Dispatcher.RunAllAsync();
+        await fixture.Dispatcher.RunAllAsync();
 
-        var payload = Assert.Single(harness.Client.Sent);
+        var payload = Assert.Single(fixture.Client.Sent);
         Assert.Equal(NotificationKinds.ApprovalRequested, payload.NotificationType);
         Assert.Equal(42, payload.IssueNumber);
         Assert.Equal("Add Hermes outbound notifications", payload.IssueTitle);
@@ -44,15 +44,15 @@ public sealed class HermesIssueNotificationTests
     [Fact]
     public async Task WorkflowFailed_SendsPayloadWithFailureReasonAndActionChoices()
     {
-        var harness = CreateHarness();
+        var fixture = CreateFixture();
 
-        await harness.Handler.HandleAsync(WorkflowEvent(
+        await fixture.Handler.HandleAsync(WorkflowEvent(
             EventCatalog.ReverseDns.WorkflowRunFailed,
             "run_1",
             new WorkflowRunFailed("check task failed")), CancellationToken.None);
-        await harness.Dispatcher.RunAllAsync();
+        await fixture.Dispatcher.RunAllAsync();
 
-        var payload = Assert.Single(harness.Client.Sent);
+        var payload = Assert.Single(fixture.Client.Sent);
         Assert.Equal(NotificationKinds.WorkflowFailed, payload.NotificationType);
         Assert.Equal("check task failed", payload.FailureReason);
         Assert.Equal("retry 42 or abandon 42", payload.SuggestedAction);
@@ -63,18 +63,18 @@ public sealed class HermesIssueNotificationTests
     [Fact]
     public async Task WorkflowFailed_OmitsStackTraceLinesFromFailurePayloadAndBody()
     {
-        var harness = CreateHarness();
+        var fixture = CreateFixture();
         var failure = "System.InvalidOperationException: check task failed\n"
             + "   at Mohist.Server.Workflow.Domain.Run.WorkflowRun.Fail() in WorkflowRun.cs:line 55\n"
             + "   at Mohist.Server.Workflow.Domain.Run.WorkflowRun.Check() in WorkflowRun.Check.cs:line 75";
 
-        await harness.Handler.HandleAsync(WorkflowEvent(
+        await fixture.Handler.HandleAsync(WorkflowEvent(
             EventCatalog.ReverseDns.WorkflowRunFailed,
             "run_1",
             new WorkflowRunFailed(failure)), CancellationToken.None);
-        await harness.Dispatcher.RunAllAsync();
+        await fixture.Dispatcher.RunAllAsync();
 
-        var payload = Assert.Single(harness.Client.Sent);
+        var payload = Assert.Single(fixture.Client.Sent);
         Assert.Equal("System.InvalidOperationException: check task failed", payload.FailureReason);
         Assert.Contains("Reason: System.InvalidOperationException: check task failed", payload.Body, StringComparison.Ordinal);
         Assert.DoesNotContain("WorkflowRun.Fail", payload.FailureReason, StringComparison.Ordinal);
@@ -85,14 +85,14 @@ public sealed class HermesIssueNotificationTests
     [Fact]
     public async Task IssueCompleted_SendsPayloadWithCompletionBody()
     {
-        var harness = CreateHarness();
+        var fixture = CreateFixture();
 
-        await harness.Handler.HandleAsync(IssueEvent(
+        await fixture.Handler.HandleAsync(IssueEvent(
             EventCatalog.ReverseDns.IssueCompleted,
             new IssueCompleted("run_1")), CancellationToken.None);
-        await harness.Dispatcher.RunAllAsync();
+        await fixture.Dispatcher.RunAllAsync();
 
-        var payload = Assert.Single(harness.Client.Sent);
+        var payload = Assert.Single(fixture.Client.Sent);
         Assert.Equal(NotificationKinds.IssueCompleted, payload.NotificationType);
         Assert.Equal("run_1", payload.WorkflowRunId);
         Assert.Equal("review issue 42", payload.SuggestedAction);
@@ -102,24 +102,24 @@ public sealed class HermesIssueNotificationTests
     [Fact]
     public async Task IssueStarted_IsDisabledByDefaultAndCanBeEnabled()
     {
-        var defaultHarness = CreateHarness();
-        await defaultHarness.Handler.HandleAsync(IssueEvent(
+        var defaultFixture = CreateFixture();
+        await defaultFixture.Handler.HandleAsync(IssueEvent(
             EventCatalog.ReverseDns.IssueWorkStarted,
             new IssueWorkStarted("run_1")), CancellationToken.None);
-        await defaultHarness.Dispatcher.RunAllAsync();
-        Assert.Empty(defaultHarness.Client.Sent);
+        await defaultFixture.Dispatcher.RunAllAsync();
+        Assert.Empty(defaultFixture.Client.Sent);
 
-        var enabledHarness = CreateHarness(new HermesNotificationOptions
+        var enabledFixture = CreateFixture(new HermesNotificationOptions
         {
             WebhookUrl = "https://hermes.local/webhooks/mohist",
             EnabledTypes = [NotificationKinds.IssueStarted],
         });
-        await enabledHarness.Handler.HandleAsync(IssueEvent(
+        await enabledFixture.Handler.HandleAsync(IssueEvent(
             EventCatalog.ReverseDns.IssueWorkStarted,
             new IssueWorkStarted("run_1")), CancellationToken.None);
-        await enabledHarness.Dispatcher.RunAllAsync();
+        await enabledFixture.Dispatcher.RunAllAsync();
 
-        var payload = Assert.Single(enabledHarness.Client.Sent);
+        var payload = Assert.Single(enabledFixture.Client.Sent);
         Assert.Equal(NotificationKinds.IssueStarted, payload.NotificationType);
         Assert.Contains("Issue #42 started", payload.Body, StringComparison.Ordinal);
     }
@@ -127,73 +127,73 @@ public sealed class HermesIssueNotificationTests
     [Fact]
     public async Task UnconfiguredWebhookUrl_DoesNotLoadStateOrSend()
     {
-        var harness = CreateHarness(new HermesNotificationOptions { WebhookUrl = null });
+        var fixture = CreateFixture(new HermesNotificationOptions { WebhookUrl = null });
 
-        await harness.Handler.HandleAsync(WorkflowEvent(
+        await fixture.Handler.HandleAsync(WorkflowEvent(
             EventCatalog.ReverseDns.StageApprovalRequested,
             "run_1",
             new StageApprovalRequested("plan")), CancellationToken.None);
 
-        Assert.Empty(harness.Client.Sent);
-        Assert.Equal(0, harness.Dispatcher.QueuedCount);
-        Assert.Equal(0, harness.WorkflowRuns.LoadCount);
-        Assert.Equal(0, harness.Issues.LoadCount);
+        Assert.Empty(fixture.Client.Sent);
+        Assert.Equal(0, fixture.Dispatcher.QueuedCount);
+        Assert.Equal(0, fixture.WorkflowRuns.LoadCount);
+        Assert.Equal(0, fixture.Issues.LoadCount);
     }
 
     [Fact]
     public async Task DisabledNotificationType_DoesNotLoadStateOrSend()
     {
-        var harness = CreateHarness(new HermesNotificationOptions
+        var fixture = CreateFixture(new HermesNotificationOptions
         {
             WebhookUrl = "https://hermes.local/webhooks/mohist",
             EnabledTypes = [NotificationKinds.WorkflowFailed],
         });
 
-        await harness.Handler.HandleAsync(WorkflowEvent(
+        await fixture.Handler.HandleAsync(WorkflowEvent(
             EventCatalog.ReverseDns.StageApprovalRequested,
             "run_1",
             new StageApprovalRequested("plan")), CancellationToken.None);
 
-        Assert.Empty(harness.Client.Sent);
-        Assert.Equal(0, harness.Dispatcher.QueuedCount);
-        Assert.Equal(0, harness.WorkflowRuns.LoadCount);
-        Assert.Equal(0, harness.Issues.LoadCount);
+        Assert.Empty(fixture.Client.Sent);
+        Assert.Equal(0, fixture.Dispatcher.QueuedCount);
+        Assert.Equal(0, fixture.WorkflowRuns.LoadCount);
+        Assert.Equal(0, fixture.Issues.LoadCount);
     }
 
     [Fact]
     public async Task DeliveryFailure_IsSwallowed()
     {
-        var harness = CreateHarness();
-        harness.Client.ThrowOnSend = true;
+        var fixture = CreateFixture();
+        fixture.Client.ThrowOnSend = true;
 
-        await harness.Handler.HandleAsync(WorkflowEvent(
+        await fixture.Handler.HandleAsync(WorkflowEvent(
             EventCatalog.ReverseDns.StageApprovalRequested,
             "run_1",
             new StageApprovalRequested("plan")), CancellationToken.None);
-        await harness.Dispatcher.RunAllAsync();
+        await fixture.Dispatcher.RunAllAsync();
     }
 
     [Fact]
     public async Task DeliveryWork_IsQueuedWithoutAwaitingSlowWebhookSend()
     {
-        var harness = CreateHarness();
-        harness.Client.BlockSend = true;
+        var fixture = CreateFixture();
+        fixture.Client.BlockSend = true;
 
-        await harness.Handler.HandleAsync(WorkflowEvent(
+        await fixture.Handler.HandleAsync(WorkflowEvent(
             EventCatalog.ReverseDns.StageApprovalRequested,
             "run_1",
             new StageApprovalRequested("plan")), CancellationToken.None);
 
-        Assert.Equal(1, harness.Dispatcher.QueuedCount);
-        Assert.Empty(harness.Client.Sent);
+        Assert.Equal(1, fixture.Dispatcher.QueuedCount);
+        Assert.Empty(fixture.Client.Sent);
 
-        var delivery = harness.Dispatcher.RunNextAsync();
-        await harness.Client.SendStarted.Task;
+        var delivery = fixture.Dispatcher.RunNextAsync();
+        await fixture.Client.SendStarted.Task;
 
         Assert.False(delivery.IsCompleted);
-        harness.Client.ReleaseSend();
+        fixture.Client.ReleaseSend();
         await delivery;
-        Assert.Single(harness.Client.Sent);
+        Assert.Single(fixture.Client.Sent);
     }
 
     [Fact]
@@ -248,7 +248,7 @@ public sealed class HermesIssueNotificationTests
         Assert.Empty(handler.Requests);
     }
 
-    private static Harness CreateHarness(HermesNotificationOptions? options = null)
+    private static NotificationFixture CreateFixture(HermesNotificationOptions? options = null)
     {
         options ??= new HermesNotificationOptions { WebhookUrl = "https://hermes.local/webhooks/mohist" };
         var issues = new FakeIssueStore();
@@ -290,7 +290,7 @@ public sealed class HermesIssueNotificationTests
             dispatcher,
             NullLogger<HermesIssueNotificationHandler>.Instance);
 
-        return new Harness(handler, client, dispatcher, issues, workflowRuns, provider);
+        return new NotificationFixture(handler, client, dispatcher, issues, workflowRuns, provider);
     }
 
     private static CloudEvent WorkflowEvent<T>(string type, string workflowRunId, T data) where T : class =>
@@ -337,7 +337,7 @@ public sealed class HermesIssueNotificationTests
         return "sha256=" + Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private sealed record Harness(
+    private sealed record NotificationFixture(
         HermesIssueNotificationHandler Handler,
         RecordingHermesWebhookClient Client,
         RecordingHermesIssueNotificationDispatcher Dispatcher,

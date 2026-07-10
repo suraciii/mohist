@@ -11,7 +11,7 @@ public class MohistCliApiEnvelopeSpecs
     private static (MohistCliApi Api, RecordingHttpHandler Handler) CreateApi(
         string? activeProjectId = "proj_abc")
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(activeProjectId: activeProjectId);
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: activeProjectId);
         var api = new MohistCliApi(http, output, error, fs, executor);
         return (api, handler);
     }

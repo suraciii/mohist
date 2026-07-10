@@ -6,7 +6,7 @@ import { screen, waitFor } from '@testing-library/react'
 import { EpicStatus, type EpicDetail } from '../../../entities/epic'
 import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue'
 
-import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
+import { issues, linkedIssue, renderPage } from './_epicDetailPageTestUtils'
 
 describe('EpicDetailPage current activity listing', () => {
   function makeEpic(overrides: Record<string, unknown> = {}): EpicDetail {

@@ -31,7 +31,7 @@ public class CliProjectUseCommandSpecs
     [Fact]
     public async Task Root_Help_NoLongerListsUseSubcommand()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["--help"], output, error, fs, executor);
@@ -51,7 +51,7 @@ public class CliProjectUseCommandSpecs
     [Fact]
     public async Task Project_Help_StillListsUseSubcommand()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "--help"], output, error, fs, executor);
@@ -66,7 +66,7 @@ public class CliProjectUseCommandSpecs
     [Fact]
     public async Task ProjectUse_PostsUseEndpointAndPersistsActiveProjectAndPrintsConfirmation()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
@@ -111,7 +111,7 @@ public class CliProjectUseCommandSpecs
         // The endpoint string is `$"/api/projects/{Uri.EscapeDataString(identifier)}/use"`.
         // Use an identifier that exercises escaping so a regression in the
         // escaping logic would fail this spec.
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
@@ -131,7 +131,7 @@ public class CliProjectUseCommandSpecs
     [Fact]
     public async Task ProjectUse_NoIdentifier_FailsToParseAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["project", "use"], output, error, fs, executor);
@@ -145,7 +145,7 @@ public class CliProjectUseCommandSpecs
     [Fact]
     public async Task ProjectUse_ServerRejects_LetsLocalStateUnmodifiedAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (_, _) => Task.FromResult(RecordingHttpHandler.JsonError("Project not found", code: "project_not_found", statusCode: HttpStatusCode.NotFound)),
             activeProjectId: null);
 
@@ -181,11 +181,11 @@ public class CliProjectUseCommandSpecs
         // `project use` must NOT overwrite it.
         const string existingId = "proj_existing";
         var statePath = ProjectStatePath();
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (_, _) => Task.FromResult(RecordingHttpHandler.JsonError("Project not found", statusCode: HttpStatusCode.NotFound)),
             activeProjectId: existingId);
 
-        // Sanity-check harness wrote the state file.
+        // Sanity-check the setup wrote the state file.
         Assert.True(fs.Exists(statePath));
         var before = fs.ReadAllText(statePath);
 
@@ -204,7 +204,7 @@ public class CliProjectUseCommandSpecs
     [Fact]
     public async Task ProjectUse_ServerUnreachable_EmitsLegacyGuidanceAndDoesNotModifyState()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
             (_, _) => throw new HttpRequestException("connection refused"),
             activeProjectId: null);
 
@@ -233,7 +233,7 @@ public class CliProjectUseCommandSpecs
     [Fact]
     public async Task LegacyRootUse_NoLongerResolvesAndExitsNonZero()
     {
-        var (handler, http, output, error, fs, executor) = CliTestHarness.Create();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["use", "proj_anything"], output, error, fs, executor);

@@ -9,7 +9,7 @@ import { EpicStatus } from '../../../entities/epic'
 import type { LinkedIssue } from '../../../entities/epic'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
 import { EpicDetailPage } from './EpicDetailPage'
-import { createDependencyGraphTestComponents, LocationProbe } from './_epicDetailPageTestHarness'
+import { createDependencyGraphTestComponents, LocationProbe } from './_epicDetailPageTestUtils'
 import { useMswServer } from '../../../../tests/support/msw'
 
 function linkedIssue(overrides: Pick<LinkedIssue, 'id' | 'number'> & Partial<Omit<LinkedIssue, 'id' | 'number'>>): LinkedIssue {

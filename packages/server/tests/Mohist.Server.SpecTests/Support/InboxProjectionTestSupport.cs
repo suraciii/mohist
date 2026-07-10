@@ -19,7 +19,7 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 namespace Mohist.Server.SpecTests.Support;
 
 /// <summary>
-/// Shared in-memory SQLite + service-scope harness for unit specs that
+/// Shared in-memory SQLite and service-scope support for unit specs that
 /// exercise <see cref="InboxProjectionHandler"/>. Each test stands up a
 /// fresh in-memory database, seeds the issue / workflow-run rows it
 /// needs, drives the handler with one CloudEvent envelope, and inspects

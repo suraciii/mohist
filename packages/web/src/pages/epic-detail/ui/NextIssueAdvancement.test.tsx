@@ -6,7 +6,7 @@ import { cleanup, screen } from '@testing-library/react'
 import { EpicStatus, type EpicDetail } from '../../../entities/epic'
 import { IssueStatus, WorkflowStage } from '../../../entities/issue'
 
-import { issues, linkedIssue, renderPage } from './_epicDetailPageTestHarness'
+import { issues, linkedIssue, renderPage } from './_epicDetailPageTestUtils'
 
 let _epicData: EpicDetail
 

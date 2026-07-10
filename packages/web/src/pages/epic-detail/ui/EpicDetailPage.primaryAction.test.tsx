@@ -7,7 +7,7 @@ import { http, HttpResponse } from 'msw'
 import { EpicStatus } from '../../../entities/epic'
 import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue'
 
-import { issues, linkedIssue, renderPage, getActionGroup } from './_epicDetailPageTestHarness'
+import { issues, linkedIssue, renderPage, getActionGroup } from './_epicDetailPageTestUtils'
 import { useMswServer } from '../../../../tests/support/msw'
 
 let _epicData: unknown = null

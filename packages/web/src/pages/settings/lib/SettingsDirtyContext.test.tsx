@@ -8,7 +8,7 @@ import {
   useSettingsDirty,
 } from './SettingsDirtyContext'
 
-function Harness() {
+function DirtyStateControls() {
   const { dirty, setDirty } = useSettingsDirty()
   return (
     <div>
@@ -40,7 +40,7 @@ describe('SettingsDirtyContext', () => {
     function Wrapper({ children }: { children: ReactNode }) {
       return (
         <SettingsDirtyProvider>
-          <Harness />
+          <DirtyStateControls />
           {children}
         </SettingsDirtyProvider>
       )

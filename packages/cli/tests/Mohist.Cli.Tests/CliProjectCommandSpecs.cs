@@ -10,7 +10,7 @@ public class CliProjectCommandSpecs
     [Fact]
     public async Task ProjectCreate_NameOnly_SendsBodyWithoutPathFields()
     {
-        var (handler, http, output, error, fileSystem, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
             async (_, _) => RecordingHttpHandler.Json(new
             {
                 success = true,
@@ -36,7 +36,7 @@ public class CliProjectCommandSpecs
     [Fact]
     public async Task ProjectList_DisplaysNamesAndCurrentMarkerWithoutPaths()
     {
-        var (handler, http, output, error, fileSystem, executor) = CliTestHarness.Create(
+        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
             async (_, _) => RecordingHttpHandler.Json(new
             {
                 success = true,
