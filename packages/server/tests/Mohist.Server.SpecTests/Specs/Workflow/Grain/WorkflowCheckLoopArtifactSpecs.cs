@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
 
-[Collection("WorkflowGrain3")]
+[Collection("WorkflowGrain")]
 public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
 {
     private readonly string _storageRoot;
