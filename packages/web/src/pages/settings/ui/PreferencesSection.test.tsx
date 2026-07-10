@@ -190,11 +190,8 @@ describe('PreferencesSection (T-003)', () => {
   })
 
   it('does not depend on SidebarProvider for its core render', () => {
-    // The Preferences tab is part of the Settings surface and may be
-    // rendered in contexts where SidebarProvider is not present (a11y
-    // scans, design review snapshots, future portal mounts). It must
-    // therefore not call useSidebar — guard the assumption by mounting
-    // without a SidebarProvider and asserting the core cards render.
+    // The Preferences tab may render without SidebarProvider, so mount it
+    // that way and assert the core cards still render.
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={queryClient}>

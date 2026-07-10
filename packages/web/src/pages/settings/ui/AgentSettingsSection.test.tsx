@@ -437,7 +437,7 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
     expect(screen.queryByText(/Save failed/)).not.toBeInTheDocument()
   })
 
-  it('renders field-level validation errors inline and does not toast them (T-003 a11y wiring)', async () => {
+  it('renders field-level validation errors inline and does not toast them', async () => {
     await renderLoaded()
 
     const timeoutInput = getNumberInputByLabel('Session Timeout')

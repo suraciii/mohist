@@ -66,7 +66,7 @@ Update table after every gate. Another agent should resume without archaeology.
 | Runner truth | DONE | Runner production/test typecheck, target retry regression, 73/1036 suite, fixed shuffle seed 20260710, and build passed |
 | Shared state | DONE | Boundary checker self-test, 297-file scan, Web typecheck, 297/4531 suite, and fixed shuffle seed 20260710 passed |
 | Fake time | DONE | Boundary checker self-test, Runner/Web scans, typechecks, 73/1036 Runner, 297/4531 Web, and fixed-seed shuffle passed |
-| Browser truth | TODO | |
+| Browser truth | IN PROGRESS | jsdom geometry guard and browser coverage migration in progress |
 | Temp ownership | TODO | |
 | Platform split | TODO | |
 | Web boundaries | TODO | |
@@ -553,25 +553,15 @@ inside viewport for:
 - detail: edit button and visible lifecycle action.
 - transcript: code block and nearest horizontal scroll owner.
 
-Split a11y commands:
-
-```json
-{
-  "test:a11y:unit": "vitest run --config vitest.a11y.config.ts",
-  "test:a11y:browser": "playwright test -c playwright.a11y.config.ts",
-  "test:a11y": "npm run test:a11y:unit && npm run test:a11y:browser"
-}
-```
-
-Test script never installs browser. CI installs once:
+CI installs Chromium once for browser tests:
 
 ```bash
 npm exec -w packages/web -- playwright install --with-deps chromium
 ```
 
 Keep one Node CI job. Build Web once. Under CI, Playwright serves existing
-`dist`; it does not rebuild for each config. Run default Web, a11y unit, browser
-install, E2E, a11y browser. Upload trace only on failure.
+`dist`; it does not rebuild. Run default Web, install Chromium, and E2E. Upload
+trace only on failure.
 
 Verify:
 
@@ -579,9 +569,7 @@ Verify:
 npm exec -w packages/web -- playwright install --with-deps chromium
 npm run check:test-boundaries -w packages/web
 npm run test:ci -w packages/web
-npm run test:a11y:unit -w packages/web
 npm run test:e2e -w packages/web
-npm run test:a11y:browser -w packages/web
 ```
 
 ## Gate: Temp ownership
@@ -802,7 +790,7 @@ Final discovery:
 
 - node: `src/**/*.test.ts`, excluding `*.dom.test.ts`.
 - jsdom: `src/**/*.test.tsx`, `src/**/*.dom.test.ts`, `tests/**/*.spec.tsx`.
-- browser and a11y dirs stay outside default.
+- browser dirs stay outside default.
 - no `@vitest-environment` directive.
 - no central filename allowlist.
 
@@ -972,10 +960,8 @@ Keep one Node CI job. Order:
 - Runner default.
 - Runner integration.
 - Web default.
-- Web a11y unit.
 - install Chromium once.
 - Web E2E.
-- Web a11y browser.
 
 Weekly Web shuffle:
 
@@ -999,9 +985,7 @@ npm run test:integration -w packages/runner
 npm run check:test-boundaries -w packages/web -- --budget-base-ref "$base_ref"
 npm run test:ci -w packages/web
 npm exec -w packages/web -- playwright install --with-deps chromium
-npm run test:a11y:unit -w packages/web
 npm run test:e2e -w packages/web
-npm run test:a11y:browser -w packages/web
 ```
 
 Run Web shuffle:
@@ -1043,7 +1027,7 @@ git status --short
 - [ ] no real-time synchronization in default tests.
 - [ ] no jsdom geometry claim.
 - [ ] false absence assertions wait for positive completion.
-- [ ] browser and a11y tests run in CI entry point.
+- [ ] browser tests run in CI entry point.
 - [ ] default and integration TMPDIR empty.
 - [ ] default Runner runtime guard blocks external process.
 - [ ] all 13 platform candidates have disposition.

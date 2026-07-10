@@ -67,16 +67,13 @@ export default defineConfig({
       '@microsoft/signalr': path.resolve(__dirname, './tests/support/signalr-fake.ts'),
     },
     exclude: [
-      '**/*.a11y.spec.ts',
       '**/node_modules/**',
       '**/dist/**',
-      '**/tests/a11y/**',
       '**/tests/e2e/**',
       '**/e2e/**',
       'tests/e2e/**',
       'node_modules/**',
       'dist/**',
-      'tests/a11y/**',
       'tests/e2e/**',
     ],
     // jsdom 实例化是测试计算量的大头（CI 上约为测试体本身的 2 倍），而纯

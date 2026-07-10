@@ -77,7 +77,7 @@ Web tests run with `isolate: false`: test files share a worker module registry a
 |---|---|---|
 | Unit | < 50ms | < 300 LOC |
 | Spec | < 500ms (hard cap 5s); collection ≤ 2min | < 800 LOC (C# 24KB enforced) |
-| E2E/a11y | separate `npm run test:e2e` / `test:a11y`; never in default `npm test` | |
+| E2E | separate `npm run test:e2e`; never in default `npm test` | |
 
 Extract shared setup. One product ability = one test file. Migration splits: delete old file once equivalent coverage exists.
 
